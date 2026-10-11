@@ -1,0 +1,88 @@
+{
+ "description": "FOLLOW THE POSE: Littlest Tokyo (our app) driven by the recorded real headset head trace real_probe_pred0.csv (real poses, timestamps and uplink timing, replayed by the mock client): every hop of the pose is compared",
+ "topology": {
+  "host": "builder",
+  "client": "builder",
+  "client_bind_ip": "127.0.0.2",
+  "host_launch": "interactive"
+ },
+ "session_overrides": {
+  "session_settings.video.foveated_encoding.enabled": false,
+  "openvr_config.enable_foveated_encoding": false,
+  "openvr_config.eye_resolution_width": 1760,
+  "openvr_config.eye_resolution_height": 1600,
+  "openvr_config.target_eye_resolution_width": 1760,
+  "openvr_config.target_eye_resolution_height": 1600,
+  "session_settings.connection.client_recv_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  },
+  "session_settings.connection.server_send_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  },
+  "session_settings.video.transcoding_view_resolution": {
+   "Scale": 1.0,
+   "Absolute": {
+    "width": 1760,
+    "height": {
+     "set": true,
+     "content": 1600
+    }
+   },
+   "variant": "Absolute"
+  },
+  "session_settings.video.emulated_headset_view_resolution": {
+   "Scale": 1.0,
+   "Absolute": {
+    "width": 1760,
+    "height": {
+     "set": true,
+     "content": 1600
+    }
+   },
+   "variant": "Absolute"
+  }
+ },
+ "host": {
+  "shim": true,
+  "fps": 90,
+  "seconds": 64,
+  "connect_timeout": 45,
+  "gpu_keepalive": 90,
+  "exit_after_frames": 6000,
+  "send_pacing": "phase",
+  "running_start_ms": 2.0,
+  "gpu_sched_class": 5
+ },
+ "client": {
+  "seconds": 68,
+  "connect_timeout": 45,
+  "display_sim": true,
+  "poll_ms": 5,
+  "queue_max": 2,
+  "refresh": 100,
+  "display_hz": 100,
+  "replay": "harness/fixtures/headtraces/real_probe_pred0.csv",
+  "real_views": true
+ },
+ "client_env": {
+  "RUST_LOG": "warn"
+ },
+ "app": {
+  "frames": 5600,
+  "timeout_s": 75,
+  "env": {
+   "XR_PROBE_CPU_MS": "0",
+   "XR_PROBE_GPU_COPIES": "0",
+   "XR_PROBE_LOAD": "steady",
+   "XR_PROBE_SCENE": "bench\\\\littlest_tokyo.vab"
+  }
+ },
+ "gpu_sample": true,
+ "timeout_s": 200,
+ "checks": {
+  "host_min_frames": 600,
+  "client_min_frames": 600
+ }
+}

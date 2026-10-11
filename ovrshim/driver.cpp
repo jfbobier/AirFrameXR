@@ -222,7 +222,7 @@ namespace shimlog {
                 tried = true;
             }
             if (f) {
-                fputs("counter,slot,client_ts,display_time,t_release,t_read,t_sample_arrive,predicted,repeated,t_submit,t_compose_start,t_publish,qx,qy,qz,qw\n", f);
+                fputs("counter,slot,client_ts,display_time,t_release,t_read,t_sample_arrive,predicted,repeated,t_submit,t_compose_start,t_publish,qx,qy,qz,qw,sqx,sqy,sqz,sqw,spx,spy,spz,lpx,lpy,lpz\n", f);
             }
         }
         if (f) {
@@ -245,6 +245,7 @@ struct FrameTraceRow {
     double displayTime{0}, tRead{0}, tArrive{0}, tSubmit{0};
     int predicted{0}, repeated{0};
     float q[4]{0, 0, 0, 1};
+    float sq[4]{0, 0, 0, 1}, sp[3]{0, 0, 0}, lp[3]{0, 0, 0}; // the host sample the game read (orientation, position) and the layer's eye-0 position
 };
 
 // VDXR's own extension flags (virtualdesktop-openxr/OVR_Ext.h): layer shown to one eye only.
@@ -1264,6 +1265,9 @@ namespace {
                         trace.q[1] = e->RenderPose[0].Orientation.y;
                         trace.q[2] = e->RenderPose[0].Orientation.z;
                         trace.q[3] = e->RenderPose[0].Orientation.w;
+                        trace.lp[0] = e->RenderPose[0].Position.x;
+                        trace.lp[1] = e->RenderPose[0].Position.y;
+                        trace.lp[2] = e->RenderPose[0].Position.z;
                         break;
                     }
                 }
@@ -1280,6 +1284,8 @@ namespace {
                         trace.tArrive = best->tArrive;
                         trace.predicted = best->predicted;
                         trace.repeated = best->repeated;
+                        memcpy(trace.sq, best->sq, sizeof(trace.sq));
+                        memcpy(trace.sp, best->sp, sizeof(trace.sp));
                     }
                 }
 #endif
@@ -1414,10 +1420,11 @@ namespace {
             SetEvent(m_ipc.frame);
 #ifdef VISIONALVR_TELEMETRY
             {
-                char line[400];
-                snprintf(line, sizeof(line), "%llu,%u,%llu,%.6f,%.6f,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", (unsigned long long)m_framesPublished,
-                         slot, (unsigned long long)clientTs, tr.displayTime, releaseS, tr.tRead, tr.tArrive, tr.predicted, tr.repeated, tr.tSubmit,
-                         composeStart, s.frameSubmitTimeS, tr.q[0], tr.q[1], tr.q[2], tr.q[3]);
+                char line[640];
+                snprintf(line, sizeof(line), "%llu,%u,%llu,%.6f,%.6f,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f\n",
+                         (unsigned long long)m_framesPublished, slot, (unsigned long long)clientTs, tr.displayTime, releaseS, tr.tRead, tr.tArrive, tr.predicted,
+                         tr.repeated, tr.tSubmit, composeStart, s.frameSubmitTimeS, tr.q[0], tr.q[1], tr.q[2], tr.q[3], tr.sq[0], tr.sq[1], tr.sq[2], tr.sq[3],
+                         tr.sp[0], tr.sp[1], tr.sp[2], tr.lp[0], tr.lp[1], tr.lp[2]);
                 shimlog::FrameCsv(line);
             }
 #endif
@@ -2150,7 +2157,9 @@ namespace {
                 std::lock_guard lock(m_lastHeadMutex);
 #ifdef VISIONALVR_TELEMETRY
                 if (clientTs) {
-                    m_readRing[m_readNext] = {clientTs, absTime, QpcSeconds(), latched.TimeInSeconds, legacyPose ? 0 : m_selPredicted, legacyPose ? 0 : m_selRepeated};
+                    m_readRing[m_readNext] = {clientTs, absTime, QpcSeconds(), latched.TimeInSeconds, legacyPose ? 0 : m_selPredicted, legacyPose ? 0 : m_selRepeated,
+                        {latched.ThePose.Orientation.x, latched.ThePose.Orientation.y, latched.ThePose.Orientation.z, latched.ThePose.Orientation.w},
+                        {latched.ThePose.Position.x, latched.ThePose.Position.y, latched.ThePose.Position.z}};
                     m_readNext = (m_readNext + 1) % 8;
                 }
 #endif
@@ -2299,7 +2308,7 @@ namespace {
         mutable std::atomic<uint64_t> m_lastConsumedTs{0};
         mutable int m_consumeLagStreak{0};
         struct PoseCacheEntry { double absTime; ovrPoseStatef pose; uint64_t ts; int predicted; int repeated; };
-        struct PoseRead { uint64_t ts; double absTime, tRead, tArrive; int predicted, repeated; };
+        struct PoseRead { uint64_t ts; double absTime, tRead, tArrive; int predicted, repeated; float sq[4], sp[3]; };
         mutable PoseRead m_readRing[8]{};
         mutable int m_readNext{0};
         mutable int m_selPredicted{0}, m_selRepeated{0};

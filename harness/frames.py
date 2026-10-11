@@ -26,6 +26,18 @@ import numpy as np
 PERIOD = 1.0 / 90.0
 
 
+def qang(a, b):
+    """Angle (deg) between two orientations (x y z w). The vector part of the relative rotation is exact near 0; 2*acos(|dot|) is not
+    (a dot product of 7-digit quaternions cannot resolve less than ~0.03 deg: it made noise look like pose errors)."""
+    x1, y1, z1, w1 = a
+    x2, y2, z2, w2 = -b[0], -b[1], -b[2], b[3]
+    vx = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    vy = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    vz = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    return math.degrees(2 * math.atan2(math.sqrt(vx * vx + vy * vy + vz * vz), abs(w)))
+
+
 def rd(path):
     try:
         with open(path, newline="") as f:
@@ -266,8 +278,7 @@ def main():
         hs = {int(r["ts_ns"]): (fl(r["qx"]), fl(r["qy"]), fl(r["qz"]), fl(r["qw"])) for r in rd(d / "head_samples.csv")}
         order = sorted(hs)
         def ang(a, b):
-            dot = abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3])
-            return 2 * math.acos(min(1.0, dot))
+            return math.radians(qang(a, b))
         have = 0
         for n, f in F.items():
             qs = hs.get(f["ts"])
@@ -310,6 +321,125 @@ def main():
                     f["marker_x"], f["marker_y"] = mm[0], mm[1]
                     f["marker_err_px"] = mm[0] - ex            # decoded marker vs where the client's pose says it should be
                     f["marker_app_err_px"] = mm[0] - ax        # decoded marker vs where the app's own pose puts it (pipeline fidelity)
+    ns = sorted(F)
+    ms = 1e3
+    # ---- follow the pose (lab / replay): every hop of the head pose, from the client's sample to the pixels
+    pose_report = []
+    sent_p = {}
+    for r in poses:
+        if "qx" in r and r["qx"] != "":
+            sent_p[int(r["target_ts_ns"])] = (np.array([fl(r[k]) for k in ("qx", "qy", "qz", "qw")]), np.array([fl(r[k]) for k in ("px", "py", "pz")]), int(r["send_ns"]) * 1e-9)
+    host_p = {}
+    if (d / "host_head.csv").exists():
+        for r in rd(d / "host_head.csv"):
+            host_p[int(r["ts_ns"])] = (np.array([fl(r[k]) for k in ("qx", "qy", "qz", "qw")]), np.array([fl(r[k]) for k in ("px", "py", "pz")]), fl(r["t"]))
+    if sent_p and host_p and not headset:
+        def qmul(a, b):
+            x1, y1, z1, w1 = a
+            x2, y2, z2, w2 = b
+            return np.array([w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2, w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2, w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2, w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2])
+        def qinv(a):
+            return np.array([-a[0], -a[1], -a[2], a[3]])
+        def qrot(q_, v):
+            qv = np.array([v[0], v[1], v[2], 0.0])
+            return qmul(qmul(q_, qv), qinv(q_))[:3]
+        def adeg(a, b):
+            return qang(a, b)
+        eye0 = np.array([-0.031057562679, 0.0, 0.0])
+        if (d / "host_stdout.txt").exists():
+            for line in (d / "host_stdout.txt").read_text(errors="replace").splitlines():
+                if '"views_config"' in line:
+                    try:
+                        eye0 = np.array(json.loads(line)["data"]["eye_offsets"][:3])
+                    except Exception:
+                        pass
+                    break
+        def hop(name, pairs, pos=True):
+            """pairs: (qa, pa, qb, pb). Rotation qb * inv(qa) after removing its median; position likewise."""
+            if not pairs:
+                pose_report.append(f"   {name:50s} no data")
+                return
+            rel = [qmul(x[2], qinv(x[0])) for x in pairs]
+            rel = [r_ if r_[3] >= 0 else -r_ for r_ in rel]
+            ref = np.median(np.array(rel), axis=0)
+            ref /= np.linalg.norm(ref)
+            rot = [adeg(r_, ref) for r_ in rel]
+            const = adeg(ref, np.array([0, 0, 0, 1.0]))
+            line = f"   {name:50s} n={len(pairs):5d} constant rotation {const:7.3f} deg, spread after removing it: p50 {q(rot,.5):.4f} p95 {q(rot,.95):.4f} max {max(rot):.4f} deg"
+            if pos:
+                dp = np.array([x[3] - x[1] for x in pairs])
+                dev = np.linalg.norm(dp - np.median(dp, axis=0), axis=1) * 1e3
+                line += f"; position offset {np.round(np.median(dp,axis=0),4).tolist()} m, spread p50 {q(list(dev),.5):.3f} p95 {q(list(dev),.95):.3f} max {max(dev):.3f} mm"
+            pose_report.append(line)
+        ts_set = {F[n]["ts"] for n in ns}
+        hop("1 client sample -> 2 host received", [(sent_p[t][0], sent_p[t][1], host_p[t][0], host_p[t][1]) for t in ts_set if t in sent_p and t in host_p])
+        lat = [host_p[t][2] - sent_p[t][2] for t in sent_p if t in host_p]
+        offs = float(np.median(lat)) if lat else 0.0
+        pose_report.append(f"   uplink: host receive time - client send time minus its median ({offs*1e3:.2f} ms) ms: " + stats([x - offs for x in lat], ms))
+        mk0 = {int(r["frame"]): r for r in marks_app if r["eye"] == "0"}
+        shim_by_n = {int(r["counter"]): r for r in shim}
+        h23, h34, h45, h25 = [], [], [], []
+        for n in ns:
+            t = F[n]["ts"]
+            row = shim_by_n.get(n)
+            if t not in host_p or row is None or row.get("sqx") in ("", None):
+                continue
+            sq = np.array([fl(row[k]) for k in ("sqx", "sqy", "sqz", "sqw")])
+            sp = np.array([fl(row[k]) for k in ("spx", "spy", "spz")])
+            h23.append((host_p[t][0], host_p[t][1], sq, sp))
+            m = mk0.get(n)
+            if m:
+                aq = np.array([fl(m[k]) for k in ("qx", "qy", "qz", "qw")])
+                ap_eye = np.array([fl(m[k]) for k in ("posx", "posy", "posz")])
+                ap_head = ap_eye - qrot(aq, eye0)
+                h34.append((sq, sp, aq, ap_head))
+                lq = np.array([fl(row[k]) for k in ("qx", "qy", "qz", "qw")])
+                lp = np.array([fl(row[k]) for k in ("lpx", "lpy", "lpz")])
+                h45.append((aq, ap_eye, lq, lp))
+                h25.append((host_p[t][0], host_p[t][1], aq, ap_head))
+        hop("2 host received -> 3 shim read (IPC)", h23)
+        hop("3 shim read -> 4 pose the app located (head)", h34)
+        hop("4 app located -> 5 layer RenderPose (eye 0)", h45)
+        hop("2 host received -> 4 app located (whole runtime)", h25)
+        if D and shown_at and len(sent_p) > 100:
+            ks = sorted(sent_p)
+            kts = np.array(ks, dtype=float)
+            sendt = np.array([sent_p[k][2] for k in ks])
+            Qs = np.array([sent_p[k][0] for k in ks])
+            Ps = np.array([sent_p[k][1] for k in ks])
+            def pose_at_ts(t):
+                i = int(np.searchsorted(kts, t))
+                if i <= 0 or i >= len(kts):
+                    return None
+                f_ = (t - kts[i - 1]) / (kts[i] - kts[i - 1])
+                a, b = Qs[i - 1], Qs[i]
+                if np.dot(a, b) < 0:
+                    b = -b
+                qq = a * (1 - f_) + b * f_
+                return qq / np.linalg.norm(qq), Ps[i - 1] * (1 - f_) + Ps[i] * f_
+            shift = float(np.median(kts - sendt * 1e9))      # tick time (client clock) -> the trajectory's timestamp axis
+            rot_res, par_res = [], []
+            tl = tr_ = None
+            for r in mk0.values():
+                tl, tr_ = fl(r["tl"]), fl(r["tr"])
+                break
+            for (t_tick, ts_shown, rep) in D:
+                if rep or ts_shown not in sent_p:
+                    continue
+                got = pose_at_ts((t_tick + off) * 1e9 + shift)
+                if got is None:
+                    continue
+                qd, pd = got
+                qs, ps_ = sent_p[ts_shown][0], sent_p[ts_shown][1]
+                rot_res.append(adeg(qs, qd))
+                dv = qrot(qinv(qd), pd - ps_)
+                par_res.append(math.degrees(math.atan2(math.hypot(dv[0], dv[1]), 3.0)))
+            if rot_res:
+                ppd = 1760 / (math.degrees(math.atan(tl)) + math.degrees(math.atan(tr_))) if tl else 17.0
+                pose_report.append("   modeled client at each display tick (the recorded trajectory is the truth for the head at display):")
+                pose_report.append("     rotation between the shown frame's pose and the head at display, which the client's warp must supply (deg): " + stats(rot_res))
+                pose_report.append(f"     parallax that a rotation-only warp leaves for a point 3 m away (deg; about {ppd:.0f} px per deg): " + stats(par_res))
+    lines_pose = (["-- follow the pose (hops compared by timestamp; a hop that changes the pose by more than a constant is where it goes wrong)"] + pose_report) if pose_report else []
     # ---- table
     cols = ["n", "slot", "ts", "ts_exact", "predicted", "repeated", "tg", "t_release", "t_read", "t_arrive", "t_submit", "t_publish", "t_host_arrive", "t_picked",
             "fate", "t_boundary", "t_enc0", "enc_ms", "t_send", "hold_ms", "t_c_arr", "t_c_dec", "qdrop", "t_shown", "app_yaw", "client_yaw", "yaw_err",
@@ -424,7 +554,7 @@ def main():
             qq = a * (1 - f_) + b * f_
             return qq / np.linalg.norm(qq)
         def angd(a, b):
-            return math.degrees(2 * math.acos(min(1.0, abs(float(np.dot(a, b))))))
+            return qang(a, b)
         totms = {}
         for r in raw if headset else []:
             if r["ts_ns"].isdigit():
@@ -466,6 +596,7 @@ def main():
                 return f"{(v - t0)*ms:8.2f}" if isinstance(v, float) and v == v else "       -"
             P(f"   {n:5d} ts..{f['ts']%100000:5d} {'P' if f['predicted'] else ' '}{'R' if f['repeated'] else ' '} tg {t('tg')} rel {t('t_release')} read {t('t_read')} sub {t('t_submit')} pub {t('t_publish')} "
               f"pick {t('t_picked')} send {t('t_send')} rcv {t('t_c_arr')} shown {t('t_shown')} {f.get('fate','?')}")
+    lines += lines_pose
     out = "\n".join(lines)
     (d / "frames_report.txt").write_text(out + "\n")
     print(out)

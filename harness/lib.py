@@ -284,7 +284,7 @@ def run_scenario(sc, outdir: Path, log=print):
         else:      # host on the builder (loopback topology: the client binds topology.client_bind_ip)
             src_arg = "" if (h.get("live") or h.get("shim")) else f'--file {sc["source"].replace("/", chr(92))} '
             dump_arg = f"--dump-qpmap {rd}\\qpmap.json " if h.get("dump_qpmap") else ""
-            envpre = "".join(f"set {k}={v}&& " for k, v in {"VISIONALVR_PIPELINE_CSV": f"{rd}\\host_pipeline.csv", **(h.get("env") or {})}.items())
+            envpre = "".join(f"set {k}={v}&& " for k, v in {"VISIONALVR_PIPELINE_CSV": f"{rd}\\host_pipeline.csv", "VISIONALVR_HEAD_CSV": f"{rd}\\host_head.csv", **(h.get("env") or {})}.items())
             hostcmd = (envpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
                        f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv '
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
@@ -306,6 +306,8 @@ def run_scenario(sc, outdir: Path, log=print):
     env = f'set ALVR_BIND_IP={topo["client_bind_ip"]}&& ' if topo.get("client_bind_ip") else ""
     for k, v in sc.get("client_env", {}).items():
         env += f"set {k}={v}&& "
+    if c.get("replay"):
+        b_put(ROOT / c["replay"], f"runs/{rid}/replay.csv")   # a recorded head trace (harness/fixtures/headtraces)
     def make_client_cmd(sfx=""):
         return (env + f'{CLIENT_EXE} --report {rd}\\client{sfx}_report.json --frames-csv {rd}\\frames{sfx}.csv --out {rd}\\client{sfx}.hevc '
                 + argline(c, {"seconds": "--seconds", "connect_timeout": "--connect-timeout", "min_frames": "--min-frames",
@@ -314,10 +316,11 @@ def run_scenario(sc, outdir: Path, log=print):
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz"})
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views"})
                 + (f" --controllers-csv {rd}\\controllers.csv" if c.get("controllers") and not sfx else "")
                 + (f" --display-csv {rd}\\display{sfx}.csv" if c.get("display_sim") else "")
                 + (f" --poses-csv {rd}\\poses.csv" if not sfx else "")
+                + (f" --replay {rd}\\replay.csv" if c.get("replay") and not sfx else "")
                 + f' > {rd}\\client{sfx}_stdout.txt 2>&1')
     clientcmd = make_client_cmd()
     client_p = b_popen(clientcmd)
@@ -357,7 +360,7 @@ def run_scenario(sc, outdir: Path, log=print):
     steps["wall_s"] = round(time.time() - t0, 1)
     log("  fetching artifacts")
     if h is not None and topo["host"] == "builder":
-        for f in ("host_report.json", "host_stdout.txt", "host_frames.csv", "host_pipeline.csv", "host_pipeline_fates.csv"):
+        for f in ("host_report.json", "host_stdout.txt", "host_frames.csv", "host_pipeline.csv", "host_pipeline_fates.csv", "host_head.csv"):
             b_get(f"runs/{rid}/{f}", outdir / f)
         if sc.get("install"):
             b_get(f"runs/{rid}/VisionALVR/config/session.json", outdir / "host_session_final.json")

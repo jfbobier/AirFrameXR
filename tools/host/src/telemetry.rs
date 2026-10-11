@@ -40,12 +40,31 @@ pub fn start() {
 pub fn start() {}
 
 /// One head sample as the host received it (debug flavour): lets the analysis compare the pose a frame was rendered with against the pose
-/// the client has for the frame's timestamp (harness/frames.py, headset mode).
+/// the client has for the frame's timestamp (harness/frames.py). Written to the debug session folder, and to VISIONALVR_HEAD_CSV when set
+/// (the lab, which has no debug session).
 #[cfg(feature = "telemetry")]
 pub fn head_sample(ts_ns: u64, q: [f32; 4], p: [f32; 3]) {
     use crate::logs;
-    logs::csv("head_samples.csv", "t,ts_ns,qx,qy,qz,qw,px,py,pz",
-        &format!("{:.6},{},{:.7},{:.7},{:.7},{:.7},{:.4},{:.4},{:.4}", logs::qpc_at(std::time::Instant::now()), ts_ns, q[0], q[1], q[2], q[3], p[0], p[1], p[2]));
+    use std::io::Write;
+    static LAB: std::sync::Mutex<Option<std::io::BufWriter<std::fs::File>>> = std::sync::Mutex::new(None);
+    let t = logs::qpc_at(std::time::Instant::now());
+    let row = format!("{:.6},{},{:.7},{:.7},{:.7},{:.7},{:.5},{:.5},{:.5}", t, ts_ns, q[0], q[1], q[2], q[3], p[0], p[1], p[2]);
+    logs::csv("head_samples.csv", "t,ts_ns,qx,qy,qz,qw,px,py,pz", &row);
+    if let Ok(path) = std::env::var("VISIONALVR_HEAD_CSV") {
+        if let Ok(mut g) = LAB.lock() {
+            if g.is_none() {
+                if let Ok(f) = std::fs::File::create(&path) {
+                    let mut w = std::io::BufWriter::new(f);
+                    let _ = writeln!(w, "t,ts_ns,qx,qy,qz,qw,px,py,pz");
+                    *g = Some(w);
+                }
+            }
+            if let Some(w) = g.as_mut() {
+                let _ = writeln!(w, "{row}");
+                let _ = w.flush();
+            }
+        }
+    }
 }
 #[cfg(not(feature = "telemetry"))]
 #[inline(always)]
