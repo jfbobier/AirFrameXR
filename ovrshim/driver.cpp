@@ -189,9 +189,53 @@ namespace shimlog {
             g_pending.push_back(line); // until the host says whether debug is on
         }
     }
+
+    // Per-frame trace (follow-the-frames harness): one CSV line per published frame, in the debug session folder
+    // (shim_frames_<exe>_<pid>.csv) or at OVRSHIM_FRAME_CSV. Times are shim clock seconds.
+    static void FrameCsv(const char* line) {
+        static FILE* f = nullptr;
+        static bool tried = false;
+        static int pending = 0;
+        std::lock_guard lock(g_mutex);
+        if (!f && !tried) {
+            char path[MAX_PATH];
+            const DWORD n = GetEnvironmentVariableA("OVRSHIM_FRAME_CSV", path, MAX_PATH);
+            if (n > 0 && n < MAX_PATH) {
+                fopen_s(&f, path, "w");
+                tried = true;
+            } else if (g_dirKnown && !g_debugDir.empty()) {
+                wchar_t name[64];
+                swprintf_s(name, L"_%lu.csv", GetCurrentProcessId());
+                std::wstring exe = ExeName();
+                const size_t dot = exe.find_last_of(L'.');
+                if (dot != std::wstring::npos) {
+                    exe = exe.substr(0, dot);
+                }
+                _wfopen_s(&f, (g_debugDir + L"\\shim_frames_" + exe + name).c_str(), L"w");
+                tried = true;
+            }
+            if (f) {
+                fputs("counter,slot,client_ts,display_time,t_release,t_read,t_sample_arrive,predicted,repeated,t_submit,t_compose_start,t_publish,qx,qy,qz,qw\n", f);
+            }
+        }
+        if (f) {
+            fputs(line, f);
+            if (++pending >= 90) {
+                fflush(f);
+                pending = 0;
+            }
+        }
+    }
 } // namespace shimlog
 
 #define ShimLog shimlog::Debug
+
+// what the frame trace records about a frame, gathered at submit and completed at publish
+struct FrameTraceRow {
+    double displayTime{0}, tRead{0}, tArrive{0}, tSubmit{0};
+    int predicted{0}, repeated{0};
+    float q[4]{0, 0, 0, 1};
+};
 
 // VDXR's own extension flags (virtualdesktop-openxr/OVR_Ext.h): layer shown to one eye only.
 static constexpr int kLayerFlagDisableLeft = 0x100000;
@@ -1167,6 +1211,7 @@ namespace {
         bool SubmitFrame(const std::vector<const ovrLayerHeader*>& layers) override {
             TraceLocalActivity(local);
             TraceLoggingWriteStart(local, "HostDriver_SubmitFrame");
+            const double tSubmitStart = QpcSeconds();
             m_submittedSinceWait = true;
             if (m_ipc.state) {
                 UpdateOutputGamma(); // the user's gamma can change live
@@ -1198,6 +1243,34 @@ namespace {
                 }
 
                 const uint64_t clientTs = FrameClientTimestamp(layers);
+                FrameTraceRow trace;
+                trace.tSubmit = tSubmitStart;
+                for (const ovrLayerHeader* lh : layers) {
+                    if (lh && (lh->Type == ovrLayerType_EyeFov || lh->Type == ovrLayerType_EyeFovDepth)) {
+                        const ovrLayerEyeFov* e = (const ovrLayerEyeFov*)lh;
+                        trace.displayTime = e->SensorSampleTime;
+                        trace.q[0] = e->RenderPose[0].Orientation.x;
+                        trace.q[1] = e->RenderPose[0].Orientation.y;
+                        trace.q[2] = e->RenderPose[0].Orientation.z;
+                        trace.q[3] = e->RenderPose[0].Orientation.w;
+                        break;
+                    }
+                }
+                {
+                    std::lock_guard rl(m_lastHeadMutex);
+                    const PoseRead* best = nullptr;
+                    for (const auto& r : m_readRing) {
+                        if (r.ts == clientTs && (!best || std::abs(r.absTime - trace.displayTime) < std::abs(best->absTime - trace.displayTime))) {
+                            best = &r;
+                        }
+                    }
+                    if (best) {
+                        trace.tRead = best->tRead;
+                        trace.tArrive = best->tArrive;
+                        trace.predicted = best->predicted;
+                        trace.repeated = best->repeated;
+                    }
+                }
                 ++m_framesSubmitted;
                 if (m_framesSubmitted % 900 == 0) {
                     const auto& st = m_ipc.state->shim;
@@ -1256,13 +1329,13 @@ namespace {
                         WaitGpuIdleSpin();
                         SetEvent(m_gpuDone[slot]);
                     }
-                    m_publishQueue.push_back({slot, clientTs, composeStart, m_lastReleaseS.load()});
+                    m_publishQueue.push_back({slot, clientTs, composeStart, m_lastReleaseS.load(), trace});
                     lock.unlock();
                     m_publishCv.notify_all();
                 } else {
                     // OVRSHIM_SYNC_SUBMIT=1: wait for the GPU on the app thread (previous behaviour, kill switch)
                     WaitGpuIdleSpin();
-                    PublishFrame(slot, clientTs, composeStart, m_lastReleaseS.load());
+                    PublishFrame(slot, clientTs, composeStart, m_lastReleaseS.load(), trace);
                 }
             }
 
@@ -1301,7 +1374,7 @@ namespace {
 
         // Hands a composed (GPU-complete) slot to the host. Called by exactly one thread at a time: the publisher thread, or the
         // app thread when there is no publisher.
-        void PublishFrame(uint32_t slot, uint64_t clientTs, double composeStart, double releaseS) {
+        void PublishFrame(uint32_t slot, uint64_t clientTs, double composeStart, double releaseS, const FrameTraceRow& tr) {
             auto& s = m_ipc.state->shim;
             const double nowS = QpcSeconds();
             s.lastComposeMs = (float)((nowS - composeStart) * 1000.0);
@@ -1327,6 +1400,13 @@ namespace {
             MemoryBarrier();
             s.frameSeq++; // even: stable
             SetEvent(m_ipc.frame);
+            {
+                char line[400];
+                snprintf(line, sizeof(line), "%llu,%u,%llu,%.6f,%.6f,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", (unsigned long long)m_framesPublished,
+                         slot, (unsigned long long)clientTs, tr.displayTime, releaseS, tr.tRead, tr.tArrive, tr.predicted, tr.repeated, tr.tSubmit,
+                         composeStart, s.frameSubmitTimeS, tr.q[0], tr.q[1], tr.q[2], tr.q[3]);
+                shimlog::FrameCsv(line);
+            }
         }
 
         // Ring slot for the next frame: never one the host holds (slotBusyMask: its newest frame, or the one its encoder reads),
@@ -1388,7 +1468,7 @@ namespace {
                         }
                         // same 50 ms cap as the spin wait: a hung GPU must not stall the stream forever
                         WaitForSingleObject(m_gpuDone[f.slot], 50);
-                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS);
+                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr);
                         {
                             std::unique_lock lock(m_publishMutex);
                             m_publishQueue.pop_front();
@@ -1869,6 +1949,8 @@ namespace {
                 if (e.ts != 0 && std::abs(e.absTime - absTime) < 1e-4) {
                     out = e.pose;
                     clientTsNs = e.ts;
+                    m_selPredicted = e.predicted;
+                    m_selRepeated = e.repeated;
                     return true;
                 }
             }
@@ -1947,7 +2029,9 @@ namespace {
                             clientTsNs = tsNew;
                             m_lastConsumedTs = tsNew;
                             m_consumePredicted++;
-                            m_poseCache[m_poseCacheNext] = {absTime, out, clientTsNs};
+                            m_selPredicted = 1;
+                            m_selRepeated = 0;
+                            m_poseCache[m_poseCacheNext] = {absTime, out, clientTsNs, 1, 0};
                             m_poseCacheNext = (m_poseCacheNext + 1) % 4;
                             return true;
                         }
@@ -1975,7 +2059,9 @@ namespace {
                 out.AngularVelocity = {sm.angVel[0], sm.angVel[1], sm.angVel[2]};
                 out.TimeInSeconds = sm.hostTimeS;
                 clientTsNs = sm.clientTsNs;
-                m_poseCache[m_poseCacheNext] = {absTime, out, clientTsNs};
+                m_selPredicted = 0;
+                m_selRepeated = (last != 0 && newer == 0) ? 1 : 0;
+                m_poseCache[m_poseCacheNext] = {absTime, out, clientTsNs, m_selPredicted, m_selRepeated};
                 m_poseCacheNext = (m_poseCacheNext + 1) % 4;
                 return true;
             }
@@ -2042,6 +2128,10 @@ namespace {
             const ovrPoseStatef result = PropagatePose(latched, absTime);
             {
                 std::lock_guard lock(m_lastHeadMutex);
+                if (clientTs) {
+                    m_readRing[m_readNext] = {clientTs, absTime, QpcSeconds(), latched.TimeInSeconds, legacyPose ? 0 : m_selPredicted, legacyPose ? 0 : m_selRepeated};
+                    m_readNext = (m_readNext + 1) % 8;
+                }
                 m_lastHeadPose = result.ThePose;
                 if (clientTs) {
                     // history of what the app read, for FrameClientTimestamp (skip exact repeats of the newest entry)
@@ -2186,7 +2276,11 @@ namespace {
         mutable int m_gpdtTrace{0};
         mutable std::atomic<uint64_t> m_lastConsumedTs{0};
         mutable int m_consumeLagStreak{0};
-        struct PoseCacheEntry { double absTime; ovrPoseStatef pose; uint64_t ts; };
+        struct PoseCacheEntry { double absTime; ovrPoseStatef pose; uint64_t ts; int predicted; int repeated; };
+        struct PoseRead { uint64_t ts; double absTime, tRead, tArrive; int predicted, repeated; };
+        mutable PoseRead m_readRing[8]{};
+        mutable int m_readNext{0};
+        mutable int m_selPredicted{0}, m_selRepeated{0};
         mutable PoseCacheEntry m_poseCache[4]{};
         mutable int m_poseCacheNext{0};
         mutable uint64_t m_consumeRepeats{0}, m_consumeSkips{0}, m_consumePredicted{0};
@@ -2248,6 +2342,7 @@ namespace {
             uint64_t clientTs;
             double composeStart;
             double releaseS; // when WaitForVsync released the app for this frame (running-start envelope)
+            FrameTraceRow tr;
         };
         ComPtr<IDXGIDevice2> m_dxgiDevice2;
         HANDLE m_gpuDone[visionalvr_ipc::kSlots]{};

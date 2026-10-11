@@ -4,7 +4,7 @@
 // Synthetic load (env): XR_PROBE_CPU_MS = busy CPU time per frame before rendering, XR_PROBE_GPU_COPIES = full copies of a
 // 4096x4096 RGBA16F texture per frame (GPU time), to model a heavy game (CPU and GPU work that only fit a frame when they overlap).
 // XR_PROBE_LOAD shapes both over time: steady (default) | jitter:<pct> (uniform +-pct per frame) | spikes:<every>:<factor> (every
-// n-th frame costs factor x) | ramp:<s> (0 -> 2x over s seconds, then back) | burst:<on_s>:<off_s> (full load / none alternating).
+// n-th frame costs factor x) | fps:<lo>:<hi> (each frame's CPU time is 1000/uniform(lo,hi) ms; use XR_PROBE_CPU_MS=1) | ramp:<s> (0 -> 2x over s seconds, then back) | burst:<on_s>:<off_s> (full load / none alternating).
 // XR_PROBE_TIMING_CSV = per-frame timing (frame, t_wait_return_ms, t_end_ms, load_factor): the game side of the pacing analysis.
 // With input_csv it also reads Touch-profile input actions every frame (trigger/squeeze/buttons/thumbstick/grip pose) and
 // fires haptics on both hands periodically.
@@ -63,6 +63,10 @@ int main(int argc, char** argv) {
     int timeoutS = argc > 3 ? atoi(argv[3]) : 30;
     const char* poseCsv = argc > 4 ? argv[4] : nullptr;
     FILE* poseF = poseCsv ? fopen(poseCsv, "w") : nullptr;
+    // follow-the-frames markers: a magenta block at the projection of a world-fixed point, in both eyes, next to the 16-bit frame
+    // counter in the left eye image; XR_PROBE_MARKERS_CSV logs where the app put it (what the view pose it used implies)
+    FILE* markF = getenv("XR_PROBE_MARKERS_CSV") ? fopen(getenv("XR_PROBE_MARKERS_CSV"), "w") : nullptr;
+    if (markF) fprintf(markF, "frame,eye,px,py,w,h,qx,qy,qz,qw,posx,posy,posz,tl,tr,tu,td,display_time\n");
     if (poseF) fprintf(poseF, "frame,yaw,x,y,z,display_time_ns\n");
     const char* inputCsv = (argc > 5 && strcmp(argv[5], "-") != 0) ? argv[5] : nullptr;
     FILE* inputF = inputCsv ? fopen(inputCsv, "w") : nullptr;
@@ -148,6 +152,7 @@ int main(int argc, char** argv) {
     uint64_t lpSeed = 0x9E3779B97F4A7C15ull;
     auto loadFactor = [&](int frame, double tSec) -> double {
         if (loadPattern == "jitter") { lpSeed ^= lpSeed << 13; lpSeed ^= lpSeed >> 7; lpSeed ^= lpSeed << 17; const double u = (double)(lpSeed >> 11) / 9007199254740992.0 * 2.0 - 1.0; return 1.0 + u * lpA / 100.0; }
+        if (loadPattern == "fps") { lpSeed ^= lpSeed << 13; lpSeed ^= lpSeed >> 7; lpSeed ^= lpSeed << 17; const double u = (double)(lpSeed >> 11) / 9007199254740992.0; const double fps = lpA + u * (lpB - lpA); return (1000.0 / fps) / std::max(loadCpuMs, 0.001); } // frame time drawn from [lpA, lpB] fps (CPU_MS=1, no GPU copies)
         if (loadPattern == "spikes") { const int every = (int)std::max(1.0, lpA); return (frame % every == every - 1) ? std::max(1.0, lpB) : 1.0; }
         if (loadPattern == "ramp") { const double T = std::max(1.0, lpA); const double ph = fmod(tSec, 2 * T); return ph < T ? 1.0 + ph / T : 3.0 - ph / T; }
         if (loadPattern == "burst") { const double on = std::max(0.1, lpA), off = std::max(0.1, lpB); return fmod(tSec, on + off) < on ? 1.0 : 0.0; }
@@ -383,6 +388,29 @@ int main(int argc, char** argv) {
                         }
                     } else {
                         ctx->ClearRenderTargetView(rtv, bg);
+                    }
+                    if (markF && i < 2) {
+                        D3D11_TEXTURE2D_DESC mt{}; imgs[i][idx].texture->GetDesc(&mt);
+                        const XrPosef& xp = views[i].pose; const XrFovf& xf = views[i].fov;
+                        const XMMATRIX mpose = XMMatrixRotationQuaternion(XMVectorSet(xp.orientation.x, xp.orientation.y, xp.orientation.z, xp.orientation.w))
+                                             * XMMatrixTranslation(xp.position.x, xp.position.y, xp.position.z);
+                        const float mtan[4] = { -tanf(xf.angleLeft), tanf(xf.angleRight), tanf(xf.angleUp), -tanf(xf.angleDown) };
+                        const XMMATRIX mvp = XMMatrixInverse(nullptr, mpose) * Projection(mtan, 0.05f, 100.f);
+                        XMFLOAT3 ndc; XMStoreFloat3(&ndc, XMVector3TransformCoord(XMVectorSet(0.f, 1.3f, -3.f, 1.f), mvp));
+                        const float mx = (ndc.x * 0.5f + 0.5f) * (float)mt.Width, my = (1.f - (ndc.y * 0.5f + 0.5f)) * (float)mt.Height;
+                        fprintf(markF, "%d,%d,%.2f,%.2f,%u,%u,%.7f,%.7f,%.7f,%.7f,%.5f,%.5f,%.5f,%.6f,%.6f,%.6f,%.6f,%lld\n", done + 1, (int)i, mx, my, mt.Width, mt.Height,
+                            xp.orientation.x, xp.orientation.y, xp.orientation.z, xp.orientation.w, xp.position.x, xp.position.y, xp.position.z,
+                            mtan[0], mtan[1], mtan[2], mtan[3], (long long)fs.predictedDisplayTime);
+                        fflush(markF);
+                        ID3D11DeviceContext1* mc = nullptr;
+                        if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&mc))) {
+                            const float magenta[4] = { 1, 0, 1, 1 };
+                            D3D11_RECT mr{ (LONG)(mx - 24), (LONG)(my - 24), (LONG)(mx + 24), (LONG)(my + 24) };
+                            mr.left = std::max<LONG>(mr.left, 0); mr.top = std::max<LONG>(mr.top, 0);
+                            mr.right = std::min<LONG>(mr.right, (LONG)mt.Width); mr.bottom = std::min<LONG>(mr.bottom, (LONG)mt.Height);
+                            if (mr.right > mr.left && mr.bottom > mr.top) mc->ClearView(rtv, magenta, &mr, 1);
+                            mc->Release();
+                        }
                     }
                     ID3D11DeviceContext1* c1 = nullptr;
                     if (i == 0 && SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {

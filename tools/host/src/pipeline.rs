@@ -82,6 +82,40 @@ struct Arrived {
     arrival: Instant,
 }
 
+/// Frame-level CSV mirrors for the harness (VISIONALVR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
+/// `fate` writes one line per event of a frame's life on the host: A arrival (slot, ts), S superseded in the intake, P picked at a
+/// boundary (index), O dropped by the encoder queue.
+static MIRRORS: std::sync::Mutex<Option<(std::io::BufWriter<std::fs::File>, std::io::BufWriter<std::fs::File>, u32)>> = std::sync::Mutex::new(None);
+fn mirror_open() -> bool {
+    let mut g = match MIRRORS.lock() { Ok(g) => g, Err(_) => return false };
+    if g.is_none() {
+        let Ok(p) = std::env::var("VISIONALVR_PIPELINE_CSV") else { return false };
+        let fates = p.replace(".csv", "_fates.csv");
+        let (Ok(a), Ok(b)) = (std::fs::File::create(&p), std::fs::File::create(&fates)) else { return false };
+        use std::io::Write;
+        let (mut a, mut b) = (std::io::BufWriter::new(a), std::io::BufWriter::new(b));
+        let _ = writeln!(a, "frame,ts_ns,slot,t_boundary,t_arrival,t_encode_start,encode_ms,t_send,hold_ms,bytes,idr");
+        let _ = writeln!(b, "counter,kind,t,a,b");
+        *g = Some((a, b, 0));
+    }
+    true
+}
+fn mirror_sent(row: &str) {
+    use std::io::Write;
+    if !mirror_open() { return; }
+    if let Ok(mut g) = MIRRORS.lock() { if let Some((a, _, n)) = g.as_mut() { let _ = writeln!(a, "{row}"); *n += 1; if *n % 90 == 0 { let _ = a.flush(); } } }
+}
+fn fate(counter: u64, kind: &str, t: Instant, a: u64, b: u64) {
+    use std::io::Write;
+    if !mirror_open() { return; }
+    if let Ok(mut g) = MIRRORS.lock() { if let Some((_, f, _)) = g.as_mut() { let _ = writeln!(f, "{counter},{kind},{:.6},{a},{b}", logs::qpc_at(t)); } }
+}
+/// flushes the mirrors (end of run)
+pub fn mirror_flush() {
+    use std::io::Write;
+    if let Ok(mut g) = MIRRORS.lock() { if let Some((a, b, _)) = g.as_mut() { let _ = a.flush(); let _ = b.flush(); } }
+}
+
 enum Job {
     App(Arrived),
     Green,
@@ -271,6 +305,7 @@ impl Pipeline {
         for t in threads {
             t.join().ok();
         }
+        mirror_flush();
     }
 
     // ---- intake: IPC frame event -> newest-frame mailbox --------------------------------------------------------------
@@ -289,9 +324,11 @@ impl Pipeline {
             let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now };
             {
                 let mut q = self.intake.lock();
+                fate(counter, "A", now, slot as u64, cts);
                 q.push_back(a);
                 while q.len() > self.intake_depth {
                     if let Some(old) = q.pop_front() {
+                        fate(old.counter, "S", now, 0, 0);
                         if old.slot != slot {
                             unsafe { nvh::nvh_ipc_slot_busy(ipc, old.slot, 0) };
                         }
@@ -338,6 +375,7 @@ impl Pipeline {
                 self.queue_picks.fetch_add(1, Ordering::Relaxed);
             } else {
                 for old in q.drain(..) {
+                    fate(old.counter, "S", boundary, 1, 0);
                     unsafe { nvh::nvh_ipc_slot_busy(ipc, old.slot, 0) };
                     self.superseded.fetch_add(1, Ordering::Relaxed);
                 }
@@ -347,6 +385,7 @@ impl Pipeline {
         };
         let job = match newest {
             Some(a) => {
+                fate(a.counter, "P", boundary, idx, 0);
                 self.last_empty.store(false, Ordering::Relaxed);
                 self.slots_filled.fetch_add(1, Ordering::Relaxed);
                 Job::App(a)
@@ -369,6 +408,7 @@ impl Pipeline {
         if let Some(old) = picked.replace(Picked { job, boundary, boundary_idx: idx }) {
             // the encoder is still busy with the previous boundary's frame and had this one waiting: newest wins
             if let Job::App(a) = old.job {
+                fate(a.counter, "O", boundary, 0, 0);
                 unsafe { nvh::nvh_ipc_slot_busy(ipc, a.slot, 0) };
             }
             self.encoder_overruns.fetch_add(1, Ordering::Relaxed);
@@ -578,6 +618,8 @@ impl Pipeline {
                 self.shared.frames_sent.fetch_add(1, Ordering::Relaxed);
                 push_bounded(&HOLD_MS, o.release_at.saturating_duration_since(o.encoded_at).as_secs_f64() * 1000.0);
                 push_bounded(&SEND_PHASE_MS, now.saturating_duration_since(o.boundary).as_secs_f64() * 1000.0);
+                mirror_sent(&format!("{},{:.6},{:.3},{},{}", o.row, logs::qpc_at(now), o.release_at.saturating_duration_since(o.encoded_at).as_secs_f64() * 1000.0,
+                    o.bytes, o.is_idr as u8));
                 logs::csv("host_frames.csv", "frame,ts_ns,slot,t_boundary,t_arrival,t_encode_start,encode_ms,t_send,hold_ms,bytes,idr",
                     &format!("{},{:.6},{:.3},{},{}", o.row, logs::qpc_at(now), o.release_at.saturating_duration_since(o.encoded_at).as_secs_f64() * 1000.0,
                         o.bytes, o.is_idr as u8));

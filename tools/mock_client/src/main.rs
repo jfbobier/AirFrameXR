@@ -62,6 +62,10 @@ struct Args {
     /// "p:ms": each tracking sample is delayed by `ms` with probability p (FIFO: later samples queue behind it), plus 0-2 ms of
     /// jitter: the headset's uplink arriving late and bunched (measured on the real headset: gaps p95 13-16 ms, max 40)
     track_late: String,
+    /// timestamp jitter (ns, sd) on the tracking samples' target timestamps, quantised to 1/24 us like the real client's
+    ts_jitter_ns: f64,
+    /// every tracking sample sent: target timestamp, yaw, send time
+    poses_csv: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -93,6 +97,8 @@ fn parse_args() -> Result<Args, String> {
         noise_mdeg: 0.0,
         bunch: false,
         track_late: String::new(),
+        ts_jitter_ns: 0.0,
+        poses_csv: None,
         encoding_gamma: 1.0,
     };
     let mut it = std::env::args().skip(1);
@@ -130,6 +136,8 @@ fn parse_args() -> Result<Args, String> {
             "--noise-mdeg" => a.noise_mdeg = v()?.parse().map_err(|e| format!("{e}"))?,
             "--bunch" => a.bunch = true,
             "--track-late" => a.track_late = v()?,
+            "--ts-jitter-ns" => a.ts_jitter_ns = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--poses-csv" => a.poses_csv = Some(v()?),
             "--no-10bit" => a.prefer_10bit = false,
             "--no-foveation" => a.foveated = false,
             other => return Err(format!("unknown argument {other}")),
@@ -143,6 +151,10 @@ struct FrameRec {
     arrival_ns: u128,
     len: usize,
     yaw: Option<f32>,
+    /// the sent yaw of the nearest sample within 3 us (the client's own lookup would need an exact timestamp)
+    yaw_near: Option<f32>,
+    decoded_ns: u128,
+    queue_dropped: bool,
 }
 
 /// A decoded frame waiting for the emulated display.
@@ -162,7 +174,8 @@ struct DisplayRec {
 
 #[derive(Default)]
 struct Shared {
-    sent_yaw: HashMap<u128, f32>,
+    sent_yaw: std::collections::BTreeMap<u128, f32>,
+    sent_log: Vec<(u128, f32, u128)>,
     queue: VecDeque<Queued>,
     dropped: usize,
     display: Vec<DisplayRec>,
@@ -250,7 +263,7 @@ fn main() {
                     if args.display_sim {
                         let (poll, bunch) = (args.poll_ms, args.bunch);
                         let late: (f64, f64) = args.track_late.split_once(':').map(|(p, m)| (p.parse().unwrap_or(0.0), m.parse().unwrap_or(0.0))).unwrap_or((0.0, 0.0));
-                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, late_views)));
+                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, late_views)));
                     } else {
                         tracking_thread = Some(thread::spawn(move || tracking(c, s, sh, origin, fps, motion, controllers, late_views)));
                     }
@@ -281,19 +294,33 @@ fn main() {
                         }
                         {
                             let mut s = sh.lock();
-                            let yaw = s.sent_yaw.get(&ts.as_nanos()).copied();
-                            s.frames.push(FrameRec { ts_ns: ts.as_nanos(), arrival_ns: arrival.as_nanos(), len: data.len(), yaw });
+                            let t = ts.as_nanos();
+                            let yaw = s.sent_yaw.get(&t).copied();
+                            let yaw_near = s.sent_yaw.range(t.saturating_sub(3000)..=t + 3000).next().map(|(_, y)| *y);
+                            s.frames.push(FrameRec { ts_ns: t, arrival_ns: arrival.as_nanos(), len: data.len(), yaw, yaw_near, decoded_ns: 0, queue_dropped: false });
                             s.bytes += data.len();
                         }
                         if let Some(c) = weak.upgrade() {
                             thread::sleep(Duration::from_millis(decode_ms));
                             c.report_frame_decoded(ts);
+                            {
+                                let mut s = sh.lock();
+                                let t = ts.as_nanos();
+                                if let Some(f) = s.frames.iter_mut().rev().take(16).find(|f| f.ts_ns == t && f.decoded_ns == 0) {
+                                    f.decoded_ns = origin.elapsed().as_nanos();
+                                }
+                            }
                             if display_sim {
                                 // like the visionOS client: decoded frames queue for the display thread, oldest dropped past the cap
                                 let mut s = sh.lock();
                                 s.queue.push_back(Queued { ts, decoded_at: Instant::now() });
                                 while s.queue.len() > queue_max {
-                                    s.queue.pop_front();
+                                    if let Some(d) = s.queue.pop_front() {
+                                        let t = d.ts.as_nanos();
+                                        if let Some(f) = s.frames.iter_mut().rev().take(32).find(|f| f.ts_ns == t && !f.queue_dropped) {
+                                            f.queue_dropped = true;
+                                        }
+                                    }
                                     s.dropped += 1;
                                 }
                             } else {
@@ -348,7 +375,8 @@ fn main() {
     let lat: Vec<f64> = s.frames.iter().map(|f| (f.arrival_ns as f64 - f.ts_ns as f64) / 1e6).collect();
     let monotonic = s.frames.windows(2).all(|w| w[1].ts_ns >= w[0].ts_ns);
     let dup = s.frames.windows(2).filter(|w| w[1].ts_ns == w[0].ts_ns).count();
-    let matched = s.frames.iter().filter(|f| f.yaw.is_some()).count();
+    let matched = s.frames.iter().filter(|f| f.yaw_near.is_some()).count();
+    let matched_exact = s.frames.iter().filter(|f| f.yaw.is_some()).count();
     let pass = stream_started && n >= args.min_frames && (args.min_frames == 0 || matched == n);
     let report = json!({
         "pass": pass,
@@ -367,6 +395,7 @@ fn main() {
         "timestamps_monotonic": monotonic,
         "duplicate_timestamps": dup,
         "frames_with_matching_sent_pose": matched,
+        "frames_with_exact_sent_pose": matched_exact,
         "poses_sent": s.poses_sent,
         "total_pipeline_latency_ms": pipeline_latency_ms,
         "views_after_first_frame": args.views_after_first_frame,
@@ -398,9 +427,17 @@ fn main() {
     }
     if let Some(p) = &args.frames_csv {
         let mut f = File::create(p).expect("create --frames-csv");
-        writeln!(f, "ts_ns,arrival_ns,len,yaw").ok();
+        writeln!(f, "ts_ns,arrival_ns,len,yaw,yaw_near,decoded_ns,queue_dropped").ok();
         for r in &s.frames {
-            writeln!(f, "{},{},{},{}", r.ts_ns, r.arrival_ns, r.len, r.yaw.map(|y| y.to_string()).unwrap_or_default()).ok();
+            writeln!(f, "{},{},{},{},{},{},{}", r.ts_ns, r.arrival_ns, r.len, r.yaw.map(|y| y.to_string()).unwrap_or_default(),
+                r.yaw_near.map(|y| y.to_string()).unwrap_or_default(), r.decoded_ns, r.queue_dropped as u8).ok();
+        }
+    }
+    if let Some(p) = &args.poses_csv {
+        let mut f = File::create(p).expect("create --poses-csv");
+        writeln!(f, "target_ts_ns,yaw,send_ns").ok();
+        for (t, y, sn) in &s.sent_log {
+            writeln!(f, "{t},{y},{sn}").ok();
         }
     }
     println!("{}", json!({ "event": "report", "data": report }));
@@ -457,6 +494,7 @@ fn display(
     poll_ms: f64,
     bunch: bool,
     late: (f64, f64),
+    ts_jitter: f64,
     late_views: bool,
 ) {
     let period = Duration::from_secs_f64(1.0 / fps as f64);
@@ -467,7 +505,7 @@ fn display(
     let mut last_shown: Option<Duration> = None;
     let mut held: Option<(Duration, DeviceMotion, f32)> = None;
     // tracking samples waiting for their (late) send time, FIFO
-    let mut outq: std::collections::VecDeque<(Instant, Duration, DeviceMotion)> = std::collections::VecDeque::new();
+    let mut outq: std::collections::VecDeque<(Instant, Duration, DeviceMotion, f32)> = std::collections::VecDeque::new();
     let mut rng: u64 = 0x9E3779B97F4A7C15;
     let mut next_f = move || {
         rng ^= rng << 13;
@@ -483,8 +521,16 @@ fn display(
             views_sent = true;
             shared.lock().views_sent_at_ms = Some(origin.elapsed().as_secs_f64() * 1000.0);
         }
-        let target = tick.duration_since(origin) + period;
-        let (yaw, m) = head_motion(&motion, target, tick_idx);
+        let nominal = tick.duration_since(origin) + period;
+        let (yaw, m) = head_motion(&motion, nominal, tick_idx);
+        // the real client's target timestamps jitter by a few tens of ns around the regular grid (quantised to 1/24 us)
+        let target = if ts_jitter > 0.0 {
+            let g = (next_f() + next_f() + next_f() + next_f() - 2.0) * 1.7320508; // ~N(0,1)
+            let q = ((g * ts_jitter) / 41.6667).round() * 41.6667;
+            Duration::from_nanos((nominal.as_nanos() as i64 + q as i64).max(0) as u64)
+        } else {
+            nominal
+        };
         {
             let mut s = shared.lock();
             s.sent_yaw.insert(target.as_nanos(), yaw);
@@ -493,7 +539,8 @@ fn display(
         if bunch && tick_idx % 2 == 1 {
             held = Some((target, m, yaw)); // sent with the next sample: two packets back to back, then a gap
         } else {
-            if let Some((hts, hm, _)) = held.take() {
+            if let Some((hts, hm, hy)) = held.take() {
+                shared.lock().sent_log.push((hts.as_nanos(), hy, origin.elapsed().as_nanos()));
                 ctx.send_tracking(hts, vec![(*HEAD_ID, hm)], [None, None], face());
             }
             if late.0 > 0.0 {
@@ -502,8 +549,9 @@ fn display(
                 if let Some(last) = outq.back() {
                     due = due.max(last.0); // FIFO: a late sample holds the ones behind it
                 }
-                outq.push_back((due, target, m));
+                outq.push_back((due, target, m, yaw));
             } else {
+                shared.lock().sent_log.push((target.as_nanos(), yaw, origin.elapsed().as_nanos()));
                 ctx.send_tracking(target, vec![(*HEAD_ID, m)], [None, None], face());
             }
         }
@@ -519,7 +567,8 @@ fn display(
                 }
             }
             while outq.front().map_or(false, |f| f.0 <= Instant::now()) {
-                let (_, t, mm) = outq.pop_front().unwrap();
+                let (_, t, mm, yy) = outq.pop_front().unwrap();
+                shared.lock().sent_log.push((t.as_nanos(), yy, origin.elapsed().as_nanos()));
                 ctx.send_tracking(t, vec![(*HEAD_ID, mm)], [None, None], face());
             }
             if Instant::now() >= deadline {
@@ -545,7 +594,8 @@ fn display(
         tick_idx += 1;
         while Instant::now() < tick {
             while outq.front().map_or(false, |f| f.0 <= Instant::now()) {
-                let (_, t, mm) = outq.pop_front().unwrap();
+                let (_, t, mm, yy) = outq.pop_front().unwrap();
+                shared.lock().sent_log.push((t.as_nanos(), yy, origin.elapsed().as_nanos()));
                 ctx.send_tracking(t, vec![(*HEAD_ID, mm)], [None, None], face());
             }
             thread::sleep(Duration::from_micros(200).min(tick.saturating_duration_since(Instant::now())));

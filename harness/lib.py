@@ -184,7 +184,7 @@ def launch_app(app, rid, rd, log):
     rt = app.get("runtime", r"out\vdxr-shim")
     cmd = ("@echo off\r\n"
            f"set XR_RUNTIME_JSON={home}\\openxr\\{rt}\\virtualdesktop-openxr.json\r\n"
-           + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\openxr\\{rd}\\ovrshim.log", "XR_PROBE_TIMING_CSV": f"{home}\\openxr\\{rd}\\app_timing.csv", **app.get("env", {})}.items()) +
+           + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\openxr\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\openxr\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\openxr\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\openxr\\{rd}\\app_timing.csv", **app.get("env", {})}.items()) +
            f"cd /d {home}\\openxr\r\n"
            f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n"
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
@@ -284,7 +284,7 @@ def run_scenario(sc, outdir: Path, log=print):
         else:      # host on the builder (loopback topology: the client binds topology.client_bind_ip)
             src_arg = "" if (h.get("live") or h.get("shim")) else f'--file {sc["source"].replace("/", chr(92))} '
             dump_arg = f"--dump-qpmap {rd}\\qpmap.json " if h.get("dump_qpmap") else ""
-            envpre = "".join(f"set {k}={v}&& " for k, v in (h.get("env") or {}).items())
+            envpre = "".join(f"set {k}={v}&& " for k, v in {"VISIONALVR_PIPELINE_CSV": f"{rd}\\host_pipeline.csv", **(h.get("env") or {})}.items())
             hostcmd = (envpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
                        f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv '
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
@@ -314,9 +314,10 @@ def run_scenario(sc, outdir: Path, log=print):
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late"})
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns"})
                 + (f" --controllers-csv {rd}\\controllers.csv" if c.get("controllers") and not sfx else "")
                 + (f" --display-csv {rd}\\display{sfx}.csv" if c.get("display_sim") else "")
+                + (f" --poses-csv {rd}\\poses.csv" if not sfx else "")
                 + f' > {rd}\\client{sfx}_stdout.txt 2>&1')
     clientcmd = make_client_cmd()
     client_p = b_popen(clientcmd)
@@ -356,7 +357,7 @@ def run_scenario(sc, outdir: Path, log=print):
     steps["wall_s"] = round(time.time() - t0, 1)
     log("  fetching artifacts")
     if h is not None and topo["host"] == "builder":
-        for f in ("host_report.json", "host_stdout.txt", "host_frames.csv"):
+        for f in ("host_report.json", "host_stdout.txt", "host_frames.csv", "host_pipeline.csv", "host_pipeline_fates.csv"):
             b_get(f"runs/{rid}/{f}", outdir / f)
         if sc.get("install"):
             b_get(f"runs/{rid}/VisionALVR/config/session.json", outdir / "host_session_final.json")
@@ -369,7 +370,7 @@ def run_scenario(sc, outdir: Path, log=print):
     if gpu_p:
         b_get(f"runs/{rid}/gpu.csv", outdir / "gpu.csv")
     if app:
-        for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_stdout.txt", "app.rc", "ovrshim.log"):
+        for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log"):
             b_get(f"runs/{rid}/{f}", outdir / f)
     for f in ("client_report.json", "client_stdout.txt", "frames.csv", "client.hevc"):
         b_get(f"runs/{rid}/{f}", outdir / f)
@@ -380,6 +381,7 @@ def run_scenario(sc, outdir: Path, log=print):
         b_get(f"runs/{rid}/controllers.csv", outdir / "controllers.csv")
     if sc.get("client", {}).get("display_sim"):
         b_get(f"runs/{rid}/display.csv", outdir / "display.csv")
+    b_get(f"runs/{rid}/poses.csv", outdir / "poses.csv")
     return steps
 
 
