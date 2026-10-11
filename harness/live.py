@@ -36,6 +36,9 @@ GAMES = {
     "probe": {"exe": "xr_probe.exe", "probe": True, "auto_input": "", "settle_s": 20},
     "eoa": {"exe": "EndOfAbyss.exe", "path": r"D:\End of Abyss\EndOfAbyss\Binaries\Win64\EndOfAbyss.exe", "auto_input": "", "settle_s": 40},
 }
+# the probe "game": a light, regular app (cadence = the display rate) or random frame times; set per variant
+PROBE_CPU_MS = 1
+PROBE_LOAD = "fps:85:100"
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", PC]
 
 
@@ -187,7 +190,7 @@ def start_game(game):
     if g.get("probe"):
         # xr_probe on the PC (build\probe, run.py build probe) through the installed runtime: the Tokyo room as an OpenXR app
         ps("""
-$cmd = "@echo off`r`nset XR_RUNTIME_JSON=""" + INSTALL + """\\virtualdesktop-openxr.json`r`nset XR_PROBE_SCENE=bench\\littlest_tokyo.vab`r`nset XR_PROBE_CPU_MS=1`r`nset XR_PROBE_LOAD=fps:85:100`r`ncd /d C:\\Users\\user\\openxr`r`nbuild\\probe\\xr_probe.exe logs\\probe_live.log 200000 900 - -`r`n"
+$cmd = "@echo off`r`nset XR_RUNTIME_JSON=""" + INSTALL + """\\virtualdesktop-openxr.json`r`nset XR_PROBE_SCENE=bench\\littlest_tokyo.vab`r`nset XR_PROBE_CPU_MS=""" + str(PROBE_CPU_MS) + """`r`nset XR_PROBE_LOAD=""" + PROBE_LOAD + """`r`ncd /d C:\\Users\\user\\openxr`r`nbuild\\probe\\xr_probe.exe logs\\probe_live.log 200000 900 - -`r`n"
 [IO.File]::WriteAllText('""" + INSTALL + """\\run_probe.cmd', $cmd)
 """)
         launch = f'"{INSTALL}\\run_probe.cmd"'
@@ -322,6 +325,8 @@ def run(variants_file, only=None, seconds=None):
         name, game = v["name"], v.get("game", "synthetic")
         secs = seconds or v.get("seconds", 60)
         log(f"=== variant {name}: game={game} {secs}s settings={v.get('settings')} session={v.get('session')}")
+        global PROBE_CPU_MS, PROBE_LOAD
+        PROBE_CPU_MS, PROBE_LOAD = v.get("probe_cpu_ms", 1), v.get("probe_load", "fps:85:100")
         stop_all(game)
         write_settings(v.get("settings"), v.get("session"))
         auto = v.get("auto_input", GAMES.get(game, {}).get("auto_input", ""))

@@ -84,5 +84,27 @@
   "session": {
    "max_prediction_ms": 100
   }
+ },
+ {
+  "name": "probe_light_pred0",
+  "game": "probe",
+  "seconds": 60,
+  "settings": {},
+  "session": {
+   "max_prediction_ms": 0
+  },
+  "probe_cpu_ms": 0,
+  "probe_load": "steady"
+ },
+ {
+  "name": "probe_light_pred100",
+  "game": "probe",
+  "seconds": 60,
+  "settings": {},
+  "session": {
+   "max_prediction_ms": 100
+  },
+  "probe_cpu_ms": 0,
+  "probe_load": "steady"
  }
 ]

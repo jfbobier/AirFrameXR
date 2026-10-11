@@ -122,7 +122,7 @@ def main():
         if len(files) > 1 and not game:
             print("several games in this session, pick one with --game:", ", ".join(f.name for f in files))
             return 1
-        shim = rd(files[0])
+        shim = [r for r in rd(files[0]) if r.get("qw") not in (None, "")]   # the last line of a killed process can be cut
         t_lo, t_hi = fl(shim[0]["t_submit"]) - 0.5, fl(shim[-1]["t_publish"]) + 1.0
         fates_all, sent_all = rd(d / "host_pipeline_fates.csv"), rd(d / "host_pipeline.csv")
         sent = [r for r in sent_all if t_lo <= fl(r["t_send"]) <= t_hi]
