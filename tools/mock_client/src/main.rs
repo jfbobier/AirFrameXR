@@ -72,6 +72,10 @@ struct Args {
     replay: Option<String>,
     /// the Vision Pro's real view geometry (eye offsets +-31 mm, asymmetric FoV) instead of zero offsets and a symmetric 1 rad FoV
     real_views: bool,
+    /// replay waits for this file to exist (a hold pose is sent meanwhile): lets the harness start the game first
+    replay_start_file: Option<String>,
+    /// finish (and write the reports) when this file appears
+    stop_file: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -108,6 +112,8 @@ fn parse_args() -> Result<Args, String> {
         poses_csv: None,
         replay: None,
         real_views: false,
+        replay_start_file: None,
+        stop_file: None,
         encoding_gamma: 1.0,
     };
     let mut it = std::env::args().skip(1);
@@ -147,6 +153,8 @@ fn parse_args() -> Result<Args, String> {
             "--bunch" => a.bunch = true,
             "--track-late" => a.track_late = v()?,
             "--ts-jitter-ns" => a.ts_jitter_ns = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--stop-file" => a.stop_file = Some(v()?),
+            "--replay-start-file" => a.replay_start_file = Some(v()?),
             "--real-views" => a.real_views = true,
             "--replay" => a.replay = Some(v()?),
             "--poses-csv" => a.poses_csv = Some(v()?),
@@ -187,7 +195,7 @@ struct DisplayRec {
 #[derive(Default)]
 struct Shared {
     sent_yaw: std::collections::BTreeMap<u128, f32>,
-    sent_log: Vec<(u128, f32, u128, [f32; 7])>,
+    sent_log: Vec<(u128, f32, u128, [f32; 7], u128)>,
     queue: VecDeque<Queued>,
     dropped: usize,
     display: Vec<DisplayRec>,
@@ -275,8 +283,9 @@ fn main() {
                     if args.display_sim {
                         let (poll, bunch) = (args.poll_ms, args.bunch);
                         let replay_samples: Arc<Vec<ReplaySample>> = Arc::new(args.replay.as_deref().map(load_replay).unwrap_or_default());
+                        let (replay_gate_arg, real_views_arg) = (args.replay_start_file.clone(), args.real_views);
                         let late: (f64, f64) = args.track_late.split_once(':').map(|(p, m)| (p.parse().unwrap_or(0.0), m.parse().unwrap_or(0.0))).unwrap_or((0.0, 0.0));
-                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, args.real_views, late_views)));
+                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, replay_gate_arg, real_views_arg, late_views)));
                     } else {
                         tracking_thread = Some(thread::spawn(move || tracking(c, s, sh, origin, fps, motion, controllers, late_views)));
                     }
@@ -357,7 +366,7 @@ fn main() {
             break;
         }
         if stream_started {
-            if stream_started_at.elapsed().as_secs_f64() > args.seconds {
+            if stream_started_at.elapsed().as_secs_f64() > args.seconds || args.stop_file.as_deref().map_or(false, |f| std::path::Path::new(f).exists()) {
                 break;
             }
             if let Some(n) = args.exit_after_frames {
@@ -448,9 +457,9 @@ fn main() {
     }
     if let Some(p) = &args.poses_csv {
         let mut f = File::create(p).expect("create --poses-csv");
-        writeln!(f, "target_ts_ns,yaw,send_ns,qx,qy,qz,qw,px,py,pz").ok();
-        for (t, y, sn, p) in &s.sent_log {
-            writeln!(f, "{t},{y},{sn},{},{},{},{},{},{},{}", p[0], p[1], p[2], p[3], p[4], p[5], p[6]).ok();
+        writeln!(f, "target_ts_ns,yaw,send_ns,qx,qy,qz,qw,px,py,pz,wall_ns").ok();
+        for (t, y, sn, p, wall) in &s.sent_log {
+            writeln!(f, "{t},{y},{sn},{},{},{},{},{},{},{},{wall}", p[0], p[1], p[2], p[3], p[4], p[5], p[6]).ok();
         }
     }
     println!("{}", json!({ "event": "report", "data": report }));
@@ -514,8 +523,30 @@ fn load_replay(path: &str) -> Vec<ReplaySample> {
     out
 }
 
-/// Sends every replay sample that is due (their original arrival times, relative to the first one).
-fn replay_flush(rs: &[ReplaySample], idx: &mut usize, start: Instant, ctx: &ClientCoreContext, shared: &Mutex<Shared>, origin: Instant) {
+/// Sends every replay sample that is due (their original arrival times, relative to the first one). With a start file, nothing is replayed
+/// until it exists: the first pose is held (timestamps running 10 ms apart, well before the trace's own) so the headset stays alive.
+fn replay_flush(rs: &[ReplaySample], idx: &mut usize, start: &mut Instant, started: &mut bool, hold_k: &mut u64, gate: &Option<String>, ctx: &ClientCoreContext, shared: &Mutex<Shared>, origin: Instant) {
+    let face = || FaceData { eye_gazes: [None, None], fb_face_expression: None, htc_eye_expression: None, htc_lip_expression: None };
+    if !*started {
+        match gate {
+            Some(g) if !std::path::Path::new(g).exists() => {
+                // hold: one sample per 10 ms of wall time
+                let due = (start.elapsed().as_secs_f64() / 0.010) as u64;
+                while *hold_k < due {
+                    let r = &rs[0];
+                    let m = DeviceMotion { pose: Pose { orientation: r.q, position: r.p }, linear_velocity: Vec3::ZERO, angular_velocity: Vec3::ZERO };
+                    let ts = r.ts.saturating_sub(Duration::from_secs(3600)) + Duration::from_millis(10 * *hold_k);
+                    ctx.send_tracking(ts, vec![(*HEAD_ID, m)], [None, None], face());
+                    *hold_k += 1;
+                }
+                return;
+            }
+            _ => {
+                *started = true;
+                *start = Instant::now();
+            }
+        }
+    }
     let now = start.elapsed().as_secs_f64();
     while *idx < rs.len() && rs[*idx].at <= now {
         let r = &rs[*idx];
@@ -525,12 +556,16 @@ fn replay_flush(rs: &[ReplaySample], idx: &mut usize, start: Instant, ctx: &Clie
             let mut s = shared.lock();
             s.sent_yaw.insert(r.ts.as_nanos(), yaw);
             s.poses_sent += 1;
-            s.sent_log.push((r.ts.as_nanos(), yaw, origin.elapsed().as_nanos(), p7(&m)));
+            s.sent_log.push((r.ts.as_nanos(), yaw, origin.elapsed().as_nanos(), p7(&m), wall_ns()));
         }
-        let face = FaceData { eye_gazes: [None, None], fb_face_expression: None, htc_eye_expression: None, htc_lip_expression: None };
-        ctx.send_tracking(r.ts, vec![(*HEAD_ID, m)], [None, None], face);
+        ctx.send_tracking(r.ts, vec![(*HEAD_ID, m)], [None, None], face());
         *idx += 1;
     }
+}
+
+/// unix time in ns (to line the mock's sends up with logs of other processes on the same machine)
+fn wall_ns() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
 }
 
 /// orientation (x y z w) and position of a motion, for the pose logs
@@ -563,6 +598,7 @@ fn display(
     late: (f64, f64),
     ts_jitter: f64,
     replay: Arc<Vec<ReplaySample>>,
+    replay_gate: Option<String>,
     real_views: bool,
     late_views: bool,
 ) {
@@ -579,8 +615,10 @@ fn display(
         [vp, vp]
     };
     let mut views_sent = false;
-    let rstart = Instant::now();
+    let mut rstart = Instant::now();
     let mut ridx = 0usize;
+    let mut rstarted = replay_gate.is_none();
+    let mut rhold = 0u64;
     let mut tick = Instant::now();
     let mut tick_idx = 0u64;
     let mut last_shown: Option<Duration> = None;
@@ -622,7 +660,7 @@ fn display(
                 held = Some((target, m, yaw)); // sent with the next sample: two packets back to back, then a gap
             } else {
                 if let Some((hts, hm, hy)) = held.take() {
-                    shared.lock().sent_log.push((hts.as_nanos(), hy, origin.elapsed().as_nanos(), p7(&hm)));
+                    shared.lock().sent_log.push((hts.as_nanos(), hy, origin.elapsed().as_nanos(), p7(&hm), wall_ns()));
                     ctx.send_tracking(hts, vec![(*HEAD_ID, hm)], [None, None], face());
                 }
                 if late.0 > 0.0 {
@@ -633,7 +671,7 @@ fn display(
                     }
                     outq.push_back((due, target, m, yaw));
                 } else {
-                    shared.lock().sent_log.push((target.as_nanos(), yaw, origin.elapsed().as_nanos(), p7(&m)));
+                    shared.lock().sent_log.push((target.as_nanos(), yaw, origin.elapsed().as_nanos(), p7(&m), wall_ns()));
                     ctx.send_tracking(target, vec![(*HEAD_ID, m)], [None, None], face());
                 }
             }
@@ -651,11 +689,11 @@ fn display(
                 }
             }
             if !replay.is_empty() {
-                replay_flush(&replay, &mut ridx, rstart, &ctx, &shared, origin);
+                replay_flush(&replay, &mut ridx, &mut rstart, &mut rstarted, &mut rhold, &replay_gate, &ctx, &shared, origin);
             }
             while outq.front().map_or(false, |f| f.0 <= Instant::now()) {
                 let (_, t, mm, yy) = outq.pop_front().unwrap();
-                shared.lock().sent_log.push((t.as_nanos(), yy, origin.elapsed().as_nanos(), p7(&mm)));
+                shared.lock().sent_log.push((t.as_nanos(), yy, origin.elapsed().as_nanos(), p7(&mm), wall_ns()));
                 ctx.send_tracking(t, vec![(*HEAD_ID, mm)], [None, None], face());
             }
             if Instant::now() >= deadline {
@@ -681,11 +719,11 @@ fn display(
         tick_idx += 1;
         while Instant::now() < tick {
             if !replay.is_empty() {
-                replay_flush(&replay, &mut ridx, rstart, &ctx, &shared, origin);
+                replay_flush(&replay, &mut ridx, &mut rstart, &mut rstarted, &mut rhold, &replay_gate, &ctx, &shared, origin);
             }
             while outq.front().map_or(false, |f| f.0 <= Instant::now()) {
                 let (_, t, mm, yy) = outq.pop_front().unwrap();
-                shared.lock().sent_log.push((t.as_nanos(), yy, origin.elapsed().as_nanos(), p7(&mm)));
+                shared.lock().sent_log.push((t.as_nanos(), yy, origin.elapsed().as_nanos(), p7(&mm), wall_ns()));
                 ctx.send_tracking(t, vec![(*HEAD_ID, mm)], [None, None], face());
             }
             thread::sleep(Duration::from_micros(200).min(tick.saturating_duration_since(Instant::now())));

@@ -84,11 +84,22 @@ def project(yaw, pos, tan4, w, h, P=(0.0, 1.3, -3.0)):
 def decode_stream(hevc, n_expect):
     """Per decoded frame: the 16-bit frame stamp (left eye, top-left blocks) and the marker position (left eye), via ffmpeg."""
     ids, marks = [], []
-    with tempfile.TemporaryDirectory() as td:
+    pr = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(hevc)],
+                        capture_output=True, text=True)
+    try:
+        pw, ph = [int(x) for x in pr.stdout.strip().split(",")[:2]]
+    except Exception:
+        print("ffprobe failed:", pr.stdout, pr.stderr[-200:])
+        return None
+    DS = 16                      # the marker is searched at 1/16 resolution (a 48 px block is 3 px: enough to find its centre to ~8 px)
+    W, Hs = pw // DS, ph // DS
+    cache = Path(__file__).resolve().parent / "cache"
+    cache.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(cache)) as td:
         stamp, small = os.path.join(td, "stamp.raw"), os.path.join(td, "small.raw")
         # stamp: 16 blocks of 64 px at the top-left -> one pixel each; small: the whole frame at 1/8 for the marker
         cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(hevc), "-filter_complex",
-               "[0:v]split=2[a][b];[a]crop=1024:64:0:0,scale=16:1:flags=area,format=gray[s];[b]scale=iw/8:ih/8:flags=area,format=rgb24[m]",
+               f"[0:v]split=2[a][b];[a]crop=1024:64:0:0,scale=16:1:flags=area,format=gray[s];[b]scale={W}:{Hs}:flags=area,format=rgb24[m]",
                "-map", "[s]", "-f", "rawvideo", stamp, "-map", "[m]", "-f", "rawvideo", small]
         p = subprocess.run(cmd, capture_output=True, text=True)
         if p.returncode:
@@ -97,17 +108,9 @@ def decode_stream(hevc, n_expect):
         sb = np.fromfile(stamp, dtype=np.uint8)
         n = len(sb) // 16
         sb = sb[:n * 16].reshape(n, 16)
-        # frame size of the small stream: derive from the file size and n
         mb = np.fromfile(small, dtype=np.uint8)
-        per = len(mb) // n if n else 0
-        pix = per // 3
-        # the stream is SBS: width = 2 * eye width; the small frame keeps the aspect 2.2:1 for 3520x1600 -> 440x200
-        W = int(round(math.sqrt(pix * 2.2)))
-        for cand in (440, 220, 880):
-            if pix % cand == 0:
-                W = cand
-                break
-        Hs = pix // W
+        per = W * Hs * 3
+        n = min(n, len(mb) // per)
         mb = mb[:n * per].reshape(n, Hs, W, 3).astype(np.int16)
         for i in range(n):
             bits = (sb[i] > 128).astype(int)
@@ -115,8 +118,8 @@ def decode_stream(hevc, n_expect):
             f = mb[i, :, :W // 2]  # left eye half
             mask = (f[..., 0] > 170) & (f[..., 2] > 170) & (f[..., 1] < 90)
             ys, xs = np.nonzero(mask)
-            marks.append(((xs.mean() + 0.5) * 8, (ys.mean() + 0.5) * 8, int(mask.sum())) if len(xs) >= 4 else None)
-    return ids, marks, (W * 8, Hs * 8)
+            marks.append(((xs.mean() + 0.5) * DS, (ys.mean() + 0.5) * DS, int(mask.sum())) if len(xs) >= 2 else None)
+    return ids, marks, (W * DS, Hs * DS)
 
 
 def main():

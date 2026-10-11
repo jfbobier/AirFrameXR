@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
     // follow-the-frames markers: a magenta block at the projection of a world-fixed point, in both eyes, next to the 16-bit frame
     // counter in the left eye image; XR_PROBE_MARKERS_CSV logs where the app put it (what the view pose it used implies)
     FILE* markF = getenv("XR_PROBE_MARKERS_CSV") ? fopen(getenv("XR_PROBE_MARKERS_CSV"), "w") : nullptr;
-    if (markF) fprintf(markF, "frame,eye,px,py,w,h,qx,qy,qz,qw,posx,posy,posz,tl,tr,tu,td,display_time\n");
+    if (markF) fprintf(markF, "frame,eye,px,py,w,h,qx,qy,qz,qw,posx,posy,posz,tl,tr,tu,td,display_time,wall_ns\n");
     if (poseF) fprintf(poseF, "frame,yaw,x,y,z,display_time_ns\n");
     const char* inputCsv = (argc > 5 && strcmp(argv[5], "-") != 0) ? argv[5] : nullptr;
     FILE* inputF = inputCsv ? fopen(inputCsv, "w") : nullptr;
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     if (layerTest) { ext.push_back(XR_KHR_COMPOSITION_LAYER_CYLINDER_EXTENSION_NAME); if (cubeTest) ext.push_back(XR_KHR_COMPOSITION_LAYER_CUBE_EXTENSION_NAME); }
     XrInstanceCreateInfo ici{ XR_TYPE_INSTANCE_CREATE_INFO };
     strcpy(ici.applicationInfo.applicationName, "xr_probe");
-    ici.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
+    ici.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0); // 1.0: every runtime accepts it (SteamVR rejects the SDK's 1.1 with API_VERSION_UNSUPPORTED)
     ici.enabledExtensionCount = (uint32_t)ext.size(); ici.enabledExtensionNames = ext.data();
     XrInstance inst;
     CK(xrCreateInstance(&ici, &inst));
@@ -390,6 +390,8 @@ int main(int argc, char** argv) {
                         ctx->ClearRenderTargetView(rtv, bg);
                     }
                     if (markF && i < 2) {
+                        FILETIME wft; GetSystemTimePreciseAsFileTime(&wft);
+                        const unsigned long long wallNs = ((((unsigned long long)wft.dwHighDateTime << 32) | wft.dwLowDateTime) - 116444736000000000ull) * 100ull;
                         D3D11_TEXTURE2D_DESC mt{}; imgs[i][idx].texture->GetDesc(&mt);
                         const XrPosef& xp = views[i].pose; const XrFovf& xf = views[i].fov;
                         const XMMATRIX mpose = XMMatrixRotationQuaternion(XMVectorSet(xp.orientation.x, xp.orientation.y, xp.orientation.z, xp.orientation.w))
@@ -398,9 +400,9 @@ int main(int argc, char** argv) {
                         const XMMATRIX mvp = XMMatrixInverse(nullptr, mpose) * Projection(mtan, 0.05f, 100.f);
                         XMFLOAT3 ndc; XMStoreFloat3(&ndc, XMVector3TransformCoord(XMVectorSet(0.f, 1.3f, -3.f, 1.f), mvp));
                         const float mx = (ndc.x * 0.5f + 0.5f) * (float)mt.Width, my = (1.f - (ndc.y * 0.5f + 0.5f)) * (float)mt.Height;
-                        fprintf(markF, "%d,%d,%.2f,%.2f,%u,%u,%.7f,%.7f,%.7f,%.7f,%.5f,%.5f,%.5f,%.6f,%.6f,%.6f,%.6f,%lld\n", done + 1, (int)i, mx, my, mt.Width, mt.Height,
+                        fprintf(markF, "%d,%d,%.2f,%.2f,%u,%u,%.7f,%.7f,%.7f,%.7f,%.5f,%.5f,%.5f,%.6f,%.6f,%.6f,%.6f,%lld,%llu\n", done + 1, (int)i, mx, my, mt.Width, mt.Height,
                             xp.orientation.x, xp.orientation.y, xp.orientation.z, xp.orientation.w, xp.position.x, xp.position.y, xp.position.z,
-                            mtan[0], mtan[1], mtan[2], mtan[3], (long long)fs.predictedDisplayTime);
+                            mtan[0], mtan[1], mtan[2], mtan[3], (long long)fs.predictedDisplayTime, wallNs);
                         fflush(markF);
                         ID3D11DeviceContext1* mc = nullptr;
                         if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&mc))) {
