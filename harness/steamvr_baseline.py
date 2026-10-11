@@ -36,7 +36,7 @@ schtasks /delete /tn sbase_dash /f 2>$null | Out-Null; schtasks /delete /tn sbas
     time.sleep(3)
 
 
-def edit_stock_session(max_pred, fps=100.0):
+def edit_stock_session(max_pred, fps=100.0, hmd=False):
     """Download the dashboard's session.json, edit it with python's json (a PowerShell round trip broke a session once) and put it back."""
     scratch = live.SCRATCH
     scratch.mkdir(parents=True, exist_ok=True)
@@ -44,13 +44,15 @@ def edit_stock_session(max_pred, fps=100.0):
     live.ps(f"Copy-Item '{ALVR}\\session.json' '{ALVR}\\session.json.bak-harness' -Force")
     subprocess.run(["scp", "-o", "BatchMode=yes", "-q", f"{live.PC}:{ALVR.replace(chr(92), '/')}/session.json", str(local)], check=True)
     j = json.loads(local.read_text())
-    j["client_connections"][MOCK[0]] = {"display_name": MOCK[1], "current_ip": None, "manual_ips": [MOCK[2]], "trusted": True, "connection_state": "Disconnected"}
+    if not hmd:
+        j["client_connections"][MOCK[0]] = {"display_name": MOCK[1], "current_ip": None, "manual_ips": [MOCK[2]], "trusted": True, "connection_state": "Disconnected"}
     s = j["session_settings"]
-    s["extra"]["logging"]["log_tracking"] = True
     s["headset"]["max_prediction_ms"] = int(max_pred)
-    s["video"]["preferred_fps"] = float(fps)
-    # no foveated encoding: the stamp blocks and the marker of the probe must stay readable in the decoded stream
-    s["video"]["foveated_encoding"]["enabled"] = False
+    if not hmd:
+        s["extra"]["logging"]["log_tracking"] = True
+        s["video"]["preferred_fps"] = float(fps)
+        # no foveated encoding: the stamp blocks and the marker of the probe must stay readable in the decoded stream
+        s["video"]["foveated_encoding"]["enabled"] = False
     out = scratch / "stock_session_edited.json"
     out.write_text(json.dumps(j, indent=2))
     live.put(out, f"{ALVR.replace(chr(92), '/')}/session.json")
