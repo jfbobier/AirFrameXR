@@ -38,3 +38,15 @@ pub fn start() {
 
 #[cfg(not(feature = "telemetry"))]
 pub fn start() {}
+
+/// One head sample as the host received it (debug flavour): lets the analysis compare the pose a frame was rendered with against the pose
+/// the client has for the frame's timestamp (harness/frames.py, headset mode).
+#[cfg(feature = "telemetry")]
+pub fn head_sample(ts_ns: u64, q: [f32; 4], p: [f32; 3]) {
+    use crate::logs;
+    logs::csv("head_samples.csv", "t,ts_ns,qx,qy,qz,qw,px,py,pz",
+        &format!("{:.6},{},{:.7},{:.7},{:.7},{:.7},{:.4},{:.4},{:.4}", logs::qpc_at(std::time::Instant::now()), ts_ns, q[0], q[1], q[2], q[3], p[0], p[1], p[2]));
+}
+#[cfg(not(feature = "telemetry"))]
+#[inline(always)]
+pub fn head_sample(_ts_ns: u64, _q: [f32; 4], _p: [f32; 3]) {}

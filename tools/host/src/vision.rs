@@ -43,6 +43,8 @@ pub struct Settings {
     pub predict_missing_head: Option<bool>,
     pub intake_depth: Option<i64>,
     pub pick_policy: Option<String>,
+    /// follow the client's display rate (detected from its sample timestamps) instead of the 90 Hz grid (default on)
+    pub follow_client_rate: Option<bool>,
     /// compositor boundary offset after the display tick, ms
     pub boundary_offset_ms: Option<f64>,
     /// D3DKMT process scheduling class to ask for (5 realtime .. 2; 0 = leave)
@@ -84,6 +86,7 @@ pub fn load_settings(path: &Path) -> Settings {
         predict_missing_head: video["predict_missing_head"].as_bool(),
         intake_depth: video["intake_depth"].as_i64(),
         pick_policy: video["pick_policy"].as_str().map(str::to_string),
+        follow_client_rate: video["follow_client_rate"].as_bool(),
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
         debug: v["debug"].as_bool(),
@@ -251,4 +254,54 @@ pub fn spawn_gpu_sampler(sample: fn() -> Option<String>) {
             }
         }
     });
+}
+
+/// Estimates the client's display period from the regular spacing of its tracking-sample timestamps (the headset's refresh rate can
+/// differ from the 90 Hz the stream asks for: visionOS ran 100 Hz in one session, 90 Hz in the others). A candidate must hold for three
+/// evaluations (90 samples each) before it is reported.
+pub struct RateEstimator {
+    prev: u64,
+    diffs: std::collections::VecDeque<u64>,
+    pushes: u32,
+    cand: u64,
+    cand_count: u32,
+}
+
+impl RateEstimator {
+    pub fn new() -> Self {
+        Self { prev: 0, diffs: Default::default(), pushes: 0, cand: 0, cand_count: 0 }
+    }
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
+    /// Feed a sample timestamp (ns); Some(period ns) once a stable estimate exists (repeated at every evaluation).
+    pub fn push(&mut self, ts_ns: u64) -> Option<u64> {
+        let prev = std::mem::replace(&mut self.prev, ts_ns);
+        if prev == 0 || ts_ns <= prev {
+            return None;
+        }
+        let d = ts_ns - prev;
+        if !(4_000_000..25_000_000).contains(&d) {
+            return None;
+        }
+        self.diffs.push_back(d);
+        if self.diffs.len() > 90 {
+            self.diffs.pop_front();
+        }
+        self.pushes += 1;
+        if self.pushes % 90 != 0 || self.diffs.len() < 60 {
+            return None;
+        }
+        let mut v: Vec<u64> = self.diffs.iter().copied().collect();
+        v.sort_unstable();
+        let med = v[v.len() / 2];
+        // a missed sample shows as a double gap; the median ignores up to half of them
+        if self.cand != 0 && (med as f64 - self.cand as f64).abs() / (self.cand as f64) < 0.01 {
+            self.cand_count += 1;
+        } else {
+            self.cand = med;
+            self.cand_count = 1;
+        }
+        if self.cand_count >= 3 { Some(self.cand) } else { None }
+    }
 }

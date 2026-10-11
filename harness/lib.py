@@ -293,7 +293,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "install_dir": "--install-dir", "debug": "--debug", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "send_pacing": "--send-pacing", "running_start_ms": "--running-start-ms", "boundary_offset_ms": "--boundary-offset-ms",
-                                     "gpu_sched_class": "--gpu-sched-class", "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head"})
+                                     "gpu_sched_class": "--gpu-sched-class", "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "no_follow_rate": "--no-follow-rate"})
                        + f' > {rd}\\host_stdout.txt 2>&1')
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -314,7 +314,7 @@ def run_scenario(sc, outdir: Path, log=print):
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns"})
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz"})
                 + (f" --controllers-csv {rd}\\controllers.csv" if c.get("controllers") and not sfx else "")
                 + (f" --display-csv {rd}\\display{sfx}.csv" if c.get("display_sim") else "")
                 + (f" --poses-csv {rd}\\poses.csv" if not sfx else "")

@@ -112,13 +112,37 @@ def main():
     d = Path(args[0])
     pixels = "--no-pixels" not in sys.argv
     list_n = int(sys.argv[sys.argv.index("--list") + 1]) if "--list" in sys.argv else 0
-    shim = rd(d / "shim_frames.csv")
-    fates = rd(d / "host_pipeline_fates.csv")
-    sent = rd(d / "host_pipeline.csv")
-    cf = rd(d / "frames.csv")
-    disp = rd(d / "display.csv")
-    poses = rd(d / "poses.csv")
-    marks_app = rd(d / "app_markers.csv")
+    game = sys.argv[sys.argv.index("--game") + 1] if "--game" in sys.argv else None
+    headset = not (d / "frames.csv").exists()      # a real-headset debug session: the client side is client_frames.csv
+    if headset:
+        files = sorted(d.glob(f"shim_frames_{game or ''}*.csv"))
+        if not files:
+            print("no shim_frames_*.csv in", d)
+            return 1
+        if len(files) > 1 and not game:
+            print("several games in this session, pick one with --game:", ", ".join(f.name for f in files))
+            return 1
+        shim = rd(files[0])
+        t_lo, t_hi = fl(shim[0]["t_submit"]) - 0.5, fl(shim[-1]["t_publish"]) + 1.0
+        fates_all, sent_all = rd(d / "host_pipeline_fates.csv"), rd(d / "host_pipeline.csv")
+        sent = [r for r in sent_all if t_lo <= fl(r["t_send"]) <= t_hi]
+        fates = [r for r in fates_all if t_lo <= fl(r["t"]) <= t_hi]   # (counters restart with every game process)
+        raw = rd(d / "client_frames.csv")
+        # the client's rows are on its own clock (seconds since its start); a frame is shown about decode + decoder queue + vsync queue after it
+        # was received. Only the time scale is meaningful, the offset is estimated like the lab's.
+        cf = [dict(ts_ns=r["ts_ns"], arrival_ns=int(fl(r["t_recv"]) * 1e9), decoded_ns=int((fl(r["t_recv"]) + fl(r["decode_ms"]) * 1e-3) * 1e9),
+                   queue_dropped=0, yaw="", yaw_near="", shown_est=fl(r["t_recv"]) + (fl(r["decode_ms"]) + fl(r["decoder_queue_ms"]) + fl(r["vsync_queue_ms"])) * 1e-3,
+                   client_ms=fl(r["total_ms"])) for r in raw
+              if r["ts_ns"].isdigit()]
+        disp, poses, marks_app = [], [], []
+    else:
+        shim = rd(d / "shim_frames.csv")
+        fates = rd(d / "host_pipeline_fates.csv")
+        sent = rd(d / "host_pipeline.csv")
+        cf = rd(d / "frames.csv")
+        disp = rd(d / "display.csv")
+        poses = rd(d / "poses.csv")
+        marks_app = rd(d / "app_markers.csv")
     if not shim or not sent:
         print("missing shim_frames.csv / host_pipeline.csv: nothing to follow")
         return 1
@@ -157,9 +181,13 @@ def main():
             F[n].update(t_boundary=row["t_boundary"], t_enc0=row["t_enc0"], enc_ms=row["enc_ms"], t_send=row["t_send"], hold_ms=row["hold"], sent=1)
     # ---- D: client, matched to the sent rows in order (the stream keeps its order)
     C = [dict(ts=int(r["ts_ns"]), arr=int(r["arrival_ns"]) * 1e-9, dec=int(r["decoded_ns"]) * 1e-9 if r.get("decoded_ns") not in (None, "", "0") else float("nan"),
-              qdrop=int(r.get("queue_dropped") or 0), yaw=fl(r.get("yaw")), yaw_near=fl(r.get("yaw_near"))) for r in cf]
+              qdrop=int(r.get("queue_dropped") or 0), yaw=fl(r.get("yaw")), yaw_near=fl(r.get("yaw_near")), shown_est=r.get("shown_est")) for r in cf]
     j = 0
     pair = []
+    first = next((s for s in sent_rows if s["n"] >= 0), None)
+    if first is not None and headset:
+        # a real-headset session holds several games' client rows: start where this game's first frame arrived
+        j = next((k for k, c in enumerate(C) if c["ts"] == first["ts"]), 0)
     for s in sent_rows:
         found = None
         for k in range(j, min(j + 6, len(C))):
@@ -198,6 +226,11 @@ def main():
         k = f.get("c_idx")
         if k is not None and k in shown_at:
             f["t_shown"] = shown_at[k]
+    if headset:
+        for n, f in F.items():
+            k = f.get("c_idx")
+            if k is not None and C[k].get("shown_est") is not None:
+                f["t_shown"] = C[k]["shown_est"] - off
     # ---- pose correctness (data): the yaw the app rendered with vs the yaw the client had at the frame's timestamp
     sent_yaw = {int(r["target_ts_ns"]): fl(r["yaw"]) for r in poses}
     keys = np.array(sorted(sent_yaw)) if sent_yaw else np.array([])
@@ -227,6 +260,29 @@ def main():
         if "app_yaw" in f and f.get("client_yaw") == f.get("client_yaw"):
             e = f["app_yaw"] - f["client_yaw"]
             f["yaw_err"] = (e + math.pi) % (2 * math.pi) - math.pi
+    # ---- headset: the pose a frame was rendered with vs the client's sample at the frame's timestamp (host head_samples.csv)
+    hs_note = ""
+    if headset and (d / "head_samples.csv").exists():
+        hs = {int(r["ts_ns"]): (fl(r["qx"]), fl(r["qy"]), fl(r["qz"]), fl(r["qw"])) for r in rd(d / "head_samples.csv")}
+        order = sorted(hs)
+        def ang(a, b):
+            dot = abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3])
+            return 2 * math.acos(min(1.0, dot))
+        have = 0
+        for n, f in F.items():
+            qs = hs.get(f["ts"])
+            if qs is None:
+                continue
+            have += 1
+            f["pose_err_deg"] = math.degrees(ang((f["qx"], f["qy"], f["qz"], f["qw"]), qs))
+            # head speed around that sample (deg/s) from its neighbours
+            i = int(np.searchsorted(order, f["ts"]))
+            if 0 < i < len(order) - 1:
+                a, b = order[i - 1], order[i + 1]
+                dt = (b - a) * 1e-9
+                if dt > 0:
+                    f["head_speed"] = math.degrees(ang(hs[a], hs[b])) / dt
+        hs_note = f"head samples logged for {have} of {len(F)} frames' timestamps"
     # ---- pixels
     px_note = ""
     if pixels and (d / "client.hevc").exists() and mk:
@@ -257,7 +313,7 @@ def main():
     # ---- table
     cols = ["n", "slot", "ts", "ts_exact", "predicted", "repeated", "tg", "t_release", "t_read", "t_arrive", "t_submit", "t_publish", "t_host_arrive", "t_picked",
             "fate", "t_boundary", "t_enc0", "enc_ms", "t_send", "hold_ms", "t_c_arr", "t_c_dec", "qdrop", "t_shown", "app_yaw", "client_yaw", "yaw_err",
-            "dec_id", "marker_err_px", "marker_app_err_px"]
+            "dec_id", "marker_err_px", "marker_app_err_px", "pose_err_deg", "head_speed"]
     with open(d / "frames_table.csv", "w", newline="") as fo:
         w = csv.writer(fo)
         w.writerow(cols)
@@ -267,6 +323,11 @@ def main():
     # ---- report
     ns = sorted(F)
     ms = 1e3
+    global PERIOD
+    tgs = sorted(F[n]["tg"] for n in ns)
+    dd = sorted(b - a for a, b in zip(tgs, tgs[1:]) if 0.004 < b - a < 0.025)
+    if dd:
+        PERIOD = dd[len(dd) // 2]
     lines = []
     P = lines.append
     P(f"== follow the frames: {d}  ({len(ns)} game frames; client clock offset {off*1e3:.2f} ms; {px_note})")
@@ -332,6 +393,14 @@ def main():
         P("   pixels: |decoded marker - where the app's own pose put it| px (pipeline fidelity):      " + stats(pa))
         bad = [n for n in ns if abs(F[n].get("marker_err_px", 0)) > 6]
         P(f"   frames with the marker > 6 px off the client's pose: {len(bad)} ({100*len(bad)/max(1,len(pe)):.1f}%)")
+    pe2 = [F[n]["pose_err_deg"] for n in ns if "pose_err_deg" in F[n]]
+    if pe2:
+        P("-- pose (headset, " + hs_note + "): angle between the frame's render pose and the client's sample at its timestamp, degrees: " + stats(pe2))
+        buckets = [(0, 20), (20, 60), (60, 120), (120, 1e9)]
+        for lo, hi in buckets:
+            v = [F[n]["pose_err_deg"] for n in ns if "pose_err_deg" in F[n] and lo <= F[n].get("head_speed", -1) < hi]
+            if v:
+                P(f"   head speed {lo:3d}-{hi if hi < 1e8 else 'inf'} deg/s: {stats(v)}")
     ids = [(n, F[n]["dec_id"]) for n in ns if "dec_id" in F[n]]
     if ids:
         P(f"-- identity: decoded stamp == game frame number for {sum(1 for n, i in ids if (n & 0xFFFF) == i)} of {len(ids)} frames found by their stamp in the decoded stream")

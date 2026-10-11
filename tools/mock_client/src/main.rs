@@ -38,6 +38,8 @@ struct Args {
     yaw_hz: f32,
     height: f32,
     refresh: f32,
+    /// the display's real rate when it differs from the refresh rate the host asked for (visionOS ran 100 Hz against a 90 Hz hint)
+    display_hz: Option<f32>,
     res: UVec2,
     prefer_10bit: bool,
     foveated: bool,
@@ -81,6 +83,7 @@ fn parse_args() -> Result<Args, String> {
         yaw_hz: 0.25,
         height: 1.5,
         refresh: 90.0,
+        display_hz: None,
         // Vision Pro defaults (what the visionOS client advertises): 3552x3200 per eye, 90 Hz, 10-bit, foveated encoding
         res: UVec2::new(3552, 3200),
         prefer_10bit: true,
@@ -115,6 +118,7 @@ fn parse_args() -> Result<Args, String> {
             "--yaw-amp" => a.yaw_amp = v()?.parse().map_err(|e| format!("{e}"))?,
             "--yaw-hz" => a.yaw_hz = v()?.parse().map_err(|e| format!("{e}"))?,
             "--height" => a.height = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--display-hz" => a.display_hz = Some(v()?.parse().map_err(|e| format!("{e}"))?),
             "--refresh" => a.refresh = v()?.parse().map_err(|e| format!("{e}"))?,
             "--decode-ms" => a.decode_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--res" => {
@@ -254,7 +258,7 @@ fn main() {
                     config_json = serde_json::to_value(&cfg.negotiated_config).unwrap_or_default();
                     event(origin, "streaming_started", config_json.clone());
                     streaming.set(true);
-                    let fps = cfg.negotiated_config.refresh_rate_hint;
+                    let fps = args.display_hz.unwrap_or(cfg.negotiated_config.refresh_rate_hint);
                     let (c, s, sh) = (Arc::clone(&ctx), Arc::clone(&streaming), Arc::clone(&shared));
                     let (amp, hz, h) = (args.yaw_amp, args.yaw_hz, args.height);
                     let controllers = args.controllers;
@@ -399,7 +403,7 @@ fn main() {
         "poses_sent": s.poses_sent,
         "total_pipeline_latency_ms": pipeline_latency_ms,
         "views_after_first_frame": args.views_after_first_frame,
-        "display": if args.display_sim { display_report(&s, 1000.0 / args.refresh as f64) } else { serde_json::Value::Null },
+        "display": if args.display_sim { display_report(&s, 1000.0 / args.display_hz.unwrap_or(args.refresh) as f64) } else { serde_json::Value::Null },
         "views_sent_at_ms": s.views_sent_at_ms,
         "haptics": {
             "count": s.haptics.len(),

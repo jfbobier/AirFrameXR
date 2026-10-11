@@ -62,6 +62,8 @@ struct Args {
     /// head-sample policy (shim): wait for a late sample this long, then reuse the last (false) or predict it (true)
     head_wait_ms: f64,
     predict_missing_head: bool,
+    /// follow the client's display rate (see vision::RateEstimator)
+    follow_rate: bool,
     /// compositor boundary = display tick + this offset
     boundary_offset_ms: f64,
     /// D3DKMT process scheduling class asked for (5 realtime .. 2; 0 = leave)
@@ -140,6 +142,7 @@ fn parse_args() -> Result<Args, String> {
         running_start_ms: 2.0,
         head_wait_ms: 3.0,
         predict_missing_head: false,
+        follow_rate: true,
         boundary_offset_ms: 0.0,
         gpu_sched_class: 5,
         auto_input: vec![],
@@ -258,6 +261,7 @@ fn parse_args() -> Result<Args, String> {
             "--idle-rgb" => a.idle_rgb = Some(parse_rgb(&v()?)?),
             "--gpu-priority" => a.gpu_priority = Some(v()?.parse().map_err(|e| format!("{e}"))?),
             "--running-start-ms" => a.running_start_ms = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--no-follow-rate" => a.follow_rate = false,
             "--head-wait-ms" => a.head_wait_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--predict-missing-head" => a.predict_missing_head = true,
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
@@ -351,6 +355,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if let Some(v) = st.head_wait_ms {
         a.head_wait_ms = v;
+    }
+    if st.follow_client_rate == Some(false) {
+        a.follow_rate = false;
     }
     if let Some(v) = st.predict_missing_head {
         a.predict_missing_head = a.predict_missing_head || v;
@@ -468,6 +475,8 @@ static VSYNC_TICKS: AtomicU64 = AtomicU64::new(0);
 /// Pacing diagnostics, reported per `encoder_stats` window. Ticks are nanoseconds since the host's `origin` instant.
 static LAST_TICK_NS: AtomicU64 = AtomicU64::new(0);
 static NEXT_TICK_NS: AtomicU64 = AtomicU64::new(0);
+/// the vsync thread runs its own grid at the client's detected display period instead of ALVR's nominal one
+static FOLLOW_RATE: AtomicBool = AtomicBool::new(false);
 /// app frames sent with the same client timestamp as the previous frame (the headset treats them as already shown)
 static SAME_TS_FRAMES: AtomicU64 = AtomicU64::new(0);
 /// send instant relative to the display-clock tick (asap: render + encode time; vsync pacing: lateness after the tick)
@@ -1482,6 +1491,7 @@ fn main() {
     // event thread
     {
         let (ctx, shared) = (Arc::clone(&ctx), Arc::clone(&shared));
+        let vsync_period_ns = Arc::clone(&vsync_period_ns);
         let session_path = layout.session();
         let mut height_target = args.height_m;
         thread::spawn(move || {
@@ -1493,6 +1503,8 @@ fn main() {
             let mut height_offset = 0f32;
             let mut height_anchored = false;
             let mut samples_since_connect = 0u32;
+            let mut rate_est = vision::RateEstimator::new();
+            let nominal_period_ns = (1e9 / args.fps) as u64;
             let mut buttons_seen = 0usize;
             let mut invalid_views = 0usize;
             for ev in events {
@@ -1500,6 +1512,7 @@ fn main() {
                     ServerCoreEvent::ClientConnected => {
                         height_anchored = false;
                         samples_since_connect = 0;
+                        rate_est.reset();
                         shared.connect_pending.store(true, Ordering::SeqCst);
                         shared.client_connected.store(true, Ordering::SeqCst);
                         shared.restart_from_idr.store(true, Ordering::SeqCst);
@@ -1528,6 +1541,21 @@ fn main() {
                             push_bounded(&TRACKING_GAP_MS, now_ns.saturating_sub(prev_ns) as f64 / 1e6);
                         }
                         *shared.latest_sample_ts.lock() = Some(sample_timestamp);
+                        if args.follow_rate {
+                            if let Some(period) = rate_est.push(sample_timestamp.as_nanos() as u64) {
+                                let cur = vsync_period_ns.load(Ordering::Relaxed);
+                                let off_nominal = (period as f64 - nominal_period_ns as f64).abs() / nominal_period_ns as f64 > 0.025;
+                                let target = if off_nominal { period } else { nominal_period_ns };
+                                if (target as f64 - cur as f64).abs() / cur as f64 > 0.005 {
+                                    vsync_period_ns.store(target, Ordering::Relaxed);
+                                    FOLLOW_RATE.store(off_nominal, Ordering::Relaxed);
+                                    event(origin, "display_rate", json!({ "client_period_ms": period as f64 / 1e6, "client_hz": 1e9 / period as f64,
+                                        "host_period_ms": target as f64 / 1e6, "following": off_nominal }));
+                                    logs::general("INFO", &format!("client display rate {:.1} Hz: host clock {}", 1e9 / period as f64,
+                                        if off_nominal { "follows it" } else { "back on the nominal grid" }));
+                                }
+                            }
+                        }
                         if !ipc.is_null() {
                             // server_core hands out angular velocity in the device's own frame (what OpenVR wants); OVR/OpenXR report
                             // it in tracking space (VDXR passes it to the app as a base-space velocity): rotate it back
@@ -1556,6 +1584,7 @@ fn main() {
                                 p[1] += height_offset;
                                 let (lv, av) = ([0f32; 3], [0f32; 3]);
                                 unsafe { nvh::nvh_ipc_publish_head(ipc, sample_timestamp.as_nanos() as u64, q.as_ptr(), p.as_ptr(), lv.as_ptr(), av.as_ptr()) };
+                                telemetry::head_sample(sample_timestamp.as_nanos() as u64, q, p);
                             }
                             for (side, id) in [(0, *HAND_LEFT_ID), (1, *HAND_RIGHT_ID)] {
                                 match ctx.get_device_motion(id, sample_timestamp) {
@@ -1668,6 +1697,7 @@ fn main() {
             let mut intervals: Vec<f64> = vec![];
             let mut last: Option<Instant> = None;
             let mut next = Instant::now();
+            let mut grid: Option<Instant> = None;
             while !stop.load(Ordering::Relaxed) {
                 // sleep to just before the tick, spin the rest (a plain sleep is only ms-accurate)
                 loop {
@@ -1687,7 +1717,18 @@ fn main() {
                 // therefore lands a few microseconds BEFORE the grid point, and ALVR then answers "a few microseconds". Clamping
                 // that to 0.5 ms produced a second tick 0.5 ms later on ~15-20% of ticks (~107 Hz instead of 90: apps ran at
                 // 97-111 fps in the first headset test). A remainder under half a period means "this grid point": aim at the next.
-                let mut interval = ctx.duration_until_next_vsync().unwrap_or(nominal);
+                let mut interval = if FOLLOW_RATE.load(Ordering::Relaxed) {
+                    // the client's display period (detected from its tracking timestamps): a free-running grid at that period
+                    let mut g = grid.map(|g| g + nominal).unwrap_or(now + nominal);
+                    if g < now + nominal / 2 {
+                        g = now + nominal; // fell behind (a stall): restart the grid
+                    }
+                    grid = Some(g);
+                    g.saturating_duration_since(now)
+                } else {
+                    grid = None;
+                    ctx.duration_until_next_vsync().unwrap_or(nominal)
+                };
                 if interval < nominal / 2 {
                     interval += nominal;
                 }
