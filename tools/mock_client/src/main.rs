@@ -480,7 +480,9 @@ impl Motion {
 }
 
 fn head_motion(m: &Motion, ts: Duration, seed: u64) -> (f32, DeviceMotion) {
-    let (yaw, q) = m.pose(ts.as_secs_f32(), seed);
+    let (_nominal_yaw, q) = m.pose(ts.as_secs_f32(), seed);
+    // the yaw of the pose actually sent (noise included), so the harness compares against what the client really had
+    let yaw = (2.0 * (q.w * q.y + q.x * q.z)).atan2(1.0 - 2.0 * (q.y * q.y + q.x * q.x));
     (yaw, DeviceMotion { pose: Pose { orientation: q, position: Vec3::new(0.0, m.height, 0.0) }, linear_velocity: Vec3::ZERO, angular_velocity: Vec3::ZERO })
 }
 

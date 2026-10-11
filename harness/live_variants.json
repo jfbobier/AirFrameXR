@@ -66,5 +66,23 @@
    "bitrate_mbps": 300
   },
   "note": "GPU-bound game (55-60 fps): empty slots expected; the headset must repeat cleanly instead of juddering"
+ },
+ {
+  "name": "probe_pred0",
+  "game": "probe",
+  "seconds": 70,
+  "settings": {},
+  "session": {
+   "max_prediction_ms": 0
+  }
+ },
+ {
+  "name": "probe_pred100",
+  "game": "probe",
+  "seconds": 70,
+  "settings": {},
+  "session": {
+   "max_prediction_ms": 100
+  }
  }
 ]

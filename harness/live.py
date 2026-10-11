@@ -32,6 +32,8 @@ GAMES = {
     # EA app version: launching the exe starts the EA app itself (it must be logged in); the mod loads with the game
     "dead_space": {"exe": "Dead Space.exe", "path": r"C:\Program Files\EA Games\Dead Space (2023)\Dead Space.exe", "auto_input": "20:rA,26:rA", "settle_s": 45},
     "cyberpunk": {"exe": "Cyberpunk2077.exe", "path": r"C:\Games\Cyberpunk 2077\bin\x64\Cyberpunk2077.exe", "steam": 1091500, "auto_input": "", "settle_s": 60},
+    # our own OpenXR test app (Littlest Tokyo room, world-fixed marker) as the "game": a scene we control, to separate the chain from game-specific behaviour
+    "probe": {"exe": "xr_probe.exe", "probe": True, "auto_input": "", "settle_s": 20},
     "eoa": {"exe": "EndOfAbyss.exe", "path": r"D:\End of Abyss\EndOfAbyss\Binaries\Win64\EndOfAbyss.exe", "auto_input": "", "settle_s": 40},
 }
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", PC]
@@ -179,7 +181,14 @@ schtasks /run /tn visionalvr_live_host | Out-Null
 
 def start_game(game):
     g = GAMES[game]
-    if g.get("path"):
+    if g.get("probe"):
+        # xr_probe on the PC (build\probe, run.py build probe) through the installed runtime: the Tokyo room as an OpenXR app
+        ps("""
+$cmd = "@echo off`r`nset XR_RUNTIME_JSON=""" + INSTALL + """\\virtualdesktop-openxr.json`r`nset XR_PROBE_SCENE=bench\\littlest_tokyo.vab`r`nset XR_PROBE_CPU_MS=1`r`nset XR_PROBE_LOAD=fps:85:100`r`ncd /d C:\\Users\\user\\openxr`r`nbuild\\probe\\xr_probe.exe logs\\probe_live.log 200000 900 - -`r`n"
+[IO.File]::WriteAllText('""" + INSTALL + """\\run_probe.cmd', $cmd)
+""")
+        launch = f'"{INSTALL}\\run_probe.cmd"'
+    elif g.get("path"):
         launch = f'start "" "{g["path"]}"'
     else:
         launch = f'start "" "steam://rungameid/{g["steam"]}"'
