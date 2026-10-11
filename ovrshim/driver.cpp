@@ -39,6 +39,7 @@
 #include <deque>
 #include <mmdeviceapi.h>
 
+static double EnvDouble(const char* n, double def) { char* v = nullptr; size_t len = 0; double r = def; if (_dupenv_s(&v, &len, n) == 0 && v) { r = atof(v); } free(v); return r; }
 static bool EnvSet(const char* n) { char* v = nullptr; size_t len = 0; const bool set = _dupenv_s(&v, &len, n) == 0 && v; free(v); return set; }
 
 
@@ -1229,11 +1230,11 @@ namespace {
                     const size_t n = m_diagAngleMdeg.size();
                     ShimLog("pose match (%zu frames): residual mdeg p50 %.3f p95 %.3f max %.3f; picked newest/2nd/3rd/older %u/%u/%u/%u, "
                             "age behind newest ms p50 %.1f p95 %.1f max %.1f; ties 1/2/3+ %u/%u/%u; no pose for display time %u; "
-                            "same timestamp as the previous frame %u; in-order consume: waited-repeat %llu catch-up skips %llu",
+                            "same timestamp as the previous frame %u; in-order consume: waited-repeat %llu catch-up skips %llu predicted %llu",
                             n, pct(m_diagAngleMdeg, 0.5), pct(m_diagAngleMdeg, 0.95), pct(m_diagAngleMdeg, 1.0), m_diagPickIdx[0],
                             m_diagPickIdx[1], m_diagPickIdx[2], m_diagPickIdx[3], pct(m_diagAgeMs, 0.5), pct(m_diagAgeMs, 0.95),
                             pct(m_diagAgeMs, 1.0), m_diagTies[0], m_diagTies[1], m_diagTies[2], m_diagNoDisplayTime, m_diagSameTs,
-                            (unsigned long long)m_consumeRepeats, (unsigned long long)m_consumeSkips);
+                            (unsigned long long)m_consumeRepeats, (unsigned long long)m_consumeSkips, (unsigned long long)m_consumePredicted);
                     m_diagAngleMdeg.clear();
                     m_diagAgeMs.clear();
                     memset(m_diagPickIdx, 0, sizeof(m_diagPickIdx));
@@ -1871,7 +1872,9 @@ namespace {
                     return true;
                 }
             }
-            const double waitUntil = QpcSeconds() + 0.003;
+            static const double trackWaitEnv = EnvDouble("OVRSHIM_TRACK_WAIT_MS", -1.0); // lab override of the host setting
+            const double trackWaitS = (trackWaitEnv >= 0 ? trackWaitEnv : (h.headWaitMs > 0 ? h.headWaitMs : 3.0)) * 1e-3; // how long a frame waits for its head sample before reusing/predicting
+            const double waitUntil = QpcSeconds() + trackWaitS;
             for (;;) {
                 HeadSample c[kHeadHist + 1]{}; // newest first
                 bool ok = false;
@@ -1897,13 +1900,13 @@ namespace {
                     return false;
                 }
                 const uint64_t last = m_lastConsumedTs;
-                if (c[0].clientTsNs < last) {
+                if (c[0].clientTsNs + 200000000ull < last) { // (a predicted timestamp may run a few periods ahead of the real samples)
                     m_lastConsumedTs = 0; // the client's clock restarted
                     m_consumeLagStreak = 0;
                     continue;
                 }
                 int newer = 0; // samples newer than the last consumed (newest first: c[0..newer-1])
-                while (newer < kHeadHist + 1 && c[newer].clientTsNs > last && c[newer].clientTsNs != 0) {
+                while (newer < kHeadHist + 1 && c[newer].clientTsNs > last + 1000000ull && c[newer].clientTsNs != 0) { // 1 ms: the real sample for a predicted timestamp is not a new one
                     newer++;
                 }
                 if (newer == 0 && last != 0 && QpcSeconds() < waitUntil) {
@@ -1912,6 +1915,44 @@ namespace {
                     continue;
                 }
                 int pick = 0;
+                static const bool predictEnv = EnvSet("OVRSHIM_PREDICT_MISSING");
+                const bool predictMissing = predictEnv || h.predictMissingHead > 0.f;
+                if (predictMissing && newer == 0 && last != 0 && c[0].clientTsNs != 0 && c[1].clientTsNs != 0 && c[0].clientTsNs > c[1].clientTsNs) {
+                    // The sample for this frame is late (uplink): rather than render a second frame with the previous sample (a
+                    // duplicate timestamp, then a jump of two when the late ones arrive) stamp the frame with the timestamp the
+                    // client's next sample will carry (the client's tick period is regular) and extrapolate the head to it from the
+                    // last two samples. The client holds its own pose for that timestamp, whenever the sample reaches us.
+                    const double dtc = (double)(c[0].clientTsNs - c[1].clientTsNs);
+                    if (dtc > 5e6 && dtc < 20e6) {
+                        const uint64_t tsNew = last + (uint64_t)dtc;
+                        const double k = (double)(tsNew - c[0].clientTsNs) / dtc;
+                        if (k <= 4.0) {
+                            const OVR::Quatf q0(c[0].head.orientation[0], c[0].head.orientation[1], c[0].head.orientation[2], c[0].head.orientation[3]);
+                            const OVR::Quatf q1(c[1].head.orientation[0], c[1].head.orientation[1], c[1].head.orientation[2], c[1].head.orientation[3]);
+                            const OVR::Quatf rel = q0 * q1.Inverted();
+                            const float vl = std::sqrt(rel.x * rel.x + rel.y * rel.y + rel.z * rel.z);
+                            OVR::Quatf qn = q0;
+                            if (vl > 1e-9f) {
+                                const float ang = 2.f * std::atan2(vl, rel.w);
+                                qn = (OVR::Quatf(OVR::Vector3f(rel.x / vl, rel.y / vl, rel.z / vl), ang * (float)k) * q0).Normalized();
+                            }
+                            out = {};
+                            out.ThePose.Orientation = {qn.x, qn.y, qn.z, qn.w};
+                            for (int a = 0; a < 3; a++) {
+                                (&out.ThePose.Position.x)[a] = c[0].head.position[a] + (float)k * (c[0].head.position[a] - c[1].head.position[a]);
+                            }
+                            out.LinearVelocity = {c[0].linVel[0], c[0].linVel[1], c[0].linVel[2]};
+                            out.AngularVelocity = {c[0].angVel[0], c[0].angVel[1], c[0].angVel[2]};
+                            out.TimeInSeconds = c[0].hostTimeS;
+                            clientTsNs = tsNew;
+                            m_lastConsumedTs = tsNew;
+                            m_consumePredicted++;
+                            m_poseCache[m_poseCacheNext] = {absTime, out, clientTsNs};
+                            m_poseCacheNext = (m_poseCacheNext + 1) % 4;
+                            return true;
+                        }
+                    }
+                }
                 if (last == 0 || newer == 0) {
                     pick = 0;
                     if (newer == 0 && last != 0) {
@@ -2148,7 +2189,7 @@ namespace {
         struct PoseCacheEntry { double absTime; ovrPoseStatef pose; uint64_t ts; };
         mutable PoseCacheEntry m_poseCache[4]{};
         mutable int m_poseCacheNext{0};
-        mutable uint64_t m_consumeRepeats{0}, m_consumeSkips{0};
+        mutable uint64_t m_consumeRepeats{0}, m_consumeSkips{0}, m_consumePredicted{0};
         mutable int m_hmdTrace{0};
         mutable uint64_t m_hmdTraceLastTs{0};
         mutable std::mutex m_displayMutex;

@@ -29,6 +29,8 @@ def load(name):
     if not p.exists():
         p = SCEN / "pacing" / f"{name}.json"        # pacing lab (`run.py pacing`), not part of `all`
     if not p.exists():
+        p = SCEN / "pacing" / "exp" / f"{name}.json"   # experiments (named explicitly)
+    if not p.exists():
         raise SystemExit(f"unknown scenario {name}; available: {', '.join(x.stem for x in sorted(SCEN.glob('*.json')))}")
     sc = json.load(open(p))
     sc.setdefault("name", name)
@@ -295,8 +297,9 @@ def main(argv):
             rows.append([n, r["status"], f'{(ak.get("fps") or 0):.0f}', f'{dk.get("repeat_pct", nan):.1f}', f'{dk.get("skip_pct", nan):.1f}',
                          f'{dw.get("p05", nan):.1f}', f'{dw.get("p50", nan):.1f}', f'{dw.get("p95", nan):.1f}',
                          str(pp.get("slots_empty")), str(pp.get("superseded")), str(pp.get("encoder_overruns")), str(pp.get("send_late")),
-                         f'{((pp.get("shim") or {}).get("app_frame_ms") or 0):.1f}', str((pp.get("shim") or {}).get("releases_late"))])
-        hdr = ["scenario", "status", "app_fps", "repeat%", "skip%", "dwell_p05", "dwell_p50", "dwell_p95", "empty", "superseded", "overruns", "send_late", "app_env_ms", "rel_late"]
+                         f'{((pp.get("shim") or {}).get("app_frame_ms") or 0):.1f}', str((pp.get("shim") or {}).get("releases_late")),
+                         f'{(dk.get("pose_age_ms") or {}).get("p50", nan):.0f}/{(dk.get("pose_age_ms") or {}).get("p95", nan):.0f}/{(dk.get("pose_age_ms") or {}).get("max", nan):.0f}', str(dk.get("same_ts_shown"))])
+        hdr = ["scenario", "status", "app_fps", "repeat%", "skip%", "dwell_p05", "dwell_p50", "dwell_p95", "empty", "superseded", "overruns", "send_late", "app_env_ms", "rel_late", "age_p50/p95/max", "same_ts"]
         w = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(hdr)]
         print("\n== pacing lab (reference SteamVR + ALVR on the headset: repeat 3.4 %, dwell 9-11 ms)")
         print("  ".join(h.ljust(w[i]) for i, h in enumerate(hdr)))

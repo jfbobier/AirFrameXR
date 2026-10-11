@@ -38,6 +38,11 @@ pub struct Settings {
     pub gpu_priority: Option<i64>,
     /// shim running start margin in ms (0 = release the game at the display tick)
     pub running_start_ms: Option<f64>,
+    /// head-sample policy of the shim (see main.rs Args::head_wait_ms) and the host's frame queue (pipeline.rs)
+    pub head_wait_ms: Option<f64>,
+    pub predict_missing_head: Option<bool>,
+    pub intake_depth: Option<i64>,
+    pub pick_policy: Option<String>,
     /// compositor boundary offset after the display tick, ms
     pub boundary_offset_ms: Option<f64>,
     /// D3DKMT process scheduling class to ask for (5 realtime .. 2; 0 = leave)
@@ -75,6 +80,10 @@ pub fn load_settings(path: &Path) -> Settings {
         send_pacing: video["send_pacing"].as_str().map(str::to_string),
         gpu_priority: video["gpu_priority"].as_i64(),
         running_start_ms: video["running_start_ms"].as_f64(),
+        head_wait_ms: video["head_wait_ms"].as_f64(),
+        predict_missing_head: video["predict_missing_head"].as_bool(),
+        intake_depth: video["intake_depth"].as_i64(),
+        pick_policy: video["pick_policy"].as_str().map(str::to_string),
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
         debug: v["debug"].as_bool(),

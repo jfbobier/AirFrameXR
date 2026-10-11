@@ -59,6 +59,9 @@ struct Args {
     noise_mdeg: f32,
     /// > 0: every other tracking sample is held and sent together with the next one (Wi-Fi bunching)
     bunch: bool,
+    /// "p:ms": each tracking sample is delayed by `ms` with probability p (FIFO: later samples queue behind it), plus 0-2 ms of
+    /// jitter: the headset's uplink arriving late and bunched (measured on the real headset: gaps p95 13-16 ms, max 40)
+    track_late: String,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -89,6 +92,7 @@ fn parse_args() -> Result<Args, String> {
         motion: "yaw".into(),
         noise_mdeg: 0.0,
         bunch: false,
+        track_late: String::new(),
         encoding_gamma: 1.0,
     };
     let mut it = std::env::args().skip(1);
@@ -125,6 +129,7 @@ fn parse_args() -> Result<Args, String> {
             "--motion" => a.motion = v()?,
             "--noise-mdeg" => a.noise_mdeg = v()?.parse().map_err(|e| format!("{e}"))?,
             "--bunch" => a.bunch = true,
+            "--track-late" => a.track_late = v()?,
             "--no-10bit" => a.prefer_10bit = false,
             "--no-foveation" => a.foveated = false,
             other => return Err(format!("unknown argument {other}")),
@@ -244,7 +249,8 @@ fn main() {
                     let motion = Motion { profile: args.motion.clone(), amp, hz, height: h, noise_mdeg: args.noise_mdeg };
                     if args.display_sim {
                         let (poll, bunch) = (args.poll_ms, args.bunch);
-                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late_views)));
+                        let late: (f64, f64) = args.track_late.split_once(':').map(|(p, m)| (p.parse().unwrap_or(0.0), m.parse().unwrap_or(0.0))).unwrap_or((0.0, 0.0));
+                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, late_views)));
                     } else {
                         tracking_thread = Some(thread::spawn(move || tracking(c, s, sh, origin, fps, motion, controllers, late_views)));
                     }
@@ -450,6 +456,7 @@ fn display(
     motion: Motion,
     poll_ms: f64,
     bunch: bool,
+    late: (f64, f64),
     late_views: bool,
 ) {
     let period = Duration::from_secs_f64(1.0 / fps as f64);
@@ -459,6 +466,15 @@ fn display(
     let mut tick_idx = 0u64;
     let mut last_shown: Option<Duration> = None;
     let mut held: Option<(Duration, DeviceMotion, f32)> = None;
+    // tracking samples waiting for their (late) send time, FIFO
+    let mut outq: std::collections::VecDeque<(Instant, Duration, DeviceMotion)> = std::collections::VecDeque::new();
+    let mut rng: u64 = 0x9E3779B97F4A7C15;
+    let mut next_f = move || {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        (rng >> 11) as f64 / 9007199254740992.0
+    };
     let face = || FaceData { eye_gazes: [None, None], fb_face_expression: None, htc_eye_expression: None, htc_lip_expression: None };
     while streaming.value() {
         // tracking for the frame that will be presented at the next tick
@@ -480,7 +496,16 @@ fn display(
             if let Some((hts, hm, _)) = held.take() {
                 ctx.send_tracking(hts, vec![(*HEAD_ID, hm)], [None, None], face());
             }
-            ctx.send_tracking(target, vec![(*HEAD_ID, m)], [None, None], face());
+            if late.0 > 0.0 {
+                let extra = next_f() * 2.0 + if next_f() < late.0 { late.1 } else { 0.0 };
+                let mut due = Instant::now() + Duration::from_secs_f64(extra / 1000.0);
+                if let Some(last) = outq.back() {
+                    due = due.max(last.0); // FIFO: a late sample holds the ones behind it
+                }
+                outq.push_back((due, target, m));
+            } else {
+                ctx.send_tracking(target, vec![(*HEAD_ID, m)], [None, None], face());
+            }
         }
         // the frame for this tick: poll the decoded queue up to poll_ms
         let deadline = tick + Duration::from_secs_f64(poll_ms / 1000.0);
@@ -492,6 +517,10 @@ fn display(
                     picked = Some(q);
                     break;
                 }
+            }
+            while outq.front().map_or(false, |f| f.0 <= Instant::now()) {
+                let (_, t, mm) = outq.pop_front().unwrap();
+                ctx.send_tracking(t, vec![(*HEAD_ID, mm)], [None, None], face());
             }
             if Instant::now() >= deadline {
                 break;
@@ -514,7 +543,13 @@ fn display(
         }
         tick += period;
         tick_idx += 1;
-        thread::sleep(tick.saturating_duration_since(Instant::now()));
+        while Instant::now() < tick {
+            while outq.front().map_or(false, |f| f.0 <= Instant::now()) {
+                let (_, t, mm) = outq.pop_front().unwrap();
+                ctx.send_tracking(t, vec![(*HEAD_ID, mm)], [None, None], face());
+            }
+            thread::sleep(Duration::from_micros(200).min(tick.saturating_duration_since(Instant::now())));
+        }
     }
 }
 

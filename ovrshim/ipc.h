@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 14;
+constexpr uint32_t kVersion = 15;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -92,6 +92,8 @@ struct HostToShim {
     // The samples before the latest, newest first (same seqlock as the head): the shim consumes tracking samples in order,
     // one per frame, whatever the phase between the app's release and the sample's arrival (see GetHmdPose).
     HeadSample headHist[kHeadHist];
+    float headWaitMs;              // how long a frame waits for its head sample before reusing/predicting (default 3)
+    float predictMissingHead;      // > 0: a late head sample is predicted (timestamp and pose) instead of reusing the last one
 };
 
 struct Haptic {

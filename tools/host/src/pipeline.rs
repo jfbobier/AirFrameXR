@@ -130,6 +130,10 @@ pub struct Pipeline {
     /// the previous boundary left a frame behind in the intake (a second one in a row drops the older instead: bounded lag)
     left_behind: AtomicBool,
     pub queue_picks: AtomicU64,
+    /// which frame a boundary takes when two wait: oldest (no drops, a period late) | newest (drops the older) | adaptive
+    /// (newest right after an empty boundary, when the headset already repeated, else oldest)
+    pick_policy: String,
+    last_empty: AtomicBool,
     last_arrival: Mutex<Option<Instant>>,
     picked: Mutex<Option<Picked>>,
     picked_cv: Condvar,
@@ -185,6 +189,8 @@ impl Pipeline {
             intake_depth: std::env::var("VISIONALVR_INTAKE_DEPTH").ok().and_then(|v| v.parse().ok()).unwrap_or(2usize).clamp(1, 3),
             left_behind: AtomicBool::new(false),
             queue_picks: AtomicU64::new(0),
+            pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "oldest".into()),
+            last_empty: AtomicBool::new(false),
             last_arrival: Mutex::new(None),
             picked: Mutex::new(None),
             picked_cv: Condvar::new(),
@@ -321,7 +327,12 @@ impl Pipeline {
             let mut q = self.intake.lock();
             // two waiting: send the older now and the newer at the next boundary (the stream runs one period late until an empty
             // boundary drains the queue; a third frame arriving first drops the oldest, see intake_loop)
-            let take_older = q.len() >= 2;
+            let take_older = q.len() >= 2
+                && match self.pick_policy.as_str() {
+                    "newest" => false,
+                    "adaptive" => !self.last_empty.load(Ordering::Relaxed),
+                    _ => true,
+                };
             let a = if take_older { q.pop_front() } else { q.pop_back() };
             if take_older {
                 self.queue_picks.fetch_add(1, Ordering::Relaxed);
@@ -336,10 +347,12 @@ impl Pipeline {
         };
         let job = match newest {
             Some(a) => {
+                self.last_empty.store(false, Ordering::Relaxed);
                 self.slots_filled.fetch_add(1, Ordering::Relaxed);
                 Job::App(a)
             }
             None if alive => {
+                self.last_empty.store(true, Ordering::Relaxed);
                 self.slots_empty.fetch_add(1, Ordering::Relaxed);
                 return;
             }
@@ -588,6 +601,7 @@ impl Pipeline {
             "superseded": self.superseded.load(Ordering::Relaxed),
             "queue_picks": self.queue_picks.load(Ordering::Relaxed),
             "intake_depth": self.intake_depth,
+            "pick_policy": self.pick_policy,
             "slots_filled": self.slots_filled.load(Ordering::Relaxed),
             "slots_empty": self.slots_empty.load(Ordering::Relaxed),
             "encoder_overruns": self.encoder_overruns.load(Ordering::Relaxed),

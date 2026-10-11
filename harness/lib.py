@@ -284,7 +284,8 @@ def run_scenario(sc, outdir: Path, log=print):
         else:      # host on the builder (loopback topology: the client binds topology.client_bind_ip)
             src_arg = "" if (h.get("live") or h.get("shim")) else f'--file {sc["source"].replace("/", chr(92))} '
             dump_arg = f"--dump-qpmap {rd}\\qpmap.json " if h.get("dump_qpmap") else ""
-            hostcmd = (f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
+            envpre = "".join(f"set {k}={v}&& " for k, v in (h.get("env") or {}).items())
+            hostcmd = (envpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
                        f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv '
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
                                      "width": "--width", "height": "--height", "noise": "--noise", "qp_map": "--qp-map",
@@ -292,7 +293,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "install_dir": "--install-dir", "debug": "--debug", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "send_pacing": "--send-pacing", "running_start_ms": "--running-start-ms", "boundary_offset_ms": "--boundary-offset-ms",
-                                     "gpu_sched_class": "--gpu-sched-class"})
+                                     "gpu_sched_class": "--gpu-sched-class", "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head"})
                        + f' > {rd}\\host_stdout.txt 2>&1')
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -313,7 +314,7 @@ def run_scenario(sc, outdir: Path, log=print):
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch"})
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late"})
                 + (f" --controllers-csv {rd}\\controllers.csv" if c.get("controllers") and not sfx else "")
                 + (f" --display-csv {rd}\\display{sfx}.csv" if c.get("display_sim") else "")
                 + f' > {rd}\\client{sfx}_stdout.txt 2>&1')
@@ -827,6 +828,14 @@ def analyse_display(sc, outdir, client, period_ms):
                        dwell_ms={"p05": round(q(0.05), 3), "p50": round(q(0.5), 3), "p95": round(q(0.95), 3)}, ticks=len(win),
                        steady_window_ticks=[lo, hi])
             out["dwell_spread_ms"] = round(q(0.95) - q(0.05), 2)
+            # pose age of what the display shows: the tick's own tracking target (tick + period) minus the shown frame's timestamp;
+            # a repeat keeps ageing. The ideal is the stream's latency; the tail is "frames from the past".
+            per_ns2 = period_ms * 1e6
+            ages = sorted((int(r[0]) + per_ns2 - int(r[1])) / 1e6 for r in win if int(r[1]) != 0)
+            qa = lambda f: ages[min(len(ages) - 1, int(f * len(ages)))] if ages else 0.0
+            same = sum(1 for a, b in zip(win, win[1:]) if not int(a[2]) and not int(b[2]) and int(a[1]) == int(b[1]))
+            out["pose_age_ms"] = {"p50": round(qa(0.5), 1), "p95": round(qa(0.95), 1), "p99": round(qa(0.99), 1), "max": round(qa(1.0), 1)}
+            out["same_ts_shown"] = same
         reps = [int(r[2]) for r in (rows[lo:hi] if best[1] - best[0] >= 3 else rows[90:])]
         runs, cur = [], 0     # runs of consecutive repeats (a stall) vs isolated ones (a missed slot)
         for x in reps:

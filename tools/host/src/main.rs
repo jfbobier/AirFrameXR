@@ -58,6 +58,9 @@ struct Args {
     send_pacing_explicit: bool,
     /// shim running start: the game is released this margin + its frame-time envelope before the next boundary (0 = at the tick)
     running_start_ms: f64,
+    /// head-sample policy (shim): wait for a late sample this long, then reuse the last (false) or predict it (true)
+    head_wait_ms: f64,
+    predict_missing_head: bool,
     /// compositor boundary = display tick + this offset
     boundary_offset_ms: f64,
     /// D3DKMT process scheduling class asked for (5 realtime .. 2; 0 = leave)
@@ -134,6 +137,8 @@ fn parse_args() -> Result<Args, String> {
         split_encode: 3,
         send_pacing: pipeline::SendPacing::Phase,
         running_start_ms: 2.0,
+        head_wait_ms: 3.0,
+        predict_missing_head: false,
         boundary_offset_ms: 0.0,
         gpu_sched_class: 5,
         auto_input: vec![],
@@ -252,6 +257,8 @@ fn parse_args() -> Result<Args, String> {
             "--idle-rgb" => a.idle_rgb = Some(parse_rgb(&v()?)?),
             "--gpu-priority" => a.gpu_priority = Some(v()?.parse().map_err(|e| format!("{e}"))?),
             "--running-start-ms" => a.running_start_ms = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--head-wait-ms" => a.head_wait_ms = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--predict-missing-head" => a.predict_missing_head = true,
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
             "--auto-input" => {
@@ -340,6 +347,23 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if let Some(v) = st.running_start_ms {
         a.running_start_ms = v;
+    }
+    if let Some(v) = st.head_wait_ms {
+        a.head_wait_ms = v;
+    }
+    if let Some(v) = st.predict_missing_head {
+        a.predict_missing_head = a.predict_missing_head || v;
+    }
+    // frame-queue policy, read by the pipeline (an explicit environment variable wins)
+    if let Some(v) = st.intake_depth {
+        if std::env::var_os("VISIONALVR_INTAKE_DEPTH").is_none() {
+            std::env::set_var("VISIONALVR_INTAKE_DEPTH", v.to_string());
+        }
+    }
+    if let Some(v) = st.pick_policy.as_deref() {
+        if std::env::var_os("VISIONALVR_PICK").is_none() {
+            std::env::set_var("VISIONALVR_PICK", v);
+        }
     }
     if let Some(v) = st.boundary_offset_ms {
         a.boundary_offset_ms = v;
@@ -714,6 +738,7 @@ mod nvh {
         pub fn nvh_ipc_shim_stats(ipc: *mut c_void, submit_mode: *mut u32, ts_matched: *mut u32, ts_fallback: *mut u32);
         pub fn nvh_ipc_slot_busy(ipc: *mut c_void, slot: u32, busy: i32);
         pub fn nvh_ipc_set_pacing(ipc: *mut c_void, boundary_offset_ms: f32, running_start_ms: f32);
+        pub fn nvh_ipc_set_head_policy(ipc: *mut c_void, wait_ms: f32, predict: f32);
         pub fn nvh_ipc_set_hand_offset(ipc: *mut c_void, side: i32, quat_xyzw: *const f32, pos: *const f32);
         pub fn nvh_ipc_shim_pacing(ipc: *mut c_void, slot_busy_waits: *mut u32, app_frame_ms: *mut f32, releases: *mut u64, releases_late: *mut u64);
         pub fn nvh_set_gpu_scheduling(cls: i32) -> i32;
@@ -1416,6 +1441,7 @@ fn main() {
             ipc_addr, Arc::clone(&ctx), Arc::clone(&shared), pipeline::Encoder { handle: h, live: l });
         logs::set_clock(Instant::now(), unsafe { nvh::nvh_qpc_seconds() });
         unsafe { nvh::nvh_ipc_set_pacing(ipc, args.boundary_offset_ms as f32, args.running_start_ms as f32) };
+        unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
         {
             // hand pose convention fix (see Args::hand_rotation_deg); the right hand mirrors y and z like ALVR's own offsets
             use alvr_common::glam::{EulerRot, Quat};
@@ -1430,7 +1456,7 @@ fn main() {
         p.set_gpu_scheduling(args.gpu_sched_class);
         p.start();
         event(origin, "pacing_config", json!({ "send_pacing": args.send_pacing.name(), "running_start_ms": args.running_start_ms,
-            "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6 }));
+            "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6 }));
         pipeline = Some(p);
     }
     let app_alive = || pipeline.as_ref().map(|p| p.app_alive.load(Ordering::Relaxed)).unwrap_or(false);

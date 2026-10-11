@@ -70,6 +70,7 @@ void nvh_ipc_shim_stats(void* ipc, uint32_t* submit_mode, uint32_t* ts_matched, 
 void nvh_ipc_slot_busy(void* ipc, uint32_t slot, int busy);
 // Compositor pacing shared with the shim: boundary offset after the display tick, running-start margin (0 = release at the tick).
 void nvh_ipc_set_pacing(void* ipc, float boundary_offset_ms, float running_start_ms);
+void nvh_ipc_set_head_policy(void* ipc, float wait_ms, float predict);
 // Hand pose offset per side (ipc.h handOffsetQuat/Pos): quat x y z w and position, applied by the shim in the hand's local frame.
 void nvh_ipc_set_hand_offset(void* ipc, int side, const float* quat_xyzw, const float* pos);
 // Shim pacing diagnostics (see ipc.h ShimToHost).

@@ -583,6 +583,11 @@ void nvh_ipc_set_pacing(void* i, float boundary_offset_ms, float running_start_m
     h.boundaryOffsetMs = boundary_offset_ms; MemoryBarrier(); h.runningStartMs = running_start_ms;
 }
 
+void nvh_ipc_set_head_policy(void* i, float wait_ms, float predict) {
+    auto& h = ((Ipc*)i)->state->host;
+    h.headWaitMs = wait_ms; MemoryBarrier(); h.predictMissingHead = predict;
+}
+
 void nvh_ipc_set_hand_offset(void* i, int side, const float* q, const float* p) {
     if (side < 0 || side > 1) return;
     auto& h = ((Ipc*)i)->state->host;
