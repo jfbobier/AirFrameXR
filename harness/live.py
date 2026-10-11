@@ -142,17 +142,20 @@ def write_settings(video_overrides, session_overrides):
     f.write_text(json.dumps(s, indent=4))  # no BOM: the host rejects one
     put(f, f"{INSTALL}/config/visionalvr.json".replace("\\", "/"))
     if session_overrides:
-        # edit the ALVR session on the PC in place (ConvertFrom-Json keeps unknown keys)
-        sets = []
+        # edit the ALVR session on the PC in place with plain text replacement (ConvertFrom/To-Json rewrites the whole file and can
+        # flatten arrays and variants: a session.json rewritten that way once left the headset without a scene)
+        edits = []
         if "max_prediction_ms" in session_overrides:
-            sets.append(f"$j.session_settings.headset.max_prediction_ms = {int(session_overrides['max_prediction_ms'])}")
+            edits.append(("max_prediction_ms", int(session_overrides["max_prediction_ms"])))
         if "bitrate_mbps" in session_overrides:
-            sets.append(f"$j.session_settings.video.bitrate.mode.ConstantMbps = {int(session_overrides['bitrate_mbps'])}")
+            edits.append(("ConstantMbps", int(session_overrides["bitrate_mbps"])))
+        body = "\n".join(f"$t = [regex]::Replace($t, '\"{k}\":\\s*[0-9.]+', '\"{k}\": {v}')" for k, v in edits)
         ps(f"""
 $p = '{INSTALL}\\config\\session.json'
-$j = Get-Content $p -Raw | ConvertFrom-Json
-{chr(10).join(sets)}
-[IO.File]::WriteAllText($p, ($j | ConvertTo-Json -Depth 32), (New-Object Text.UTF8Encoding $false))
+Copy-Item $p "$p.bak-live" -Force
+$t = [IO.File]::ReadAllText($p)
+{body}
+[IO.File]::WriteAllText($p, $t, (New-Object Text.UTF8Encoding $false))
 """)
 
 
