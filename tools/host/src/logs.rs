@@ -172,7 +172,7 @@ pub fn csv(name: &str, header: &str, row: &str) {
     if let Some((_, w, rows)) = files.iter_mut().find(|(n, _, _)| n == name) {
         let _ = writeln!(w, "{row}");
         *rows += 1;
-        if *rows % 90 == 0 {
+        if *rows % 90 == 0 || name == "sched.csv" {
             let _ = w.flush(); // a crash loses at most a second
         }
     }
