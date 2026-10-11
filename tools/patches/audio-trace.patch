@@ -1,0 +1,53 @@
+diff --git a/alvr/audio/src/lib.rs b/alvr/audio/src/lib.rs
+index ca76d26..41973fc 100644
+--- a/alvr/audio/src/lib.rs
++++ b/alvr/audio/src/lib.rs
+@@ -299,6 +299,12 @@ fn downmix_audio(data: Vec<u8>, in_channels: u16, out_channels: u16) -> Vec<u8>
+ }
+ 
+ #[allow(unused_variables)]
++/// VisionALVR audio telemetry hook (debug builds of the host set it): called from the capture callback and the receive loop with
++/// (kind, time, [a, b, c, d]); kind "S" = capture started [sample rate, channels, 0, 0], "C" = one capture callback
++/// [frames captured, send failed (1/0), microseconds since the previous callback, microseconds spent in the callback].
++pub static TRACE: std::sync::OnceLock<Box<dyn Fn(&str, std::time::Instant, [u64; 4]) + Send + Sync>> =
++    std::sync::OnceLock::new();
++
+ pub fn record_audio_blocking(
+     is_running: Arc<dyn Fn() -> bool + Send + Sync>,
+     mut sender: StreamSender<()>,
+@@ -331,6 +337,10 @@ pub fn record_audio_blocking(
+     };
+ 
+     let state = Arc::new(Mutex::new(AudioRecordState::Recording));
++    if let Some(h) = TRACE.get() {
++        h("S", std::time::Instant::now(), [config.sample_rate().0 as u64, config.channels() as u64, 0, 0]);
++    }
++    let mut last_callback: Option<std::time::Instant> = None;
+ 
+     let stream = device.inner.build_input_stream_raw(
+         &stream_config,
+@@ -339,6 +349,7 @@ pub fn record_audio_blocking(
+             let state = Arc::clone(&state);
+             let is_running = Arc::clone(&is_running);
+             move |data, _| {
++                let t_in = std::time::Instant::now();
+                 let data = if config.sample_format() == SampleFormat::F32 {
+                     data.bytes()
+                         .chunks_exact(4)
+@@ -356,9 +367,15 @@ pub fn record_audio_blocking(
+                 let data = downmix_audio(data, config.channels(), channels_count);
+ 
+                 if is_running() {
++                    let frames = data.len() as u64 / 4;
+                     let mut buffer = sender.get_buffer(&()).unwrap();
+                     buffer.get_range_mut(0, data.len()).copy_from_slice(&data);
+-                    sender.send(buffer).ok();
++                    let failed = sender.send(buffer).is_err();
++                    if let Some(h) = TRACE.get() {
++                        let gap = last_callback.map(|l| t_in.duration_since(l).as_micros() as u64).unwrap_or(0);
++                        h("C", t_in, [frames, failed as u64, gap, t_in.elapsed().as_micros() as u64]);
++                    }
++                    last_callback = Some(t_in);
+                 } else {
+                     *state.lock() = AudioRecordState::ShouldStop;
+                 }

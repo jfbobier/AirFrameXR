@@ -16,6 +16,7 @@ mod discovery;
 mod logs;
 mod nvidia_profile;
 mod pipeline;
+mod telemetry;
 mod vision;
 
 use serde_json::json;
@@ -1208,6 +1209,7 @@ fn main() {
     };
     fs::create_dir_all(alvr_log.parent().unwrap_or(&args.config_dir)).ok();
     logs::init(logs_dir.as_deref(), Some(&alvr_log), args.debug == Some(true));
+    telemetry::start();
     let mut debug_on = args.debug == Some(true);
     let mut user_gamma = args.gamma.unwrap_or(1.0).clamp(0.5, 2.0);
     event(origin, "host_start", json!({ "version": vision::VERSION, "alvr": env!("CARGO_PKG_VERSION"), "args": std::env::args().skip(1).collect::<Vec<_>>(),

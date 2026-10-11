@@ -37,6 +37,7 @@ function Put($from, $to) { New-Item -ItemType Directory -Force (Split-Path $to) 
 Put "$repo\deps.lock.json" "$repo\_tmp\deps.lock.json"
 Put "$repo\tools\patches\loopback-client.patch" "$repo\_tmp\loopback-client.patch"
 Put "$repo\tools\patches\client-stats-log.patch" "$repo\_tmp\client-stats-log.patch"
+Put "$repo\tools\patches\audio-trace.patch" "$repo\_tmp\audio-trace.patch"
 Put "$repo\tools\host\Cargo.toml" "$repo\_tmp\host\Cargo.toml"
 Put "$repo\tools\host\build.rs" "$repo\_tmp\host\build.rs"
 Get-ChildItem "$repo\tools\host\src\*.rs" | ForEach-Object { Put $_.FullName "$repo\_tmp\host\src\$($_.Name)" }

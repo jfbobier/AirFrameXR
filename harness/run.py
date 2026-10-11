@@ -88,7 +88,8 @@ def build(what):
               "client": ("tools/mock_client/Cargo.toml", "tools/mock_client/src/main.rs", "_tmp/mock_client", "tools/remote/stage7_mockclient.ps1")}
     if any(w in ("client", "host") for w in (what or ["client", "host"])):
         lib.b_run("if not exist _tmp mkdir _tmp")
-        lib.b_put(lib.ROOT / "tools/patches/loopback-client.patch", "_tmp/loopback-client.patch")
+        for pn in ("loopback-client.patch", "client-stats-log.patch", "audio-trace.patch"):
+            lib.b_put(lib.ROOT / "tools/patches" / pn, f"_tmp/{pn}")
         r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage9_patch.ps1"], cwd=lib.ROOT, capture_output=True)
         o = r.stdout.decode(errors="replace").replace("\x00", "")
         print("patch:", "ok" if "applied" in o else "FAILED " + o[-300:])
