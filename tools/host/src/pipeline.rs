@@ -89,7 +89,11 @@ static MIRRORS: std::sync::Mutex<Option<(std::io::BufWriter<std::fs::File>, std:
 fn mirror_open() -> bool {
     let mut g = match MIRRORS.lock() { Ok(g) => g, Err(_) => return false };
     if g.is_none() {
-        let Ok(p) = std::env::var("VISIONALVR_PIPELINE_CSV") else { return false };
+        let p = match std::env::var("VISIONALVR_PIPELINE_CSV") {
+            Ok(p) => p,
+            // headset sessions: beside the other debug logs
+            Err(_) => match logs::debug_dir() { Some(d) => d.join("host_pipeline.csv").to_string_lossy().into_owned(), None => return false },
+        };
         let fates = p.replace(".csv", "_fates.csv");
         let (Ok(a), Ok(b)) = (std::fs::File::create(&p), std::fs::File::create(&fates)) else { return false };
         use std::io::Write;
