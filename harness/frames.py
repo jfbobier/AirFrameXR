@@ -313,7 +313,7 @@ def main():
     # ---- table
     cols = ["n", "slot", "ts", "ts_exact", "predicted", "repeated", "tg", "t_release", "t_read", "t_arrive", "t_submit", "t_publish", "t_host_arrive", "t_picked",
             "fate", "t_boundary", "t_enc0", "enc_ms", "t_send", "hold_ms", "t_c_arr", "t_c_dec", "qdrop", "t_shown", "app_yaw", "client_yaw", "yaw_err",
-            "dec_id", "marker_err_px", "marker_app_err_px", "pose_err_deg", "head_speed"]
+            "dec_id", "marker_err_px", "marker_app_err_px", "pose_err_deg", "head_speed", "warp_deg"]
     with open(d / "frames_table.csv", "w", newline="") as fo:
         w = csv.writer(fo)
         w.writerow(cols)
@@ -401,6 +401,49 @@ def main():
             v = [F[n]["pose_err_deg"] for n in ns if "pose_err_deg" in F[n] and lo <= F[n].get("head_speed", -1) < hi]
             if v:
                 P(f"   head speed {lo:3d}-{hi if hi < 1e8 else 'inf'} deg/s: {stats(v)}")
+    if headset and (d / "head_samples.csv").exists():
+        # head pose flow: where the pose goes between the headset and the screen, and how far the head moves meanwhile
+        hsr = rd(d / "head_samples.csv")
+        hts = np.array([int(r["ts_ns"]) for r in hsr])
+        hq = np.array([[fl(r[k]) for k in ("qx", "qy", "qz", "qw")] for r in hsr])
+        hta = np.array([fl(r["t"]) for r in hsr])
+        arr = dict(zip(hts.tolist(), hta.tolist()))
+        gaps = np.diff(hta) * 1e3
+        P("-- head pose flow (headset -> game -> screen)")
+        P("   uplink: head samples arrive every ms: " + stats(list(gaps)) + f"   >15 ms {int((gaps > 15).sum())}  >30 ms {int((gaps > 30).sum())}")
+        P("   sample age when the game reads it (read time - arrival) ms: " + stats([F[n]["t_read"] - arr[F[n]["ts"]] for n in ns if F[n]["ts"] in arr and "t_read" in F[n]], ms))
+        tot = {c_["ts"]: c_ for c_ in C}
+        def qat(t):
+            i = int(np.searchsorted(hts, t))
+            if i <= 0 or i >= len(hts):
+                return None
+            f_ = (t - hts[i - 1]) / (hts[i] - hts[i - 1])
+            a, b = hq[i - 1], hq[i]
+            if np.dot(a, b) < 0:
+                b = -b
+            qq = a * (1 - f_) + b * f_
+            return qq / np.linalg.norm(qq)
+        def angd(a, b):
+            return math.degrees(2 * math.acos(min(1.0, abs(float(np.dot(a, b))))))
+        totms = {}
+        for r in raw if headset else []:
+            if r["ts_ns"].isdigit():
+                totms[int(r["ts_ns"])] = fl(r["total_ms"])
+        warp = []
+        for n in ns:
+            f = F[n]
+            tm = totms.get(f["ts"])
+            if tm is None:
+                continue
+            a, b = qat(f["ts"]), qat(f["ts"] + tm * 1e6)
+            if a is None or b is None:
+                continue
+            f["warp_deg"] = angd(a, b)
+            warp.append(f["warp_deg"])
+        if warp:
+            P("   sample -> photon latency ALVR measures (ms): " + stats([totms[F[n]["ts"]] for n in ns if F[n]["ts"] in totms]))
+            P("   head rotation the client must compensate per frame (deg, over that latency): " + stats(warp))
+            P(f"   frames needing more than 2 deg: {100*sum(1 for w in warp if w>2)/len(warp):.1f}%, more than 5 deg: {100*sum(1 for w in warp if w>5)/len(warp):.1f}%, more than 10 deg: {100*sum(1 for w in warp if w>10)/len(warp):.1f}%")
     ids = [(n, F[n]["dec_id"]) for n in ns if "dec_id" in F[n]]
     if ids:
         P(f"-- identity: decoded stamp == game frame number for {sum(1 for n, i in ids if (n & 0xFFFF) == i)} of {len(ids)} frames found by their stamp in the decoded stream")
