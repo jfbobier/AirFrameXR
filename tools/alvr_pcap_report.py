@@ -2,7 +2,7 @@
 """Frame delivery report from a packet capture of the ALVR stream (UDP, default port 9944), for ANY ALVR server:
 SteamVR + ALVR and VisionALVR alike, so the two can be compared on the same footing.
 
-    python3 tools/alvr_pcap_report.py capture.pcapng [--pc <pc-ip>] [--hmd <headset-ip>]
+    python3 tools/alvr_pcap_report.py capture.pcapng --pc <streamer ip> --hmd <headset ip>
 
 Capture on the PC with tools/remote/pktmon_capture.ps1 (pktmon, 160-byte snaplen is enough). Parsed streams (ALVR 20.x
 shard prefix: u32 BE length, u16 BE stream id, u32 BE packet index, u32 BE shard count, u32 BE shard index, then the
@@ -70,7 +70,7 @@ def dist(name, v, unit='ms', scale=1000.0):
     if not v: print(f'  {name:46s} (no data)'); return
     print(f'  {name:46s} p50 {pct(v, .5):7.2f}  p95 {pct(v, .95):7.2f}  p99 {pct(v, .99):7.2f}  max {max(v):8.2f} {unit}  n={len(v)}')
 
-def main(path, pc='<pc-ip>', hmd='<headset-ip>', port=9944):
+def main(path, pc='', hmd='', port=9944):
     video = {}      # packet index -> dict(ts, t_first, t_last, shards, bytes)
     tracking = []   # (t_arrival, ts)
     stats = []      # (t_arrival, dict)

@@ -10,7 +10,7 @@ client and the probe built by harness/run.py (C:\\Users\\<user>\\openxr), the AL
 The dashboard's session.json is edited (backup kept as session.json.bak-harness): the mock client is trusted, tracking logging is on and
 max_prediction_ms is set. Results: harness/results/<UTC>_steamvr_<name>/ (probe pose logs, mock poses/frames/display, ALVR session log).
 """
-import json, subprocess, sys, time
+import json, os, subprocess, sys, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import live
 
 ROOT = live.ROOT
-ALVR = r"D:\_VR\alvr_launcher_windows\installations\v20.14.1"
-HOME = r"C:\Users\user\openxr"
+ALVR = os.environ.get("VISIONALVR_STOCK_ALVR", r"D:\_VR\alvr_launcher_windows\installations\v20.14.1")   # stock ALVR install (tools/pc.local)
+HOME = rf"C:\Users\{live.PC_USER}\openxr"
 CLIENT = HOME + r"\src\ALVR-v20.14.1\target\release\alvr_client_headless.exe"
 PROBE = HOME + r"\build\probe\xr_probe.exe"
 STEAMXR = r"C:\Program Files (x86)\Steam\steamapps\common\SteamVR\steamxr_win64.json"

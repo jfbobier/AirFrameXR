@@ -21,9 +21,21 @@ import csv, json, os, statistics, subprocess, sys, time, glob
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PC = os.environ.get("VISIONALVR_PC", "user@pc")
-CLONE = r"C:\Users\user\vision-alvr"
-INSTALL = r"D:\_VR\VisionALVR"
+def _local_env():
+    """tools/pc.local (gitignored): VISIONALVR_PC=user@host, VISIONALVR_HEADSET_IP=..., VISIONALVR_INSTALL=..., one KEY=VALUE per line."""
+    f = Path(__file__).resolve().parent.parent / "tools" / "pc.local"
+    if f.exists():
+        for line in f.read_text().splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
+
+_local_env()
+PC = os.environ.get("VISIONALVR_PC", "user@pc")      # the test PC (ssh, key auth): set it in tools/pc.local or the environment
+PC_USER = PC.split("@")[0]
+CLONE = rf"C:\Users\{PC_USER}\vision-alvr"
+INSTALL = os.environ.get("VISIONALVR_INSTALL", r"D:\_VR\VisionALVR")
 LOGS_LOCAL = ROOT / "logs" / "pilot3"
 RESULTS = ROOT / "harness" / "results" / "live"
 SCRATCH = Path(os.environ.get("VISIONALVR_SCRATCH", "/tmp/visionalvr-live"))
@@ -131,7 +143,7 @@ Get-Item "$inst\\alvr_host.exe", "$inst\\LibOVRRT64_1.dll", "$inst\\virtualdeskt
 
 
 BASE_SETTINGS = {
-    "display": {"gamma": 1.2}, "headset": {"ip": "<headset-ip>"}, "debug": True,
+    "display": {"gamma": 1.2}, "headset": {"ip": os.environ.get("VISIONALVR_HEADSET_IP", "")}, "debug": True,
     # the staged pipeline (tools/host/src/pipeline.rs): phase-paced sends, shim running start 2 ms, realtime GPU scheduling class
     "video": {"split_encode": "3", "send_pacing": "phase", "running_start_ms": 2.0, "boundary_offset_ms": 0, "gpu_priority": 0, "gpu_sched_class": 5},
 }
@@ -190,7 +202,7 @@ def start_game(game):
     if g.get("probe"):
         # xr_probe on the PC (build\probe, run.py build probe) through the installed runtime: the Tokyo room as an OpenXR app
         ps("""
-$cmd = "@echo off`r`nset XR_RUNTIME_JSON=""" + INSTALL + """\\virtualdesktop-openxr.json`r`nset XR_PROBE_SCENE=bench\\littlest_tokyo.vab`r`nset XR_PROBE_CPU_MS=""" + str(PROBE_CPU_MS) + """`r`nset XR_PROBE_LOAD=""" + PROBE_LOAD + """`r`ncd /d C:\\Users\\user\\openxr`r`nbuild\\probe\\xr_probe.exe logs\\probe_live.log 200000 900 - -`r`n"
+$cmd = "@echo off`r`nset XR_RUNTIME_JSON=""" + INSTALL + """\\virtualdesktop-openxr.json`r`nset XR_PROBE_SCENE=bench\\littlest_tokyo.vab`r`nset XR_PROBE_CPU_MS=""" + str(PROBE_CPU_MS) + """`r`nset XR_PROBE_LOAD=""" + PROBE_LOAD + """`r`ncd /d C:\\Users\\""" + PC_USER + """\\openxr`r`nbuild\\probe\\xr_probe.exe logs\\probe_live.log 200000 900 - -`r`n"
 [IO.File]::WriteAllText('""" + INSTALL + """\\run_probe.cmd', $cmd)
 """)
         launch = f'"{INSTALL}\\run_probe.cmd"'

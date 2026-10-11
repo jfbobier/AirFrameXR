@@ -26,3 +26,6 @@ target/
 *.swp
 __pycache__/
 /external/_wslcheck/
+
+# the test PC's address and install paths (harness/live.py)
+tools/pc.local
