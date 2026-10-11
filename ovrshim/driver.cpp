@@ -39,6 +39,9 @@
 #include <deque>
 #include <mmdeviceapi.h>
 
+static bool EnvSet(const char* n) { char* v = nullptr; size_t len = 0; const bool set = _dupenv_s(&v, &len, n) == 0 && v; free(v); return set; }
+
+
 using namespace visionalvr_ipc;
 
 // Logging. General log: <folder of this DLL>\logs\VisionALVR.log, appended by every VisionALVR component (one WriteFile per
@@ -398,9 +401,26 @@ namespace {
                             }
                         }
                         m_vsyncInterval = interval;
-                        m_nextFramePredictedDisplayTime = tick + interval + m_photonsTime;
+                        if (!m_rsDisplayTimeOwned) { // else WaitForVsync's running start sets it from the grid
+                            std::lock_guard dl(m_displayMutex);
+                            m_nextFramePredictedDisplayTime = tick + interval + m_photonsTime;
+                        }
                         m_latestTickS = tick;
-                        m_lastSignaledVsync++;
+                        // the host's tick event is a plain event: two ticks can coalesce into one wake. Count by tick time so the
+                        // boundary grid (indexed by this counter) stays aligned with the host's ticks.
+                        long long advance = 1;
+                        if (r == WAIT_OBJECT_0 && m_prevHostTickS > 0) {
+                            advance = std::max<long long>(1, (long long)std::llround((tick - m_prevHostTickS) / interval));
+                            if (advance > 1) {
+                                m_vsyncCoalesced += advance - 1;
+                            }
+                        }
+                        if (r == WAIT_OBJECT_0) {
+                            m_prevHostTickS = tick;
+                        } else {
+                            m_prevHostTickS = 0;
+                        }
+                        m_lastSignaledVsync += advance;
                         m_frameVsync.notify_all();
                     }
                     timeEndPeriod(1);
@@ -637,6 +657,7 @@ namespace {
             TraceLoggingWriteStart(local, "HostDriver_GetPredictedDisplayTime", TLArg(frameIndex, "Frame"));
 
             double predictedDisplayTime;
+            std::lock_guard dl(m_displayMutex);
             // Base our prediction on the last successfully waited frame.
             if (frameIndex <= m_lastWaitedFrame) {
                 predictedDisplayTime = m_nextFramePredictedDisplayTime;
@@ -698,10 +719,50 @@ namespace {
                     while (boundaryTime(target) - lead < now - period) {
                         target++; // far behind (paused app, very long frame): skip boundaries more than a period in the past
                     }
-                    const double plannedRelease = boundaryTime(target) - lead;
+                    // Sample-arrival alignment: the client's tracking samples arrive once per period at some phase a after the
+                    // boundary before this release's boundary. A release just before that arrival reads a sample one period old
+                    // (head pose ~10 ms stale), and one drifting across it makes two frames read the same sample then skip one.
+                    // So the release is kept off a by a guard g: slightly later than the sample's arrival when that costs at most
+                    // m_phaseDelayMax of the running-start margin (fresh pose, the usual case), else slightly before it (stable,
+                    // one period older pose). Moving from one side to the other happens only when the wanted phase has moved by
+                    // more than that, so the sample choice flips rarely instead of on every wobble.
+                    static const bool noAlign = !EnvSet("OVRSHIM_ALIGN_RELEASE"); // opt-in: see SelectHostHead
+                    auto alignedRelease = [&](double releaseAt) {
+                        if (noAlign) {
+                            return releaseAt;
+                        }
+                        const double arrival = m_ipc.state->host.headHostTimeS;
+                        const double b0 = boundaryTime(target) - period;
+                        if (arrival <= 0) {
+                            return releaseAt;
+                        }
+                        double a = std::fmod(arrival - b0, period);
+                        if (a < 0) {
+                            a += period;
+                        }
+                        const double g = 0.0005;
+                        const double rp = releaseAt - b0;
+                        if (rp < 0 || rp > period || a + g > period - 0.5 * marginMs * 0.001) {
+                            return releaseAt;
+                        }
+                        const double d = (a + g) - rp; // how much later the fresh side is than the wanted release
+                        if (d <= 0) {
+                            m_phaseFresh = true;
+                            return releaseAt;
+                        }
+                        // hysteresis: a fresh-side release is delayed up to 2 ms (of the 2 ms margin plus the lead's own wobble)
+                        // before giving the fresh pose up; a stale-side release comes back only when it costs under 0.5 ms
+                        if (m_phaseFresh ? d <= 0.002 : d <= 0.0005) {
+                            m_phaseFresh = true;
+                            return b0 + a + g;
+                        }
+                        m_phaseFresh = false;
+                        return std::min(releaseAt, b0 + a - g);
+                    };
+                    const double plannedRelease = alignedRelease(boundaryTime(target) - lead);
                     for (;;) {
                         now = QpcSeconds();
-                        const double releaseAt = boundaryTime(target) - lead; // ticks arriving meanwhile refine the grid
+                        const double releaseAt = alignedRelease(boundaryTime(target) - lead); // ticks arriving meanwhile refine the grid
                         if (releaseAt <= now) {
                             break;
                         }
@@ -710,11 +771,23 @@ namespace {
                         m_frameVsync.wait_until(lock, std::chrono::steady_clock::now() + waitFor);
                     }
                     m_lastTargetBoundary = target;
+                    // The display time follows the grid boundary the app was released for, not whichever host tick happens to be the
+                    // latest when it wakes: a release landing within a wake-up jitter of a tick otherwise got the previous
+                    // boundary's time (duplicate timestamps, then a skip).
+                    {
+                        // base time and the frame it belongs to change together: VDXR asks GetPredictedDisplayTime from another thread
+                        // and extrapolates by (frameIndex - m_lastWaitedFrame) periods
+                        std::lock_guard dl(m_displayMutex);
+                        m_nextFramePredictedDisplayTime = boundaryTime(target) - offset + m_photonsTime;
+                        m_lastWaitedFrame = std::max(m_lastWaitedFrame, frameIndex);
+                        m_rsDisplayTimeOwned = true;
+                    }
                     if (plannedRelease < now - 0.0005) {
                         m_releasesLate++;
                     }
                 } else {
                     // no running start: release at the host's next display tick
+                    m_rsDisplayTimeOwned = false;
                     const auto lastSignaledVsync = m_lastSignaledVsync;
                     if (!m_frameVsync.wait_for(lock, 100ms, [&]() { return m_lastSignaledVsync > lastSignaledVsync; })) {
                         m_waitTimeouts++;
@@ -1156,10 +1229,11 @@ namespace {
                     const size_t n = m_diagAngleMdeg.size();
                     ShimLog("pose match (%zu frames): residual mdeg p50 %.3f p95 %.3f max %.3f; picked newest/2nd/3rd/older %u/%u/%u/%u, "
                             "age behind newest ms p50 %.1f p95 %.1f max %.1f; ties 1/2/3+ %u/%u/%u; no pose for display time %u; "
-                            "same timestamp as the previous frame %u",
+                            "same timestamp as the previous frame %u; in-order consume: waited-repeat %llu catch-up skips %llu",
                             n, pct(m_diagAngleMdeg, 0.5), pct(m_diagAngleMdeg, 0.95), pct(m_diagAngleMdeg, 1.0), m_diagPickIdx[0],
                             m_diagPickIdx[1], m_diagPickIdx[2], m_diagPickIdx[3], pct(m_diagAgeMs, 0.5), pct(m_diagAgeMs, 0.95),
-                            pct(m_diagAgeMs, 1.0), m_diagTies[0], m_diagTies[1], m_diagTies[2], m_diagNoDisplayTime, m_diagSameTs);
+                            pct(m_diagAgeMs, 1.0), m_diagTies[0], m_diagTies[1], m_diagTies[2], m_diagNoDisplayTime, m_diagSameTs,
+                            (unsigned long long)m_consumeRepeats, (unsigned long long)m_consumeSkips);
                     m_diagAngleMdeg.clear();
                     m_diagAgeMs.clear();
                     memset(m_diagPickIdx, 0, sizeof(m_diagPickIdx));
@@ -1776,6 +1850,96 @@ namespace {
             return false;
         }
 
+        // Head sample for the next frame. The latest sample is not always the right one: the app is released at some phase
+        // relative to the arrival of the client's samples (one per display period), and when that phase drifts across the
+        // arrival, two consecutive frames read the same sample and the next one jumps two (duplicate timestamp, then a skip:
+        // a missing frame and a repeat on the headset). So samples are consumed in order, one per frame: the oldest one newer
+        // than the last consumed; when none is newer the frame waits briefly for the sample to arrive; when the app has fallen
+        // two or more samples behind it jumps to the newest but one (catch-up).
+        bool SelectHostHead(ovrPoseStatef& out, uint64_t& clientTsNs, double absTime) const {
+            if (!m_ipc.state) {
+                return false;
+            }
+            using namespace visionalvr_ipc;
+            const auto& h = m_ipc.state->host;
+            // one sample per frame, keyed by the display time the app asks the pose for (an app or VDXR reads the head pose several
+            // times per frame, and pipelined engines read frame N+1's pose before submitting N): the same time gets the same sample
+            for (const auto& e : m_poseCache) {
+                if (e.ts != 0 && std::abs(e.absTime - absTime) < 1e-4) {
+                    out = e.pose;
+                    clientTsNs = e.ts;
+                    return true;
+                }
+            }
+            const double waitUntil = QpcSeconds() + 0.003;
+            for (;;) {
+                HeadSample c[kHeadHist + 1]{}; // newest first
+                bool ok = false;
+                for (int attempt = 0; attempt < 8 && !ok; attempt++) {
+                    const uint64_t s1 = h.headSeq;
+                    if (s1 & 1 || s1 == 0) {
+                        _mm_pause();
+                        continue;
+                    }
+                    MemoryBarrier();
+                    c[0].clientTsNs = h.headClientTsNs;
+                    c[0].hostTimeS = h.headHostTimeS;
+                    c[0].head = h.head;
+                    memcpy(c[0].linVel, h.headLinVel, 12);
+                    memcpy(c[0].angVel, h.headAngVel, 12);
+                    for (int k = 0; k < kHeadHist; k++) {
+                        c[k + 1] = h.headHist[k];
+                    }
+                    MemoryBarrier();
+                    ok = h.headSeq == s1;
+                }
+                if (!ok) {
+                    return false;
+                }
+                const uint64_t last = m_lastConsumedTs;
+                if (c[0].clientTsNs < last) {
+                    m_lastConsumedTs = 0; // the client's clock restarted
+                    m_consumeLagStreak = 0;
+                    continue;
+                }
+                int newer = 0; // samples newer than the last consumed (newest first: c[0..newer-1])
+                while (newer < kHeadHist + 1 && c[newer].clientTsNs > last && c[newer].clientTsNs != 0) {
+                    newer++;
+                }
+                if (newer == 0 && last != 0 && QpcSeconds() < waitUntil) {
+                    Sleep(0); // the sample for this frame is still in flight
+                    _mm_pause();
+                    continue;
+                }
+                int pick = 0;
+                if (last == 0 || newer == 0) {
+                    pick = 0;
+                    if (newer == 0 && last != 0) {
+                        m_consumeRepeats++;
+                    }
+                } else if (newer >= 3 || (newer == 2 && m_consumeLagStreak >= 2)) {
+                    pick = 0; // behind by two or more samples (or lagging steadily): catch up to the newest
+                    m_consumeLagStreak = 0;
+                    m_consumeSkips++;
+                } else {
+                    pick = newer - 1; // the oldest unconsumed
+                    m_consumeLagStreak = newer == 2 ? m_consumeLagStreak + 1 : 0;
+                }
+                const HeadSample& sm = c[pick];
+                m_lastConsumedTs = std::max<uint64_t>(m_lastConsumedTs, sm.clientTsNs);
+                out = {};
+                out.ThePose.Orientation = {sm.head.orientation[0], sm.head.orientation[1], sm.head.orientation[2], sm.head.orientation[3]};
+                out.ThePose.Position = {sm.head.position[0], sm.head.position[1], sm.head.position[2]};
+                out.LinearVelocity = {sm.linVel[0], sm.linVel[1], sm.linVel[2]};
+                out.AngularVelocity = {sm.angVel[0], sm.angVel[1], sm.angVel[2]};
+                out.TimeInSeconds = sm.hostTimeS;
+                clientTsNs = sm.clientTsNs;
+                m_poseCache[m_poseCacheNext] = {absTime, out, clientTsNs};
+                m_poseCacheNext = (m_poseCacheNext + 1) % 4;
+                return true;
+            }
+        }
+
         // Reads one hand from the host under the same seqlock as the head (no torn pose). False if the hand is not tracked.
         bool ReadHostHand(int side, ovrPoseStatef& out) const {
             const auto& h = m_ipc.state->host;
@@ -1824,7 +1988,9 @@ namespace {
         ovrPoseStatef GetHmdPose(double absTime) const override {
             ovrPoseStatef latched;
             uint64_t clientTs = 0;
-            if (ReadHostHead(latched, clientTs)) {
+            // in-order sample consumption (SelectHostHead); OVRSHIM_LEGACY_POSE = the latest sample, for A/B runs
+            static const bool legacyPose = EnvSet("OVRSHIM_LEGACY_POSE");
+            if (legacyPose ? ReadHostHead(latched, clientTs) : SelectHostHead(latched, clientTs, absTime)) {
                 // Remember which client tracking sample the app is about to render with: the frame it submits
                 // must carry this timestamp so the headset can reproject against the right pose.
                 m_lastPoseClientTsNs = clientTs;
@@ -1974,6 +2140,20 @@ namespace {
 
         mutable std::mutex m_frameMutex;
         long long m_lastSignaledVsync{};
+        double m_prevHostTickS{0.0};
+        bool m_phaseFresh{true};
+        mutable int m_gpdtTrace{0};
+        mutable std::atomic<uint64_t> m_lastConsumedTs{0};
+        mutable int m_consumeLagStreak{0};
+        struct PoseCacheEntry { double absTime; ovrPoseStatef pose; uint64_t ts; };
+        mutable PoseCacheEntry m_poseCache[4]{};
+        mutable int m_poseCacheNext{0};
+        mutable uint64_t m_consumeRepeats{0}, m_consumeSkips{0};
+        mutable int m_hmdTrace{0};
+        mutable uint64_t m_hmdTraceLastTs{0};
+        mutable std::mutex m_displayMutex;
+        std::atomic<bool> m_rsDisplayTimeOwned{false};
+        uint64_t m_vsyncCoalesced{0};
         long long m_lastWaitedFrame{};
         std::atomic<bool> m_submittedSinceWait{false};
         uint64_t m_waitCalls{0}, m_waitWaited{0}, m_waitRepeatedIndex{0}, m_waitTimeouts{0};

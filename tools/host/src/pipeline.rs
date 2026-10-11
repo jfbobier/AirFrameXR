@@ -124,7 +124,12 @@ pub struct Pipeline {
     ctx: Arc<ServerCoreContext>,
     shared: Arc<Shared>,
     pub enc: Mutex<Encoder>,
-    intake: Mutex<Option<Arrived>>,
+    /// frames the app finished and no boundary has taken yet, oldest first (at most `intake_depth`)
+    intake: Mutex<VecDeque<Arrived>>,
+    intake_depth: usize,
+    /// the previous boundary left a frame behind in the intake (a second one in a row drops the older instead: bounded lag)
+    left_behind: AtomicBool,
+    pub queue_picks: AtomicU64,
     last_arrival: Mutex<Option<Instant>>,
     picked: Mutex<Option<Picked>>,
     picked_cv: Condvar,
@@ -173,7 +178,13 @@ impl Pipeline {
             ctx,
             shared,
             enc: Mutex::new(enc),
-            intake: Mutex::new(None),
+            intake: Mutex::new(VecDeque::new()),
+            // Depth 2: a GPU-bound game completes frames in bunches (two within one period, then none). Newest-wins threw the
+            // older of each pair away and left the next boundary empty (Cyberpunk: 90 submitted, ~65 streamed). With depth 2
+            // the older one goes out at the boundary and the newer at the next. VISIONALVR_INTAKE_DEPTH=1: the old behaviour.
+            intake_depth: std::env::var("VISIONALVR_INTAKE_DEPTH").ok().and_then(|v| v.parse().ok()).unwrap_or(2usize).clamp(1, 3),
+            left_behind: AtomicBool::new(false),
+            queue_picks: AtomicU64::new(0),
             last_arrival: Mutex::new(None),
             picked: Mutex::new(None),
             picked_cv: Condvar::new(),
@@ -270,11 +281,17 @@ impl Pipeline {
             // hold the slot for the shim until the encoder has read it (or a newer frame supersedes it)
             unsafe { nvh::nvh_ipc_slot_busy(ipc, slot, 1) };
             let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now };
-            if let Some(old) = self.intake.lock().replace(a) {
-                if old.slot != slot {
-                    unsafe { nvh::nvh_ipc_slot_busy(ipc, old.slot, 0) };
+            {
+                let mut q = self.intake.lock();
+                q.push_back(a);
+                while q.len() > self.intake_depth {
+                    if let Some(old) = q.pop_front() {
+                        if old.slot != slot {
+                            unsafe { nvh::nvh_ipc_slot_busy(ipc, old.slot, 0) };
+                        }
+                        self.superseded.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
-                self.superseded.fetch_add(1, Ordering::Relaxed);
             }
             self.arrived.fetch_add(1, Ordering::Relaxed);
             let mut last = self.last_arrival.lock();
@@ -300,7 +317,23 @@ impl Pipeline {
         if !self.active.load(Ordering::Relaxed) {
             return;
         }
-        let newest = self.intake.lock().take();
+        let newest = {
+            let mut q = self.intake.lock();
+            // two waiting: send the older now and the newer at the next boundary (the stream runs one period late until an empty
+            // boundary drains the queue; a third frame arriving first drops the oldest, see intake_loop)
+            let take_older = q.len() >= 2;
+            let a = if take_older { q.pop_front() } else { q.pop_back() };
+            if take_older {
+                self.queue_picks.fetch_add(1, Ordering::Relaxed);
+            } else {
+                for old in q.drain(..) {
+                    unsafe { nvh::nvh_ipc_slot_busy(ipc, old.slot, 0) };
+                    self.superseded.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            self.left_behind.store(!q.is_empty(), Ordering::Relaxed);
+            a
+        };
         let job = match newest {
             Some(a) => {
                 self.slots_filled.fetch_add(1, Ordering::Relaxed);
@@ -553,6 +586,8 @@ impl Pipeline {
             "send_pacing": self.cfg.send_pacing.name(),
             "arrived": self.arrived.load(Ordering::Relaxed),
             "superseded": self.superseded.load(Ordering::Relaxed),
+            "queue_picks": self.queue_picks.load(Ordering::Relaxed),
+            "intake_depth": self.intake_depth,
             "slots_filled": self.slots_filled.load(Ordering::Relaxed),
             "slots_empty": self.slots_empty.load(Ordering::Relaxed),
             "encoder_overruns": self.encoder_overruns.load(Ordering::Relaxed),

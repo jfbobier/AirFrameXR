@@ -270,3 +270,18 @@ own Touch pose convention. The shim now applies a configurable local offset per 
 right hand mirrored like ALVR's offsets. Settings `controllers.hand_rotation_deg` [x,y,z] / `controllers.hand_position_m`,
 CLI `--hand-rotation x,y,z` / `--hand-position x,y,z`. The exact value is to be confirmed in the headset (the harness only checks
 hand positions, never orientation): if 180 about Y is not it, the candidates are 180 about Z (roll) or a pitch offset.
+
+2026-10-11 (first contact of v0.2 on the 5090 PC, then the first games): v0.2 built and ran on the first attempt. Lab findings and fixes:
+(1) the pacing lab scored warm-up and the idle tail (green frames at 30 fps), reading ~20 % repeats on every run: `analyse_display` now scores the
+steady window and keeps the whole-run numbers under `whole_run`. (2) The shim's predicted display time followed whichever host tick was latest when
+the app woke, and raced with the frame counter VDXR extrapolates from: duplicate display times then a skip. Now it follows the grid boundary the
+app was released for, updated together with the frame index under a lock. (3) Head-pose samples are consumed in order, one per display time
+(IPC v14: the host keeps the last 3 head samples; the shim picks the oldest unconsumed, waits up to 3 ms if none, catches up when two behind):
+duplicate client timestamps 229 -> ~10 per 1800 frames; the first version cached per release and broke pipelined engines (17 % skips on the
+Littlest Tokyo scene), keyed by display time it is fine (3 %). Release alignment to the sample arrival exists behind `OVRSHIM_ALIGN_RELEASE`
+(off: it only added skips). (4) Cyberpunk playtest: GPU 96-98 % and power-capped, the game completes frames in bunches (two in one period, then
+none); the one-deep newest-wins intake threw the older of every pair away (90 submitted, ~65 streamed). The host intake is now two deep
+(`VISIONALVR_INTAKE_DEPTH`, 1 = old): the older frame goes out at this boundary, the newer at the next, a third arrival drops the oldest.
+Lab: pace_bunch repeats 4 % -> 0.2 %, pace_jitter30 6.7 % -> 0.6 %, pace_scene 3 % -> 0.5 %, dwell 6-8 ms (SteamVR 9-11). Costs up to a period
+of latency while the queue is occupied. Playtest after: only a slight improvement; the headset reports ~20 % fewer frames received than the host
+sends (End of Abyss): next to diagnose. Running start vs none: pace_rs0 is the cleanest lab run (0.1 % repeats, 0 empty), to A/B on the headset.

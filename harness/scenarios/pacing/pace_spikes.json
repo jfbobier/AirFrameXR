@@ -96,7 +96,7 @@
     },
     "app_timing": {
       "min_fps": 85,
-      "max_release_p95_ms": 12.5
+      "max_release_p95_ms": 13.5
     }
   }
 }

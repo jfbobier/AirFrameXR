@@ -401,6 +401,12 @@ void nvh_ipc_set_connected(void* i, int c) { ((Ipc*)i)->state->host.clientConnec
 void nvh_ipc_publish_head(void* i, uint64_t ts, const float* q, const float* p, const float* lv, const float* av) {
     auto& h = ((Ipc*)i)->state->host;
     h.headSeq++; MemoryBarrier();                      // odd: writing
+    if (h.headClientTsNs != 0) {                       // push the previous latest into the history
+        for (int k = visionalvr_ipc::kHeadHist - 1; k > 0; k--) h.headHist[k] = h.headHist[k - 1];
+        auto& o = h.headHist[0];
+        o.clientTsNs = h.headClientTsNs; o.hostTimeS = h.headHostTimeS; o.head = h.head;
+        memcpy(o.linVel, h.headLinVel, 12); memcpy(o.angVel, h.headAngVel, 12);
+    }
     h.headClientTsNs = ts; h.headHostTimeS = visionalvr_ipc::QpcSeconds();
     memcpy(h.head.orientation, q, 16); memcpy(h.head.position, p, 12); memcpy(h.headLinVel, lv, 12); memcpy(h.headAngVel, av, 12);
     MemoryBarrier(); h.headSeq++;                      // even: stable

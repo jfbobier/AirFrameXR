@@ -800,7 +800,34 @@ def analyse_display(sc, outdir, client, period_ms):
     out["dwell_spread_ms"] = round((d.get("dwell_ms") or {}).get("p95", 0) - (d.get("dwell_ms") or {}).get("p05", 0), 2)
     _, rows = read_csv(outdir / "display.csv")   # tick_ns,shown_ts_ns,repeat,dwell_ms,queue_len
     if rows:
-        reps = [int(r[2]) for r in rows[90:]]
+        # Warm-up (the green idle frames at 30 fps before the app's first frame) and the tail (the app has exited, the host is
+        # back to idle frames) are not the stream under test: they made every run read ~20 % repeats. Score the steady window:
+        # the longest stretch of 90-tick blocks that each repeat less than 30 %. The whole-run numbers stay under whole_run.
+        allreps = [int(r[2]) for r in rows]
+        blocks = [sum(allreps[i:i + 90]) / max(1, len(allreps[i:i + 90])) for i in range(0, len(allreps) - 89, 90)]
+        best, cur0, bs = (0, 0), None, None
+        for bi, v in enumerate(blocks + [1.0]):
+            if v < 0.30:
+                cur0 = bi if cur0 is None else cur0
+            elif cur0 is not None:
+                if bi - cur0 > best[1] - best[0]:
+                    best = (cur0, bi)
+                cur0 = None
+        if best[1] - best[0] >= 3:
+            lo, hi = best[0] * 90, best[1] * 90
+            win = rows[lo:hi]
+            reps_w = [int(r[2]) for r in win]
+            shown = [int(r[1]) for r in win if not int(r[2])]
+            per_ns = period_ms * 1e6
+            skips = sum(1 for a, b in zip(shown, shown[1:]) if b - a > 1.5 * per_ns)
+            dw = sorted(float(r[3]) for r in win if not int(r[2]))
+            q = lambda f: dw[min(len(dw) - 1, int(f * len(dw)))] if dw else 0.0
+            out["whole_run"] = {k: out.get(k) for k in ("repeat_pct", "skip_pct", "dwell_ms", "ticks")}
+            out.update(repeat_pct=100.0 * sum(reps_w) / len(reps_w), skip_pct=100.0 * skips / max(1, len(shown) - 1),
+                       dwell_ms={"p05": round(q(0.05), 3), "p50": round(q(0.5), 3), "p95": round(q(0.95), 3)}, ticks=len(win),
+                       steady_window_ticks=[lo, hi])
+            out["dwell_spread_ms"] = round(q(0.95) - q(0.05), 2)
+        reps = [int(r[2]) for r in (rows[lo:hi] if best[1] - best[0] >= 3 else rows[90:])]
         runs, cur = [], 0     # runs of consecutive repeats (a stall) vs isolated ones (a missed slot)
         for x in reps:
             if x:

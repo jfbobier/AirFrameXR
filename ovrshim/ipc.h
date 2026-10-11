@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 13;
+constexpr uint32_t kVersion = 14;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -42,6 +42,15 @@ struct HandInput {
     uint32_t touches;
     float trigger, squeeze, stickX, stickY;
 };
+
+// One head tracking sample (what headClientTsNs.. hold for the latest one).
+struct HeadSample {
+    uint64_t clientTsNs;
+    double hostTimeS;
+    Pose head;
+    float linVel[3], angVel[3];
+};
+constexpr int kHeadHist = 3;
 
 struct HostToShim {
     uint32_t hostAlive;        // incremented by the host every vsync (shim detects a dead host)
@@ -80,6 +89,9 @@ struct HostToShim {
     // pose' = (q * offsetQ, p + q * offsetQ * offsetP); the right hand mirrors the rotation (x, -y, -z) like ALVR's own offsets.
     float handOffsetQuat[2][4];    // x y z w, per side (left, right); all zero = identity
     float handOffsetPos[2][3];
+    // The samples before the latest, newest first (same seqlock as the head): the shim consumes tracking samples in order,
+    // one per frame, whatever the phase between the app's release and the sample's arrival (see GetHmdPose).
+    HeadSample headHist[kHeadHist];
 };
 
 struct Haptic {
