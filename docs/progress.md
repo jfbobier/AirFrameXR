@@ -296,3 +296,13 @@ within 42 ns) and the client looks the pose up by timestamp. Without prediction 
 mock client frames/poses CSVs, probe frame stamp + world marker) and the telemetry compile flag (docs/DEVELOPMENT.md). Lab baseline (Littlest
 Tokyo, 75-95 fps random frame times, uplink 12 % late by 25 ms): all frames identified in the decoded stream, marker within 1.4 px of the
 client pose (pixel check passes), 22 % of frames carry the previous frame's timestamp (no new head sample yet).
+
+2026-10-11 (night): comparison with SteamVR + ALVR (ALVR dashboard screenshots) and the cause of the head-motion artifacts. ALVR's *client* predicts
+the head pose forward by min(average total pipeline latency, `headset.max_prediction_ms`) before it sends a sample (client_core send_tracking), so
+frames are rendered for where the head will be at display time and the client's correction is only the residual. The PC's session.json had
+`max_prediction_ms: 0` (left over from the 10/10 experiments, `harness/live_variants.json` still sets 0 for its variants; ALVR's default and
+`tools/install/session.default.json` have 100), i.e. no head prediction: the client had to rotate frames by the whole ~90-130 ms latency
+(p95 7 deg, p99 15.7 deg in Cyberpunk). Set to 150 on the PC (backup session.json.bak-maxpred0-20261011). Stage comparison (ALVR's numbers):
+EoA total 85 ms SteamVR vs 87 ours (encode 10.5 vs 6.0, transport 9.2 vs 7.2, decoder 5.7 vs 6.1); Cyberpunk total 105-106 vs 127 (game stage ~48 vs 70,
+encode 8.5 vs 14.9, transport 9-10 vs 6.6, decoder 6 vs 5.4): our extra latency is in the game stage (the game runs a deep pipeline when released early)
+and the boundary wait; the 100 ms prediction cap was also exceeded in Cyberpunk.
