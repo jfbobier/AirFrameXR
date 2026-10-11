@@ -85,7 +85,9 @@ struct Arrived {
 /// Frame-level CSV mirrors for the harness (VISIONALVR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
 /// `fate` writes one line per event of a frame's life on the host: A arrival (slot, ts), S superseded in the intake, P picked at a
 /// boundary (index), O dropped by the encoder queue.
+#[cfg(feature = "telemetry")]
 static MIRRORS: std::sync::Mutex<Option<(std::io::BufWriter<std::fs::File>, std::io::BufWriter<std::fs::File>, u32)>> = std::sync::Mutex::new(None);
+#[cfg(feature = "telemetry")]
 fn mirror_open() -> bool {
     let mut g = match MIRRORS.lock() { Ok(g) => g, Err(_) => return false };
     if g.is_none() {
@@ -104,17 +106,28 @@ fn mirror_open() -> bool {
     }
     true
 }
+#[cfg(not(feature = "telemetry"))]
+#[inline(always)]
+fn mirror_sent(_row: &str) {}
+#[cfg(feature = "telemetry")]
 fn mirror_sent(row: &str) {
     use std::io::Write;
     if !mirror_open() { return; }
     if let Ok(mut g) = MIRRORS.lock() { if let Some((a, _, n)) = g.as_mut() { let _ = writeln!(a, "{row}"); *n += 1; if *n % 90 == 0 { let _ = a.flush(); } } }
 }
+#[cfg(not(feature = "telemetry"))]
+#[inline(always)]
+fn fate(_counter: u64, _kind: &str, _t: Instant, _a: u64, _b: u64) {}
+#[cfg(feature = "telemetry")]
 fn fate(counter: u64, kind: &str, t: Instant, a: u64, b: u64) {
     use std::io::Write;
     if !mirror_open() { return; }
     if let Ok(mut g) = MIRRORS.lock() { if let Some((_, f, _)) = g.as_mut() { let _ = writeln!(f, "{counter},{kind},{:.6},{a},{b}", logs::qpc_at(t)); } }
 }
 /// flushes the mirrors (end of run)
+#[cfg(not(feature = "telemetry"))]
+pub fn mirror_flush() {}
+#[cfg(feature = "telemetry")]
 pub fn mirror_flush() {
     use std::io::Write;
     if let Ok(mut g) = MIRRORS.lock() { if let Some((a, b, _)) = g.as_mut() { let _ = a.flush(); let _ = b.flush(); } }
@@ -624,9 +637,12 @@ impl Pipeline {
                 push_bounded(&SEND_PHASE_MS, now.saturating_duration_since(o.boundary).as_secs_f64() * 1000.0);
                 mirror_sent(&format!("{},{:.6},{:.3},{},{}", o.row, logs::qpc_at(now), o.release_at.saturating_duration_since(o.encoded_at).as_secs_f64() * 1000.0,
                     o.bytes, o.is_idr as u8));
-                logs::csv("host_frames.csv", "frame,ts_ns,slot,t_boundary,t_arrival,t_encode_start,encode_ms,t_send,hold_ms,bytes,idr",
-                    &format!("{},{:.6},{:.3},{},{}", o.row, logs::qpc_at(now), o.release_at.saturating_duration_since(o.encoded_at).as_secs_f64() * 1000.0,
-                        o.bytes, o.is_idr as u8));
+                #[cfg(feature = "telemetry")]
+                {
+                    logs::csv("host_frames.csv", "frame,ts_ns,slot,t_boundary,t_arrival,t_encode_start,encode_ms,t_send,hold_ms,bytes,idr",
+                        &format!("{},{:.6},{:.3},{},{}", o.row, logs::qpc_at(now), o.release_at.saturating_duration_since(o.encoded_at).as_secs_f64() * 1000.0,
+                            o.bytes, o.is_idr as u8));
+                }
             }
         }
     }

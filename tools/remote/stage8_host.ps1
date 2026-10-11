@@ -8,6 +8,11 @@ Copy-Item "$root\_tmp\host\src\*.rs" "$dst\src\" -Force
 Copy-Item "$root\_tmp\host\build.rs" "$dst\build.rs" -Force
 Set-Location "$root\src\ALVR-v20.14.1"
 $env:PATH += ";$env:USERPROFILE\.cargo\bin"
-cargo build --release -p alvr_host 2>&1 | Out-File -Encoding utf8 "$root\logs\host_build.log"
+# flavour (run.py build --release): the release host drops the per-frame telemetry (cargo feature `telemetry`)
+$flavour = if (Test-Path "$root\_tmp\flavour.txt") { (Get-Content "$root\_tmp\flavour.txt" -Raw).Trim() } else { 'debug' }
+$cargoArgs = @('build', '--release', '-p', 'alvr_host')
+if ($flavour -eq 'release') { $cargoArgs += '--no-default-features' }
+Write-Host "flavour: $flavour"
+cargo @cargoArgs 2>&1 | Out-File -Encoding utf8 "$root\logs\host_build.log"
 Get-Content "$root\logs\host_build.log" | Select-String -Pattern '^error|^warning: unused|Finished|could not' -Context 0,6 | Select-Object -First 40
 Get-Item "$root\src\ALVR-v20.14.1\target\release\alvr_host.exe" -ErrorAction SilentlyContinue | Select-Object FullName, Length, LastWriteTime

@@ -49,6 +49,12 @@ using namespace visionalvr_ipc;
 // line, so the host and several games can share it): game start/exit and errors only. Debug log (verbose): OVRSHIM_LOG = path
 // (harness), else shim_<exe>_<pid>.log in the host's debug session folder, which the shim learns through the IPC block; lines
 // logged before that are kept in memory and written once the folder is known.
+// Compile-time telemetry flag: the per-frame trace (shim_frames.csv), the pose-match diagnostics and the bookkeeping behind them cost CPU
+// on every frame. Release builds define VISIONALVR_RELEASE (tools/remote/stage11_ovrshim.ps1 via CL, run.py build --release) and drop them.
+#ifndef VISIONALVR_RELEASE
+#define VISIONALVR_TELEMETRY 1
+#endif
+
 namespace shimlog {
     static std::mutex g_mutex;
     static FILE* g_env = nullptr;     // OVRSHIM_LOG (harness / manual debugging)
@@ -193,6 +199,7 @@ namespace shimlog {
     // Per-frame trace (follow-the-frames harness): one CSV line per published frame, in the debug session folder
     // (shim_frames_<exe>_<pid>.csv) or at OVRSHIM_FRAME_CSV. Times are shim clock seconds.
     static void FrameCsv(const char* line) {
+#ifdef VISIONALVR_TELEMETRY
         static FILE* f = nullptr;
         static bool tried = false;
         static int pending = 0;
@@ -225,6 +232,9 @@ namespace shimlog {
                 pending = 0;
             }
         }
+#else
+        (void)line;
+#endif
     }
 } // namespace shimlog
 
@@ -1244,6 +1254,7 @@ namespace {
 
                 const uint64_t clientTs = FrameClientTimestamp(layers);
                 FrameTraceRow trace;
+#ifdef VISIONALVR_TELEMETRY
                 trace.tSubmit = tSubmitStart;
                 for (const ovrLayerHeader* lh : layers) {
                     if (lh && (lh->Type == ovrLayerType_EyeFov || lh->Type == ovrLayerType_EyeFovDepth)) {
@@ -1271,6 +1282,7 @@ namespace {
                         trace.repeated = best->repeated;
                     }
                 }
+#endif
                 ++m_framesSubmitted;
                 if (m_framesSubmitted % 900 == 0) {
                     const auto& st = m_ipc.state->shim;
@@ -1400,6 +1412,7 @@ namespace {
             MemoryBarrier();
             s.frameSeq++; // even: stable
             SetEvent(m_ipc.frame);
+#ifdef VISIONALVR_TELEMETRY
             {
                 char line[400];
                 snprintf(line, sizeof(line), "%llu,%u,%llu,%.6f,%.6f,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", (unsigned long long)m_framesPublished,
@@ -1407,6 +1420,7 @@ namespace {
                          composeStart, s.frameSubmitTimeS, tr.q[0], tr.q[1], tr.q[2], tr.q[3]);
                 shimlog::FrameCsv(line);
             }
+#endif
         }
 
         // Ring slot for the next frame: never one the host holds (slotBusyMask: its newest frame, or the one its encoder reads),
@@ -1576,6 +1590,7 @@ namespace {
                     if (pick < kPoseRing) {
                         ts = sample(pick).clientTsNs;
                         matched = true;
+#ifdef VISIONALVR_TELEMETRY // pose-match diagnostics (the 900-frame log line): angle evaluations per recorded pose, every frame
                         uint32_t ties = 0;
                         for (size_t k = 0; k < m_poseRingCount; k++) {
                             if (sample(k).clientTsNs >= m_lastFrameTsNs && angle(sample(k)) <= best + kTie) {
@@ -1586,6 +1601,7 @@ namespace {
                         m_diagPickIdx[std::min<size_t>(pick, 3)]++;
                         m_diagAngleMdeg.push_back((float)(best * 57295.78));
                         m_diagAgeMs.push_back((float)((sample(0).clientTsNs - sample(pick).clientTsNs) / 1e6));
+#endif
                     }
                 }
                 m_lastFrameTsNs = std::max(m_lastFrameTsNs, ts);
@@ -2115,8 +2131,12 @@ namespace {
         ovrPoseStatef GetHmdPose(double absTime) const override {
             ovrPoseStatef latched;
             uint64_t clientTs = 0;
-            // in-order sample consumption (SelectHostHead); OVRSHIM_LEGACY_POSE = the latest sample, for A/B runs
-            static const bool legacyPose = EnvSet("OVRSHIM_LEGACY_POSE");
+            // Default: the latest head sample. In-order consumption with a wait or a predicted timestamp (SelectHostHead) is opt-in
+            // (video.predict_missing_head, or OVRSHIM_INORDER_POSE for the lab): against the real headset the "next" sample is often
+            // not there yet (20-60 % of frames waited then repeated) and a predicted timestamp matches one of the client's own only
+            // 16 % of the time (its timestamps jitter by tens of ns), so the client reprojects with the wrong pose.
+            static const bool inOrderEnv = EnvSet("OVRSHIM_INORDER_POSE");
+            const bool legacyPose = !(inOrderEnv || (m_ipc.state && m_ipc.state->host.predictMissingHead > 0.f));
             if (legacyPose ? ReadHostHead(latched, clientTs) : SelectHostHead(latched, clientTs, absTime)) {
                 // Remember which client tracking sample the app is about to render with: the frame it submits
                 // must carry this timestamp so the headset can reproject against the right pose.
@@ -2128,10 +2148,12 @@ namespace {
             const ovrPoseStatef result = PropagatePose(latched, absTime);
             {
                 std::lock_guard lock(m_lastHeadMutex);
+#ifdef VISIONALVR_TELEMETRY
                 if (clientTs) {
                     m_readRing[m_readNext] = {clientTs, absTime, QpcSeconds(), latched.TimeInSeconds, legacyPose ? 0 : m_selPredicted, legacyPose ? 0 : m_selRepeated};
                     m_readNext = (m_readNext + 1) % 8;
                 }
+#endif
                 m_lastHeadPose = result.ThePose;
                 if (clientTs) {
                     // history of what the app read, for FrameClientTimestamp (skip exact repeats of the newest entry)

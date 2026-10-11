@@ -11,7 +11,7 @@ rsync -a --exclude 'OVRNull.vcxproj*' --exclude bin --exclude obj "$R/external/V
 cp -r "$R/ovrshim/"* "$B/"
 for n in ReprojectVS ReprojectPS LayerVS LayerPS LayerCubePS; do printf '#pragma once\nconst unsigned char k_%s[] = {0, 1, 2, 3};\n' "$n" > "$B/$n.h"; done
 echo "== ovrshim/driver.cpp"
-clang-cl /std:c++20 /EHsc -fsyntax-only /W3 /D OVR_DLL_BUILD /D NDEBUG /D _WINDOWS /D _USRDLL /D _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING $NOWARN \
+clang-cl /std:c++20 /EHsc -fsyntax-only /W3 /D OVR_DLL_BUILD /D NDEBUG /D _WINDOWS /D _USRDLL $EXTRA_DEFS /D _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING $NOWARN \
   /I"$B" /I"$R/external/VDXR/external/LibOVR/Include" /I"$R/external/VDXR/external/LibOVR/Include/Extras" /I"$D/wil/include" $W "$B/driver.cpp" || rc=1
 # --- host library: the build.rs header patches reproduced for the two headers nvh.cpp needs
 python3 -I - "$D/nvhinc" "$R/nvenc/upstream/platform/win32/" <<'PY'

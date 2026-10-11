@@ -75,6 +75,15 @@ def run_one(name):
 
 
 def build(what):
+    # flavour: `--release` drops the per-frame telemetry (cargo feature `telemetry`, C++ VISIONALVR_TELEMETRY); the default build keeps it
+    release = "--release" in (what or [])
+    what = [w for w in (what or []) if w != "--release"]
+    lib.b_run("if not exist _tmp mkdir _tmp")
+    flav = lib.CACHE / "flavour.txt"
+    lib.CACHE.mkdir(parents=True, exist_ok=True)
+    flav.write_text("release" if release else "debug")
+    lib.b_put(flav, "_tmp/flavour.txt")
+    print("flavour:", "release (no telemetry)" if release else "debug (telemetry)")
     stages = {"host": ("tools/host/Cargo.toml", "tools/host/src/main.rs", "_tmp/host", "tools/remote/stage8_host.ps1"),
               "client": ("tools/mock_client/Cargo.toml", "tools/mock_client/src/main.rs", "_tmp/mock_client", "tools/remote/stage7_mockclient.ps1")}
     if any(w in ("client", "host") for w in (what or ["client", "host"])):

@@ -8,6 +8,12 @@ license.workspace = true
 
 # Lives in tools/host in the harness repo; copied into <ALVR>/alvr/host_harness on the builder
 # (the ALVR workspace globs alvr/*), see tools/remote/stage8_host.ps1.
+# `telemetry` (default): per-frame traces (frame fates, the sent-frames CSVs). Release builds drop them: `cargo build --release
+# --no-default-features -p alvr_host` (run.py build host --release), see docs/DEVELOPMENT.md.
+[features]
+default = ["telemetry"]
+telemetry = []
+
 [dependencies]
 alvr_audio.workspace = true # device ids for the game-audio log (server_core does the capture itself)
 alvr_common.workspace = true

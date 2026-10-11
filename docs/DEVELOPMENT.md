@@ -39,6 +39,24 @@ powershell -ExecutionPolicy Bypass -File build.ps1 host gui     # only some part
   (SHA-256 checked); to regenerate it, `tools/bench_scene/build.sh <work dir> build/bench/littlest_tokyo.vab` (a Linux shell
   with g++, cmake and curl: downloads the pinned GLB, Draco and cgltf, checks their hashes, converts).
 
+## Telemetry flag (debug vs release builds)
+
+The advanced per-frame telemetry costs CPU on every frame, so it is a compile-time flag. Debug builds (the default while we hunt
+judder) keep it, release builds drop it:
+
+| | debug (default) | release |
+|---|---|---|
+| Rust host | cargo feature `telemetry` (default on) | `--no-default-features` |
+| shim (C++) | `VISIONALVR_TELEMETRY` defined | `VISIONALVR_RELEASE` defined (undefines it) |
+| harness | `python3 harness/run.py build host shim` | `python3 harness/run.py build host shim --release` (then `package`) |
+
+What the flag covers today: the shim's per-frame trace `shim_frames.csv` (pose read, head-sample arrival, release, submit, publish) and
+the pose-match diagnostics behind the 900-frame log line; the host's frame fates and sent-frame CSVs (`host_pipeline*.csv`,
+`host_frames.csv`). New per-frame telemetry must sit behind it (`#ifdef VISIONALVR_TELEMETRY` / `#[cfg(feature = "telemetry")]`);
+counters that are a single add per frame and the periodic stats lines stay in both. `tools/wsl/check_cpp.sh` and `check_host.sh
+--no-default-features` compile the release flavour (`EXTRA_DEFS="/D VISIONALVR_RELEASE" bash tools/wsl/check_cpp.sh`). The follow-the-frames
+analysis (`harness/frames.py`) needs a debug build.
+
 ## How the build fits together
 - `alvr_host` is a member of ALVR's own Rust workspace (`tools/remote/stage8_host.ps1` copies `tools/host` to
   `src\ALVR-v20.14.1\alvr\host_harness`), so it links ALVR's crates exactly as ALVR's server does.

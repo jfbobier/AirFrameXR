@@ -28,6 +28,11 @@ $proj = $proj.Replace($fxPs, $fxPs + "`n    " + $extra)
 $proj = $proj.Replace('$(SolutionDir)\bin\', '$(SolutionDir)\bin-shim\').Replace('<ClInclude Include="driver.h" />', '<ClInclude Include="driver.h" /><ClInclude Include="ipc.h" /><ClInclude Include="ipc_win.h" />')
 Set-Content "$dst\OVRShim.vcxproj" $proj -Encoding UTF8
 Set-Location $vdxr
+# flavour (run.py build --release): the release shim drops the per-frame telemetry (VISIONALVR_RELEASE undefines VISIONALVR_TELEMETRY)
+$flavour = if (Test-Path "$root\_tmp\flavour.txt") { (Get-Content "$root\_tmp\flavour.txt" -Raw).Trim() } else { 'debug' }
+$env:CL = if ($flavour -eq 'release') { '/DVISIONALVR_RELEASE' } else { '' }
+Write-Host "flavour: $flavour"
+(Get-Item "$dst\driver.cpp").LastWriteTime = Get-Date   # the flavour is a compile definition: always recompile the driver
 & $msbuild "OVRShim\OVRShim.vcxproj" /p:Configuration=Release /p:Platform=x64 "/p:SolutionDir=$vdxr\\" /m /v:minimal /nologo 2>&1 |
   Out-File -Encoding utf8 "$root\logs\ovrshim_build.log"
 Get-Content "$root\logs\ovrshim_build.log" | Select-String -Pattern 'error|warning C4|Build succeeded' | Select-Object -First 25
