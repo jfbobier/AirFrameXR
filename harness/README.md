@@ -96,3 +96,11 @@ pass `host.gpu_keepalive: 90` (a background GPU load standing in for the composi
 
 ## Pacing checks
 `checks.pacing` (scenarios `e2e_baseline`, `e2e_openxr_probe`): client arrival spacing of the app's frames after `warmup_frames` (`client_p99_ms`, `max_late_frac` = share of gaps over 1.5 periods), and the host's own `pacing` report (`vsync_p99_ms`, `vsync_max_ms`, `intake_p99_ms`). The counter check pairs received frames with host rows in order (the host may skip frame numbers) and needs a constant counter offset.
+
+
+## Follow-the-frames / follow-the-pose / SteamVR baseline (2026-10-11)
+- `python3 harness/run.py pacing <scenario>` then `python3 harness/frames.py <results dir>`: per-frame join of the whole chain (needs a debug build, see docs/DEVELOPMENT.md); scenarios in `scenarios/pacing/exp/` (`ftf_*`, `replay_*`).
+- Replay of recorded real head traces (`harness/fixtures/headtraces/*.csv`, cut with `tools/make_headtrace.py`) with `client.replay` + `client.real_views` in a scenario; the hop table in frames.py shows every pose hop.
+- `python3 harness/steamvr_baseline.py <trace> --seconds 60`: stock ALVR + SteamVR + the probe + the mock client replaying the trace (needs stock ALVR and SteamVR installed; paths at the top of the script);
+  `python3 harness/pose_compare.py <dir>` and `python3 harness/stamp_check.py <dir>` analyse it (and our own replay runs) the same way.
+- `python3 harness/steamvr_hmd.py`: the same on a real headset. `python3 harness/live.py run harness/live_variants.json --only probe_light_pred100` runs the probe through our chain on the real headset.

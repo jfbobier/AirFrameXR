@@ -306,3 +306,13 @@ frames are rendered for where the head will be at display time and the client's 
 EoA total 85 ms SteamVR vs 87 ours (encode 10.5 vs 6.0, transport 9.2 vs 7.2, decoder 5.7 vs 6.1); Cyberpunk total 105-106 vs 127 (game stage ~48 vs 70,
 encode 8.5 vs 14.9, transport 9-10 vs 6.6, decoder 6 vs 5.4): our extra latency is in the game stage (the game runs a deep pipeline when released early)
 and the boundary wait; the 100 ms prediction cap was also exceeded in Cyberpunk.
+
+2026-10-11 (night): **harness and instrumentation day**. Built: follow-the-frames (`harness/frames.py`: every game frame joined across shim / host / client / display, headset and lab modes), follow-the-pose
+(per-hop head pose checks: client sample, host, shim IPC, app located, layer RenderPose, decoded pixels; `--replay` of recorded real head traces in the mock client, `--real-views` for
+the Vision Pro's IPD and asymmetric FoV; fixtures in `harness/fixtures/headtraces/`), `pose_compare.py` / `stamp_check.py`, the SteamVR baseline (`harness/steamvr_baseline.py`: stock ALVR +
+SteamVR driven by the mock client replaying a head trace, our Tokyo probe under SteamVR's OpenXR runtime; `harness/steamvr_hmd.py` for the real headset), probe-as-a-game variants in `live.py`,
+audio telemetry, a compile-time telemetry flag (docs/DEVELOPMENT.md). Findings: our pose path is exact end to end (every hop, 100 % of frames stamped with the pose they were rendered with),
+and so is stock's (SteamVR passes the headset's pose through unchanged, same stamping); the earlier "0.1 deg mismatches" were a numeric artefact of 2*acos(dot). Headless, same trace and app:
+stock repeats 2.1 % / rotation the client must supply p95 1.8 deg, ours 8.5 % / 3.0 deg. On the real AVP with the same Tokyo probe and max_prediction_ms 100: stock is clean (still and moving), ours
+trembles even at a still pose; asap sends, no running start, queue depth 1 and a single encode slice change nothing visible. Hypothesis (user): the multithreaded pipeline mishandles inputs/outputs along the
+chain; next: judge trembling automatically from the recordings and the generated images, then optimise the architecture.

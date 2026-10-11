@@ -106,5 +106,38 @@
   },
   "probe_cpu_ms": 0,
   "probe_load": "steady"
+ },
+ {
+  "name": "probe_stocklike1_pred100",
+  "game": "probe",
+  "seconds": 60,
+  "settings": {
+   "send_pacing": "asap",
+   "running_start_ms": 0,
+   "intake_depth": 1,
+   "pick_policy": "newest"
+  },
+  "session": {
+   "max_prediction_ms": 100
+  },
+  "probe_cpu_ms": 0,
+  "probe_load": "steady"
+ },
+ {
+  "name": "probe_stocklike2_pred100",
+  "game": "probe",
+  "seconds": 60,
+  "settings": {
+   "send_pacing": "asap",
+   "running_start_ms": 0,
+   "intake_depth": 1,
+   "pick_policy": "newest",
+   "split_encode": "off"
+  },
+  "session": {
+   "max_prediction_ms": 100
+  },
+  "probe_cpu_ms": 0,
+  "probe_load": "steady"
  }
 ]
