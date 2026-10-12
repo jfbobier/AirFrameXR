@@ -43,8 +43,6 @@ pub struct Settings {
     pub predict_missing_head: Option<bool>,
     pub intake_depth: Option<i64>,
     pub pick_policy: Option<String>,
-    /// "low" (default: send at once, the newest frame, no buffer: lowest latency) | "smooth" (one-frame buffer, fewest repeated frames) | "auto" (experimental, not recommended, pipeline.rs)
-    pub latency_mode: Option<String>,
     /// slide the host's display grid so frames arrive just before the headset's tick (phase.rs); default on
     pub phase_lock: Option<bool>,
     /// follow the client's display rate (detected from its sample timestamps) instead of the 90 Hz grid (default on)
@@ -90,7 +88,6 @@ pub fn load_settings(path: &Path) -> Settings {
         predict_missing_head: video["predict_missing_head"].as_bool(),
         intake_depth: video["intake_depth"].as_i64(),
         pick_policy: video["pick_policy"].as_str().map(str::to_string),
-        latency_mode: video["latency_mode"].as_str().map(str::to_string),
         phase_lock: video["phase_lock"].as_bool(),
         follow_client_rate: video["follow_client_rate"].as_bool(),
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),

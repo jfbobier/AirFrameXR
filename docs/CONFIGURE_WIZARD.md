@@ -66,7 +66,7 @@ It started as a benchmark that informs a configuration; it should become a wizar
    on the 5090 and the 3080 Ti, with stock ALVR + SteamVR as the "baseline" row.
 5. **Proposed configuration.** The existing settings page, prefilled from the handshake and the tests, each value with a short reason (tooltip or a
    second column): per-eye resolution (<= panel, <= what the encoder sustains), refresh rate (highest supported that the encoder fits), bitrate (the
-   network test's recommendation), foveation (supported + recommended), codec / 10 bit / gamma / range (from the capabilities), latency mode and phase
+   network test's recommendation), foveation (supported + recommended), codec / 10 bit / gamma / range (from the capabilities), and phase
    lock (defaults from the lab), audio, idle colour. For "update existing" show what differs from the user's current values. Save writes session.json and
    visionalvr.json (unknown keys preserved) and offers "Save and start VisionALVR".
 

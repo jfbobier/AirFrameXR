@@ -20,7 +20,6 @@ namespace VisionALVR
         public readonly RadioButton ProfFov = new RadioButton { Text = "Foveated (ALVR foveated encoding; recommended)", AutoSize = true };
         public readonly RadioButton ProfFull = new RadioButton { Text = "Full frame + split encode (experimental: 3x the pixels, needs a strong Wi-Fi link)", AutoSize = true };
         public readonly NumericUpDown Fcx = Dec(0.1m, 1m), Fcy = Dec(0.1m, 1m), Fsx = Dec(-1m, 1m), Fsy = Dec(-1m, 1m), Frx = Dec(1m, 10m), Fry = Dec(1m, 10m);
-        public readonly ComboBox Latency = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
         readonly Button idle = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
         public readonly CheckBox Audio = new CheckBox { Text = "Stream game audio (Windows default output)", AutoSize = true };
         public readonly CheckBox Mute = new CheckBox { Text = "Mute the PC speakers while streaming", AutoSize = true };
@@ -68,8 +67,6 @@ namespace VisionALVR
             row("Foveation center size", flow(Fcx, Fcy), Fcx);
             row("Foveation center shift", flow(Fsx, Fsy), Fsx);
             row("Foveation edge ratio", flow(Frx, Fry, Ui.Line("(higher = fewer pixels at the edges)")), Frx);
-            Latency.Items.AddRange(new object[] { "low: lowest latency (default)", "smooth: one-frame buffer, fewest repeated pictures" });
-            row("Latency mode", Latency);
             idle.Click += (s, e) =>
             {
                 using (var cd = new ColorDialog { Color = idle.BackColor, FullOpen = true })
@@ -130,7 +127,6 @@ namespace VisionALVR
             Fsy.Value = Clamp(Fsy, Json.Num(s, V + "foveated_encoding.content.center_shift_y", 0.1));
             Frx.Value = Clamp(Frx, Json.Num(s, V + "foveated_encoding.content.edge_ratio_x", 4));
             Fry.Value = Clamp(Fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
-            Latency.SelectedIndex = settings.LatencyMode == "smooth" ? 1 : 0;
             try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
             Audio.Checked = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             Mute.Checked = Json.Bool(s, "session_settings.audio.game_audio.content.mute_when_streaming", true);
@@ -152,7 +148,6 @@ namespace VisionALVR
             Fps.SelectedItem = f; SetReason(Fps, p.Why("fps"));
             num(Bitrate, p.BitrateMbps, p.Why("bitrate"));
             (p.Foveated ? ProfFov : ProfFull).Checked = true; SetReason(ProfFov, p.Why("foveation"));
-            Latency.SelectedIndex = p.LatencyMode == "smooth" ? 1 : 0; SetReason(Latency, p.Why("latency"));
             Audio.Checked = p.Audio; SetReason(Audio, p.Why("audio"));
         }
 
@@ -195,11 +190,10 @@ namespace VisionALVR
             try { Json.Save(Paths.Session, s); }
             catch (Exception e) { error = "Cannot write config\\session.json: " + e.Message; return false; }
             settings.EncodeProfile = ProfFull.Checked ? "full-split" : "foveated";
-            settings.LatencyMode = Latency.SelectedIndex == 1 ? "smooth" : "low";
             settings.IdleRgb = $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}";
             settings.Debug = DebugDefault.Checked;
             settings.Save();
-            Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {rate} Hz, {Bitrate.Value} Mbps, {settings.EncodeProfile}, latency {settings.LatencyMode}, idle #{settings.IdleRgb}, audio {Audio.Checked}, {Proto.SelectedItem}, debug {settings.Debug}");
+            Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {rate} Hz, {Bitrate.Value} Mbps, {settings.EncodeProfile}, idle #{settings.IdleRgb}, audio {Audio.Checked}, {Proto.SelectedItem}, debug {settings.Debug}");
             return true;
         }
     }

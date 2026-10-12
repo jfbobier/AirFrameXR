@@ -573,7 +573,7 @@ namespace VisionALVR
                 ["tests"] = (steps ?? new List<TestStep>()).Select(x => (object)new Dictionary<string, object> { ["name"] = x.Name, ["state"] = x.State.ToString(), ["note"] = x.Note }).ToArray(),
                 ["proposal"] = proposal == null ? null : new Dictionary<string, object>
                 {
-                    ["eye"] = new object[] { proposal.EyeW, proposal.EyeH }, ["fps"] = proposal.Fps, ["bitrate_mbps"] = proposal.BitrateMbps, ["foveated"] = proposal.Foveated, ["latency"] = proposal.LatencyMode,
+                    ["eye"] = new object[] { proposal.EyeW, proposal.EyeH }, ["fps"] = proposal.Fps, ["bitrate_mbps"] = proposal.BitrateMbps, ["foveated"] = proposal.Foveated,
                     ["why_resolution"] = proposal.Why("resolution"), ["why_bitrate"] = proposal.Why("bitrate"), ["why_fps"] = proposal.Why("fps"),
                 },
             };

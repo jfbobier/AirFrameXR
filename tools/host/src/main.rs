@@ -61,8 +61,6 @@ struct Args {
     /// when an encoded frame leaves the host (pipeline.rs): asap | vsync (next tick) | phase (boundary + encode envelope)
     send_pacing: pipeline::SendPacing,
     send_pacing_explicit: bool,
-    /// smooth | low | auto (vision::Settings::latency_mode); the command line wins over config/visionalvr.json
-    latency_mode: Option<String>,
     /// shim running start: the game is released this margin + its frame-time envelope before the next boundary (0 = at the tick)
     running_start_ms: f64,
     /// head-sample policy (shim): wait for a late sample this long, then reuse the last (false) or predict it (true)
@@ -156,7 +154,6 @@ fn parse_args() -> Result<Args, String> {
         gpu_sched_class: 5,
         auto_input: vec![],
         send_pacing_explicit: false,
-        latency_mode: None,
         qp_map: None,
         dump_qpmap: None,
         idle_rgb: None,
@@ -278,7 +275,6 @@ fn parse_args() -> Result<Args, String> {
             "--dump-qpmap" => a.dump_qpmap = Some(v()?.into()),
             "--idle-rgb" => a.idle_rgb = Some(parse_rgb(&v()?)?),
             "--gpu-priority" => a.gpu_priority = Some(v()?.parse().map_err(|e| format!("{e}"))?),
-            "--latency-mode" => a.latency_mode = Some(v()?),
             "--allow-any-gpu" => std::env::set_var("VISIONALVR_ALLOW_ANY_GPU", "1"), // tests on an older GPU (the product needs an RTX 40 or newer)
             "--running-start-ms" => a.running_start_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--no-follow-rate" => a.follow_rate = false,
@@ -394,20 +390,6 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
         }
     }
     phase::configure(st.phase_lock.unwrap_or(true));
-    // default: low (no frame buffer, the newest frame, sent at once): the root causes of the old trembling are fixed, the buffer is no longer needed
-    let latency_mode = a.latency_mode.clone().or_else(|| st.latency_mode.clone()).unwrap_or_else(|| "low".to_string());
-    match Some(latency_mode.as_str()) {
-        Some("low") | Some("auto") => {
-            let auto = latency_mode == "auto";
-            if !a.send_pacing_explicit && st.send_pacing.is_none() {
-                a.send_pacing = pipeline::SendPacing::Asap;
-            }
-            if std::env::var_os("VISIONALVR_PICK").is_none() {
-                std::env::set_var("VISIONALVR_PICK", if auto { "auto" } else { "newest" });
-            }
-        }
-        _ => {}
-    }
     if let Some(v) = st.boundary_offset_ms {
         a.boundary_offset_ms = v;
     }
@@ -1768,7 +1750,6 @@ fn main() {
                 let tick_idx = VSYNC_TICKS.fetch_add(1, Ordering::Relaxed) + 1;
                 if let Some(p) = &clock_pipeline {
                     // compositor boundary: the newest complete app frame goes to the encoder (pipeline.rs)
-                    let boundary_offset = p.pick_offset(boundary_offset);   // fixed (--boundary-offset-ms) or the auto buffer's current delay
                     let b = if boundary_offset > Duration::ZERO && boundary_offset + Duration::from_millis(2) < interval {
                         sleep_spin_until(now + boundary_offset);
                         now + boundary_offset

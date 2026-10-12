@@ -171,24 +171,6 @@ pub struct Drained {
     pub sent_ts: Vec<u64>,
 }
 
-/// Steers the `auto` buffer. The pick of a boundary happens `h` after the display tick: a game frame that finishes up to `h` late still makes it, a
-/// longer `h` costs exactly that much latency on every frame (a one-frame queue costs a whole period). Frames are always the newest one (no standing
-/// queue). Boundaries that find no frame ready ("empties") are what the client shows as a repeated picture; the controller raises `h` while they
-/// exceed the target and lowers it, slowly, while the app is early by a clear margin.
-struct AutoCtl {
-    ema_empty: f64,
-    margins_ms: std::collections::VecDeque<f64>,
-    n: u64,
-    h_ms: f64,
-    last_log: Instant,
-}
-
-impl AutoCtl {
-    fn new() -> Self {
-        Self { ema_empty: 0.0, margins_ms: Default::default(), n: 0, h_ms: 2.0, last_log: Instant::now() }
-    }
-}
-
 pub struct Pipeline {
     cfg: Config,
     ipc: usize,
@@ -201,14 +183,10 @@ pub struct Pipeline {
     /// the previous boundary left a frame behind in the intake (a second one in a row drops the older instead: bounded lag)
     left_behind: AtomicBool,
     pub queue_picks: AtomicU64,
-    /// which frame a boundary takes when two wait: oldest (no drops, a period late) | newest (drops the older) | adaptive
+    /// which frame a boundary takes when two wait: oldest (default: no drops, a period late) | newest (lab only: drops the older, loses frames when the app's frame times jitter) | adaptive
     /// (newest right after an empty boundary, when the headset already repeated, else oldest)
     pick_policy: String,
     last_empty: AtomicBool,
-    /// `auto` pick policy: the buffer is a delay between the display tick and the pick, steered by the app's lateness (AutoCtl)
-    auto: bool,
-    auto_offset_us: AtomicU64,
-    auto_ctl: Mutex<AutoCtl>,
     last_arrival: Mutex<Option<Instant>>,
     picked: Mutex<Option<Picked>>,
     picked_cv: Condvar,
@@ -266,9 +244,6 @@ impl Pipeline {
             queue_picks: AtomicU64::new(0),
             pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "oldest".into()),
             last_empty: AtomicBool::new(false),
-            auto: std::env::var("VISIONALVR_PICK").map(|v| v == "auto").unwrap_or(false),
-            auto_offset_us: AtomicU64::new(2000),
-            auto_ctl: Mutex::new(AutoCtl::new()),
             last_arrival: Mutex::new(None),
             picked: Mutex::new(None),
             picked_cv: Condvar::new(),
@@ -302,49 +277,6 @@ impl Pipeline {
 
     fn ipc(&self) -> *mut std::ffi::c_void {
         self.ipc as *mut std::ffi::c_void
-    }
-
-    /// The delay after the display tick at which the clock thread hands the pick to the encoder: the auto buffer's, or the fixed one.
-    pub fn pick_offset(&self, fixed: Duration) -> Duration {
-        if self.auto {
-            Duration::from_micros(self.auto_offset_us.load(Ordering::Relaxed))
-        } else {
-            fixed
-        }
-    }
-
-    /// One observation per boundary while the app runs: how early the newest frame was ready (None: nothing ready, an empty boundary).
-    fn auto_observe(&self, margin_ms: Option<f64>) {
-        let target = std::env::var("VISIONALVR_AUTO_REPEAT_PCT").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1.5) / 100.0;
-        let period_ms = self.period().as_secs_f64() * 1000.0;
-        let enc_ms = *self.encode_env_ms.lock();
-        let h_max = (period_ms - enc_ms - 3.0).clamp(0.0, 0.7 * period_ms);
-        let mut c = self.auto_ctl.lock();
-        c.n += 1;
-        let empty = margin_ms.is_none();
-        c.ema_empty += (empty as u8 as f64 - c.ema_empty) / 150.0;
-        if let Some(m) = margin_ms {
-            c.margins_ms.push_back(m);
-            if c.margins_ms.len() > 150 {
-                c.margins_ms.pop_front();
-            }
-        }
-        if c.n % 20 == 0 {
-            let mut sorted: Vec<f64> = c.margins_ms.iter().copied().collect();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let p5 = sorted.get(sorted.len() / 20).copied().unwrap_or(0.0);
-            if c.ema_empty > target {
-                c.h_ms += 0.7;
-            } else if c.ema_empty < target * 0.3 && sorted.len() >= 100 && p5 > 2.5 {
-                c.h_ms -= 0.3;
-            }
-            c.h_ms = c.h_ms.clamp(0.0, h_max);
-            self.auto_offset_us.store((c.h_ms * 1000.0) as u64, Ordering::Relaxed);
-            if c.last_log.elapsed() >= Duration::from_secs(2) {
-                c.last_log = Instant::now();
-                event(self.cfg.origin, "auto_buffer", json!({ "delay_ms": c.h_ms, "empty_pct": c.ema_empty * 100.0, "margin_p5_ms": p5, "target_pct": target * 100.0, "h_max_ms": h_max }));
-            }
-        }
     }
 
     /// `aged` pick: how long the older of two waiting frames may have waited (VISIONALVR_PICK_AGE_MS, default 0.7 of a display period)
@@ -463,12 +395,9 @@ impl Pipeline {
             let mut q = self.intake.lock();
             // two waiting: send the older now and the newer at the next boundary (the stream runs one period late until an empty
             // boundary drains the queue; a third frame arriving first drops the oldest, see intake_loop)
-            if self.auto && alive {
-                self.auto_observe(q.back().map(|f| boundary.saturating_duration_since(f.arrival).as_secs_f64() * 1000.0));
-            }
             let take_older = q.len() >= 2
                 && match self.pick_policy.as_str() {
-                    "newest" | "auto" => false,
+                    "newest" => false,
                     "adaptive" => !self.last_empty.load(Ordering::Relaxed),
                     // oldest unless it has already waited long: a frame that waits more than a fraction of a period means a standing queue
                     // (the app delivers as fast as the display consumes: the queue never drains and every frame is a period late), so drop
@@ -775,7 +704,6 @@ impl Pipeline {
             "queue_picks": self.queue_picks.load(Ordering::Relaxed),
             "intake_depth": self.intake_depth,
             "pick_policy": self.pick_policy,
-            "auto_delay_ms": if self.auto { Some(self.auto_offset_us.load(Ordering::Relaxed) as f64 / 1000.0) } else { None },
             "slots_filled": self.slots_filled.load(Ordering::Relaxed),
             "slots_empty": self.slots_empty.load(Ordering::Relaxed),
             "encoder_overruns": self.encoder_overruns.load(Ordering::Relaxed),

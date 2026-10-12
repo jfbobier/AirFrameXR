@@ -166,7 +166,6 @@ namespace VisionALVR
         public int EyeW, EyeH;
         public double Fps, BitrateMbps;
         public bool Foveated = true, Audio = true;
-        public string LatencyMode = "low";
         readonly Dictionary<string, string> why = new Dictionary<string, string>();
         public string Why(string k) => why.TryGetValue(k, out var s) ? s : "";
 
@@ -217,8 +216,6 @@ namespace VisionALVR
             p.Foveated = hs.Foveation;
             p.why["codec"] = hs.Profile.CodecAdvice;
             p.why["foveation"] = hs.Foveation ? "the headset supports ALVR's foveated encoding: fewer pixels at the edges, same sharpness where you look" : "the headset did not advertise foveated encoding: full frame (needs a strong link)";
-            p.LatencyMode = "low";
-            p.why["latency"] = "no frame buffer, the newest frame sent at once; switch to smooth for fewer repeated pictures on uneven games";
             p.Audio = true;
             p.why["audio"] = hs.MicRate > 0 ? $"game audio to the headset (it advertised a {hs.MicRate} Hz microphone path)" : "game audio to the headset";
             return p;
