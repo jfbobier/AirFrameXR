@@ -362,6 +362,59 @@ namespace VisionALVR
     }
 
     /// Window chrome shared by both tools: logo, version, the red alpha warning.
+    /// Windows Firewall state of alvr_host.exe (the rules are per executable path: every folder the package is unzipped to needs its own). Without an
+    /// allow rule the headset is not found by mDNS and the stream may not connect; a dismissed Windows prompt leaves a BLOCK rule that beats any allow.
+    public enum FirewallState { Allowed, Blocked, Missing, Unknown }
+
+    public static class Firewall
+    {
+        public static FirewallState Check(string program)
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("netsh.exe", "advfirewall firewall show rule name=all dir=in verbose")
+                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage) };
+                string text;
+                using (var p = System.Diagnostics.Process.Start(psi)) { text = p.StandardOutput.ReadToEnd(); p.WaitForExit(20000); }
+                bool allow = false, block = false, understood = false;
+                foreach (var blk in text.Replace("\r", "").Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string prog = null, action = null; bool enabled = true;
+                    foreach (var raw in blk.Split('\n'))
+                    {
+                        var i = raw.IndexOf(':');
+                        if (i < 0) continue;
+                        var k = raw.Substring(0, i).Trim(); var v = raw.Substring(i + 1).Trim();
+                        if (k.StartsWith("Program", StringComparison.OrdinalIgnoreCase)) prog = v;
+                        else if (k.StartsWith("Action", StringComparison.OrdinalIgnoreCase)) action = v;
+                        else if (k.StartsWith("Enabled", StringComparison.OrdinalIgnoreCase) || k.StartsWith("Activ", StringComparison.OrdinalIgnoreCase)) enabled = !(v.Equals("No", StringComparison.OrdinalIgnoreCase) || v.Equals("Non", StringComparison.OrdinalIgnoreCase));
+                    }
+                    if (action != null && (action.Equals("Allow", StringComparison.OrdinalIgnoreCase) || action.Equals("Autoriser", StringComparison.OrdinalIgnoreCase) || action.Equals("Block", StringComparison.OrdinalIgnoreCase) || action.Equals("Bloquer", StringComparison.OrdinalIgnoreCase))) understood = true;
+                    if (prog == null || action == null || !enabled || !string.Equals(prog, program, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (action.Equals("Allow", StringComparison.OrdinalIgnoreCase) || action.Equals("Autoriser", StringComparison.OrdinalIgnoreCase)) allow = true;
+                    else if (action.Equals("Block", StringComparison.OrdinalIgnoreCase) || action.Equals("Bloquer", StringComparison.OrdinalIgnoreCase)) block = true;
+                }
+                if (!understood) return FirewallState.Unknown;   // another Windows language: do not claim anything
+                return block ? FirewallState.Blocked : (allow ? FirewallState.Allowed : FirewallState.Missing);
+            }
+            catch (Exception e) { Log.Write("WARN", "firewall check: " + e.Message); return FirewallState.Unknown; }
+        }
+
+        /// Removes every rule of this program (a block rule beats an allow rule) and adds one inbound allow rule, through a UAC prompt. False: declined or failed.
+        public static bool Allow(string program)
+        {
+            try
+            {
+                var args = $"/c netsh advfirewall firewall delete rule name=all program=\"{program}\" & netsh advfirewall firewall add rule name=\"VisionALVR (alvr_host)\" dir=in action=allow program=\"{program}\" enable=yes profile=any";
+                var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", args) { UseShellExecute = true, Verb = "runas", WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden };
+                using (var p = System.Diagnostics.Process.Start(psi)) { p.WaitForExit(30000); }
+                Log.Write("INFO", $"firewall: allow rule for {program} requested");
+                return true;
+            }
+            catch (Exception e) { Log.Write("WARN", "firewall rule not added: " + e.Message); return false; }
+        }
+    }
+
     public static class Ui
     {
         public static readonly Font Body = new Font("Segoe UI", 9.5f);

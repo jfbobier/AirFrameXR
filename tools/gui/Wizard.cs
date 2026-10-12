@@ -209,6 +209,28 @@ namespace VisionALVR
             manual.Controls.Add(Ui.Line("Headset with a fixed IP not listed?")); manual.Controls.Add(ipBox); manual.Controls.Add(add);
             p.Controls.Add(manual);
             p.Controls.Add(discStatus);
+            // Windows Firewall: rules are per executable path; without an allow rule the headset is not found and the stream may not connect
+            var fwLine = new FlowLayoutPanel { AutoSize = true };
+            var fwLabel = Ui.Line("Checking the Windows Firewall...");
+            var fwFix = new Button { Text = "Allow VisionALVR through the firewall (asks for administrator)", AutoSize = true, Visible = false };
+            fwLine.Controls.Add(fwLabel); fwLine.Controls.Add(fwFix);
+            p.Controls.Add(fwLine);
+            void fwCheck()
+            {
+                if (demo) { fwLabel.Text = "Windows Firewall: alvr_host.exe is allowed."; fwLabel.ForeColor = Color.SeaGreen; return; }
+                Task.Run(() => Firewall.Check(Paths.Host)).ContinueWith(t => BeginInvoke((Action)(() =>
+                {
+                    var st = t.Result;
+                    fwFix.Visible = st == FirewallState.Blocked || st == FirewallState.Missing;
+                    fwLabel.Text = st == FirewallState.Allowed ? "Windows Firewall: alvr_host.exe in this folder is allowed."
+                        : st == FirewallState.Blocked ? "Windows Firewall BLOCKS alvr_host.exe in this folder (a dismissed Windows prompt does that): the headset will not be found and the stream will not connect."
+                        : st == FirewallState.Missing ? "Windows Firewall has no rule for alvr_host.exe in this folder: discovery will find nothing until it is allowed (the rule belongs to this exact folder)."
+                        : "Windows Firewall: state unknown (this Windows language is not recognised).";
+                    fwLabel.ForeColor = st == FirewallState.Allowed ? Color.SeaGreen : st == FirewallState.Unknown ? Color.DimGray : Color.Firebrick;
+                })));
+            }
+            fwFix.Click += (s, e) => { Firewall.Allow(Paths.Host); fwCheck(); StartDiscovery(); };
+            fwCheck();
             // the headsets we already know: paired in session.json, saved in visionalvr.json (they must be in the list AND selected)
             var hsPaired = Session.Headset(session);
             if (hsPaired != null) AddRow(hsPaired.Item1, hsPaired.Item3, hsPaired.Item2, "paired before", true);
