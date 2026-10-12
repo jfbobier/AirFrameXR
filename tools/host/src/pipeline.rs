@@ -183,7 +183,7 @@ pub struct Pipeline {
     /// the previous boundary left a frame behind in the intake (a second one in a row drops the older instead: bounded lag)
     left_behind: AtomicBool,
     pub queue_picks: AtomicU64,
-    /// which frame a boundary takes when two wait: oldest (default: no drops, a standing queue stays a period late) | newest (lab only: drops the older of
+    /// which frame a boundary takes when two wait: drain (default: in order, plus one dropped frame to resynchronise a queue that has stood 8 boundaries, with a backoff) | oldest (no drops, a standing queue stays a period late) | newest (lab only: drops the older of
     /// every pair, loses frames when the app's frame times jitter) | adaptive (newest right after an empty boundary, else oldest) | aged
     pick_policy: String,
     last_empty: AtomicBool,
@@ -250,7 +250,7 @@ impl Pipeline {
             intake_depth: std::env::var("VISIONALVR_INTAKE_DEPTH").ok().and_then(|v| v.parse().ok()).unwrap_or(2usize).clamp(1, 3),
             left_behind: AtomicBool::new(false),
             queue_picks: AtomicU64::new(0),
-            pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "oldest".into()),
+            pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "drain".into()),
             last_empty: AtomicBool::new(false),
             standing: AtomicU64::new(0),
             drain_state: Mutex::new((None, 3.0)),

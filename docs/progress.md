@@ -351,3 +351,10 @@ sampled or real NVENC encode, timer transport), `harness/simrig/run_sim.py` (sce
   period, the host does not send one frame (event `client_queue_drain`, counter `drains`), which lets the headset's queue run dry once (one skipped
   picture, about one period of latency back); backoff 3 s, doubled when the queue returns within 15 s, at most 60 s. To judge on the headset: decoder_queue
   in client_graph.csv before and after, total latency, and whether the skipped pictures are visible.
+
+2026-10-13 (later, lab, 5090): the intake `drain` policy came back with a backoff (3 s, doubled up to 60 s when the queue returns within 15 s of the last drain) and is now
+the default (VISIONALVR_PICK=oldest restores the pure in-order queue). Lab, ours only: `pace_steady` pose-to-display 33.3 ms (oldest 33.4), repeats 18.1-18.3 % (17.9), skipped
+pictures 198-200 (204-230); `x_d2_oldest_w3` 32.0 ms (32.1), 18.1-18.2 % (18.0), 341-371 (348-353): neutral on the jittery apps. `cmp_tokyo_4k100_gpu` (steady GPU-bound app, 3 runs): host
+wait before the encode 2.3 ms instead of 12.2, pose-to-arrival 14.2 against 24.1 ms, pose-to-display 27.9 / 18.0 / 18.9 against oldest 38.2 / 38.1 / 28.5 / 28.0 (the mock headset's own display queue
+is the second standing queue: when it is not empty too, the gain does not show at the display). Stock ALVR + SteamVR on the same scene: 29.3-29.8 ms. Not seen on the real headset yet; the
+headset-side drain (`video.client_queue_drain`) never fired in the lab (the mock reports no decoder queue that large) and stays opt-in.
