@@ -28,6 +28,13 @@ It is not affiliated with or supported by NVIDIA, Apple or the ALVR project.
 - **AMD / Intel GPUs**: not supported and not planned. The encode path is NVENC only; you are welcome to fork and adapt it.
   [ALVR](https://github.com/alvr-org/ALVR) itself supports them.
 
+> [!NOTE]
+> **Game compatibility is not the goal.** VisionALVR is a lean, low-latency path for the games that work with it; it does not aim
+> to run every VR game. **For a game that does not work, use SteamVR + ALVR**: SteamVR is excellent at compatibility and at
+> configurability, and this project does not try to compete with that. In testing, the vast majority of **UEVR games**, the
+> **Luke Ross mods** and **native OpenXR / VR games** worked, but some games still have controller problems, crashes or both.
+> Not supported: SteamVR/OpenVR-only games (they need SteamVR).
+
 VisionALVR replaces the SteamVR + ALVR server pair on the PC with one lean streamer. It speaks the ALVR 20.14.1 protocol
 unchanged, so the ALVR app on the headset sees an ordinary ALVR server. In between, it does less work:
 no SteamVR compositor, no extra frame copies between processes, and an encode path written for NVENC only.
@@ -42,11 +49,11 @@ OpenXR game
 ```
 
 ## Status
-- **Works on the real headset** (first pilot, RTX 5090 + Vision Pro): most UEVR games, Luke Ross mods (Dead Space Remake),
-  controllers (ALVR's Quest/Touch emulation), haptics, game audio, discovery/pairing with the stock app.
-- **Known issues**: one Unity game crashes, one UEVR game shows no image, one Unity game shows its menu very small.
-  Fixed since the pilot but not yet re-tested on the headset: frame pacing (host display clock), head bobbing, image too dark,
-  games running elevated (e.g. Cemu) never reaching the streamer.
+- **Works on the real headset** (tested on RTX 5090 + Vision Pro): the vast majority of UEVR games, Luke Ross mods (Dead Space
+  Remake), native VR games, controllers (ALVR's Quest/Touch emulation), haptics, game audio, discovery/pairing with the stock app.
+- **Known issues**: some games still have controller and/or crash issues (for example one Unity game crashes, one UEVR game shows
+  no image, one Unity game shows its menu very small). Use SteamVR + ALVR for those. Games running elevated (e.g. Cemu) cannot
+  reach the streamer.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
