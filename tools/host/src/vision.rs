@@ -43,7 +43,7 @@ pub struct Settings {
     pub predict_missing_head: Option<bool>,
     pub intake_depth: Option<i64>,
     pub pick_policy: Option<String>,
-    /// "smooth" (default: one-frame buffer, fewest repeated frames) | "low" (send at once, newest frame, no buffer) | "auto" (the buffer follows the app, see pipeline.rs)
+    /// "smooth" (default: one-frame buffer, fewest repeated frames) | "low" (send at once, newest frame, no buffer) | "auto" (experimental, not recommended: a delay steered by the app's lateness, pipeline.rs; adds latency without fewer repeats in the lab)
     pub latency_mode: Option<String>,
     /// follow the client's display rate (detected from its sample timestamps) instead of the 90 Hz grid (default on)
     pub follow_client_rate: Option<bool>,
