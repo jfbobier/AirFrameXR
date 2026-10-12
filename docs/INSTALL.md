@@ -29,7 +29,7 @@ open the ALVR app on the Vision Pro, select it, **Pair**; check the settings; se
 game runs" (default #00FF00). 4. `VisionALVR.exe`, then start an OpenXR game. Close SteamVR and ALVR's own launcher first (same ports).
 
 **A plain green screen on connecting is normal**: it is the idle frame while no game runs; set the chroma-key colour in the ALVR app to that
-green (#00FF00) and it turns transparent. Network advice (6E access point in dumb-AP mode, PC on Ethernet, fixed IP by MAC): see the
+green (#00FF00) and it turns transparent. Network advice (a Wi-Fi 6 access point in dumb-AP mode on 5 GHz with a 160 MHz channel for the first Vision Pro, PC on Ethernet, fixed IP by MAC): see the
 README's "Recommended network setup".
 
 VisionALVR.exe refuses to stream on GPUs older than RTX 40 (NVML architecture < Ada). Developers: `VISIONALVR_ALLOW_ANY_GPU=1`.
