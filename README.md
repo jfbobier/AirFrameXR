@@ -28,6 +28,9 @@ It is not affiliated with or supported by NVIDIA, Apple or the ALVR project.
 - **AMD / Intel GPUs**: not supported and not planned. The encode path is NVENC only; you are welcome to fork and adapt it.
   [ALVR](https://github.com/alvr-org/ALVR) itself supports them.
 
+This project **does not aim to compete with existing commercial applications**. It offers **more options to the VR community**, using the
+already open source [ALVR](https://github.com/alvr-org/ALVR) as the infrastructure.
+
 > [!NOTE]
 > **Game compatibility is not the goal.** VisionALVR is a lean, low-latency path for the games that work with it; it does not aim
 > to run every VR game. **For a game that does not work, use SteamVR + ALVR**: SteamVR is excellent at compatibility and at
@@ -54,6 +57,10 @@ OpenXR game
 - **Known issues**: some games still have controller and/or crash issues (for example one Unity game crashes, one UEVR game shows
   no image, one Unity game shows its menu very small). Use SteamVR + ALVR for those. Games running elevated (e.g. Cemu) cannot
   reach the streamer.
+- **Coming in 0.3** (work in progress on the [`0.3` branch](https://github.com/jfbobier/vision-alvr/tree/0.3)): a new **autoconfigure tool**
+  that proposes the best settings for your headset, PC hardware and software, and Wi-Fi / network setup. It checks your PC, connects to
+  the headset to read what it supports, runs a checklist of tests (encoder, picture quality, network, streaming) and proposes a
+  configuration you can change. The 0.2 release keeps the simpler configure tool below.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
