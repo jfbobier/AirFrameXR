@@ -10,22 +10,23 @@
 Stream PC OpenXR games to **Apple Vision Pro** with the stock **ALVR** visionOS app, **without SteamVR**, on NVIDIA GPUs.
 
 > [!WARNING]
-> **ALPHA SOFTWARE (0.1): TEST AT YOUR OWN RISK.**
+> **ALPHA SOFTWARE (0.2): TEST AT YOUR OWN RISK.**
 > On a real headset it has been tested by one person, on one PC (RTX 5090) with one Vision Pro (plus automated tests on a
 > laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
 > (both undone by `unregister_openxr_runtime.bat`). Keep comfort in mind: a frozen or juddering image in a headset can cause
 > discomfort; take the headset off if anything looks wrong. Provided "as is", without warranty of any kind (see [LICENSE](LICENSE)).
 
-**Target, and only target:** the **Windows** streamer on an **NVIDIA GeForce RTX 40 series or newer** GPU, with the
-**ALVR app (20.14.x) on Apple Vision Pro**.
+**Main focus:** the **Windows** streamer on an **NVIDIA GeForce RTX 40 series or newer** GPU, with the **ALVR app (20.14.x) on
+Apple Vision Pro**. That is what is built, tuned and tested here.
 
 This is a **personal project**. It targets NVIDIA because that is what I run, and the Vision Pro because that is my headset.
 It is not affiliated with or supported by NVIDIA, Apple or the ALVR project.
-- **Other headsets**: the ALVR protocol is device agnostic, so other ALVR clients (Quest, Pico, ...) may well connect, but they
-  are untested and not supported (encoder settings, defaults and the idle chroma-key frame are tuned for the Vision Pro).
+- **Other headsets**: the ALVR protocol is device agnostic, so **other headsets with an ALVR client (Quest, Pico, ...) are expected to
+  work**, but they are **not actively supported**: they are not tested here, and the encoder settings, defaults and the idle chroma-key
+  frame are tuned for the Vision Pro. Reports and small fixes for them are welcome, with no promise of an answer or a fix; nothing
+  that makes the Vision Pro path worse will be merged.
 - **AMD / Intel GPUs**: not supported and not planned. The encode path is NVENC only; you are welcome to fork and adapt it.
-- Issues and pull requests for other headsets or GPU vendors will be closed. [ALVR](https://github.com/alvr-org/ALVR) itself
-  supports them.
+  [ALVR](https://github.com/alvr-org/ALVR) itself supports them.
 
 VisionALVR replaces the SteamVR + ALVR server pair on the PC with one lean streamer. It speaks the ALVR 20.14.1 protocol
 unchanged, so the ALVR app on the headset sees an ordinary ALVR server. In between, it does less work:
@@ -54,14 +55,15 @@ OpenXR game
 
 ## Requirements
 - Windows 10/11, **NVIDIA GeForce RTX 40 series or newer** (the runtime refuses older GPUs).
-- Apple Vision Pro with the **ALVR** app (20.14.x), PC and headset on the same LAN (5 GHz / 6 GHz Wi-Fi recommended).
+- Apple Vision Pro with the **ALVR** app (20.14.x), PC and headset on the same LAN (Wi-Fi 6 on 5 GHz for the first Vision Pro; 6 GHz is for newer models and Quest 3). Other headsets with an ALVR client: see above.
 - SteamVR and ALVR's own launcher closed while streaming (same ports).
 
 ## Recommended network setup
 The stream is 100+ Mbit/s of low-latency video: the network matters more than the PC. What works best:
-- **A Wi-Fi 6E (or newer) router dedicated to the headset**, on the 6 GHz band, in the same room (line of sight if you can). Put it
-  in **dumb access point mode** (router functions, NAT and its own DHCP server off), wired by Ethernet to your main router or switch,
-  so the headset stays on the same subnet as the PC and no second NAT adds latency.
+- **A Wi-Fi 6 (or newer) router dedicated to the headset**, in the same room (line of sight if you can). The first Vision Pro (M2) has
+  **Wi-Fi 6 on 5 GHz only (no 6 GHz)**: use the 5 GHz band with a **160 MHz channel**. A 6E/7 router is fine, and the 6 GHz band is for
+  newer Vision Pro models and the Quest 3. Put it in **dumb access point mode** (router functions, NAT and its own DHCP server off), wired
+  by Ethernet to your main router or switch, so the headset stays on the same subnet as the PC and no second NAT adds latency.
 - **PC on Ethernet** (not Wi-Fi), on the same network as the access point.
 - **A fixed IP for the headset**: a DHCP reservation on your DHCP server (usually the main router) bound to the headset's **MAC address**.
   In visionOS, set *Private Wi-Fi Address* to Off (or Fixed) for this network, otherwise the MAC address can change and the reservation
