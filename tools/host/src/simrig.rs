@@ -133,6 +133,9 @@ struct Sim {
     rng: Mutex<Rng>,
     last_ready: Mutex<f64>,
     stop: AtomicBool,
+    /// VISIONALVR_SIM_CAPTURE=intake: the viewer's copy of a frame is taken when it arrives from the shim (diagnosis: is the slot still the frame at encode time?)
+    capture_intake: bool,
+    early: Mutex<std::collections::HashMap<u32, i32>>,
 }
 
 static SIM: OnceLock<Sim> = OnceLock::new();
@@ -276,7 +279,10 @@ pub fn init(out_dir: &str, ipc: usize, nvh_handle: *mut c_void, shared: &Arc<Sha
         rng: Mutex::new(Rng(seed.wrapping_mul(0x9E3779B97F4A7C15) | 1)),
         last_ready: Mutex::new(0.0),
         stop: AtomicBool::new(false),
+        capture_intake: std::env::var("VISIONALVR_SIM_CAPTURE").map(|v| v == "intake").unwrap_or(false),
+        early: Mutex::new(Default::default()),
     };
+    NVH.store(nvh_handle as usize, Ordering::Relaxed);
     let _ = SIM.set(sim);
     // the client side: connected, stream ready, views, the display period the host's clock follows
     vsync_period_ns.store(SIM.get().unwrap().cfg.period_ns as u64, Ordering::Relaxed);
@@ -336,6 +342,7 @@ fn head_generator() {
     }
 }
 
+static NVH: AtomicUsize = AtomicUsize::new(0);
 static IPC: AtomicUsize = AtomicUsize::new(0);
 
 pub fn set_ipc(ipc: usize) {
@@ -363,7 +370,13 @@ pub fn encode(nvh_handle: *mut c_void, ipc: *mut c_void, slot: u32, counter: u32
         sleep_until(now + d * 1e-3);
         d
     };
-    let ring = if ms >= 0.0 && s.started.load(Ordering::Relaxed) { unsafe { sv_capture(viewer, nvh_handle, ipc, slot, counter) } } else { -1 };
+    let ring = if s.capture_intake {
+        s.early.lock().unwrap().remove(&counter).unwrap_or(-1)
+    } else if ms >= 0.0 && s.started.load(Ordering::Relaxed) {
+        unsafe { sv_capture(viewer, nvh_handle, ipc, slot, counter) }
+    } else {
+        -1
+    };
     LAST_RING.store(if ring >= 0 { ring as usize } else { usize::MAX }, Ordering::Relaxed);
     ms
 }
@@ -397,5 +410,14 @@ pub fn stop() {
     if let Some(s) = SIM.get() {
         s.stop.store(true, Ordering::Relaxed);
         let _ = &s.out_dir;
+    }
+}
+
+/// Called by the intake thread the moment a frame arrives (VISIONALVR_SIM_CAPTURE=intake).
+pub fn on_arrival(ipc: *mut c_void, slot: u32, counter: u32) {
+    let s = SIM.get().unwrap();
+    if s.capture_intake && s.started.load(Ordering::Relaxed) {
+        let ring = unsafe { sv_capture(s.viewer as *mut c_void, NVH.load(Ordering::Relaxed) as *mut c_void, ipc, slot, counter) };
+        s.early.lock().unwrap().insert(counter, ring);
     }
 }

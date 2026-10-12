@@ -87,7 +87,7 @@ def run_one(name, seconds, extra):
     try:
         task("simrig_host", host_cmd(rd, env, seconds), rd, elevated=True)
         time.sleep(8)
-        probe = ["@echo off", f'set XR_RUNTIME_JSON={live.INSTALL}\\virtualdesktop-openxr.json', "set XR_PROBE_SCENE=dots", "set XR_PROBE_CPU_MS=0", "set XR_PROBE_LOAD=steady",
+        probe = ["@echo off", f'set XR_RUNTIME_JSON={live.INSTALL}\\virtualdesktop-openxr.json', "set XR_PROBE_SCENE=dots", "set XR_PROBE_CPU_MS=0", "set XR_PROBE_LOAD=steady", f"set XR_PROBE_MARKERS_CSV={rd}\\app_markers.csv",
                  f"cd /d {live.INSTALL}", f'"{live.CLONE}\\build\\probe\\xr_probe.exe" {rd}\\probe.log 200000 {seconds + 60} - - > {rd}\\probe_stdout.txt 2>&1']
         task("simrig_probe", probe, rd)
         t0 = time.time()
@@ -121,7 +121,7 @@ def main(a):
         seconds = int(a[a.index("--seconds") + 1]) if "--seconds" in a else 30
         extra = {}
         for flag, key in (("--show", "SHOW"), ("--real-encode", "REAL_ENCODE"), ("--seed", "SEED"), ("--eye-w", "EYE_W"), ("--omega", "OMEGA_DPS"),
-                          ("--predict-ms", "PREDICT_MS"), ("--dump-every", "DUMP_EVERY")):
+                          ("--predict-ms", "PREDICT_MS"), ("--dump-every", "DUMP_EVERY"), ("--capture", "CAPTURE")):
             if flag in a:
                 extra[key] = a[a.index(flag) + 1]
         rc = 0

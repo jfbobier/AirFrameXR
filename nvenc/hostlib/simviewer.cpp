@@ -115,7 +115,7 @@ struct Viewer {
     std::vector<ID3D11Texture2D*> ring; std::vector<ID3D11ShaderResourceView*> ringSrv;
     DXGI_FORMAT ringFmt = DXGI_FORMAT_UNKNOWN; UINT ringW = 0, ringH = 0;
     ID3D11Texture2D* rt = nullptr; ID3D11RenderTargetView* rtv = nullptr; ID3D11ShaderResourceView* rtSrv = nullptr;
-    ID3D11Texture2D* stage = nullptr;
+    ID3D11Texture2D* stage = nullptr; ID3D11Texture2D* stampStage = nullptr;
     IDXGISwapChain1* sc = nullptr; ID3D11RenderTargetView* scRtv = nullptr; HWND hwnd = nullptr; UINT winW = 0, winH = 0;
     ID3D11Texture2D* winStage = nullptr;
     std::mutex m;                       // posted frames, the sample table, the truth table
@@ -124,7 +124,7 @@ struct Viewer {
     std::vector<uint64_t> sampleOrder;
     std::vector<Q4> truth; double truthT0 = 0, truthDt = 1e6;
     std::thread th; std::atomic<bool> stop{false}; std::atomic<bool> started{false};
-    FILE* dots = nullptr;
+    FILE* dots = nullptr; FILE* tlog = nullptr;
     int ticks = 0, shown = 0, repeats = 0, missingPose = 0;
     double yHorizon = 0.5;
 
@@ -173,6 +173,9 @@ struct Viewer {
         snprintf(path, sizeof path, "%s\\dots.csv", cfg.out_dir);
         dots = fopen(path, "w");
         if (dots) fprintf(dots, "tick,t_s,shown_ts,reproj,yaw_deg,eye,n,x...\n");
+        snprintf(path, sizeof path, "%s\\ticks.csv", cfg.out_dir);
+        tlog = fopen(path, "w");
+        if (tlog) fprintf(tlog, "tick,fresh,ring,shown_ts,ts_disp,qd_x,qd_y,qd_z,qd_w,qf_x,qf_y,qf_z,qf_w,haveF,queue,app_frame\n");
         snprintf(path, sizeof path, "%s\\meta.json", cfg.out_dir);
         if (FILE* f = fopen(path, "w")) {
             const float* fv = cfg.fov8;
@@ -263,6 +266,32 @@ struct Viewer {
         }
     }
 
+    // the probe stamps its frame number (+1) as 16 white/black 64 px blocks in the top-left of the left eye of its swapchain image (3552 px wide);
+    // read them back from the unwarped frame: which app frame's pixels does this slot hold? (-1: unreadable)
+    int readStamp(int ringIdx) {
+        if (ringIdx < 0 || ringIdx >= (int)ring.size() || !ring[ringIdx]) return -1;
+        const double scale = (ringW / 2.0) / 3552.0;
+        const UINT w = (UINT)std::ceil(1024 * scale) + 1, y = (UINT)std::max(0.0, 32 * scale);
+        if (!stampStage) {
+            D3D11_TEXTURE2D_DESC td{}; ring[ringIdx]->GetDesc(&td);
+            td.Width = 2048; td.Height = 1; td.Usage = D3D11_USAGE_STAGING; td.BindFlags = 0; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ; td.MiscFlags = 0;
+            if (FAILED(dev->CreateTexture2D(&td, nullptr, &stampStage))) return -1;
+        }
+        D3D11_BOX box{ 0, y, 0, std::min(w, ringW), y + 1, 1 };
+        ctx->CopySubresourceRegion(stampStage, 0, 0, 0, 0, ring[ringIdx], 0, &box);
+        D3D11_MAPPED_SUBRESOURCE mp{};
+        if (FAILED(ctx->Map(stampStage, 0, D3D11_MAP_READ, 0, &mp))) return -1;
+        int v = 0;
+        for (int b = 0; b < 16; b++) {
+            const UINT x = (UINT)((b * 64 + 32) * scale);
+            const uint32_t px = ((const uint32_t*)mp.pData)[x];
+            const bool on = ringFmt == DXGI_FORMAT_R10G10B10A2_UNORM ? ((px & 0x3ff) > 512) : ((px & 0xff) > 128);
+            if (on) v |= 1 << b;
+        }
+        ctx->Unmap(stampStage, 0);
+        return v;
+    }
+
     void dumpBmp(int tick) {
         if (!sc || !scRtv) return;
         ID3D11Texture2D* bb = nullptr; sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&bb);
@@ -345,6 +374,7 @@ struct Viewer {
             ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); ctx->IASetInputLayout(nullptr);
             const float black[4] = { 0, 0, 0, 1 }; ctx->ClearRenderTargetView(rtv, black);
             for (int eye = 0; eye < 2; eye++) drawEye(eye, cur.ring, M, cfg.reproject != 0 && haveF);
+            if (tlog) fprintf(tlog, "%d,%d,%d,%llu,%.0f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%d,%d,%d\n", k, fresh ? 1 : 0, cur.ring, (unsigned long long)cur.ts, tsDisp, qd.x, qd.y, qd.z, qd.w, qf.x, qf.y, qf.z, qf.w, haveF ? 1 : 0, (int)queue.size(), readStamp(cur.ring));
             // yaw of the displayed pose (the judge's truth), from the rotation matrix
             const double yawDisp = -std::atan2(-Rd[6], Rd[8]) * 180.0 / 3.14159265358979;   // counted to the right (OpenXR yaw about +Y turns left): the judge's convention
             if (dots) {
@@ -368,6 +398,7 @@ struct Viewer {
             if (cur.ts) lastShownTs = cur.ts;
         }
         if (dots) { fflush(dots); fclose(dots); dots = nullptr; }
+        if (tlog) { fclose(tlog); tlog = nullptr; }
         char path[600]; snprintf(path, sizeof path, "%s\\viewer_summary.json", cfg.out_dir);
         if (FILE* f = fopen(path, "w")) { fprintf(f, "{\"ticks\": %d, \"fresh\": %d, \"repeats\": %d, \"missing_pose\": %d}\n", ticks, shown, repeats, missingPose); fclose(f); }
     }

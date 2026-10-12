@@ -270,6 +270,12 @@ namespace {
             ComPtr<ID3D11RenderTargetView> RTVs[k_SwapchainLength];
             ovrTextureSwapChainDesc desc{};
             uint32_t lastCommittedIndex{0};
+            // The slot holding the frame the app just committed. GetSwapchainImageIndex reports lastCommittedIndex - 1 as the slot to write
+            // next, so VDXR commits until lastCommittedIndex - 2 is the slot it rendered/copied frame F into: that is the slot to read (reading
+            // lastCommittedIndex itself composed frame F-1's image under frame F's pose).
+            uint32_t ComposeIndex() const {
+                return desc.StaticImage ? 0u : (uint32_t)((lastCommittedIndex + k_SwapchainLength - 2) % k_SwapchainLength);
+            }
         };
 
       public:
@@ -1076,7 +1082,7 @@ namespace {
                             const D3D11_VIEWPORT viewport = EyeViewport(eye, width, height);
                             m_submissionContext->RSSetViewports(1, &viewport);
                             m_submissionContext->PSSetShaderResources(
-                                0, 1, swapchainObject->SRVs[swapchainObject->lastCommittedIndex].GetAddressOf());
+                                0, 1, swapchainObject->SRVs[swapchainObject->ComposeIndex()].GetAddressOf());
                             m_submissionContext->Draw(3, 0);
                         }
                     } else if (layer->Header.Type == ovrLayerType_Quad || layer->Header.Type == ovrLayerType_Cylinder) {
@@ -1114,7 +1120,7 @@ namespace {
                         m_submissionContext->PSSetShader(m_layerPS.Get(), nullptr, 0);
                         m_submissionContext->VSSetConstantBuffers(0, 1, m_layerConstantsBuffer.GetAddressOf());
                         m_submissionContext->PSSetConstantBuffers(0, 1, m_layerConstantsBuffer.GetAddressOf());
-                        m_submissionContext->PSSetShaderResources(0, 1, sc->SRVs[sc->lastCommittedIndex].GetAddressOf());
+                        m_submissionContext->PSSetShaderResources(0, 1, sc->SRVs[sc->ComposeIndex()].GetAddressOf());
 
                         for (uint32_t eye = 0; eye < ovrEye_Count; eye++) {
                             if ((eye == 0 && skipLeft) || (eye == 1 && skipRight)) {
@@ -1151,7 +1157,7 @@ namespace {
                         m_submissionContext->PSSetShader(m_layerCubePS.Get(), nullptr, 0);
                         m_submissionContext->VSSetConstantBuffers(0, 1, m_layerConstantsBuffer.GetAddressOf());
                         m_submissionContext->PSSetConstantBuffers(0, 1, m_layerConstantsBuffer.GetAddressOf());
-                        m_submissionContext->PSSetShaderResources(0, 1, sc->SRVs[sc->lastCommittedIndex].GetAddressOf());
+                        m_submissionContext->PSSetShaderResources(0, 1, sc->SRVs[sc->ComposeIndex()].GetAddressOf());
 
                         for (uint32_t eye = 0; eye < ovrEye_Count; eye++) {
                             if ((eye == 0 && skipLeft) || (eye == 1 && skipRight)) {

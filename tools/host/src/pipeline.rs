@@ -340,6 +340,10 @@ impl Pipeline {
             let now = Instant::now();
             // hold the slot for the shim until the encoder has read it (or a newer frame supersedes it)
             unsafe { nvh::nvh_ipc_slot_busy(ipc, slot, 1) };
+            #[cfg(feature = "simrig")]
+            if crate::simrig::active() {
+                crate::simrig::on_arrival(ipc, slot, counter as u32);
+            }
             let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now };
             {
                 let mut q = self.intake.lock();
