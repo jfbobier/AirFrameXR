@@ -15,6 +15,7 @@ mod bench_quality;
 mod discovery;
 mod logs;
 mod nvidia_profile;
+mod phase;
 mod pipeline;
 #[cfg(feature = "simrig")]
 mod simrig;
@@ -391,6 +392,7 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
             std::env::set_var("VISIONALVR_PICK", v);
         }
     }
+    phase::configure(st.phase_lock.unwrap_or(true));
     match a.latency_mode.clone().or_else(|| st.latency_mode.clone()).as_deref() {
         Some("low") | Some("auto") => {
             let auto = a.latency_mode.clone().or_else(|| st.latency_mode.clone()).as_deref() == Some("auto");
@@ -1535,6 +1537,7 @@ fn main() {
             for ev in events {
                 match ev {
                     ServerCoreEvent::ClientConnected => {
+                        phase::reset();
                         height_anchored = false;
                         samples_since_connect = 0;
                         rate_est.reset();
@@ -1732,9 +1735,16 @@ fn main() {
                 // therefore lands a few microseconds BEFORE the grid point, and ALVR then answers "a few microseconds". Clamping
                 // that to 0.5 ms produced a second tick 0.5 ms later on ~15-20% of ticks (~107 Hz instead of 90: apps ran at
                 // 97-111 fps in the first headset test). A remainder under half a period means "this grid point": aim at the next.
-                let mut interval = if FOLLOW_RATE.load(Ordering::Relaxed) {
+                phase::set_period_ns(nominal.as_nanos() as u64);
+                let mut interval = if FOLLOW_RATE.load(Ordering::Relaxed) || phase::enabled() {
                     // the client's display period (detected from its tracking timestamps): a free-running grid at that period
                     let mut g = grid.map(|g| g + nominal).unwrap_or(now + nominal);
+                    let adj = phase::take_adjust_ns(); // the phase lock slides the grid (phase.rs)
+                    if adj >= 0 {
+                        g += Duration::from_nanos(adj as u64);
+                    } else {
+                        g = g.checked_sub(Duration::from_nanos((-adj) as u64)).unwrap_or(g);
+                    }
                     if g < now + nominal / 2 {
                         g = now + nominal; // fell behind (a stall): restart the grid
                     }

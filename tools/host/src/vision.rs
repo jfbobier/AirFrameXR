@@ -45,6 +45,8 @@ pub struct Settings {
     pub pick_policy: Option<String>,
     /// "smooth" (default: one-frame buffer, fewest repeated frames) | "low" (send at once, newest frame, no buffer) | "auto" (experimental, not recommended: a delay steered by the app's lateness, pipeline.rs; adds latency without fewer repeats in the lab)
     pub latency_mode: Option<String>,
+    /// slide the host's display grid so frames arrive just before the headset's tick (phase.rs); default on
+    pub phase_lock: Option<bool>,
     /// follow the client's display rate (detected from its sample timestamps) instead of the 90 Hz grid (default on)
     pub follow_client_rate: Option<bool>,
     /// compositor boundary offset after the display tick, ms
@@ -89,6 +91,7 @@ pub fn load_settings(path: &Path) -> Settings {
         intake_depth: video["intake_depth"].as_i64(),
         pick_policy: video["pick_policy"].as_str().map(str::to_string),
         latency_mode: video["latency_mode"].as_str().map(str::to_string),
+        phase_lock: video["phase_lock"].as_bool(),
         follow_client_rate: video["follow_client_rate"].as_bool(),
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
