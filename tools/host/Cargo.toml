@@ -13,6 +13,8 @@ license.workspace = true
 [features]
 default = ["telemetry"]
 telemetry = []
+# the simrig harness (headset-less synthetic head + viewer, see docs/DEVELOPMENT.md): off in normal and release builds
+simrig = ["telemetry"]
 
 [dependencies]
 alvr_audio.workspace = true # device ids for the game-audio log (server_core does the capture itself)

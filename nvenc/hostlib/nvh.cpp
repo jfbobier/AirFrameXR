@@ -498,6 +498,25 @@ double nvh_encode_green(void* hh, uint32_t frame_no, uint64_t ts_ns, int force_i
     return nowMs() - a;
 }
 
+#ifdef VISIONALVR_SIMRIG
+// simrig (see simviewer.cpp): the viewer shares the encoder's D3D11 device and reads the shim's slots through it.
+extern "C" void* nvh_sim_device(void* hh) { return ((Nvh*)hh)->render->GetDevice(); }
+extern "C" void* nvh_sim_context(void* hh) { return ((Nvh*)hh)->render->GetContext(); }
+extern "C" void* nvh_sim_slot(void* hh, void* i, uint32_t slot) {
+    auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
+    if (slot >= (uint32_t)visionalvr_ipc::kSlots) return nullptr;
+    uint64_t handle = ipc->state->shim.slotHandle[slot];
+    if (!handle) return nullptr;
+    if (n->sharedHandle[slot] != handle || !n->shared[slot]) {
+        if (n->shared[slot]) { n->shared[slot]->Release(); n->shared[slot] = nullptr; }
+        if (FAILED(n->render->GetDevice()->OpenSharedResource((HANDLE)(uintptr_t)handle, __uuidof(ID3D11Texture2D), (void**)&n->shared[slot]))) return nullptr;
+        n->sharedHandle[slot] = handle;
+        n->ffr[slot].reset();
+    }
+    return n->shared[slot];
+}
+#endif
+
 double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
     auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
     if (slot >= (uint32_t)visionalvr_ipc::kSlots) { seterr(err, errlen, "bad slot"); return -1; }

@@ -160,6 +160,10 @@ fn main() {
         .file(up.join("platform/win32/d3d-render-utils/RenderUtils.cpp"))
         .file(up.join("ALVR-common/exception.cpp"))
         .warnings(false);
+    // The simrig (docs/DEVELOPMENT.md): the viewer and its hooks exist only with the cargo feature, never in a normal or release build.
+    if env::var_os("CARGO_FEATURE_SIMRIG").is_some() {
+        b.define("VISIONALVR_SIMRIG", None).file(nvenc.join("hostlib/simviewer.cpp"));
+    }
     // NVH_SKIP_CC=1: type-check only (cargo check on a machine without MSVC, e.g. WSL): the C++ library is not compiled or linked.
     if env::var_os("NVH_SKIP_CC").is_none() {
         b.compile("nvh");
