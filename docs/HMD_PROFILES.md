@@ -7,7 +7,12 @@ project's first target), which ships in the package as an example.
 
 ## Using a profile
 
-Drop the file into `config\profiles\` next to `VisionALVR.exe` (create the folder). The setup wizard (`configure.exe`) matches the headset's handshake
+**Import profile...** on the wizard's headset page opens a file picker. It reads the profile, shows what ALVR reports about *your* headset next to what
+the profile expects, and warns about every mismatch (name, panel resolution, refresh rates, 10-bit, foveation, a stream larger than the panel) without
+ever refusing: a profile written on a Quest 2 usually suits a Quest 3, so you decide. On a yes it copies the file into `config\profiles\` (you can
+also drop the file there yourself) and uses it for this run.
+
+At the handshake the setup wizard (`configure.exe`) matches the headset's handshake
 against every profile it finds (`profiles\` shipped with the package, then `config\profiles\`; your file replaces a shipped one with the same `id`):
 
 1. **Identify.** The handshake gives the headset name, the default view resolution and the supported refresh rates. A profile matches when its

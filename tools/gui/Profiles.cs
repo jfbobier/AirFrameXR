@@ -127,6 +127,53 @@ namespace VisionALVR
             catch (Exception e) { Log.Write("WARN", $"profile '{p.Id}': session settings not applied: {e.Message}"); return false; }
         }
 
+        /// What ALVR said about the headset, as the import dialog shows it next to the profile's expectations.
+        public static string Describe(Handshake hs) =>
+            $"{hs.DisplayName} ({hs.Hostname}): panel {hs.PanelW} x {hs.PanelH} per eye, refresh rates {string.Join("/", hs.Rates.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture)))} Hz, " +
+            $"foveated encoding {(hs.Foveation ? "yes" : "no")}, 10-bit {(hs.Enc10 ? "yes" : "no")}, preferred gamma {hs.Gamma:0.0#}";
+
+        /// Why this profile may not suit this headset (empty: it matches). Only warnings: copying a profile from a Quest 2 to a Quest 3 is usually fine,
+        /// the user decides.
+        public static List<string> Compatibility(HmdProfile p, Handshake hs)
+        {
+            var w = new List<string>();
+            if (p.NameContains.Length > 0 && !p.NameContains.Any(n => hs.DisplayName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0))
+                w.Add($"the profile is for a headset named like \"{string.Join("\" / \"", p.NameContains)}\", this one reports \"{hs.DisplayName}\"");
+            if (p.ViewRes != null && (hs.PanelW != p.ViewRes[0] || hs.PanelH != p.ViewRes[1]))
+                w.Add($"the profile expects a {p.ViewRes[0]} x {p.ViewRes[1]} panel, this headset reports {hs.PanelW} x {hs.PanelH}");
+            var missing = p.RatesInclude.Where(r => !hs.Rates.Any(x => Math.Abs(x - r) < 0.6)).ToList();
+            if (missing.Count > 0) w.Add($"the profile expects the refresh rate(s) {string.Join(", ", missing.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture)))} Hz, which this headset does not offer");
+            if (!hs.Rates.Any(x => Math.Abs(x - p.Fps) < 0.6)) w.Add($"the profile streams at {p.Fps:0} fps, which this headset does not list among its refresh rates");
+            if (p.EyeW > hs.PanelW * 1.25 || p.EyeH > hs.PanelH * 1.25) w.Add($"the profile's {p.EyeW} x {p.EyeH} stream is larger than this headset's panel");
+            if (p.BitDepth >= 10 && !hs.Enc10) w.Add("the profile uses 10-bit video and this headset did not advertise 10-bit decoding");
+            if (p.Foveated && !hs.Foveation) w.Add("the profile uses foveated encoding and this headset did not advertise it");
+            return w;
+        }
+
+        /// Reads a profile file the user picked: the profile (null + error when it is not usable) and the compatibility warnings for this headset.
+        public static HmdProfile Read(string path, Handshake hs, out List<string> warnings, out string error)
+        {
+            warnings = new List<string>(); error = null;
+            try
+            {
+                var list = Parse(File.ReadAllText(path), Path.GetFileName(path));
+                if (list.Count == 0) { error = "this file is not a VisionALVR headset profile (it needs an id, a stream section and at least one network variant; see profiles\\template.profile.json)"; return null; }
+                warnings = Compatibility(list[0], hs);
+                return list[0];
+            }
+            catch (Exception e) { error = e.Message; return null; }
+        }
+
+        /// Copies the profile file into config\profiles (named after its id), so the wizard finds it next time. Returns the new path.
+        public static string Install(string path, HmdProfile p)
+        {
+            Directory.CreateDirectory(UserDir);
+            var safe = new string(p.Id.Select(c => char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '-').ToArray());
+            var dst = Path.Combine(UserDir, safe + ".profile.json");
+            File.Copy(path, dst, true);
+            return dst;
+        }
+
         /// The most specific profile whose match fields all hold for this handshake (null: none, the wizard falls back to the capabilities alone).
         public static HmdProfile Match(Handshake hs, List<HmdProfile> all)
         {

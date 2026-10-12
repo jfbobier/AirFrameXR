@@ -25,6 +25,11 @@ Thanks for helping. A few things keep this project workable:
   Python on purpose; the GUIs need nothing beyond .NET Framework 4.8).
 - Never commit logs, `harness/results/`, session files with your headset in them, or `tools/builder.local`.
 
+## Headset profiles
+A profile is one small JSON file for a headset (see `docs/HMD_PROFILES.md` and `profiles/template.profile.json`). They are shared between users
+(the Discord), not collected in the repository: only the template and the Apple Vision Pro profile live here. Put **only values you have run** in a
+profile and say on what (`verified`).
+
 ## Bug reports
 Attach `logs\VisionALVR.log` and the matching `logs\debug\<time>\` folder (turn debug on in VisionALVR.exe, reproduce, then zip
 the folder), the game and how it is started (UEVR, mod, native OpenXR), GPU and driver.

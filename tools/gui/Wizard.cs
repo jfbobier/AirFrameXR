@@ -34,7 +34,8 @@ namespace VisionALVR
         TestContext ctx;
         List<TestStep> steps;
         Proposal proposal;
-        HmdProfile profile;          // the community profile that matches the handshake (null: generic proposal from the capabilities and the searches)
+        HmdProfile profile;          // the profile that matches the handshake (null: generic proposal from the capabilities and the searches)
+        HmdProfile importedProfile;  // a profile the user imported on the handshake page: it wins over the automatic match
         string variantId = "";       // the network variant chosen for it
         ComboBox variantBox;
         SettingsPanel settingsPanel;
@@ -354,7 +355,7 @@ namespace VisionALVR
                 g.Controls.Add(Ui.Line(v));
             }
             row("Headset", $"{hs.DisplayName}   ({hs.Hostname})   vendor: {hs.Vendor}");
-            profile = real ? HmdProfiles.Match(hs, HmdProfiles.LoadAll()) : null;
+            profile = importedProfile ?? (real ? HmdProfiles.Match(hs, HmdProfiles.LoadAll()) : null);
             variantBox = null;
             if (profile != null)
             {
@@ -380,9 +381,43 @@ namespace VisionALVR
             row("Video codec", $"HEVC{(hs.EncHigh ? " (high profile)" : "")}{(hs.Enc10 ? ", 10-bit" : ", 8-bit")}{(hs.EncAv1 ? "; the headset also decodes AV1 (VisionALVR encodes HEVC)" : "")}");
             row("Colour", $"{(hs.PreferFull ? "full range" : "limited range")}, encoding gamma {hs.Gamma:0.00}{(hs.PreferHdr ? ", HDR preferred" : "")}");
             row("Microphone", hs.MicRate > 0 ? $"{hs.MicRate} Hz" : "none advertised");
+            var import = new Button { Text = "Import profile...", AutoSize = true };
+            import.Click += (s, e) => ImportProfile(real);
+            g.Controls.Add(import); g.SetColumnSpan(import, 3);
             hsDetails.Controls.Add(g);
             hsDetails.Visible = true;
             hsAuto.Visible = true; hsManual.Visible = true;
+        }
+
+        /// "Import profile...": pick a profile file (shared by another user), show what ALVR says about this headset next to what the profile expects,
+        /// warn about every mismatch (never refuse: a Quest 2 profile usually suits a Quest 3), and install it in config\\profiles.
+        void ImportProfile(bool real)
+        {
+            string path;
+            using (var dlg = new OpenFileDialog { Title = "Import a headset profile", Filter = "VisionALVR profile (*.json)|*.json|All files (*.*)|*.*", CheckFileExists = true })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                path = dlg.FileName;
+            }
+            var p = HmdProfiles.Read(path, hs, out var warnings, out var error);
+            if (p == null) { MessageBox.Show(this, error, "Import profile", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            var text = $"Profile: {p.DisplayName}{(p.Author.Length > 0 ? " by " + p.Author : "")}\n{p.EyeW} x {p.EyeH} per eye at {p.Fps:0} fps, {p.Codec.ToUpperInvariant()} {p.BitDepth}-bit, " +
+                       $"{(p.Foveated ? "foveated" : "full frame")}, split encode {p.SplitEncode}, {p.Variant(null).Mbps:0} Mbps, {p.SessionOverrides.Count} ALVR setting(s)\n\n" +
+                       $"Your headset, as ALVR reports it:\n{HmdProfiles.Describe(hs)}\n\n";
+            if (warnings.Count > 0)
+            {
+                text += "Possible mismatch (the profile may not suit this headset, you can still use it):\n - " + string.Join("\n - ", warnings) + "\n\nImport it anyway?";
+                if (MessageBox.Show(this, text, "Import profile", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            }
+            else
+            {
+                text += "This headset matches the profile. Import it?";
+                if (MessageBox.Show(this, text, "Import profile", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            }
+            try { var dst = HmdProfiles.Install(path, p); Log.Write("INFO", $"profile '{p.Id}' imported to {dst} ({warnings.Count} warning(s))"); }
+            catch (Exception e) { MessageBox.Show(this, "Cannot copy the profile into config\\profiles: " + e.Message, "Import profile", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            importedProfile = p;
+            ShowHandshakeResult(real);
         }
 
         void ApplyOverrides()

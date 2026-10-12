@@ -187,6 +187,11 @@ pub struct Pipeline {
     /// every pair, loses frames when the app's frame times jitter) | adaptive (newest right after an empty boundary, else oldest) | aged
     pick_policy: String,
     last_empty: AtomicBool,
+    /// `drain` pick policy: consecutive boundaries that left a frame behind in the intake (a standing queue: the app delivers exactly as fast as the
+    /// display consumes, so every frame waits a period more than it needs to), when it last dropped one and how long it waits before the next
+    standing: AtomicU64,
+    drain_state: Mutex<(Option<Instant>, f64)>,
+    pub intake_drains: AtomicU64,
     /// the headset's decoder queue stood a whole period or more (phase.rs): drop one frame at a boundary to let it drain (opt-in, see phase::client_drain_due)
     client_drain: bool,
     pub drains: AtomicU64,
@@ -247,6 +252,9 @@ impl Pipeline {
             queue_picks: AtomicU64::new(0),
             pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "oldest".into()),
             last_empty: AtomicBool::new(false),
+            standing: AtomicU64::new(0),
+            drain_state: Mutex::new((None, 3.0)),
+            intake_drains: AtomicU64::new(0),
             client_drain: std::env::var("VISIONALVR_CLIENT_DRAIN").map(|v| v == "1").unwrap_or(false),
             drains: AtomicU64::new(0),
             last_arrival: Mutex::new(None),
@@ -404,6 +412,23 @@ impl Pipeline {
                 && match self.pick_policy.as_str() {
                     "newest" => false,
                     "adaptive" => !self.last_empty.load(Ordering::Relaxed),
+                    // in order like `oldest`, but a queue that has stood VISIONALVR_DRAIN_AFTER (8) boundaries without ever emptying drops its older frame once
+                    // (one skipped picture, one period of latency back); after a drain the next one waits 3 s, doubled (at most 60 s) when the queue is back
+                    // within 15 s of the last one, so an app that rebuilds it all the time is not skipped all the time
+                    "drain" => {
+                        let after = std::env::var("VISIONALVR_DRAIN_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(8).max(1);
+                        let mut st = self.drain_state.lock();
+                        let due = self.standing.load(Ordering::Relaxed) >= after && st.0.map(|t| boundary.saturating_duration_since(t).as_secs_f64() >= st.1).unwrap_or(true);
+                        if due {
+                            if let Some(t) = st.0 {
+                                let since = boundary.saturating_duration_since(t).as_secs_f64();
+                                st.1 = if since < st.1 + 15.0 { (st.1 * 2.0).min(60.0) } else { 3.0 };
+                            }
+                            st.0 = Some(boundary);
+                            self.intake_drains.fetch_add(1, Ordering::Relaxed);
+                        }
+                        !due
+                    }
                     // oldest unless it has already waited long: a frame that waits more than a fraction of a period means a standing queue
                     // (the app delivers as fast as the display consumes: the queue never drains and every frame is a period late), so drop
                     // it for the newer one. A fresh bunch (a late frame followed by its catch-up frame) still goes out in order.
@@ -421,6 +446,11 @@ impl Pipeline {
                 }
             }
             self.left_behind.store(!q.is_empty(), Ordering::Relaxed);
+            if q.is_empty() {
+                self.standing.store(0, Ordering::Relaxed);
+            } else {
+                self.standing.fetch_add(1, Ordering::Relaxed);
+            }
             a
         };
         if self.client_drain && newest.is_some() && alive && crate::phase::client_drain_due() {
@@ -720,6 +750,7 @@ impl Pipeline {
             "superseded": self.superseded.load(Ordering::Relaxed),
             "queue_picks": self.queue_picks.load(Ordering::Relaxed),
             "drains": self.drains.load(Ordering::Relaxed),
+            "intake_drains": self.intake_drains.load(Ordering::Relaxed),
             "intake_depth": self.intake_depth,
             "pick_policy": self.pick_policy,
             "slots_filled": self.slots_filled.load(Ordering::Relaxed),
