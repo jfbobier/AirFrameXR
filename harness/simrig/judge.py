@@ -80,7 +80,7 @@ def judge(d, thr=None):
         if len(r) < 20:
             continue
         h = hf(r)
-        out[f"eye{eye}"] = {"rms_deg": float(np.sqrt(np.mean(r ** 2))), "p99_deg": float(np.percentile(np.abs(r), 99)), "hf_rms_deg": float(np.sqrt(np.mean(h ** 2))), "mean_deg": float(r.mean())}
+        out[f"eye{eye}"] = {"rms_deg": float(np.sqrt(np.mean(r ** 2))), "p99_deg": float(np.percentile(np.abs(r - np.median(r)), 99)), "hf_rms_deg": float(np.sqrt(np.mean(h ** 2))), "bias_deg": float(r.mean())}
         allr.append(r)
     both = [(a, b) for a, b in zip(res[0], res[1]) if a is not None and b is not None]
     if both:
@@ -88,7 +88,7 @@ def judge(d, thr=None):
         out["disparity_rms_deg"] = float(np.sqrt(np.mean((dsp - dsp.mean()) ** 2)))
     worst_hf = max((out[f"eye{e}"]["hf_rms_deg"] for e in (0, 1) if f"eye{e}" in out), default=0)
     worst_p99 = max((out[f"eye{e}"]["p99_deg"] for e in (0, 1) if f"eye{e}" in out), default=0)
-    out["verdict"] = "TREMBLE" if (worst_hf > thr["hf"] or worst_p99 > thr["p99"]) else "CLEAN"
+    out["verdict"] = "INVALID (no dots measured: the scene or the frames are wrong)" if not allr else "TREMBLE" if (worst_hf > thr["hf"] or worst_p99 > thr["p99"]) else "CLEAN"
     out["thresholds"] = thr
     return out
 

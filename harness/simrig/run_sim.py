@@ -88,7 +88,7 @@ def run_one(name, seconds, extra):
         task("simrig_host", host_cmd(rd, env, seconds), rd, elevated=True)
         time.sleep(8)
         probe = ["@echo off", f'set XR_RUNTIME_JSON={live.INSTALL}\\virtualdesktop-openxr.json', "set XR_PROBE_SCENE=dots", "set XR_PROBE_CPU_MS=0", "set XR_PROBE_LOAD=steady",
-                 f"cd /d {live.INSTALL}", f'"C:\\Users\\{live.PC_USER}\\openxr\\build\\probe\\xr_probe.exe" {rd}\\probe.log 200000 {seconds + 60} - - > {rd}\\probe_stdout.txt 2>&1']
+                 f"cd /d {live.INSTALL}", f'"{live.CLONE}\\build\\probe\\xr_probe.exe" {rd}\\probe.log 200000 {seconds + 60} - - > {rd}\\probe_stdout.txt 2>&1']
         task("simrig_probe", probe, rd)
         t0 = time.time()
         while time.time() - t0 < seconds + 90:
