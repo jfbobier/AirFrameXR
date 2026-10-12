@@ -155,6 +155,8 @@ struct Outgoing {
     /// CSV columns up to the send time (frame,ts_ns,slot,t_boundary,t_arrival,t_encode_start,encode_ms)
     row: String,
     bytes: usize,
+    #[cfg(feature = "simrig")]
+    sim_ring: i32,
 }
 
 /// Per-frame histories the main thread drains into its own vectors (statistics windows, end-of-run report).
@@ -519,6 +521,8 @@ impl Pipeline {
             let t0 = Instant::now();
             let mut err = [0 as std::ffi::c_char; 256];
             let ms = match (&p.job, slot) {
+                #[cfg(feature = "simrig")]
+                (Job::App(_), Some(s)) if crate::simrig::active() => crate::simrig::encode(handle, ipc, s, counter as u32, ts.as_nanos() as u64, force_idr, err.as_mut_ptr(), 256),
                 (Job::App(_), Some(s)) => unsafe {
                     nvh::nvh_encode_shared(handle, ipc, s, counter as u32, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256)
                 },
@@ -577,7 +581,17 @@ impl Pipeline {
             let row = format!("{},{},{},{:.6},{:.6},{:.6},{:.3}", if slot.is_some() { counter as i64 } else { -1 }, ts.as_nanos(), slot_s,
                 logs::qpc_at(p.boundary), arrival_s, logs::qpc_at(t0), ms);
             let bytes = l.packet_bytes;
-            let pending: Vec<_> = l.pending.drain(..).collect();
+            #[allow(unused_mut)]
+            let mut pending: Vec<_> = l.pending.drain(..).collect();
+            #[cfg(feature = "simrig")]
+            let sim_ring = if crate::simrig::active() && slot.is_some() {
+                if pending.is_empty() {
+                    pending.push((ts, vec![0u8], force_idr, None)); // the simulated encode produces no bitstream: a token for the sender
+                }
+                crate::simrig::last_ring()
+            } else {
+                -1
+            };
             drop(enc);
             {
                 let mut d = self.drained.lock();
@@ -599,7 +613,8 @@ impl Pipeline {
             let mut q = self.outgoing.lock();
             for (k, (pts, frame, is_idr, config)) in pending.into_iter().enumerate() {
                 q.push_back(Outgoing { release_at, boundary: p.boundary, ts: pts, frame, is_idr, config, encoded_at,
-                    row: if k + 1 == n { row.clone() } else { String::new() }, bytes });
+                    row: if k + 1 == n { row.clone() } else { String::new() }, bytes,
+                    #[cfg(feature = "simrig")] sim_ring });
             }
             drop(q);
             self.outgoing_cv.notify_one();
@@ -630,6 +645,15 @@ impl Pipeline {
                 self.ctx.set_video_config_nals(c, CodecType::Hevc);
                 self.shared.config_sent.fetch_add(1, Ordering::Relaxed);
             }
+            #[cfg(feature = "simrig")]
+            if crate::simrig::active() {
+                if !o.row.is_empty() {
+                    crate::simrig::delivered(o.sim_ring, o.ts.as_nanos() as u64);
+                }
+            } else {
+                self.ctx.send_video_nal(o.ts, o.frame, o.is_idr);
+            }
+            #[cfg(not(feature = "simrig"))]
             self.ctx.send_video_nal(o.ts, o.frame, o.is_idr);
             if !o.row.is_empty() {
                 self.shared.frames_sent.fetch_add(1, Ordering::Relaxed);

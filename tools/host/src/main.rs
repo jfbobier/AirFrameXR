@@ -16,6 +16,8 @@ mod discovery;
 mod logs;
 mod nvidia_profile;
 mod pipeline;
+#[cfg(feature = "simrig")]
+mod simrig;
 mod telemetry;
 mod vision;
 
@@ -109,6 +111,9 @@ struct Args {
     bq_preview: Option<PathBuf>,
     bq_ref_scale: i32,
     bench_scene: Option<PathBuf>,
+    /// simrig (cargo feature): run the pipeline without a headset against the synthetic client, results in this directory
+    #[cfg(feature = "simrig")]
+    simrig: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -179,6 +184,8 @@ fn parse_args() -> Result<Args, String> {
         bq_preview: None,
         bq_ref_scale: 1,
         bench_scene: None,
+        #[cfg(feature = "simrig")]
+        simrig: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -236,6 +243,12 @@ fn parse_args() -> Result<Args, String> {
             "--bq-out" => a.bq_out = Some(v()?.into()),
             "--bq-preview" => a.bq_preview = Some(v()?.into()),
             "--bq-ref-scale" => a.bq_ref_scale = v()?.parse().map_err(|e| format!("{e}"))?,
+            #[cfg(feature = "simrig")]
+            "--simrig" => {
+                a.simrig = Some(v()?.into());
+                a.shim = true;
+                a.live = true;
+            }
             "--bench-scene" => a.bench_scene = Some(v()?.into()),
             "--encode-profile" => {
                 a.encode_profile = nvidia_profile::EncodeProfile::parse(&v()?)?;
@@ -1468,6 +1481,11 @@ fn main() {
         p.start();
         event(origin, "pacing_config", json!({ "send_pacing": args.send_pacing.name(), "running_start_ms": args.running_start_ms,
             "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6 }));
+        #[cfg(feature = "simrig")]
+        if let Some(dir) = &args.simrig {
+            simrig::set_ipc(ipc_addr);
+            simrig::init(&dir.to_string_lossy(), ipc_addr, p.enc.lock().handle, &shared, &vsync_period_ns, read_encoding_gamma(&layout.session()));
+        }
         pipeline = Some(p);
     }
     let app_alive = || pipeline.as_ref().map(|p| p.app_alive.load(Ordering::Relaxed)).unwrap_or(false);
@@ -2008,6 +2026,10 @@ fn main() {
                     break;
                 }
             }
+        }
+        #[cfg(feature = "simrig")]
+        if simrig::finished() {
+            break;
         }
         if let Some(n) = args.exit_after_frames {
             if shared.frames_sent.load(Ordering::Relaxed) >= n {

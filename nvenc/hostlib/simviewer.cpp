@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <atomic>
 #include <deque>
 #include <mutex>
 #include <random>
@@ -122,7 +123,7 @@ struct Viewer {
     std::unordered_map<uint64_t, Q4> samples;
     std::vector<uint64_t> sampleOrder;
     std::vector<Q4> truth; double truthT0 = 0, truthDt = 1e6;
-    std::thread th; bool stop = false;
+    std::thread th; std::atomic<bool> stop{false}; std::atomic<bool> started{false};
     FILE* dots = nullptr;
     int ticks = 0, shown = 0, repeats = 0, missingPose = 0;
     double yHorizon = 0.5;
@@ -297,8 +298,12 @@ struct Viewer {
         std::deque<Frame> queue;
         Frame last{ -1, 0, 0 };
         uint64_t lastShownTs = 0;
+        while (!started && !stop) {   // idle (window alive) until the host starts the run
+            if (hwnd) { MSG msg; while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); } }
+            Sleep(5);
+        }
         const double T0 = cfg.t0_qpc_s;
-        for (int k = 0;; k++) {
+        for (int k = 0; !stop; k++) {
             const double tk = T0 + k * cfg.period_ns * 1e-9 + nj(rng) * cfg.tick_jitter_ns * 1e-9;
             if (stop || tk - T0 > cfg.seconds) break;
             while (nvh_qpc_seconds() < tk) { if (tk - nvh_qpc_seconds() > 0.0015) Sleep(1); else YieldProcessor(); }
@@ -417,6 +422,14 @@ void sv_truth(void* h, double t0_ns, double dt_ns, const float* q4, int n) {
     v->truthT0 = t0_ns; v->truthDt = dt_ns;
     v->truth.resize(n);
     for (int i = 0; i < n; i++) v->truth[i] = Q4{ q4[i * 4], q4[i * 4 + 1], q4[i * 4 + 2], q4[i * 4 + 3] };
+}
+
+// starts the display ticks: tick 0 at QPC time t0_qpc_s, whose client timestamp is ts_base_ns
+void sv_start(void* h, double t0_qpc_s, uint64_t ts_base_ns) {
+    auto* v = (Viewer*)h;
+    if (!v) return;
+    v->cfg.t0_qpc_s = t0_qpc_s; v->cfg.ts_base_ns = ts_base_ns;
+    v->started = true;
 }
 
 int sv_running(void* h) { auto* v = (Viewer*)h; return v && !v->stop && v->th.joinable() ? 1 : 0; }
