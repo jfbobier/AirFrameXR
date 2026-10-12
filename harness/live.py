@@ -117,7 +117,7 @@ def build(what, simrig=False):
 $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
 {"$env:VISIONALVR_SIMRIG_BUILD = '1'" if simrig else ""}
 Set-Location '{CLONE}'
-powershell -ExecutionPolicy Bypass -File build.ps1 {bld} 2>&1 | Select-String -Pattern 'RESULT|FAILED|== '
+powershell -ExecutionPolicy Bypass -File build.ps1 {bld} debug 2>&1 | Select-String -Pattern 'RESULT|FAILED|== '
 Get-Content logs\\host_build.log -ErrorAction SilentlyContinue | Select-String -Pattern '^error' | Select-Object -First 5
 Get-Content logs\\ovrshim_build.log -ErrorAction SilentlyContinue | Select-String -Pattern 'error C' | Select-Object -First 5
 """, timeout=900)

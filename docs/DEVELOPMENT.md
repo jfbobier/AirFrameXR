@@ -104,3 +104,5 @@ shows the frames like the headset client, measuring the dots of the probe's `XR_
 measurements into a verdict (TREMBLE / CLEAN). Run it with `python3 harness/simrig/run_sim.py build` then `run ideal,games,probe100,still100,inject`.
 The feature is off in normal and release builds; the knobs are the `VISIONALVR_SIM_*` variables documented at the top of `tools/host/src/simrig.rs`.
 Scenario `ideal` is the null test (must be CLEAN) and `inject` validates the judge (must be TREMBLE).
+
+`build.ps1` builds the **release** flavour by default (per-frame debug traces compiled out); add the target `debug` (`build.ps1 host shim debug`) to keep them.

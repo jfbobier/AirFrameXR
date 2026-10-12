@@ -4,7 +4,7 @@ Builds VisionALVR on Windows from this checkout (see docs/DEVELOPMENT.md for the
     powershell -ExecutionPolicy Bypass -File build.ps1                 # everything for the release zip
     powershell -ExecutionPolicy Bypass -File build.ps1 host gui        # only some parts (setup runs first if needed)
 
-Targets, in build order: vdxr host shim gui package (default: all five), plus client probe (test tools for the harness).
+Add `debug` to keep the debug traces (default flavour: release). Targets, in build order: vdxr host shim gui package (default: all five), plus client probe (test tools for the harness).
 The first run clones ALVR v20.14.1 and VirtualDesktop-OpenXR at the commits in deps.lock.json into src\ and builds their
 prerequisites (tools\remote\setup_builder.ps1, idempotent). Output: out\dist\VisionALVR\ and out\dist\VisionALVR-<version>.zip.
 Logs: logs\build_<step>.txt. Nothing outside this folder is changed (no registry, no OpenXR runtime registration).
@@ -14,10 +14,15 @@ $ErrorActionPreference = 'Continue'
 $repo = $PSScriptRoot
 $env:VISIONALVR_ROOT = $repo          # the build scripts work in <root>\src, <root>\out, <root>\_tmp, <root>\logs
 $all = @('vdxr', 'host', 'shim', 'gui', 'package')
+# flavour: the release build (default) compiles the per-frame debug traces out; `debug` as a target keeps them (harness / developers)
+$flavour = if ($Targets -contains 'debug') { 'debug' } else { 'release' }
+$Targets = @($Targets | Where-Object { $_ -ne 'debug' -and $_ -ne 'release' })
 if (-not $Targets -or $Targets.Count -eq 0) { $Targets = $all }
 $known = $all + @('client', 'probe')
 foreach ($t in $Targets) { if ($known -notcontains $t) { Write-Host "unknown target '$t' (known: $($known -join ', '))"; exit 3 } }
 New-Item -ItemType Directory -Force "$repo\_tmp", "$repo\logs", "$repo\bench" | Out-Null
+Set-Content -Path "$repo\_tmp\flavour.txt" -Value $flavour -NoNewline
+Write-Host "flavour: $flavour"
 
 function Stage($name, $script, $ok, [string[]]$a = @()) {
     Write-Host "== $name"

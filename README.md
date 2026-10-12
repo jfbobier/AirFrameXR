@@ -57,6 +57,17 @@ OpenXR game
 - Apple Vision Pro with the **ALVR** app (20.14.x), PC and headset on the same LAN (5 GHz / 6 GHz Wi-Fi recommended).
 - SteamVR and ALVR's own launcher closed while streaming (same ports).
 
+## Recommended network setup
+The stream is 100+ Mbit/s of low-latency video: the network matters more than the PC. What works best:
+- **A Wi-Fi 6E (or newer) router dedicated to the headset**, on the 6 GHz band, in the same room (line of sight if you can). Put it
+  in **dumb access point mode** (router functions, NAT and its own DHCP server off), wired by Ethernet to your main router or switch,
+  so the headset stays on the same subnet as the PC and no second NAT adds latency.
+- **PC on Ethernet** (not Wi-Fi), on the same network as the access point.
+- **A fixed IP for the headset**: a DHCP reservation on your DHCP server (usually the main router) bound to the headset's **MAC address**.
+  In visionOS, set *Private Wi-Fi Address* to Off (or Fixed) for this network, otherwise the MAC address can change and the reservation
+  stops matching. A fixed address makes pairing and reconnecting reliable.
+- Nothing else heavy on that access point while you play (downloads, other headsets).
+
 ## Install (users)
 Download the release zip, unzip it anywhere, run `register_openxr_runtime.bat` once, then `configure.exe` (pair the headset,
 benchmark, settings) and `VisionALVR.exe` (keep it open while you play). Details, settings and logs: [docs/INSTALL.md](docs/INSTALL.md).
