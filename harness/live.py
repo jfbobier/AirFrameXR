@@ -23,7 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 def _local_env():
     """tools/pc.local (gitignored): VISIONALVR_PC=user@host, VISIONALVR_HEADSET_IP=..., VISIONALVR_INSTALL=..., one KEY=VALUE per line."""
-    f = Path(__file__).resolve().parent.parent / "tools" / "pc.local"
+    prof = os.environ.get("VISIONALVR_PROFILE")   # a machine: tools/pc.<profile>.local (e.g. VISIONALVR_PROFILE=5090); none: tools/pc.local
+    f = Path(__file__).resolve().parent.parent / "tools" / (f"pc.{prof}.local" if prof else "pc.local")
     if f.exists():
         for line in f.read_text().splitlines():
             if "=" in line and not line.lstrip().startswith("#"):

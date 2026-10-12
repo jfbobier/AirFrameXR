@@ -1,0 +1,88 @@
+{
+ "description": "1:1 COMPARISON with stock, Vision Pro stream size, GPU-bound app (20 big GPU copies per frame + 3 ms CPU): the realtime GPU class and the encoder's queueing matter; RTX 5090 baseline",
+ "topology": {
+  "host": "builder",
+  "client": "builder",
+  "client_bind_ip": "127.0.0.2",
+  "host_launch": "interactive"
+ },
+ "session_overrides": {
+  "session_settings.video.foveated_encoding.enabled": true,
+  "openvr_config.enable_foveated_encoding": true,
+  "openvr_config.eye_resolution_width": 3552,
+  "openvr_config.eye_resolution_height": 3200,
+  "openvr_config.target_eye_resolution_width": 3552,
+  "openvr_config.target_eye_resolution_height": 3200,
+  "session_settings.connection.client_recv_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  },
+  "session_settings.connection.server_send_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  },
+  "session_settings.video.transcoding_view_resolution": {
+   "Scale": 1.0,
+   "Absolute": {
+    "width": 3552,
+    "height": {
+     "set": true,
+     "content": 3200
+    }
+   },
+   "variant": "Absolute"
+  },
+  "session_settings.video.emulated_headset_view_resolution": {
+   "Scale": 1.0,
+   "Absolute": {
+    "width": 3552,
+    "height": {
+     "set": true,
+     "content": 3200
+    }
+   },
+   "variant": "Absolute"
+  }
+ },
+ "host": {
+  "shim": true,
+  "fps": 100,
+  "seconds": 40,
+  "connect_timeout": 45,
+  "exit_after_frames": 4400,
+  "send_pacing": "phase",
+  "running_start_ms": 2.0,
+  "gpu_sched_class": 5
+ },
+ "client": {
+  "seconds": 44,
+  "connect_timeout": 45,
+  "display_sim": true,
+  "poll_ms": 5,
+  "queue_max": 2,
+  "refresh": 100,
+  "display_hz": 100,
+  "replay": "harness/fixtures/headtraces/real_probe_pred100.csv",
+  "real_views": true,
+  "no_stream_dump": true
+ },
+ "client_env": {
+  "RUST_LOG": "warn"
+ },
+ "app": {
+  "frames": 4600,
+  "timeout_s": 51,
+  "env": {
+   "XR_PROBE_CPU_MS": "3",
+   "XR_PROBE_GPU_COPIES": "20",
+   "XR_PROBE_LOAD": "steady",
+   "XR_PROBE_SCENE": "bench\\\\littlest_tokyo.vab"
+  }
+ },
+ "gpu_sample": true,
+ "timeout_s": 200,
+ "checks": {
+  "host_min_frames": 600,
+  "client_min_frames": 600
+ }
+}

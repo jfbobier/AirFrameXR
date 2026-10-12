@@ -9,7 +9,7 @@ BUILDER = ROOT / "tools" / "builder.sh"
 def _builder_root():
     """The builder's working folder under %USERPROFILE% (tools/builder.local VISIONALVR_BUILDER_ROOT, default openxr; same as builder.sh)."""
     v = os.environ.get("VISIONALVR_BUILDER_ROOT")
-    loc = ROOT / "tools" / "builder.local"
+    loc = ROOT / "tools" / (f"builder.{os.environ['VISIONALVR_PROFILE']}.local" if os.environ.get("VISIONALVR_PROFILE") else "builder.local")
     if not v and loc.exists():
         v = next((l.split("=", 1)[1].strip() for l in loc.read_text().splitlines() if l.startswith("VISIONALVR_BUILDER_ROOT=")), None)
     return v or "openxr"
@@ -140,7 +140,7 @@ def _builder_ip():
     if os.environ.get("VISIONALVR_BUILDER_IP"):
         return os.environ["VISIONALVR_BUILDER_IP"]
     b = os.environ.get("VISIONALVR_BUILDER", "")
-    loc = ROOT / "tools" / "builder.local"
+    loc = ROOT / "tools" / (f"builder.{os.environ['VISIONALVR_PROFILE']}.local" if os.environ.get("VISIONALVR_PROFILE") else "builder.local")
     if not b and loc.exists():
         b = next((l.split("=", 1)[1].strip() for l in loc.read_text().splitlines() if l.startswith("VISIONALVR_BUILDER=")), "")
     return b.rsplit("@", 1)[-1] or "127.0.0.1"

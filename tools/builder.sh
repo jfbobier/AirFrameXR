@@ -12,11 +12,12 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-if [[ -z "${VISIONALVR_BUILDER:-}" && -f "$HERE/builder.local" ]]; then
-  VISIONALVR_BUILDER="$(sed -n 's/^VISIONALVR_BUILDER=//p' "$HERE/builder.local" | head -1)"
+LOCAL="$HERE/builder${VISIONALVR_PROFILE:+.$VISIONALVR_PROFILE}.local"   # VISIONALVR_PROFILE=5090 -> tools/builder.5090.local (a second machine)
+if [[ -z "${VISIONALVR_BUILDER:-}" && -f "$LOCAL" ]]; then
+  VISIONALVR_BUILDER="$(sed -n 's/^VISIONALVR_BUILDER=//p' "$LOCAL" | head -1)"
 fi
-if [[ -z "${VISIONALVR_BUILDER_ROOT:-}" && -f "$HERE/builder.local" ]]; then
-  VISIONALVR_BUILDER_ROOT="$(sed -n 's/^VISIONALVR_BUILDER_ROOT=//p' "$HERE/builder.local" | head -1)"
+if [[ -z "${VISIONALVR_BUILDER_ROOT:-}" && -f "$LOCAL" ]]; then
+  VISIONALVR_BUILDER_ROOT="$(sed -n 's/^VISIONALVR_BUILDER_ROOT=//p' "$LOCAL" | head -1)"
 fi
 ROOTNAME="${VISIONALVR_BUILDER_ROOT:-openxr}"    # the working folder under %USERPROFILE% (default openxr; e.g. VisionALVR to work in a git clone)
 HOST="${VISIONALVR_BUILDER:?set VISIONALVR_BUILDER=user@host (or write it to tools/builder.local), see docs/DEVELOPMENT.md}"

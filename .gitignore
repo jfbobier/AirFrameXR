@@ -19,6 +19,8 @@ target/
 /private/
 /external/
 /tools/builder.local
+/tools/builder.*.local
+tools/pc.*.local
 /.claude/
 *:sec.endpointdlp
 .vscode/
