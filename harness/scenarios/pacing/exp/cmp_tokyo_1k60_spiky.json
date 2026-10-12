@@ -65,7 +65,8 @@
   "refresh": 60,
   "display_hz": 60,
   "replay": "harness/fixtures/headtraces/real_probe_pred100_60hz.csv",
-  "real_views": true
+  "real_views": true,
+  "no_stream_dump": true
  },
  "client_env": {
   "RUST_LOG": "warn"

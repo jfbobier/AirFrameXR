@@ -338,7 +338,7 @@ def run_scenario(sc, outdir: Path, log=print):
     if c.get("replay"):
         b_put(ROOT / c["replay"], f"runs/{rid}/replay.csv")   # a recorded head trace (harness/fixtures/headtraces)
     def make_client_cmd(sfx=""):
-        return (env + f'{CLIENT_EXE} --report {rd}\\client{sfx}_report.json --frames-csv {rd}\\frames{sfx}.csv --out {rd}\\client{sfx}.hevc '
+        return (env + f'{CLIENT_EXE} --report {rd}\\client{sfx}_report.json --frames-csv {rd}\\frames{sfx}.csv ' + ('' if c.get('no_stream_dump') else f'--out {rd}\\client{sfx}.hevc ')
                 + argline(c, CLIENT_FLAGS)
                 + (f" --controllers-csv {rd}\\controllers.csv" if c.get("controllers") and not sfx else "")
                 + (f" --display-csv {rd}\\display{sfx}.csv" if c.get("display_sim") else "")
@@ -398,7 +398,7 @@ def run_scenario(sc, outdir: Path, log=print):
     if app:
         for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log"):
             b_get(f"runs/{rid}/{f}", outdir / f)
-    for f in ("client_report.json", "client_stdout.txt", "frames.csv", "client.hevc"):
+    for f in ("client_report.json", "client_stdout.txt", "frames.csv") + (() if sc.get("client", {}).get("no_stream_dump") else ("client.hevc",)):
         b_get(f"runs/{rid}/{f}", outdir / f)
     if sc.get("reconnect"):
         for f in ("client2_report.json", "client2_stdout.txt", "frames2.csv", "client2.hevc"):

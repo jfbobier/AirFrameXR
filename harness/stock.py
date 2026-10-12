@@ -96,7 +96,7 @@ def run_stock(sc, outdir: Path):
         log("SteamVR + ALVR driver up" if up else "SteamVR/ALVR did not come up in 150 s (continuing anyway)")
         time.sleep(8)
         flags = lib.argline({**c, "seconds": int(c.get("seconds", seconds)) + 140, "connect_timeout": 120}, lib.CLIENT_FLAGS)
-        cmd = (f"{CLIENT} --report {rd}\\client_report.json --frames-csv {rd}\\frames.csv --out {rd}\\client.hevc {flags} "
+        cmd = (f"{CLIENT} --report {rd}\\client_report.json --frames-csv {rd}\\frames.csv {'' if c.get('no_stream_dump') else f'--out {rd}\\client.hevc '}{flags} "
                f"--replay {rd}\\replay.csv --replay-start-file {rd}\\replay.go --stop-file {rd}\\client.stop "
                f"--display-csv {rd}\\display.csv --poses-csv {rd}\\poses.csv > {rd}\\client_stdout.txt 2>&1")
         log("starting the mock client (replaying the head trace)")
