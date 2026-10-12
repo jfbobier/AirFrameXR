@@ -86,6 +86,35 @@ def metrics(d, skip=200):
         if 0 < i < len(ks) and ts in quat:
             qd = slerp(Q[i - 1], Q[i], (t - ks[i - 1]) / (ks[i] - ks[i - 1]))
             rot.append(qang(quat[ts], qd))
+    # where the pose->arrival time goes: the pose's age when the app read it (phase between the headset's samples and the game's frame start: random
+    # per run) and the rest (the app's frame, the streamer, the network): matched through the exact quaternion the app located
+    mk = d / "app_markers.csv"
+    if mk.exists() and "wall_ns" in P[0]:
+        W = np.array([int(r["wall_ns"]) for r in P], dtype=float)           # wall time each pose was sent
+        off = float(np.median(W - sendt))                                  # client clock -> wall clock
+        arr_by_ts = {int(r["ts_ns"]): int(r["arrival_ns"]) for r in F if r.get("arrival_ns")}
+        order = np.argsort(W)
+        age, rest = [], []
+        for r in _rows(mk):
+            if r["eye"] != "0":
+                continue
+            wall = int(r["wall_ns"])
+            hi = int(np.searchsorted(W[order], wall))
+            lo = max(0, hi - 40)
+            if hi - lo < 5:
+                continue
+            mq = np.array([float(r[k]) for k in ("qx", "qy", "qz", "qw")])
+            idx = order[lo:hi]
+            dq = np.linalg.norm(Q[idx][:, :3] - mq[:3], axis=1)
+            j = int(np.argmin(dq))
+            if dq[j] > 1e-5:
+                continue
+            ts = int(ks[idx[j]])
+            if ts in arr_by_ts and wall > W[0] + 3e9:
+                age.append((wall - W[idx[j]]) / 1e6)
+                rest.append((arr_by_ts[ts] + off - wall) / 1e6)
+        out["pose_age_at_app_ms"] = {"p50": pct(age, 50), "p95": pct(age, 95)}
+        out["app_to_arrival_ms"] = {"p50": pct(rest, 50), "p95": pct(rest, 95)}
     out["display"] = {"ticks": ticks, "repeat_pct": 100.0 * reps / max(1, ticks)}
     out["pose_to_display_ms"] = {"p50": pct(p2d, 50), "p95": pct(p2d, 95), "p99": pct(p2d, 99)}
     out["rotation_deg"] = {"p50": pct(rot, 50), "p95": pct(rot, 95), "p99": pct(rot, 99)}
@@ -97,8 +126,11 @@ def metrics(d, skip=200):
 
 def line(name, m):
     a, p, r = m["pose_to_arrival_ms"], m["pose_to_display_ms"], m["rotation_deg"]
+    ex = ""
+    if "pose_age_at_app_ms" in m:
+        ex = f"  [age {m['pose_age_at_app_ms']['p50']:4.1f} + app->arr {m['app_to_arrival_ms']['p50']:4.1f} p95 {m['app_to_arrival_ms']['p95']:4.1f}]"
     return (f"{name:34s} fps {m.get('frames_per_s', float('nan')):5.1f}  p2arr p50 {a['p50']:5.1f} p95 {a['p95']:5.1f}  p2disp p50 {p['p50']:5.1f} p95 {p['p95']:5.1f}  "
-            f"repeats {m['display']['repeat_pct']:4.1f}%  rot p50 {r['p50']:.2f} p95 {r['p95']:.2f}  dup/skip {m['ts_step_periods']['dup(0)']}/{m['ts_step_periods']['skip(>=2)']}")
+            f"repeats {m['display']['repeat_pct']:4.1f}%  rot p50 {r['p50']:.2f} p95 {r['p95']:.2f}  dup/skip {m['ts_step_periods']['dup(0)']}/{m['ts_step_periods']['skip(>=2)']}" + ex)
 
 
 if __name__ == "__main__":
