@@ -39,7 +39,11 @@ class Blocked(Exception):
 
 
 def sh(cmd, timeout=600, check=False, text=True):
-    p = subprocess.run(cmd, capture_output=True, text=text, errors="replace", timeout=timeout)
+    for i in range(6):     # the builder's sshd sometimes drops a fresh connection (255): retry
+        p = subprocess.run(cmd, capture_output=True, text=text, errors="replace", timeout=timeout)
+        if p.returncode != 255 or i == 5:
+            break
+        time.sleep(3 + 2 * i)
     if check and p.returncode:
         raise Blocked(f"{cmd[:3]} failed ({p.returncode}): {p.stdout[-300:]} {p.stderr[-300:]}")
     return p
@@ -47,7 +51,11 @@ def sh(cmd, timeout=600, check=False, text=True):
 
 def b_run(cmd, timeout=600):
     """Run a cmd.exe command in ~/openxr on the builder."""
-    p = subprocess.run(["bash", str(BUILDER), "run", cmd], capture_output=True, timeout=timeout)
+    for i in range(6):
+        p = subprocess.run(["bash", str(BUILDER), "run", cmd], capture_output=True, timeout=timeout)
+        if p.returncode != 255 or i == 5:
+            break
+        time.sleep(3 + 2 * i)
     return p.returncode, p.stdout.decode(errors="replace").replace("\x00", "").replace("\r", "")
 
 

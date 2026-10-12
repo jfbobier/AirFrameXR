@@ -20,7 +20,7 @@ if [[ -z "${VISIONALVR_BUILDER_ROOT:-}" && -f "$HERE/builder.local" ]]; then
 fi
 ROOTNAME="${VISIONALVR_BUILDER_ROOT:-openxr}"    # the working folder under %USERPROFILE% (default openxr; e.g. VisionALVR to work in a git clone)
 HOST="${VISIONALVR_BUILDER:?set VISIONALVR_BUILDER=user@host (or write it to tools/builder.local), see docs/DEVELOPMENT.md}"
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o LogLevel=ERROR)
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o LogLevel=ERROR -o ControlMaster=auto -o "ControlPath=/tmp/visionalvr-ssh-%C" -o ControlPersist=10m)   # one multiplexed connection: some sshd setups drop fresh ones
 NOISE='post-quantum|store now, decrypt later|openssh.com/pq|server may need to be upgraded|^\*\* *$'
 
 allow_destructive=0

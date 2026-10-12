@@ -51,7 +51,17 @@ GAMES = {
 # the probe "game": a light, regular app (cadence = the display rate) or random frame times; set per variant
 PROBE_CPU_MS = 1
 PROBE_LOAD = "fps:85:100"
-SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", PC]
+MUX = ["-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/visionalvr-ssh-%C", "-o", "ControlPersist=10m"]   # one connection for the many short commands (the PC's sshd drops some fresh ones)
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", *MUX, PC]
+
+
+def _retry(cmd, tries=6, **kw):
+    """subprocess.run, repeated while ssh/scp fail to connect (exit 255)."""
+    for i in range(tries):
+        p = subprocess.run(cmd, **kw)
+        if p.returncode != 255 or i == tries - 1:
+            return p
+        time.sleep(3 + 2 * i)
 
 
 def log(msg):
@@ -60,7 +70,7 @@ def log(msg):
 
 def pc(cmd, timeout=120):
     """Run a cmd.exe command line on the PC; returns (rc, text)."""
-    p = subprocess.run(SSH + ["cmd /c " + cmd], capture_output=True, timeout=timeout)
+    p = _retry(SSH + ["cmd /c " + cmd], capture_output=True, timeout=timeout)
     out = (p.stdout + p.stderr).decode(errors="replace").replace("\x00", "").replace("\r", "")
     out = "\n".join(l for l in out.splitlines() if "post-quantum" not in l and "store now" not in l and "openssh.com" not in l)
     return p.returncode, out
@@ -68,18 +78,19 @@ def pc(cmd, timeout=120):
 
 def ps(script, timeout=300):
     """Run a PowerShell script (text) on the PC through stdin; returns its output."""
-    p = subprocess.run(SSH + ["powershell -NoProfile -Command -"], input=script.encode(), capture_output=True, timeout=timeout)
+    p = _retry(SSH + ["powershell -NoProfile -Command -"], input=script.encode(), capture_output=True, timeout=timeout)
     out = (p.stdout + p.stderr).decode(errors="replace").replace("\x00", "").replace("\r", "")
     return "\n".join(l for l in out.splitlines() if "post-quantum" not in l and "store now" not in l and "openssh.com" not in l)
 
 
 def put(local, remote):
-    subprocess.run(["scp", "-o", "BatchMode=yes", "-q", str(local), f"{PC}:{remote}"], check=True, timeout=300)
+    p = _retry(["scp", "-o", "BatchMode=yes", *MUX, "-q", str(local), f"{PC}:{remote}"], timeout=300)
+    p.check_returncode()
 
 
 def get_dir(remote, local):
     Path(local).mkdir(parents=True, exist_ok=True)
-    subprocess.run(["scp", "-o", "BatchMode=yes", "-q", "-r", f"{PC}:{remote}/*", str(local) + "/"], timeout=600)
+    _retry(["scp", "-o", "BatchMode=yes", *MUX, "-q", "-r", f"{PC}:{remote}/*", str(local) + "/"], timeout=600)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
