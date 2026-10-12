@@ -35,6 +35,12 @@ pub fn run(stop: Arc<AtomicBool>, udp: bool, on_seen: &dyn Fn(Seen)) -> Result<(
     let server_protocol_u64 = alvr_common::protocol_id_u64();
     let daemon = ServiceDaemon::new()?;
     let receiver = daemon.browse(alvr_sockets::MDNS_SERVICE_TYPE)?;
+    let debug = std::env::var_os("VISIONALVR_DISCOVERY_DEBUG").is_some();
+    if debug {
+        crate::logs::general("INFO", &format!("discovery: browsing {} (mdns-sd daemon up)", alvr_sockets::MDNS_SERVICE_TYPE));
+    }
+    let mut loops = 0u64;
+    let mut events = 0u64;
     let socket = if udp {
         match UdpSocket::bind(("0.0.0.0", alvr_sockets::CONTROL_PORT)) {
             Ok(s) => {
@@ -60,7 +66,15 @@ pub fn run(stop: Arc<AtomicBool>, udp: bool, on_seen: &dyn Fn(Seen)) -> Result<(
     };
     let mut buf = [0u8; 64];
     while !stop.load(Ordering::Relaxed) {
+        loops += 1;
+        if debug && loops % 10 == 1 {
+            crate::logs::general("INFO", &format!("discovery: loop {loops}, {events} mdns event(s) so far"));
+        }
         while let Ok(ev) = receiver.try_recv() {
+            events += 1;
+            if std::env::var_os("VISIONALVR_DISCOVERY_DEBUG").is_some() {
+                crate::logs::general("INFO", &format!("discovery: mdns event {:?}", ev).chars().take(300).collect::<String>());
+            }
             if let ServiceEvent::ServiceResolved(info) = ev {
                 let hostname = info.get_property_val_str(alvr_sockets::MDNS_DEVICE_ID_KEY).unwrap_or_else(|| info.get_hostname()).to_string();
                 let protocol = info.get_property_val_str(alvr_sockets::MDNS_PROTOCOL_KEY).unwrap_or("").to_string();

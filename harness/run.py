@@ -165,6 +165,11 @@ def build(what):
                 vis = json.dumps(pc.get("visionalvr", {}), indent=2)
                 ver = pc.get("version_suffix", "-personal")
                 print(f"package: personal build ({ver}) from {pers.name}")
+            extra = []
+            if os.environ.get("VISIONALVR_PERSONAL") == "1":
+                extra = json.loads(pers.read_text()).get("extra_files", [])   # build-PC paths copied next to VisionALVR.exe (personal builds only)
+            (out_dir / "personal_files.txt").write_text("\n".join(extra))
+            lib.b_put(out_dir / "personal_files.txt", "_tmp/install/personal_files.txt")
             (out_dir / "visionalvr.personal.json").write_text(vis)
             (out_dir / "version_suffix.txt").write_text(ver)
             lib.b_put(out_dir / "visionalvr.personal.json", "_tmp/install/visionalvr.personal.json")

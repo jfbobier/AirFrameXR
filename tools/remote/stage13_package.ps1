@@ -30,6 +30,10 @@ if (Test-Path $suffixFile) { $version += (Get-Content $suffixFile -Raw).Trim() }
 $persFile = "$root\_tmp\install\visionalvr.personal.json"
 $persShip = @()
 if ((Test-Path $persFile) -and ((Get-Content $persFile -Raw).Trim().Length -gt 2)) { Copy-Item $persFile "$pkg\config\visionalvr.json" -Force; $persShip = @('config\visionalvr.json') }
+# personal build: extra files from the build PC (launcher .bat, tools it calls) next to VisionALVR.exe
+$persFiles = @()
+$pfList = "$root\_tmp\install\personal_files.txt"
+if (Test-Path $pfList) { foreach ($line in (Get-Content $pfList)) { $f = $line.Trim(); if ($f -and (Test-Path $f)) { Copy-Item $f $pkg -Force; $persFiles += (Split-Path $f -Leaf) } } }
 $zip = "$root\out\dist\VisionALVR-$version.zip"
 # the zip holds only what ships (never logs\, config\session.json or results a test run may have left in the folder);
 # everything sits under VisionALVR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
@@ -37,6 +41,7 @@ $ship = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'LibOVRRT64_1.dll'
           'register_openxr_runtime.ps1', 'register_openxr_runtime.bat', 'unregister_openxr_runtime.bat', 'README.txt',
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'THIRD_PARTY_NOTICES.md', 'LICENSE.txt')
 $ship += $persShip
+$ship += $persFiles
 $ship += Get-ChildItem "$pkg\profiles" -File -Filter *.json | ForEach-Object { "profiles\$($_.Name)" }
 $ship += Get-ChildItem "$pkg\licenses" -File | ForEach-Object { "licenses\$($_.Name)" }
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
