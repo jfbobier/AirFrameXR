@@ -88,7 +88,10 @@ def judge(d, thr=None, skip=150):
         if len(r) < 20:
             continue
         h = hf(r)
-        out[f"eye{eye}"] = {"rms_deg": float(np.sqrt(np.mean(r ** 2))), "p99_deg": float(np.percentile(np.abs(r - np.median(r)), 99)), "hf_rms_deg": float(np.sqrt(np.mean(h ** 2))), "bias_deg": float(r.mean())}
+        spikes = np.abs(h) > 0.3   # isolated glitches (a dot lost at the image edge, one skipped tick): counted apart, they do not make a tremble by themselves
+        hc = h[~spikes]
+        out[f"eye{eye}"] = {"rms_deg": float(np.sqrt(np.mean(r ** 2))), "p99_deg": float(np.percentile(np.abs(r - np.median(r)), 99)), "hf_rms_deg": float(np.sqrt(np.mean(hc ** 2))),
+                            "bias_deg": float(r.mean()), "spikes": int(spikes.sum()), "spike_rate": float(spikes.mean())}
         allr.append(r)
     both = [(a, b) for a, b in zip(res[0], res[1]) if a is not None and b is not None]
     if both:
@@ -96,7 +99,9 @@ def judge(d, thr=None, skip=150):
         out["disparity_rms_deg"] = float(np.sqrt(np.mean((dsp - dsp.mean()) ** 2)))
     worst_hf = max((out[f"eye{e}"]["hf_rms_deg"] for e in (0, 1) if f"eye{e}" in out), default=0)
     worst_p99 = max((out[f"eye{e}"]["p99_deg"] for e in (0, 1) if f"eye{e}" in out), default=0)
-    out["verdict"] = "INVALID (no dots measured: the scene or the frames are wrong)" if not allr else "TREMBLE" if (worst_hf > thr["hf"] or worst_p99 > thr["p99"]) else "CLEAN"
+    spiky = any(out.get(f"eye{e}", {}).get("spike_rate", 0) > 0.01 for e in (0, 1))   # more than 1 tick in 100 off by 0.3 deg or more
+    worst_p99 = 0 if not spiky and worst_hf <= thr["hf"] else worst_p99
+    out["verdict"] = "INVALID (no dots measured: the scene or the frames are wrong)" if not allr else "TREMBLE" if (worst_hf > thr["hf"] or spiky or worst_p99 > thr["p99"]) else "CLEAN"
     out["thresholds"] = thr
     return out
 

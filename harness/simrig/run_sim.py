@@ -51,6 +51,28 @@ schtasks /run /tn {name} | Out-Null
 """)
 
 
+def set_stream(eye, fps):
+    """Encode smaller/slower samples on a weak encoder (the laptop 3080 Ti): per-eye size WxH and refresh rate, written into the install's
+    session.json by text replacement (the pristine copy is kept as session.json.simrig-orig and restored with `--eye default`)."""
+    sj = f"{live.INSTALL}\\config\\session.json"
+    live.ps(f"if (-not (Test-Path '{sj}.simrig-orig')) {{ Copy-Item '{sj}' '{sj}.simrig-orig' }}")
+    if eye == "default":
+        live.ps(f"Copy-Item '{sj}.simrig-orig' '{sj}' -Force")
+        return
+    w, h = (int(x) for x in eye.split("x"))
+    edits = [("eye_resolution_width", w), ("eye_resolution_height", h), ("target_eye_resolution_width", w), ("target_eye_resolution_height", h),
+             ("refresh_rate", int(fps)), ("preferred_fps", f"{float(fps)}"), ("width", w), ("content", h)]
+    body = "\n".join(f"$t = [regex]::Replace($t, '\"{k}\":\\s*[0-9.]+', '\"{k}\": {v}')" for k, v in edits[:6])
+    ps = f"""
+$p = '{sj}'
+Copy-Item '{sj}.simrig-orig' $p -Force
+$t = [IO.File]::ReadAllText($p)
+{body}
+[IO.File]::WriteAllText($p, $t, (New-Object Text.UTF8Encoding $false))
+"""
+    live.ps(ps)
+
+
 def kill():
     live.ps(f"Stop-Process -Name xr_probe,{Path(SIMEXE).stem},alvr_host,VisionALVR -Force -ErrorAction SilentlyContinue; "
             "schtasks /delete /tn simrig_host /f 2>$null | Out-Null; schtasks /delete /tn simrig_probe /f 2>$null | Out-Null")
@@ -129,8 +151,12 @@ def main(a):
         return 0
     if a[0] == "run":
         names = a[1].split(",")
-        seconds = int(a[a.index("--seconds") + 1]) if "--seconds" in a else 30
         extra = {}
+        if "--eye" in a:   # --eye 1024x1024 --fps 60 | --eye default
+            fps = a[a.index("--fps") + 1] if "--fps" in a else "90"
+            set_stream(a[a.index("--eye") + 1], fps)
+            extra["PERIOD_MS"] = f"{1000.0 / float(fps):.4f}"
+        seconds = int(a[a.index("--seconds") + 1]) if "--seconds" in a else 30
         for flag, key in (("--show", "SHOW"), ("--real-encode", "REAL_ENCODE"), ("--seed", "SEED"), ("--eye-w", "EYE_W"), ("--omega", "OMEGA_DPS"),
                           ("--predict-ms", "PREDICT_MS"), ("--dump-every", "DUMP_EVERY"), ("--capture", "CAPTURE")):
             if flag in a:

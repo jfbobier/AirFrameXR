@@ -270,7 +270,7 @@ struct Viewer {
     // read them back from the unwarped frame: which app frame's pixels does this slot hold? (-1: unreadable)
     int readStamp(int ringIdx) {
         if (ringIdx < 0 || ringIdx >= (int)ring.size() || !ring[ringIdx]) return -1;
-        const double scale = (ringW / 2.0) / 3552.0;
+        const double scale = 1.0;   // the probe renders at the stream's eye size (the shim slot is two of them side by side)
         const UINT w = (UINT)std::ceil(1024 * scale) + 1, y = (UINT)std::max(0.0, 32 * scale);
         if (!stampStage) {
             D3D11_TEXTURE2D_DESC td{}; ring[ringIdx]->GetDesc(&td);
