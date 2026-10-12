@@ -3,7 +3,7 @@
 # bench\littlest_tokyo.vab (the benchmark scene).
 $ErrorActionPreference = 'Continue'
 $root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
-$version = '0.2-alpha'
+$version = if ($env:VISIONALVR_VERSION) { $env:VISIONALVR_VERSION } else { '0.2-alpha' }
 $pkg = "$root\out\dist\VisionALVR"   # a folder no earlier layout used (out\visionalvr = the old installer package)
 New-Item -ItemType Directory -Force $pkg, "$pkg\config" | Out-Null
 Copy-Item "$root\out\vdxr-shim\*" $pkg -Force                 # virtualdesktop-openxr.dll / .json, LibOVRRT64_1.dll

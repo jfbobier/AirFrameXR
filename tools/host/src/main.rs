@@ -147,7 +147,7 @@ fn parse_args() -> Result<Args, String> {
         // 5090, tools/nvenc_split_probe), so the foveated 4224x1664 frame stayed on one engine (6.9 ms vs 2.5 ms). NVENC uses
         // min(3, engines) strips, so this is also right on 1- and 2-engine GPUs.
         split_encode: 3,
-        send_pacing: pipeline::SendPacing::Phase,
+        send_pacing: pipeline::SendPacing::Asap,
         running_start_ms: 2.0,
         head_wait_ms: 3.0,
         predict_missing_head: false,
