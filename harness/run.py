@@ -153,6 +153,13 @@ def build(what):
                         print(f"package: personal session key {k} does not exist in session.default.json")
                         return 2
                     d[ks[-1]] = v
+                def merge(dst, src):
+                    for k, v in src.items():
+                        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+                            merge(dst[k], v)
+                        else:
+                            dst[k] = v
+                merge(sess, pc.get("session_merge", {}))   # e.g. the paired headset (client_connections)
                 (out_dir / "session.default.json").write_text(json.dumps(sess, indent=2))
                 lib.b_put(out_dir / "session.default.json", "_tmp/install/session.default.json")
                 vis = json.dumps(pc.get("visionalvr", {}), indent=2)

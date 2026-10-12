@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to private/personal_config.json (gitignored). `VISIONALVR_PERSONAL=1 python3 harness/run.py build ... package` then ships these values in the portable folder (zip suffix -personal). Dotted keys are set inside session.default.json; `visionalvr` becomes config\\visionalvr.json (the host/GUI settings). Not for GitHub releases.",
+  "_comment": "Copy to private/personal_config.json (gitignored). `VISIONALVR_PERSONAL=1 python3 harness/run.py build ... package` then ships these values in the portable folder (zip suffix -personal). Dotted keys are set inside session.default.json; `visionalvr` becomes config\\visionalvr.json (the host/GUI settings). Not for GitHub releases. `session_merge` is deep-merged into session.default.json (the paired headset: an entry with an empty hostname is a headset added by IP address); `visionalvr.headset` is the headset the runtime window connects to without asking.",
   "version_suffix": "-personal",
   "session": {
     "session_settings.video.foveated_encoding.enabled": false,
@@ -12,8 +12,31 @@
     "session_settings.video.emulated_headset_view_resolution.Absolute.height.content": 3200
   },
   "visionalvr": {
-    "video": { "encode_profile": "full-split", "idle_rgb": "00ff00" },
+    "video": {
+      "encode_profile": "full-split",
+      "idle_rgb": "00ff00"
+    },
     "debug": true,
-    "display": { "gamma": 1.2 }
+    "display": {
+      "gamma": 1.2
+    },
+    "headset": {
+      "hostname": "",
+      "name": "Apple Vision Pro",
+      "ip": "192.168.1.x"
+    }
+  },
+  "session_merge": {
+    "client_connections": {
+      "": {
+        "display_name": "Apple Headset",
+        "current_ip": "192.168.1.x",
+        "manual_ips": [
+          "192.168.1.x"
+        ],
+        "trusted": true,
+        "connection_state": "Disconnected"
+      }
+    }
   }
 }
