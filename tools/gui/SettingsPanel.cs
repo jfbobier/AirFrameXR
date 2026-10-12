@@ -113,7 +113,7 @@ namespace VisionALVR
         public void ClearReasons() { foreach (var l in reasons.Values) { l.Text = ""; l.Visible = false; } }
 
         /// Reads the current values from session.json / visionalvr.json (what is on disk wins).
-        public void Load()
+        public new void Load()
         {
             session = Session.Load();
             var s = session;

@@ -46,7 +46,6 @@ namespace VisionALVR
         ProgressBar hsBar;
         // tests page
         ListView testList; Label testStatus; Button testCancel;
-        bool testsDone;
         // unattended run for the harness (harness/wizard_e2e.py): --auto --headset-ip X --headset-host H --report file
         readonly string[] cmd = Environment.GetCommandLineArgs();
         bool auto => cmd.Contains("--auto");
@@ -424,7 +423,6 @@ namespace VisionALVR
 
         void StartTests()
         {
-            testsDone = false;
             // the candidate configuration (the headset's panel, the chosen rate) goes to disk first: the encoder tests read it
             var panel = new SettingsPanel(settings, session);
             panel.Load();
@@ -473,7 +471,6 @@ namespace VisionALVR
         void FinishTests()
         {
             if (step != 3) return;
-            testsDone = true;
             testCancel.Enabled = false;
             for (int i = 0; i < steps.Count; i++) UpdateRow(steps[i]);
             var failed = steps.Count(x => x.State == TestState.Failed);
