@@ -120,7 +120,11 @@ int main(int argc, char** argv) {
     Scene scene; bool sceneOn = false;
     ID3D11DepthStencilView* sceneDsv[2] = {};
     UINT sceneDsvW[2] = {}, sceneDsvH[2] = {};
-    if (const char* scenePath = getenv("XR_PROBE_SCENE")) {
+    // XR_PROBE_SCENE=dots: black sky, white rectangles every XR_PROBE_DOT_DEG (default 10) degrees on the horizon ring (world-fixed, drawn per eye from the
+    // pose the app located: the simplest scene whose motion is known exactly: the follow-the-frames "judge" of a constant head rotation reads them)
+    const bool dotsOn = getenv("XR_PROBE_SCENE") && strcmp(getenv("XR_PROBE_SCENE"), "dots") == 0;
+    const double dotDeg = getenv("XR_PROBE_DOT_DEG") ? atof(getenv("XR_PROBE_DOT_DEG")) : 10.0;
+    if (const char* scenePath = dotsOn ? nullptr : getenv("XR_PROBE_SCENE")) {
         std::string err;
         sceneOn = LoadScene(dev, ctx, scenePath, scene, err);
         if (sceneOn && !scene.room.count) MakeRoom(dev, scene);
@@ -388,6 +392,38 @@ int main(int argc, char** argv) {
                         }
                     } else {
                         ctx->ClearRenderTargetView(rtv, bg);
+                    }
+                    if (dotsOn && i < 2) {
+                        D3D11_TEXTURE2D_DESC dt{}; imgs[i][idx].texture->GetDesc(&dt);
+                        const XrPosef& dp = views[i].pose; const XrFovf& df = views[i].fov;
+                        const XMVECTOR dq = XMVectorSet(dp.orientation.x, dp.orientation.y, dp.orientation.z, dp.orientation.w);
+                        const XMMATRIX dpose = XMMatrixRotationQuaternion(dq) * XMMatrixTranslation(dp.position.x, dp.position.y, dp.position.z);
+                        const XMMATRIX dview = XMMatrixInverse(nullptr, dpose);
+                        const float dtl = -tanf(df.angleLeft), dtr = tanf(df.angleRight), dtu = tanf(df.angleUp), dtd = -tanf(df.angleDown);
+                        const float pxPerTanX = (float)dt.Width / (dtl + dtr), pxPerTanY = (float)dt.Height / (dtu + dtd);
+                        ID3D11DeviceContext1* dc = nullptr;
+                        if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&dc))) {
+                            const float black[4] = { 0, 0, 0, 1 }, white[4] = { 1, 1, 1, 1 };
+                            ctx->ClearRenderTargetView(rtv, black);
+                            const int n = (int)(360.0 / dotDeg + 0.5);
+                            for (int k = 0; k < n; k++) {
+                                const double th = k * dotDeg * 3.14159265358979 / 180.0;
+                                // a point 3 m away on the horizon ring around the world origin's height (the head's own height: the ring is level with the eyes)
+                                const XMVECTOR wp = XMVectorSet((float)(3.0 * sin(th)), dp.position.y, (float)(-3.0 * cos(th)), 1.f);
+                                const XMVECTOR vv = XMVector3TransformCoord(wp, dview);
+                                const float vx = XMVectorGetX(vv), vy = XMVectorGetY(vv), vz = XMVectorGetZ(vv);
+                                if (vz > -0.1f) continue;                                  // behind the eye
+                                const float tx = vx / -vz, ty = vy / -vz;
+                                const float cx = (tx + dtl) * pxPerTanX, cy = (1.f - (ty + dtd) / (dtu + dtd)) * (float)dt.Height;
+                                const float hw = std::max(2.f, 0.35f * 0.0174533f * pxPerTanX * (k == 0 ? 2.f : 1.f));   // 0.7 deg wide (the 0 deg reference twice that)
+                                const float hh = 4.f * 0.0174533f * pxPerTanY * 1.f;
+                                D3D11_RECT dr{ (LONG)(cx - hw), (LONG)(cy - hh), (LONG)(cx + hw), (LONG)(cy + hh) };
+                                dr.left = std::max<LONG>(dr.left, 0); dr.top = std::max<LONG>(dr.top, 0);
+                                dr.right = std::min<LONG>(dr.right, (LONG)dt.Width); dr.bottom = std::min<LONG>(dr.bottom, (LONG)dt.Height);
+                                if (dr.right > dr.left && dr.bottom > dr.top) dc->ClearView(rtv, white, &dr, 1);
+                            }
+                            dc->Release();
+                        }
                     }
                     if (markF && i < 2) {
                         FILETIME wft; GetSystemTimePreciseAsFileTime(&wft);
