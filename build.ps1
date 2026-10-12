@@ -42,6 +42,7 @@ function Put($from, $to) { New-Item -ItemType Directory -Force (Split-Path $to) 
 Put "$repo\deps.lock.json" "$repo\_tmp\deps.lock.json"
 Put "$repo\tools\patches\loopback-client.patch" "$repo\_tmp\loopback-client.patch"
 Put "$repo\tools\patches\client-stats-log.patch" "$repo\_tmp\client-stats-log.patch"
+Put "$repo\tools\patches\client-caps-log.patch" "$repo\_tmp\client-caps-log.patch"
 Put "$repo\tools\patches\audio-trace.patch" "$repo\_tmp\audio-trace.patch"
 Put "$repo\tools\host\Cargo.toml" "$repo\_tmp\host\Cargo.toml"
 Put "$repo\tools\host\build.rs" "$repo\_tmp\host\build.rs"
@@ -49,7 +50,7 @@ Get-ChildItem "$repo\tools\host\src\*.rs" | ForEach-Object { Put $_.FullName "$r
 Put "$repo\tools\mock_client\Cargo.toml" "$repo\_tmp\mock_client\Cargo.toml"
 Put "$repo\tools\mock_client\src\main.rs" "$repo\_tmp\mock_client\src\main.rs"
 Get-ChildItem "$repo\ovrshim" -File | ForEach-Object { Put $_.FullName "$repo\_tmp\ovrshim\$($_.Name)" }
-foreach ($f in 'Common.cs', 'VisionALVR.cs', 'Configure.cs', 'app.manifest') { Put "$repo\tools\gui\$f" "$repo\_tmp\gui\$f" }
+foreach ($f in 'Common.cs', 'VisionALVR.cs', 'Configure.cs', 'SettingsPanel.cs', 'Reference.cs', 'TestRunner.cs', 'Wizard.cs', 'app.manifest') { Put "$repo\tools\gui\$f" "$repo\_tmp\gui\$f" }
 foreach ($f in 'visionalvr.ico', 'logo_640.png') { Put "$repo\tools\gui\res\$f" "$repo\_tmp\gui\res\$f" }
 foreach ($f in 'register_openxr_runtime.ps1', 'register_openxr_runtime.bat', 'unregister_openxr_runtime.bat', 'session.default.json', 'README.txt') {
     Put "$repo\tools\install\$f" "$repo\_tmp\install\$f"

@@ -12,7 +12,7 @@ $refs = 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.F
 $common = @('/nologo', '/noconfig', '/target:winexe', '/platform:x64', '/optimize+', '/langversion:latest', '/nowarn:1701,1702',
             "/win32icon:$src\res\visionalvr.ico", "/win32manifest:$src\app.manifest", "/resource:$src\res\logo_640.png,logo_640.png") + $refs
 $ok = $true
-foreach ($t in @(@{ exe = 'VisionALVR.exe'; files = @("$src\Common.cs", "$src\VisionALVR.cs") }, @{ exe = 'configure.exe'; files = @("$src\Common.cs", "$src\Configure.cs") })) {
+foreach ($t in @(@{ exe = 'VisionALVR.exe'; files = @("$src\Common.cs", "$src\VisionALVR.cs") }, @{ exe = 'configure.exe'; files = @("$src\Common.cs", "$src\Configure.cs", "$src\SettingsPanel.cs", "$src\Reference.cs", "$src\TestRunner.cs", "$src\Wizard.cs") })) {
     $o = & $csc @common "/out:$out\$($t.exe)" @($t.files) 2>&1
     ($o | Out-String) | Add-Content -Path "$out\build.log" -Encoding UTF8
     $o | ForEach-Object { Write-Host ("$_" -replace "[^\x20-\x7E]", '?') }

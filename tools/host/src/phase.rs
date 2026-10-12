@@ -27,6 +27,11 @@ pub fn set_origin(o: Instant) {
     let _ = ORIGIN.set(o);
 }
 
+/// the host's start time (the origin of every event's t_ms)
+pub fn origin() -> Option<Instant> {
+    ORIGIN.get().copied()
+}
+
 struct State {
     phases_ms: Vec<f64>,
     ignore: u32,

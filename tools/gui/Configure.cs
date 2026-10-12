@@ -450,11 +450,13 @@ namespace VisionALVR
             Log.Component = "configure";
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            var args = Environment.GetCommandLineArgs();
+            // tests on an older GPU than the product supports: the streamer processes inherit the variable
+            if (args.Contains("--allow-any-gpu")) Environment.SetEnvironmentVariable("VISIONALVR_ALLOW_ANY_GPU", "1");
             Log.Write("INFO", $"configure.exe {Version.Text} start ({Paths.Dir})");
             var check = File.Exists(Paths.Host) ? SystemCheck.Run() : null;
-            if (check != null && !(check.TryGetValue("gpu_supported", out var g) && g is bool b && b) && Ui.ScreenshotPath() == null)
-                MessageBox.Show("Note: " + (check.TryGetValue("reason", out var r) ? r : "unsupported GPU") + ". VisionALVR.exe will refuse to stream.", "VisionALVR");
-            Application.Run(new ConfigureForm(check));
+            if (args.Contains("--advanced")) { Application.Run(new ConfigureForm(check)); return; }
+            Application.Run(new WizardForm(check, args.Contains("--demo")));
         }
     }
 }

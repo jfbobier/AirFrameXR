@@ -212,6 +212,14 @@ impl log::Log for AlvrLogger {
         let msg = format!("{}", record.args());
         // The headset's raw per-frame report (patched into server_core's report_statistics: tools/patches/client-stats-log.patch):
         // one CSV row per frame the headset displayed, keyed by the frame's timestamp so it joins with host_frames.csv.
+        // What the headset advertised at the handshake (tools/patches/client-caps-log.patch): the configure wizard's `client_capabilities` event.
+        if let Some(inner) = msg.strip_prefix("{\"va_client_caps\":").and_then(|s| s.strip_suffix('}')) {
+            if let (Ok(v), Some(o)) = (serde_json::from_str::<Value>(inner), crate::phase::origin()) {
+                write_alvr("CAPS", inner);
+                crate::event(o, "client_capabilities", v);
+            }
+            return;
+        }
         if let Some(inner) = msg.strip_prefix("{\"va_client_stats\":").and_then(|s| s.strip_suffix('}')) {
             if let Ok(v) = serde_json::from_str::<Value>(inner) {
                 let ms = |k: &str| v[k].as_f64().unwrap_or(0.0) / 1000.0;

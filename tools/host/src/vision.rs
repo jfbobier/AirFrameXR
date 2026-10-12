@@ -239,7 +239,11 @@ pub fn system_check(gpu_info: Value) -> Value {
         "gpu_supported": ok,
         "gpu_override": override_,
         "ok": ok || override_,
-        "reason": if ok { "".to_string() } else { format!("needs an NVIDIA GeForce RTX 40 series or newer (Ada / Blackwell); found '{name}'") },
+        "reason": if ok { "".to_string() } else if gpu_info["nvml"].as_i64().unwrap_or(0) == 0 && !name.to_lowercase().contains("nvidia") {
+            format!("VisionALVR streams with NVIDIA's hardware encoder and needs an NVIDIA GeForce RTX 40 series GPU or newer; no NVIDIA GPU was found{}", if name.is_empty() { String::new() } else { format!(" ('{name}')") })
+        } else {
+            format!("needs an NVIDIA GeForce RTX 40 series or newer (Ada / Blackwell); found '{name}'")
+        },
     })
 }
 
