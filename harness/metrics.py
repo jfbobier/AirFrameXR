@@ -89,7 +89,8 @@ def metrics(d, skip=200):
     out["display"] = {"ticks": ticks, "repeat_pct": 100.0 * reps / max(1, ticks)}
     out["pose_to_display_ms"] = {"p50": pct(p2d, 50), "p95": pct(p2d, 95), "p99": pct(p2d, 99)}
     out["rotation_deg"] = {"p50": pct(rot, 50), "p95": pct(rot, 95), "p99": pct(rot, 99)}
-    steps = np.diff(np.array(shown)) / 1e7 if len(shown) > 1 else []
+    raw = np.diff(np.array(shown)) if len(shown) > 1 else np.array([])
+    steps = raw / np.median(raw) if len(raw) else raw   # in display periods (the median step)
     out["ts_step_periods"] = {"dup(0)": int((np.round(steps) == 0).sum()), "skip(>=2)": int((np.round(steps) >= 2).sum()), "n": len(steps)}
     return out
 

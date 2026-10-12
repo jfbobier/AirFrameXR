@@ -45,14 +45,29 @@ def main(a):
         sc["client"]["seconds"] = s + 4
         sc.setdefault("app", {})["timeout_s"] = s + 11
         sc["app"].pop("frames", None)
+    label = ""
+    for kv in [a[i + 1] for i, x in enumerate(a) if x == "--set"]:      # --set host.send_pacing=asap --set host.env.VISIONALVR_PICK=newest (JSON values)
+        k, v = kv.split("=", 1)
+        try:
+            v = json.loads(v)
+        except ValueError:
+            pass
+        d = sc
+        keys = k.split(".")
+        for kk in keys[:-1]:
+            d = d.setdefault(kk, {})
+        d[keys[-1]] = v
+        label += f" {keys[-1]}={v}"
+    if "--label" in a:
+        label = " " + a[a.index("--label") + 1]
     rows = []
     for i in range(repeat):
         for ch in chains:
             t0 = time.time()
             d = (run_ours if ch == "ours" else run_stock)(json.loads(json.dumps(sc)), name)
             try:
-                rows.append((f"{ch} #{i + 1}", d, metrics.metrics(d)))
-                print(metrics.line(f"{ch} #{i + 1}", rows[-1][2]), f"  [{d.name}, {time.time() - t0:.0f} s]")
+                rows.append((f"{ch}{label if ch == 'ours' else ''} #{i + 1}", d, metrics.metrics(d)))
+                print(metrics.line(rows[-1][0], rows[-1][2]), f"  [{d.name}, {time.time() - t0:.0f} s]")
             except Exception as e:
                 print(f"{ch} #{i + 1}: no metrics ({e!r}) in {d}")
     print("\n== " + name)
