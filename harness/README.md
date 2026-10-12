@@ -104,3 +104,6 @@ pass `host.gpu_keepalive: 90` (a background GPU load standing in for the composi
 - `python3 harness/steamvr_baseline.py <trace> --seconds 60`: stock ALVR + SteamVR + the probe + the mock client replaying the trace (needs stock ALVR and SteamVR installed; paths at the top of the script);
   `python3 harness/pose_compare.py <dir>` and `python3 harness/stamp_check.py <dir>` analyse it (and our own replay runs) the same way.
 - `python3 harness/steamvr_hmd.py`: the same on a real headset. `python3 harness/live.py run harness/live_variants.json --only probe_light_pred100` runs the probe through our chain on the real headset.
+
+## simrig
+`harness/simrig/`: make_profile.py (timing profiles from a real session), judge.py (dots.csv -> verdict, `--selftest`), run_sim.py (scenarios on the PC). See docs/DEVELOPMENT.md.

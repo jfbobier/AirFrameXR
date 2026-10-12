@@ -12,7 +12,9 @@ $env:PATH += ";$env:USERPROFILE\.cargo\bin"
 $flavour = if (Test-Path "$root\_tmp\flavour.txt") { (Get-Content "$root\_tmp\flavour.txt" -Raw).Trim() } else { 'debug' }
 $cargoArgs = @('build', '--release', '-p', 'alvr_host')
 if ($flavour -eq 'release') { $cargoArgs += '--no-default-features' }
-Write-Host "flavour: $flavour"
+# simrig (harness/simrig, docs/DEVELOPMENT.md): the headset-less rig, a separate build that is never deployed as the installed host
+if ($env:VISIONALVR_SIMRIG_BUILD -eq '1') { $cargoArgs += @('--features', 'simrig') }
+Write-Host "flavour: $flavour$(if ($env:VISIONALVR_SIMRIG_BUILD -eq '1') { ' + simrig' })"
 cargo @cargoArgs 2>&1 | Out-File -Encoding utf8 "$root\logs\host_build.log"
 Get-Content "$root\logs\host_build.log" | Select-String -Pattern '^error|^warning: unused|Finished|could not' -Context 0,6 | Select-Object -First 40
 Get-Item "$root\src\ALVR-v20.14.1\target\release\alvr_host.exe" -ErrorAction SilentlyContinue | Select-Object FullName, Length, LastWriteTime

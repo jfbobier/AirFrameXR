@@ -345,8 +345,8 @@ struct Viewer {
             ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); ctx->IASetInputLayout(nullptr);
             const float black[4] = { 0, 0, 0, 1 }; ctx->ClearRenderTargetView(rtv, black);
             for (int eye = 0; eye < 2; eye++) drawEye(eye, cur.ring, M, cfg.reproject != 0 && haveF);
-            // yaw of the displayed pose (the judge's truth): about +Y, from the rotation matrix
-            const double yawDisp = std::atan2(-Rd[6], Rd[8]) * 180.0 / 3.14159265358979;
+            // yaw of the displayed pose (the judge's truth), from the rotation matrix
+            const double yawDisp = -std::atan2(-Rd[6], Rd[8]) * 180.0 / 3.14159265358979;   // counted to the right (OpenXR yaw about +Y turns left): the judge's convention
             if (dots) {
                 for (int eye = 0; eye < 2; eye++) {
                     std::vector<double> xs; measure(eye, xs);

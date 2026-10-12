@@ -316,3 +316,8 @@ and so is stock's (SteamVR passes the headset's pose through unchanged, same sta
 stock repeats 2.1 % / rotation the client must supply p95 1.8 deg, ours 8.5 % / 3.0 deg. On the real AVP with the same Tokyo probe and max_prediction_ms 100: stock is clean (still and moving), ours
 trembles even at a still pose; asap sends, no running start, queue depth 1 and a single encode slice change nothing visible. Hypothesis (user): the multithreaded pipeline mishandles inputs/outputs along the
 chain; next: judge trembling automatically from the recordings and the generated images, then optimise the architecture.
+
+## 2026-10-12 simrig built (untested on hardware)
+Profiles + judge (self-test passes), probe dots scene, simviewer (queue, reprojection, dots.csv), host `simrig` feature (synthetic head with profile timing,
+sampled or real NVENC encode, timer transport), `harness/simrig/run_sim.py` (scenarios ideal/games/probe100/still100/still0/noreproject/inject). All compile-checked in WSL
+(check_cpp.sh, check_host.sh with and without the feature); first run on the RTX 3080 Ti machine pending. Order: `ideal` (null), `inject` (judge), then `games`, `probe100`, `still100`.

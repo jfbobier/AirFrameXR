@@ -97,10 +97,10 @@ def check():
 """))
 
 
-def build(what):
+def build(what, simrig=False):
     files = {
         "host": [(f"tools/host/src/{m}", "tools/host/src/") for m in sorted(p.name for p in (ROOT / "tools/host/src").glob("*.rs"))]
-                + [("nvenc/hostlib/nvh.cpp", "nvenc/hostlib/"), ("nvenc/hostlib/nvh.h", "nvenc/hostlib/"), ("tools/host/build.rs", "tools/host/"),
+                + [("nvenc/hostlib/nvh.cpp", "nvenc/hostlib/"), ("nvenc/hostlib/simviewer.cpp", "nvenc/hostlib/"), ("nvenc/hostlib/nvh.h", "nvenc/hostlib/"), ("tools/host/build.rs", "tools/host/"),
                    ("tools/host/Cargo.toml", "tools/host/"),
                    ("ovrshim/ipc.h", "ovrshim/"), ("ovrshim/ipc_win.h", "ovrshim/"), ("build.ps1", "")]
                 + [(f"tools/patches/{p.name}", "tools/patches/") for p in (ROOT / "tools/patches").glob("*.patch")]
@@ -115,6 +115,7 @@ def build(what):
     log(f"building {bld} on the PC")
     out = ps(f"""
 $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+{"$env:VISIONALVR_SIMRIG_BUILD = '1'" if simrig else ""}
 Set-Location '{CLONE}'
 powershell -ExecutionPolicy Bypass -File build.ps1 {bld} 2>&1 | Select-String -Pattern 'RESULT|FAILED|== '
 Get-Content logs\\host_build.log -ErrorAction SilentlyContinue | Select-String -Pattern '^error' | Select-Object -First 5
@@ -382,7 +383,7 @@ def main(argv):
     if cmd == "check":
         check()
     elif cmd == "build":
-        build(argv[1] if len(argv) > 1 else "all")
+        build(argv[1] if len(argv) > 1 and not argv[1].startswith("--") else "all", simrig="--simrig" in argv)
     elif cmd == "deploy":
         deploy()
     elif cmd == "score":

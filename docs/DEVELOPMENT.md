@@ -93,3 +93,14 @@ Details: `harness/README.md`.
   `--allow-destructive` only for a command you have checked.
 - A result is reported as **tested** only when a scenario or a measurement shows it; otherwise *built* or *source-verified*
   (`docs/progress.md` legend). Say what was not tested.
+
+## The simrig (headset-less rig, debug only)
+
+`cargo build -p alvr_host --features simrig` (C++ define `VISIONALVR_SIMRIG`, `nvenc/hostlib/simviewer.cpp`) builds a host that runs the real pipeline
+(shim IPC, intake, clock + boundary pick, encoder and sender threads) against a synthetic client instead of ALVR and a headset: a head with constant
+rotation (or still) and the timing of a recorded profile (`harness/simrig/make_profile.py`), encode / network / decode as sampled timers (the encode
+optionally the real NVENC, `VISIONALVR_SIM_REAL_ENCODE=1`; bitstream discarded), and a viewer that queues, corrects (rotation reprojection) and
+shows the frames like the headset client, measuring the dots of the probe's `XR_PROBE_SCENE=dots` scene. `harness/simrig/judge.py` turns the
+measurements into a verdict (TREMBLE / CLEAN). Run it with `python3 harness/simrig/run_sim.py build` then `run ideal,games,probe100,still100,inject`.
+The feature is off in normal and release builds; the knobs are the `VISIONALVR_SIM_*` variables documented at the top of `tools/host/src/simrig.rs`.
+Scenario `ideal` is the null test (must be CLEAN) and `inject` validates the judge (must be TREMBLE).
