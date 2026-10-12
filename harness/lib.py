@@ -4,6 +4,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent          # the repository root
 BUILDER = ROOT / "tools" / "builder.sh"
+
+
+def _builder_root():
+    """The builder's working folder under %USERPROFILE% (tools/builder.local VISIONALVR_BUILDER_ROOT, default openxr; same as builder.sh)."""
+    v = os.environ.get("VISIONALVR_BUILDER_ROOT")
+    loc = ROOT / "tools" / "builder.local"
+    if not v and loc.exists():
+        v = next((l.split("=", 1)[1].strip() for l in loc.read_text().splitlines() if l.startswith("VISIONALVR_BUILDER_ROOT=")), None)
+    return v or "openxr"
+
+
+ROOTNAME = _builder_root()
 RESULTS = ROOT / "harness" / "results"
 CACHE = ROOT / "harness" / "cache"
 HOST_EXE = r"src\ALVR-v20.14.1\target\release\alvr_host.exe"
@@ -11,6 +23,15 @@ CLIENT_EXE = r"src\ALVR-v20.14.1\target\release\alvr_client_headless.exe"
 FFMPEG_WIN = "ffmpeg.exe"        # Windows ffmpeg via WSL interop, D3D11VA on the AMD iGPU
 FFMPEG = "ffmpeg"                 # native software fallback
 FFPROBE = "ffprobe"
+
+
+CLIENT_FLAGS = {"seconds": "--seconds", "connect_timeout": "--connect-timeout", "min_frames": "--min-frames",
+                              "exit_after_frames": "--exit-after-frames", "yaw_amp": "--yaw-amp", "yaw_hz": "--yaw-hz",
+                              "refresh": "--refresh", "res": "--res", "decode_ms": "--decode-ms",
+                              "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
+                              "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
+                              "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views"}
 
 
 class Blocked(Exception):
@@ -165,13 +186,13 @@ def start_limited(rid, task, script_name, body, rc_name, env=None):
     resources, which do not cross Windows sessions). The exit code is written to runs\\<rid>\\<rc_name>."""
     rc, home = b_run("echo %USERPROFILE%")
     home = home.strip().splitlines()[-1].strip()
-    cmd = "@echo off\r\n" + "".join(f"set {k}={v}\r\n" for k, v in (env or {}).items()) + f"cd /d {home}\\openxr\r\n" + body + \
+    cmd = "@echo off\r\n" + "".join(f"set {k}={v}\r\n" for k, v in (env or {}).items()) + f"cd /d {home}\\{ROOTNAME}\r\n" + body + \
           f"echo %ERRORLEVEL% > runs\\{rid}\\{rc_name}\r\n"
     local = CACHE / script_name
     CACHE.mkdir(parents=True, exist_ok=True)
     local.write_text(cmd)
     b_put(local, f"runs/{rid}/{script_name}")
-    b_run(f'schtasks /create /tn {task} /tr "cmd /c {home}\\openxr\\runs\\{rid}\\{script_name}" /sc once /st 00:00 /rl LIMITED /it /f')
+    b_run(f'schtasks /create /tn {task} /tr "cmd /c {home}\\{ROOTNAME}\\runs\\{rid}\\{script_name}" /sc once /st 00:00 /rl LIMITED /it /f')
     b_run(f"schtasks /run /tn {task}")
     return TaskProc(rid, task, rc_name)
 
@@ -183,9 +204,9 @@ def launch_app(app, rid, rd, log):
     home = home.strip().splitlines()[-1].strip()
     rt = app.get("runtime", r"out\vdxr-shim")
     cmd = ("@echo off\r\n"
-           f"set XR_RUNTIME_JSON={home}\\openxr\\{rt}\\virtualdesktop-openxr.json\r\n"
-           + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\openxr\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\openxr\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\openxr\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\openxr\\{rd}\\app_timing.csv", **app.get("env", {})}.items()) +
-           f"cd /d {home}\\openxr\r\n"
+           f"set XR_RUNTIME_JSON={home}\\{ROOTNAME}\\{rt}\\virtualdesktop-openxr.json\r\n"
+           + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\{ROOTNAME}\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\{ROOTNAME}\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_timing.csv", **app.get("env", {})}.items()) +
+           f"cd /d {home}\\{ROOTNAME}\r\n"
            f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n"
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
     local = CACHE / "app.cmd"
@@ -193,7 +214,7 @@ def launch_app(app, rid, rd, log):
     local.write_text(cmd)
     b_put(local, f"runs/{rid}/app.cmd")
     task = "openxr_app_tmp"
-    b_run(f'schtasks /create /tn {task} /tr "cmd /c {home}\\openxr\\runs\\{rid}\\app.cmd" /sc once /st 00:00 /rl LIMITED /it /f')
+    b_run(f'schtasks /create /tn {task} /tr "cmd /c {home}\\{ROOTNAME}\\runs\\{rid}\\app.cmd" /sc once /st 00:00 /rl LIMITED /it /f')
     b_run(f"schtasks /run /tn {task}")
     log("  started OpenXR app (limited integrity)")
     t0 = time.time()
@@ -254,7 +275,7 @@ def run_scenario(sc, outdir: Path, log=print):
         if "COPIED" not in out:
             raise Blocked("portable package missing (build it first: python3 harness/run.py build gui package): " + out[-300:])
         host_exe = f"{inst}\\alvr_host.exe"
-        h = sc["host"] = {**sc["host"], "install_dir": f"%USERPROFILE%\\openxr\\{inst}"}
+        h = sc["host"] = {**sc["host"], "install_dir": f"%USERPROFILE%\\{ROOTNAME}\\{inst}"}
         if sc.get("app"):
             sc["app"] = {**sc["app"], "runtime": inst}
         steps["installed_from"] = "out\\dist\\VisionALVR (portable folder)"
@@ -310,13 +331,7 @@ def run_scenario(sc, outdir: Path, log=print):
         b_put(ROOT / c["replay"], f"runs/{rid}/replay.csv")   # a recorded head trace (harness/fixtures/headtraces)
     def make_client_cmd(sfx=""):
         return (env + f'{CLIENT_EXE} --report {rd}\\client{sfx}_report.json --frames-csv {rd}\\frames{sfx}.csv --out {rd}\\client{sfx}.hevc '
-                + argline(c, {"seconds": "--seconds", "connect_timeout": "--connect-timeout", "min_frames": "--min-frames",
-                              "exit_after_frames": "--exit-after-frames", "yaw_amp": "--yaw-amp", "yaw_hz": "--yaw-hz",
-                              "refresh": "--refresh", "res": "--res", "decode_ms": "--decode-ms",
-                              "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
-                              "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
-                              "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views"})
+                + argline(c, CLIENT_FLAGS)
                 + (f" --controllers-csv {rd}\\controllers.csv" if c.get("controllers") and not sfx else "")
                 + (f" --display-csv {rd}\\display{sfx}.csv" if c.get("display_sim") else "")
                 + (f" --poses-csv {rd}\\poses.csv" if not sfx else "")
