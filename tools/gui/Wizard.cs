@@ -47,6 +47,10 @@ namespace VisionALVR
         // tests page
         ListView testList; Label testStatus; Button testCancel;
         bool testsDone;
+        // unattended run for the harness (harness/wizard_e2e.py): --auto --headset-ip X --headset-host H --report file
+        readonly string[] cmd = Environment.GetCommandLineArgs();
+        bool auto => cmd.Contains("--auto");
+        string Arg(string k) { for (int i = 1; i + 1 < cmd.Length; i++) if (cmd[i] == k) return cmd[i + 1]; return null; }
 
         public WizardForm(Dictionary<string, object> check, bool demo)
         {
@@ -108,6 +112,12 @@ namespace VisionALVR
             if (demo) LoadDemo();
             var ok = check != null && check.TryGetValue("ok", out var o) && o is bool b && b;
             if (!ok && !demo) { GoTo(0); return; }
+            if (auto && Arg("--headset-ip") != null)
+            {
+                chosenIp = Arg("--headset-ip"); chosenHost = Arg("--headset-host") ?? ""; chosenName = "Apple Vision Pro";
+                step = 1; GoNext();
+                return;
+            }
             GoTo(page >= 1 ? page : 1);
         }
 
@@ -135,6 +145,7 @@ namespace VisionALVR
             }
             page.Dock = DockStyle.Fill;
             content.Controls.Add(page);
+            if (auto) BeginInvoke((Action)AutoDrive);
         }
 
         void GoBack()
@@ -329,6 +340,7 @@ namespace VisionALVR
                 hs.Hostname = h != null ? h.Item1 : chosenHost; hs.Ip = chosenIp;
                 hs.DisplayName = h != null && h.Item2 != null && h.Item2.Length > 0 ? h.Item2 : chosenName;
                 ShowHandshakeResult(true);
+                if (auto) hsAuto.PerformClick();
             }));
             discovery?.Dispose();
             var err = local.Start(Base() + "--live --seconds 3 --connect-timeout 90");
@@ -427,6 +439,17 @@ namespace VisionALVR
             if (demo) { FinishTests(); return; }
             testCts = new CancellationTokenSource();
             ctx.Ct = testCts.Token;
+            ctx.OnEncoderDone = () => Invoke((Action)(() =>
+            {
+                // the encoder test measured the candidate: the tests that follow run at the interim proposal (lower resolution / rate if it could not keep up)
+                var interim = Proposal.Build(hs, ctx.R, ctxFps);
+                interim.Foveated = ctxFoveation;
+                if (interim.EyeW > (int)(hs.PanelW * ctxScale) / 32 * 32) interim.EyeW = (int)(hs.PanelW * ctxScale) / 32 * 32;
+                var pn = new SettingsPanel(settings, session);
+                pn.Load();
+                pn.Prefill(interim);
+                if (pn.Save(out var e2)) Log.Write("INFO", $"wizard: tests continue at {interim.EyeW}x{interim.EyeH} @ {interim.Fps} Hz");
+            }));
             ctx.Status = s => BeginInvoke((Action)(() => { testStatus.Text = s; testStatus.ForeColor = Color.DimGray; }));
             Task.Run(async () =>
             {
@@ -458,6 +481,7 @@ namespace VisionALVR
             testStatus.ForeColor = failed == 0 ? Color.SeaGreen : Color.DarkOrange;
             proposal = Proposal.Build(hs, ctx.R, ctxFps);
             next.Enabled = true;
+            if (auto) GoNext();
         }
 
         // ------------------------------------------------------------------------------------------------------------- 4 results
@@ -526,6 +550,41 @@ namespace VisionALVR
             if (settingsPanel == null) return false;
             if (!settingsPanel.Save(out var err)) { MessageBox.Show(this, err, Text); return false; }
             return true;
+        }
+
+        void AutoDrive()
+        {
+            if (step == 4) { var t = new System.Windows.Forms.Timer { Interval = 600 }; t.Tick += (s, e) => { t.Stop(); GoNext(); }; t.Start(); }
+            else if (step == 5)
+            {
+                var t = new System.Windows.Forms.Timer { Interval = 600 };
+                t.Tick += (s, e) => { t.Stop(); SaveConfig(); WriteReport(); Close(); };
+                t.Start();
+            }
+            else if (step == 0) { WriteReport(); Close(); }
+        }
+
+        void WriteReport()
+        {
+            var path = Arg("--report");
+            if (path == null) return;
+            var r = ctx?.R ?? new Results();
+            var d = new Dictionary<string, object>
+            {
+                ["handshake"] = new Dictionary<string, object> { ["display_name"] = hs.DisplayName, ["hostname"] = hs.Hostname, ["panel"] = new object[] { hs.PanelW, hs.PanelH }, ["rates"] = hs.Rates.Cast<object>().ToArray(), ["foveation"] = hs.Foveation, ["gamma"] = hs.Gamma, ["from_headset"] = hs.FromHeadset },
+                ["results"] = new Dictionary<string, object>
+                {
+                    ["gpu"] = r.GpuName, ["encode_p50"] = r.EncodeP50, ["encode_p95"] = r.EncodeP95, ["budget_ms"] = r.BudgetMs, ["encode_fits"] = r.EncodeFits, ["enc_size"] = new object[] { r.EncW, r.EncH },
+                    ["quality"] = r.QualityLabel, ["clean_mbps"] = r.CleanMbps, ["loss_per_s"] = r.LossPerS, ["total_ms"] = r.TotalMs, ["network_ms"] = r.NetworkMs, ["decode_ms"] = r.DecodeMs, ["displayed_fps"] = r.DisplayedFps, ["audio"] = r.AudioNote,
+                },
+                ["tests"] = (steps ?? new List<TestStep>()).Select(x => (object)new Dictionary<string, object> { ["name"] = x.Name, ["state"] = x.State.ToString(), ["note"] = x.Note }).ToArray(),
+                ["proposal"] = proposal == null ? null : new Dictionary<string, object>
+                {
+                    ["eye"] = new object[] { proposal.EyeW, proposal.EyeH }, ["fps"] = proposal.Fps, ["bitrate_mbps"] = proposal.BitrateMbps, ["foveated"] = proposal.Foveated, ["latency"] = proposal.LatencyMode,
+                    ["why_resolution"] = proposal.Why("resolution"), ["why_bitrate"] = proposal.Why("bitrate"), ["why_fps"] = proposal.Why("fps"),
+                },
+            };
+            try { Json.Save(path, d); } catch (Exception e) { Log.Write("ERROR", "report: " + e.Message); }
         }
 
         // ------------------------------------------------------------------------------------------------------------- demo data (screenshots, no headset)

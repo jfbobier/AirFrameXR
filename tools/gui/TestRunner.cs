@@ -36,6 +36,8 @@ namespace VisionALVR
         public string NetSteps = "100,150,200,250,300,350,400,500";
         public int StepSecs = 6;
         public Action<string> Status = s => { };
+        /// called when the encoder test is done: the wizard applies the interim proposal (so the later tests run at a configuration the encoder can sustain)
+        public Action OnEncoderDone = () => { };
         public CancellationToken Ct;
     }
 
@@ -115,7 +117,8 @@ namespace VisionALVR
                     }, 120000);
                     if (error != null) throw new TestFailed(error);
                     if (result == null) throw new TestFailed("the encoder test produced no result (see logs\\VisionALVR.log)");
-                    if (!ctx.R.EncodeFits) { st.Warn(); result += " - too slow for this rate: the proposal lowers the resolution or the rate"; }
+                    if (!ctx.R.EncodeFits) { st.Warn(); result += " - too slow for this rate: the later tests and the proposal use a lower resolution or rate"; }
+                    ctx.OnEncoderDone();
                     return result;
                 },
             });
@@ -198,7 +201,7 @@ namespace VisionALVR
                     {
                         if (cl == null) return;
                         var s = Math.Max(1, Num(cl, "samples"));
-                        w += s; total += s * Num(cl, "total_ms"); game += s * Num(cl, "game_ms"); enc += s * Num(cl, "encode_ms"); net += s * Num(cl, "network_ms");
+                        w += s; total += s * Num(cl, "total_latency_ms"); game += s * Num(cl, "game_ms"); enc += s * Num(cl, "encode_ms"); net += s * Num(cl, "network_ms");
                         dec += s * Num(cl, "decode_ms"); dq += s * Num(cl, "decoder_queue_ms"); vq += s * Num(cl, "vsync_queue_ms");
                         cf += s * Num(cl, "client_fps"); df += s * Num(cl, "displayed_fps"); mbps += s * Num(cl, "bitrate_mbps");
                     }

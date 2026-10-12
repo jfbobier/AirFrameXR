@@ -1,0 +1,37 @@
+{
+ "description": "Wizard handshake: the host in --live mode with the mock headset (100 Hz, its own panel size) must emit the client_capabilities event",
+ "topology": {
+  "host": "builder",
+  "client": "builder",
+  "client_bind_ip": "127.0.0.2"
+ },
+ "session_overrides": {
+  "session_settings.video.foveated_encoding.enabled": false,
+  "openvr_config.enable_foveated_encoding": false,
+  "session_settings.connection.client_recv_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  },
+  "session_settings.connection.server_send_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  }
+ },
+ "host": {
+  "live": true,
+  "seconds": 4,
+  "connect_timeout": 45
+ },
+ "client": {
+  "seconds": 12,
+  "connect_timeout": 45,
+  "refresh": 100,
+  "real_views": true
+ },
+ "timeout_s": 150,
+ "checks": {},
+ "client_env": {
+  "RUST_LOG": "info"
+ },
+ "gpu_sample": true
+}

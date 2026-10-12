@@ -24,6 +24,8 @@ the zip holds exactly the files above under one `VisionALVR\` folder, never logs
 general log appended by every run, one `logs\debug\<time>\` per debug run, config seeded, benchmark finds its scene).
 
 ## Steps
+configure.exe is a setup wizard: it checks the PC (NVIDIA RTX 40 series or newer), finds and pairs the headset (a paired or fixed-IP headset is listed at once; or add its IP), connects to read what the headset supports, then offers **Autoconfigure** (it tests the encoder, picture quality, network and streaming with a checklist, shows how your setup performs and proposes a configuration) or **Manual / update existing** (your current settings). `configure.exe --advanced` opens the old tabs; `--allow-any-gpu` is for tests on an older GPU.
+
 1. Unzip. 2. `register_openxr_runtime.bat` (asks for administrator rights; moved the folder? run it again). 3. `configure.exe`:
 open the ALVR app on the Vision Pro, select it, **Pair**; check the settings; set the ALVR app's chroma key to the "colour when no
 game runs" (default #00FF00). 4. `VisionALVR.exe`, then start an OpenXR game. Close SteamVR and ALVR's own launcher first (same ports).
