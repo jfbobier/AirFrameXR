@@ -34,7 +34,7 @@ def _local_env():
 _local_env()
 PC = os.environ.get("VISIONALVR_PC", "user@pc")      # the test PC (ssh, key auth): set it in tools/pc.local or the environment
 PC_USER = PC.split("@")[0]
-CLONE = rf"C:\Users\{PC_USER}\vision-alvr"
+CLONE = os.environ.get("VISIONALVR_CLONE", rf"C:\Users\{PC_USER}\vision-alvr")   # the PC's checkout (tools/pc.local)
 INSTALL = os.environ.get("VISIONALVR_INSTALL", r"D:\_VR\VisionALVR")
 LOGS_LOCAL = ROOT / "logs" / "pilot3"
 RESULTS = ROOT / "harness" / "results" / "live"

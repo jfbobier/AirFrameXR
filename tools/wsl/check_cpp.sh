@@ -25,6 +25,10 @@ acc = '    uint32_t GetEncoderBufferCount() const { return m_nEncoderBuffer; }'
 nv = nv.replace(acc, acc + '\n    void* GetSessionHandle() const { return m_hEncoder; }\n    const NV_ENCODE_API_FUNCTION_LIST& GetApi() const { return m_nvenc; }')
 open(out + '/NvEncoder.h', 'w').write(nv)
 for f in ['NvEncoderD3D11.h', 'VideoEncoder.h']: shutil.copy(up + f, out)
+fh = open(up + 'FFR.h').read().replace('\r\n', '\n')
+fh = fh.replace('    ID3D11Texture2D* GetOutputTexture();', '    ID3D11Texture2D* GetOutputTexture();\n    bool CanRenderDirect() const;\n    void RenderTo(ID3D11Texture2D* target);')
+fh = fh.replace('    std::vector<d3d_render_utils::RenderPipeline> mPipelines;', '    std::vector<d3d_render_utils::RenderPipeline> mPipelines;\n    Microsoft::WRL::ComPtr<ID3D11Buffer> mFovBuffer;\n    Microsoft::WRL::ComPtr<ID3D11Texture2D> mComposition;\n    std::map<ID3D11Texture2D*, d3d_render_utils::RenderPipeline> mDirect;').replace('#pragma once', '#pragma once\n#include <map>', 1)
+open(out + '/FFR.h', 'w').write(fh)
 PY
 for f in nvh.cpp bench.cpp simviewer.cpp; do   # (STBI_NO_SIMD below: stb_image.h's cpuid probe trips clang-cl; MSVC builds it as is)
   echo "== nvenc/hostlib/$f"

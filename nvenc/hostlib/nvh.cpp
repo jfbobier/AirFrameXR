@@ -170,7 +170,7 @@ static void seterr(char* err, int n, const char* s) { if (err && n > 0) { strncp
 // through ALVR's foveation warp when it is on), so the periphery gets a higher QP and the center a lower one.
 std::vector<int8_t> g_qpMap;
 static int g_qpCols = 0, g_qpRows = 0, g_qpW = 0, g_qpH = 0; static bool g_qpFoveated = false;
-extern "C" { int8_t* g_nvh_qp_map = nullptr; uint32_t g_nvh_qp_map_size = 0; }
+extern "C" { int8_t* g_nvh_qp_map = nullptr; uint32_t g_nvh_qp_map_size = 0; void* g_nvh_prepared_input = nullptr; }
 
 // the compress shader's output->source mapping for one axis (same as harness/lib.py _fov_f)
 static float foveF(float e, float cs, float sh, float er) {
@@ -545,11 +545,22 @@ double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, ui
     double a = nowMs();
     try {
         ctx->Begin(n->qDisjoint); ctx->End(n->qT0);
+        static const bool zeroCopy = !(getenv("VISIONALVR_ZEROCOPY") && strcmp(getenv("VISIONALVR_ZEROCOPY"), "0") == 0);
+        if (zeroCopy && n->ffr[slot]->CanRenderDirect()) {
+            // zero copy: the foveation pass renders straight into the encoder's next input frame; Transmit skips its copy
+            const NvEncInputFrame* in = n->enc->GetNvEncoder()->GetNextInputFrame();
+            n->ffr[slot]->RenderTo(reinterpret_cast<ID3D11Texture2D*>(in->inputPtr));
+            ctx->End(n->qT1); ctx->End(n->qDisjoint);
+            g_nvh_prepared_input = (void*)in;
+            struct Reset { ~Reset() { g_nvh_prepared_input = nullptr; } } reset;
+            n->enc->Transmit(nullptr, frame_no, ts_ns, force_idr != 0);
+        } else {
         n->ffr[slot]->Render();
         ctx->End(n->qT1); ctx->End(n->qDisjoint);
         // (No CPU wait here to measure queueing: waiting for this pass before Transmit makes its input copy queue behind other
         // GPU work a second time; measured +5.7 ms per frame under the harness's GPU keep-alive load.)
         n->enc->Transmit(n->ffr[slot]->GetOutputTexture(), frame_no, ts_ns, force_idr != 0);
+        }
         // Transmit returns after the packet is out, so the queries are resolved
         D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj{}; UINT64 t0 = 0, t1 = 0;
         if (ctx->GetData(n->qDisjoint, &dj, sizeof(dj), 0) == S_OK && !dj.Disjoint && ctx->GetData(n->qT0, &t0, 8, 0) == S_OK && ctx->GetData(n->qT1, &t1, 8, 0) == S_OK)

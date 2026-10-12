@@ -18,7 +18,7 @@ import live
 
 ROOT = live.ROOT
 PROFILES = ROOT / "harness" / "simrig" / "profiles"
-SIMEXE = "alvr_host_simrig.exe"
+SIMEXE = os.environ.get("VISIONALVR_SIMEXE", "alvr_host_simrig.exe")   # which build to run (A/B: copies next to it)
 
 # knobs are VISIONALVR_SIM_* variables (tools/host/src/simrig.rs); a scenario is a set of them
 SCENARIOS = {
@@ -33,8 +33,9 @@ SCENARIOS = {
 
 
 def host_cmd(rd, env, seconds):
-    lines = ["@echo off"] + [f"set VISIONALVR_SIM_{k}={v}" for k, v in env.items()] + [
-        f'"{live.INSTALL}\\{SIMEXE}" --install-dir "{live.INSTALL}" --shim --simrig {rd}\\out --seconds {seconds + 90} --debug --connect-timeout 30 > {rd}\\host_stdout.txt 2>&1']
+    lines = ["@echo off"] + [f"set VISIONALVR_SIM_{k}={v}" for k, v in env.items() if not k.startswith("ENV:")] \
+        + [f"set {k[4:]}={v}" for k, v in env.items() if k.startswith("ENV:")] + [
+        f'"{live.INSTALL}\\{SIMEXE}" --install-dir "{live.INSTALL}" --shim --simrig {rd}\\out --seconds {seconds + 90} --debug --connect-timeout 30 --report {rd}\\host_report.json > {rd}\\host_stdout.txt 2>&1']
     return lines
 
 
@@ -56,12 +57,12 @@ def kill():
     time.sleep(2)
 
 
-def build():
+def build(copy_as=None):
     live.build("host", simrig=True)
     live.build("shim")
     live.ps(f"""
 $src = '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe'
-Copy-Item $src '{live.INSTALL}\\{SIMEXE}' -Force
+Copy-Item $src '{live.INSTALL}\\{copy_as or SIMEXE}' -Force
 Copy-Item '{live.CLONE}\\src\\VDXR\\bin-shim\\x64\\Release\\LibOVRRT64_1.dll' '{live.INSTALL}\\LibOVRRT64_1.dll' -Force
 Get-Item '{live.INSTALL}\\{SIMEXE}' | Select-Object Name, Length, LastWriteTime | Out-String
 """)
@@ -95,10 +96,20 @@ def run_one(name, seconds, extra):
             time.sleep(5)
             if live.ps(f"Test-Path '{rd}\\out\\viewer_summary.json'").strip() == "True":
                 ok = True
+                # CPU the streamer used (all threads, whole run) before it is stopped; its report is written when it exits by itself
+                cpu = live.ps(f"$p = Get-Process {Path(SIMEXE).stem} -ErrorAction SilentlyContinue | Select -First 1; if ($p) {{ '{{\"cpu_s\": ' + [math]::Round($p.TotalProcessorTime.TotalSeconds,2) + ', \"wall_s\": ' + [math]::Round(((Get-Date) - $p.StartTime).TotalSeconds,2) + '}}' }}")
+                (outdir / "cpu.json").write_text(cpu.strip() or "{}")
+                for _ in range(8):
+                    if live.ps(f"Test-Path '{rd}\\host_report.json'").strip() == "True":
+                        break
+                    time.sleep(2)
                 break
     finally:
         kill()
     live.get_dir(rd.replace("\\", "/"), outdir)
+    newest = live.ps(f"Get-ChildItem '{live.INSTALL}\\logs\\debug' -Directory | Sort Name | Select -Last 1 | ForEach-Object {{ $_.Name }}").strip()
+    if newest:   # the streamer's and the shim's own traces of this run
+        live.get_dir(f"{live.INSTALL}\\logs\\debug\\{newest}".replace("\\", "/"), outdir / "debug")
     if not ok:
         live.log("the viewer did not finish (see host_stdout.txt / probe.log in the results)")
         return 2
@@ -114,7 +125,7 @@ def main(a):
             print(f"{k:12s} {v['note']}")
         return 0
     if a[0] == "build":
-        build()
+        build(a[1] if len(a) > 1 else None)
         return 0
     if a[0] == "run":
         names = a[1].split(",")
@@ -124,6 +135,9 @@ def main(a):
                           ("--predict-ms", "PREDICT_MS"), ("--dump-every", "DUMP_EVERY"), ("--capture", "CAPTURE")):
             if flag in a:
                 extra[key] = a[a.index(flag) + 1]
+        for e in [a[i + 1] for i, x in enumerate(a) if x == "--env"]:   # --env VISIONALVR_SPIN_US=1000: any variable for the streamer
+            k, v = e.split("=", 1)
+            extra["ENV:" + k] = v
         rc = 0
         for n in names:
             rc = max(rc, run_one(n, seconds, extra))

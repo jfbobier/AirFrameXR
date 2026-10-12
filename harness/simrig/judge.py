@@ -69,11 +69,19 @@ def hf(series, w=9):
     return s - sm[:len(s)]
 
 
-def judge(d, thr=None):
+def judge(d, thr=None, skip=150):
     thr = thr or {"hf": 0.04, "p99": 0.15}
     meta, ticks = load(d)
+    ticks = {k: v for k, v in ticks.items() if k >= skip}
+    late = 0
+    tf = Path(d) / "ticks.csv"
+    if tf.exists():   # ticks where the viewer thread itself woke up late (an OS hiccup of the rig, not of the pipeline) are not measurements
+        rows = {int(r["tick"]): float(r.get("late_ms") or 0) for r in csv.DictReader(open(tf))}
+        keep = {k: v for k, v in ticks.items() if rows.get(k, 0) <= 1.0}
+        late = len(ticks) - len(keep)
+        ticks = keep   # the first 1.5 s: the app is still starting (its first frames are irregular)
     tt, res = residuals(meta, ticks)
-    out = {"ticks": len(tt), "reprojected_share": float(np.mean([ticks[k]["reproj"] for k in tt])) if tt else 0}
+    out = {"late_viewer_ticks_dropped": late, "ticks": len(tt), "reprojected_share": float(np.mean([ticks[k]["reproj"] for k in tt])) if tt else 0}
     allr = []
     for eye in (0, 1):
         r = np.array([x for x in res[eye] if x is not None])
@@ -135,7 +143,7 @@ if __name__ == "__main__":
     if "--thresholds" in a:
         thr = {k: float(v) for k, v in (x.split("=") for x in a[a.index("--thresholds") + 1].split(","))}
         thr = {"hf": thr.get("hf", 0.04), "p99": thr.get("p99", 0.15)}
-    out = judge(a[0], thr)
+    out = judge(a[0], thr, int(a[a.index("--skip") + 1]) if "--skip" in a else 150)
     print(json.dumps(out, indent=1))
     if "--json" in a:
         Path(a[a.index("--json") + 1]).write_text(json.dumps(out, indent=1))

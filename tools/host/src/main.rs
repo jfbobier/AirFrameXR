@@ -19,6 +19,7 @@ mod pipeline;
 #[cfg(feature = "simrig")]
 mod simrig;
 mod telemetry;
+mod timing;
 mod vision;
 
 use serde_json::json;
@@ -519,19 +520,9 @@ fn pct_json(v: &mut Vec<f64>, over: &[(&str, f64)]) -> serde_json::Value {
     e
 }
 
-/// Sleeps to just before `t`, then spins (a plain sleep is only ms-accurate).
+/// Waits until `t` (high-resolution timer, then a short spin: timing.rs).
 fn sleep_spin_until(t: Instant) {
-    loop {
-        let left = t.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            break;
-        }
-        if left > Duration::from_micros(1500) {
-            thread::sleep(left - Duration::from_micros(1000));
-        } else {
-            std::hint::spin_loop();
-        }
-    }
+    timing::sleep_until(t);
 }
 
 impl StatsWindow {
@@ -1717,18 +1708,8 @@ fn main() {
             let mut next = Instant::now();
             let mut grid: Option<Instant> = None;
             while !stop.load(Ordering::Relaxed) {
-                // sleep to just before the tick, spin the rest (a plain sleep is only ms-accurate)
-                loop {
-                    let left = next.saturating_duration_since(Instant::now());
-                    if left.is_zero() || stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    if left > Duration::from_micros(1500) {
-                        thread::sleep(left - Duration::from_micros(1000));
-                    } else {
-                        std::hint::spin_loop();
-                    }
-                }
+                // high-resolution timer to just before the tick, spin the rest (timing.rs)
+                timing::sleep_until_or(next, &stop);
                 let now = Instant::now();
                 let nominal = Duration::from_nanos(period_ns.load(Ordering::Relaxed));
                 // ALVR measures "until the next grid point" from its own, slightly later, Instant::now(); waking at now + interval

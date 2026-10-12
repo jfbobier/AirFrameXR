@@ -175,7 +175,7 @@ struct Viewer {
         if (dots) fprintf(dots, "tick,t_s,shown_ts,reproj,yaw_deg,eye,n,x...\n");
         snprintf(path, sizeof path, "%s\\ticks.csv", cfg.out_dir);
         tlog = fopen(path, "w");
-        if (tlog) fprintf(tlog, "tick,fresh,ring,shown_ts,ts_disp,qd_x,qd_y,qd_z,qd_w,qf_x,qf_y,qf_z,qf_w,haveF,queue,app_frame\n");
+        if (tlog) fprintf(tlog, "tick,fresh,ring,shown_ts,ts_disp,qd_x,qd_y,qd_z,qd_w,qf_x,qf_y,qf_z,qf_w,haveF,queue,app_frame,late_ms\n");
         snprintf(path, sizeof path, "%s\\meta.json", cfg.out_dir);
         if (FILE* f = fopen(path, "w")) {
             const float* fv = cfg.fov8;
@@ -344,6 +344,7 @@ struct Viewer {
                     else i++;
                 }
             };
+            const double lateMs = (nvh_qpc_seconds() - tk) * 1e3;   // how late this thread woke up for its tick (an OS scheduling hiccup shows as a wrong display time)
             ingest(nvh_qpc_seconds());
             const double pollEnd = tk + cfg.poll_ms * 1e-3;
             while (queue.empty() && nvh_qpc_seconds() < pollEnd) { Sleep(0); ingest(nvh_qpc_seconds()); }
@@ -374,7 +375,7 @@ struct Viewer {
             ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); ctx->IASetInputLayout(nullptr);
             const float black[4] = { 0, 0, 0, 1 }; ctx->ClearRenderTargetView(rtv, black);
             for (int eye = 0; eye < 2; eye++) drawEye(eye, cur.ring, M, cfg.reproject != 0 && haveF);
-            if (tlog) fprintf(tlog, "%d,%d,%d,%llu,%.0f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%d,%d,%d\n", k, fresh ? 1 : 0, cur.ring, (unsigned long long)cur.ts, tsDisp, qd.x, qd.y, qd.z, qd.w, qf.x, qf.y, qf.z, qf.w, haveF ? 1 : 0, (int)queue.size(), readStamp(cur.ring));
+            if (tlog) fprintf(tlog, "%d,%d,%d,%llu,%.0f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%d,%d,%d,%.3f\n", k, fresh ? 1 : 0, cur.ring, (unsigned long long)cur.ts, tsDisp, qd.x, qd.y, qd.z, qd.w, qf.x, qf.y, qf.z, qf.w, haveF ? 1 : 0, (int)queue.size(), readStamp(cur.ring), lateMs);
             // yaw of the displayed pose (the judge's truth), from the rotation matrix
             const double yawDisp = -std::atan2(-Rd[6], Rd[8]) * 180.0 / 3.14159265358979;   // counted to the right (OpenXR yaw about +Y turns left): the judge's convention
             if (dots) {

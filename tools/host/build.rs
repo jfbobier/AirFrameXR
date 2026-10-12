@@ -27,6 +27,11 @@ fn main() {
     patched.push_str(&tail[..r]);
     patched.push_str("DXGI_FORMAT_R10G10B10A2_UNORM");
     patched.push_str(&tail[r + "DXGI_FORMAT_R8G8B8A8_UNORM".len()..]);
+    // zero-copy input (nvh.cpp): the foveation pass renders straight into the encoder's input texture; its pipeline also makes a shader
+    // resource view of the render target, so the input textures must be shader-readable too.
+    let bind_old = "desc.BindFlags = D3D11_BIND_RENDER_TARGET;";
+    assert!(patched.contains(bind_old), "NvEncoderD3D11 BindFlags anchor not found");
+    let patched = patched.replacen(bind_old, "desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;", 1);
     let patched_path = out.join("NvEncoderD3D11_fix10.cpp");
     fs::write(&patched_path, patched).unwrap();
 
@@ -38,6 +43,32 @@ fn main() {
         "DXGI_FORMAT_R8G8B8A8_UNORM_SRGB",
         "(Settings::Instance().m_use10bitEncoder ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM)",
     );
+    // RenderTo: the same compression pass into a caller-owned texture (the encoder's input frame): no intermediate texture, no copy
+    let a1 = "    ComPtr<ID3D11Buffer> foveatedRenderingBuffer = CreateBuffer(mDevice.Get(), fovVars);";
+    assert!(ffr.contains(a1), "FFR.cpp buffer anchor not found");
+    let mut ffr = ffr.replacen(a1, &format!("{a1}\n    mFovBuffer = foveatedRenderingBuffer;\n    mComposition = compositionTexture;"), 1);
+    ffr.push_str(
+        "\nbool FFR::CanRenderDirect() const { return Settings::Instance().m_enableFoveatedEncoding && !mPipelines.empty(); }\n\
+void FFR::RenderTo(ID3D11Texture2D* target) {\n\
+    auto it = mDirect.find(target);\n\
+    if (it == mDirect.end()) {\n\
+        std::vector<uint8_t> cso(COMPRESS_AXIS_ALIGNED_CSO_PTR, COMPRESS_AXIS_ALIGNED_CSO_PTR + COMPRESS_AXIS_ALIGNED_CSO_LEN);\n\
+        d3d_render_utils::RenderPipeline p(mDevice.Get());\n\
+        p.Initialize({ mComposition.Get() }, mQuadVertexShader.Get(), cso, target, mFovBuffer.Get());\n\
+        it = mDirect.emplace(target, p).first;\n\
+    }\n\
+    it->second.Render();\n\
+}\n",
+    );
+    let ffr_h = read_lf(&up.join("platform/win32/FFR.h"), "read FFR.h");
+    let h1 = "    ID3D11Texture2D* GetOutputTexture();";
+    let h2 = "    std::vector<d3d_render_utils::RenderPipeline> mPipelines;";
+    assert!(ffr_h.contains(h1) && ffr_h.contains(h2), "FFR.h anchors not found");
+    let ffr_h = ffr_h
+        .replacen(h1, &format!("{h1}\n    bool CanRenderDirect() const;\n    void RenderTo(ID3D11Texture2D* target);"), 1)
+        .replacen(h2, &format!("{h2}\n    Microsoft::WRL::ComPtr<ID3D11Buffer> mFovBuffer;\n    Microsoft::WRL::ComPtr<ID3D11Texture2D> mComposition;\n    std::map<ID3D11Texture2D*, d3d_render_utils::RenderPipeline> mDirect;"), 1)
+        .replacen("#pragma once", "#pragma once\n#include <map>", 1);
+    fs::write(out.join("FFR.h"), ffr_h).unwrap();
     let ffr_path = out.join("FFR_fix10.cpp");
     fs::write(&ffr_path, ffr).unwrap();
 
@@ -72,6 +103,10 @@ fn main() {
     let rc_anchor = "    encodeConfig.rcParams.lowDelayKeyFrameScale = 1;\n";
     assert!(enc_cpp.contains(rc_anchor), "lowDelayKeyFrameScale anchor not found");
     let enc_cpp = enc_cpp.replacen(rc_anchor, &format!("{rc_anchor}    if (Settings::Instance().m_qpMapEnabled) {{\n        encodeConfig.rcParams.qpMapMode = NV_ENC_QP_MAP_DELTA;\n    }}\n"), 1);
+    // zero-copy: nvh.cpp may already have rendered into the encoder's next input frame (g_nvh_prepared_input): use it, skip the copy
+    let tx_old = "    const NvEncInputFrame* encoderInputFrame = m_NvNecoder->GetNextInputFrame();\n\n    ID3D11Texture2D* pInputTexture\n        = reinterpret_cast<ID3D11Texture2D*>(encoderInputFrame->inputPtr);\n    m_pD3DRender->GetContext()->CopyResource(pInputTexture, pTexture);";
+    assert!(enc_cpp.contains(tx_old), "Transmit input anchor not found");
+    let enc_cpp = enc_cpp.replacen(tx_old, "    const NvEncInputFrame* encoderInputFrame = g_nvh_prepared_input ? (const NvEncInputFrame*)g_nvh_prepared_input : m_NvNecoder->GetNextInputFrame();\n\n    ID3D11Texture2D* pInputTexture\n        = reinterpret_cast<ID3D11Texture2D*>(encoderInputFrame->inputPtr);\n    if (!g_nvh_prepared_input) {\n        m_pD3DRender->GetContext()->CopyResource(pInputTexture, pTexture);\n    }", 1);
     let idr_anchor = "    m_NvNecoder->EncodeFrame(vPacket, &picParams);";
     assert!(enc_cpp.contains(idr_anchor), "EncodeFrame anchor not found");
     let enc_cpp = enc_cpp.replacen(idr_anchor, "    if (g_nvh_qp_map && Settings::Instance().m_qpMapEnabled) {\n        picParams.qpDeltaMap = g_nvh_qp_map;\n        picParams.qpDeltaMapSize = g_nvh_qp_map_size;\n    }\n    if (g_nvh_recon_ptr) {\n        picParams.outputReconBuffer = g_nvh_recon_ptr;\n        picParams.encodePicFlags |= NV_ENC_PIC_FLAG_OUTPUT_RECON_FRAME;\n    }\n    m_NvNecoder->EncodeFrame(vPacket, &picParams);", 1);
@@ -79,7 +114,7 @@ fn main() {
     let enc_cpp = enc_cpp.replacen(anchor, &format!("    initializeParams.enableReconFrameOutput = g_nvh_recon_enable ? 1 : 0;\n{anchor}"), 1);
     let inc_anchor = "#include \"VideoEncoderNVENC.h\"";
     assert!(enc_cpp.contains(inc_anchor), "include anchor not found");
-    let enc_cpp = enc_cpp.replacen(inc_anchor, &format!("{inc_anchor}\n#include <cstdio>\n#include <string>\nextern \"C\" {{ extern int8_t* g_nvh_qp_map; extern uint32_t g_nvh_qp_map_size; extern void* g_nvh_recon_ptr; extern int g_nvh_recon_enable; }}"), 1);
+    let enc_cpp = enc_cpp.replacen(inc_anchor, &format!("{inc_anchor}\n#include <cstdio>\n#include <string>\nextern \"C\" {{ extern int8_t* g_nvh_qp_map; extern uint32_t g_nvh_qp_map_size; extern void* g_nvh_recon_ptr; extern int g_nvh_recon_enable; extern void* g_nvh_prepared_input; }}"), 1);
     let mut enc_cpp = enc_cpp;
     enc_cpp.push_str(DESCRIBE_CPP);
     enc_cpp.push_str("\nint VideoEncoderNVENC::GetEncoderEngineCount() {\n    return m_NvNecoder ? m_NvNecoder->GetCapabilityValue(NV_ENC_CODEC_HEVC_GUID, NV_ENC_CAPS_NUM_ENCODER_ENGINES) : 0;\n}\n");
