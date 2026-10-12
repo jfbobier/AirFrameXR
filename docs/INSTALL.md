@@ -40,6 +40,7 @@ VisionALVR.exe refuses to stream on GPUs older than RTX 40 (NVML architecture < 
   PC speakers, stream protocol (UDP/TCP), packet size, haptics strength. ALVR's controller section IS used (we deliver ALVR's own
   Quest/Touch emulation: button mapping, haptics curve, controller offsets), as is its network section.
 - VisionALVR (visionalvr.json): encode profile (`foveated` or `full-split`), idle colour, debug default, display gamma. The NVENC
+- **Latency mode** (`config\visionalvr.json`, `"video": {"latency_mode": "smooth" | "low" | "auto"}`): `smooth` (default) keeps a one-frame buffer, fewest repeated pictures, about one display period more latency; `low` sends each frame at once with no buffer (lowest latency, more repeated pictures when the game is uneven); `auto` sizes a small delay from how late the game's frames are and lowers it while the game is steady. `auto` is experimental: restart VisionALVR.exe after changing it.
   encoder parameters are fixed (`tools/host/src/nvidia_profile.rs`).
 - Not used: SteamVR/OpenVR options, color correction / sharpening (ALVR compositor features we bypass), wired/ADB.
 
