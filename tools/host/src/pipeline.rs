@@ -279,6 +279,14 @@ impl Pipeline {
         self.ipc as *mut std::ffi::c_void
     }
 
+    /// `aged` pick: how long the older of two waiting frames may have waited (VISIONALVR_PICK_AGE_MS, default 0.7 of a display period)
+    fn pick_age(&self) -> Duration {
+        match std::env::var("VISIONALVR_PICK_AGE_MS").ok().and_then(|v| v.parse::<f64>().ok()) {
+            Some(ms) => Duration::from_secs_f64(ms / 1000.0),
+            None => self.period().mul_f64(0.7),
+        }
+    }
+
     fn period(&self) -> Duration {
         Duration::from_nanos(self.cfg.period_ns.load(Ordering::Relaxed).max(1_000_000))
     }
@@ -391,6 +399,10 @@ impl Pipeline {
                 && match self.pick_policy.as_str() {
                     "newest" => false,
                     "adaptive" => !self.last_empty.load(Ordering::Relaxed),
+                    // oldest unless it has already waited long: a frame that waits more than a fraction of a period means a standing queue
+                    // (the app delivers as fast as the display consumes: the queue never drains and every frame is a period late), so drop
+                    // it for the newer one. A fresh bunch (a late frame followed by its catch-up frame) still goes out in order.
+                    "aged" => q.front().map(|f| boundary.saturating_duration_since(f.arrival) < self.pick_age()).unwrap_or(true),
                     _ => true,
                 };
             let a = if take_older { q.pop_front() } else { q.pop_back() };
