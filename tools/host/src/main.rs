@@ -338,7 +338,7 @@ fn parse_args() -> Result<Args, String> {
             a.profile_explicit = true;
         }
     }
-    if !a.live && a.file.as_os_str().is_empty() && !a.system_check && !a.bench_quality {
+    if !a.live && a.file.as_os_str().is_empty() && !a.system_check && !a.bench_quality && a.discover.is_none() {
         return Err("--file <annexb.hevc> is required unless --live".into());
     }
     Ok(a)
