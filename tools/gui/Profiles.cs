@@ -174,6 +174,85 @@ namespace VisionALVR
             return dst;
         }
 
+        // ---------------------------------------------------------------------------------------------------------------- export
+        static readonly string[] ExportSkip = { "client_connections", "openvr_config", "server_version", "gui_collapsed", "session_settings.extra.capture", "session_settings.extra.steamvr_launcher", "game_audio.content.device", "audio.microphone.content.devices" };
+        static readonly string[] StreamKeys = { "session_settings.video.bitrate.mode", "session_settings.video.preferred_fps", "session_settings.video.transcoding_view_resolution", "session_settings.video.emulated_headset_view_resolution",
+                                                "session_settings.video.foveated_encoding.enabled", "session_settings.connection.stream_protocol.variant" };
+
+        static void Flatten(object o, string path, Dictionary<string, object> into)
+        {
+            if (o is Dictionary<string, object> d) { foreach (var kv in d) Flatten(kv.Value, path.Length == 0 ? kv.Key : path + "." + kv.Key, into); }
+            else into[path] = o;
+        }
+
+        /// The ALVR settings that differ from the shipped defaults (config\session.default.json), minus machine-specific ones and the ones the stream/network
+        /// sections already carry: what this user tuned, as dotted path -> value.
+        public static Dictionary<string, object> TunedSettings(Dictionary<string, object> session, Dictionary<string, object> defaults)
+        {
+            var a = new Dictionary<string, object>(); var b = new Dictionary<string, object>();
+            Flatten(session, "", a); Flatten(defaults, "", b);
+            var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var res = new Dictionary<string, object>();
+            foreach (var kv in a.OrderBy(x => x.Key, StringComparer.Ordinal))
+            {
+                if (ExportSkip.Any(x => kv.Key.Contains(x)) || StreamKeys.Any(x => kv.Key.StartsWith(x))) continue;
+                if (b.TryGetValue(kv.Key, out var dv) && ser.Serialize(dv) == ser.Serialize(kv.Value)) continue;
+                res[kv.Key] = kv.Value;
+            }
+            return res;
+        }
+
+        /// A shareable profile from what is configured now (the saved session.json / visionalvr.json), what ALVR declared about the headset at the handshake and the
+        /// numbers of the tests that ran. `author` and `networkLabel` are the user's words.
+        public static Dictionary<string, object> BuildExport(Handshake hs, Results r, AppSettings settings, string author, string networkLabel)
+        {
+            var s = Session.Load();
+            double N(string k, double d) => Json.Num(s, k, d);
+            const string V = "session_settings.video.";
+            int w = (int)N(V + "transcoding_view_resolution.Absolute.width", 3552), h = (int)N(V + "transcoding_view_resolution.Absolute.height.content", 3200);
+            double fps = N(V + "preferred_fps", 90), mbps = N(V + "bitrate.mode.ConstantMbps", 150);
+            bool fov = Json.Bool(s, V + "foveated_encoding.enabled", false);
+            var proto = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp").ToLowerInvariant();
+            var slug = new string((hs.DisplayName.Length > 0 ? hs.DisplayName : "headset").ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
+            var rates = hs.Rates.Select(x => (object)x).ToList();
+            var verified = new List<object>();
+            if (r != null && (r.DisplayedFps > 0 || r.EncodeP95 > 0))
+            {
+                var bits = new List<string>();
+                if (r.DisplayedFps > 0) bits.Add($"{r.DisplayedFps:0} of {fps:0} fps shown");
+                if (r.TotalMs > 0) bits.Add($"total latency {r.TotalMs:0} ms (ALVR's measure: encode {r.EncoderMs:0}, network {r.NetworkMs:0}, decode {r.DecodeMs:0})");
+                if (r.EncodeP95 > 0) bits.Add($"encode p95 {r.EncodeP95:0.0} ms for {r.EncW}x{r.EncH}");
+                if (r.LossPerS >= 0 && r.CleanMbps > 0) bits.Add($"{r.LossPerS:0.0} packets lost per second at {mbps:0} Mbps");
+                if (r.Slices > 0) bits.Add(r.Engines >= 2 && r.Slices >= 1.5 ? $"split encoding engaged ({r.Slices:0.#} strips on {r.Engines} engines)" : $"split encoding not engaged ({r.Engines} engine(s))");
+                verified.Add(new Dictionary<string, object> {
+                    ["gpu"] = string.IsNullOrEmpty(r.GpuName) ? "" : $"{r.GpuName}, driver {r.Driver}", ["client"] = $"{hs.DisplayName} ({hs.Hostname})",
+                    ["date"] = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ["result"] = string.Join("; ", bits) });
+            }
+            var export = new Dictionary<string, object>
+            {
+                ["_comment"] = "VisionALVR headset profile exported by the setup wizard. Share this file; to use it, Import profile... in the wizard or drop it into config\\profiles. See docs/HMD_PROFILES.md.",
+                ["schema"] = 1,
+                ["id"] = slug + (author.Length > 0 ? "-" + new string(author.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-') : ""),
+                ["display_name"] = hs.DisplayName,
+                ["author"] = author,
+                ["match"] = new Dictionary<string, object> { ["name_contains"] = new List<object> { hs.DisplayName }, ["default_view_resolution"] = new List<object> { hs.PanelW, hs.PanelH }, ["supported_refresh_rates_include"] = rates },
+                ["stream"] = new Dictionary<string, object> {
+                    ["eye_resolution"] = new List<object> { w, h }, ["fps"] = fps, ["codec"] = "hevc", ["bit_depth"] = Json.Bool(s, V + "encoder_config.use_10bit", hs.Enc10) ? 10 : 8,
+                    ["full_range"] = hs.PreferFull, ["encoding_gamma"] = hs.Gamma, ["foveated"] = fov, ["split_encode"] = !fov && settings.EncodeProfile == "full-split" ? 3 : 0, ["protocol"] = proto },
+                ["network"] = new Dictionary<string, object> { ["default"] = "mine", ["variants"] = new List<object> { new Dictionary<string, object> { ["id"] = "mine", ["label"] = networkLabel.Length > 0 ? networkLabel : "the network this was tested on", ["bitrate_mbps"] = mbps } } },
+                ["session_overrides"] = TunedSettings(s, Json.Load(Paths.SessionDefault)),
+                ["notes"] = new List<object>(),
+                ["verified"] = verified,
+                ["exported_by"] = new Dictionary<string, object> {
+                    ["visionalvr"] = Version.Text, ["date"] = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    ["alvr_declared"] = new Dictionary<string, object> {
+                        ["display_name"] = hs.DisplayName, ["hostname"] = hs.Hostname, ["panel"] = new List<object> { hs.PanelW, hs.PanelH }, ["refresh_rates"] = rates,
+                        ["foveated_encoding"] = hs.Foveation, ["encoder_10_bits"] = hs.Enc10, ["encoder_high_profile"] = hs.EncHigh, ["encoder_av1"] = hs.EncAv1,
+                        ["prefer_10bit"] = hs.Prefer10, ["prefer_full_range"] = hs.PreferFull, ["prefer_hdr"] = hs.PreferHdr, ["preferred_encoding_gamma"] = hs.Gamma, ["microphone_sample_rate"] = hs.MicRate } },
+            };
+            return export;
+        }
+
         /// The most specific profile whose match fields all hold for this handshake (null: none, the wizard falls back to the capabilities alone).
         public static HmdProfile Match(Handshake hs, List<HmdProfile> all)
         {

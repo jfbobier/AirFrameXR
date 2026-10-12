@@ -27,6 +27,15 @@ against every profile it finds (`profiles\` shipped with the package, then `conf
 4. **Save.** The values go into `config\session.json` and `config\visionalvr.json`, then the profile's `session_overrides` are written into
    `session.json`.
 
+## Exporting yours
+
+At the end of the wizard (the configuration page) **Export profile...** saves the configuration you ended up with as a profile file, ready to share:
+the headset's identity exactly as ALVR declared it at the handshake (`exported_by.alvr_declared`: name, hostname, panel, refresh rates, codec
+capabilities, gamma), the stream settings, the ALVR settings you changed from the shipped defaults (`session_overrides`; machine-specific ones such as
+audio device names are left out), your bitrate with a one-line description of your network, and the numbers of the verdict (`verified`: GPU, frames
+shown, latency, packet loss, encode time, whether split encoding engaged). You can type your name and the network description first; edit the
+file by hand (notes, more network variants) before sharing if you like.
+
 ## Making or editing a profile
 
 Copy `profiles\template.profile.json`, rename it `<headset>.profile.json`, fill in values **you have run**, and share it. Keys (all optional except

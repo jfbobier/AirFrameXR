@@ -630,7 +630,36 @@ namespace VisionALVR
             settingsPanel.Load();
             if (autoconfig && proposal != null) settingsPanel.Prefill(proposal);
             p.Controls.Add(settingsPanel);
+            // share what you ended up with: a profile file with everything ALVR declared about the headset, these settings and the verdict's numbers
+            p.RowCount = 4;
+            p.RowStyles.Clear();
+            p.RowStyles.Add(new RowStyle(SizeType.AutoSize)); p.RowStyles.Add(new RowStyle(SizeType.AutoSize)); p.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); p.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var exp = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            var authorBox = new TextBox { Width = 130, Text = "" };
+            var netBox = new TextBox { Width = 230, Text = "" };
+            var export = new Button { Text = "Export profile...", AutoSize = true };
+            export.Click += (s, e) => ExportProfile(authorBox.Text.Trim(), netBox.Text.Trim());
+            exp.Controls.Add(export);
+            exp.Controls.Add(Ui.Line("your name:")); exp.Controls.Add(authorBox);
+            exp.Controls.Add(Ui.Line("your network (e.g. Wi-Fi 6E 6 GHz, same room):")); exp.Controls.Add(netBox);
+            p.Controls.Add(exp);
             return p;
+        }
+
+        /// Saves the settings, then writes a shareable profile (see docs/HMD_PROFILES.md) next to the user's choice of file name.
+        void ExportProfile(string author, string networkLabel)
+        {
+            string err = null;
+            if (settingsPanel == null || !settingsPanel.Save(out err)) { MessageBox.Show(this, err ?? "Cannot save the settings first.", "Export profile"); return; }
+            var data = HmdProfiles.BuildExport(hs, ctx?.R, settings, author, networkLabel);
+            using (var dlg = new SaveFileDialog { Title = "Export this configuration as a profile", Filter = "VisionALVR profile (*.json)|*.json", FileName = ((string)data["id"]) + ".profile.json", OverwritePrompt = true })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                try { Json.Save(dlg.FileName, data); }
+                catch (Exception e) { MessageBox.Show(this, "Cannot write the file: " + e.Message, "Export profile"); return; }
+                Log.Write("INFO", $"profile exported to {dlg.FileName}");
+                MessageBox.Show(this, $"Saved: {dlg.FileName}\n\nShare this file (for example on the VisionALVR Discord). Whoever imports it sees what ALVR declared about your headset and is warned if theirs differs.", "Export profile");
+            }
         }
 
         bool SaveConfig()
