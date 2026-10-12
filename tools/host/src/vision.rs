@@ -43,7 +43,7 @@ pub struct Settings {
     pub predict_missing_head: Option<bool>,
     pub intake_depth: Option<i64>,
     pub pick_policy: Option<String>,
-    /// "smooth" (default: one-frame buffer, fewest repeated frames) | "low" (send at once, newest frame, no buffer) | "auto" (experimental, not recommended: a delay steered by the app's lateness, pipeline.rs; adds latency without fewer repeats in the lab)
+    /// "low" (default: send at once, the newest frame, no buffer: lowest latency) | "smooth" (one-frame buffer, fewest repeated frames) | "auto" (experimental, not recommended, pipeline.rs)
     pub latency_mode: Option<String>,
     /// slide the host's display grid so frames arrive just before the headset's tick (phase.rs); default on
     pub phase_lock: Option<bool>,

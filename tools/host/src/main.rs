@@ -393,9 +393,11 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
         }
     }
     phase::configure(st.phase_lock.unwrap_or(true));
-    match a.latency_mode.clone().or_else(|| st.latency_mode.clone()).as_deref() {
+    // default: low (no frame buffer, the newest frame, sent at once): the root causes of the old trembling are fixed, the buffer is no longer needed
+    let latency_mode = a.latency_mode.clone().or_else(|| st.latency_mode.clone()).unwrap_or_else(|| "low".to_string());
+    match Some(latency_mode.as_str()) {
         Some("low") | Some("auto") => {
-            let auto = a.latency_mode.clone().or_else(|| st.latency_mode.clone()).as_deref() == Some("auto");
+            let auto = latency_mode == "auto";
             if !a.send_pacing_explicit && st.send_pacing.is_none() {
                 a.send_pacing = pipeline::SendPacing::Asap;
             }
