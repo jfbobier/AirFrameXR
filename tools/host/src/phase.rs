@@ -1,6 +1,7 @@
 //! Phase lock to the headset's display clock.
 //!
-//! The headset reports, for every frame it displayed, how long the decoded frame waited for its display tick (`vsync_queue`). Together with the
+//! The headset reports, for every frame it displayed, how long the decoded frame waited for its render tick (`decoder_queue`: decoded -> the
+//! compositor starts on it; the visionOS client renders once per display tick, a fixed lead before the vsync, so `vsync_queue`, the rest, is constant). Together with the
 //! host's own display period that gives the phase of our frames' arrival relative to the headset's ticks: a frame that arrives just after a tick
 //! waits almost a whole period (latency), one that arrives just before it risks missing it (a repeated picture). Without a lock the phase is
 //! whatever the connection start happened to produce and drifts with every clock difference.
@@ -58,9 +59,9 @@ pub fn stats() -> (f64, u64) {
     STATE.lock().as_ref().map(|s| (s.total_ms, s.corrections)).unwrap_or((0.0, 0))
 }
 
-/// One headset report: the frame waited `vsync_queue_ms` for its tick.
-pub fn observe(vsync_queue_ms: f64) {
-    if !enabled() || !vsync_queue_ms.is_finite() {
+/// One headset report: the decoded frame waited `queue_ms` for the headset's render tick.
+pub fn observe(queue_ms: f64) {
+    if !enabled() || !queue_ms.is_finite() {
         return;
     }
     let period_ms = PERIOD_NS.load(Ordering::Relaxed) as f64 / 1e6;
@@ -71,7 +72,7 @@ pub fn observe(vsync_queue_ms: f64) {
         s.ignore -= 1;
         return;
     }
-    s.phases_ms.push(vsync_queue_ms.rem_euclid(period_ms));
+    s.phases_ms.push(queue_ms.rem_euclid(period_ms));
     if s.phases_ms.len() < 40 || s.last.elapsed().as_millis() < 500 {
         return;
     }

@@ -215,7 +215,7 @@ impl log::Log for AlvrLogger {
         if let Some(inner) = msg.strip_prefix("{\"va_client_stats\":").and_then(|s| s.strip_suffix('}')) {
             if let Ok(v) = serde_json::from_str::<Value>(inner) {
                 let ms = |k: &str| v[k].as_f64().unwrap_or(0.0) / 1000.0;
-                crate::phase::observe(ms("vsync_queue_us"));   // the phase lock's only input
+                crate::phase::observe(ms("decoder_queue_us"));   // the phase lock's only input: how long the decoded frame waited for the headset's render tick
                 csv("client_frames.csv",
                     "t_recv,ts_ns,frame_interval_ms,decode_ms,decoder_queue_ms,client_comp_ms,vsync_queue_ms,total_ms",
                     &format!("{:.6},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}", qpc_now(), v["ts"].as_u64().unwrap_or(0), ms("frame_interval_us"),
