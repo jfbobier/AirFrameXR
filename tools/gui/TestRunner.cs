@@ -218,7 +218,7 @@ namespace VisionALVR
                     var r = ctx.R;
                     r.TotalMs = total / w; r.GameMs = game / w; r.EncoderMs = enc / w; r.NetworkMs = net / w; r.DecodeMs = dec / w; r.DecoderQueueMs = dq / w; r.VsyncQueueMs = vq / w;
                     r.ClientFps = cf / w; r.DisplayedFps = df / w; r.StreamedMbps = mbps / w;
-                    if (Reference.Latency(r.TotalMs) == Rating.Poor) st.Warn();
+                    if (Reference.Latency(r.TotalMs, Targets.For(Math.Max(1, r.EncW), Math.Max(1, r.EncH), ctx.Fps)) == Rating.Poor) st.Warn();
                     return $"latency {r.TotalMs:0.0} ms (encode {r.EncoderMs:0.0}, network {r.NetworkMs:0.0}, decode {r.DecodeMs:0.0}, headset queues {r.DecoderQueueMs + r.VsyncQueueMs:0.0}), {r.DisplayedFps:0} fps shown";
                 },
             });

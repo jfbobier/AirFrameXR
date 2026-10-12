@@ -89,3 +89,17 @@ It started as a benchmark that informs a configuration; it should become a wizar
 - The reference values for step 4 are the one real unknown (see above).
 - Laptops: GPU clocks and battery change encoder results; keep the existing clock-stability warning and show it in step 4.
 - Keep the old three-tab configure.exe reachable (`--advanced`) until the wizard has been used on real headsets.
+
+## The verdicts (rules of thumb, 2026-10-12)
+Step 4 judges the measurements against targets scaled to the stream that is sent; they come from forum guidance and ALVR's documentation, not from
+our own lab, and say whether a setup is likely fine:
+| Item | Rule | Source |
+|---|---|---|
+| bitrate | about 0.13 bits per encoded pixel per frame as the minimum, 0.18 comfortable (HEVC). Foveated encoding is measured on the encoded size. Forum guidance of ~200 Mbps for 2 x 4K at 90 Hz and ALVR's 100-150 Mbps HEVC for a Quest-class stream both come to ~0.13 | user's forum notes, [ALVR settings tutorial](https://github.com/alvr-org/ALVR/wiki/Settings-tutorial) |
+| codec | HEVC 10-bit; H.264 needs 3-4x the bitrate (400-500 Mbps vs 100-150) and is never recommended; AV1 only on newest GPUs and on Quest 3 (and newer Vision Pro chips); VisionALVR encodes HEVC today | ALVR docs, Meta developer media guidance |
+| encoder | 5-10 ms per frame, and under 90 % of the frame time | forum guidance |
+| network / decode | about 10 ms / 5-8 ms at high bitrates | forum guidance, Virtual Desktop developer comments on decode time |
+| Wi-Fi | first Vision Pro (M2): Wi-Fi 6 on 5 GHz only (no 6 GHz), 160 MHz channel; Quest 3: 6 GHz; Quest 2: Wi-Fi 6 / 5 GHz; PC on Ethernet | Apple specs / FCC filing, ALVR docs |
+Per-headset profiles (HeadsetProfile in tools/gui/Reference.cs): Vision Pro (tuned), Quest 3, Quest 2 / Pro, generic. Not found in forums: an authoritative
+Vision Pro bitrate or millisecond targets for the network; those stay rules of thumb until the lab comparisons give measured ones.
+Measured on the real Vision Pro (M2) link: about 360 Mbps carried cleanly.

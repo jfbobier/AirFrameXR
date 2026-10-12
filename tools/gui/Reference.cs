@@ -16,6 +16,7 @@ namespace VisionALVR
         public bool Foveation = true, EncHigh = true, Enc10 = true, EncAv1 = false, Prefer10 = true, PreferFull = true, PreferHdr = false;
         public double Gamma = 1.0;
         public bool FromHeadset;   // false: the defaults of a Vision Pro (nothing was received)
+        public HeadsetProfile Profile => HeadsetProfile.From(this);
 
         static double D(object o) { try { return Convert.ToDouble(o, CultureInfo.InvariantCulture); } catch { return 0; } }
         static bool B(Dictionary<string, object> d, string k, bool def) => d.TryGetValue(k, out var v) && v is bool b ? b : def;
@@ -44,20 +45,73 @@ namespace VisionALVR
         public string Vendor => IsVisionPro ? "Apple" : (DisplayName.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0 ? "Meta" : "unknown");
     }
 
+    /// Per-headset rules of thumb (ALVR's docs and settings guide, forum guidance; see docs/CONFIGURE_WIZARD.md for the sources).
+    public class HeadsetProfile
+    {
+        public string Family = "generic";            // avp | quest3 | quest2 | generic
+        public string Label = "unknown headset";
+        public string CodecAdvice = "HEVC (H.265), 10-bit";
+        public string WifiAdvice = "5 GHz or 6 GHz Wi-Fi, a wide channel, the PC on Ethernet";
+        public bool Tuned;
+
+        public static HeadsetProfile From(Handshake h)
+        {
+            var n = (h.DisplayName ?? "") + " " + (h.Hostname ?? "");
+            if (h.IsVisionPro)
+                return new HeadsetProfile
+                {
+                    Family = "avp", Label = "Apple Vision Pro", Tuned = true,
+                    CodecAdvice = h.EncAv1 ? "HEVC 10-bit. Your headset also decodes AV1 (newer chip): VisionALVR encodes HEVC today. H.264 is never recommended."
+                                           : "HEVC 10-bit (strongly recommended on the M2 Vision Pro; it has no AV1 decoder; H.264 is never recommended)",
+                    WifiAdvice = "the first Vision Pro (M2) has Wi-Fi 6 on 5 GHz only (no 6 GHz): a Wi-Fi 6 router on 5 GHz with a 160 MHz channel, close to the headset, the PC on Ethernet; newer models can also use 6 GHz",
+                };
+            if (System.Text.RegularExpressions.Regex.IsMatch(n, @"Quest\s*3", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return new HeadsetProfile
+                {
+                    Family = "quest3", Label = "Meta Quest 3",
+                    CodecAdvice = "HEVC 10-bit (AV1 also works on the Quest 3 with an RTX 40 GPU: VisionALVR encodes HEVC today; H.264 needs 3-4x the bitrate)",
+                    WifiAdvice = "Wi-Fi 6E on the 6 GHz band, close to the headset, the PC on Ethernet",
+                };
+            if (n.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0)
+                return new HeadsetProfile
+                {
+                    Family = "quest2", Label = "Meta Quest 2 / Pro",
+                    CodecAdvice = "HEVC 10-bit (no AV1 on this headset; H.264 needs 3-4x the bitrate)",
+                    WifiAdvice = "Wi-Fi 6 or 5 GHz Wi-Fi 5 with an 80-160 MHz channel, close to the headset, the PC on Ethernet",
+                };
+            return new HeadsetProfile { Label = string.IsNullOrEmpty(h.DisplayName) ? "unknown headset" : h.DisplayName };
+        }
+    }
+
+    /// The numbers a setup is judged against: rules of thumb scaled to the stream being sent.
+    ///  bitrate: bits per encoded pixel per frame. Forum guidance of about 200 Mbps for 2 x 4K at 90 Hz (and ALVR's own 100-150 Mbps HEVC for a
+    ///  Quest-class stream) both come to about 0.13; 0.18 is the comfortable value. Foveated encoding is measured on the encoded size (what is sent).
+    ///  encode time: 5-10 ms is the usual budget; network about 10 ms; decode 5-8 ms at high bitrates.
+    public class Targets
+    {
+        public const double MinBpp = 0.13, GoodBpp = 0.18;
+        public double MinMbps, GoodMbps, FrameMs;
+        public double EncodeGoodMs = 6, EncodeOkMs = 10, NetworkGoodMs = 10, NetworkOkMs = 20, DecodeGoodMs = 8, DecodeOkMs = 14, LatencyGoodMs = 50, LatencyOkMs = 80;
+
+        public static Targets For(int encW, int encH, double fps)
+        {
+            var t = new Targets { FrameMs = 1000.0 / Math.Max(1, fps) };
+            var pix = (double)Math.Max(1, encW) * Math.Max(1, encH) * Math.Max(1, fps);
+            t.MinMbps = MinBpp * pix / 1e6;
+            t.GoodMbps = GoodBpp * pix / 1e6;
+            return t;
+        }
+    }
+
     public enum Rating { Unknown, Good, Ok, Poor }
 
-    /// Provisional reference values (the final ones come from the lab comparisons with stock ALVR + SteamVR, see docs/CONFIGURE_WIZARD.md).
-    /// `bench\reference.json` next to configure.exe overrides any of them (same key names).
+    /// Rules of thumb that do not depend on the stream (the ones that do are in Targets). `bench\reference.json` next to configure.exe overrides any of them.
     public static class Reference
     {
         static readonly Dictionary<string, double> Defaults = new Dictionary<string, double>
         {
-            ["encode_good"] = 0.70, ["encode_ok"] = 0.90,         // encode p95 as a share of the frame time
-            ["bitrate_good_mbps"] = 200, ["bitrate_ok_mbps"] = 100,
+            ["encode_good"] = 0.70, ["encode_ok"] = 0.90,         // encode p95 as a share of the frame time (with the 5-10 ms rule, Targets)
             ["loss_ok_per_s"] = 1.0,
-            ["latency_good_ms"] = 45, ["latency_ok_ms"] = 70,      // ALVR's total pipeline latency
-            ["decode_good_ms"] = 8, ["decode_ok_ms"] = 14,
-            ["network_good_ms"] = 12, ["network_ok_ms"] = 25,
             ["fps_good_share"] = 0.97, ["fps_ok_share"] = 0.90,    // displayed fps / refresh rate
         };
         static Dictionary<string, double> table;
@@ -78,12 +132,18 @@ namespace VisionALVR
             return table.TryGetValue(k, out var v) ? v : 0;
         }
 
-        public static Rating EncodeBudget(double p95, double budget) => budget <= 0 || p95 <= 0 ? Rating.Unknown : p95 < Get("encode_good") * budget ? Rating.Good : p95 < Get("encode_ok") * budget ? Rating.Ok : Rating.Poor;
-        public static Rating Bitrate(double clean) => clean <= 0 ? Rating.Unknown : clean >= Get("bitrate_good_mbps") ? Rating.Good : clean >= Get("bitrate_ok_mbps") ? Rating.Ok : Rating.Poor;
+        public static Rating EncodeBudget(double p95, double frameMs, Targets t)
+        {
+            if (p95 <= 0 || frameMs <= 0) return Rating.Unknown;
+            var byTime = p95 < Get("encode_good") * frameMs ? Rating.Good : p95 < Get("encode_ok") * frameMs ? Rating.Ok : Rating.Poor;   // share of the frame time
+            var byRule = p95 <= t.EncodeGoodMs ? Rating.Good : p95 <= t.EncodeOkMs ? Rating.Ok : Rating.Poor;                              // the 5-10 ms rule of thumb
+            return (Rating)Math.Max((int)byTime, (int)byRule);
+        }
+        public static Rating Bitrate(double clean, Targets t) => clean <= 0 ? Rating.Unknown : clean >= t.GoodMbps ? Rating.Good : clean >= t.MinMbps ? Rating.Ok : Rating.Poor;
         public static Rating Loss(double perS) => perS < 0 ? Rating.Unknown : perS <= 0.01 ? Rating.Good : perS <= Get("loss_ok_per_s") ? Rating.Ok : Rating.Poor;
-        public static Rating Latency(double ms) => ms <= 0 ? Rating.Unknown : ms <= Get("latency_good_ms") ? Rating.Good : ms <= Get("latency_ok_ms") ? Rating.Ok : Rating.Poor;
-        public static Rating Decode(double ms) => ms <= 0 ? Rating.Unknown : ms <= Get("decode_good_ms") ? Rating.Good : ms <= Get("decode_ok_ms") ? Rating.Ok : Rating.Poor;
-        public static Rating Network(double ms) => ms <= 0 ? Rating.Unknown : ms <= Get("network_good_ms") ? Rating.Good : ms <= Get("network_ok_ms") ? Rating.Ok : Rating.Poor;
+        public static Rating Latency(double ms, Targets t) => ms <= 0 ? Rating.Unknown : ms <= t.LatencyGoodMs ? Rating.Good : ms <= t.LatencyOkMs ? Rating.Ok : Rating.Poor;
+        public static Rating Decode(double ms, Targets t) => ms <= 0 ? Rating.Unknown : ms <= t.DecodeGoodMs ? Rating.Good : ms <= t.DecodeOkMs ? Rating.Ok : Rating.Poor;
+        public static Rating Network(double ms, Targets t) => ms <= 0 ? Rating.Unknown : ms <= t.NetworkGoodMs ? Rating.Good : ms <= t.NetworkOkMs ? Rating.Ok : Rating.Poor;
         public static Rating FpsShare(double share) => share <= 0 ? Rating.Unknown : share >= Get("fps_good_share") ? Rating.Good : share >= Get("fps_ok_share") ? Rating.Ok : Rating.Poor;
     }
 
@@ -141,10 +201,21 @@ namespace VisionALVR
             p.why["resolution"] = share >= 0.999
                 ? $"the headset's panel resolution ({hs.PanelW} x {hs.PanelH} per eye): the encoder keeps up ({r.EncodeP95:0.0} ms of {budget:0.0} ms)"
                 : $"scaled to {share * 100:0}% of the panel: the encoder needs {r.EncodeP95:0.0} ms at full size, the frame time is {budget:0.0} ms (estimate: encode time follows the pixel count)";
-            // bitrate: the network test's clean step, else a safe default
-            if (r.CleanMbps > 0) { p.BitrateMbps = Math.Max(30, Math.Min(1000, r.CleanMbps)); p.why["bitrate"] = $"{r.CleanMbps:0} Mbps: the highest rate your link carried cleanly in the network test, minus a 10% margin"; }
-            else { p.BitrateMbps = 150; p.why["bitrate"] = "150 Mbps: a safe default (the network test did not run or no step passed)"; }
+            // bitrate: twice the rule-of-thumb target for the stream that is sent (the comfortable value with headroom), within what the link carried cleanly
+            var ew = r.EncW > 0 ? r.EncW : (int)(p.EyeW * 2 * (hs.Foveation ? 0.35 : 1.0));
+            var eh = r.EncH > 0 ? r.EncH : (int)(p.EyeH * (hs.Foveation ? 0.52 : 1.0));
+            var tg = Targets.For(ew, eh, p.Fps);
+            var want = Math.Max(60, Math.Round(2 * tg.GoodMbps / 10) * 10);
+            if (r.CleanMbps > 0)
+            {
+                p.BitrateMbps = Math.Min(want, Math.Max(30, r.CleanMbps));
+                p.why["bitrate"] = r.CleanMbps >= want
+                    ? $"{p.BitrateMbps:0} Mbps = about twice the rule-of-thumb target ({tg.GoodMbps:0} Mbps for {ew}x{eh} at {p.Fps:0} Hz); your link carried {r.CleanMbps:0} Mbps cleanly, so there is room to raise it if you see compression artifacts"
+                    : $"{p.BitrateMbps:0} Mbps: all your link carried cleanly in the network test (the rule-of-thumb target is {tg.GoodMbps:0} Mbps for {ew}x{eh} at {p.Fps:0} Hz)";
+            }
+            else { p.BitrateMbps = want; p.why["bitrate"] = $"{want:0} Mbps = about twice the rule-of-thumb target ({tg.GoodMbps:0} Mbps for {ew}x{eh} at {p.Fps:0} Hz); the network test did not run or no step passed"; }
             p.Foveated = hs.Foveation;
+            p.why["codec"] = hs.Profile.CodecAdvice;
             p.why["foveation"] = hs.Foveation ? "the headset supports ALVR's foveated encoding: fewer pixels at the edges, same sharpness where you look" : "the headset did not advertise foveated encoding: full frame (needs a strong link)";
             p.LatencyMode = "low";
             p.why["latency"] = "no frame buffer, the newest frame sent at once; switch to smooth for fewer repeated pictures on uneven games";

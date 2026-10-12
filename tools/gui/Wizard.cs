@@ -487,37 +487,45 @@ namespace VisionALVR
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
             p.Controls.Add(H("How your setup performs"));
             var r = ctx?.R ?? new Results();
-            var list = new ListView { View = View.Details, FullRowSelect = true, Width = 790, Height = 330, ShowItemToolTips = true };
-            list.Columns.Add("Measurement", 230); list.Columns.Add("Your value", 200); list.Columns.Add("Reference (provisional)", 250); list.Columns.Add("Verdict", 90);
+            var prof = hs.Profile;
+            // what the setup is judged against: rules of thumb scaled to the stream that is sent (the encoded size when it was measured)
+            var rate = proposal != null ? proposal.Fps : ctxFps;
+            var ew = r.EncW > 0 ? r.EncW : (int)(hs.PanelW * ctxScale * 2 * (hs.Foveation ? 0.35 : 1.0));
+            var eh = r.EncH > 0 ? r.EncH : (int)(hs.PanelH * ctxScale * (hs.Foveation ? 0.52 : 1.0));
+            var tg = Targets.For(ew, eh, ctxFps);
+            var list = new ListView { View = View.Details, FullRowSelect = true, Width = 790, Height = 350, ShowItemToolTips = true };
+            list.Columns.Add("Measurement", 220); list.Columns.Add("Your value", 190); list.Columns.Add("Target for your setup", 280); list.Columns.Add("Verdict", 90);
             var bad = new List<string>();
-            void add(string name, string val, string refText, Rating rt, string advice = null)
+            void add(string name, string val, string target, Rating rt, string advice = null)
             {
-                var it = new ListViewItem(new[] { name, val, refText, rt == Rating.Unknown ? "not measured" : rt.ToString() });
+                var it = new ListViewItem(new[] { name, val, target, rt == Rating.Unknown ? "-" : rt.ToString() }) { ToolTipText = name + ": " + val + "\n" + target };
                 it.ForeColor = rt == Rating.Good ? Color.SeaGreen : rt == Rating.Ok ? Color.DarkOrange : rt == Rating.Poor ? Color.Firebrick : Color.Gray;
                 list.Items.Add(it);
                 if (rt == Rating.Poor && advice != null) bad.Add(advice);
             }
-            var budget = r.BudgetMs > 0 ? r.BudgetMs : 1000.0 / Math.Max(1, ctxFps);
-            add("Encoder time per frame (p95)", r.EncodeP95 > 0 ? $"{r.EncodeP95:0.0} ms of {budget:0.0}" : "-", $"under {Reference.Get("encode_good") * 100:0}% good, {Reference.Get("encode_ok") * 100:0}% ok of the frame time", Reference.EncodeBudget(r.EncodeP95, budget),
-                "The encoder is close to or over the frame time: the proposal lowers the resolution or the refresh rate.");
-            add("Clean network bitrate", r.CleanMbps > 0 ? $"{r.CleanMbps:0} Mbps" : "-", $"{Reference.Get("bitrate_good_mbps"):0}+ good, {Reference.Get("bitrate_ok_mbps"):0}+ ok", Reference.Bitrate(r.CleanMbps),
-                "The link carries little: use a Wi-Fi 6E (6 GHz) router in access-point mode close to the headset, and put the PC on Ethernet.");
-            add("Packets lost per second", r.LossPerS >= 0 && r.CleanMbps > 0 ? $"{r.LossPerS:0.00}" : "-", "0 good, up to 1 ok", Reference.Loss(r.CleanMbps > 0 ? r.LossPerS : -1), "The wireless link drops packets: move closer, use the 6 GHz band, avoid other traffic on that access point.");
-            add("Total latency (ALVR's own)", r.TotalMs > 0 ? $"{r.TotalMs:0.0} ms" : "-", $"under {Reference.Get("latency_good_ms"):0} good, {Reference.Get("latency_ok_ms"):0} ok", Reference.Latency(r.TotalMs));
-            add("   network", r.NetworkMs > 0 ? $"{r.NetworkMs:0.0} ms" : "-", $"under {Reference.Get("network_good_ms"):0} good", Reference.Network(r.NetworkMs));
-            add("   headset decoder", r.DecodeMs > 0 ? $"{r.DecodeMs:0.0} ms" : "-", $"under {Reference.Get("decode_good_ms"):0} good", Reference.Decode(r.DecodeMs));
+            var frame = r.BudgetMs > 0 ? r.BudgetMs : tg.FrameMs;
+            add("Encoder time per frame (p95)", r.EncodeP95 > 0 ? $"{r.EncodeP95:0.0} ms (frame {frame:0.0} ms)" : "-", $"5-10 ms is the usual budget, and under {Reference.Get("encode_ok") * 100:0}% of the frame", Reference.EncodeBudget(r.EncodeP95, frame, tg),
+                "The encoder is slower than the budget for this rate: the proposal lowers the resolution (or the refresh rate).");
+            add("Clean network bitrate", r.CleanMbps > 0 ? $"{r.CleanMbps:0} Mbps" : "-", $"{tg.MinMbps:0} Mbps minimum, {tg.GoodMbps:0}+ comfortable ({ew}x{eh} at {ctxFps:0} Hz, HEVC)", Reference.Bitrate(r.CleanMbps, tg),
+                $"The link carries less than the stream needs ({tg.MinMbps:0} Mbps): {prof.WifiAdvice}.");
+            add("Packets lost per second", r.LossPerS >= 0 && r.CleanMbps > 0 ? $"{r.LossPerS:0.00}" : "-", "0 is clean; up to 1 is tolerable", Reference.Loss(r.CleanMbps > 0 ? r.LossPerS : -1), $"The wireless link drops packets: {prof.WifiAdvice}.");
+            add("Total latency (ALVR's own)", r.TotalMs > 0 ? $"{r.TotalMs:0.0} ms" : "-", $"under {tg.LatencyGoodMs:0} ms good, {tg.LatencyOkMs:0} ms acceptable", Reference.Latency(r.TotalMs, tg));
+            add("   network", r.NetworkMs > 0 ? $"{r.NetworkMs:0.0} ms" : "-", $"about {tg.NetworkGoodMs:0} ms", Reference.Network(r.NetworkMs, tg));
+            add("   headset decoder", r.DecodeMs > 0 ? $"{r.DecodeMs:0.0} ms" : "-", $"5-{tg.DecodeGoodMs:0} ms at high bitrates", Reference.Decode(r.DecodeMs, tg));
             add("   encoder (ALVR's view)", r.EncoderMs > 0 ? $"{r.EncoderMs:0.0} ms" : "-", "", Rating.Unknown);
             add("   headset queues", r.DecoderQueueMs + r.VsyncQueueMs > 0 ? $"{r.DecoderQueueMs + r.VsyncQueueMs:0.0} ms" : "-", "", Rating.Unknown);
-            add("Frames shown / refresh rate", r.DisplayedFps > 0 ? $"{r.DisplayedFps:0} of {ctxFps:0} fps" : "-", $"{Reference.Get("fps_good_share") * 100:0}%+ good", Reference.FpsShare(r.DisplayedFps > 0 ? r.DisplayedFps / ctxFps : 0));
+            add("Frames shown / refresh rate", r.DisplayedFps > 0 ? $"{r.DisplayedFps:0} of {ctxFps:0} fps" : "-", $"{Reference.Get("fps_good_share") * 100:0}% or more", Reference.FpsShare(r.DisplayedFps > 0 ? r.DisplayedFps / ctxFps : 0));
+            add("Video codec", hs.Enc10 ? "HEVC 10-bit" : "HEVC 8-bit", prof.CodecAdvice, hs.Enc10 || !prof.Tuned ? Rating.Good : Rating.Ok);
             add("GPU", string.IsNullOrEmpty(r.GpuName) ? "-" : r.GpuName, $"{r.Engines} hardware encoder engine(s), {r.VramMb / 1024.0:0} GB", Rating.Unknown);
             p.Controls.Add(list);
-            var good = list.Items.Cast<ListViewItem>().Count(x => x.SubItems[3].Text == "Good");
-            var poor = list.Items.Cast<ListViewItem>().Count(x => x.SubItems[3].Text == "Poor");
-            var okc = list.Items.Cast<ListViewItem>().Count(x => x.SubItems[3].Text == "Ok");
-            var verdict = poor > 0 ? "Limited: some parts are below the reference (see below)" : (okc > 0 ? "Good: the setup works, a few values are only acceptable" : (good > 0 ? "Excellent: everything measured is within the reference" : "Not enough measurements to judge"));
+            var count = new Func<string, int>(v => list.Items.Cast<ListViewItem>().Count(x => x.SubItems[3].Text == v));
+            var verdict = count("Poor") > 0 ? "Limited: some parts are below the target (see below)" : (count("Ok") > 0 ? "Good: the setup works, a few values are only acceptable" : (count("Good") > 0 ? "Excellent: everything measured meets the target" : "Not enough measurements to judge"));
             p.Controls.Add(Ui.Line(verdict, Ui.Big));
-            foreach (var a in bad.Distinct()) p.Controls.Add(Ui.Line("• " + a));
-            var note = Ui.Line("The reference values are provisional: they will come from our lab comparisons with stock ALVR + SteamVR.");
+            if (r.CleanMbps >= 2 * tg.GoodMbps && r.CleanMbps > 0)
+                p.Controls.Add(Ui.Line($"\u2022 Your link carries {r.CleanMbps:0} Mbps, far more than this stream needs ({tg.GoodMbps:0} Mbps): there is room for a higher resolution or less foveation if your GPU's encoder allows it."));
+            foreach (var a in bad.Distinct()) p.Controls.Add(Ui.Line("\u2022 " + a));
+            p.Controls.Add(Ui.Line($"\u2022 Network advice for {prof.Label}: {prof.WifiAdvice}."));
+            var note = Ui.Line("Targets are rules of thumb from ALVR's documentation and forum guidance (about 0.13 bits per encoded pixel as the minimum, 0.18 comfortable; encoder 5-10 ms; network about 10 ms), scaled to your stream. They tell you whether this setup is likely fine, not whether it is perfect.");
             note.ForeColor = Color.DimGray;
             p.Controls.Add(note);
             return p;
@@ -592,11 +600,13 @@ namespace VisionALVR
                 FromHeadset = true, DisplayName = "Apple Vision Pro", Hostname = "1234.client.alvr", Ip = "192.168.1.50", PanelW = 3552, PanelH = 3200,
                 Rates = new List<double> { 90, 96, 100 }, MicRate = 48000, Gamma = 1.0,
             };
-            chosenHost = hs.Hostname; chosenIp = hs.Ip; chosenName = hs.DisplayName; ctxFps = 90;
+            if (Arg("--demo-headset") == "quest3")
+                hs = new Handshake { FromHeadset = true, DisplayName = "Oculus Quest3", Hostname = "quest3.client.alvr_", Ip = "192.168.1.30", PanelW = 2064, PanelH = 2208, Rates = new List<double> { 72, 80, 90, 120 }, MicRate = 48000, EncAv1 = true, Gamma = 2.2 };
+            chosenHost = hs.Hostname; chosenIp = hs.Ip; chosenName = hs.DisplayName; ctxFps = hs.Rates.Contains(90) ? 90 : hs.Rates.Max();
             ctx = new TestContext { HS = hs, Check = check, HeadsetAvailable = true };
             ctx.R = new Results
             {
-                GpuName = "NVIDIA GeForce RTX 5090", GpuArch = "Blackwell", Driver = "617.42", VramMb = 32768, EncodeP50 = 3.1, EncodeP95 = 3.6, BudgetMs = 11.1, EncodeFits = true, Engines = 3,
+                GpuName = "NVIDIA GeForce RTX 5090", GpuArch = "Blackwell", Driver = "617.42", VramMb = 32768, EncodeP50 = 3.1, EncodeP95 = 3.6, BudgetMs = 11.1, EncodeFits = true, Engines = 3, EncW = 4224, EncH = 1664,
                 CleanMbps = 270, LossPerS = 0.02, TotalMs = 52, NetworkMs = 9.5, DecodeMs = 6.2, EncoderMs = 4.1, DecoderQueueMs = 8, VsyncQueueMs = 10, DisplayedFps = 89, ClientFps = 90, TestFps = 90,
             };
             proposal = Proposal.Build(hs, ctx.R, 90);
