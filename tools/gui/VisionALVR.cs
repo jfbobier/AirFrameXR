@@ -55,6 +55,20 @@ namespace VisionALVR
             stats.Location = new Point(10, 22);
             body.Controls.Add(box);
 
+            // VR settings: where you start. Games with the action on the floor by default (Moss, Titan Isles) assume a standing user; the Vision
+            // Pro's floor estimate is unreliable, so the streamer hands games this height (above the floor) when you enter VR and keeps your own
+            // vertical movement on top of it. Applied live (re-anchored to your current pose).
+            var vr = new GroupBox { Text = "VR settings (applied live)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
+            var vt = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Location = new Point(8, 20), Font = Ui.Body };
+            AddKnob(vt, "Starting height, m", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v);
+            var hint = Ui.Line("The height above the floor you start at when you enter VR (default 1.30 m; 0 = the headset's own floor estimate). Change it while in VR to re-anchor.");
+            hint.ForeColor = Color.DimGray;
+            hint.MaximumSize = new Size(560, 0);
+            vt.Controls.Add(hint);
+            vt.SetColumnSpan(hint, 3);
+            vr.Controls.Add(vt);
+            body.Controls.Add(vr);
+
             var live = new GroupBox { Text = "Display (applied live)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
             var lt = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Location = new Point(8, 20), Font = Ui.Body };
             if (!settings.HasDisplay) { settings.Gamma = AppSettings.DefaultGamma; settings.Save(); } // the streamer reads it at start
@@ -63,10 +77,7 @@ namespace VisionALVR
             AddKnob(lt, "Contrast", -30, 30, 0, () => settings.Contrast, v => settings.Contrast = v);
             AddKnob(lt, "Saturation (<0 less vivid)", -50, 50, 0, () => settings.Saturation, v => settings.Saturation = v);
             AddKnob(lt, "Sharpening", 0, 100, 0, () => settings.Sharpening, v => settings.Sharpening = v);
-            // games with the action on the floor by default (Moss, Titan Isles) assume a standing user; the Vision Pro's floor estimate
-            // is unreliable, so the streamer hands games this height and keeps your own vertical movement on top of it
-            AddKnob(lt, "Height above floor, m (0 = headset)", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v);
-            var reset = new Button { Text = "Defaults (gamma 1.2, height 1.30, rest neutral)", AutoSize = true };
+            var reset = new Button { Text = "Defaults (start height 1.30 m, gamma 1.2, rest neutral)", AutoSize = true };
             reset.Click += (s, e) => { foreach (var k in knobs) k.Bar.Value = (int)Math.Round(k.Def * 100); };
             lt.Controls.Add(reset);
             lt.SetColumnSpan(reset, 3);
@@ -87,7 +98,7 @@ namespace VisionALVR
             body.Controls.Add(footer);
 
             Controls.Add(body);
-            Controls.Add(Ui.Header("Streamer for Apple Vision Pro (ALVR visionOS app)"));
+            Controls.Add(Ui.CompactHeader("Streamer for Apple Vision Pro (ALVR visionOS app)"));
 
 
             debug.Checked = settings.Debug;

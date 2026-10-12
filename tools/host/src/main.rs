@@ -1210,7 +1210,7 @@ fn main() {
     let origin = Instant::now();
     phase::set_origin(origin);
     let gpu_info: serde_json::Value = {
-        let mut b = vec![0 as std::ffi::c_char; 1024];
+        let mut b = vec![0 as std::ffi::c_char; 2048];
         unsafe { nvh::nvh_gpu_info(b.as_mut_ptr(), b.len() as i32) };
         serde_json::from_str(&unsafe { std::ffi::CStr::from_ptr(b.as_ptr()) }.to_string_lossy()).unwrap_or(json!({}))
     };

@@ -61,6 +61,10 @@ struct KeepAlive {
     ~KeepAlive() { stop(); }
 };
 
+bool nvml_chosen_ids(unsigned* dev, unsigned* sub);   // defined with the NVML code below
+// The NVIDIA adapter the encoder runs on: the one NVML chose (matched by PCI device and subsystem id), else VISIONALVR_GPU, else the one with
+// the most dedicated memory. (The first NVIDIA adapter DXGI lists is not necessarily the right one on a PC with two.)
+static int pickNvidiaAdapter(IDXGIFactory1* fac, struct Nvh* n);
 struct Nvh {
     std::shared_ptr<CD3DRender> render;
     std::unique_ptr<VideoEncoderNVENC> enc;
@@ -263,8 +267,7 @@ void* nvh_create(int W, int H, int noise, nvh_packet_cb pcb, nvh_params_cb qcb, 
     n->w = W; n->h = H; n->bits = Settings::Instance().m_use10bitEncoder ? 10 : 8;
 
     IDXGIFactory1* fac; CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&fac);
-    int adapter = -1; IDXGIAdapter1* ad;
-    for (UINT i = 0; fac->EnumAdapters1(i, &ad) == S_OK; i++) { DXGI_ADAPTER_DESC1 d; ad->GetDesc1(&d); ad->Release(); if (d.VendorId == 0x10DE && adapter < 0) { adapter = (int)i; n->luid = d.AdapterLuid; char nm[128]; WideCharToMultiByte(CP_UTF8, 0, d.Description, -1, nm, sizeof nm, nullptr, nullptr); n->gpuName = nm; } }
+    int adapter = pickNvidiaAdapter(fac, n);
     fac->Release();
     if (adapter < 0) { seterr(err, errlen, "no NVIDIA adapter"); delete n; return nullptr; }
     n->render = std::make_shared<CD3DRender>();
@@ -676,6 +679,9 @@ void nvh_destroy(void* hh) {
 namespace {
 typedef int (*FnVoid)();
 typedef int (*FnHandle)(unsigned, void**);
+typedef int (*FnCount)(unsigned*);
+struct NvmlPci { char busIdLegacy[16]; unsigned domain, bus, device, pciDeviceId, pciSubSystemId; char busId[32]; };
+typedef int (*FnPci)(void*, NvmlPci*);
 typedef int (*FnStr)(void*, char*, unsigned);
 typedef int (*FnSysStr)(char*, unsigned);
 typedef int (*FnU)(void*, unsigned*);
@@ -689,6 +695,9 @@ typedef int (*FnUtil)(void*, NvmlUtil*);
 typedef int (*FnMem)(void*, NvmlMem*);
 struct Nvml {
     bool tried = false, ok = false; void* dev = nullptr;
+    unsigned pciDeviceId = 0, pciSubSystemId = 0;   // of the chosen device (matches the DXGI adapter's DeviceId / SubSysId)
+    std::string gpus;                               // JSON list of every NVIDIA GPU found, for the logs and the system check
+    int chosen = 0, count = 0;
     FnStr name = nullptr; FnSysStr driver = nullptr; FnU arch = nullptr; FnUtil util = nullptr; FnU2 enc = nullptr, dec = nullptr;
     FnIU clock = nullptr; FnU power = nullptr; FnIU temp = nullptr; FnI pstate = nullptr; FnMem mem = nullptr; FnULL reasons = nullptr;
 } g_nvml;
@@ -699,7 +708,8 @@ bool nvml() {
     if (!h) { char p[MAX_PATH]; if (GetEnvironmentVariableA("ProgramW6432", p, MAX_PATH)) { strcat_s(p, "\\NVIDIA Corporation\\NVSMI\\nvml.dll"); h = LoadLibraryA(p); } }
     if (!h) return false;
     auto init = (FnVoid)GetProcAddress(h, "nvmlInit_v2"); auto get = (FnHandle)GetProcAddress(h, "nvmlDeviceGetHandleByIndex_v2");
-    if (!init || !get || init() != 0 || get(0, &g_nvml.dev) != 0) return false;
+    auto count = (FnCount)GetProcAddress(h, "nvmlDeviceGetCount_v2");
+    if (!init || !get || init() != 0) return false;
     g_nvml.name = (FnStr)GetProcAddress(h, "nvmlDeviceGetName"); g_nvml.driver = (FnSysStr)GetProcAddress(h, "nvmlSystemGetDriverVersion");
     g_nvml.arch = (FnU)GetProcAddress(h, "nvmlDeviceGetArchitecture"); g_nvml.util = (FnUtil)GetProcAddress(h, "nvmlDeviceGetUtilizationRates");
     g_nvml.enc = (FnU2)GetProcAddress(h, "nvmlDeviceGetEncoderUtilization"); g_nvml.dec = (FnU2)GetProcAddress(h, "nvmlDeviceGetDecoderUtilization");
@@ -708,6 +718,39 @@ bool nvml() {
     g_nvml.mem = (FnMem)GetProcAddress(h, "nvmlDeviceGetMemoryInfo");
     g_nvml.reasons = (FnULL)GetProcAddress(h, "nvmlDeviceGetCurrentClocksEventReasons");
     if (!g_nvml.reasons) g_nvml.reasons = (FnULL)GetProcAddress(h, "nvmlDeviceGetCurrentClocksThrottleReasons");
+    // Every NVIDIA GPU, not device 0: a PC with two (an older card next to the new one, a laptop with an eGPU) must use the right one.
+    // VISIONALVR_GPU (an index or a part of the name) forces a choice; otherwise the newest architecture, then the most memory.
+    auto pci = (FnPci)GetProcAddress(h, "nvmlDeviceGetPciInfo_v3"); if (!pci) pci = (FnPci)GetProcAddress(h, "nvmlDeviceGetPciInfo_v2");
+    unsigned n = 0;
+    if (count) count(&n); else n = 1;
+    char want[96] = ""; GetEnvironmentVariableA("VISIONALVR_GPU", want, sizeof want);
+    int best = -1; unsigned bestArch = 0; unsigned long long bestMem = 0; bool forced = false;
+    g_nvml.gpus = "[";
+    for (unsigned i = 0; i < n; i++) {
+        void* d = nullptr;
+        if (get(i, &d) != 0) continue;
+        char nm[96] = "?"; unsigned arch = 0xFFFFFFFF; NvmlMem m{}; NvmlPci pi{};
+        if (g_nvml.name) g_nvml.name(d, nm, sizeof nm);
+        if (g_nvml.arch) g_nvml.arch(d, &arch);
+        if (g_nvml.mem) g_nvml.mem(d, &m);
+        if (pci) pci(d, &pi);
+        std::string lower = nm; for (auto& c : lower) c = (char)tolower(c);
+        std::string w = want; for (auto& c : w) c = (char)tolower(c);
+        if (!w.empty()) {
+            bool isIdx = std::all_of(w.begin(), w.end(), ::isdigit);
+            if ((isIdx && (unsigned)atoi(w.c_str()) == i) || (!isIdx && lower.find(w) != std::string::npos)) { best = (int)i; forced = true; g_nvml.dev = d; g_nvml.pciDeviceId = pi.pciDeviceId; g_nvml.pciSubSystemId = pi.pciSubSystemId; }
+        }
+        if (!forced && (best < 0 || (arch != 0xFFFFFFFF ? arch : 0) > bestArch || ((arch != 0xFFFFFFFF ? arch : 0) == bestArch && m.total > bestMem))) {
+            best = (int)i; bestArch = arch != 0xFFFFFFFF ? arch : 0; bestMem = m.total; g_nvml.dev = d; g_nvml.pciDeviceId = pi.pciDeviceId; g_nvml.pciSubSystemId = pi.pciSubSystemId;
+        }
+        for (char* c = nm; *c; c++) if (*c == '"' || *c == '\\') *c = ' ';
+        char row[200]; snprintf(row, sizeof row, "%s{\"i\":%u,\"name\":\"%s\",\"arch\":%d,\"vram_mb\":%llu}", i ? "," : "", i, nm, arch == 0xFFFFFFFF ? -1 : (int)arch, m.total >> 20);
+        g_nvml.gpus += row;
+    }
+    g_nvml.gpus += "]";
+    g_nvml.count = (int)n;
+    if (best < 0 || !g_nvml.dev) return false;
+    g_nvml.chosen = best;
     g_nvml.ok = true;
     return true;
 }
@@ -726,8 +769,8 @@ int nvh_gpu_info(char* buf, int len) {
     if (g_nvml.arch) g_nvml.arch(g_nvml.dev, &arch);
     if (g_nvml.mem) g_nvml.mem(g_nvml.dev, &m);
     for (char* c = name; *c; c++) if (*c == '"' || *c == '\\') *c = ' ';
-    return snprintf(buf, len, "{\"nvml\":1,\"name\":\"%s\",\"driver\":\"%s\",\"arch\":%d,\"arch_name\":\"%s\",\"vram_mb\":%llu}",
-                    name, drv, arch == 0xFFFFFFFF ? -1 : (int)arch, arch_name(arch), m.total >> 20);
+    return snprintf(buf, len, "{\"nvml\":1,\"name\":\"%s\",\"driver\":\"%s\",\"arch\":%d,\"arch_name\":\"%s\",\"vram_mb\":%llu,\"chosen\":%d,\"gpus\":%s}",
+                    name, drv, arch == 0xFFFFFFFF ? -1 : (int)arch, arch_name(arch), m.total >> 20, g_nvml.chosen, g_nvml.gpus.c_str());
 }
 
 // One CSV row: gpu%,mem%,enc%,dec%,graphics MHz,memory MHz,video MHz,power W,temp C,pstate,vram used MB,clock event reasons
@@ -744,4 +787,35 @@ int nvh_gpu_sample(char* buf, int len) {
     if (g_nvml.mem) g_nvml.mem(g_nvml.dev, &m);
     if (g_nvml.reasons) g_nvml.reasons(g_nvml.dev, &r);
     return snprintf(buf, len, "%u,%u,%u,%u,%u,%u,%u,%.1f,%u,P%d,%llu,0x%llx", u.gpu, u.memory, enc, dec, cg, cm, cv, pw / 1000.0, t, ps, m.used >> 20, r);
+}
+
+// ---- the NVIDIA adapter the encoder runs on ---------------------------------------------------------------------------------
+bool nvml_chosen_ids(unsigned* dev, unsigned* sub) {
+    if (!nvml() || g_nvml.pciDeviceId == 0) return false;
+    *dev = g_nvml.pciDeviceId >> 16; *sub = g_nvml.pciSubSystemId;
+    return true;
+}
+
+static int pickNvidiaAdapter(IDXGIFactory1* fac, Nvh* n) {
+    unsigned wantDev = 0, wantSub = 0;
+    const bool have = nvml_chosen_ids(&wantDev, &wantSub);   // NVML chose the best GPU (VISIONALVR_GPU can force one): find its DXGI adapter
+    int matched = -1, biggest = -1; SIZE_T bigMem = 0;
+    for (UINT i = 0;; i++) {
+        IDXGIAdapter1* ad = nullptr;
+        if (fac->EnumAdapters1(i, &ad) != S_OK) break;
+        DXGI_ADAPTER_DESC1 d; ad->GetDesc1(&d); ad->Release();
+        if (d.VendorId != 0x10DE || (d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) continue;
+        if (have && matched < 0 && d.DeviceId == wantDev && (wantSub == 0 || d.SubSysId == wantSub)) matched = (int)i;
+        if (d.DedicatedVideoMemory > bigMem) { bigMem = d.DedicatedVideoMemory; biggest = (int)i; }
+    }
+    const int pick = matched >= 0 ? matched : biggest;
+    if (pick < 0) return -1;
+    IDXGIAdapter1* ad = nullptr;
+    if (fac->EnumAdapters1((UINT)pick, &ad) == S_OK) {
+        DXGI_ADAPTER_DESC1 d; ad->GetDesc1(&d); ad->Release();
+        n->luid = d.AdapterLuid;
+        char nm[128]; WideCharToMultiByte(CP_UTF8, 0, d.Description, -1, nm, sizeof nm, nullptr, nullptr);
+        n->gpuName = nm;
+    }
+    return pick;
 }
