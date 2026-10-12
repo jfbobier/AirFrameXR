@@ -17,8 +17,10 @@ namespace VisionALVR
         public string[] NameContains = new string[0];
         public int[] ViewRes;                       // default_view_resolution to match, null = any
         public double[] RatesInclude = new double[0];
-        public int EyeW = 3552, EyeH = 3200, BitDepth = 10, SplitEncode = 3;
-        public double Fps = 90, Gamma = 1.0;
+        /// 0 = not given: ALVR's / the headset's own default (the handshake's panel resolution, its preferred gamma, a rate it supports)
+        public int EyeW, EyeH, BitDepth, SplitEncode;
+        public double Fps, Gamma;
+        public List<string> Sources = new List<string>();
         public string Codec = "hevc", Protocol = "udp";
         public bool FullRange = true, Foveated;
         public string DefaultVariant = "";
@@ -70,17 +72,18 @@ namespace VisionALVR
                 p.RatesInclude = A(m, "supported_refresh_rates_include").Select(D).ToArray();
                 var er = A(st, "eye_resolution");
                 if (er.Length >= 2) { p.EyeW = (int)D(er[0]); p.EyeH = (int)D(er[1]); }
-                p.Fps = D(st.TryGetValue("fps", out var f) ? f : 90); if (p.Fps < 1) p.Fps = 90;
+                p.Fps = D(st.TryGetValue("fps", out var f) ? f : 0);
                 p.Codec = S(st, "codec", "hevc"); p.Protocol = S(st, "protocol", "udp");
-                p.BitDepth = st.TryGetValue("bit_depth", out var bd) ? (int)D(bd) : 10;
-                p.SplitEncode = st.TryGetValue("split_encode", out var se) ? (int)D(se) : 3;
-                p.Gamma = st.TryGetValue("encoding_gamma", out var g) ? D(g) : 1.0;
+                p.BitDepth = st.TryGetValue("bit_depth", out var bd) ? (int)D(bd) : 0;
+                p.SplitEncode = st.TryGetValue("split_encode", out var se) ? (int)D(se) : 0;
+                p.Gamma = st.TryGetValue("encoding_gamma", out var g) ? D(g) : 0;
                 p.FullRange = B(st, "full_range", true); p.Foveated = B(st, "foveated", false);
                 var net = O(e, "network");
                 p.DefaultVariant = S(net, "default");
                 foreach (var v in A(net, "variants").OfType<Dictionary<string, object>>())
                     p.Variants.Add(new NetworkVariant { Id = S(v, "id"), Label = S(v, "label"), Mbps = v.TryGetValue("bitrate_mbps", out var mb) ? D(mb) : 0 });
                 p.Notes = A(e, "notes").OfType<string>().ToList();
+                p.Sources = A(e, "sources").OfType<string>().ToList();
                 foreach (var v in A(e, "verified").OfType<Dictionary<string, object>>())
                     p.Verified.Add($"{S(v, "gpu")}, {S(v, "client")}, {S(v, "date")}: {S(v, "result")}");
                 if (p.Variants.Count == 0) continue;
@@ -143,8 +146,8 @@ namespace VisionALVR
                 w.Add($"the profile expects a {p.ViewRes[0]} x {p.ViewRes[1]} panel, this headset reports {hs.PanelW} x {hs.PanelH}");
             var missing = p.RatesInclude.Where(r => !hs.Rates.Any(x => Math.Abs(x - r) < 0.6)).ToList();
             if (missing.Count > 0) w.Add($"the profile expects the refresh rate(s) {string.Join(", ", missing.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture)))} Hz, which this headset does not offer");
-            if (!hs.Rates.Any(x => Math.Abs(x - p.Fps) < 0.6)) w.Add($"the profile streams at {p.Fps:0} fps, which this headset does not list among its refresh rates");
-            if (p.EyeW > hs.PanelW * 1.25 || p.EyeH > hs.PanelH * 1.25) w.Add($"the profile's {p.EyeW} x {p.EyeH} stream is larger than this headset's panel");
+            if (p.Fps > 0 && !hs.Rates.Any(x => Math.Abs(x - p.Fps) < 0.6)) w.Add($"the profile streams at {p.Fps:0} fps, which this headset does not list among its refresh rates");
+            if (p.EyeW > 0 && (p.EyeW > hs.PanelW * 1.25 || p.EyeH > hs.PanelH * 1.25)) w.Add($"the profile's {p.EyeW} x {p.EyeH} stream is larger than this headset's panel");
             if (p.BitDepth >= 10 && !hs.Enc10) w.Add("the profile uses 10-bit video and this headset did not advertise 10-bit decoding");
             if (p.Foveated && !hs.Foveation) w.Add("the profile uses foveated encoding and this headset did not advertise it");
             return w;
@@ -256,14 +259,15 @@ namespace VisionALVR
         /// The most specific profile whose match fields all hold for this handshake (null: none, the wizard falls back to the capabilities alone).
         public static HmdProfile Match(Handshake hs, List<HmdProfile> all)
         {
-            HmdProfile best = null; int bestScore = 0;
+            HmdProfile best = null; double bestScore = 0;
             foreach (var p in all)
             {
-                int score = 0;
+                double score = 0;
                 if (p.NameContains.Length > 0)
                 {
-                    if (!p.NameContains.Any(n => hs.DisplayName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
-                    score += 2;
+                    var hit = p.NameContains.Where(n => hs.DisplayName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0).OrderByDescending(n => n.Length).FirstOrDefault();
+                    if (hit == null) continue;
+                    score += 2 + hit.Length / 100.0;   // the more specific name wins ("Quest 3S" over "Quest 3")
                 }
                 if (p.ViewRes != null)
                 {

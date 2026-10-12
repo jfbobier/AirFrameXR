@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "id": "pico-4",
+  "display_name": "Pico 4 / Pico 4 Ultra",
+  "author": "VisionALVR project (compiled from public guidance, not tested on this headset)",
+  "match": {
+    "name_contains": [
+      "Pico 4",
+      "Pico4",
+      "PICO 4"
+    ]
+  },
+  "stream": {
+    "fps": 72,
+    "codec": "hevc",
+    "foveated": true
+  },
+  "network": {
+    "default": "wifi-good",
+    "variants": [
+      {
+        "id": "wifi-good",
+        "label": "Good wireless router, strong signal (the wiki's upper HEVC range)",
+        "bitrate_mbps": 150
+      },
+      {
+        "id": "wifi-average",
+        "label": "Average Wi-Fi or a busy network (the wiki's lower HEVC range)",
+        "bitrate_mbps": 100
+      }
+    ]
+  },
+  "session_overrides": {},
+  "notes": [
+    "Starting point compiled from public guidance, NOT verified by the VisionALVR project on this headset (no `verified` entry). VisionALVR's support for headsets other than the Apple Vision Pro is best effort.",
+    "ALVR's wiki (Settings tutorial, v20): on a good wireless router use the medium resolution preset (the default) with sharpening 1.0 and HEVC at a constant 100-150 Mbps; HEVC is usually the best codec when bitrate is limited; turn foveated encoding on and tune it from the statistics graph.",
+    "Resolution, gamma and the encoder details are left out on purpose: the headset's own default (what ALVR reports at the handshake) is used. Change them in the wizard if you know better.",
+    "Panel about 2160 x 2160 per eye (Pico's specification); refresh rates 72 and 90 Hz. Users report 72 Hz as the smooth, stable choice on modest GPUs and that 90 Hz has to be enabled in the headset first; this profile starts at 72 Hz (set 90 in the wizard if your PC keeps up).",
+    "No ALVR-specific Pico 4 settings were found: the forum reports behind the 72 Hz advice are about Virtual Desktop / Pico Connect."
+  ],
+  "sources": [
+    "https://github.com/alvr-org/ALVR/wiki/Settings-tutorial",
+    "https://forum.falcon-bms.com/post/361742"
+  ],
+  "verified": []
+}

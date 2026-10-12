@@ -175,16 +175,21 @@ namespace VisionALVR
 
         /// The configuration of a community profile (profiles\\hmd_profiles.json) for one network variant: nothing is searched or scaled, the tests
         /// verify it. `scale` shrinks the resolution (the wizard's scale box), `fps` and `foveated` are the user's own choices on the previous page.
-        public static Proposal FromProfile(HmdProfile prof, string variantId, double fps, double scale, bool foveated)
+        public static Proposal FromProfile(Handshake hs, HmdProfile prof, string variantId, double fps, double scale, bool foveated)
         {
             var v = prof.Variant(variantId);
-            var p = new Proposal { EyeW = Align32(prof.EyeW * scale), EyeH = Align32(prof.EyeH * scale), Fps = fps > 0 ? fps : prof.Fps, BitrateMbps = v.Mbps, Foveated = foveated, Audio = true };
+            // what a profile leaves out is the headset's / ALVR's own default: the handshake's panel resolution, a rate the headset offers (90 if it can, else its highest)
+            int bw = prof.EyeW > 0 ? prof.EyeW : hs.PanelW, bh = prof.EyeH > 0 ? prof.EyeH : hs.PanelH;
+            double pfps = prof.Fps > 0 ? prof.Fps : (hs.Rates.Any(x => Math.Abs(x - 90) < 0.6) ? 90 : (hs.Rates.Count > 0 ? hs.Rates.Max() : 90));
+            var p = new Proposal { EyeW = Align32(bw * scale), EyeH = Align32(bh * scale), Fps = fps > 0 ? fps : pfps, BitrateMbps = v.Mbps, Foveated = foveated, Audio = true };
             var src = $"profile '{prof.DisplayName}'";
-            p.why["fps"] = $"{p.Fps:0} Hz: " + (Math.Abs(p.Fps - prof.Fps) < 0.5 ? $"the {src}" : $"your choice (the {src} uses {prof.Fps:0} Hz)");
-            p.why["resolution"] = scale >= 0.999 ? $"{p.EyeW} x {p.EyeH} per eye: the {src}" : $"{p.EyeW} x {p.EyeH}: {scale * 100:0}% of the {src} ({prof.EyeW} x {prof.EyeH})";
+            p.why["fps"] = $"{p.Fps:0} Hz: " + (Math.Abs(p.Fps - pfps) < 0.5 ? $"the {src}" : $"your choice (the {src} uses {pfps:0} Hz)");
+            p.why["resolution"] = prof.EyeW > 0
+                ? (scale >= 0.999 ? $"{p.EyeW} x {p.EyeH} per eye: the {src}" : $"{p.EyeW} x {p.EyeH}: {scale * 100:0}% of the {src} ({prof.EyeW} x {prof.EyeH})")
+                : $"{p.EyeW} x {p.EyeH} per eye: the headset's own default (the {src} leaves the resolution to ALVR)" + (scale >= 0.999 ? "" : $", scaled to {scale * 100:0}%");
             p.why["bitrate"] = $"{p.BitrateMbps:0} Mbps: the {src}, network '{v.Label}'. The tests check this value on your link; nothing is searched.";
             p.why["foveation"] = (foveated ? "foveated encoding (your choice)" : "full frame, no foveation") + $"; the {src} " + (prof.Foveated ? "uses foveation" : "uses the full frame");
-            p.why["codec"] = $"{prof.Codec.ToUpperInvariant()}, {prof.BitDepth}-bit, " + (prof.FullRange ? "full range" : "limited range") + $", gamma {prof.Gamma:0.0#} (the {src})";
+            p.why["codec"] = $"{prof.Codec.ToUpperInvariant()}" + (prof.BitDepth > 0 ? $", {prof.BitDepth}-bit" : "") + (prof.Gamma > 0 ? $", gamma {prof.Gamma:0.0#}" : "") + $" (the {src}; what it leaves out stays at ALVR's default)";
             p.why["audio"] = "game audio to the headset";
             p.Profile = prof;
             return p;

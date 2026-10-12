@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "id": "meta-quest-2",
+  "display_name": "Meta Quest 2",
+  "author": "VisionALVR project (compiled from public guidance, not tested on this headset)",
+  "match": {
+    "name_contains": [
+      "Quest 2",
+      "Quest2",
+      "Quest_2"
+    ]
+  },
+  "stream": {
+    "fps": 90,
+    "codec": "hevc",
+    "foveated": true
+  },
+  "network": {
+    "default": "wifi-good",
+    "variants": [
+      {
+        "id": "wifi-good",
+        "label": "Good wireless router, strong signal (the wiki's upper HEVC range)",
+        "bitrate_mbps": 150
+      },
+      {
+        "id": "wifi-average",
+        "label": "Average Wi-Fi or a busy network (the wiki's lower HEVC range)",
+        "bitrate_mbps": 100
+      }
+    ]
+  },
+  "session_overrides": {},
+  "notes": [
+    "Starting point compiled from public guidance, NOT verified by the VisionALVR project on this headset (no `verified` entry). VisionALVR's support for headsets other than the Apple Vision Pro is best effort.",
+    "ALVR's wiki (Settings tutorial, v20): on a good wireless router use the medium resolution preset (the default) with sharpening 1.0 and HEVC at a constant 100-150 Mbps; HEVC is usually the best codec when bitrate is limited; turn foveated encoding on and tune it from the statistics graph.",
+    "Resolution, gamma and the encoder details are left out on purpose: the headset's own default (what ALVR reports at the handshake) is used. Change them in the wizard if you know better.",
+    "Panel about 1832 x 1920 per eye (Meta's specification); refresh rates 72/80/90/120 Hz. ALVR's wiki: 120 Hz has to be enabled in the Quest 2's own settings; this profile uses 90 Hz, the commonly recommended balance (72 Hz is the stable fallback)."
+  ],
+  "sources": [
+    "https://github.com/alvr-org/ALVR/wiki/Settings-tutorial",
+    "https://gamesfuze.com/guides/how-to-fix-meta-quest-3-alvr-stuttering-and-frame-drops-after-the-latest-update/"
+  ],
+  "verified": []
+}

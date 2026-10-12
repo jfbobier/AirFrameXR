@@ -493,7 +493,7 @@ namespace VisionALVR
             Proposal cand;
             if (profile != null)
             {
-                cand = Proposal.FromProfile(profile, variantId, ctxFps, ctxScale, ctxFoveation);
+                cand = Proposal.FromProfile(hs, profile, variantId, ctxFps, ctxScale, ctxFoveation);
                 ctx.Profile = profile; ctx.ConfigMbps = cand.BitrateMbps;
             }
             else
@@ -549,7 +549,7 @@ namespace VisionALVR
             var failed = steps.Count(x => x.State == TestState.Failed);
             testStatus.Text = failed == 0 ? "Done." : $"Done: {failed} test(s) failed (details in logs\\VisionALVR.log); the proposal uses defaults where a measurement is missing.";
             testStatus.ForeColor = failed == 0 ? Color.SeaGreen : Color.DarkOrange;
-            proposal = profile != null ? Proposal.FromProfile(profile, variantId, ctxFps, ctxScale, ctxFoveation) : Proposal.Build(hs, ctx.R, ctxFps);
+            proposal = profile != null ? Proposal.FromProfile(hs, profile, variantId, ctxFps, ctxScale, ctxFoveation) : Proposal.Build(hs, ctx.R, ctxFps);
             next.Enabled = true;
             if (auto) GoNext();
         }

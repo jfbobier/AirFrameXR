@@ -52,6 +52,13 @@ Copy `profiles\template.profile.json`, rename it `<headset>.profile.json`, fill 
 
 A profile only changes this PC's configuration files, and only when you run the wizard and save.
 
+## Starting-point profiles for other headsets
+
+`profiles\` also holds small starting points for the Meta Quest 2, 3, 3S and Pro and the Pico 4 / 4 Ultra. They are **compiled from public guidance, not tested by
+this project** (they have no `verified` entry, and say so): HEVC at 100-150 Mbps (two network variants), foveated encoding on, 90 Hz (72 Hz for the Pico 4), and everything else
+left to ALVR's and the headset's own defaults (resolution, gamma, encoder details). The sources are listed in each file (mainly ALVR's wiki, Settings tutorial). If you
+have run one of them, improve it and share it: that is what the `verified` section is for.
+
 ## The Apple Vision Pro profile
 
 `profiles\apple-vision-pro.profile.json`: 3552x3200 per eye at 90 fps, HEVC 10-bit, full frame (no foveation), split encoding 3, 230 Mbps on a good

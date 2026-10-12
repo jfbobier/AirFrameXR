@@ -117,7 +117,7 @@ def build(what):
             continue
         if w == "gui":       # VisionALVR.exe + configure.exe (C# WinForms, .NET Framework 4.8)
             lib.b_run("if not exist _tmp\\gui\\res mkdir _tmp\\gui\\res")
-            for f in ("Common.cs", "VisionALVR.cs", "Configure.cs", "SettingsPanel.cs", "Reference.cs", "TestRunner.cs", "Wizard.cs", "app.manifest"):
+            for f in ("Common.cs", "VisionALVR.cs", "Configure.cs", "SettingsPanel.cs", "Reference.cs", "TestRunner.cs", "Wizard.cs", "Profiles.cs", "app.manifest"):
                 lib.b_put(lib.ROOT / "tools/gui" / f, f"_tmp/gui/{f}")
             for f in ("visionalvr.ico", "logo_640.png"):
                 lib.b_put(lib.ROOT / "tools/gui/res" / f, f"_tmp/gui/res/{f}")
