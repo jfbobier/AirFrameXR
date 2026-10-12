@@ -34,6 +34,9 @@ namespace VisionALVR
         TestContext ctx;
         List<TestStep> steps;
         Proposal proposal;
+        HmdProfile profile;          // the community profile that matches the handshake (null: generic proposal from the capabilities and the searches)
+        string variantId = "";       // the network variant chosen for it
+        ComboBox variantBox;
         SettingsPanel settingsPanel;
         bool autoconfig;
         // headset page
@@ -351,15 +354,28 @@ namespace VisionALVR
                 g.Controls.Add(Ui.Line(v));
             }
             row("Headset", $"{hs.DisplayName}   ({hs.Hostname})   vendor: {hs.Vendor}");
-            row("Profile", hs.IsVisionPro ? "Apple Vision Pro: tuned defaults" : "no tuned profile for this headset: it may work, it is not supported");
+            profile = real ? HmdProfiles.Match(hs, HmdProfiles.LoadAll()) : null;
+            variantBox = null;
+            if (profile != null)
+            {
+                row("Profile", $"{profile.DisplayName}{(profile.Author.Length > 0 ? ", by " + profile.Author : "")} ({profile.Source}): the setup starts from it and verifies it on this PC, it does not search for a configuration");
+                variantBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 520 };
+                foreach (var v in profile.Variants) variantBox.Items.Add($"{v.Label}: {v.Mbps:0} Mbps");
+                variantBox.SelectedIndex = Math.Max(0, profile.Variants.FindIndex(x => x.Id == profile.Variant(null).Id));
+                row("Your network", "the bitrate depends on it: pick what describes your Wi-Fi (you can change the value later)", variantBox);
+                foreach (var n in profile.Notes) row("Note", n);
+                foreach (var v in profile.Verified) row("Verified", v);
+            }
+            else row("Profile", hs.IsVisionPro && !real ? "Apple Vision Pro: tuned defaults" : "no profile matches this headset: the proposal is generic, built from what it advertised. Profiles are small files shared among users (see docs\\HMD_PROFILES.md); drop one into config\\profiles.");
             row("Panel resolution per eye", $"{hs.PanelW} x {hs.PanelH}", null);
             rateBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
             foreach (var r in hs.Rates) rateBox.Items.Add(r.ToString("0.#", CultureInfo.InvariantCulture));
             rateBox.SelectedIndex = Math.Max(0, hs.Rates.Count - 1);
+            if (profile != null) { var pi = hs.Rates.FindIndex(x => Math.Abs(x - profile.Fps) < 0.6); if (pi >= 0) rateBox.SelectedIndex = pi; }
             row("Refresh rate to use", "the headset supports " + string.Join(", ", hs.Rates.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture))) + " Hz", rateBox);
             scaleBox = new NumericUpDown { Minimum = 40, Maximum = 100, Increment = 5, Value = 100, Width = 70 };
             row("Resolution scale (%)", "100% = the panel's own resolution; lower renders and streams less", scaleBox);
-            foveationBox = new CheckBox { Text = "use it", Checked = hs.Foveation, Enabled = hs.Foveation, AutoSize = true };
+            foveationBox = new CheckBox { Text = "use it", Checked = profile != null ? profile.Foveated && hs.Foveation : hs.Foveation, Enabled = hs.Foveation, AutoSize = true };
             row("Foveated encoding", hs.Foveation ? "supported by the headset" : "not advertised by the headset", foveationBox);
             row("Video codec", $"HEVC{(hs.EncHigh ? " (high profile)" : "")}{(hs.Enc10 ? ", 10-bit" : ", 8-bit")}{(hs.EncAv1 ? "; the headset also decodes AV1 (VisionALVR encodes HEVC)" : "")}");
             row("Colour", $"{(hs.PreferFull ? "full range" : "limited range")}, encoding gamma {hs.Gamma:0.00}{(hs.PreferHdr ? ", HDR preferred" : "")}");
@@ -374,6 +390,7 @@ namespace VisionALVR
             if (rateBox != null && rateBox.SelectedItem != null) ctxFps = double.Parse((string)rateBox.SelectedItem, CultureInfo.InvariantCulture);
             ctxScale = scaleBox != null ? (double)scaleBox.Value / 100.0 : 1.0;
             ctxFoveation = foveationBox == null || foveationBox.Checked;
+            variantId = profile != null && variantBox != null && variantBox.SelectedIndex >= 0 ? profile.Variants[variantBox.SelectedIndex].Id : "";
         }
 
         double ctxFps = 90, ctxScale = 1.0; bool ctxFoveation = true;
@@ -416,10 +433,20 @@ namespace VisionALVR
             panel.Load();
             ctx = new TestContext { HS = hs, Check = check, Fps = ctxFps, HeadsetAvailable = hs.FromHeadset };
             ctx.R.TestFps = ctxFps;
-            var cand = Proposal.Build(hs, new Results(), ctxFps);
-            cand.EyeW = (int)(hs.PanelW * ctxScale) / 32 * 32; cand.EyeH = (int)(hs.PanelH * ctxScale); cand.Foveated = ctxFoveation;
+            Proposal cand;
+            if (profile != null)
+            {
+                cand = Proposal.FromProfile(profile, variantId, ctxFps, ctxScale, ctxFoveation);
+                ctx.Profile = profile; ctx.ConfigMbps = cand.BitrateMbps;
+            }
+            else
+            {
+                cand = Proposal.Build(hs, new Results(), ctxFps);
+                cand.EyeW = (int)(hs.PanelW * ctxScale) / 32 * 32; cand.EyeH = (int)(hs.PanelH * ctxScale); cand.Foveated = ctxFoveation;
+            }
             panel.Prefill(cand);
             if (!panel.Save(out var err) && err != null) { testStatus.Text = err; testStatus.ForeColor = Color.Firebrick; }
+            else HmdProfiles.ApplySessionOverrides(profile);
             steps = demo ? DemoSteps() : Tests.Build(ctx);
             foreach (var st in steps) testList.Items.Add(new ListViewItem(new[] { Glyph(st.State) + "  " + st.Name, "" }));
             if (demo) { FinishTests(); return; }
@@ -427,6 +454,7 @@ namespace VisionALVR
             ctx.Ct = testCts.Token;
             ctx.OnEncoderDone = () => Invoke((Action)(() =>
             {
+                if (profile != null) return;   // a profile is verified as it is: the later tests run at the same configuration, nothing is lowered silently
                 // the encoder test measured the candidate: the tests that follow run at the interim proposal (lower resolution / rate if it could not keep up)
                 var interim = Proposal.Build(hs, ctx.R, ctxFps);
                 interim.Foveated = ctxFoveation;
@@ -464,7 +492,7 @@ namespace VisionALVR
             var failed = steps.Count(x => x.State == TestState.Failed);
             testStatus.Text = failed == 0 ? "Done." : $"Done: {failed} test(s) failed (details in logs\\VisionALVR.log); the proposal uses defaults where a measurement is missing.";
             testStatus.ForeColor = failed == 0 ? Color.SeaGreen : Color.DarkOrange;
-            proposal = Proposal.Build(hs, ctx.R, ctxFps);
+            proposal = profile != null ? Proposal.FromProfile(profile, variantId, ctxFps, ctxScale, ctxFoveation) : Proposal.Build(hs, ctx.R, ctxFps);
             next.Enabled = true;
             if (auto) GoNext();
         }
@@ -494,6 +522,16 @@ namespace VisionALVR
             var frame = r.BudgetMs > 0 ? r.BudgetMs : tg.FrameMs;
             add("Encoder time per frame (p95)", r.EncodeP95 > 0 ? $"{r.EncodeP95:0.0} ms (frame {frame:0.0} ms)" : "-", $"5-10 ms is the usual budget, and under {Reference.Get("encode_ok") * 100:0}% of the frame", Reference.EncodeBudget(r.EncodeP95, frame, tg),
                 "The encoder is slower than the budget for this rate: the proposal lowers the resolution (or the refresh rate).");
+            if (profile != null)
+            {
+                var cfgMbps = ctx != null ? ctx.ConfigMbps : 0;
+                add("Network at your configured bitrate", cfgMbps <= 0 ? "-" : (r.CleanMbps > 0 ? $"{cfgMbps:0} Mbps: clean" : $"{cfgMbps:0} Mbps: NOT clean"), "no packet loss, the headset keeps its frame rate, the latency does not rise (one step at the configured value, nothing is searched)",
+                    cfgMbps <= 0 ? Rating.Unknown : (r.CleanMbps > 0 ? Rating.Good : Rating.Poor), $"Your link did not carry {cfgMbps:0} Mbps cleanly: choose a lower network variant or bitrate in the setup, or improve the Wi-Fi: {prof.WifiAdvice}.");
+                if (!proposal.Foveated && profile.SplitEncode > 0)
+                    add("Split encoding", r.Slices <= 0 ? "-" : (r.Engines >= 2 && r.Slices >= 1.5 ? $"engaged ({r.Slices:0.#} strips, {r.Engines} engines)" : $"not engaged ({r.Engines} engine(s))"), "engaged when the GPU has two or more NVENC engines",
+                        r.Slices <= 0 ? Rating.Unknown : (r.Engines >= 2 && r.Slices >= 1.5 ? Rating.Good : Rating.Ok));
+            }
+            else
             add("Clean network bitrate", r.CleanMbps > 0 ? $"{r.CleanMbps:0} Mbps" : "-", $"{tg.MinMbps:0} Mbps minimum, {tg.GoodMbps:0}+ comfortable ({ew}x{eh} at {ctxFps:0} Hz, HEVC)", Reference.Bitrate(r.CleanMbps, tg),
                 $"The link carries less than the stream needs ({tg.MinMbps:0} Mbps): {prof.WifiAdvice}.");
             add("Packets lost per second", r.LossPerS >= 0 && r.CleanMbps > 0 ? $"{r.LossPerS:0.00}" : "-", "0 is clean; up to 1 is tolerable", Reference.Loss(r.CleanMbps > 0 ? r.LossPerS : -1), $"The wireless link drops packets: {prof.WifiAdvice}.");
@@ -509,7 +547,7 @@ namespace VisionALVR
             var count = new Func<string, int>(v => list.Items.Cast<ListViewItem>().Count(x => x.SubItems[3].Text == v));
             var verdict = count("Poor") > 0 ? "Limited: some parts are below the target (see below)" : (count("Ok") > 0 ? "Good: the setup works, a few values are only acceptable" : (count("Good") > 0 ? "Excellent: everything measured meets the target" : "Not enough measurements to judge"));
             p.Controls.Add(Ui.Line(verdict, Ui.Big));
-            if (r.CleanMbps >= 2 * tg.GoodMbps && r.CleanMbps > 0)
+            if (profile == null && r.CleanMbps >= 2 * tg.GoodMbps && r.CleanMbps > 0)
                 p.Controls.Add(Ui.Line($"\u2022 Your link carries {r.CleanMbps:0} Mbps, far more than this stream needs ({tg.GoodMbps:0} Mbps): there is room for a higher resolution or less foveation if your GPU's encoder allows it."));
             foreach (var a in bad.Distinct()) p.Controls.Add(Ui.Line("\u2022 " + a));
             p.Controls.Add(Ui.Line($"\u2022 Network advice for {prof.Label}: {prof.WifiAdvice}."));
@@ -542,6 +580,7 @@ namespace VisionALVR
         {
             if (settingsPanel == null) return false;
             if (!settingsPanel.Save(out var err)) { MessageBox.Show(this, err, Text); return false; }
+            if (autoconfig) HmdProfiles.ApplySessionOverrides(profile);
             return true;
         }
 

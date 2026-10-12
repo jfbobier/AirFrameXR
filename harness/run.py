@@ -165,6 +165,9 @@ def build(what):
             import re
             m = re.search(r'pub const VERSION: &str = "([^"]+)"', (lib.ROOT / "tools/host/src/vision.rs").read_text())
             (out_dir / "version.txt").write_text(m.group(1) if m else "")
+            lib.b_run("if not exist _tmp\\install\\profiles mkdir _tmp\\install\\profiles")
+            for pf in sorted((lib.ROOT / "profiles").glob("*.json")):   # shipped as profiles\\*.json: the template and the Vision Pro profile (users add theirs to config\\profiles)
+                lib.b_put(pf, f"_tmp/install/profiles/{pf.name}")
             lib.b_put(out_dir / "version.txt", "_tmp/install/version.txt")   # the zip is named after the host's VERSION (vision.rs)
             # licences shipped with the binaries: the notices, the project licence (once chosen) and the upstream texts
             lib.b_run("if not exist _tmp\\install\\licenses mkdir _tmp\\install\\licenses")

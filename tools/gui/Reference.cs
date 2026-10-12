@@ -158,6 +158,8 @@ namespace VisionALVR
         public double TotalMs, GameMs, EncoderMs, NetworkMs, DecodeMs, DecoderQueueMs, VsyncQueueMs, ClientFps, DisplayedFps, StreamedMbps;
         public string AudioNote = "";
         public double TestFps;   // the refresh rate the tests ran at
+        public int SplitMode;    // the encoder test's split_encode_mode and the strips per frame it measured (>= 2 means split encoding engaged)
+        public double Slices;
     }
 
     /// The configuration proposed from the handshake and the tests, with a short reason for each value.
@@ -170,6 +172,25 @@ namespace VisionALVR
         public string Why(string k) => why.TryGetValue(k, out var s) ? s : "";
 
         static int Align32(double w) => Math.Max(256, (int)(w / 32) * 32);
+
+        /// The configuration of a community profile (profiles\\hmd_profiles.json) for one network variant: nothing is searched or scaled, the tests
+        /// verify it. `scale` shrinks the resolution (the wizard's scale box), `fps` and `foveated` are the user's own choices on the previous page.
+        public static Proposal FromProfile(HmdProfile prof, string variantId, double fps, double scale, bool foveated)
+        {
+            var v = prof.Variant(variantId);
+            var p = new Proposal { EyeW = Align32(prof.EyeW * scale), EyeH = Align32(prof.EyeH * scale), Fps = fps > 0 ? fps : prof.Fps, BitrateMbps = v.Mbps, Foveated = foveated, Audio = true };
+            var src = $"profile '{prof.DisplayName}'";
+            p.why["fps"] = $"{p.Fps:0} Hz: " + (Math.Abs(p.Fps - prof.Fps) < 0.5 ? $"the {src}" : $"your choice (the {src} uses {prof.Fps:0} Hz)");
+            p.why["resolution"] = scale >= 0.999 ? $"{p.EyeW} x {p.EyeH} per eye: the {src}" : $"{p.EyeW} x {p.EyeH}: {scale * 100:0}% of the {src} ({prof.EyeW} x {prof.EyeH})";
+            p.why["bitrate"] = $"{p.BitrateMbps:0} Mbps: the {src}, network '{v.Label}'. The tests check this value on your link; nothing is searched.";
+            p.why["foveation"] = (foveated ? "foveated encoding (your choice)" : "full frame, no foveation") + $"; the {src} " + (prof.Foveated ? "uses foveation" : "uses the full frame");
+            p.why["codec"] = $"{prof.Codec.ToUpperInvariant()}, {prof.BitDepth}-bit, " + (prof.FullRange ? "full range" : "limited range") + $", gamma {prof.Gamma:0.0#} (the {src})";
+            p.why["audio"] = "game audio to the headset";
+            p.Profile = prof;
+            return p;
+        }
+
+        public HmdProfile Profile;
 
         public static Proposal Build(Handshake hs, Results r, double chosenFps)
         {

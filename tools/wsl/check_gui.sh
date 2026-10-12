@@ -9,9 +9,10 @@ T="/mnt/c/Users/$WUSER/AppData/Local/Temp/visionalvr_gui"; mkdir -p "$T" || exit
 FW='C:\Windows\Microsoft.NET\Framework64\v4.0.30319'; SRC=$(wslpath -w "$R/tools/gui"); OUT=$(wslpath -w "$T")
 REFS=(); for r in System.dll System.Core.dll System.Drawing.dll System.Windows.Forms.dll System.Web.Extensions.dll; do REFS+=("/r:$FW\\$r"); done
 rc=0
-for t in "VisionALVR.exe:VisionALVR.cs" "configure.exe:Configure.cs"; do
+for t in "VisionALVR.exe:VisionALVR.cs" "configure.exe:Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs"; do
   exe=${t%%:*}; src=${t##*:}; echo "== $exe"
-  (cd "$T" && "$CSC" /nologo /noconfig /target:winexe /platform:x64 /langversion:latest /nowarn:1701,1702 "${REFS[@]}" \
-     "/win32manifest:$SRC\\app.manifest" "/resource:$SRC\\res\\logo_640.png,logo_640.png" "/out:$OUT\\$exe" "$SRC\\Common.cs" "$SRC\\$src" 2>&1 | tr -d '\r') || rc=1
+  FILES=("$SRC\\Common.cs"); for f in $src; do FILES+=("$SRC\\$f"); done
+  out=$(cd "$T" && "$CSC" /nologo /noconfig /target:winexe /platform:x64 /langversion:latest /nowarn:1701,1702 "${REFS[@]}" \
+     "/win32manifest:$SRC\\app.manifest" "/resource:$SRC\\res\\logo_640.png,logo_640.png" "/out:$OUT\\$exe" "${FILES[@]}" 2>&1 | tr -d '\r'); echo "$out"; echo "$out" | grep -q 'error CS' && rc=1
 done
 echo "check_gui: $([ $rc = 0 ] && echo OK || echo FAILED)"; exit $rc

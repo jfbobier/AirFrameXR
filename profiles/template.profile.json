@@ -1,0 +1,62 @@
+{
+  "_comment": "TEMPLATE for a VisionALVR headset profile. Copy it, rename it <your-headset>.profile.json, fill it with values YOU have run, and share the file (for example on the VisionALVR Discord). To use one: drop the file into the config\\\\profiles folder next to VisionALVR.exe (create it if it does not exist); the setup wizard matches it to your headset at the handshake. Delete every key you do not need; only `id`, `stream` and `network` are required. A profile only changes this PC's configuration files (session.json) and is never downloaded automatically.",
+  "schema": 1,
+  "id": "my-headset-example",
+  "display_name": "My headset (client app)",
+  "author": "your name or handle",
+  "match": {
+    "name_contains": [
+      "part of the name the headset reports"
+    ],
+    "default_view_resolution": [
+      0,
+      0
+    ],
+    "supported_refresh_rates_include": [
+      90
+    ]
+  },
+  "stream": {
+    "eye_resolution": [
+      0,
+      0
+    ],
+    "fps": 90,
+    "codec": "hevc",
+    "bit_depth": 10,
+    "full_range": true,
+    "encoding_gamma": 1.0,
+    "foveated": false,
+    "split_encode": 3,
+    "protocol": "udp"
+  },
+  "network": {
+    "default": "wifi-good",
+    "variants": [
+      {
+        "id": "wifi-good",
+        "label": "describe the network this bitrate was tested on",
+        "bitrate_mbps": 150
+      },
+      {
+        "id": "wifi-average",
+        "label": "a weaker link",
+        "bitrate_mbps": 100
+      }
+    ]
+  },
+  "session_overrides": {
+    "session_settings.video.encoder_config.nvenc.quality_preset.variant": "P3"
+  },
+  "notes": [
+    "anything another user should know"
+  ],
+  "verified": [
+    {
+      "gpu": "your GPU",
+      "client": "headset app and version",
+      "date": "YYYY-MM-DD",
+      "result": "what you observed (fps, latency, packet loss)"
+    }
+  ]
+}

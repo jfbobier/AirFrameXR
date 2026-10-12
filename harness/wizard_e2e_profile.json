@@ -1,0 +1,43 @@
+{
+  "id": "e2e-mock-headset",
+  "display_name": "Mock headset (harness)",
+  "match": {
+    "name_contains": [
+      "Windows PC"
+    ],
+    "default_view_resolution": [
+      3552,
+      3200
+    ]
+  },
+  "stream": {
+    "eye_resolution": [
+      1760,
+      1600
+    ],
+    "fps": 100,
+    "codec": "hevc",
+    "bit_depth": 10,
+    "full_range": true,
+    "encoding_gamma": 1.0,
+    "foveated": false,
+    "split_encode": 3,
+    "protocol": "udp"
+  },
+  "network": {
+    "default": "lab",
+    "variants": [
+      {
+        "id": "lab",
+        "label": "loopback lab",
+        "bitrate_mbps": 150
+      }
+    ]
+  },
+  "notes": [
+    "test profile, not for users"
+  ],
+  "verified": [],
+  "schema": 1,
+  "_comment": "Test profile for harness/wizard_e2e.py: matches the mock headset (alvr_client_headless: 'Windows PC', 3552x3200, 100 Hz) so the wizard takes the profile path. One profile per file."
+}

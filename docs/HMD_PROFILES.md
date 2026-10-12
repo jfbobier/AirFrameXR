@@ -1,36 +1,46 @@
-# Headset profiles (`profiles/hmd_profiles.json`)
+# Headset profiles
 
-VisionALVR cannot test every headset. The configure wizard therefore does not search for a configuration: the headset's handshake
-identifies the client, a **community-maintained profile** gives the starting configuration, you can change anything, and the wizard
-then **verifies the configuration on your PC** and gives a verdict.
+VisionALVR cannot test every headset, and it does not try to know them all. A **profile** is one small JSON file that says how a given headset
+(and its client app) should be configured. Profiles are **shared among users, peer to peer** (the VisionALVR Discord, like UEVR profiles): the
+program never downloads anything, there is no central database. The repository only holds a **template** and the **Apple Vision Pro** profile (the
+project's first target), which ships in the package as an example.
 
-## Flow
+## Using a profile
 
-1. **Identify.** The handshake (`client_capabilities` in the host log) gives the headset name, the default view resolution, the
-   supported refresh rates and what the client supports (foveation, codecs, 10 bit, microphone). A profile matches when its
-   `match` fields all hold (`name_contains` any of, `default_view_resolution` equal, `supported_refresh_rates_include` all present).
-   No match: a generic profile from the capabilities alone, marked "unverified".
-2. **Propose.** The profile's `stream` values and a network variant (`network.variants`; you pick the one that describes your
-   Wi-Fi, for example after a bad previous run). Everything is editable in the wizard before the test.
-3. **Verify** (what we see with *this* configuration, no bandwidth search): a streaming test of about 30 s at the configured bitrate
-   with the benchmark scene, then a verdict per check:
-   - encode time p95 below 90% of the frame period (and below the profile's budget);
-   - client fps equals the target, no packets lost, network latency not rising;
-   - decode and headset queue times in range;
-   - **split encoding really engaged** (the encoder reports its engines and strips per frame: a configuration that asks for split 3 on a
-     GPU that cannot do it is flagged, with the fallback);
-   - audio output present.
-   Each check says what it saw and what to change if it failed.
-4. **Save.** The values go into `config\session.json` and `config\visionalvr.json` (one writer, so a setting cannot be silently overridden
-   by another file).
+Drop the file into `config\profiles\` next to `VisionALVR.exe` (create the folder). The setup wizard (`configure.exe`) matches the headset's handshake
+against every profile it finds (`profiles\` shipped with the package, then `config\profiles\`; your file replaces a shipped one with the same `id`):
 
-## File
+1. **Identify.** The handshake gives the headset name, the default view resolution and the supported refresh rates. A profile matches when its
+   `match` fields hold: `name_contains` (any), `default_view_resolution` (equal), `supported_refresh_rates_include` (all present). No match: a generic
+   proposal built from what the headset advertised, marked as such.
+2. **Propose.** The profile's `stream` values and one **network variant** (the bitrate depends on your Wi-Fi: you pick the line that describes yours,
+   for instance after a bad earlier run). The wizard shows everything and lets you change it before anything runs.
+3. **Verify.** The wizard does not search for a configuration or measure your bandwidth: it checks *this* configuration on *this* PC and gives a
+   verdict with what it saw: encode time against the frame period, a streaming test with the headset at the configured bitrate (packet loss, frame
+   rate held, network latency not rising), decode and headset queues, audio, and **whether split encoding really engaged** (engines and strips per
+   frame reported by the encoder; a GPU that cannot split is flagged).
+4. **Save.** The values go into `config\session.json` and `config\visionalvr.json`, then the profile's `session_overrides` are written into
+   `session.json`.
 
-`profiles/hmd_profiles.json` in the repository is the source of truth. The package ships a copy; the wizard may download the current
-file from the public repository when you ask it to (never silently), validates it against the schema and ignores unknown keys.
-`config\hmd_profiles.local.json` (same format) overrides or adds profiles on your machine and is never overwritten.
+## Making or editing a profile
 
-Entry fields: `id`, `display_name`, `match`, `stream` (`eye_resolution`, `fps`, `codec`, `bit_depth`, `full_range`, `encoding_gamma`,
-`foveated`, `split_encode` 0-3, `protocol`), `network` (`default`, `variants[]` with `id`, `label`, `bitrate_mbps`), `notes[]`,
-`verified[]` (gpu, client, date, what was observed). **Only add values you ran.** A pull request that adds a headset should include the
-`client_capabilities` line from its log.
+Copy `profiles\template.profile.json`, rename it `<headset>.profile.json`, fill in values **you have run**, and share it. Keys (all optional except
+`id`, `stream`, `network`):
+
+| key | meaning |
+|---|---|
+| `id`, `display_name`, `author` | identity; the same `id` replaces another file's profile |
+| `match` | `name_contains` [strings], `default_view_resolution` [w, h], `supported_refresh_rates_include` [Hz] |
+| `stream` | `eye_resolution` [w, h], `fps`, `codec` (hevc), `bit_depth`, `full_range`, `encoding_gamma`, `foveated`, `split_encode` (0-3), `protocol` (udp/tcp) |
+| `network` | `default` (variant id) and `variants[]`: `id`, `label`, `bitrate_mbps` |
+| `session_overrides` | ALVR session settings as dotted paths into `config\session.json`, for example `session_settings.video.encoder_config.nvenc.quality_preset.variant`: `"P3"` |
+| `notes`, `verified` | what another user should know; GPU, client, date and result of the runs that back the values |
+
+A profile only changes this PC's configuration files, and only when you run the wizard and save.
+
+## The Apple Vision Pro profile
+
+`profiles\apple-vision-pro.profile.json`: 3552x3200 per eye at 90 fps, HEVC 10-bit, full frame (no foveation), split encoding 3, 230 Mbps on a good
+Wi-Fi 6/6E link, plus the 22 ALVR settings the author tuned by A/B testing on stock ALVR + SteamVR (QuestPro emulation, NVENC P3 without multi-pass,
+CABAC, 1.5 buffered frames, no microphone, the VideoToolbox low-latency option, chroma-key passthrough, ...). They are also the defaults of
+`config\session.default.json` in the package (the author's session without foveation, 230 Mbps).

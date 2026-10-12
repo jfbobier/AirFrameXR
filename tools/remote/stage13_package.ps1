@@ -19,6 +19,9 @@ Copy-Item "$root\_tmp\install\licenses\*.txt" "$pkg\licenses" -Force
 # the benchmark scene (tools/bench_scene/build.sh, uploaded by `run.py build host`)
 New-Item -ItemType Directory -Force "$pkg\bench" | Out-Null
 if (Test-Path "$root\bench\littlest_tokyo.vab") { Copy-Item "$root\bench\littlest_tokyo.vab" "$pkg\bench\littlest_tokyo.vab" -Force }
+# the wizard's community headset profiles
+New-Item -ItemType Directory -Force "$pkg\profiles" | Out-Null
+if (Test-Path "$root\_tmp\install\profiles") { Copy-Item "$root\_tmp\install\profiles\*.json" "$pkg\profiles" -Force }
 # personal build (harness/run.py package with VISIONALVR_PERSONAL=1): a ready config\visionalvr.json and a zip suffix; a generic build leaves both empty
 $versionFile = "$root\_tmp\install\version.txt"
 if ((Test-Path $versionFile) -and ((Get-Content $versionFile -Raw).Trim().Length -gt 0)) { $version = (Get-Content $versionFile -Raw).Trim() }
@@ -34,6 +37,7 @@ $ship = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'LibOVRRT64_1.dll'
           'register_openxr_runtime.ps1', 'register_openxr_runtime.bat', 'unregister_openxr_runtime.bat', 'README.txt',
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'THIRD_PARTY_NOTICES.md', 'LICENSE.txt')
 $ship += $persShip
+$ship += Get-ChildItem "$pkg\profiles" -File -Filter *.json | ForEach-Object { "profiles\$($_.Name)" }
 $ship += Get-ChildItem "$pkg\licenses" -File | ForEach-Object { "licenses\$($_.Name)" }
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $fs = [IO.File]::Open($zip, [IO.FileMode]::Create)

@@ -34,6 +34,10 @@ namespace VisionALVR
         public double Fps = 90;
         public bool HeadsetAvailable;
         public string NetSteps = "100,150,200,250,300,350,400,500";
+        /// the community profile in use (null: the generic path with its searches) and the bitrate it asks for; the tests then verify that configuration
+        public HmdProfile Profile;
+        public double ConfigMbps;
+        public string EncodeProfileArg => Profile != null && !Profile.Foveated ? "full-split" : "foveated";
         public int StepSecs = 6;
         public Action<string> Status = s => { };
         /// called when the encoder test is done: the wizard applies the interim proposal (so the later tests run at a configuration the encoder can sustain)
@@ -105,7 +109,7 @@ namespace VisionALVR
                 {
                     string result = null; string error = null;
                     ctx.Status("Encoding test frames with the hardware encoder...");
-                    await Host(ctx, Base + "--live --bench 300 --noise-temporal --encode-profile foveated", (n, d) =>
+                    await Host(ctx, Base + $"--live --bench 300 --noise-temporal --encode-profile {(ctx.Profile != null ? ctx.EncodeProfileArg : "foveated")}", (n, d) =>
                     {
                         if (n == "setup_error") error = d != null && d.TryGetValue("message", out var m) ? m as string : "setup error";
                         if (n != "bench" || d == null) return;
@@ -113,11 +117,20 @@ namespace VisionALVR
                         r.EncodeP50 = Num(d, "p50_ms"); r.EncodeP95 = Num(d, "p95_ms"); r.BudgetMs = Num(d, "budget_ms");
                         r.EncodeFits = d.TryGetValue("fits", out var f) && f is bool fb && fb;
                         r.EncW = (int)Num(d, "width"); r.EncH = (int)Num(d, "height"); r.Engines = (int)Num(d, "nvenc_engines");
+                        r.SplitMode = (int)Num(d, "split_encode_mode"); r.Slices = Num(d, "slices_per_frame");
                         result = $"{r.EncW}x{r.EncH} encoded: p50 {r.EncodeP50:0.0} ms, p95 {r.EncodeP95:0.0} ms of {r.BudgetMs:0.0} ms per frame; {r.Engines} NVENC engine(s)";
                     }, 120000);
                     if (error != null) throw new TestFailed(error);
                     if (result == null) throw new TestFailed("the encoder test produced no result (see logs\\VisionALVR.log)");
-                    if (!ctx.R.EncodeFits) { st.Warn(); result += " - too slow for this rate: the later tests and the proposal use a lower resolution or rate"; }
+                    if (!ctx.R.EncodeFits) { st.Warn(); result += ctx.Profile != null ? " - too slow for this configuration: lower the resolution or the refresh rate in the setup" : " - too slow for this rate: the later tests and the proposal use a lower resolution or rate"; }
+                    if (ctx.Profile != null && ctx.Profile.SplitEncode > 0 && !ctx.Profile.Foveated)
+                    {
+                        // advanced users want to know whether split encoding really runs: the encoder reports its engines and the strips it produced per frame
+                        var engaged = ctx.R.Engines >= 2 && ctx.R.Slices >= 1.5;
+                        result += engaged ? $"; split encoding engaged ({ctx.R.Slices:0.#} strips per frame on {ctx.R.Engines} engines)"
+                                          : $"; split encoding NOT engaged ({ctx.R.Engines} NVENC engine(s), {ctx.R.Slices:0.#} strip per frame): this GPU encodes the frame in one piece, expect a longer encode time";
+                        if (!engaged) st.Warn();
+                    }
                     ctx.OnEncoderDone();
                     return result;
                 },
@@ -128,6 +141,7 @@ namespace VisionALVR
                 Name = "Picture quality benchmark (about 1.5 minutes)",
                 Run = async (ctx, st) =>
                 {
+                    if (ctx.Profile != null) throw new TestSkipped("not needed: the profile gives the stream settings");
                     string error = null; int n = 0; string line = null;
                     ctx.Status("Quality benchmark: starting...");
                     await Host(ctx, Base + "--benchmark-quality", (ev, d) =>
@@ -163,6 +177,35 @@ namespace VisionALVR
                 Run = async (ctx, st) =>
                 {
                     if (!ctx.HeadsetAvailable) throw new TestSkipped("needs the headset connected");
+                    if (ctx.Profile != null)
+                    {
+                        // one step at the configured bitrate: pass or fail with the reasons, no search for another bitrate
+                        string perr = null, verdict = null; bool ok = false; var why = new List<string>(); var plost = new List<double>();
+                        var mbps = Math.Max(30, (int)Math.Round(ctx.ConfigMbps));
+                        ctx.Status($"Network check at {mbps} Mbps: waiting for the headset (open the ALVR app)...");
+                        await Host(ctx, Base + $"--benchmark-network {mbps} --bench-step-s {Math.Max(ctx.StepSecs, 10)} --connect-timeout 120 --seconds 900 --encode-profile {ctx.EncodeProfileArg}", (n, d) =>
+                        {
+                            switch (n)
+                            {
+                                case "client_connected": ctx.Status($"Network check: headset connected, streaming {mbps} Mbps..."); break;
+                                case "setup_error": perr = d != null && d.TryGetValue("message", out var m) ? m as string : "setup error"; break;
+                                case "bench_step": plost.Add(Num(d, "packets_lost_per_s")); break;
+                                case "bench_result":
+                                    var steps0 = d != null && d.TryGetValue("steps", out var ss) ? ss as object[] : null;
+                                    var s0 = steps0 != null && steps0.Length > 0 ? steps0[0] as Dictionary<string, object> : null;
+                                    ok = s0 != null && s0.TryGetValue("ok", out var okv) && okv is bool okb && okb;
+                                    if (s0 != null && s0.TryGetValue("why", out var wv) && wv is object[] wa) why.AddRange(wa.Select(x => x?.ToString() ?? ""));
+                                    verdict = "done";
+                                    break;
+                            }
+                        }, 600000);
+                        if (perr != null) throw new TestFailed(perr);
+                        if (verdict == null) throw new TestFailed("the headset did not connect or the test did not finish");
+                        ctx.R.CleanMbps = ok ? mbps : 0;
+                        ctx.R.LossPerS = plost.Count > 0 ? plost.Average() : -1;
+                        if (!ok) { st.Warn(); return $"{mbps} Mbps did NOT run clean on your link: {string.Join(", ", why)}. Pick a lower network variant or bitrate in the setup (nothing was searched)."; }
+                        return $"{mbps} Mbps ran clean (no packet loss, the headset kept its frame rate, the network latency did not rise)";
+                    }
                     string error = null; int rec = 0; var lost = new List<double>(); string note = null;
                     ctx.Status("Network test: waiting for the headset (open the ALVR app)...");
                     await Host(ctx, Base + $"--benchmark-network {ctx.NetSteps} --bench-step-s {ctx.StepSecs} --connect-timeout 120 --seconds 900 --encode-profile foveated", (n, d) =>

@@ -10,7 +10,10 @@ import live, lib
 
 U = live.PC_USER
 wd = rf"C:\Users\{U}\wizard_e2e"
-tmpl = rf"C:\Users\{U}\VisionALVR_0.3test"
+# --template <folder>: the unzipped package used as the base (default C:\Users\<u>\VisionALVR_0.3test)
+# --local-profile <file>: a headset profile file copied to config\profiles\ so the mock headset ("Windows PC", 3552x3200, 100 Hz) matches it
+tmpl = sys.argv[sys.argv.index("--template") + 1] if "--template" in sys.argv else rf"C:\Users\{U}\VisionALVR_0.3test"
+local_profile = sys.argv[sys.argv.index("--local-profile") + 1] if "--local-profile" in sys.argv else None
 root = live.CLONE
 limit = int(sys.argv[sys.argv.index("--seconds") + 1]) if "--seconds" in sys.argv else 900
 host = lib.builder_client_hostname()
@@ -24,7 +27,11 @@ robocopy '{tmpl}' '{wd}' /E /NFL /NDL /NJH /NJS | Out-Null
 Remove-Item '{wd}\\config\\session.json','{wd}\\config\\visionalvr.json','{wd}\\logs' -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item '{root}\\out\\gui\\configure.exe' '{wd}\\configure.exe' -Force
 Copy-Item '{root}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wd}\\alvr_host.exe' -Force
+New-Item -ItemType Directory -Force '{wd}\\profiles','{wd}\\config\\profiles' | Out-Null
+Copy-Item '{root}\\_tmp\\install\\profiles\\*.json' '{wd}\\profiles' -Force -ErrorAction SilentlyContinue
 """)
+if local_profile:
+    live.put(Path(local_profile), f"{wd.replace(chr(92), '/')}/config/profiles/e2e-profile.json")
 client = rf"{root}\{lib.CLIENT_EXE}"
 loop = ["@echo off", "set ALVR_BIND_IP=127.0.0.2", ":loop",
         f'"{client}" --report {wd}\\mock_report.json --connect-timeout 900 --seconds 1200 --refresh 100 --real-views --poll-ms 5 --queue-max 2 --display-sim --display-hz 100 > {wd}\\mock_stdout.txt 2>&1',
