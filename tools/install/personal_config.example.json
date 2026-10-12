@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy to private/personal_config.json (gitignored). `VISIONALVR_PERSONAL=1 python3 harness/run.py build ... package` then ships these values in the portable folder (zip suffix -personal). Dotted keys are set inside session.default.json; `visionalvr` becomes config\\visionalvr.json (the host/GUI settings). Not for GitHub releases.",
+  "version_suffix": "-personal",
+  "session": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "session_settings.video.bitrate.mode.ConstantMbps": 230,
+    "session_settings.video.preferred_fps": 90.0,
+    "session_settings.video.transcoding_view_resolution.Absolute.width": 3552,
+    "session_settings.video.transcoding_view_resolution.Absolute.height.content": 3200,
+    "session_settings.video.emulated_headset_view_resolution.Absolute.width": 3552,
+    "session_settings.video.emulated_headset_view_resolution.Absolute.height.content": 3200
+  },
+  "visionalvr": {
+    "video": { "encode_profile": "full-split", "idle_rgb": "00ff00" },
+    "debug": true,
+    "display": { "gamma": 1.2 }
+  }
+}

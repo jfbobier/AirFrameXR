@@ -94,8 +94,11 @@ struct Args {
     /// the launcher sets a plausible seated height (1.3 m) and the headset's own vertical movement is kept on top of it.
     height_m: f32,
     /// hand pose convention fix (shim, Oculus-emulation path): local rotation in degrees (XYZ Euler, left hand; right hand mirrors
-    /// y and z like ALVR's controller offsets) and local position offset in metres. Default 180 deg about Y: with ALVR's
-    /// OpenVR-convention controller pose handed straight to LibOVR, palm/back and the aim came out inverted (Subside, Midnight Walk).
+    /// y and z like ALVR's controller offsets) and local position offset in metres (in the LibOVR frame, after the rotation).
+    /// Default (derived 2026-10-13, see docs/progress.md): ALVR's hand motion is the OpenXR grip pose turned by its Quest 2 offset (-15 deg
+    /// about X) with its +0.11 m controller offset behind the origin; VDXR's calibration says the LibOVR hand pose is the OpenXR aim frame
+    /// and the grip is +60 deg about X from it, so LibOVR = ALVR * Rx(+15) * Rx(-60) = ALVR * Rx(-45 deg), position (0, -0.048, 0.038). The earlier
+    /// 180 deg about Y turned the hands to face backwards in every game (OpenXR and LibOVR).
     hand_rotation_deg: [f32; 3],
     hand_position_m: [f32; 3],
     bench_network: Option<Vec<u32>>,
@@ -169,8 +172,8 @@ fn parse_args() -> Result<Args, String> {
         discover: None,
         gamma: None,
         height_m: 1.3,
-        hand_rotation_deg: [0.0, 180.0, 0.0],
-        hand_position_m: [0.0, 0.0, 0.0],
+        hand_rotation_deg: [-45.0, 0.0, 0.0],
+        hand_position_m: [0.0, -0.048, 0.038],
         bench_network: None,
         bench_step_s: 8.0,
         noise_block: 16,
@@ -387,6 +390,11 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if let Some(v) = st.pick_policy.as_deref() {
         if std::env::var_os("VISIONALVR_PICK").is_none() {
             std::env::set_var("VISIONALVR_PICK", v);
+        }
+    }
+    if let Some(v) = st.client_queue_drain {
+        if std::env::var_os("VISIONALVR_CLIENT_DRAIN").is_none() {
+            std::env::set_var("VISIONALVR_CLIENT_DRAIN", if v { "1" } else { "0" });
         }
     }
     phase::configure(st.phase_lock.unwrap_or(true));
@@ -1361,6 +1369,34 @@ fn main() {
     ];
     let audio_cfg = game_audio_config(&layout.session());
     event(origin, "game_audio", audio_cfg.clone());
+    // The headset's sound level must not follow the PC's volume: ALVR loop-back captures the default output, and when that is the VB-Audio cable
+    // device its endpoint volume scales what is captured (the PC's volume keys then change the headset's volume). Keep that device at 100 %
+    // while the host runs (checked every 3 s, so a change is undone within seconds). VISIONALVR_FORCE_CABLE_VOLUME=0 disables it.
+    #[cfg(windows)]
+    if audio_cfg["enabled"].as_bool().unwrap_or(true) && std::env::var("VISIONALVR_FORCE_CABLE_VOLUME").map(|v| v != "0").unwrap_or(true) {
+        std::thread::spawn(move || {
+            let mut last_logged = -1.0f32;
+            loop {
+                if let Ok(dev) = alvr_audio::AudioDevice::new_output(None) {
+                    if let Ok(name) = dev.name() {
+                        let lower = name.to_ascii_lowercase();
+                        if lower.contains("cable") || lower.contains("vb-audio") {
+                            if let Ok((vol, _muted)) = alvr_audio::get_volume_windows_device(&dev) {
+                                if vol < 0.999 {
+                                    let ok = alvr_audio::set_volume_windows_device(&dev, 1.0).is_ok();
+                                    if (vol - last_logged).abs() > 0.01 {
+                                        last_logged = vol;
+                                        event(origin, "audio_volume_forced", json!({ "device": name, "was": vol, "set_ok": ok }));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_secs(3));
+            }
+        });
+    }
     let mut reconfigs = 0usize;
     if args.live {
         let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, &host_keys);
@@ -1463,14 +1499,42 @@ fn main() {
         unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
         {
             // hand pose convention fix (see Args::hand_rotation_deg); the right hand mirrors y and z like ALVR's own offsets
-            use alvr_common::glam::{EulerRot, Quat};
-            let r = args.hand_rotation_deg.map(f32::to_radians);
-            for (side, (ry, rz, px)) in [(0, (r[1], r[2], args.hand_position_m[0])), (1, (-r[1], -r[2], -args.hand_position_m[0]))] {
-                let q = Quat::from_euler(EulerRot::XYZ, r[0], ry, rz).to_array();
-                let p = [px, args.hand_position_m[1], args.hand_position_m[2]];
-                unsafe { nvh::nvh_ipc_set_hand_offset(ipc, side, q.as_ptr(), p.as_ptr()) };
+            fn apply_hand_offset(ipc: *mut std::ffi::c_void, rot_deg: [f32; 3], pos_m: [f32; 3]) {
+                use alvr_common::glam::{EulerRot, Quat};
+                let r = rot_deg.map(f32::to_radians);
+                for (side, (ry, rz, px)) in [(0, (r[1], r[2], pos_m[0])), (1, (-r[1], -r[2], -pos_m[0]))] {
+                    let q = Quat::from_euler(EulerRot::XYZ, r[0], ry, rz).to_array();
+                    let p = [px, pos_m[1], pos_m[2]];
+                    unsafe { nvh::nvh_ipc_set_hand_offset(ipc, side, q.as_ptr(), p.as_ptr()) };
+                }
             }
+            apply_hand_offset(ipc, args.hand_rotation_deg, args.hand_position_m);
             event(origin, "hand_offset", json!({ "rotation_deg": args.hand_rotation_deg, "position_m": args.hand_position_m }));
+            // Tuning aid: config/hand_offset.json {"rotation_deg":[x,y,z],"position_m":[x,y,z]} is re-read every second while the host runs and
+            // wins over the settings, so a candidate can be tried in a running game without restarting anything. Delete the file to stop.
+            let (ipc_addr, path, base) = (ipc as usize, args.config_dir.join("hand_offset.json"), (args.hand_rotation_deg, args.hand_position_m));
+            std::thread::spawn(move || {
+                let mut last: Option<std::time::SystemTime> = None;
+                loop {
+                    std::thread::sleep(Duration::from_secs(1));
+                    let m = fs::metadata(&path).and_then(|m| m.modified()).ok();
+                    if m == last {
+                        continue;
+                    }
+                    last = m;
+                    let (rot, pos) = match fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+                        Some(v) => {
+                            let a3 = |k: &str, d: [f32; 3]| -> [f32; 3] {
+                                v[k].as_array().filter(|a| a.len() == 3).map(|a| [0, 1, 2].map(|i| a[i].as_f64().unwrap_or(d[i] as f64) as f32)).unwrap_or(d)
+                            };
+                            (a3("rotation_deg", base.0), a3("position_m", base.1))
+                        }
+                        None => base,
+                    };
+                    apply_hand_offset(ipc_addr as *mut std::ffi::c_void, rot, pos);
+                    event(origin, "hand_offset", json!({ "rotation_deg": rot, "position_m": pos, "source": if m.is_some() { "config/hand_offset.json" } else { "settings" } }));
+                }
+            });
         }
         p.set_gpu_scheduling(args.gpu_sched_class);
         p.start();

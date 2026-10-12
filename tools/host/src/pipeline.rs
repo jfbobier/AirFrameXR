@@ -183,10 +183,13 @@ pub struct Pipeline {
     /// the previous boundary left a frame behind in the intake (a second one in a row drops the older instead: bounded lag)
     left_behind: AtomicBool,
     pub queue_picks: AtomicU64,
-    /// which frame a boundary takes when two wait: oldest (default: no drops, a period late) | newest (lab only: drops the older, loses frames when the app's frame times jitter) | adaptive
-    /// (newest right after an empty boundary, when the headset already repeated, else oldest)
+    /// which frame a boundary takes when two wait: oldest (default: no drops, a standing queue stays a period late) | newest (lab only: drops the older of
+    /// every pair, loses frames when the app's frame times jitter) | adaptive (newest right after an empty boundary, else oldest) | aged
     pick_policy: String,
     last_empty: AtomicBool,
+    /// the headset's decoder queue stood a whole period or more (phase.rs): drop one frame at a boundary to let it drain (opt-in, see phase::client_drain_due)
+    client_drain: bool,
+    pub drains: AtomicU64,
     last_arrival: Mutex<Option<Instant>>,
     picked: Mutex<Option<Picked>>,
     picked_cv: Condvar,
@@ -244,6 +247,8 @@ impl Pipeline {
             queue_picks: AtomicU64::new(0),
             pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "oldest".into()),
             last_empty: AtomicBool::new(false),
+            client_drain: std::env::var("VISIONALVR_CLIENT_DRAIN").map(|v| v == "1").unwrap_or(false),
+            drains: AtomicU64::new(0),
             last_arrival: Mutex::new(None),
             picked: Mutex::new(None),
             picked_cv: Condvar::new(),
@@ -418,6 +423,18 @@ impl Pipeline {
             self.left_behind.store(!q.is_empty(), Ordering::Relaxed);
             a
         };
+        if self.client_drain && newest.is_some() && alive && crate::phase::client_drain_due() {
+            // the headset's decoded frames wait a whole period or more (a FIFO standing queue that the phase lock, modulo the period, cannot see):
+            // not sending this one lets the headset's queue run dry once (one skipped picture) and gives the period back
+            if let Some(a) = newest {
+                fate(a.counter, "S", boundary, 1, 0);
+                unsafe { nvh::nvh_ipc_slot_busy(ipc, a.slot, 0) };
+                self.superseded.fetch_add(1, Ordering::Relaxed);
+                self.drains.fetch_add(1, Ordering::Relaxed);
+                event(self.cfg.origin, "client_queue_drain", json!({ "boundary": idx }));
+            }
+            return;
+        }
         let job = match newest {
             Some(a) => {
                 fate(a.counter, "P", boundary, idx, 0);
@@ -702,6 +719,7 @@ impl Pipeline {
             "arrived": self.arrived.load(Ordering::Relaxed),
             "superseded": self.superseded.load(Ordering::Relaxed),
             "queue_picks": self.queue_picks.load(Ordering::Relaxed),
+            "drains": self.drains.load(Ordering::Relaxed),
             "intake_depth": self.intake_depth,
             "pick_policy": self.pick_policy,
             "slots_filled": self.slots_filled.load(Ordering::Relaxed),

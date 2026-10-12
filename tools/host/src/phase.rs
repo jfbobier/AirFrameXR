@@ -21,6 +21,16 @@ static PERIOD_NS: AtomicU64 = AtomicU64::new(10_000_000);
 static ADJUST_NS: AtomicI64 = AtomicI64::new(0);
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static STATE: Mutex<Option<State>> = Mutex::new(None);
+/// raw decoder queue of the last ~60 reports (ms, not modulo the period), the median of it, and the drain schedule
+static RAW: Mutex<Vec<f64>> = Mutex::new(Vec::new());
+static DRAIN: Mutex<DrainState> = Mutex::new(DrainState { median_ms: 0.0, last: None, backoff_s: 3.0, rearmed_at: None });
+struct DrainState {
+    median_ms: f64,
+    last: Option<Instant>,
+    backoff_s: f64,
+    rearmed_at: Option<Instant>,
+}
+
 static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
 
 pub fn set_origin(o: Instant) {
@@ -70,10 +80,45 @@ pub fn stats() -> (f64, u64) {
     STATE.lock().as_ref().map(|s| (s.total_ms, s.corrections)).unwrap_or((0.0, 0))
 }
 
+/// True once (then silent for a backoff) when the headset's decoded frames have been waiting a whole display period or more for 60 reports in a row:
+/// the phase lock works modulo the period and cannot see that (a frame that missed its tick looks like an early one), but it is a standing FIFO queue
+/// that adds one period of latency until a frame is missing. The caller skips one frame; the backoff (3 s, doubled when the queue comes back within
+/// 15 s, at most 60 s) keeps an app that rebuilds the queue every second from being skipped every second.
+pub fn client_drain_due() -> bool {
+    let period_ms = PERIOD_NS.load(Ordering::Relaxed) as f64 / 1e6;
+    let mut d = DRAIN.lock();
+    if d.median_ms < period_ms {
+        return false;
+    }
+    let now = Instant::now();
+    if let Some(l) = d.last {
+        if l.elapsed().as_secs_f64() < d.backoff_s {
+            return false;
+        }
+        // back again soon after the last drain: wait longer next time; long calm: back to 3 s
+        d.backoff_s = if l.elapsed().as_secs_f64() < d.backoff_s + 15.0 { (d.backoff_s * 2.0).min(60.0) } else { 3.0 };
+    }
+    d.last = Some(now);
+    d.rearmed_at = Some(now);
+    d.median_ms = 0.0;
+    RAW.lock().clear(); // judge the next decision on frames sent after the skip
+    true
+}
+
 /// One headset report: the decoded frame waited `queue_ms` for the headset's render tick.
 pub fn observe(queue_ms: f64) {
     if !enabled() || !queue_ms.is_finite() {
         return;
+    }
+    {
+        let mut r = RAW.lock();
+        r.push(queue_ms);
+        if r.len() >= 60 {
+            let mut v = r.clone();
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            DRAIN.lock().median_ms = v[v.len() / 2];
+            r.clear();
+        }
     }
     let period_ms = PERIOD_NS.load(Ordering::Relaxed) as f64 / 1e6;
     let margin = std::env::var("VISIONALVR_PHASE_MARGIN_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(3.0);

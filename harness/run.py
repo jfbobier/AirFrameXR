@@ -13,7 +13,7 @@
 Exit code: 0 all PASS, 1 any FAIL, 2 any BLOCKED (infrastructure), 3 usage.
 Results: harness/results/<UTC>_<scenario>/{result.json, analysis.json, *_report.json, client.hevc, ...}
 """
-import json, subprocess, sys, time
+import json, os, subprocess, sys, time
 from datetime import datetime, timezone
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -88,7 +88,7 @@ def build(what):
               "client": ("tools/mock_client/Cargo.toml", "tools/mock_client/src/main.rs", "_tmp/mock_client", "tools/remote/stage7_mockclient.ps1")}
     if any(w in ("client", "host") for w in (what or ["client", "host"])):
         lib.b_run("if not exist _tmp mkdir _tmp")
-        for pn in ("loopback-client.patch", "client-stats-log.patch", "client-caps-log.patch", "audio-trace.patch"):
+        for pn in ("loopback-client.patch", "client-stats-log.patch", "client-caps-log.patch", "audio-trace.patch", "audio-volume.patch"):
             lib.b_put(lib.ROOT / "tools/patches" / pn, f"_tmp/{pn}")
         r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage9_patch.ps1"], cwd=lib.ROOT, capture_output=True)
         o = r.stdout.decode(errors="replace").replace("\x00", "")
@@ -132,6 +132,40 @@ def build(what):
             lib.b_run("if not exist _tmp\\install mkdir _tmp\\install")
             for f in ("register_openxr_runtime.ps1", "register_openxr_runtime.bat", "unregister_openxr_runtime.bat", "session.default.json", "README.txt"):
                 lib.b_put(lib.ROOT / "tools/install" / f, f"_tmp/install/{f}")
+            # personal build (VISIONALVR_PERSONAL=1, values from private/personal_config.json, never published): other session defaults, a ready
+            # config\visionalvr.json and a zip suffix. A generic build overwrites these with empty ones so a stale personal file cannot leak.
+            pers = lib.ROOT / "private/personal_config.json"
+            out_dir = lib.ROOT / "build/personal"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            vis, ver = "{}", ""
+            if os.environ.get("VISIONALVR_PERSONAL") == "1":
+                if not pers.exists():
+                    print("package: VISIONALVR_PERSONAL=1 but private/personal_config.json is missing (copy tools/install/personal_config.example.json)")
+                    return 2
+                pc = json.loads(pers.read_text())
+                sess = json.loads((lib.ROOT / "tools/install/session.default.json").read_text())
+                for k, v in pc.get("session", {}).items():
+                    d = sess
+                    ks = k.split(".")
+                    for kk in ks[:-1]:
+                        d = d[kk]
+                    if ks[-1] not in d:
+                        print(f"package: personal session key {k} does not exist in session.default.json")
+                        return 2
+                    d[ks[-1]] = v
+                (out_dir / "session.default.json").write_text(json.dumps(sess, indent=2))
+                lib.b_put(out_dir / "session.default.json", "_tmp/install/session.default.json")
+                vis = json.dumps(pc.get("visionalvr", {}), indent=2)
+                ver = pc.get("version_suffix", "-personal")
+                print(f"package: personal build ({ver}) from {pers.name}")
+            (out_dir / "visionalvr.personal.json").write_text(vis)
+            (out_dir / "version_suffix.txt").write_text(ver)
+            lib.b_put(out_dir / "visionalvr.personal.json", "_tmp/install/visionalvr.personal.json")
+            lib.b_put(out_dir / "version_suffix.txt", "_tmp/install/version_suffix.txt")
+            import re
+            m = re.search(r'pub const VERSION: &str = "([^"]+)"', (lib.ROOT / "tools/host/src/vision.rs").read_text())
+            (out_dir / "version.txt").write_text(m.group(1) if m else "")
+            lib.b_put(out_dir / "version.txt", "_tmp/install/version.txt")   # the zip is named after the host's VERSION (vision.rs)
             # licences shipped with the binaries: the notices, the project licence (once chosen) and the upstream texts
             lib.b_run("if not exist _tmp\\install\\licenses mkdir _tmp\\install\\licenses")
             lib.b_put(lib.ROOT / "THIRD_PARTY_NOTICES.md", "_tmp/install/THIRD_PARTY_NOTICES.md")

@@ -1,0 +1,46 @@
+diff --git a/alvr/audio/src/windows.rs b/alvr/audio/src/windows.rs
+--- a/alvr/audio/src/windows.rs
++++ b/alvr/audio/src/windows.rs
+@@ -69,3 +69,27 @@
+ 
+     Ok(())
+ }
++
++// VisionALVR: endpoint volume of an output device (scalar 0.0-1.0) and its mute state, used to keep the VB-Audio cable device at full volume
++// (the loopback capture level follows the endpoint volume, so the headset's sound would follow the PC's volume keys).
++pub fn get_volume_windows_device(device: &AudioDevice) -> Result<(f32, bool)> {
++    unsafe {
++        let imm_device = get_windows_device(device)?;
++
++        let endpoint_volume = imm_device.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None)?;
++
++        Ok((endpoint_volume.GetMasterVolumeLevelScalar()?, endpoint_volume.GetMute()?.as_bool()))
++    }
++}
++
++pub fn set_volume_windows_device(device: &AudioDevice, volume: f32) -> Result<()> {
++    unsafe {
++        let imm_device = get_windows_device(device)?;
++
++        let endpoint_volume = imm_device.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None)?;
++
++        endpoint_volume.SetMasterVolumeLevelScalar(volume.clamp(0.0, 1.0), &GUID::zeroed())?;
++    }
++
++    Ok(())
++}
+diff --git a/alvr/audio/src/lib.rs b/alvr/audio/src/lib.rs
+--- a/alvr/audio/src/lib.rs
++++ b/alvr/audio/src/lib.rs
+@@ -94,6 +94,11 @@
+ 
+ #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+ impl AudioDevice {
++    /// VisionALVR: the device's friendly name (the same one the windows module looks it up by).
++    pub fn name(&self) -> Result<String> {
++        Ok(self.inner.name()?)
++    }
++
+     pub fn new_output(config: Option<&CustomAudioDeviceConfig>) -> Result<Self> {
+         let host = cpal::default_host();
+ 

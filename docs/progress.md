@@ -271,6 +271,21 @@ right hand mirrored like ALVR's offsets. Settings `controllers.hand_rotation_deg
 CLI `--hand-rotation x,y,z` / `--hand-position x,y,z`. The exact value is to be confirmed in the headset (the harness only checks
 hand positions, never orientation): if 180 about Y is not it, the candidates are 180 about Z (roll) or a pitch offset.
 
+2026-10-13 (hand posture, derived, **not yet confirmed on the headset**): the 180 deg about Y above is wrong: in every game (OpenXR through VDXR, UEVR,
+Cemu/BetterVR) the posture came out exactly reversed (user, left hand, natural hand-shake pose). Derivation from the sources instead of a guess:
+(1) VDXR's calibration block (`external/VDXR/virtualdesktop-openxr/action.cpp`, `rebindControllerActions`) records the same static controller under
+the Oculus runtime and under VDXR: its raw LibOVR hand pose quaternion equals the Oculus runtime's OpenXR **aim** orientation, and the grip is exactly
+**+60 deg about local X** from it (computed: relative rotation 60.00 deg, axis (1,0,0); positions: grip (0, -0.030, +0.040) m, aim (0, 0, -0.055) m in
+the LibOVR pose frame). (2) ALVR's own Quest client sends `grip * offset` with offset = Rx(-15 deg) for Quest 2 (`alvr/client_openxr/src/interaction.rs`
+`get_controller_offset`, applied at line 775) and the host adds only the controller offsets (`left_controller_*_offset`, default rotation 0, position
+(0, 0, -0.11)) in `server_core/src/tracking/mod.rs`; the hand-tracking offsets (0, -45, -90) only move the SteamVR skeleton. So the host's hand motion is
+`grip * Rx(-15)` with the origin 0.11 m in front of the grip, and LibOVR wants `grip * Rx(-60)`: offset **Rx(-45 deg)**, position (0, -0.048, +0.038) m in
+the LibOVR frame (the grip origin minus the LibOVR pose-to-grip offset), right hand mirrored like ALVR's (a pure X rotation is unchanged). New defaults
+`hand_rotation_deg` [-45, 0, 0], `hand_position_m` [0, -0.048, 0.038]. Assumption: the visionOS client emits Quest-like controller poses (it is tuned to
+look right in SteamVR with ALVR's default offsets, which is the same assumption). To try other candidates in a running game without restarting
+anything: write `config\hand_offset.json` (`{"rotation_deg":[x,y,z],"position_m":[x,y,z]}`), the host re-reads it every second (event `hand_offset`
+in host_events.jsonl says what is in force). Candidates if -45 is not it: [-45,0,180] (palm/back flipped), [135,0,0], [0,180,0] (the old value).
+
 2026-10-11 (first contact of v0.2 on the 5090 PC, then the first games): v0.2 built and ran on the first attempt. Lab findings and fixes:
 (1) the pacing lab scored warm-up and the idle tail (green frames at 30 fps), reading ~20 % repeats on every run: `analyse_display` now scores the
 steady window and keeps the whole-run numbers under `whole_run`. (2) The shim's predicted display time followed whichever host tick was latest when
@@ -321,3 +336,18 @@ chain; next: judge trembling automatically from the recordings and the generated
 Profiles + judge (self-test passes), probe dots scene, simviewer (queue, reprojection, dots.csv), host `simrig` feature (synthetic head with profile timing,
 sampled or real NVENC encode, timer transport), `harness/simrig/run_sim.py` (scenarios ideal/games/probe100/still100/still0/noreproject/inject). All compile-checked in WSL
 (check_cpp.sh, check_host.sh with and without the feature); first run on the RTX 3080 Ti machine pending. Order: `ideal` (null), `inject` (judge), then `games`, `probe100`, `still100`.
+
+2026-10-13 (standing queues, measured on the 5090 with the real headset and the lab):
+- Host intake: with the in-order queue (`oldest`) the lab's `pace_steady` shows 98 % of the boundaries picking the older of two frames (queue_picks 1763 of
+  1800): a standing queue of one period, +11 ms pose-to-display against `newest` (33.4 against 22.4 ms p50). `newest` pays for it with ~2 % dropped frames in
+  the steady lab and 15-30 % in GPU-bound Cyberpunk, so the default stays `oldest` (consistency over latency). A `drain` policy (drop the older of two
+  once a queue has stood 8 boundaries, at most once a second) was built and measured: pose-to-display 33.1 against 33.4 ms, but 20 drains in 20 s
+  (bunches come back ~2 times a second), more repeats (20.0 against 17.9 %) and more skipped pictures; with the jittery `x_d2_oldest_w3` 31.4-31.8 against
+  32.1 ms, repeats 20 against 18 %. Removed. `x_d2` newest: 21.0 ms, repeats 22.5 %.
+- Headset side: ALVR's `decoder_queue` (decoded frame waits for the render tick) sits in two regimes in the real-headset runs, 12-15 ms and 2-4 ms,
+  switching only when a frame goes missing (the game's heavy phase starting, an empty boundary); stock ALVR + SteamVR shows 0.7-2.9 ms. The phase lock
+  (phase.rs) works modulo the display period, so it cannot see a whole extra period: a FIFO standing queue at the headset. New, **opt-in and not yet tried on
+  the headset**: `video.client_queue_drain` in visionalvr.json (or VISIONALVR_CLIENT_DRAIN=1): when the median raw decoder queue of 60 reports is at least one
+  period, the host does not send one frame (event `client_queue_drain`, counter `drains`), which lets the headset's queue run dry once (one skipped
+  picture, about one period of latency back); backoff 3 s, doubled when the queue returns within 15 s, at most 60 s. To judge on the headset: decoder_queue
+  in client_graph.csv before and after, total latency, and whether the skipped pictures are visible.
