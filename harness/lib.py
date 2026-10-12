@@ -322,7 +322,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "install_dir": "--install-dir", "debug": "--debug", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "send_pacing": "--send-pacing", "running_start_ms": "--running-start-ms", "boundary_offset_ms": "--boundary-offset-ms",
-                                     "gpu_sched_class": "--gpu-sched-class", "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "no_follow_rate": "--no-follow-rate"})
+                                     "gpu_sched_class": "--gpu-sched-class", "latency_mode": "--latency-mode", "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "no_follow_rate": "--no-follow-rate"})
                        + f' > {rd}\\host_stdout.txt 2>&1')
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")

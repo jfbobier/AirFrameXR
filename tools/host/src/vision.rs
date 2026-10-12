@@ -43,6 +43,8 @@ pub struct Settings {
     pub predict_missing_head: Option<bool>,
     pub intake_depth: Option<i64>,
     pub pick_policy: Option<String>,
+    /// "smooth" (default: one-frame buffer, fewest repeated frames) | "low" (send at once, newest frame, no buffer) | "auto" (the buffer follows the app, see pipeline.rs)
+    pub latency_mode: Option<String>,
     /// follow the client's display rate (detected from its sample timestamps) instead of the 90 Hz grid (default on)
     pub follow_client_rate: Option<bool>,
     /// compositor boundary offset after the display tick, ms
@@ -86,6 +88,7 @@ pub fn load_settings(path: &Path) -> Settings {
         predict_missing_head: video["predict_missing_head"].as_bool(),
         intake_depth: video["intake_depth"].as_i64(),
         pick_policy: video["pick_policy"].as_str().map(str::to_string),
+        latency_mode: video["latency_mode"].as_str().map(str::to_string),
         follow_client_rate: video["follow_client_rate"].as_bool(),
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
