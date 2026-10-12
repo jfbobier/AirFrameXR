@@ -21,6 +21,11 @@ static PERIOD_NS: AtomicU64 = AtomicU64::new(10_000_000);
 static ADJUST_NS: AtomicI64 = AtomicI64::new(0);
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static STATE: Mutex<Option<State>> = Mutex::new(None);
+static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+pub fn set_origin(o: Instant) {
+    let _ = ORIGIN.set(o);
+}
 
 struct State {
     phases_ms: Vec<f64>,
@@ -28,6 +33,7 @@ struct State {
     last: Instant,
     total_ms: f64,
     corrections: u64,
+    recent: Vec<f64>,
 }
 
 pub fn enabled() -> bool {
@@ -67,13 +73,13 @@ pub fn observe(queue_ms: f64) {
     let period_ms = PERIOD_NS.load(Ordering::Relaxed) as f64 / 1e6;
     let margin = std::env::var("VISIONALVR_PHASE_MARGIN_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(3.0);
     let mut g = STATE.lock();
-    let s = g.get_or_insert_with(|| State { phases_ms: vec![], ignore: 12, last: Instant::now(), total_ms: 0.0, corrections: 0 });
+    let s = g.get_or_insert_with(|| State { phases_ms: vec![], ignore: 12, last: Instant::now(), total_ms: 0.0, corrections: 0, recent: vec![] });
     if s.ignore > 0 {
         s.ignore -= 1;
         return;
     }
     s.phases_ms.push(queue_ms.rem_euclid(period_ms));
-    if s.phases_ms.len() < 40 || s.last.elapsed().as_millis() < 500 {
+    if s.phases_ms.len() < 90 || s.last.elapsed().as_millis() < 1000 {
         return;
     }
     // circular cluster: it starts after the largest empty gap
@@ -93,15 +99,28 @@ pub fn observe(queue_ms: f64) {
     rel.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let m0 = if start > period_ms / 2.0 { start - period_ms } else { start }; // negative: part of the cluster already missed its tick
     let p10 = m0 + rel[n / 10];
-    let err = p10 - margin;
+    // the estimate is noisy (a 10th percentile of ~90 samples): act on the median of the last three, and only outside a dead band
+    s.recent.push(p10);
+    if s.recent.len() > 3 {
+        s.recent.remove(0);
+    }
+    let mut r = s.recent.clone();
+    r.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let est = r[r.len() / 2];
+    let err = est - margin;
     s.phases_ms.clear();
     s.last = Instant::now();
-    if err.abs() > 0.4 {
-        let step = (0.4 * err).clamp(-3.0, 3.0); // positive: arrivals too early, slide the grid later
+    let acted = s.recent.len() >= 2 && err.abs() > 1.2;
+    if acted {
+        let step = (0.3 * err).clamp(-2.0, 2.0); // positive: arrivals too early, slide the grid later
         ADJUST_NS.store((step * 1e6) as i64, Ordering::Relaxed);
         s.total_ms += step;
         s.corrections += 1;
         s.ignore = 12;
-        crate::logs::general("INFO", &format!("phase lock: arrivals {p10:.1} ms before the tick (target {margin:.1}), sliding the grid {step:+.2} ms"));
+        s.recent.clear();
+        crate::logs::general("INFO", &format!("phase lock: arrivals {est:.1} ms before the render tick (target {margin:.1}), sliding the grid {step:+.2} ms"));
+    }
+    if let Some(o) = ORIGIN.get() {
+        crate::event(*o, "phase_lock", serde_json::json!({ "p10_ms": p10, "est_ms": est, "cluster_start_ms": m0, "spread_ms": rel[n - 1], "period_ms": period_ms, "acted": acted, "total_slide_ms": s.total_ms, "corrections": s.corrections }));
     }
 }

@@ -623,7 +623,7 @@ impl StatsWindow {
     }
 }
 
-fn event(origin: Instant, name: &str, extra: serde_json::Value) {
+pub(crate) fn event(origin: Instant, name: &str, extra: serde_json::Value) {
     let wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
     let line = json!({ "t_ms": origin.elapsed().as_secs_f64() * 1000.0, "unix_s": wall, "event": name, "data": extra }).to_string();
     println!("{line}");
@@ -1205,6 +1205,7 @@ fn main() {
         }
     };
     let origin = Instant::now();
+    phase::set_origin(origin);
     let gpu_info: serde_json::Value = {
         let mut b = vec![0 as std::ffi::c_char; 1024];
         unsafe { nvh::nvh_gpu_info(b.as_mut_ptr(), b.len() as i32) };
