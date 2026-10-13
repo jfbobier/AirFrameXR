@@ -97,9 +97,10 @@ struct HostToShim {
     // The user's standing eye height above the floor (m), reported to games as OVR_KEY_EYE_HEIGHT. VDXR treats this LibOVR as an eye-level
     // origin runtime: LOCAL space = the head pose as published (y about 0 at the anchor), STAGE / LOCAL_FLOOR = that + this eye height. 0 = default (1.675).
     float eyeHeightM;
-    // Intake gate (the host's frame queue, pipeline.rs): intakeWaiting = frames the host holds that a compositor boundary has already
-    // passed over (a standing queue: the app runs a frame ahead of the stream, every frame a period late). With intakeGate set the shim
-    // holds the app's next release while it is > 0, so the queue drains at the next boundary without dropping a rendered frame.
+    // Intake gate (the host's frame queue, pipeline.rs): intakeWaiting = frames the host holds that compositor boundaries have passed over
+    // for several boundaries in a row (a standing queue: the app runs a frame ahead of the stream, every frame a period late; a single
+    // left-behind frame is jitter and stays 0). With intakeGate set the shim skips one release of the app while it is > 0, so the queue
+    // drains when that gap reaches the host, without dropping a rendered frame.
     uint32_t intakeWaiting;
     uint32_t intakeGate;
 };

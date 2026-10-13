@@ -54,12 +54,14 @@ the one SteamVR's compositor runs with, so the encoder's copy never queues behin
   GPU, two held by the host; six slots never wait in practice (`slotBusyWaits` counts if they do).
 - **Intake queue and gate.** The host's intake holds up to two finished frames in order; a boundary takes the oldest. When the game
   delivers one frame per period but runs a frame ahead of the stream (after a bunch: two frames completed in one period), the queue
-  never empties and every frame waits a period more than it needs to (a standing queue, measured at 10-12 ms on the headset). The
-  host publishes at every boundary how many frames it passed over (`intakeWaiting`) and the shim's `WaitForVsync` then holds the
-  game's next release until the next boundary has taken them: the stream shows every rendered frame, the game skips one render
-  period it would have spent on latency only, and no hole reaches the headset (`gate_holds` in the statistics; `video.intake_gate`,
-  default on). The `drain` pick policy is the fallback when the gate could not act (a queue standing 8 boundaries drops its older
-  frame, at most once a second).
+  never empties and every frame waits a period more than it needs to (a standing queue, measured at 10-12 ms on the headset). Once
+  the queue has stood three boundaries in a row (one left-behind frame is jitter: a late frame paired with an on-time one, both
+  shown in order) the host publishes the count (`intakeWaiting`) and the shim's `WaitForVsync` skips one release of the game: the
+  game renders one frame fewer, the gap reaches the host's intake a lead later (release to completion, several periods for a
+  pipelined engine) and the boundary there empties the queue. Every rendered frame is shown and no hole reaches the headset; the
+  gate then stays quiet until that gap has arrived (`gate_holds`, `gate_suppressed` in the statistics; `video.intake_gate`, default
+  on). The `drain` pick policy is the fallback when the gate could not act (a queue standing 8 boundaries drops its older frame, at
+  most once a second).
 - **Newest-wins mailboxes** between host threads (intake → clock, clock → encoder) and a FIFO with release times to the sender.
   A frame superseded before a boundary (`superseded`) means the game ran faster than the display; an encoder overrun means an
   encode took longer than a period.

@@ -191,6 +191,8 @@ pub struct Pipeline {
     /// the shim holds the game's next release while a frame a boundary passed over still waits here (ipc intakeWaiting, written at every
     /// boundary): the queue drains at the next boundary without dropping a rendered frame. VISIONALVR_INTAKE_GATE=0 disables it.
     intake_gate: bool,
+    /// consecutive boundaries with a frame left behind before the gate acts (VISIONALVR_GATE_AFTER, default 3)
+    gate_after: u64,
     /// boundaries that left a frame behind (since start): how long queues stood, whatever drained them
     pub standing_total: AtomicU64,
     last_empty: AtomicBool,
@@ -264,6 +266,7 @@ impl Pipeline {
             queue_picks: AtomicU64::new(0),
             pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "drain".into()),
             intake_gate: intake_gate_enabled(),
+            gate_after: std::env::var("VISIONALVR_GATE_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).max(1),
             standing_total: AtomicU64::new(0),
             last_empty: AtomicBool::new(false),
             standing: AtomicU64::new(0),
@@ -463,15 +466,20 @@ impl Pipeline {
                 }
             }
             self.left_behind.store(!q.is_empty(), Ordering::Relaxed);
-            if q.is_empty() {
+            let standing = if q.is_empty() {
                 self.standing.store(0, Ordering::Relaxed);
+                0
             } else {
-                self.standing.fetch_add(1, Ordering::Relaxed);
                 self.standing_total.fetch_add(1, Ordering::Relaxed);
-            }
+                self.standing.fetch_add(1, Ordering::Relaxed) + 1
+            };
             if self.intake_gate {
-                // frames this boundary passed over: the shim holds the app's next release until a boundary takes them (see `intake_gate`)
-                unsafe { nvh::nvh_ipc_set_intake(ipc, q.len() as u32) };
+                // A frame left behind at ONE boundary is usually a late frame paired with an on-time one (arrival jitter: the lab's "steady"
+                // probe showed depth 2 at every third boundary and never twice in a row); in order, both are shown and nothing is lost. A queue
+                // that stands VISIONALVR_GATE_AFTER (3) boundaries in a row is the app running a frame ahead of the stream (Cyberpunk: 95 % of
+                // boundaries): only then does the shim skip one release (see `intake_gate`). Gating on a single boundary skipped 16 % of releases.
+                let waiting = if standing >= self.gate_after { q.len() as u32 } else { 0 };
+                unsafe { nvh::nvh_ipc_set_intake(ipc, waiting) };
             }
             a
         };
@@ -775,6 +783,7 @@ impl Pipeline {
             "intake_drains": self.intake_drains.load(Ordering::Relaxed),
             "standing_total": self.standing_total.load(Ordering::Relaxed),
             "intake_gate": self.intake_gate,
+            "gate_after": self.gate_after,
             "intake_depth": self.intake_depth,
             "pick_policy": self.pick_policy,
             "slots_filled": self.slots_filled.load(Ordering::Relaxed),
