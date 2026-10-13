@@ -27,7 +27,7 @@
     "bit_depth": 10,
     "full_range": true,
     "encoding_gamma": 1.5,
-    "foveated": false,
+    "foveated": true,
     "split_encode": 3,
     "protocol": "udp"
   },
@@ -36,8 +36,8 @@
     "variants": [
       {
         "id": "wifi-good",
-        "label": "Wi-Fi 6/6E, 5 or 6 GHz, strong signal, headset on the same subnet as the PC",
-        "bitrate_mbps": 230
+        "label": "Wi-Fi 6/6E, 5 or 6 GHz, strong signal, headset on the same subnet as the PC (the author's link; 300 Mbps measured stable with foveated encoding)",
+        "bitrate_mbps": 300
       }
     ]
   },
@@ -107,7 +107,8 @@
     "session_settings.video.preferred_codec.variant": "Hevc"
   },
   "notes": [
-    "Full frame (no foveation) costs about 4-5 ms more encode time than foveated on an RTX 5090 (7.7 ms against 3.1 ms) and a higher NVENC load, but the picture is sharper everywhere; the decoder time on the headset is about 1 ms lower.",
+    "Foveated encoding (ALVR's, centre 0.45 x 0.4, shift 0.4 / 0.1, edge ratio 4 x 5) is the recommended mode: measured on an RTX 5090 + Vision Pro at 100 Hz, encode 3.1 ms against 7.7 ms for the full 7104x3200 frame (spikes 14 ms against 18-33), headset decode about 1.5 ms lighter, NVENC under 10% against 54%, and 3x the bits per pixel at the same bitrate (0.39 against 0.12). The full frame showed no visible gain: the centre is native resolution in both modes and gets a third of the bits in full-frame mode.",
+    "Full frame (encode profile `full-split`) stays available for GPUs with 3 NVENC engines; it needs roughly 3x the bitrate to match the foveated centre quality, which Wi-Fi cannot carry.",
     "The headset displays at 100 Hz while the stream is 90 fps: the host follows the headset's display rate.",
     "Split encoding needs a GPU with several NVENC engines (RTX 4070 Ti and up, RTX 50 series).",
     "session_overrides are ALVR session settings (dotted paths into config\\\\session.json): QuestPro emulation, NVENC preset P3 without multi-pass, CABAC, 10-bit HEVC, buffering 1.5 frames, no microphone, the Vision Pro's low-latency VideoToolbox option, chroma-key passthrough."
@@ -118,6 +119,12 @@
       "client": "alvr-visionos (ALVR 20.14.1 protocol)",
       "date": "2026-10-12",
       "result": "100 fps rendered and streamed in Cyberpunk 2077, total latency about 117 ms (ALVR's measure), 0 packets lost"
+    },
+    {
+      "gpu": "NVIDIA GeForce RTX 5090",
+      "client": "alvr-visionos (ALVR 20.14.1 protocol)",
+      "date": "2026-10-12",
+      "result": "Foveated 4224x1664 at 100 Hz in Cyberpunk 2077: host encode 3.1 ms, headset decode 5.4 ms, total latency about 117 ms; full frame in the same session: encode 7.7 ms, decode 6.8 ms, no visible quality gain"
     }
   ]
 }

@@ -62,7 +62,9 @@ have run one of them, improve it and share it: that is what the `verified` secti
 
 ## The Apple Vision Pro profile
 
-`profiles\apple-vision-pro.profile.json`: 3552x3200 per eye at 90 fps, HEVC 10-bit, full frame (no foveation), split encoding 3, 230 Mbps on a good
-Wi-Fi 6/6E link, plus the 22 ALVR settings the author tuned by A/B testing on stock ALVR + SteamVR (QuestPro emulation, NVENC P3 without multi-pass,
+`profiles\apple-vision-pro.profile.json`: 3552x3200 per eye at 90 fps, HEVC 10-bit, ALVR foveated encoding (centre 0.45 x 0.4, shift 0.4 / 0.1, edge
+ratio 4 x 5: a 4224x1664 encoded frame), split encoding 3, 300 Mbps on a good Wi-Fi 6/6E link, plus the 22 ALVR settings the author tuned by A/B testing on stock ALVR + SteamVR (QuestPro emulation, NVENC P3 without multi-pass,
 CABAC, 1.5 buffered frames, no microphone, the VideoToolbox low-latency option, chroma-key passthrough, ...). They are also the defaults of
-`config\session.default.json` in the package (the author's session without foveation, 230 Mbps).
+`config\session.default.json` in the package (the author's session, foveated, 300 Mbps). Foveated is the measured choice on the RTX 5090: encode 3.1 ms against
+7.7 ms for the full 7104x3200 frame, a lighter headset decode, and three times the bits per pixel at the same bitrate; the full frame looked no better. The
+full frame (encode profile `full-split`) remains selectable in the Settings window.

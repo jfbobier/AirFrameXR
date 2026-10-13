@@ -34,7 +34,7 @@
     "controllers_enabled": true,
     "body_tracking_vive_enabled": false,
     "body_tracking_has_legs": false,
-    "enable_foveated_encoding": false,
+    "enable_foveated_encoding": true,
     "foveation_center_size_x": 0.45,
     "foveation_center_size_y": 0.4,
     "foveation_center_shift_x": 0.4,
@@ -119,7 +119,7 @@
       "bitrate": {
         "gui_collapsed": false,
         "mode": {
-          "ConstantMbps": 230,
+          "ConstantMbps": 300,
           "Adaptive": {
             "gui_collapsed": true,
             "saturation_multiplier": 0.95,
@@ -166,7 +166,7 @@
         "variant": "Hevc"
       },
       "foveated_encoding": {
-        "enabled": false,
+        "enabled": true,
         "content": {
           "gui_collapsed": true,
           "force_enable": false,
