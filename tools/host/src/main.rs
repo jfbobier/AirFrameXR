@@ -1207,7 +1207,7 @@ pub(crate) struct Shared {
     /// (hostname, name, ip) of the connected headset
     headset: Mutex<Option<(String, String, String)>>,
     latest_sample_ts: Mutex<Option<Duration>>,
-    /// the last tracking samples with their head orientation (x y z w), oldest first (at most 16): the host-side re-stamp (pipeline.rs) takes
+    /// the last tracking samples with their head orientation (x y z w), oldest first (at most 48, half a second): the host-side re-stamp (pipeline.rs) takes
     /// the oldest one newer than the last sent frame, so the stamp runs exactly one sample ahead and the rotation stays one sample's worth
     recent_samples: Mutex<std::collections::VecDeque<(Duration, [f32; 4])>>,
     client_connected: AtomicBool,
@@ -1714,7 +1714,7 @@ fn main() {
                                     let mut ring = shared.recent_samples.lock();
                                     if ring.back().map(|(t, _)| sample_timestamp > *t).unwrap_or(true) {
                                         ring.push_back((sample_timestamp, q));
-                                        while ring.len() > 16 {
+                                        while ring.len() > 48 {
                                             ring.pop_front();
                                         }
                                     } else if ring.back().map(|(t, _)| sample_timestamp + Duration::from_secs(1) < *t).unwrap_or(false) {

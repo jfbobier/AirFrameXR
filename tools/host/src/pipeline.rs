@@ -627,10 +627,21 @@ impl Pipeline {
                     let last = *self.last_sent_ts.lock();
                     if last != Duration::ZERO && ts <= last {
                         // the oldest sample newer than the last sent frame: one sample ahead, the smallest rotation that gives a new timestamp
-                        let pick = self.shared.recent_samples.lock().iter().find(|(t, _)| *t > last).copied();
+                        let (pick, rendered) = {
+                            let ring = self.shared.recent_samples.lock();
+                            (ring.iter().find(|(t, _)| *t > last).copied(), ring.iter().find(|(t, _)| *t == ts).map(|(_, q)| *q))
+                        };
                         match pick {
                             Some((sts, q)) if a.has_projection => {
-                                unsafe { nvh::nvh_set_warp(enc.handle, ipc, a.render_q.as_ptr(), q.as_ptr(), 1) };
+                                // Rotate between the two tracking SAMPLES (the one the frame was rendered with, the one it is stamped with): that is
+                                // the correction the headset's reprojection assumes. A game's own eye orientation (a fixed rotation of the render
+                                // pose relative to the head sample, which the layer carries) must stay in the picture on every frame; taking it
+                                // from the render pose removed it on re-stamped frames only, a constant offset alternating with the plain frames.
+                                let render_q: [f32; 8] = match rendered {
+                                    Some(rq) => [rq[0], rq[1], rq[2], rq[3], rq[0], rq[1], rq[2], rq[3]],
+                                    None => a.render_q, // the render sample left the ring (a very old frame): the layer's own orientation
+                                };
+                                unsafe { nvh::nvh_set_warp(enc.handle, ipc, render_q.as_ptr(), q.as_ptr(), 1) };
                                 warp_set = true;
                                 ts = sts;
                                 self.host_restamps.fetch_add(1, Ordering::Relaxed);
