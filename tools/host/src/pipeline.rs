@@ -207,6 +207,12 @@ pub struct Pipeline {
     pub host_restamp_dropped: AtomicU64,
     /// frames put back for the next boundary because no newer sample existed yet at encode time
     pub host_restamp_deferred: AtomicU64,
+    /// VISIONALVR_HOST_WARP=0: re-stamp without rotating the picture (diagnostic: separates the stamp choice from the warp)
+    host_warp: bool,
+    /// diagnostics per statistics window: angle between the layer's render orientation and the render sample (a game's own eye orientation),
+    /// and the rotation applied by the re-stamp (sample to sample), in millidegrees (sum and max, count)
+    pub diag_layer_vs_sample_mdeg: Mutex<(f64, f64, u64)>,
+    pub diag_warp_mdeg: Mutex<(f64, f64, u64)>,
     /// the last boundary that found no frame (the app is not keeping up): the gate and the drain stay out for VISIONALVR_KEEPUP_BOUNDARIES (30)
     /// boundaries after it. A GPU-bound game delivers in bunches (two frames at half the boundaries, none at a tenth: Cyberpunk at 88 fps on a 100 Hz
     /// display, 2026-10-13 evening); that is not a standing queue, and skipping its releases only lowered its frame rate (258 skips in 82 s, hold unchanged).
@@ -254,6 +260,12 @@ pub struct Pipeline {
     gpu_sched: Mutex<Option<(i32, i64)>>,
 }
 
+/// angle between two unit quaternions (x y z w), millidegrees
+fn quat_angle_mdeg(a: &[f32], b: &[f32]) -> f64 {
+    let dot = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]).abs().min(1.0) as f64;
+    2.0 * dot.acos() * 57295.78
+}
+
 /// VISIONALVR_HOST_STAMP (default on): see `Pipeline::host_stamp`
 pub fn host_stamp_enabled() -> bool {
     std::env::var("VISIONALVR_HOST_STAMP").map(|v| v != "0").unwrap_or(true)
@@ -295,6 +307,9 @@ impl Pipeline {
             host_restamps: AtomicU64::new(0),
             host_restamp_dropped: AtomicU64::new(0),
             host_restamp_deferred: AtomicU64::new(0),
+            host_warp: std::env::var("VISIONALVR_HOST_WARP").map(|v| v != "0").unwrap_or(true),
+            diag_layer_vs_sample_mdeg: Mutex::new((0.0, 0.0, 0)),
+            diag_warp_mdeg: Mutex::new((0.0, 0.0, 0)),
             last_empty_idx: AtomicU64::new(0),
             keepup_boundaries: std::env::var("VISIONALVR_KEEPUP_BOUNDARIES").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30),
             standing_total: AtomicU64::new(0),
@@ -641,8 +656,18 @@ impl Pipeline {
                                     Some(rq) => [rq[0], rq[1], rq[2], rq[3], rq[0], rq[1], rq[2], rq[3]],
                                     None => a.render_q, // the render sample left the ring (a very old frame): the layer's own orientation
                                 };
-                                unsafe { nvh::nvh_set_warp(enc.handle, ipc, render_q.as_ptr(), q.as_ptr(), 1) };
-                                warp_set = true;
+                                if let Some(rq) = rendered {
+                                    let lv = quat_angle_mdeg(&rq, &a.render_q[..4]);
+                                    let mut d = self.diag_layer_vs_sample_mdeg.lock();
+                                    d.0 += lv; d.1 = d.1.max(lv); d.2 += 1;
+                                    let w = quat_angle_mdeg(&rq, &q);
+                                    let mut e = self.diag_warp_mdeg.lock();
+                                    e.0 += w; e.1 = e.1.max(w); e.2 += 1;
+                                }
+                                if self.host_warp {
+                                    unsafe { nvh::nvh_set_warp(enc.handle, ipc, render_q.as_ptr(), q.as_ptr(), 1) };
+                                    warp_set = true;
+                                }
                                 ts = sts;
                                 self.host_restamps.fetch_add(1, Ordering::Relaxed);
                             }
@@ -862,6 +887,13 @@ impl Pipeline {
     pub fn stats_json(&self) -> serde_json::Value {
         let (mut waits, mut app_ms, mut releases, mut late, mut gate_holds, mut gate_suppressed) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
         unsafe { nvh::nvh_ipc_shim_pacing(self.ipc(), &mut waits, &mut app_ms, &mut releases, &mut late, &mut gate_holds, &mut gate_suppressed) };
+        let take = |m: &Mutex<(f64, f64, u64)>| {
+            let mut d = m.lock();
+            let v = json!({ "avg": if d.2 > 0 { d.0 / d.2 as f64 } else { 0.0 }, "max": d.1, "n": d.2 });
+            *d = (0.0, 0.0, 0);
+            v
+        };
+        let (diag_layer, diag_warp) = (take(&self.diag_layer_vs_sample_mdeg), take(&self.diag_warp_mdeg));
         let (mut restamps, mut restamp_timeouts, mut warp_max, mut rwaits, mut rwait_sum, mut rwait_max) = (0u64, 0u64, 0f32, 0u64, 0f64, 0f32);
         unsafe { nvh::nvh_ipc_shim_restamps(self.ipc(), &mut restamps, &mut restamp_timeouts, &mut warp_max, &mut rwaits, &mut rwait_sum, &mut rwait_max) };
         json!({
@@ -877,6 +909,9 @@ impl Pipeline {
             "host_restamps": self.host_restamps.load(Ordering::Relaxed),
             "host_restamp_dropped": self.host_restamp_dropped.load(Ordering::Relaxed),
             "host_restamp_deferred": self.host_restamp_deferred.load(Ordering::Relaxed),
+            "host_warp": self.host_warp,
+            "layer_vs_sample_mdeg": diag_layer,
+            "restamp_rotation_mdeg": diag_warp,
             "gate_after": self.gate_after,
             "keepup_boundaries": self.keepup_boundaries,
             "intake_depth": self.intake_depth,
