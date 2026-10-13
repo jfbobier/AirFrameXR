@@ -764,6 +764,7 @@ mod nvh {
         pub fn nvh_ipc_slot_busy(ipc: *mut c_void, slot: u32, busy: i32);
         pub fn nvh_ipc_set_pacing(ipc: *mut c_void, boundary_offset_ms: f32, running_start_ms: f32);
         pub fn nvh_ipc_set_head_policy(ipc: *mut c_void, wait_ms: f32, predict: f32);
+        pub fn nvh_ipc_set_eye_height(ipc: *mut c_void, eye_height_m: f32);
         pub fn nvh_ipc_set_hand_offset(ipc: *mut c_void, side: i32, quat_xyzw: *const f32, pos: *const f32);
         pub fn nvh_ipc_shim_pacing(ipc: *mut c_void, slot_busy_waits: *mut u32, app_frame_ms: *mut f32, releases: *mut u64, releases_late: *mut u64);
         pub fn nvh_set_gpu_scheduling(cls: i32) -> i32;
@@ -1574,9 +1575,12 @@ fn main() {
         thread::spawn(move || {
             let ipc = ipc_addr as *mut std::ffi::c_void;
             let mut hands = [HandInputState::default(); 2];
-            // Height calibration: a constant offset on the headset's y so that the head sits at `height_target` when anchored
-            // (at connect, after a short settle, and whenever the launcher sends a new height); the headset's own vertical movement
-            // stays on top. 0 = no offset (the headset's floor estimate as is).
+            // Height calibration. VDXR treats our LibOVR as an eye-level-origin runtime (no Virtual Desktop server running): LOCAL space is the head
+            // pose as published, STAGE / LOCAL_FLOOR add the eye height we report (OVR_KEY_EYE_HEIGHT). So, like Oculus' runtime: the anchored head
+            // (at connect, after a short settle, and whenever the launcher sends a new height) is published at y = 0 (eye-level origin) with the
+            // headset's own vertical movement on top, and the eye height games get is `height_target` (0 = the headset's own floor estimate: its y
+            // at the anchor). Floor-level games then see the player at that height, eye-level games at the origin (before this a floor-level game saw
+            // height + 1.675 m and an eye-level game a head 1.3 m above its origin: the scene looked far too low).
             let mut height_offset = 0f32;
             let mut height_anchored = false;
             let mut samples_since_connect = 0u32;
@@ -1648,11 +1652,13 @@ fn main() {
                             if let Some(m) = ctx.get_device_motion(*HEAD_ID, sample_timestamp) {
                                 if !height_anchored && samples_since_connect >= 45 {
                                     // half a second of tracking after connect: the pose is real, anchor the height on it
-                                    height_offset = if height_target > 0.0 { height_target - m.pose.position.y } else { 0.0 };
+                                    let eye_height = if height_target > 0.0 { height_target } else { m.pose.position.y.max(0.3) };
+                                    height_offset = -m.pose.position.y;
                                     height_anchored = true;
-                                    logs::general("INFO", &format!("height: headset at {:.2} m -> handed to games as {:.2} m (offset {:+.2})",
-                                        m.pose.position.y, m.pose.position.y + height_offset, height_offset));
-                                    event(origin, "height_calibrated", json!({ "target_m": height_target, "headset_y": m.pose.position.y, "offset_m": height_offset }));
+                                    unsafe { nvh::nvh_ipc_set_eye_height(ipc, eye_height) };
+                                    logs::general("INFO", &format!("height: headset at {:.2} m -> eye-level origin (published y {:+.2}), eye height {:.2} m for floor-level games",
+                                        m.pose.position.y, m.pose.position.y + height_offset, eye_height));
+                                    event(origin, "height_calibrated", json!({ "target_m": height_target, "headset_y": m.pose.position.y, "offset_m": height_offset, "eye_height_m": eye_height }));
                                 }
                                 // Head: pose only, zero velocity, exactly like ALVR's SteamVR driver (Hmd::OnPoseUpdated). The
                                 // visionOS client sends a finite-difference velocity of two ARKit poses (noisy); extrapolating

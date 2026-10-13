@@ -358,3 +358,13 @@ pictures 198-200 (204-230); `x_d2_oldest_w3` 32.0 ms (32.1), 18.1-18.2 % (18.0),
 wait before the encode 2.3 ms instead of 12.2, pose-to-arrival 14.2 against 24.1 ms, pose-to-display 27.9 / 18.0 / 18.9 against oldest 38.2 / 38.1 / 28.5 / 28.0 (the mock headset's own display queue
 is the second standing queue: when it is not empty too, the gain does not show at the display). Stock ALVR + SteamVR on the same scene: 29.3-29.8 ms. Not seen on the real headset yet; the
 headset-side drain (`video.client_queue_drain`) never fired in the lab (the mock reports no decoder queue that large) and stays opt-in.
+
+2026-10-13 (height workflow, measured in the lab with the probe app in both spaces, mock headset fixed at y = 1.5 m): before, the launcher's height reached the games
+as the published head y, which VDXR then treated as an eye-level pose: with no Virtual Desktop server running VDXR sets `m_useOculusRuntime` and an EYE-LEVEL tracking
+origin (`system.cpp`: "For Oculus, we use eye level"), where LOCAL = the pose as published and STAGE / LOCAL_FLOOR = pose + `OVR_KEY_EYE_HEIGHT` (our shim returned the constant
+1.675 m). Measured: LOCAL y = the setting (1.3 / 2.0 / 0.5; 0 = raw 1.5), STAGE y = the setting + 1.675 (2.975 at the default): a floor-level game saw the player ~3 m tall, an
+eye-level game a head 1.3 m above its origin, both putting the world far too low ("the scene at the bottom of the legs"); no setting could make STAGE right, which is why the slider
+seemed to do nothing. Now (IPC v16 `eyeHeightM`, `nvh_ipc_set_eye_height`, shim `GetEyeHeight`): the anchored head is published at y = 0 (eye-level origin, the headset's own vertical
+movement on top, hands in the same frame) and the setting is the eye height reported to games (0 = the headset's y at the anchor). Measured after: LOCAL y = 0.000, STAGE y = 1.300 /
+2.000 / 1.500 for 1.3 / 2.0 / 0. Live: a new height re-anchors at the current head position and changes the eye height at once (VDXR reads it on every locate); a game that cached
+its player height at start keeps it. Launcher label/hint: "Eye height". Probe: `XR_PROBE_SPACE=stage`; harness: `host.height_m`. Not yet tried on the headset.

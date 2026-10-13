@@ -1917,6 +1917,14 @@ namespace {
         }
 
         float GetEyeHeight() const override {
+            // the user's standing eye height from the host (the launcher's "starting height"): VDXR adds it to the eye-level poses to make the floor-level
+            // (STAGE / LOCAL_FLOOR) spaces, so games that think in absolute heights see the player at that height (read every locate: live)
+            if (m_ipc.state) {
+                const float h = m_ipc.state->host.eyeHeightM;
+                if (h > 0.3f && h < 3.0f) {
+                    return h;
+                }
+            }
             return OVR_DEFAULT_EYE_HEIGHT;
         }
 

@@ -140,7 +140,10 @@ int main(int argc, char** argv) {
     CK(xrCreateSession(inst, &sci, &sess));
 
     XrReferenceSpaceCreateInfo rsi{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
-    rsi.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL; rsi.poseInReferenceSpace.orientation.w = 1;
+    // XR_PROBE_SPACE=stage: locate the views in the STAGE (floor level) space instead of LOCAL (eye level): what a game that thinks in absolute heights sees
+    const bool stageSpace = getenv("XR_PROBE_SPACE") && strcmp(getenv("XR_PROBE_SPACE"), "stage") == 0;
+    rsi.referenceSpaceType = stageSpace ? XR_REFERENCE_SPACE_TYPE_STAGE : XR_REFERENCE_SPACE_TYPE_LOCAL; rsi.poseInReferenceSpace.orientation.w = 1;
+    L("reference space: %s", stageSpace ? "STAGE" : "LOCAL");
     XrSpace space;
     CK(xrCreateReferenceSpace(sess, &rsi, &space));
     XrSpace viewSpace{};

@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 15;
+constexpr uint32_t kVersion = 16;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -94,6 +94,9 @@ struct HostToShim {
     HeadSample headHist[kHeadHist];
     float headWaitMs;              // how long a frame waits for its head sample before reusing/predicting (default 3)
     float predictMissingHead;      // > 0: a late head sample is predicted (timestamp and pose) instead of reusing the last one
+    // The user's standing eye height above the floor (m), reported to games as OVR_KEY_EYE_HEIGHT. VDXR treats this LibOVR as an eye-level
+    // origin runtime: LOCAL space = the head pose as published (y about 0 at the anchor), STAGE / LOCAL_FLOOR = that + this eye height. 0 = default (1.675).
+    float eyeHeightM;
 };
 
 struct Haptic {

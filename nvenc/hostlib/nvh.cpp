@@ -620,6 +620,9 @@ void nvh_ipc_set_head_policy(void* i, float wait_ms, float predict) {
     auto& h = ((Ipc*)i)->state->host;
     h.headWaitMs = wait_ms; MemoryBarrier(); h.predictMissingHead = predict;
 }
+void nvh_ipc_set_eye_height(void* i, float eye_height_m) {
+    ((Ipc*)i)->state->host.eyeHeightM = eye_height_m;
+}
 
 void nvh_ipc_set_hand_offset(void* i, int side, const float* q, const float* p) {
     if (side < 0 || side > 1) return;

@@ -60,8 +60,8 @@ namespace VisionALVR
             // vertical movement on top of it. Applied live (re-anchored to your current pose).
             var vr = new GroupBox { Text = "VR settings (applied live)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
             var vt = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Location = new Point(8, 20), Font = Ui.Body };
-            AddKnob(vt, "Starting height, m", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v);
-            var hint = Ui.Line("The height above the floor you start at when you enter VR (default 1.30 m; 0 = the headset's own floor estimate). Change it while in VR to re-anchor.");
+            AddKnob(vt, "Eye height, m", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v);
+            var hint = Ui.Line("Your eye height above the floor, as games see it (default 1.30 m, seated; about 1.6-1.7 m standing; 0 = the headset's own floor estimate). Games that place you from the floor use it, applied live (moving it re-anchors at your current head position); games that start from an eye-level origin are not affected.");
             hint.ForeColor = Color.DimGray;
             hint.MaximumSize = new Size(560, 0);
             vt.Controls.Add(hint);

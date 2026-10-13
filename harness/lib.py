@@ -317,7 +317,7 @@ def run_scenario(sc, outdir: Path, log=print):
             hostcmd = (envpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
                        f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv '
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
-                                     "width": "--width", "height": "--height", "noise": "--noise", "qp_map": "--qp-map",
+                                     "width": "--width", "height": "--height", "height_m": "--height-m", "noise": "--noise", "qp_map": "--qp-map",
                                      "idle_rgb": "--idle-rgb", "gpu_priority": "--gpu-priority", "encode_profile": "--encode-profile",
                                      "install_dir": "--install-dir", "debug": "--debug", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
