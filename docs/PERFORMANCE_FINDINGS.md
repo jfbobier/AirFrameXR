@@ -64,3 +64,39 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 - Duplicate timestamps (5-10% of the Vision Pro's frames in heavy games, 20% in Dead Space): the re-stamp that removes them is parked (`exp/restamp-2026-10-13`) until the visionOS client handles stamped frames; the Quest 3 already shows them.
 - Headset decoder queue regimes (12-15 ms against stock 3 ms) when a frame goes missing.
 - Whether foveated or full-frame looks better at the same bitrate on the headset (unjudged).
+
+## Future work on the ALVR visionOS client (why re-stamped frames tremble there and not on the Quest)
+
+Observations, 2026-10-13 night (Cyberpunk intro, same host build, A/B by the user): shim-side re-stamp (nearly every frame stamped with the
+newest sample and rotated to it) clean on both headsets; host-side stamping (only duplicates re-stamped, with the oldest sample newer than the
+last sent) clean on the Quest 3, a mild tremble on the Vision Pro without the rotation and a strong one with it. The lab finds the host's
+geometry exact; the simrig is clean in all modes. So the difference is in the client, not in the streamer.
+
+What the two clients do differently. The Quest runs ALVR's Android client: the OpenXR runtime reprojects every frame from the pose the frame
+declares (looked up by its timestamp) to the display pose, so any monotonic, real timestamp is fine. The visionOS app is a separate Swift
+codebase rendering through Compositor Services: the display time, the device-anchor timestamps and the final reprojection belong to Apple; the
+app's only lever is the device anchor it attaches to each drawable, and the timestamps on the wire are the client's own convention (they jitter
+by tens of ns and must match exactly, see finding "predicting a missing head sample").
+
+Hypothesis that fits all five observations: the visionOS client compensates the frame's declared pose less than a full per-frame
+reprojection, so what matters is how close and how *steady* the declared pose is relative to the display pose. Shim-side stamping keeps
+the staleness constant (every frame at the newest sample): clean. Host-side stamping alternates between the real render sample and the next
+one, so the staleness jumps frame to frame: a mild tremble even with the picture unchanged. Rotating the picture to a pose the client does not
+fully compensate turns the alternation into a strong tremble. A second feedback path: the client predicts its anchor query ahead by the
+server's reported latency, and the stamp shortens the measured game stage, so the prediction horizon moves with the stamping mode.
+
+What to check in the client source before changing anything:
+1. Where the drawable's `deviceAnchor` comes from: the pose history keyed by the frame's timestamp (full compensation) or a fresh query at
+   present time (none). If it is a fresh query, use the stored anchor; the shim-side re-stamp then becomes correct for the Vision Pro as it
+   already is for the Quest.
+2. How the prediction horizon is computed from the reported latency, and whether a change in the game stage moves it per frame.
+3. Whether the per-sample timestamp the client sends carries the anchor's own time, so Compositor Services can extrapolate from it, or a
+   client-side value with no relation to the anchor.
+
+What the recorded sessions can and cannot tell: `client_frames.csv` of the Quest stamp-on run against the Vision Pro stamp-on run
+(frame interval, decoder queue, vsync queue per frame) separates a display-timing reaction from a pose problem; it cannot show which pose
+the client displayed with. The expectation is "pose problem" (the cadence was the same in all three host-side modes while the symptom scaled
+with the rotation).
+
+Plan when the client is recompiled: bring the shim-side path back from `exp/restamp-2026-10-13` first (clean on both headsets), then the
+host-side one only if the shim-side wait's arrival jitter still matters.
