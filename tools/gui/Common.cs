@@ -19,7 +19,7 @@ namespace VisionALVR
 {
     public static class Version
     {
-        public const string Text = "0.3 test";
+        public const string Text = "0.3 alpha";
     }
 
     /// The portable folder: everything next to the exe, config/ and logs/ inside it.
