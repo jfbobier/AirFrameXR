@@ -46,7 +46,14 @@
     ]
   },
   "session_overrides": {
-    "session_settings.video.encoder_config.nvenc.quality_preset.variant": "P3"
+    "session_settings.video.encoder_config.nvenc.quality_preset.variant": "P3",
+    "session_settings.video.passthrough.content.RgbChromaKey.blue": 0,
+    "session_settings.video.passthrough.content.RgbChromaKey.distance_threshold": 50,
+    "session_settings.video.passthrough.content.RgbChromaKey.feathering": 0.19999999,
+    "session_settings.video.passthrough.content.RgbChromaKey.green": 255,
+    "session_settings.video.passthrough.content.RgbChromaKey.red": 0,
+    "session_settings.video.passthrough.content.variant": "RgbChromaKey",
+    "session_settings.video.passthrough.enabled": true
   },
   "notes": [
     "anything another user should know"

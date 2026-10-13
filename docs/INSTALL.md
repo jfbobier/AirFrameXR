@@ -34,6 +34,8 @@ configure.exe is a setup wizard: it checks the PC (NVIDIA GPU with a driver that
 open the ALVR app on the Vision Pro, select it, **Pair**; check the settings; set the ALVR app's chroma key to the "colour when no
 game runs" (default #00FF00). 4. `VisionALVR.exe`, then start an OpenXR game. Close SteamVR and ALVR's own launcher first (same ports).
 
+**Passthrough:** `video.passthrough` is enabled by default with an RGB chroma key on pure green (#00FF00, threshold 50, feathering 0.2), in the default session and in every shipped profile. The Vision Pro app has its own chroma-key setting and ignores it; the Quest app (and other ALVR clients with passthrough) use it, so the idle green frame is transparent there without touching the ALVR dashboard.
+
 **A plain green screen on connecting is normal**: it is the idle frame while no game runs; set the chroma-key colour in the ALVR app to that
 green (#00FF00) and it turns transparent. Network advice (a Wi-Fi 6 access point in dumb-AP mode on 5 GHz with a 160 MHz channel for the first Vision Pro, PC on Ethernet, fixed IP by MAC): see the
 README's "Recommended network setup".

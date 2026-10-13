@@ -30,7 +30,15 @@
       }
     ]
   },
-  "session_overrides": {},
+  "session_overrides": {
+    "session_settings.video.passthrough.content.RgbChromaKey.blue": 0,
+    "session_settings.video.passthrough.content.RgbChromaKey.distance_threshold": 50,
+    "session_settings.video.passthrough.content.RgbChromaKey.feathering": 0.19999999,
+    "session_settings.video.passthrough.content.RgbChromaKey.green": 255,
+    "session_settings.video.passthrough.content.RgbChromaKey.red": 0,
+    "session_settings.video.passthrough.content.variant": "RgbChromaKey",
+    "session_settings.video.passthrough.enabled": true
+  },
   "notes": [
     "Starting point compiled from public guidance, NOT verified by the VisionALVR project on this headset (no `verified` entry). VisionALVR's support for headsets other than the Apple Vision Pro is best effort.",
     "ALVR's wiki (Settings tutorial, v20): on a good wireless router use the medium resolution preset (the default) with sharpening 1.0 and HEVC at a constant 100-150 Mbps; HEVC is usually the best codec when bitrate is limited; turn foveated encoding on and tune it from the statistics graph.",
