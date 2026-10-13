@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 23;
+constexpr uint32_t kVersion = 24;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -103,15 +103,6 @@ struct HostToShim {
     // drains when that gap reaches the host, without dropping a rendered frame.
     uint32_t intakeWaiting;
     uint32_t intakeGate;
-    // Release alignment (WaitForVsync): keep the app's running-start release just after the tracking sample's arrival instead of wherever the
-    // host grid puts it, so consecutive frames do not read the same sample when release and arrival coincide (duplicate timestamps the
-    // headset skips). The headset's samples arrive on its own clock; the host grid slides (phase lock), so the phase between the two drifts.
-    uint32_t alignRelease;
-    // Duplicate-timestamp fix (SubmitFrame): a frame whose render pose matches the sample the previous frame left with would be
-    // skipped by the headset (same timestamp). With dupRestamp set the shim waits up to dupWaitMs for the next tracking sample,
-    // stamps the frame with it and rotates the layers from the rendered orientation to that sample's (rotation-only reprojection).
-    uint32_t dupRestamp;
-    float dupWaitMs;
 };
 
 struct Haptic {
@@ -128,8 +119,6 @@ struct ShimToHost {
     uint32_t frameSeq;             // seqlock for the frame fields: odd while the shim is writing them
     uint64_t frameClientTsNs;      // client tracking timestamp of the pose the app rendered that frame with
     double frameSubmitTimeS;       // shim clock when the frame was submitted
-    float frameRenderQuat[2][4];   // orientation (x y z w, tracking space) each eye's projection layer was rendered with: the host's re-stamp rotates from it
-    uint32_t frameHasProjection;   // 1 when the frame has a projection layer (frameRenderQuat valid)
     uint64_t slotHandle[kSlots];   // legacy shared texture handles (HANDLE values)
     int32_t sbsWidth, sbsHeight;
     uint32_t sbsFormat;            // DXGI_FORMAT of the SBS slots
@@ -144,12 +133,6 @@ struct ShimToHost {
     uint64_t releasesLate;         // releases whose computed time was already past (app slower than a display period: free-running)
     uint64_t gateHolds;            // releases the intake gate skipped for a standing host queue (see HostToShim::intakeGate)
     uint64_t gateSuppressed;       // standing queue seen while the gate was quiet after a skip (its effect still in flight)
-    uint64_t restamps;             // frames re-stamped with the next tracking sample (duplicate-timestamp fix, HostToShim::dupRestamp)
-    uint64_t restampTimeouts;      // duplicates left as they were: no newer sample within dupWaitMs
-    float restampWarpMaxMdeg;      // largest rotation applied by a re-stamp since the shim started (millidegrees)
-    uint64_t restampWaits;         // re-stamps that had to wait for the sample (more than 0.2 ms); the rest found it already there
-    double restampWaitSumMs;       // total time spent waiting (ms), re-stamps and timeouts
-    float restampWaitMaxMs;        // longest single wait since the shim started
 };
 
 struct IpcState {

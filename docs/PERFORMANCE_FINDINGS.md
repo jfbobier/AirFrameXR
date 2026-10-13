@@ -43,6 +43,7 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 | **HEVC QP-delta map** (foveal emphasis) | built and proven against a Python oracle, never judged on the headset. | Milder foveation plus a QP map is encode-bound on a one-engine GPU. Opt-in. |
 | **Client queue drain** (`video.client_queue_drain`) | never fired in the lab; untested on the headset. | Opt-in. |
 | **Release alignment alone** (`OVRSHIM_ALIGN_RELEASE`) | no effect on duplicates. | Lab only. |
+| **Duplicate-timestamp re-stamp** (shim-side wait for the next sample + rotation, and host-side compositor stamping, 2026-10-13) | duplicates 0, shown fps = host fps, headset gaps halved in the heavy games; but the Vision Pro trembles with host-side stamping (the Quest 3 is clean either way) and the shim-side wait moves Wi-Fi jitter into the frame arrivals. | The visionOS client handles stamped frames differently; wait for a recompiled client rather than work around it in the streamer. Parked on branch `exp/restamp-2026-10-13`; the product sends every frame with its render sample's timestamp. |
 
 ## Findings that changed our mind
 
@@ -60,6 +61,6 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 
 ## Still open
 
-- Dead Space duplicates (20%): game-side pose reads; a client-side or reprojection answer would be needed.
+- Duplicate timestamps (5-10% of the Vision Pro's frames in heavy games, 20% in Dead Space): the re-stamp that removes them is parked (`exp/restamp-2026-10-13`) until the visionOS client handles stamped frames; the Quest 3 already shows them.
 - Headset decoder queue regimes (12-15 ms against stock 3 ms) when a frame goes missing.
 - Whether foveated or full-frame looks better at the same bitrate on the headset (unjudged).

@@ -80,9 +80,6 @@ struct Arrived {
     ts_ns: u64,
     submit_s: f64,
     arrival: Instant,
-    /// per-eye orientation the projection layer was rendered with (ipc frameRenderQuat), valid when `has_projection`
-    render_q: [f32; 8],
-    has_projection: bool,
 }
 
 /// Frame-level CSV mirrors for the harness (VISIONALVR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
@@ -198,22 +195,6 @@ pub struct Pipeline {
     gate_after: u64,
     /// boundaries that left a frame behind (since start): how long queues stood, whatever drained them
     pub standing_total: AtomicU64,
-    /// host-side re-stamp (VISIONALVR_HOST_STAMP, default on): a frame whose timestamp is not newer than the last sent is stamped with the newest
-    /// tracking sample the host holds at encode time and rotated to it (nvh_set_warp), instead of the shim waiting for that sample at submit
-    host_stamp: bool,
-    pub host_restamps: AtomicU64,
-    /// frames dropped at encode time: not newer than the last sent frame and no newer tracking sample yet (the headset would have skipped
-    /// a repeated timestamp anyway, and a timestamp older than the previous frame's must never go out)
-    pub host_restamp_dropped: AtomicU64,
-    /// frames put back for the next boundary because no newer sample existed yet at encode time
-    pub host_restamp_deferred: AtomicU64,
-    /// VISIONALVR_HOST_WARP=0: re-stamp without rotating the picture (diagnostic: separates the stamp choice from the warp)
-    host_warp: bool,
-    /// diagnostics per statistics window: angle between the layer's render orientation and the render sample (a game's own eye orientation),
-    /// and the rotation applied by the re-stamp (sample to sample), in millidegrees (sum and max, count)
-    pub diag_layer_vs_sample_mdeg: Mutex<(f64, f64, u64)>,
-    pub diag_warp_mdeg: Mutex<(f64, f64, u64)>,
-    diag_lookup_logged: AtomicU64,
     /// the last boundary that found no frame (the app is not keeping up): the gate and the drain stay out for VISIONALVR_KEEPUP_BOUNDARIES (30)
     /// boundaries after it. A GPU-bound game delivers in bunches (two frames at half the boundaries, none at a tenth: Cyberpunk at 88 fps on a 100 Hz
     /// display, 2026-10-13 evening); that is not a standing queue, and skipping its releases only lowered its frame rate (258 skips in 82 s, hold unchanged).
@@ -261,18 +242,6 @@ pub struct Pipeline {
     gpu_sched: Mutex<Option<(i32, i64)>>,
 }
 
-/// angle between two unit quaternions (x y z w), millidegrees
-fn quat_angle_mdeg(a: &[f32], b: &[f32]) -> f64 {
-    let dot = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]).abs().min(1.0) as f64;
-    2.0 * dot.acos() * 57295.78
-}
-
-/// VISIONALVR_HOST_STAMP (default OFF since 2026-10-13 night: the host-side re-stamp trembles on the Vision Pro with foveation on while
-/// the lab finds its rotation exact with foveation off; the shim-side re-stamp is the default until that is understood): see `Pipeline::host_stamp`
-pub fn host_stamp_enabled() -> bool {
-    std::env::var("VISIONALVR_HOST_STAMP").map(|v| v == "1").unwrap_or(false)
-}
-
 /// VISIONALVR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
 pub fn intake_gate_enabled() -> bool {
     std::env::var("VISIONALVR_INTAKE_GATE").map(|v| v != "0").unwrap_or(true)
@@ -305,14 +274,6 @@ impl Pipeline {
             pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "drain".into()),
             intake_gate: intake_gate_enabled(),
             gate_after: std::env::var("VISIONALVR_GATE_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).max(1),
-            host_stamp: host_stamp_enabled(),
-            host_restamps: AtomicU64::new(0),
-            host_restamp_dropped: AtomicU64::new(0),
-            host_restamp_deferred: AtomicU64::new(0),
-            host_warp: std::env::var("VISIONALVR_HOST_WARP").map(|v| v != "0").unwrap_or(true),
-            diag_layer_vs_sample_mdeg: Mutex::new((0.0, 0.0, 0)),
-            diag_warp_mdeg: Mutex::new((0.0, 0.0, 0)),
-            diag_lookup_logged: AtomicU64::new(0),
             last_empty_idx: AtomicU64::new(0),
             keepup_boundaries: std::env::var("VISIONALVR_KEEPUP_BOUNDARIES").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30),
             standing_total: AtomicU64::new(0),
@@ -420,8 +381,7 @@ impl Pipeline {
         let ipc = self.ipc();
         while !self.stop.load(Ordering::Relaxed) {
             let (mut counter, mut slot, mut cts, mut submit_s) = (0u64, 0u32, 0u64, 0f64);
-            let (mut render_q, mut has_proj) = ([0f32; 8], 0i32);
-            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s, render_q.as_mut_ptr(), &mut has_proj) } == 0 {
+            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s) } == 0 {
                 continue;
             }
             let now = Instant::now();
@@ -431,7 +391,7 @@ impl Pipeline {
             if crate::simrig::active() {
                 crate::simrig::on_arrival(ipc, slot, counter as u32);
             }
-            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now, render_q, has_projection: has_proj != 0 };
+            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now };
             {
                 let mut q = self.intake.lock();
                 fate(counter, "A", now, slot as u64, cts);
@@ -635,76 +595,6 @@ impl Pipeline {
                     self.frame_idx.store(0, Ordering::Relaxed);
                 }
             }
-            // Host-side re-stamp: by the boundary the host usually holds a tracking sample newer than the one the frame was rendered with.
-            // A frame that would repeat the last sent timestamp (the headset skips those) is stamped with that sample and the picture is
-            // rotated from the eyes' render orientation to it in the encode path (nvh_set_warp -> warp pass -> foveation).
-            let mut ts = ts;
-            let mut warp_set = false;
-            if let (Job::App(a), true) = (&p.job, self.host_stamp) {
-                if a.ts_ns != 0 {
-                    let last = *self.last_sent_ts.lock();
-                    if last != Duration::ZERO && ts <= last {
-                        // the oldest sample newer than the last sent frame: one sample ahead, the smallest rotation that gives a new timestamp
-                        let (pick, rendered) = {
-                            let ring = self.shared.recent_samples.lock();
-                            let found = ring.iter().find(|(t, _)| *t == ts).map(|(_, q)| *q);
-                            if found.is_none() && self.diag_lookup_logged.fetch_add(1, Ordering::Relaxed) < 20 {
-                                let nearest = ring.iter().map(|(t, _)| (t.as_nanos() as i128 - ts.as_nanos() as i128).abs()).min();
-                                event(self.cfg.origin, "restamp_lookup_miss", json!({
-                                    "ts_ns": a.ts_ns, "last_sent_ns": last.as_nanos() as u64, "ring_len": ring.len(),
-                                    "ring_front_ns": ring.front().map(|(t, _)| t.as_nanos() as u64), "ring_back_ns": ring.back().map(|(t, _)| t.as_nanos() as u64),
-                                    "nearest_abs_ns": nearest.map(|n| n as i64) }));
-                            }
-                            (ring.iter().find(|(t, _)| *t > last).copied(), found)
-                        };
-                        match pick {
-                            Some((sts, q)) if a.has_projection => {
-                                // Rotate between the two tracking SAMPLES (the one the frame was rendered with, the one it is stamped with): that is
-                                // the correction the headset's reprojection assumes. A game's own eye orientation (a fixed rotation of the render
-                                // pose relative to the head sample, which the layer carries) must stay in the picture on every frame; taking it
-                                // from the render pose removed it on re-stamped frames only, a constant offset alternating with the plain frames.
-                                let render_q: [f32; 8] = match rendered {
-                                    Some(rq) => [rq[0], rq[1], rq[2], rq[3], rq[0], rq[1], rq[2], rq[3]],
-                                    None => a.render_q, // the render sample left the ring (a very old frame): the layer's own orientation
-                                };
-                                if let Some(rq) = rendered {
-                                    let lv = quat_angle_mdeg(&rq, &a.render_q[..4]);
-                                    let mut d = self.diag_layer_vs_sample_mdeg.lock();
-                                    d.0 += lv; d.1 = d.1.max(lv); d.2 += 1;
-                                    let w = quat_angle_mdeg(&rq, &q);
-                                    let mut e = self.diag_warp_mdeg.lock();
-                                    e.0 += w; e.1 = e.1.max(w); e.2 += 1;
-                                }
-                                if self.host_warp {
-                                    unsafe { nvh::nvh_set_warp(enc.handle, ipc, render_q.as_ptr(), q.as_ptr(), 1) };
-                                    warp_set = true;
-                                }
-                                ts = sts;
-                                self.host_restamps.fetch_add(1, Ordering::Relaxed);
-                            }
-                            _ => {
-                                // nothing newer yet: never send a repeated or older timestamp. Defer the frame to the next boundary (a newer
-                                // sample is almost always there by then: one period of latency for this frame, no hole on the headset); a frame
-                                // already two periods old, or one without a projection layer to rotate, is dropped instead.
-                                let period = self.period();
-                                if a.has_projection && a.arrival.elapsed() < period * 2 {
-                                    self.host_restamp_deferred.fetch_add(1, Ordering::Relaxed);
-                                    fate(a.counter, "D", Instant::now(), 0, 0);
-                                    self.intake.lock().push_front(*a);
-                                } else {
-                                    self.host_restamp_dropped.fetch_add(1, Ordering::Relaxed);
-                                    fate(a.counter, "S", Instant::now(), 2, 0);
-                                    unsafe { nvh::nvh_ipc_slot_busy(ipc, a.slot, 0) };
-                                }
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-            if !warp_set {
-                unsafe { nvh::nvh_set_warp(enc.handle, ipc, std::ptr::null(), std::ptr::null(), 0) };
-            }
             let force_idr = self.frame_idx.fetch_add(1, Ordering::Relaxed) == 0;
             {
                 let mut last = self.last_sent_ts.lock();
@@ -898,14 +788,6 @@ impl Pipeline {
     pub fn stats_json(&self) -> serde_json::Value {
         let (mut waits, mut app_ms, mut releases, mut late, mut gate_holds, mut gate_suppressed) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
         unsafe { nvh::nvh_ipc_shim_pacing(self.ipc(), &mut waits, &mut app_ms, &mut releases, &mut late, &mut gate_holds, &mut gate_suppressed) };
-        // cumulative since start (sum, max, count): the caller samples this every main-loop tick, so nothing is reset here
-        let take = |m: &Mutex<(f64, f64, u64)>| {
-            let d = m.lock();
-            json!({ "sum": d.0, "max": d.1, "n": d.2 })
-        };
-        let (diag_layer, diag_warp) = (take(&self.diag_layer_vs_sample_mdeg), take(&self.diag_warp_mdeg));
-        let (mut restamps, mut restamp_timeouts, mut warp_max, mut rwaits, mut rwait_sum, mut rwait_max) = (0u64, 0u64, 0f32, 0u64, 0f64, 0f32);
-        unsafe { nvh::nvh_ipc_shim_restamps(self.ipc(), &mut restamps, &mut restamp_timeouts, &mut warp_max, &mut rwaits, &mut rwait_sum, &mut rwait_max) };
         json!({
             "send_pacing": self.cfg.send_pacing.name(),
             "arrived": self.arrived.load(Ordering::Relaxed),
@@ -915,13 +797,6 @@ impl Pipeline {
             "intake_drains": self.intake_drains.load(Ordering::Relaxed),
             "standing_total": self.standing_total.load(Ordering::Relaxed),
             "intake_gate": self.intake_gate,
-            "host_stamp": self.host_stamp,
-            "host_restamps": self.host_restamps.load(Ordering::Relaxed),
-            "host_restamp_dropped": self.host_restamp_dropped.load(Ordering::Relaxed),
-            "host_restamp_deferred": self.host_restamp_deferred.load(Ordering::Relaxed),
-            "host_warp": self.host_warp,
-            "layer_vs_sample_mdeg": diag_layer,
-            "restamp_rotation_mdeg": diag_warp,
             "gate_after": self.gate_after,
             "keepup_boundaries": self.keepup_boundaries,
             "intake_depth": self.intake_depth,
@@ -935,9 +810,7 @@ impl Pipeline {
             "idr_restarts": self.idr_restarts.load(Ordering::Relaxed),
             "encode_envelope_ms": *self.encode_env_ms.lock(),
             "gpu_scheduling": self.gpu_sched.lock().map(|(c, st)| json!({ "class": c, "status": st })),
-            "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_suppressed": gate_suppressed,
-                      "restamps": restamps, "restamp_timeouts": restamp_timeouts, "restamp_warp_max_mdeg": warp_max,
-                      "restamp_waits": rwaits, "restamp_wait_sum_ms": rwait_sum, "restamp_wait_max_ms": rwait_max },
+            "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_suppressed": gate_suppressed },
         })
     }
 }

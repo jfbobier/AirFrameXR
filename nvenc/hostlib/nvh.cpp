@@ -6,7 +6,6 @@
 #include "shim.h"
 #include "ipc_win.h"
 #include "FFR.h"
-#include <d3dcompiler.h>
 #include <dxgi.h>
 #include <algorithm>
 #include <cmath>
@@ -87,20 +86,6 @@ struct Nvh {
     std::unique_ptr<KeepAlive> keepAlive;
     int gpuPriority = 0; long gpuPriorityHr = 0;   // IDXGIDevice::SetGPUThreadPriority on the encoder device (0 = not set)
     std::vector<ID3D11Texture2D*> noiseTex;          // noise == 2: independent random frames (nothing for motion search to reuse)
-    // Host-side re-stamp warp (nvh_set_warp): the shared slot rotated per eye into `warped`, which feeds its own foveation pass
-    struct Warp {
-        bool on = false;
-        double M[2][9]{};                                // per eye: direction in the stamp view -> direction in the rendered view (rows)
-        ID3D11VertexShader* vs = nullptr; ID3D11PixelShader* ps = nullptr; ID3D11Buffer* cb = nullptr; ID3D11SamplerState* smp = nullptr;
-        ID3D11Texture2D* tex = nullptr; ID3D11RenderTargetView* rtv = nullptr;
-        UINT w = 0, h = 0; DXGI_FORMAT fmt = DXGI_FORMAT_UNKNOWN;
-        ID3D11ShaderResourceView* srcSrv[visionalvr_ipc::kSlots] = {};
-        ID3D11Texture2D* srcOf[visionalvr_ipc::kSlots] = {};
-        std::unique_ptr<FFR> ffr;                        // foveation pass bound to `warped`
-        bool failed = false;
-        uint64_t frames = 0;
-        int lastWarpedSlot = -1;                         // the slot whose last encode went through the warp (the simrig viewer then shows `tex`)
-    } warp;
 };
 
 // host options that are not ALVR settings
@@ -461,7 +446,7 @@ float nvh_ipc_last_compose_ms(void* i) { return ((Ipc*)i)->state->shim.lastCompo
 float nvh_last_ffr_gpu_ms(void* hh) { return ((Nvh*)hh)->lastFfrMs; }
 float nvh_last_ffr_wait_ms(void* hh) { return ((Nvh*)hh)->lastFfrWaitMs; }
 
-int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit, float* render_q8, int* has_projection) {
+int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit) {
     auto* ipc = (Ipc*)i;
     static uint64_t last = 0;
     auto& s = ipc->state->shim;
@@ -480,8 +465,6 @@ int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slo
         if (q1 & 1) { YieldProcessor(); continue; }
         MemoryBarrier();
         *counter = s.frameCounter; *slot = s.frameSlot; *ts = s.frameClientTsNs; *submit = s.frameSubmitTimeS;
-        if (render_q8) memcpy(render_q8, s.frameRenderQuat, sizeof(float) * 8);
-        if (has_projection) *has_projection = (int)s.frameHasProjection;
         MemoryBarrier();
         if (*(volatile uint32_t*)&s.frameSeq == q1) break;
     }
@@ -525,133 +508,11 @@ extern "C" void* nvh_sim_context(void* hh) { return ((Nvh*)hh)->render->GetConte
 extern "C" void* nvh_sim_slot(void* hh, void* i, uint32_t slot) {
     auto* n = (Nvh*)hh;
     if (!n || slot >= (uint32_t)visionalvr_ipc::kSlots) return nullptr;
-    // the picture the encoder saw: the warped texture when the last encode of this slot went through the host-side re-stamp warp
-    if (n->warp.lastWarpedSlot == (int)slot && n->warp.tex) return n->warp.tex;
     (void)i;
     return n->shared[slot];
 }
 
 #endif
-
-// ---- host-side re-stamp warp ------------------------------------------------------------------------------------------------------
-// Per eye, the output pixel's view direction in the stamp orientation is rotated into the orientation the eye was rendered with and
-// sampled there (the same mapping as the shim's EyeHomography and the simrig viewer): camera rotation handled exactly, black outside
-// the rendered view. Source and destination share the host's eye FoV (the shim composed the layer into it).
-static const char* kWarpShader = R"(
-cbuffer CB : register(b0) {
-    float4 rowA; float4 rowB; float4 rowC;   // M rows: stamp-view direction -> rendered-view direction
-    float4 tanF;                             // l r u d tangents of the eye
-    float4 eyeRect;                          // x: u0 of this eye in the SBS source, y: u width (0.5)
-};
-Texture2D src : register(t0);
-SamplerState smp : register(s0);
-struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
-VSOut VS(uint id : SV_VertexID) {
-    VSOut o;
-    float2 p = float2((id << 1) & 2, id & 2);
-    o.pos = float4(p * float2(2, -2) + float2(-1, 1), 0, 1);
-    o.uv = p;
-    return o;
-}
-float4 PS(VSOut i) : SV_Target {
-    float tx = lerp(-tanF.x, tanF.y, i.uv.x);
-    float ty = lerp(tanF.z, -tanF.w, i.uv.y);
-    float3 d = float3(tx, ty, -1);
-    d = float3(dot(rowA.xyz, d), dot(rowB.xyz, d), dot(rowC.xyz, d));
-    if (d.z > -1e-4) return float4(0, 0, 0, 1);
-    float2 t = d.xy / -d.z;
-    float u = (t.x + tanF.x) / (tanF.x + tanF.y);
-    float v = 1 - (t.y + tanF.w) / (tanF.z + tanF.w);
-    if (u < 0 || u > 1 || v < 0 || v > 1) return float4(0, 0, 0, 1);
-    return float4(src.SampleLevel(smp, float2(eyeRect.x + u * eyeRect.y, v), 0).rgb, 1);
-}
-)";
-
-static void qmatRow(const float* q, double m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w)
-    double x = q[0], y = q[1], z = q[2], w = q[3];
-    const double n = std::sqrt(x * x + y * y + z * z + w * w);
-    if (n > 0) { x /= n; y /= n; z /= n; w /= n; } else { x = y = z = 0; w = 1; }
-    m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y - z * w);     m[2] = 2 * (x * z + y * w);
-    m[3] = 2 * (x * y + z * w);     m[4] = 1 - 2 * (x * x + z * z); m[5] = 2 * (y * z - x * w);
-    m[6] = 2 * (x * z - y * w);     m[7] = 2 * (y * z + x * w);     m[8] = 1 - 2 * (x * x + y * y);
-}
-
-void nvh_set_warp(void* hh, void* i, const float* q_render8, const float* q_stamp4, int on) {
-    auto* n = (Nvh*)hh; if (!n) return;
-    if (!on || !q_render8 || !q_stamp4) { n->warp.on = false; return; }
-    double rs[9]; qmatRow(q_stamp4, rs);
-    for (int e = 0; e < 2; e++) {
-        double rr[9]; qmatRow(q_render8 + e * 4, rr);
-        // M = R_render^T * R_stamp: a direction in the stamp view -> world -> the rendered view
-        for (int r = 0; r < 3; r++) for (int c = 0; c < 3; c++) { double acc = 0; for (int k = 0; k < 3; k++) acc += rr[k * 3 + r] * rs[k * 3 + c]; n->warp.M[e][r * 3 + c] = acc; }
-    }
-    n->warp.on = true;
-    (void)i;
-}
-
-// Renders the warped slot into n->warp.tex; returns the foveation pass to use (bound to the warped texture), or nullptr on failure.
-static FFR* warpSlot(Nvh* n, Ipc* ipc, uint32_t slot, char* err, int errlen) {
-    auto& W = n->warp;
-    if (W.failed) return nullptr;
-    ID3D11Device* dev = n->render->GetDevice(); ID3D11DeviceContext* ctx = n->render->GetContext();
-    if (!W.vs) {
-        ID3DBlob *vb = nullptr, *pb = nullptr, *e = nullptr;
-        if (FAILED(D3DCompile(kWarpShader, strlen(kWarpShader), "warp", nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vb, &e)) ||
-            FAILED(D3DCompile(kWarpShader, strlen(kWarpShader), "warp", nullptr, nullptr, "PS", "ps_5_0", 0, 0, &pb, &e))) {
-            seterr(err, errlen, e ? (const char*)e->GetBufferPointer() : "warp shader compile failed"); W.failed = true; return nullptr;
-        }
-        dev->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &W.vs);
-        dev->CreatePixelShader(pb->GetBufferPointer(), pb->GetBufferSize(), nullptr, &W.ps);
-        vb->Release(); pb->Release();
-        D3D11_BUFFER_DESC bd{}; bd.ByteWidth = 16 * 5; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        dev->CreateBuffer(&bd, nullptr, &W.cb);
-        D3D11_SAMPLER_DESC sd{}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sd.MaxLOD = D3D11_FLOAT32_MAX;
-        dev->CreateSamplerState(&sd, &W.smp);
-        if (!W.vs || !W.ps || !W.cb || !W.smp) { seterr(err, errlen, "warp pipeline objects"); W.failed = true; return nullptr; }
-    }
-    D3D11_TEXTURE2D_DESC sdsc{}; n->shared[slot]->GetDesc(&sdsc);
-    if (!W.tex || W.w != sdsc.Width || W.h != sdsc.Height || W.fmt != sdsc.Format) {
-        if (W.rtv) { W.rtv->Release(); W.rtv = nullptr; }
-        if (W.tex) { W.tex->Release(); W.tex = nullptr; }
-        W.ffr.reset();
-        D3D11_TEXTURE2D_DESC td{}; td.Width = sdsc.Width; td.Height = sdsc.Height; td.MipLevels = 1; td.ArraySize = 1; td.Format = sdsc.Format;
-        td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-        if (FAILED(dev->CreateTexture2D(&td, nullptr, &W.tex)) || FAILED(dev->CreateRenderTargetView(W.tex, nullptr, &W.rtv))) {
-            seterr(err, errlen, "warp target"); W.failed = true; return nullptr;
-        }
-        W.w = sdsc.Width; W.h = sdsc.Height; W.fmt = sdsc.Format;
-        try { W.ffr = std::make_unique<FFR>(dev); W.ffr->Initialize(W.tex); }
-        catch (std::exception& ex) { seterr(err, errlen, ex.what()); W.failed = true; return nullptr; }
-    }
-    if (W.srcOf[slot] != n->shared[slot] || !W.srcSrv[slot]) {
-        if (W.srcSrv[slot]) { W.srcSrv[slot]->Release(); W.srcSrv[slot] = nullptr; }
-        if (FAILED(dev->CreateShaderResourceView(n->shared[slot], nullptr, &W.srcSrv[slot]))) { seterr(err, errlen, "warp source view"); W.failed = true; return nullptr; }
-        W.srcOf[slot] = n->shared[slot];
-    }
-    const auto& fov = ipc->state->host.eyeFovTan;
-    ctx->OMSetRenderTargets(1, &W.rtv, nullptr);
-    ctx->IASetInputLayout(nullptr); ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    ctx->VSSetShader(W.vs, nullptr, 0); ctx->PSSetShader(W.ps, nullptr, 0);
-    ctx->PSSetSamplers(0, 1, &W.smp); ctx->PSSetShaderResources(0, 1, &W.srcSrv[slot]);
-    ctx->PSSetConstantBuffers(0, 1, &W.cb);
-    for (int e = 0; e < 2; e++) {
-        float cbv[20] = {};
-        const double* M = W.M[e];
-        cbv[0] = (float)M[0]; cbv[1] = (float)M[1]; cbv[2] = (float)M[2];
-        cbv[4] = (float)M[3]; cbv[5] = (float)M[4]; cbv[6] = (float)M[5];
-        cbv[8] = (float)M[6]; cbv[9] = (float)M[7]; cbv[10] = (float)M[8];
-        cbv[12] = fov[e][0]; cbv[13] = fov[e][1]; cbv[14] = fov[e][2]; cbv[15] = fov[e][3];
-        cbv[16] = e ? 0.5f : 0.f; cbv[17] = 0.5f;
-        ctx->UpdateSubresource(W.cb, 0, nullptr, cbv, 0, 0);
-        D3D11_VIEWPORT vp{}; vp.TopLeftX = e ? W.w * 0.5f : 0.f; vp.Width = W.w * 0.5f; vp.Height = (float)W.h; vp.MaxDepth = 1.f;
-        ctx->RSSetViewports(1, &vp);
-        ctx->Draw(3, 0);
-    }
-    ID3D11ShaderResourceView* nullSrv = nullptr; ctx->PSSetShaderResources(0, 1, &nullSrv);
-    ID3D11RenderTargetView* nullRtv = nullptr; ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
-    W.frames++;
-    return W.ffr.get();
-}
 
 double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
     auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
@@ -681,15 +542,7 @@ double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, ui
     double a = nowMs();
     try {
         ctx->Begin(n->qDisjoint); ctx->End(n->qT0);
-        // host-side re-stamp: the slot rotated to the stamp orientation feeds its own foveation pass (one extra full-frame pass on this device)
         FFR* ffr = n->ffr[slot].get();
-        const bool warpOn = n->warp.on;
-        n->warp.on = false; // per frame: nvh_set_warp before each encode
-        n->warp.lastWarpedSlot = -1;
-        if (warpOn) {
-            if (FFR* wf = warpSlot(n, ipc, slot, err, errlen)) { ffr = wf; n->warp.lastWarpedSlot = (int)slot; }
-            // (on failure the frame goes out unrotated with its new stamp: the error text is left for the caller's log, the encode continues)
-        }
         static const bool zeroCopy = !(getenv("VISIONALVR_ZEROCOPY") && strcmp(getenv("VISIONALVR_ZEROCOPY"), "0") == 0);
         if (zeroCopy && ffr->CanRenderDirect()) {
             // zero copy: the foveation pass renders straight into the encoder's next input frame; Transmit skips its copy
@@ -739,8 +592,6 @@ int nvh_ipc_app_exe(void* i, char* buf, int len) {
 void nvh_release_shared(void* hh) {
     auto* n = (Nvh*)hh; if (!n) return;
     for (auto& f : n->ffr) f.reset();
-    n->warp.ffr.reset();
-    for (int k = 0; k < visionalvr_ipc::kSlots; k++) { if (n->warp.srcSrv[k]) { n->warp.srcSrv[k]->Release(); n->warp.srcSrv[k] = nullptr; } n->warp.srcOf[k] = nullptr; }
     for (int k = 0; k < visionalvr_ipc::kSlots; k++) { if (n->shared[k]) { n->shared[k]->Release(); n->shared[k] = nullptr; } n->sharedHandle[k] = 0; }
 }
 
@@ -787,21 +638,6 @@ void nvh_ipc_set_intake(void* i, uint32_t waiting) {
 
 void nvh_ipc_set_intake_gate(void* i, uint32_t on) {
     ((Ipc*)i)->state->host.intakeGate = on;
-}
-
-void nvh_ipc_set_align_release(void* i, uint32_t on) {
-    ((Ipc*)i)->state->host.alignRelease = on;
-}
-
-void nvh_ipc_set_dup_restamp(void* i, uint32_t on, float wait_ms) {
-    auto& h = ((Ipc*)i)->state->host;
-    h.dupWaitMs = wait_ms; MemoryBarrier(); h.dupRestamp = on;
-}
-
-void nvh_ipc_shim_restamps(void* i, uint64_t* restamps, uint64_t* timeouts, float* warp_max_mdeg, uint64_t* waits, double* wait_sum_ms, float* wait_max_ms) {
-    const auto& s = ((Ipc*)i)->state->shim;
-    *restamps = s.restamps; *timeouts = s.restampTimeouts; *warp_max_mdeg = s.restampWarpMaxMdeg;
-    *waits = s.restampWaits; *wait_sum_ms = s.restampWaitSumMs; *wait_max_ms = s.restampWaitMaxMs;
 }
 
 long nvh_set_gpu_scheduling(int cls) {
