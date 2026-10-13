@@ -81,6 +81,8 @@ void nvh_ipc_shim_pacing(void* ipc, uint32_t* slot_busy_waits, float* app_frame_
 void nvh_ipc_set_intake(void* ipc, uint32_t waiting);
 void nvh_ipc_set_intake_gate(void* ipc, uint32_t on);
 void nvh_ipc_set_align_release(void* ipc, uint32_t on);
+void nvh_ipc_set_dup_restamp(void* ipc, uint32_t on, float wait_ms);
+void nvh_ipc_shim_restamps(void* ipc, uint64_t* restamps, uint64_t* timeouts, float* warp_max_mdeg);
 // Process-wide GPU scheduling class (D3DKMT): 0 idle .. 4 high, 5 realtime (needs the increase-base-priority privilege, i.e. an
 // elevated host). SteamVR's compositor runs realtime, so its copy/encode never queues behind the game's GPU work. Returns the
 // NTSTATUS (0 = success).

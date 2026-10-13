@@ -406,6 +406,16 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
             std::env::set_var("VISIONALVR_ALIGN_RELEASE", if v { "1" } else { "0" });
         }
     }
+    if let Some(v) = st.dup_restamp {
+        if std::env::var_os("VISIONALVR_DUP_RESTAMP").is_none() {
+            std::env::set_var("VISIONALVR_DUP_RESTAMP", if v { "1" } else { "0" });
+        }
+    }
+    if let Some(v) = st.dup_wait_ms {
+        if std::env::var_os("VISIONALVR_DUP_WAIT_MS").is_none() {
+            std::env::set_var("VISIONALVR_DUP_WAIT_MS", v.to_string());
+        }
+    }
     phase::configure(st.phase_lock.unwrap_or(true));
     if let Some(v) = st.boundary_offset_ms {
         a.boundary_offset_ms = v;
@@ -780,6 +790,8 @@ mod nvh {
         pub fn nvh_ipc_set_intake(ipc: *mut c_void, waiting: u32);
         pub fn nvh_ipc_set_intake_gate(ipc: *mut c_void, on: u32);
         pub fn nvh_ipc_set_align_release(ipc: *mut c_void, on: u32);
+        pub fn nvh_ipc_set_dup_restamp(ipc: *mut c_void, on: u32, wait_ms: f32);
+        pub fn nvh_ipc_shim_restamps(ipc: *mut c_void, restamps: *mut u64, timeouts: *mut u64, warp_max_mdeg: *mut f32);
         pub fn nvh_set_gpu_scheduling(cls: i32) -> i32;
     }
 }
@@ -1515,6 +1527,11 @@ fn main() {
         let align = std::env::var("VISIONALVR_ALIGN_RELEASE").map(|v| v != "0").unwrap_or(true);
         unsafe { nvh::nvh_ipc_set_align_release(ipc, if align { 1 } else { 0 }) };
         event(origin, "release_alignment", json!({ "on": align }));
+        // duplicate-timestamp fix (ipc.h dupRestamp): on unless VISIONALVR_DUP_RESTAMP=0 / video.dup_restamp false; wait VISIONALVR_DUP_WAIT_MS (8)
+        let restamp = std::env::var("VISIONALVR_DUP_RESTAMP").map(|v| v != "0").unwrap_or(true);
+        let dup_wait_ms = std::env::var("VISIONALVR_DUP_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(8.0).clamp(0.0, 30.0);
+        unsafe { nvh::nvh_ipc_set_dup_restamp(ipc, if restamp { 1 } else { 0 }, dup_wait_ms as f32) };
+        event(origin, "dup_restamp", json!({ "on": restamp, "wait_ms": dup_wait_ms }));
         unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
         {
             // hand pose convention fix (see Args::hand_rotation_deg); the right hand mirrors y and z like ALVR's own offsets

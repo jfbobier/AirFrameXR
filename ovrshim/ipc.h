@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 20;
+constexpr uint32_t kVersion = 21;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -107,6 +107,11 @@ struct HostToShim {
     // host grid puts it, so consecutive frames do not read the same sample when release and arrival coincide (duplicate timestamps the
     // headset skips). The headset's samples arrive on its own clock; the host grid slides (phase lock), so the phase between the two drifts.
     uint32_t alignRelease;
+    // Duplicate-timestamp fix (SubmitFrame): a frame whose render pose matches the sample the previous frame left with would be
+    // skipped by the headset (same timestamp). With dupRestamp set the shim waits up to dupWaitMs for the next tracking sample,
+    // stamps the frame with it and rotates the layers from the rendered orientation to that sample's (rotation-only reprojection).
+    uint32_t dupRestamp;
+    float dupWaitMs;
 };
 
 struct Haptic {
@@ -137,6 +142,9 @@ struct ShimToHost {
     uint64_t releasesLate;         // releases whose computed time was already past (app slower than a display period: free-running)
     uint64_t gateHolds;            // releases the intake gate skipped for a standing host queue (see HostToShim::intakeGate)
     uint64_t gateSuppressed;       // standing queue seen while the gate was quiet after a skip (its effect still in flight)
+    uint64_t restamps;             // frames re-stamped with the next tracking sample (duplicate-timestamp fix, HostToShim::dupRestamp)
+    uint64_t restampTimeouts;      // duplicates left as they were: no newer sample within dupWaitMs
+    float restampWarpMaxMdeg;      // largest rotation applied by a re-stamp since the shim started (millidegrees)
 };
 
 struct IpcState {

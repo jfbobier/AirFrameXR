@@ -649,6 +649,16 @@ void nvh_ipc_set_align_release(void* i, uint32_t on) {
     ((Ipc*)i)->state->host.alignRelease = on;
 }
 
+void nvh_ipc_set_dup_restamp(void* i, uint32_t on, float wait_ms) {
+    auto& h = ((Ipc*)i)->state->host;
+    h.dupWaitMs = wait_ms; MemoryBarrier(); h.dupRestamp = on;
+}
+
+void nvh_ipc_shim_restamps(void* i, uint64_t* restamps, uint64_t* timeouts, float* warp_max_mdeg) {
+    const auto& s = ((Ipc*)i)->state->shim;
+    *restamps = s.restamps; *timeouts = s.restampTimeouts; *warp_max_mdeg = s.restampWarpMaxMdeg;
+}
+
 long nvh_set_gpu_scheduling(int cls) {
     typedef long(APIENTRY * PFN)(HANDLE, int);
     HMODULE gdi = LoadLibraryW(L"gdi32.dll");

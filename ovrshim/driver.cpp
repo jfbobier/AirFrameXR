@@ -998,12 +998,65 @@ namespace {
             return viewport;
         }
 
+        // The head pose a frame is stamped with when it differs from the pose the projection layer was rendered with (the
+        // duplicate-timestamp fix, SubmitFrame): the layers are drawn as seen from this pose.
+        struct Stamp {
+            bool warp{false};
+            OVR::Posef head;
+        };
+
+        // Output-eye NDC -> homogeneous source-eye NDC for the projection-layer pass (ReprojectVS/PS, which divide per pixel):
+        // the FoV change and the rotation qRel = qSrc^-1 * qOut from the orientation the frame is stamped with (out) to the one
+        // the layer was rendered with (src). Returned in the cbuffer's memory layout (column-major float4x4 for mul(v, M)).
+        static DirectX::XMFLOAT4X4 EyeHomography(const ovrFovPort& outFov, const ovrFovPort& srcFov, const OVR::Quatf& qRel) {
+            // [x y 1] -> view direction in the output eye (OVR: -Z forward, +Y up, NDC y up)
+            const double A[3][3] = {{(outFov.LeftTan + outFov.RightTan) / 2.0, 0, (outFov.RightTan - outFov.LeftTan) / 2.0},
+                                    {0, (outFov.UpTan + outFov.DownTan) / 2.0, (outFov.UpTan - outFov.DownTan) / 2.0},
+                                    {0, 0, -1}};
+            double R[3][3];
+            for (int c = 0; c < 3; c++) {
+                const OVR::Vector3f r = qRel.Rotate(OVR::Vector3f(c == 0 ? 1.f : 0.f, c == 1 ? 1.f : 0.f, c == 2 ? 1.f : 0.f));
+                R[0][c] = r.x;
+                R[1][c] = r.y;
+                R[2][c] = r.z;
+            }
+            // direction in the source eye -> (X, Y, Z) with source NDC = (X / Z, Y / Z), Z = -d.z
+            const double sx = (srcFov.LeftTan + srcFov.RightTan) / 2.0, sy = (srcFov.UpTan + srcFov.DownTan) / 2.0;
+            const double B[3][3] = {{1 / sx, 0, (srcFov.RightTan - srcFov.LeftTan) / 2.0 / sx},
+                                    {0, 1 / sy, (srcFov.UpTan - srcFov.DownTan) / 2.0 / sy},
+                                    {0, 0, -1}};
+            double RA[3][3]{}, H[3][3]{};
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    for (int k = 0; k < 3; k++) {
+                        RA[i][j] += R[i][k] * A[k][j];
+                    }
+                }
+            }
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    for (int k = 0; k < 3; k++) {
+                        H[i][j] += B[i][k] * RA[k][j];
+                    }
+                }
+            }
+            // HLSL reads the float4x4 column-major, so memory [j][i] is M(i, j) and mul(v, M)_j = sum_i v_i * mem[j][i] = sum_i H[j][i] v_i
+            DirectX::XMFLOAT4X4 m{};
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    m.m[i][j] = (float)H[i][j];
+                }
+            }
+            return m;
+        }
+
         // Draws all supported layers into `rtv` (left eye in the left half, right eye in the right half), in submission order.
         bool ComposeLayers(const std::vector<const ovrLayerHeader*>& layers,
                            ID3D11RenderTargetView* rtv,
                            uint32_t width,
                            uint32_t height,
-                           TargetMode mode) {
+                           TargetMode mode,
+                           const Stamp* stamp = nullptr) {
             const float clearColor[] = {0.f, 0.f, 0.f, 1.f};
             m_submissionContext->ClearRenderTargetView(rtv, clearColor);
 
@@ -1017,7 +1070,17 @@ namespace {
             // was rendered with (so world-locked layers line up with the world), else the head pose the app last read.
             ovrPosef eyeView[ovrEye_Count];
             bool haveProjection = false;
+            if (stamp && stamp->warp) {
+                // the frame leaves with the stamped pose: world-locked layers are drawn from it, like the rotated projection layers
+                for (int e = 0; e < ovrEye_Count; e++) {
+                    eyeView[e] = stamp->head * OVR::Posef(m_eyePose[e]);
+                }
+                haveProjection = true;
+            }
             for (const ovrLayerHeader* h : layers) {
+                if (haveProjection) {
+                    break;
+                }
                 if (h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth)) {
                     const auto* l = (const ovrLayerEyeFov*)h;
                     eyeView[0] = l->RenderPose[0];
@@ -1067,14 +1130,16 @@ namespace {
                             if ((eye == 0 && skipLeft) || (eye == 1 && skipRight)) {
                                 continue;
                             }
-                            const auto baseProjection = LoadOvrProjection(m_eyeFov[eye], 0.01f, 1000.f);
-                            const auto projection = LoadOvrProjection(eyeFov->Fov[eye], 0.01f, 1000.f);
-
-                            // TODO: Reproject for mismatched eye poses (not just mutable FOV).
-                            DirectX::XMStoreFloat4x4(
-                                &constants.reprojectionMatrix,
-                                DirectX::XMMatrixTranspose(DirectX::XMMatrixInverse(nullptr, baseProjection) *
-                                                           projection));
+                            // FoV change, plus the rotation from the stamped pose to the rendered one when the frame is stamped
+                            // with a newer tracking sample than the app rendered with (rotation-only reprojection, like a
+                            // compositor's timewarp; the position delta over one tracking period is below a millimetre)
+                            OVR::Quatf qRel; // identity
+                            if (stamp && stamp->warp) {
+                                const OVR::Quatf qSrc(eyeFov->RenderPose[eye].Orientation);
+                                const OVR::Quatf qOut = (stamp->head * OVR::Posef(m_eyePose[eye])).Rotation;
+                                qRel = qSrc.Inverted() * qOut;
+                            }
+                            constants.reprojectionMatrix = EyeHomography(m_eyeFov[eye], eyeFov->Fov[eye], qRel);
 
                             // OVR allows specifying null texture for the right eye.
                             const auto swapchain = eye == 0 || !eyeFov->ColorTexture[eye] ? eyeFov->ColorTexture[0]
@@ -1262,9 +1327,70 @@ namespace {
             }
             LogLayersIfChanged(layers);
 
+            // The timestamp the frame leaves with: the tracking sample the app rendered with (FrameClientTimestamp). When that is
+            // not newer than the previous frame's stamp the headset would skip the frame (same timestamp: 5-10 % of the Vision
+            // Pro's frames in Cyberpunk / Dead Space, 2026-10-13). Duplicate-timestamp fix (host setting video.dup_restamp): wait
+            // up to dupWaitMs for the next sample, stamp the frame with it and rotate the layers to its orientation (the compose
+            // below). The wait runs on VDXR's submission thread, never on the app's render thread.
+            uint64_t clientTs = FrameClientTimestamp(layers);
+            Stamp stamp{};
+            bool hasProjection = false;
+            for (const ovrLayerHeader* h : layers) {
+                hasProjection |= h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth);
+            }
+            if (m_ipc.state && clientTs != 0 && clientTs + 1000000000ull < m_lastStampTs) {
+                m_lastStampTs = 0; // the client's clock restarted (new headset session)
+            }
+            if (m_ipc.state && m_ipc.state->host.dupRestamp && hasProjection && clientTs != 0 && m_lastStampTs != 0 &&
+                clientTs <= m_lastStampTs) {
+                const double waitS = std::max(0.f, m_ipc.state->host.dupWaitMs) * 1e-3;
+                const double t0 = QpcSeconds();
+                ovrPoseStatef fresh{};
+                uint64_t freshTs = 0;
+                bool got = false;
+                for (uint32_t spins = 0;; spins++) {
+                    if (ReadHostHead(fresh, freshTs) && freshTs > m_lastStampTs) {
+                        got = true;
+                        break;
+                    }
+                    if (QpcSeconds() - t0 >= waitS) {
+                        break;
+                    }
+                    if (spins % 16 == 15) {
+                        SwitchToThread();
+                    } else {
+                        _mm_pause();
+                    }
+                }
+                if (got) {
+                    stamp.warp = true;
+                    stamp.head = OVR::Posef(fresh.ThePose);
+                    clientTs = freshTs;
+                    m_restamps++;
+                    // how far the layers are rotated (the eye's render orientation vs the stamp's)
+                    for (const ovrLayerHeader* h : layers) {
+                        if (h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth)) {
+                            const OVR::Quatf qSrc(((const ovrLayerEyeFov*)h)->RenderPose[0].Orientation);
+                            const OVR::Quatf qOut = (stamp.head * OVR::Posef(m_eyePose[0])).Rotation;
+                            const OVR::Quatf d = qSrc.Inverted() * qOut;
+                            const double sn = std::min(1.0, std::sqrt((double)d.x * d.x + (double)d.y * d.y + (double)d.z * d.z));
+                            const float mdeg = (float)(2.0 * std::asin(sn) * 57295.78);
+                            m_restampWarpMaxMdeg = std::max(m_restampWarpMaxMdeg, mdeg);
+                            m_restampWarpMaxMdegLine = std::max(m_restampWarpMaxMdegLine, mdeg);
+                            break;
+                        }
+                    }
+                } else {
+                    m_restampTimeouts++;
+                }
+            }
+            if (clientTs != 0) {
+                m_lastStampTs = std::max(m_lastStampTs, clientTs);
+            }
+
             bool ok = true;
             if (m_mirrorRTV) {
-                ok &= ComposeLayers(layers, m_mirrorRTV.Get(), m_mirrorWidth, m_mirrorHeight, TargetMode::Plain);
+                ok &= ComposeLayers(layers, m_mirrorRTV.Get(), m_mirrorWidth, m_mirrorHeight, TargetMode::Plain, &stamp);
             }
 
             if (m_ipc.state && m_sbsWidth) {
@@ -1277,13 +1403,12 @@ namespace {
                 if (composed > 1 && m_linearRTV) {
                     // Several layers (e.g. quads over the world): blend in linear light like a real compositor, then
                     // sRGB-encode once into the shared slot.
-                    ok &= ComposeLayers(layers, m_linearRTV.Get(), m_sbsWidth, m_sbsHeight, TargetMode::Linear);
+                    ok &= ComposeLayers(layers, m_linearRTV.Get(), m_sbsWidth, m_sbsHeight, TargetMode::Linear, &stamp);
                     EncodeLinearToSlot(m_sbsRTV[slot].Get(), m_sbsWidth, m_sbsHeight);
                 } else {
-                    ok &= ComposeLayers(layers, m_sbsRTV[slot].Get(), m_sbsWidth, m_sbsHeight, TargetMode::DirectEncode);
+                    ok &= ComposeLayers(layers, m_sbsRTV[slot].Get(), m_sbsWidth, m_sbsHeight, TargetMode::DirectEncode, &stamp);
                 }
 
-                const uint64_t clientTs = FrameClientTimestamp(layers);
                 FrameTraceRow trace;
 #ifdef VISIONALVR_TELEMETRY
                 trace.tSubmit = tSubmitStart;
@@ -1335,12 +1460,16 @@ namespace {
                             m_lastSignaledVsync, (unsigned long long)m_waitCalls, (unsigned long long)m_waitWaited,
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
-                            "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), release alignment %s, GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x",
+                            "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), release alignment %s, dup re-stamp %s (re-stamped %llu, "
+                            "timeouts %llu, warp max %.0f mdeg), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
-                            (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, m_ipc.state->host.alignRelease ? "on" : "off", (unsigned long long)m_gpuThrottleTimeouts,
+                            (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, m_ipc.state->host.alignRelease ? "on" : "off",
+                            m_ipc.state->host.dupRestamp ? "on" : "off", (unsigned long long)m_restamps, (unsigned long long)m_restampTimeouts,
+                            (double)m_restampWarpMaxMdegLine, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask);
+                    m_restampWarpMaxMdegLine = 0.f;
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
                             return 0.0f;
@@ -1442,6 +1571,9 @@ namespace {
             s.releasesLate = m_releasesLate.load();
             s.gateHolds = m_gateHolds;
             s.gateSuppressed = m_gateSuppressed;
+            s.restamps = m_restamps;
+            s.restampTimeouts = m_restampTimeouts;
+            s.restampWarpMaxMdeg = m_restampWarpMaxMdeg;
             s.frameSeq++; // odd: the host re-reads until it sees the same even value before and after
             MemoryBarrier();
             s.frameSlot = slot;
@@ -2387,6 +2519,10 @@ namespace {
         std::atomic<uint64_t> m_releases{0}, m_releasesLate{0}, m_slotBusyWaits{0};
         uint64_t m_gpuThrottleTimeouts{0};
         uint64_t m_gateHolds{0}, m_gateSuppressed{0}; // intake gate (WaitForVsync): releases skipped for a standing host queue, standing seen while quiet
+        // duplicate-timestamp fix (SubmitFrame): the timestamp the previous frame left with, re-stamps, waits that found no newer sample, warp sizes
+        uint64_t m_lastStampTs{0};
+        uint64_t m_restamps{0}, m_restampTimeouts{0};
+        float m_restampWarpMaxMdeg{0.f}, m_restampWarpMaxMdegLine{0.f};
         long long m_gateQuietUntil{0};                 // boundary index until which the gate stays quiet after a skip (its effect is still in flight)
         uint32_t m_nextSlot{0};                    // round-robin position of PickSlot
         std::atomic<uint32_t> m_lastPublishedSlot{0xFFFFFFFFu};
