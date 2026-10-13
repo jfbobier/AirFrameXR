@@ -28,7 +28,7 @@ configure.exe is a setup wizard: it checks the PC (NVIDIA GPU with a driver that
 
 **The headset's address is not fixed.** VisionALVR dials the address saved at pairing first, and ALVR re-finds a paired headset by its name on the network on its own (mDNS for the Vision Pro, UDP broadcasts for Quest). If it still does not connect (new address that was not picked up, another headset, a reinstalled app), click **Find headset...** in the VisionALVR window: it stops the streamer, lists what the network shows (a headset at a new address is selected for you), pairs the one you pick and starts the streamer again. A fixed address can also be typed there for an already paired headset.
 
-**Quest:** the Meta store version of the ALVR app is 20.14.0; the protocol id only depends on the major version (20), so it should connect to this streamer (untested on a real Quest 3 at the time of writing). It appears in the list as untrusted until you pick it once.
+**Quest:** the Meta store version of the ALVR app is 20.14.0; the protocol id only depends on the major version (20), and ALVR's own diff from 20.14.0 to 20.14.1 touches only audio-device handling and the dashboard (no client/server packet or stream change), so it connects to this streamer (not yet tried on a real Quest 3 at the time of writing). It appears in the list as untrusted until you pick it once.
 
 1. Unzip. 2. `register_openxr_runtime.bat` (asks for administrator rights; moved the folder? run it again). 3. `configure.exe`:
 open the ALVR app on the Vision Pro, select it, **Pair**; check the settings; set the ALVR app's chroma key to the "colour when no
