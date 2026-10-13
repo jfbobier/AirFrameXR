@@ -26,8 +26,8 @@ namespace VisionALVR
         readonly Button back = new Button { Text = "< Back", AutoSize = true, MinimumSize = new Size(90, 30) };
         readonly Button next = new Button { Text = "Next >", AutoSize = true, MinimumSize = new Size(110, 30), Font = Ui.Bold };
         readonly Button advanced = new Button { Text = "Advanced (old tabs)", AutoSize = true };
-        readonly Label[] stepLabels = new Label[6];
-        static readonly string[] StepNames = { "0  Your PC", "1  Headset", "2  What we learned", "3  Tests", "4  How you perform", "5  Configuration" };
+        readonly Label[] stepLabels = new Label[7];
+        static readonly string[] StepNames = { "0  Your PC", "1  Headset", "2  Your headset says", "3  Choose a setup", "4  Tests", "5  How you perform", "6  Configuration" };
         int step;
         // state
         Handshake hs = new Handshake();
@@ -48,7 +48,7 @@ namespace VisionALVR
         // handshake page
         ComboBox rateBox; NumericUpDown scaleBox; CheckBox foveationBox; Label hsStatus; FlowLayoutPanel hsDetails, modePanel; Button hsRetry, hsSkip, hsGo;
         RadioButton modeProfile, modeManual, modeExisting; HmdProfile matchedProfile;
-        ProgressBar hsBar;
+        ProgressBar hsBar; bool hsReal, hsDone;   // hsDone: the handshake of the paired headset is in hand (Back from the next page does not redo it)
         // tests page
         ListView testList; Label testStatus; Button testCancel;
         // unattended run for the harness (harness/wizard_e2e.py): --auto --headset-ip X --headset-host H --report file
@@ -68,11 +68,11 @@ namespace VisionALVR
             Width = 1080;
             Height = 900;
             MinimumSize = new Size(980, 760);
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 7; i++)
             {
                 stepLabels[i] = new Label { Text = StepNames[i], AutoSize = false, Width = 200, Height = 30, Dock = DockStyle.Top, Font = Ui.Body, ForeColor = Color.DimGray, TextAlign = ContentAlignment.MiddleLeft };
             }
-            for (int i = 5; i >= 0; i--) stepsPanel.Controls.Add(stepLabels[i]);
+            for (int i = 6; i >= 0; i--) stepsPanel.Controls.Add(stepLabels[i]);
             var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, Height = 52, ColumnCount = 4, Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -118,7 +118,7 @@ namespace VisionALVR
             step = s;
             discovery?.Dispose(); discovery = null;
             content.Controls.Clear();
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 7; i++)
             {
                 stepLabels[i].Font = i == s ? Ui.Bold : Ui.Body;
                 stepLabels[i].ForeColor = i == s ? Ui.Accent : (i < s ? Color.SeaGreen : Color.DimGray);
@@ -131,8 +131,9 @@ namespace VisionALVR
                 case 0: page = PageGate(); back.Visible = false; next.Text = "Exit"; break;
                 case 1: page = PageHeadset(); break;
                 case 2: page = PageHandshake(); next.Visible = false; break;
-                case 3: page = PageTests(); next.Enabled = false; break;
-                case 4: page = PageResults(); break;
+                case 3: page = PageMode(); next.Visible = false; break;
+                case 4: page = PageTests(); next.Enabled = false; break;
+                case 5: page = PageResults(); break;
                 default: page = PageConfig(); next.Text = "Save and start VisionALVR"; break;
             }
             page.Dock = DockStyle.Fill;
@@ -142,7 +143,7 @@ namespace VisionALVR
 
         void GoBack()
         {
-            if (step == 3) { testCts?.Cancel(); }
+            if (step == 4) { testCts?.Cancel(); }
             GoTo(Math.Max(1, step - 1));
         }
 
@@ -158,11 +159,12 @@ namespace VisionALVR
                     settings.HeadsetHost = chosenHost; settings.HeadsetName = chosenName; settings.HeadsetIp = chosenIp;
                     settings.Save();
                     Log.Write("INFO", $"paired headset {chosenName} ({chosenHost}) at {chosenIp}");
+                    hsDone = false;
                     GoTo(2);
                     break;
-                case 3: GoTo(4); break;
                 case 4: GoTo(5); break;
-                case 5:
+                case 5: GoTo(6); break;
+                case 6:
                     if (SaveConfig() && !demo) { try { System.Diagnostics.Process.Start(Paths.Runtime); } catch { } Close(); }
                     break;
             }
@@ -306,15 +308,15 @@ namespace VisionALVR
             hsRetry = new Button { Text = "Try again", AutoSize = true, Visible = false };
             hsRetry.Click += (s, e) => BeginHandshake();
             hsSkip = new Button { Text = "Continue without the headset (default values)", AutoSize = true, Visible = false };
-            hsSkip.Click += (s, e) => { hs = new Handshake { DisplayName = chosenName, Hostname = chosenHost, Ip = chosenIp }; ShowHandshakeResult(false); };
+            hsSkip.Click += (s, e) => { hs = new Handshake { DisplayName = chosenName, Hostname = chosenHost, Ip = chosenIp }; hsReal = false; ShowHandshakeResult(false); };
             bar.Controls.Add(hsRetry); bar.Controls.Add(hsSkip);
             p.Controls.Add(bar);
-            hsDetails = new FlowLayoutPanel { AutoSize = true, Visible = false, WrapContents = false };
+            hsDetails = new FlowLayoutPanel { AutoSize = true, Visible = false, WrapContents = false, FlowDirection = FlowDirection.TopDown };
             p.Controls.Add(hsDetails);
-            hsGo = new Button { Text = "Run the tests >", AutoSize = true, Font = Ui.Big, Padding = new Padding(10), Visible = false, Margin = new Padding(0, 12, 0, 0) };
-            hsGo.Click += (s, e) => ContinueToTests();
+            hsGo = new Button { Text = "Yes, this is my headset: continue >", AutoSize = true, Font = Ui.Big, Padding = new Padding(10), Visible = false, Margin = new Padding(0, 12, 0, 0) };
+            hsGo.Click += (s, e) => GoTo(3);
             p.Controls.Add(hsGo);
-            if (demo) ShowHandshakeResult(true); else BeginHandshake();
+            if (demo) { hsReal = true; ShowHandshakeResult(true); } else if (hsDone) ShowHandshakeResult(hsReal); else BeginHandshake();
             return p;
         }
 
@@ -348,10 +350,12 @@ namespace VisionALVR
                 var h = Session.Headset(session);
                 hs.Hostname = h != null ? h.Item1 : chosenHost; hs.Ip = chosenIp;
                 hs.DisplayName = h != null && h.Item2 != null && h.Item2.Length > 0 ? h.Item2 : chosenName;
+                hsReal = true;
                 ShowHandshakeResult(true);
                 if (auto)
                 {
-                    // --auto-mode profile (default) | manual | existing: the three options of this page
+                    // --auto-mode profile (default) | manual | existing: the three options of the next page
+                    GoTo(3);
                     if (Arg("--auto-mode") == "manual") modeManual.Checked = true;
                     else if (Arg("--auto-mode") == "existing") modeExisting.Checked = true;
                     ContinueToTests();
@@ -366,6 +370,8 @@ namespace VisionALVR
 
         void ShowHandshakeResult(bool real)
         {
+            hsDone = true;
+            hsGo.Text = real ? "Yes, this is my headset: continue >" : "Continue with the defaults >";
             hsBar.Visible = false; hsRetry.Visible = false; hsSkip.Visible = false;
             hsStatus.Text = real ? $"Connected to {hs.DisplayName}. This is what it told us:" : "No headset data: the defaults of a Vision Pro are used, and the tests that need the headset are skipped.";
             hsStatus.ForeColor = real ? Color.SeaGreen : Color.DarkOrange;
@@ -380,23 +386,36 @@ namespace VisionALVR
             row("Colour", $"{(hs.PreferFull ? "full range" : "limited range")}, encoding gamma {hs.Gamma:0.00}{(hs.PreferHdr ? ", HDR preferred" : "")}");
             row("Microphone", hs.MicRate > 0 ? $"{hs.MicRate} Hz" : "none advertised");
             hsDetails.Controls.Add(g);
+            hsDetails.Visible = true;
+            hsGo.Visible = true;
+            hsGo.Enabled = true;
+        }
+
+        // ------------------------------------------------------------------------------------------------------------- 3 setup choice
+        Control PageMode()
+        {
+            var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+            p.Controls.Add(H("Choose a setup"));
+            var real = hsReal;
             matchedProfile = importedProfile ?? (real ? HmdProfiles.Match(hs, HmdProfiles.LoadAll()) : null);
-            // the two ways to a configuration; the tests (next page) then check it on this PC
-            hsDetails.Controls.Add(Ui.Line("How do you want to configure the stream?", Ui.Big));
-            var modes = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            // the three ways to a configuration; the tests (next page) then check it on this PC
+            p.Controls.Add(Ui.Line("How do you want to configure the stream?", Ui.Big));
+            var modes = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(820, 0) };
             modeProfile = new RadioButton { Appearance = Appearance.Button, Text = "Community profile (recommended)", AutoSize = true, Checked = true, Font = Ui.Bold, Padding = new Padding(8) };
             modeManual = new RadioButton { Appearance = Appearance.Button, Text = "Manual configuration (pre-filled)", AutoSize = true, Font = Ui.Body, Padding = new Padding(8) };
-            modeProfile.CheckedChanged += (s, e) => { modeProfile.Font = modeProfile.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
             modeExisting = new RadioButton { Appearance = Appearance.Button, Text = "I have an existing ALVR configuration", AutoSize = true, Font = Ui.Body, Padding = new Padding(8) };
+            modeProfile.CheckedChanged += (s, e) => { modeProfile.Font = modeProfile.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
             modeManual.CheckedChanged += (s, e) => { modeManual.Font = modeManual.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
             modeExisting.CheckedChanged += (s, e) => { modeExisting.Font = modeExisting.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
             modes.Controls.Add(modeProfile); modes.Controls.Add(modeManual); modes.Controls.Add(modeExisting);
-            hsDetails.Controls.Add(modes);
+            p.Controls.Add(modes);
             modePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-            hsDetails.Controls.Add(modePanel);
-            hsDetails.Visible = true;
-            hsGo.Visible = true;
+            p.Controls.Add(modePanel);
+            hsGo = new Button { Text = "Run the tests >", AutoSize = true, Font = Ui.Big, Padding = new Padding(10), Margin = new Padding(0, 12, 0, 0) };
+            hsGo.Click += (s, e) => ContinueToTests();
+            p.Controls.Add(hsGo);
             RenderMode(real);
+            return p;
         }
 
         /// The lower part of the handshake page for the chosen option: the profile (matched or imported) with the network it is for, or the pre-filled values.
@@ -457,7 +476,7 @@ namespace VisionALVR
 
         void ContinueToTests()
         {
-            autoconfig = !(modeExisting != null && modeExisting.Checked); ApplyOverrides(); GoTo(3);
+            autoconfig = !(modeExisting != null && modeExisting.Checked); ApplyOverrides(); GoTo(4);
         }
 
         /// "Import profile...": pick a profile file (shared by another user), show what ALVR says about this headset next to what the profile expects,
@@ -488,7 +507,7 @@ namespace VisionALVR
             try { var dst = HmdProfiles.Install(path, p); Log.Write("INFO", $"profile '{p.Id}' imported to {dst} ({warnings.Count} warning(s))"); }
             catch (Exception e) { MessageBox.Show(this, "Cannot copy the profile into config\\profiles: " + e.Message, "Import profile", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             importedProfile = p;
-            ShowHandshakeResult(real);
+            GoTo(3);
         }
 
         void ApplyOverrides()
@@ -618,7 +637,7 @@ namespace VisionALVR
 
         void FinishTests()
         {
-            if (step != 3) return;
+            if (step != 4) return;
             testCancel.Enabled = false;
             for (int i = 0; i < steps.Count; i++) UpdateRow(steps[i]);
             var failed = steps.Count(x => x.State == TestState.Failed);
@@ -752,8 +771,8 @@ namespace VisionALVR
 
         void AutoDrive()
         {
-            if (step == 4) { var t = new System.Windows.Forms.Timer { Interval = 600 }; t.Tick += (s, e) => { t.Stop(); GoNext(); }; t.Start(); }
-            else if (step == 5)
+            if (step == 5) { var t = new System.Windows.Forms.Timer { Interval = 600 }; t.Tick += (s, e) => { t.Stop(); GoNext(); }; t.Start(); }
+            else if (step == 6)
             {
                 var t = new System.Windows.Forms.Timer { Interval = 600 };
                 t.Tick += (s, e) => { t.Stop(); SaveConfig(); WriteReport(); Close(); };
@@ -803,7 +822,7 @@ namespace VisionALVR
                 CleanMbps = 270, LossPerS = 0.02, TotalMs = 52, NetworkMs = 9.5, DecodeMs = 6.2, EncoderMs = 4.1, DecoderQueueMs = 8, VsyncQueueMs = 10, DisplayedFps = 89, ClientFps = 90, TestFps = 90,
             };
             proposal = Proposal.Build(hs, ctx.R, 90);
-            autoconfig = true;
+            autoconfig = true; hsReal = true;
         }
 
         List<TestStep> DemoSteps()

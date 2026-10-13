@@ -132,7 +132,10 @@ int main(int argc, char** argv) {
     }
     // the scene is normalised around the origin (~3 m); the benchmark looks at it from (0, 0.2, 1.9): put it where a standing
     // viewer at the mock headset's height (1.5 m) sees the same picture
-    const XMMATRIX scenePlace = XMMatrixTranslation(0.f, 1.3f, -1.9f);
+    // A real headset's LOCAL space has an arbitrary origin and yaw (the tracking floor, the direction it was started in): the scene is re-placed once,
+    // from the first valid head pose, 1.9 m ahead of where the head looks horizontally and 0.2 m below the eyes (the mock headset at 1.5 m facing -z gives this same default).
+    XMMATRIX scenePlace = XMMatrixTranslation(0.f, 1.3f, -1.9f);
+    bool sceneAtHead = false;
 
     XrGraphicsBindingD3D11KHR gb{ XR_TYPE_GRAPHICS_BINDING_D3D11_KHR }; gb.device = dev;
     XrSessionCreateInfo sci{ XR_TYPE_SESSION_CREATE_INFO }; sci.next = &gb; sci.systemId = sys;
@@ -354,6 +357,21 @@ int main(int argc, char** argv) {
                 const double yaw = atan2(2.0 * (q.w * q.y + q.x * q.z), 1.0 - 2.0 * (q.y * q.y + q.x * q.x));
                 fprintf(poseF, "%d,%.6f,%.5f,%.5f,%.5f,%lld\n", done + 1, yaw, views[0].pose.position.x, views[0].pose.position.y, views[0].pose.position.z, (long long)fs.predictedDisplayTime);
                 fflush(poseF);
+            }
+            if (sceneOn && !sceneAtHead && (vs.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) && (vs.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
+                const XrPosef& hp = views[0].pose;
+                const float qx = hp.orientation.x, qy = hp.orientation.y, qz = hp.orientation.z, qw = hp.orientation.w;
+                // horizontal forward = the view's -z axis projected on the floor plane (a head looking straight down keeps the previous placement)
+                const float fx = -(2.f * (qx * qz + qw * qy)), fz = -(1.f - 2.f * (qx * qx + qy * qy));
+                const float n = sqrtf(fx * fx + fz * fz);
+                if (n > 0.2f) {
+                    const float dx = fx / n, dz = fz / n;
+                    // the scene's -z axis must point along (dx, dz): rotate about y by the yaw that maps (0,-1) to it
+                    const float yaw = atan2f(dx, -dz);
+                    scenePlace = XMMatrixRotationY(yaw) * XMMatrixTranslation(hp.position.x + dx * 1.9f, hp.position.y - 0.2f, hp.position.z + dz * 1.9f);
+                    sceneAtHead = true;
+                    L("scene placed at the head: eyes (%.2f %.2f %.2f), facing yaw %.0f deg", hp.position.x, hp.position.y, hp.position.z, yaw * 57.29578f);
+                }
             }
             SceneFrame sceneFrame;
             if (sceneOn) BeginSceneFrame(scene, ctx, (qpcMs() - loopStartMs) / 1000.0, sceneFrame, scenePlace);
