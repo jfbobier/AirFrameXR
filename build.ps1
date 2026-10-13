@@ -50,7 +50,8 @@ Get-ChildItem "$repo\tools\host\src\*.rs" | ForEach-Object { Put $_.FullName "$r
 Put "$repo\tools\mock_client\Cargo.toml" "$repo\_tmp\mock_client\Cargo.toml"
 Put "$repo\tools\mock_client\src\main.rs" "$repo\_tmp\mock_client\src\main.rs"
 Get-ChildItem "$repo\ovrshim" -File | ForEach-Object { Put $_.FullName "$repo\_tmp\ovrshim\$($_.Name)" }
-foreach ($f in 'Common.cs', 'VisionALVR.cs', 'Configure.cs', 'SettingsPanel.cs', 'Reference.cs', 'TestRunner.cs', 'Wizard.cs', 'app.manifest') { Put "$repo\tools\gui\$f" "$repo\_tmp\gui\$f" }
+Get-ChildItem "$repo\tools\gui\*.cs", "$repo\tools\gui\app.manifest" | ForEach-Object { Put $_.FullName "$repo\_tmp\gui\$($_.Name)" }
+Get-ChildItem "$repo\profiles\*.json" | ForEach-Object { Put $_.FullName "$repo\_tmp\install\profiles\$($_.Name)" }
 foreach ($f in 'visionalvr.ico', 'logo_640.png') { Put "$repo\tools\gui\res\$f" "$repo\_tmp\gui\res\$f" }
 foreach ($f in 'register_openxr_runtime.ps1', 'register_openxr_runtime.bat', 'unregister_openxr_runtime.bat', 'session.default.json', 'README.txt') {
     Put "$repo\tools\install\$f" "$repo\_tmp\install\$f"

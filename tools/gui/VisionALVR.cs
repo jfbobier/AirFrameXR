@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace VisionALVR
@@ -16,6 +17,11 @@ namespace VisionALVR
         readonly AppSettings settings = new AppSettings();
         readonly HostProcess host = new HostProcess();
         readonly Label headset = Ui.Line("Headset: -", Ui.Big);
+        readonly Button find = new Button { Text = "Find headset...", AutoSize = true, Margin = new Padding(12, 0, 0, 0) };
+        readonly Label findHint = Ui.Line("VisionALVR dials the saved address and re-finds a paired headset by name. If it does not connect (new address, another headset), use Find headset.");
+        readonly Dictionary<string, object> check;
+        readonly bool autoFind;
+        bool finding, gameRunning;
         readonly Label game = Ui.Line("Game: none", Ui.Bold);
         readonly Label runtime = Ui.Line("");
         readonly Label stats = Ui.Line("Waiting for the first statistics (every 10 s)...");
@@ -29,8 +35,10 @@ namespace VisionALVR
         int restarts;
         string setupError;   // the streamer's `setup_error` message: a problem to fix, restarting it would not help
 
-        public RuntimeForm(Dictionary<string, object> check)
+        public RuntimeForm(Dictionary<string, object> check, bool autoFind = false)
         {
+            this.check = check;
+            this.autoFind = autoFind;
             Text = "VisionALVR";
             Icon = Ui.AppIcon();
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -45,7 +53,14 @@ namespace VisionALVR
             var gpu = check != null && check.TryGetValue("gpu", out var g) ? g as Dictionary<string, object> : null;
             runtime.Text = $"GPU: {S(gpu, "name")} ({S(gpu, "arch_name")}, driver {S(gpu, "driver")})   ·   OpenXR runtime: {(OpenXr.IsOurs() ? "VisionALVR (this folder)" : "NOT registered")}";
             runtime.ForeColor = Color.DimGray;
-            body.Controls.Add(headset);
+            var hrow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            hrow.Controls.Add(headset);
+            hrow.Controls.Add(find);
+            find.Click += (s, e) => FindHeadset(false);
+            findHint.ForeColor = Color.DimGray;
+            findHint.Font = new Font("Segoe UI", 8.5f);
+            body.Controls.Add(hrow);
+            body.Controls.Add(findHint);
             body.Controls.Add(game);
             body.Controls.Add(runtime);
 
@@ -111,7 +126,11 @@ namespace VisionALVR
 
             host.OnEvent += (name, data) => BeginInvoke((Action)(() => HostEvent(name, data)));
             host.OnExit += code => BeginInvoke((Action)(() => HostExited(code)));
-            Shown += (s, e) => StartHost();
+            Shown += (s, e) =>
+            {
+                StartHost();
+                if (autoFind) { var t = new Timer { Interval = 3000 }; t.Tick += (a, b) => { t.Stop(); FindHeadset(true); }; t.Start(); }
+            };
             Ui.ScreenshotWhenShown(this, 12000);
             FormClosing += (s, e) => { closing = true; footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); Log.Write("INFO", "VisionALVR.exe closed"); };
         }
@@ -151,6 +170,7 @@ namespace VisionALVR
             pairedIp = hs?.Item3 ?? "";
             headset.Text = hs == null ? "Headset: none paired - use Configure..." : $"Headset: searching for {pairedName} ({pairedIp}) ...";
             headset.ForeColor = Color.DarkOrange;
+            findHint.Visible = true;
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
             var err = host.Start(args);
             if (err != null)
@@ -161,6 +181,42 @@ namespace VisionALVR
             }
             footer.Text = "Streamer running. Open the ALVR app on the Vision Pro; it connects by itself. Close this window to stop.";
             Log.Write("INFO", "streamer started: alvr_host " + args);
+        }
+
+        /// The streamer owns UDP 9943 (headset discovery), so it stops while the dialog searches; a chosen headset is paired (saved address) and
+        /// the streamer starts again either way.
+        void FindHeadset(bool autoPick)
+        {
+            if (finding) return;
+            if (gameRunning && !autoPick && MessageBox.Show(this, "A game is running. Searching restarts the streamer: the game loses the headset for a few seconds. Continue?",
+                    "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            finding = true;
+            find.Enabled = false;
+            closing = true;
+            headset.Text = "Headset: searching the network...";
+            headset.ForeColor = Color.DarkOrange;
+            host.Stop();
+            Log.Write("INFO", "find headset: streamer stopped, searching");
+            try
+            {
+                using (var dlg = new FindHeadsetForm(Session.Headset(Session.Load()), autoPick))
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
+                    {
+                        var session = Session.Load();
+                        Session.Pair(session, dlg.ChosenHost, dlg.ChosenName, dlg.ChosenIp);
+                        Json.Save(Paths.Session, session);
+                        settings.HeadsetHost = dlg.ChosenHost; settings.HeadsetName = dlg.ChosenName; settings.HeadsetIp = dlg.ChosenIp;
+                        settings.Save();
+                        Log.Write("INFO", $"find headset: paired {dlg.ChosenName} ({dlg.ChosenHost}) at {dlg.ChosenIp}");
+                    }
+                    else Log.Write("INFO", "find headset: cancelled");
+            }
+            catch (Exception e) { Log.Write("ERROR", "find headset failed: " + e.Message); }
+            closing = false;
+            finding = false;
+            find.Enabled = true;
+            restarts = 0;
+            StartHost();
         }
 
         void HostExited(int code)
@@ -202,9 +258,11 @@ namespace VisionALVR
                     var ip = S(d, "ip");
                     headset.Text = $"Headset: connected - {(n.Length > 0 ? n : pairedName)} ({(ip.Length > 0 ? ip : pairedIp)})";
                     headset.ForeColor = Color.SeaGreen;
+                    findHint.Visible = false;
                     if (ip.Length > 0 && ip != settings.HeadsetIp) { settings.HeadsetIp = ip; settings.Save(); }
                     break;
                 case "client_disconnected":
+                    findHint.Visible = true;
                     headset.Text = $"Headset: searching for {pairedName} ({pairedIp}) ...";
                     headset.ForeColor = Color.DarkOrange;
                     break;
@@ -221,8 +279,10 @@ namespace VisionALVR
                     break;
                 case "game_started":
                     game.Text = "Game: " + S(d, "exe");
+                    gameRunning = true;
                     break;
                 case "game_ended":
+                    gameRunning = false;
                     game.Text = $"Game: none (last: {S(d, "exe")}, {F(D(d, "seconds") / 60, "0.0")} min)";
                     break;
                 case "status":
@@ -271,7 +331,7 @@ namespace VisionALVR
                     MessageBox.Show("VisionALVR cannot run on this PC: " + why, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
-                var testing = Ui.ScreenshotPath() != null;
+                var testing = Ui.ScreenshotPath() != null || Environment.GetCommandLineArgs().Contains("--test");   // --test: no prompts (harness)
                 if (!OpenXr.IsOurs() && !testing)
                 {
                     var cur = OpenXr.ActiveRuntime();
@@ -289,7 +349,7 @@ namespace VisionALVR
                         return;
                     }
                 }
-                Application.Run(new RuntimeForm(check));
+                Application.Run(new RuntimeForm(check, Environment.GetCommandLineArgs().Contains("--find-auto")));
             }
         }
     }

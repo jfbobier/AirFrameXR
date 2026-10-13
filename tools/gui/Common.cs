@@ -464,10 +464,11 @@ namespace VisionALVR
             return null;
         }
 
-        public static void ScreenshotWhenShown(Form f, int delayMs, Action before = null)
+        public static void ScreenshotWhenShown(Form f, int delayMs, Action before = null, string suffix = "")
         {
             var path = ScreenshotPath();
             if (path == null) return;
+            path += suffix;
             var t = new System.Windows.Forms.Timer { Interval = delayMs };
             t.Tick += (s, e) =>
             {
