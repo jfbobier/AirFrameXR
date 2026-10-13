@@ -14,6 +14,8 @@ extra = " ".join(sys.argv[3:])
 wt = rf"C:\Users\{live.PC_USER}\wizard_test"
 live.ps(f"""
 if (-not (Test-Path '{wt}\\alvr_host.exe')) {{ Copy-Item '{live.INSTALL if False else rf"C:\\Users\\{live.PC_USER}\\VisionALVR_0.3test"}\\*' '{wt}' -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force '{wt}' | Out-Null }}
+Stop-Process -Name VisionALVR,configure,alvr_host -Force -ErrorAction SilentlyContinue
+Copy-Item '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wt}\\alvr_host.exe' -Force
 Copy-Item '{live.CLONE}\\out\\gui\\{exe}' '{wt}\\{exe}' -Force
 Remove-Item '{wt}\\shot_{page}.png' -ErrorAction SilentlyContinue
 """)

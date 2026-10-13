@@ -75,7 +75,7 @@ namespace VisionALVR
             var idleReset = new Button { Text = "Pure green (recommended)", AutoSize = true };
             idleReset.Click += (s, e) => SetIdle(Color.FromArgb(0, 255, 0));
             row("Colour when no game runs", flow(idle, idleReset), idle);
-            var remind = Ui.Line("Set the SAME colour as the chroma key in the ALVR app on the Vision Pro (Settings > Chroma key), so it shows your room.");
+            var remind = Ui.Line("Set the SAME colour as the chroma key in the ALVR app on the headset (Settings > Chroma key), so it shows your room.");
             remind.ForeColor = Color.DimGray;
             note(remind);
 

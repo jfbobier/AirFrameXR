@@ -66,7 +66,7 @@ namespace VisionALVR
             p.Controls.Add(manual);
             p.Controls.Add(status);
 
-            var fw = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
+            var fw = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
             fw.Controls.Add(fwLabel);
             fw.Controls.Add(fwFix);
             p.Controls.Add(fw);
@@ -97,7 +97,7 @@ namespace VisionALVR
 
         class Row { public string Host, Ip, Name; public bool Usable, Known, Moved; }
 
-        static string NameFor(string host) => host.EndsWith(".client.alvr") ? "Apple Vision Pro" : host;
+        static string NameFor(string host) => host.EndsWith(".client.alvr") ? "Apple Vision Pro" : host.EndsWith(".client") ? "Headset (Quest or other ALVR client)" : host;
 
         void StartDiscovery()
         {

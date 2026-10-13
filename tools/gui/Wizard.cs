@@ -152,7 +152,7 @@ namespace VisionALVR
             {
                 case 0: Close(); break;
                 case 1:
-                    if (string.IsNullOrEmpty(chosenIp)) { MessageBox.Show(this, "Select a headset first (open the ALVR app on the Vision Pro), or add its IP address.", Text); return; }
+                    if (string.IsNullOrEmpty(chosenIp)) { MessageBox.Show(this, "Select a headset first (open the ALVR app on the headset), or add its IP address.", Text); return; }
                     Session.Pair(session, chosenHost, chosenName, chosenIp);
                     Json.Save(Paths.Session, session);
                     settings.HeadsetHost = chosenHost; settings.HeadsetName = chosenName; settings.HeadsetIp = chosenIp;
@@ -189,7 +189,7 @@ namespace VisionALVR
             found = new ListView { View = View.Details, FullRowSelect = true, Height = 200, Width = 780, HideSelection = false, MultiSelect = false };
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
             p.Controls.Add(H("Your headset"));
-            p.Controls.Add(Ui.Line("Open the ALVR app on the Vision Pro (same network as this PC). It appears below within a few seconds. A headset you paired before is listed at once."));
+            p.Controls.Add(Ui.Line("Open the ALVR app on the headset (same network as this PC). It appears below within a few seconds. A headset you paired before is listed at once."));
             found.Columns.Clear(); found.Items.Clear(); rows.Clear();
             found.Columns.Add("Name (hostname)", 300);
             found.Columns.Add("IP address", 140);
@@ -205,7 +205,7 @@ namespace VisionALVR
             var manual = new FlowLayoutPanel { AutoSize = true };
             var ipBox = new TextBox { Width = 140 };
             var add = new Button { Text = "Add this IP address", AutoSize = true };
-            add.Click += (s, e) => { if (System.Net.IPAddress.TryParse(ipBox.Text.Trim(), out _)) AddRow("", ipBox.Text.Trim(), "Apple Vision Pro", "added by IP address", true); };
+            add.Click += (s, e) => { if (System.Net.IPAddress.TryParse(ipBox.Text.Trim(), out _)) AddRow("", ipBox.Text.Trim(), "Headset", "added by IP address", true); };
             manual.Controls.Add(Ui.Line("Headset with a fixed IP not listed?")); manual.Controls.Add(ipBox); manual.Controls.Add(add);
             p.Controls.Add(manual);
             p.Controls.Add(discStatus);
@@ -284,7 +284,7 @@ namespace VisionALVR
             discovery.OnFound += f => BeginInvoke((Action)(() =>
             {
                 if (step != 1) return;
-                var name = f.Hostname.EndsWith(".client.alvr") ? "Apple Vision Pro" : f.Hostname;
+                var name = f.Hostname.EndsWith(".client.alvr") ? "Apple Vision Pro" : f.Hostname.EndsWith(".client") ? "Headset (Quest or other ALVR client)" : f.Hostname;
                 AddRow(f.Hostname, f.Ip, name, f.Compatible ? $"found on the network (ALVR protocol {f.Protocol})" : $"INCOMPATIBLE ({f.Protocol}, streamer {f.ServerProtocol})", false);
             }));
             discovery.OnError += m => BeginInvoke((Action)(() => { discStatus.Text = "Discovery failed: " + m; discStatus.ForeColor = Color.Firebrick; }));
@@ -305,7 +305,7 @@ namespace VisionALVR
             var bar = new FlowLayoutPanel { AutoSize = true };
             hsRetry = new Button { Text = "Try again", AutoSize = true, Visible = false };
             hsRetry.Click += (s, e) => BeginHandshake();
-            hsSkip = new Button { Text = "Continue without the headset (default Vision Pro values)", AutoSize = true, Visible = false };
+            hsSkip = new Button { Text = "Continue without the headset (default values)", AutoSize = true, Visible = false };
             hsSkip.Click += (s, e) => { hs = new Handshake { DisplayName = chosenName, Hostname = chosenHost, Ip = chosenIp }; ShowHandshakeResult(false); };
             bar.Controls.Add(hsRetry); bar.Controls.Add(hsSkip);
             p.Controls.Add(bar);

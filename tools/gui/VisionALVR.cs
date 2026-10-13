@@ -19,6 +19,9 @@ namespace VisionALVR
         readonly Label headset = Ui.Line("Headset: -", Ui.Big);
         readonly Button find = new Button { Text = "Find headset...", AutoSize = true, Margin = new Padding(12, 0, 0, 0) };
         readonly Label findHint = Ui.Line("VisionALVR dials the saved address and re-finds a paired headset by name. If it does not connect (new address, another headset), use Find headset.");
+        // Windows Firewall: the rule belongs to this exact folder; a missing or blocking rule means no discovery and no connection
+        readonly Label fwWarn = Ui.Line("", Ui.Bold);
+        readonly Button fwFix = new Button { Text = "Allow VisionALVR through the firewall (asks for administrator)", AutoSize = true };
         readonly Dictionary<string, object> check;
         readonly bool autoFind;
         bool finding, gameRunning;
@@ -28,7 +31,7 @@ namespace VisionALVR
         // display controls: (label, min, max, default, settings getter/setter), values x100 on the track bars
         class Knob { public string Name; public TrackBar Bar; public Label Value; public double Def; public Func<double> Get; public Action<double> Set; }
         readonly List<Knob> knobs = new List<Knob>();
-        readonly CheckBox debug = new CheckBox { Text = "Debug logging (verbose files in logs\\debug\\)", AutoSize = true, Font = Ui.Body };
+        readonly CheckBox debug = new CheckBox { Text = "Debug logging (files in logs\\debug\\)", AutoSize = true, Font = Ui.Body };
         readonly Label footer = Ui.Line("", new Font("Segoe UI", 8.5f));
         string pairedName = "", pairedIp = "";
         bool closing;
@@ -61,6 +64,11 @@ namespace VisionALVR
             findHint.Font = new Font("Segoe UI", 8.5f);
             body.Controls.Add(hrow);
             body.Controls.Add(findHint);
+            fwWarn.ForeColor = Color.Firebrick;
+            fwWarn.Visible = fwFix.Visible = false;
+            fwFix.Click += (s, e) => { Firewall.Allow(Paths.Host); CheckFirewall(); };
+            body.Controls.Add(fwWarn);
+            body.Controls.Add(fwFix);
             body.Controls.Add(game);
             body.Controls.Add(runtime);
 
@@ -70,34 +78,26 @@ namespace VisionALVR
             stats.Location = new Point(10, 22);
             body.Controls.Add(box);
 
-            // VR settings: where you start. Games with the action on the floor by default (Moss, Titan Isles) assume a standing user; the Vision
-            // Pro's floor estimate is unreliable, so the streamer hands games this height (above the floor) when you enter VR and keeps your own
-            // vertical movement on top of it. Applied live (re-anchored to your current pose).
-            var vr = new GroupBox { Text = "VR settings (applied live)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
-            var vt = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Location = new Point(8, 20), Font = Ui.Body };
-            AddKnob(vt, "Eye height, m", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v);
-            var hint = Ui.Line("Your eye height above the floor, as games see it (default 1.30 m, seated; about 1.6-1.7 m standing; 0 = the headset's own floor estimate). Games that place you from the floor use it, applied live (moving it re-anchors at your current head position); games that start from an eye-level origin are not affected.");
-            hint.ForeColor = Color.DimGray;
-            hint.MaximumSize = new Size(560, 0);
-            vt.Controls.Add(hint);
-            vt.SetColumnSpan(hint, 3);
-            vr.Controls.Add(vt);
-            body.Controls.Add(vr);
-
-            var live = new GroupBox { Text = "Display (applied live)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
-            var lt = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Location = new Point(8, 20), Font = Ui.Body };
+            // Position and picture, two knobs per row so the window fits a laptop screen. Games with the action on the floor by default (Moss,
+            // Titan Isles) assume a standing user; the headset's floor estimate is unreliable, so the streamer hands games the eye height set here
+            // (above the floor) when you enter VR and keeps your own vertical movement on top of it. Everything is applied live.
+            var live = new GroupBox { Text = "Position and picture (applied live)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
+            var lt = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Location = new Point(8, 20), Font = Ui.Body };
             if (!settings.HasDisplay) { settings.Gamma = AppSettings.DefaultGamma; settings.Save(); } // the streamer reads it at start
+            AddKnob(lt, "Eye height, m", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v,
+                    "Your eye height above the floor, as games see it: about 1.30 m seated, 1.6-1.7 m standing; 0 = the headset's own floor estimate. Games that place you from the floor use it; moving it re-anchors at your current head position.");
             AddKnob(lt, "Gamma (>1 brighter)", 50, 200, AppSettings.DefaultGamma, () => settings.Gamma, v => settings.Gamma = v);
             AddKnob(lt, "Brightness", -30, 30, 0, () => settings.Brightness, v => settings.Brightness = v);
             AddKnob(lt, "Contrast", -30, 30, 0, () => settings.Contrast, v => settings.Contrast = v);
-            AddKnob(lt, "Saturation (<0 less vivid)", -50, 50, 0, () => settings.Saturation, v => settings.Saturation = v);
+            AddKnob(lt, "Saturation", -50, 50, 0, () => settings.Saturation, v => settings.Saturation = v, "Below 0: less vivid.");
             AddKnob(lt, "Sharpening", 0, 100, 0, () => settings.Sharpening, v => settings.Sharpening = v);
-            var reset = new Button { Text = "Defaults (start height 1.30 m, gamma 1.2, rest neutral)", AutoSize = true };
+            var reset = new Button { Text = "Defaults", AutoSize = true };
             reset.Click += (s, e) => { foreach (var k in knobs) k.Bar.Value = (int)Math.Round(k.Def * 100); };
+            tips.SetToolTip(reset, "Eye height 1.30 m, gamma 1.2, the rest neutral.");
             lt.Controls.Add(reset);
-            lt.SetColumnSpan(reset, 3);
+            lt.SetColumnSpan(reset, 2);
             lt.Controls.Add(debug);
-            lt.SetColumnSpan(debug, 3);
+            lt.SetColumnSpan(debug, 4);
             live.Controls.Add(lt);
             body.Controls.Add(live);
 
@@ -113,7 +113,7 @@ namespace VisionALVR
             body.Controls.Add(footer);
 
             Controls.Add(body);
-            Controls.Add(Ui.CompactHeader("Streamer for Apple Vision Pro (ALVR visionOS app)"));
+            Controls.Add(Ui.CompactHeader("Streamer for ALVR headsets (Vision Pro, Quest, ...)"));
 
 
             debug.Checked = settings.Debug;
@@ -129,16 +129,40 @@ namespace VisionALVR
             Shown += (s, e) =>
             {
                 StartHost();
+                CheckFirewall();
                 if (autoFind) { var t = new Timer { Interval = 3000 }; t.Tick += (a, b) => { t.Stop(); FindHeadset(true); }; t.Start(); }
             };
             Ui.ScreenshotWhenShown(this, 12000);
             FormClosing += (s, e) => { closing = true; footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); Log.Write("INFO", "VisionALVR.exe closed"); };
         }
 
-        void AddKnob(TableLayoutPanel t, string name, int min, int max, double def, Func<double> get, Action<double> set)
+        readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 400 };
+
+        void CheckFirewall()
+        {
+            if (Ui.ScreenshotPath() != null) return;
+            System.Threading.Tasks.Task.Run(() => Firewall.Check(Paths.Host)).ContinueWith(t =>
+            {
+                try
+                {
+                    BeginInvoke((Action)(() =>
+                    {
+                        var st = t.Result;
+                        var bad = st == FirewallState.Blocked || st == FirewallState.Missing;
+                        fwWarn.Visible = fwFix.Visible = bad;
+                        fwWarn.Text = st == FirewallState.Blocked ? "Windows Firewall BLOCKS alvr_host.exe in this folder (a dismissed Windows prompt does that): the headset will not be found and cannot connect."
+                                    : "Windows Firewall has no rule for alvr_host.exe in this folder: the headset may not be found or may not connect until it is allowed (the rule belongs to this exact folder).";
+                        Log.Write(bad ? "WARN" : "INFO", "firewall: " + st);
+                    }));
+                }
+                catch { }
+            });
+        }
+
+        void AddKnob(TableLayoutPanel t, string name, int min, int max, double def, Func<double> get, Action<double> set, string tip = null)
         {
             var k = new Knob { Name = name, Def = def, Get = get, Set = set, Value = Ui.Line("0.00"),
-                               Bar = new TrackBar { Minimum = min, Maximum = max, TickFrequency = (max - min) / 6, SmallChange = 5, LargeChange = 10, Width = 280, AutoSize = false, Height = 32 } };
+                               Bar = new TrackBar { Minimum = min, Maximum = max, TickFrequency = (max - min) / 6, SmallChange = 5, LargeChange = 10, Width = 170, AutoSize = false, Height = 32 } };
             k.Bar.Value = (int)Math.Max(min, Math.Min(max, Math.Round(get() * 100)));
             k.Value.Text = (k.Bar.Value / 100.0).ToString("0.00", CultureInfo.InvariantCulture);
             k.Bar.ValueChanged += (s, e) =>
@@ -149,9 +173,11 @@ namespace VisionALVR
                 settings.Save();
                 SendDisplay();
             };
-            t.Controls.Add(Ui.Line(name + ":"));
+            var label = Ui.Line(name + ":");
+            t.Controls.Add(label);
             t.Controls.Add(k.Bar);
             t.Controls.Add(k.Value);
+            if (tip != null) { tips.SetToolTip(label, tip); tips.SetToolTip(k.Bar, tip); }
             knobs.Add(k);
         }
 
@@ -168,7 +194,7 @@ namespace VisionALVR
             var hs = Session.Headset(Session.Load());
             pairedName = hs?.Item2 ?? "";
             pairedIp = hs?.Item3 ?? "";
-            headset.Text = hs == null ? "Headset: none paired - use Configure..." : $"Headset: searching for {pairedName} ({pairedIp}) ...";
+            headset.Text = hs == null ? "Headset: none paired - click Find headset" : $"Headset: searching for {pairedName} ({pairedIp}) ...";
             headset.ForeColor = Color.DarkOrange;
             findHint.Visible = true;
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
@@ -179,7 +205,7 @@ namespace VisionALVR
                 Log.Write("ERROR", err);
                 return;
             }
-            footer.Text = "Streamer running. Open the ALVR app on the Vision Pro; it connects by itself. Close this window to stop.";
+            footer.Text = "Streamer running. Open the ALVR app on the headset; it connects by itself. Close this window to stop.";
             Log.Write("INFO", "streamer started: alvr_host " + args);
         }
 
@@ -273,7 +299,7 @@ namespace VisionALVR
                     {
                         var seenName = S(d, "hostname"); var seenIp = S(d, "ip");
                         var paired = pairedName.Length > 0 && (seenName == settings.HeadsetHost || seenIp == pairedIp);
-                        headset.Text = paired ? $"Headset: {pairedName} seen at {seenIp}, connecting..." : $"Headset: {seenName} seen at {seenIp} - not paired (use Configure...)";
+                        headset.Text = paired ? $"Headset: {pairedName} seen at {seenIp}, connecting..." : $"Headset: {seenName} seen at {seenIp} - not paired (click Find headset)";
                         if (paired && seenIp.Length > 0 && seenIp != settings.HeadsetIp) { settings.HeadsetIp = seenIp; settings.Save(); pairedIp = seenIp; }
                     }
                     break;
@@ -343,7 +369,7 @@ namespace VisionALVR
                 }
                 if (Session.Headset(Session.Load()) == null && !testing)
                 {
-                    if (MessageBox.Show("No headset is paired yet. Open configure.exe to pair your Vision Pro?", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    if (MessageBox.Show("No headset is paired yet. Open configure.exe to set up and pair your headset? (Or answer No and use Find headset in the window.)", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                     {
                         Process.Start(Paths.Configure);
                         return;
