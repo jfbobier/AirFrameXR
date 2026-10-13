@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to private/personal_config.json (gitignored). `VISIONALVR_PERSONAL=1 python3 harness/run.py build ... package` then ships these values in the portable folder (zip suffix -personal). Dotted keys are set inside session.default.json; `visionalvr` becomes config\\visionalvr.json (the host/GUI settings). Not for GitHub releases. `session_merge` is deep-merged into session.default.json (the paired headset: an entry with an empty hostname is a headset added by IP address); `visionalvr.headset` is the headset the runtime window connects to without asking. `extra_files` are files on the build PC copied next to VisionALVR.exe in the package (your launcher .bat and the tools it calls).",
+  "_comment": "Copy to private/personal_config.json (gitignored). `VISIONALVR_PERSONAL=1 python3 harness/run.py build ... package` then ships these values in the portable folder (zip suffix -personal). Dotted keys are set inside session.default.json; `visionalvr` becomes config\\visionalvr.json (the host/GUI settings). Not for GitHub releases. `session_merge` is deep-merged into session.default.json (the paired headset: an entry with an empty hostname is a headset added by IP address); `visionalvr.headset` is the headset the runtime window connects to without asking. `extra_files` are files on the build PC copied next to VisionALVR.exe in the package (your launcher .bat and the tools it calls; keep them in a folder that is not the install folder, with a backup in private\\personal_files; a personal build FAILS if one is missing).",
   "version_suffix": "-personal",
   "session": {
     "session_settings.video.foveated_encoding.enabled": true,
@@ -40,7 +40,7 @@
     }
   },
   "extra_files": [
-    "D:\\_VR\\VisionALVR\\startvisionalvr.bat",
-    "D:\\_VR\\VisionALVR\\svcl.exe"
+    "C:\\Users\\<you>\\personal_files\\startvisionalvr.bat",
+    "C:\\Users\\<you>\\personal_files\\svcl.exe"
   ]
 }
