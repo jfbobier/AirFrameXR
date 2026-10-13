@@ -213,6 +213,7 @@ pub struct Pipeline {
     /// and the rotation applied by the re-stamp (sample to sample), in millidegrees (sum and max, count)
     pub diag_layer_vs_sample_mdeg: Mutex<(f64, f64, u64)>,
     pub diag_warp_mdeg: Mutex<(f64, f64, u64)>,
+    diag_lookup_logged: AtomicU64,
     /// the last boundary that found no frame (the app is not keeping up): the gate and the drain stay out for VISIONALVR_KEEPUP_BOUNDARIES (30)
     /// boundaries after it. A GPU-bound game delivers in bunches (two frames at half the boundaries, none at a tenth: Cyberpunk at 88 fps on a 100 Hz
     /// display, 2026-10-13 evening); that is not a standing queue, and skipping its releases only lowered its frame rate (258 skips in 82 s, hold unchanged).
@@ -266,9 +267,10 @@ fn quat_angle_mdeg(a: &[f32], b: &[f32]) -> f64 {
     2.0 * dot.acos() * 57295.78
 }
 
-/// VISIONALVR_HOST_STAMP (default on): see `Pipeline::host_stamp`
+/// VISIONALVR_HOST_STAMP (default OFF since 2026-10-13 night: the host-side re-stamp trembles on the Vision Pro with foveation on while
+/// the lab finds its rotation exact with foveation off; the shim-side re-stamp is the default until that is understood): see `Pipeline::host_stamp`
 pub fn host_stamp_enabled() -> bool {
-    std::env::var("VISIONALVR_HOST_STAMP").map(|v| v != "0").unwrap_or(true)
+    std::env::var("VISIONALVR_HOST_STAMP").map(|v| v == "1").unwrap_or(false)
 }
 
 /// VISIONALVR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
@@ -310,6 +312,7 @@ impl Pipeline {
             host_warp: std::env::var("VISIONALVR_HOST_WARP").map(|v| v != "0").unwrap_or(true),
             diag_layer_vs_sample_mdeg: Mutex::new((0.0, 0.0, 0)),
             diag_warp_mdeg: Mutex::new((0.0, 0.0, 0)),
+            diag_lookup_logged: AtomicU64::new(0),
             last_empty_idx: AtomicU64::new(0),
             keepup_boundaries: std::env::var("VISIONALVR_KEEPUP_BOUNDARIES").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30),
             standing_total: AtomicU64::new(0),
@@ -644,7 +647,15 @@ impl Pipeline {
                         // the oldest sample newer than the last sent frame: one sample ahead, the smallest rotation that gives a new timestamp
                         let (pick, rendered) = {
                             let ring = self.shared.recent_samples.lock();
-                            (ring.iter().find(|(t, _)| *t > last).copied(), ring.iter().find(|(t, _)| *t == ts).map(|(_, q)| *q))
+                            let found = ring.iter().find(|(t, _)| *t == ts).map(|(_, q)| *q);
+                            if found.is_none() && self.diag_lookup_logged.fetch_add(1, Ordering::Relaxed) < 20 {
+                                let nearest = ring.iter().map(|(t, _)| (t.as_nanos() as i128 - ts.as_nanos() as i128).abs()).min();
+                                event(self.cfg.origin, "restamp_lookup_miss", json!({
+                                    "ts_ns": a.ts_ns, "last_sent_ns": last.as_nanos() as u64, "ring_len": ring.len(),
+                                    "ring_front_ns": ring.front().map(|(t, _)| t.as_nanos() as u64), "ring_back_ns": ring.back().map(|(t, _)| t.as_nanos() as u64),
+                                    "nearest_abs_ns": nearest.map(|n| n as i64) }));
+                            }
+                            (ring.iter().find(|(t, _)| *t > last).copied(), found)
                         };
                         match pick {
                             Some((sts, q)) if a.has_projection => {
@@ -887,11 +898,10 @@ impl Pipeline {
     pub fn stats_json(&self) -> serde_json::Value {
         let (mut waits, mut app_ms, mut releases, mut late, mut gate_holds, mut gate_suppressed) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
         unsafe { nvh::nvh_ipc_shim_pacing(self.ipc(), &mut waits, &mut app_ms, &mut releases, &mut late, &mut gate_holds, &mut gate_suppressed) };
+        // cumulative since start (sum, max, count): the caller samples this every main-loop tick, so nothing is reset here
         let take = |m: &Mutex<(f64, f64, u64)>| {
-            let mut d = m.lock();
-            let v = json!({ "avg": if d.2 > 0 { d.0 / d.2 as f64 } else { 0.0 }, "max": d.1, "n": d.2 });
-            *d = (0.0, 0.0, 0);
-            v
+            let d = m.lock();
+            json!({ "sum": d.0, "max": d.1, "n": d.2 })
         };
         let (diag_layer, diag_warp) = (take(&self.diag_layer_vs_sample_mdeg), take(&self.diag_warp_mdeg));
         let (mut restamps, mut restamp_timeouts, mut warp_max, mut rwaits, mut rwait_sum, mut rwait_max) = (0u64, 0u64, 0f32, 0u64, 0f64, 0f32);
