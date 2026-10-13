@@ -1527,9 +1527,11 @@ fn main() {
         let align = std::env::var("VISIONALVR_ALIGN_RELEASE").map(|v| v != "0").unwrap_or(true);
         unsafe { nvh::nvh_ipc_set_align_release(ipc, if align { 1 } else { 0 }) };
         event(origin, "release_alignment", json!({ "on": align }));
-        // duplicate-timestamp fix (ipc.h dupRestamp): on unless VISIONALVR_DUP_RESTAMP=0 / video.dup_restamp false; wait VISIONALVR_DUP_WAIT_MS (8)
+        // duplicate-timestamp fix (ipc.h dupRestamp): on unless VISIONALVR_DUP_RESTAMP=0 / video.dup_restamp false; wait VISIONALVR_DUP_WAIT_MS
+        // (12: a bound longer than one 100 Hz sample interval lets the second frame of a bunch get the next sample; 8 ms left 4-7 % of the
+        // heavy games' frames as duplicates, 12 ms 1 %, for +0.7 ms average wait; 2026-10-13 night)
         let restamp = std::env::var("VISIONALVR_DUP_RESTAMP").map(|v| v != "0").unwrap_or(true);
-        let dup_wait_ms = std::env::var("VISIONALVR_DUP_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(8.0).clamp(0.0, 30.0);
+        let dup_wait_ms = std::env::var("VISIONALVR_DUP_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(12.0).clamp(0.0, 30.0);
         unsafe { nvh::nvh_ipc_set_dup_restamp(ipc, if restamp { 1 } else { 0 }, dup_wait_ms as f32) };
         event(origin, "dup_restamp", json!({ "on": restamp, "wait_ms": dup_wait_ms }));
         unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
