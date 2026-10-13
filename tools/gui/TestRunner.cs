@@ -37,7 +37,12 @@ namespace VisionALVR
         /// the community profile in use (null: the generic path with its searches) and the bitrate it asks for; the tests then verify that configuration
         public HmdProfile Profile;
         public double ConfigMbps;
-        public string EncodeProfileArg => Profile != null && !Profile.Foveated ? "full-split" : "foveated";
+        /// the user's own ALVR / VisionALVR settings are used as they are (third option of the wizard): the tests verify them like a profile, nothing is searched or changed
+        public bool Existing;
+        public string ExistingEncodeProfile = "foveated";
+        /// a fixed configuration to verify (a profile or the existing settings), as opposed to the generic path with its searches
+        public bool Fixed => Profile != null || Existing;
+        public string EncodeProfileArg => Profile != null ? (Profile.Foveated ? "foveated" : "full-split") : Existing ? ExistingEncodeProfile : "foveated";
         public int StepSecs = 6;
         public Action<string> Status = s => { };
         /// called when the encoder test is done: the wizard applies the interim proposal (so the later tests run at a configuration the encoder can sustain)
@@ -107,7 +112,7 @@ namespace VisionALVR
                 {
                     string result = null; string error = null;
                     ctx.Status("Encoding test frames with the hardware encoder...");
-                    await Host(ctx, Base + $"--live --bench 300 --noise-temporal --encode-profile {(ctx.Profile != null ? ctx.EncodeProfileArg : "foveated")}", (n, d) =>
+                    await Host(ctx, Base + $"--live --bench 300 --noise-temporal --encode-profile {ctx.EncodeProfileArg}", (n, d) =>
                     {
                         if (n == "setup_error") error = d != null && d.TryGetValue("message", out var m) ? m as string : "setup error";
                         if (n != "bench" || d == null) return;
@@ -120,7 +125,7 @@ namespace VisionALVR
                     }, 120000);
                     if (error != null) throw new TestFailed(error);
                     if (result == null) throw new TestFailed("the encoder test produced no result (see logs\\VisionALVR.log)");
-                    if (!ctx.R.EncodeFits) { st.Warn(); result += ctx.Profile != null ? " - too slow for this configuration: lower the resolution or the refresh rate in the setup" : " - too slow for this rate: the later tests and the proposal use a lower resolution or rate"; }
+                    if (!ctx.R.EncodeFits) { st.Warn(); result += ctx.Fixed ? " - too slow for this configuration: lower the resolution or the refresh rate in the setup" : " - too slow for this rate: the later tests and the proposal use a lower resolution or rate"; }
                     ctx.OnEncoderDone();
                     return result;
                 },
@@ -131,7 +136,7 @@ namespace VisionALVR
                 Name = "Picture quality benchmark (about 1.5 minutes)",
                 Run = async (ctx, st) =>
                 {
-                    if (ctx.Profile != null) throw new TestSkipped("not needed: the profile gives the stream settings");
+                    if (ctx.Fixed) throw new TestSkipped(ctx.Existing ? "not needed: your configuration is used as it is" : "not needed: the profile gives the stream settings");
                     string error = null; int n = 0; string line = null;
                     ctx.Status("Quality benchmark: starting...");
                     await Host(ctx, Base + "--benchmark-quality", (ev, d) =>
@@ -167,7 +172,7 @@ namespace VisionALVR
                 Run = async (ctx, st) =>
                 {
                     if (!ctx.HeadsetAvailable) throw new TestSkipped("needs the headset connected");
-                    if (ctx.Profile != null)
+                    if (ctx.Fixed)
                     {
                         // one step at the configured bitrate: pass or fail with the reasons, no search for another bitrate
                         string perr = null, verdict = null; bool ok = false; var why = new List<string>(); var plost = new List<double>();
@@ -312,7 +317,7 @@ namespace VisionALVR
                     var yaw = new List<double>(); var xs = new List<double>(); var ys = new List<double>(); var zs = new List<double>();
                     try
                     {
-                        foreach (var line in System.IO.File.ReadAllLines(poseCsv).Skip(1))
+                        foreach (var line in System.IO.File.ReadAllLines(poseCsv).Skip(1 + (int)ctx.Fps))   // the first second holds the start-up re-anchor
                         {
                             var c = line.Split(',');
                             if (c.Length < 5) continue;
@@ -349,8 +354,8 @@ namespace VisionALVR
                 Run = async (ctx, st) =>
                 {
                     await Task.Yield();
-                    var wanted = ctx.Profile != null ? ctx.Profile.SplitEncode > 0 && !ctx.Profile.Foveated : false;
-                    if (!wanted) throw new TestSkipped(ctx.Profile == null ? "not used by this configuration (foveated encoding encodes a smaller frame in one piece)" : "this profile does not use it");
+                    var wanted = ctx.Profile != null ? ctx.Profile.SplitEncode > 0 && !ctx.Profile.Foveated : ctx.Existing && ctx.ExistingEncodeProfile == "full-split";
+                    if (!wanted) throw new TestSkipped(!ctx.Fixed || ctx.Existing ? "not used by this configuration (foveated encoding encodes a smaller frame in one piece)" : "this profile does not use it");
                     var r = ctx.R;
                     var benchOn = r.Engines >= 2 && r.Slices >= 1.5;
                     var live = r.SceneRan ? $"; the live stream carried {r.SliceLive:0.#} strips per frame" : "";

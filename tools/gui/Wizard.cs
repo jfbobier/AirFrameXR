@@ -47,7 +47,7 @@ namespace VisionALVR
         string chosenHost = "", chosenIp = "", chosenName = "";
         // handshake page
         ComboBox rateBox; NumericUpDown scaleBox; CheckBox foveationBox; Label hsStatus; FlowLayoutPanel hsDetails, modePanel; Button hsRetry, hsSkip, hsGo;
-        RadioButton modeProfile, modeManual; HmdProfile matchedProfile;
+        RadioButton modeProfile, modeManual, modeExisting; HmdProfile matchedProfile;
         ProgressBar hsBar;
         // tests page
         ListView testList; Label testStatus; Button testCancel;
@@ -380,8 +380,11 @@ namespace VisionALVR
             var modes = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
             modeProfile = new RadioButton { Appearance = Appearance.Button, Text = "Community profile (recommended)", AutoSize = true, Checked = true, Font = Ui.Bold, Padding = new Padding(8) };
             modeManual = new RadioButton { Appearance = Appearance.Button, Text = "Manual configuration (pre-filled)", AutoSize = true, Font = Ui.Body, Padding = new Padding(8) };
-            modeProfile.CheckedChanged += (s, e) => { modeProfile.Font = modeProfile.Checked ? Ui.Bold : Ui.Body; modeManual.Font = modeManual.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
-            modes.Controls.Add(modeProfile); modes.Controls.Add(modeManual);
+            modeProfile.CheckedChanged += (s, e) => { modeProfile.Font = modeProfile.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
+            modeExisting = new RadioButton { Appearance = Appearance.Button, Text = "I have an existing ALVR configuration", AutoSize = true, Font = Ui.Body, Padding = new Padding(8) };
+            modeManual.CheckedChanged += (s, e) => { modeManual.Font = modeManual.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
+            modeExisting.CheckedChanged += (s, e) => { modeExisting.Font = modeExisting.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
+            modes.Controls.Add(modeProfile); modes.Controls.Add(modeManual); modes.Controls.Add(modeExisting);
             hsDetails.Controls.Add(modes);
             modePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
             hsDetails.Controls.Add(modePanel);
@@ -417,6 +420,16 @@ namespace VisionALVR
                 modePanel.Controls.Add(import);
                 hsGo.Enabled = profile != null;
             }
+            else if (modeExisting.Checked)
+            {
+                profile = null;
+                session = Session.Load();
+                const string V = "session_settings.video.";
+                var mbps = Json.Num(session, V + "bitrate.mode.ConstantMbps", 0);
+                modePanel.Controls.Add(Ui.Line("Your current settings (config\\session.json and visionalvr.json) are used exactly as they are: the tests check them on this PC and your link, and nothing is changed or searched."));
+                modePanel.Controls.Add(Ui.Line($"Now: {(int)Json.Num(session, V + "preferred_fps", 90)} Hz, {(mbps > 0 ? mbps.ToString("0", CultureInfo.InvariantCulture) + " Mbps" : "adaptive bitrate")}, encoding '{settings.EncodeProfile}'. At the end you can still change anything."));
+                hsGo.Enabled = true;
+            }
             else
             {
                 profile = null;
@@ -438,7 +451,7 @@ namespace VisionALVR
 
         void ContinueToTests()
         {
-            autoconfig = true; ApplyOverrides(); GoTo(3);
+            autoconfig = !(modeExisting != null && modeExisting.Checked); ApplyOverrides(); GoTo(3);
         }
 
         /// "Import profile...": pick a profile file (shared by another user), show what ALVR says about this headset next to what the profile expects,
@@ -480,6 +493,11 @@ namespace VisionALVR
                 ctxFps = profile.Fps > 0 && hs.Rates.Count > 0 ? hs.Rates.OrderBy(x => Math.Abs(x - profile.Fps)).First() : (profile.Fps > 0 ? profile.Fps : 90);
                 ctxScale = 1.0;
                 ctxFoveation = profile.Foveated && hs.Foveation;
+            }
+            else if (modeExisting != null && modeExisting.Checked)
+            {
+                ctxFps = Json.Num(session, "session_settings.video.preferred_fps", hs.Rates.Count > 0 ? hs.Rates.Max() : 90);
+                ctxScale = 1.0; ctxFoveation = settings.EncodeProfile != "full-split";
             }
             else
             {
@@ -530,20 +548,31 @@ namespace VisionALVR
             panel.Load();
             ctx = new TestContext { HS = hs, Check = check, Fps = ctxFps, HeadsetAvailable = hs.FromHeadset };
             ctx.R.TestFps = ctxFps;
-            Proposal cand;
-            if (profile != null)
+            var existing = modeExisting != null && modeExisting.Checked;
+            if (existing)
             {
-                cand = Proposal.FromProfile(hs, profile, variantId, ctxFps, ctxScale, ctxFoveation);
-                ctx.Profile = profile; ctx.ConfigMbps = cand.BitrateMbps;
+                // the user's own configuration: nothing is written, the tests read it as it is
+                ctx.Existing = true; ctx.ExistingEncodeProfile = settings.EncodeProfile;
+                ctx.ConfigMbps = Json.Num(session, "session_settings.video.bitrate.mode.ConstantMbps", 0);
+                if (ctx.ConfigMbps <= 0) ctx.ConfigMbps = 150;
             }
             else
             {
-                cand = Proposal.Build(hs, new Results(), ctxFps);
-                cand.EyeW = (int)(hs.PanelW * ctxScale) / 32 * 32; cand.EyeH = (int)(hs.PanelH * ctxScale); cand.Foveated = ctxFoveation;
+                Proposal cand;
+                if (profile != null)
+                {
+                    cand = Proposal.FromProfile(hs, profile, variantId, ctxFps, ctxScale, ctxFoveation);
+                    ctx.Profile = profile; ctx.ConfigMbps = cand.BitrateMbps;
+                }
+                else
+                {
+                    cand = Proposal.Build(hs, new Results(), ctxFps);
+                    cand.EyeW = (int)(hs.PanelW * ctxScale) / 32 * 32; cand.EyeH = (int)(hs.PanelH * ctxScale); cand.Foveated = ctxFoveation;
+                }
+                panel.Prefill(cand);
+                if (!panel.Save(out var err) && err != null) { testStatus.Text = err; testStatus.ForeColor = Color.Firebrick; }
+                else HmdProfiles.ApplySessionOverrides(profile);
             }
-            panel.Prefill(cand);
-            if (!panel.Save(out var err) && err != null) { testStatus.Text = err; testStatus.ForeColor = Color.Firebrick; }
-            else HmdProfiles.ApplySessionOverrides(profile);
             steps = demo ? DemoSteps() : Tests.Build(ctx);
             foreach (var st in steps) testList.Items.Add(new ListViewItem(new[] { Glyph(st.State) + "  " + st.Name, "" }));
             if (demo) { FinishTests(); return; }
@@ -551,7 +580,7 @@ namespace VisionALVR
             ctx.Ct = testCts.Token;
             ctx.OnEncoderDone = () => Invoke((Action)(() =>
             {
-                if (profile != null) return;   // a profile is verified as it is: the later tests run at the same configuration, nothing is lowered silently
+                if (ctx.Fixed) return;   // a profile or the existing settings are verified as it is: the later tests run at the same configuration, nothing is lowered silently
                 // the encoder test measured the candidate: the tests that follow run at the interim proposal (lower resolution / rate if it could not keep up)
                 var interim = Proposal.Build(hs, ctx.R, ctxFps);
                 interim.Foveated = ctxFoveation;

@@ -27,6 +27,10 @@ robocopy '{tmpl}' '{wd}' /E /NFL /NDL /NJH /NJS | Out-Null
 Remove-Item '{wd}\\config\\session.json','{wd}\\config\\visionalvr.json','{wd}\\logs' -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item '{root}\\out\\gui\\configure.exe' '{wd}\\configure.exe' -Force
 Copy-Item '{root}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wd}\\alvr_host.exe' -Force
+Copy-Item '{root}\\out\\vdxr-shim\\*' '{wd}' -Force
+New-Item -ItemType Directory -Force '{wd}\\bench' | Out-Null
+Copy-Item '{root}\\build\\probe\\xr_probe.exe' '{wd}\\bench\\xr_probe.exe' -Force
+if (-not (Test-Path '{wd}\\bench\\littlest_tokyo.vab')) {{ Copy-Item '{root}\\bench\\littlest_tokyo.vab' '{wd}\\bench\\littlest_tokyo.vab' -Force }}
 New-Item -ItemType Directory -Force '{wd}\\profiles','{wd}\\config\\profiles' | Out-Null
 Copy-Item '{root}\\_tmp\\install\\profiles\\*.json' '{wd}\\profiles' -Force -ErrorAction SilentlyContinue
 """)

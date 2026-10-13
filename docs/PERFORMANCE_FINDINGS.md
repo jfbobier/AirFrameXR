@@ -1,0 +1,64 @@
+# Performance and smoothness: what we tried and what we learned
+
+A map of the experiments behind the streaming pipeline, so nobody repeats the dead ends. Day-by-day detail with numbers is in
+[progress.md](progress.md); the list of ideas that were never started is in [PERFORMANCE_NOTES.md](PERFORMANCE_NOTES.md). Setup of all
+measurements: an RTX 5090 PC streaming to an Apple Vision Pro (ALVR client 20.14.1), plus a headset-less lab (mock client, probe app, simrig).
+
+Targets that shaped every decision: consistency before latency (a stable 90 fps beats a lower average with spikes), frame rate before latency,
+and no optimisation under about 1 ms.
+
+## What the pipeline looks like now
+
+Game (OpenXR/LibOVR via VDXR + our shim) -> shim composes the ring slot -> host frame queue (`drain` pick) -> foveation pass or full frame ->
+NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> headset. Head pose comes the other way and is stamped on each frame.
+
+## Kept (measured, in the product)
+
+| What | Result |
+|---|---|
+| **Realtime GPU scheduling class for the host** | removes the encoder queueing behind the game's GPU work (+5.7 ms under load measured before). Needs the elevated host. |
+| **GPU keepalive for lightly loaded encodes** | an idle-ish NVENC loop sat in P8 (video clock 555 MHz, encode about 30 ms against 9 ms at P0). Any encode timing on a lightly loaded GPU is suspect; check `gpu.csv` p-state and clocks. |
+| **Dedicated vsync thread following the headset's display rate** | the shim predicts display time from it. A double-ticking bug (about 107 Hz) was found and fixed; the host now follows the client's rate (100 Hz on the Vision Pro in some sessions, 90 in others). |
+| **Phase lock** (`phase.rs`) | steers when frames arrive relative to the headset's render tick; works modulo one display period, so it cannot see a whole extra period of queue. |
+| **Shim compose index fix** | the shim composed frame F-1's image under pose F (an off-by-two inherited from the reference runtime): any sample bunching became about 0.9 deg of error at 90 deg/s, which is why a still head looked fine and a moving one trembled. Found with the simrig and `stamp_check.py`. |
+| **Split encoding (3 strips on 3 NVENC engines)** | full 7104x3200 10-bit encodes in about 8 ms; the wizard now reports whether it engaged (engines and strips per frame). |
+| **High-resolution waitable timers** | streamer CPU 0.62 to about 0.50 cores with no visible precision loss. |
+| **`drain` pick policy (default)** | in-order delivery plus one resync drop when a queue has stood 8 boundaries (backoff 3 s doubling to 60 s). Neutral on jittery lab scenes, about 10 ms better on a steady GPU-bound scene (pose-to-display 18-28 ms against 38 ms with the pure in-order queue; stock ALVR + SteamVR 29-30 ms). |
+| **Eye-height workflow (IPC v16)** | the head is published at y = 0 and the user's eye height is reported to games (`OVR_KEY_EYE_HEIGHT`). Fixes worlds sitting too low. Confirmed on the headset. |
+| **Hand offset derived from VDXR's calibration** | fixes the reversed hand posture. Confirmed on the headset. |
+
+## Tried and removed or left off
+
+| What | What happened | Lesson |
+|---|---|---|
+| **Latency modes "low" / "auto"** (pick `newest`) | superseded 15-30% of frames in GPU-bound games (Cyberpunk streamed 77-80 fps of 94-95 rendered; Dead Space 59 of 87). | When frame times jitter, two frames land inside one period and "newest" throws one away. Removed; the in-order queue is the only user-facing behaviour. `VISIONALVR_PICK` stays a lab hook. |
+| **Slot pacing v1-v6** (deliver exactly one frame per period at a fixed phase, hole filling) | each version regressed Cyberpunk: boundaries sat on the game's completion phase, frames were superseded just before their slot, bunching grew, the headset got about 60 fps with holes. | A compositor loop only works if the app is throttled at frame start; our `xrWaitFrame` released the app every tick regardless of GPU progress. Fixed later by the shim's GPU throttle and running start; the slot idea itself was dropped. |
+| **Head stamp `newest` + exact homography warp, "compositor-like" mode** | duplicates fell to about 0 but the moving-head feel did not improve. | The frame deficit was not the root cause of the tremble. Removed. |
+| **Predicting a missing head sample** (`video.predict_missing_head`, lab `OVRSHIM_INORDER_POSE`) | the predicted timestamp matched one of the client's own only 16% of the time (client timestamps jitter by tens of ns); the client looks the pose up by timestamp, so the picture came out misplaced (tilted, offset, even the head-locked title). | Never invent timestamps; the client's lookup is exact. Opt-in, off. |
+| **`video.head_in_order`** (consume head samples in order, wait up to 8 ms) | lab: duplicates 244 -> 11 and 3.7 ms less pose-to-display. Headset: Cyberpunk 13% -> 7% duplicates, Dead Space unchanged at 20%, and a one-frame flash of the Cyberpunk warning page, shifted out of place. | Tracking packets arrive unevenly (gaps over 12 ms on 13-19% of samples) so the wait often times out; the lab does not capture that. Removed in IPC v18. |
+| **Send pacing variants** (`vsync`, slot, `asap`) | no visible gain over `asap`; `asap` stayed. | |
+| **Zero-copy encoder input** | about 0.2 ms. | Below the 1 ms bar; it stays on by default (`VISIONALVR_ZEROCOPY=0` disables) because it costs nothing. |
+| **Lower render scale (0.75)** | did not help the moving-head feel. | The GPU budget is not what differs from SteamVR. |
+| **HEVC QP-delta map** (foveal emphasis) | built and proven against a Python oracle, never judged on the headset. | Milder foveation plus a QP map is encode-bound on a one-engine GPU. Opt-in. |
+| **Client queue drain** (`video.client_queue_drain`) | never fired in the lab; untested on the headset. | Opt-in. |
+| **Release alignment alone** (`OVRSHIM_ALIGN_RELEASE`) | no effect on duplicates. | Lab only. |
+
+## Findings that changed our mind
+
+1. **Frames "sent but not displayed" are duplicate timestamps, not drops.** On the headset, displayed + same-timestamp frames equal sent (End of Abyss 175 + 5 = 180 per 2 s). The headset skips a frame whose head-sample timestamp equals the previous one. Cyberpunk and Dead Space produce 7-20% of them because the game reads its pose in bursts (interval p05 7.9 ms, p95 24.5 ms), so two reads fall inside one 10 ms tracking sample. Not fixable by a pick policy; the game side decides.
+2. **ALVR's client predicts the head by `headset.max_prediction_ms`.** With 0 (left over from experiments) the client rotated frames by the whole 90-130 ms latency. The default is 100, the personal sessions use 150. This, not our pacing, explained "visibly worse than SteamVR" in one stretch.
+3. **SteamVR + ALVR is the right reference, and it is not perfect.** Packet captures show perfect 90 Hz send spacing there (p95 11.7 ms) because the compositor re-presents on a miss, and 3.8% duplicate-timestamp sends. Same-scene totals: ours 117 ms against stock 107 ms; the game stage and the headset's vsync queue (about 20 ms, ALVR's client, identical in both) account for most of it.
+4. **A standing queue costs a whole period.** The in-order queue at a steady rate held about 11.7 ms between arrival and encode start. `drain` removed it.
+5. **Pose path is exact.** Follow-the-frames and follow-the-pose harnesses show every hop (client sample, host, shim, app, layer, decoded pixels) stamped with the pose the frame was rendered with, for ours and for stock.
+6. **Averages hide the loading screens.** "Game ended" fps includes seconds of loading; judge steady windows (`encoder_stats` per 2 s).
+7. **Lab and headset disagree about uplink timing.** The lab replays recorded head traces and uplink delays, which helped, but only the headset showed the in-order wait failing and the flash.
+
+## How we measure
+
+`harness/` (live, frames, pose_compare, stamp_check, baseline), `harness/simrig` (headset-less rig and judge), the debug session logs (`logs\debug\<time>`: `host_events.jsonl`, `client_frames.csv`, `client_graph.csv`, `gpu.csv`, shim logs), `tools/pacing_table.py`, `tools/pipeline_report.py`. Stock reference stats via ALVR's websocket (port 8082, header `X-ALVR: true`). See [DEVELOPMENT.md](DEVELOPMENT.md) for the telemetry build flag.
+
+## Still open
+
+- Dead Space duplicates (20%): game-side pose reads; a client-side or reprojection answer would be needed.
+- Headset decoder queue regimes (12-15 ms against stock 3 ms) when a frame goes missing.
+- Whether foveated or full-frame looks better at the same bitrate on the headset (unjudged).

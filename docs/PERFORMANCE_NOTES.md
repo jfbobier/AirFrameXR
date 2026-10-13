@@ -1,5 +1,7 @@
 # Performance opportunities (noted 2026-10-10, after the v0.2 redesign; none started)
 
+> What was actually tried, and what it taught us: [PERFORMANCE_FINDINGS.md](PERFORMANCE_FINDINGS.md).
+
 Per frame today (7104x3200 side by side, 10-bit): the game renders two eye images -> the **shim composes** them (one full-resolution
 pass into a ring slot, sRGB/gamma handling, optional warp) -> the **host's foveation pass** (ALVR's CompressAxisAligned, a second
 full-resolution pass into the encoder's input texture) -> **NVENC input copy** inside ALVR's `Transmit` (a third full-frame GPU

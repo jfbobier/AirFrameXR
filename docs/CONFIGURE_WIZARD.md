@@ -27,8 +27,9 @@ It started as a benchmark that informs a configuration; it should become a wizar
    shows as paired but not in the list. Fix: seed the list from the known entries at start, de-duplicate with discovery results, preselect the known
    one, and show it in both places (selected + list).
 2. **Handshake and what we learned.** Connect (the ALVR app open on the headset), capture the headset's advertised capabilities, show them, let the
-   the read-only stats, then exactly two options, both leading to the tests (step 3): **Community profile (recommended)** (the matching or an
-   imported profile, plus the network it is for) or **Manual configuration** (values pre-filled from the stats: rate, scale, foveation). Capabilities come from `VideoStreamingCapabilities` + `display_name` (server_core/src/connection.rs ~575). The
+   the read-only stats, then exactly three options, all leading to the tests (step 3): **Community profile (recommended)** (the matching or an
+   imported profile, plus the network it is for), **Manual configuration** (values pre-filled from the stats: rate, scale, foveation) or **I have an
+   existing ALVR configuration** (config\session.json + visionalvr.json used as they are and only verified; step 5 then shows them unchanged). Capabilities come from `VideoStreamingCapabilities` + `display_name` (server_core/src/connection.rs ~575). The
    current host never exposes them (only the negotiated result lands in `openvr_config`), so: a small server_core patch like
    `client-stats-log.patch` (`client-caps-log.patch`: one log line with the JSON), parsed in logs.rs into a `client_capabilities` event, and a new
    `alvr_host --handshake <s>` mode that connects, emits it and disconnects (no game, no SteamVR needed).
