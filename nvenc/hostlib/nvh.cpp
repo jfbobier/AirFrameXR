@@ -630,9 +630,19 @@ void nvh_ipc_set_hand_offset(void* i, int side, const float* q, const float* p) 
     memcpy(h.handOffsetPos[side], p, 12); MemoryBarrier(); memcpy(h.handOffsetQuat[side], q, 16);
 }
 
-void nvh_ipc_shim_pacing(void* i, uint32_t* slot_busy_waits, float* app_frame_ms, uint64_t* releases, uint64_t* releases_late) {
+void nvh_ipc_shim_pacing(void* i, uint32_t* slot_busy_waits, float* app_frame_ms, uint64_t* releases, uint64_t* releases_late,
+                         uint64_t* gate_holds, uint64_t* gate_timeouts) {
     const auto& s = ((Ipc*)i)->state->shim;
     *slot_busy_waits = s.slotBusyWaits; *app_frame_ms = s.appFrameMs; *releases = s.releases; *releases_late = s.releasesLate;
+    *gate_holds = s.gateHolds; *gate_timeouts = s.gateTimeouts;
+}
+
+void nvh_ipc_set_intake(void* i, uint32_t waiting) {
+    InterlockedExchange((volatile LONG*)&((Ipc*)i)->state->host.intakeWaiting, (LONG)waiting);
+}
+
+void nvh_ipc_set_intake_gate(void* i, uint32_t on) {
+    ((Ipc*)i)->state->host.intakeGate = on;
 }
 
 long nvh_set_gpu_scheduling(int cls) {

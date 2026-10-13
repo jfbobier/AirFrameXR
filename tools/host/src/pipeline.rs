@@ -183,14 +183,21 @@ pub struct Pipeline {
     /// the previous boundary left a frame behind in the intake (a second one in a row drops the older instead: bounded lag)
     left_behind: AtomicBool,
     pub queue_picks: AtomicU64,
-    /// which frame a boundary takes when two wait: drain (default: in order, plus one dropped frame to resynchronise a queue that has stood 8 boundaries, with a backoff) | oldest (no drops, a standing queue stays a period late) | newest (lab only: drops the older of
-    /// every pair, loses frames when the app's frame times jitter) | adaptive (newest right after an empty boundary, else oldest) | aged
+    /// which frame a boundary takes when two wait: drain (default: in order, plus one dropped frame to resynchronise a queue that has stood
+    /// VISIONALVR_DRAIN_AFTER boundaries, at most once per VISIONALVR_DRAIN_EVERY_MS; a fallback: the intake gate normally drains the queue first,
+    /// see `intake_gate`) | oldest (no drops, a standing queue stays a period late) | newest (lab only: drops the older of every pair, loses frames
+    /// when the app's frame times jitter) | adaptive (newest right after an empty boundary, else oldest) | aged
     pick_policy: String,
+    /// the shim holds the game's next release while a frame a boundary passed over still waits here (ipc intakeWaiting, written at every
+    /// boundary): the queue drains at the next boundary without dropping a rendered frame. VISIONALVR_INTAKE_GATE=0 disables it.
+    intake_gate: bool,
+    /// boundaries that left a frame behind (since start): how long queues stood, whatever drained them
+    pub standing_total: AtomicU64,
     last_empty: AtomicBool,
     /// `drain` pick policy: consecutive boundaries that left a frame behind in the intake (a standing queue: the app delivers exactly as fast as the
-    /// display consumes, so every frame waits a period more than it needs to), when it last dropped one and how long it waits before the next
+    /// display consumes, so every frame waits a period more than it needs to), and when it last dropped one
     standing: AtomicU64,
-    drain_state: Mutex<(Option<Instant>, f64)>,
+    drain_last: Mutex<Option<Instant>>,
     pub intake_drains: AtomicU64,
     /// the headset's decoder queue stood a whole period or more (phase.rs): drop one frame at a boundary to let it drain (opt-in, see phase::client_drain_due)
     client_drain: bool,
@@ -228,6 +235,11 @@ pub struct Pipeline {
     gpu_sched: Mutex<Option<(i32, i64)>>,
 }
 
+/// VISIONALVR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
+pub fn intake_gate_enabled() -> bool {
+    std::env::var("VISIONALVR_INTAKE_GATE").map(|v| v != "0").unwrap_or(true)
+}
+
 fn set_thread_priority(_p: i32) {
     #[cfg(windows)]
     unsafe {
@@ -251,9 +263,11 @@ impl Pipeline {
             left_behind: AtomicBool::new(false),
             queue_picks: AtomicU64::new(0),
             pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "drain".into()),
+            intake_gate: intake_gate_enabled(),
+            standing_total: AtomicU64::new(0),
             last_empty: AtomicBool::new(false),
             standing: AtomicU64::new(0),
-            drain_state: Mutex::new((None, 3.0)),
+            drain_last: Mutex::new(None),
             intake_drains: AtomicU64::new(0),
             client_drain: std::env::var("VISIONALVR_CLIENT_DRAIN").map(|v| v == "1").unwrap_or(false),
             drains: AtomicU64::new(0),
@@ -402,6 +416,9 @@ impl Pipeline {
         let alive = unsafe { nvh::nvh_ipc_shim_alive(ipc) } != 0;
         self.app_alive.store(alive, Ordering::Relaxed);
         if !self.active.load(Ordering::Relaxed) {
+            if self.intake_gate {
+                unsafe { nvh::nvh_ipc_set_intake(ipc, 0) }; // nothing is picked while inactive: never hold the app for it
+            }
             return;
         }
         let newest = {
@@ -412,19 +429,19 @@ impl Pipeline {
                 && match self.pick_policy.as_str() {
                     "newest" => false,
                     "adaptive" => !self.last_empty.load(Ordering::Relaxed),
-                    // in order like `oldest`, but a queue that has stood VISIONALVR_DRAIN_AFTER (8) boundaries without ever emptying drops its older frame once
-                    // (one skipped picture, one period of latency back); after a drain the next one waits 3 s, doubled (at most 60 s) when the queue is back
-                    // within 15 s of the last one, so an app that rebuilds it all the time is not skipped all the time
+                    // in order like `oldest`, but a queue that has stood VISIONALVR_DRAIN_AFTER (8) boundaries without ever emptying drops its older frame
+                    // once (one rendered frame never shown, one period of latency back), at most once per VISIONALVR_DRAIN_EVERY_MS (1000). The earlier
+                    // backoff doubled to 60 s whenever the queue came back, which in a GPU-bound game (a bunch every few seconds) left it standing most
+                    // of the time (Cyberpunk 2026-10-13: 3-4 drains in 100 s, hold 9.9 ms). With the intake gate on, the gate drains the queue first and
+                    // this fires only when it could not (shim without the gate, or the app ignoring its release).
                     "drain" => {
                         let after = std::env::var("VISIONALVR_DRAIN_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(8).max(1);
-                        let mut st = self.drain_state.lock();
-                        let due = self.standing.load(Ordering::Relaxed) >= after && st.0.map(|t| boundary.saturating_duration_since(t).as_secs_f64() >= st.1).unwrap_or(true);
+                        let every = std::env::var("VISIONALVR_DRAIN_EVERY_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1000.0).max(0.0) / 1000.0;
+                        let mut last = self.drain_last.lock();
+                        let due = self.standing.load(Ordering::Relaxed) >= after
+                            && last.map(|t| boundary.saturating_duration_since(t).as_secs_f64() >= every).unwrap_or(true);
                         if due {
-                            if let Some(t) = st.0 {
-                                let since = boundary.saturating_duration_since(t).as_secs_f64();
-                                st.1 = if since < st.1 + 15.0 { (st.1 * 2.0).min(60.0) } else { 3.0 };
-                            }
-                            st.0 = Some(boundary);
+                            *last = Some(boundary);
                             self.intake_drains.fetch_add(1, Ordering::Relaxed);
                         }
                         !due
@@ -450,6 +467,11 @@ impl Pipeline {
                 self.standing.store(0, Ordering::Relaxed);
             } else {
                 self.standing.fetch_add(1, Ordering::Relaxed);
+                self.standing_total.fetch_add(1, Ordering::Relaxed);
+            }
+            if self.intake_gate {
+                // frames this boundary passed over: the shim holds the app's next release until a boundary takes them (see `intake_gate`)
+                unsafe { nvh::nvh_ipc_set_intake(ipc, q.len() as u32) };
             }
             a
         };
@@ -742,8 +764,8 @@ impl Pipeline {
 
     /// Counters for the 2 s statistics windows (deltas are taken by the caller) and the end-of-run report.
     pub fn stats_json(&self) -> serde_json::Value {
-        let (mut waits, mut app_ms, mut releases, mut late) = (0u32, 0f32, 0u64, 0u64);
-        unsafe { nvh::nvh_ipc_shim_pacing(self.ipc(), &mut waits, &mut app_ms, &mut releases, &mut late) };
+        let (mut waits, mut app_ms, mut releases, mut late, mut gate_holds, mut gate_timeouts) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
+        unsafe { nvh::nvh_ipc_shim_pacing(self.ipc(), &mut waits, &mut app_ms, &mut releases, &mut late, &mut gate_holds, &mut gate_timeouts) };
         json!({
             "send_pacing": self.cfg.send_pacing.name(),
             "arrived": self.arrived.load(Ordering::Relaxed),
@@ -751,6 +773,8 @@ impl Pipeline {
             "queue_picks": self.queue_picks.load(Ordering::Relaxed),
             "drains": self.drains.load(Ordering::Relaxed),
             "intake_drains": self.intake_drains.load(Ordering::Relaxed),
+            "standing_total": self.standing_total.load(Ordering::Relaxed),
+            "intake_gate": self.intake_gate,
             "intake_depth": self.intake_depth,
             "pick_policy": self.pick_policy,
             "slots_filled": self.slots_filled.load(Ordering::Relaxed),
@@ -762,7 +786,7 @@ impl Pipeline {
             "idr_restarts": self.idr_restarts.load(Ordering::Relaxed),
             "encode_envelope_ms": *self.encode_env_ms.lock(),
             "gpu_scheduling": self.gpu_sched.lock().map(|(c, st)| json!({ "class": c, "status": st })),
-            "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late },
+            "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_timeouts": gate_timeouts },
         })
     }
 }

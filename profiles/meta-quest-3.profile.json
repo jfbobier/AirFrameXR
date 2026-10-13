@@ -11,8 +11,14 @@
     ]
   },
   "stream": {
+    "eye_resolution": [
+      2064,
+      2208
+    ],
     "fps": 90,
     "codec": "hevc",
+    "bit_depth": 10,
+    "full_range": true,
     "foveated": true
   },
   "network": {
@@ -41,6 +47,7 @@
   },
   "notes": [
     "Starting point compiled from public guidance, NOT verified by the VisionALVR project on this headset (no `verified` entry). VisionALVR's support for headsets other than the Apple Vision Pro is best effort.",
+    "Differences from the Apple Vision Pro profile: the Quest 3's panel is 2064 x 2208 per eye (about 2K) against 3552 x 3200 (4K) on the Vision Pro, so the stream is about 2.4x fewer pixels, needs about half the bitrate (100-150 Mbps against 300) and the encoder has an easy job on any NVENC GPU (split encoding is not needed). Same as on the Vision Pro: 90 Hz, HEVC 10-bit (ALVR's Quest client advertises 10-bit HEVC decoding; the default session already forces 10-bit), full colour range, ALVR foveated encoding, chroma-key passthrough on pure green.",
     "ALVR's wiki (Settings tutorial, v20): on a good wireless router use the medium resolution preset (the default) with sharpening 1.0 and HEVC at a constant 100-150 Mbps; HEVC is usually the best codec when bitrate is limited; turn foveated encoding on and tune it from the statistics graph.",
     "Resolution, gamma and the encoder details are left out on purpose: the headset's own default (what ALVR reports at the handshake) is used. Change them in the wizard if you know better.",
     "Panel about 2064 x 2208 per eye (Meta's specification); refresh rates 72/80/90/120 Hz. 90 Hz is the commonly recommended balance, 72 Hz the stable fallback.",

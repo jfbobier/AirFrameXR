@@ -396,6 +396,11 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
             std::env::set_var("VISIONALVR_CLIENT_DRAIN", if v { "1" } else { "0" });
         }
     }
+    if let Some(v) = st.intake_gate {
+        if std::env::var_os("VISIONALVR_INTAKE_GATE").is_none() {
+            std::env::set_var("VISIONALVR_INTAKE_GATE", if v { "1" } else { "0" });
+        }
+    }
     phase::configure(st.phase_lock.unwrap_or(true));
     if let Some(v) = st.boundary_offset_ms {
         a.boundary_offset_ms = v;
@@ -765,7 +770,10 @@ mod nvh {
         pub fn nvh_ipc_set_head_policy(ipc: *mut c_void, wait_ms: f32, predict: f32);
         pub fn nvh_ipc_set_eye_height(ipc: *mut c_void, eye_height_m: f32);
         pub fn nvh_ipc_set_hand_offset(ipc: *mut c_void, side: i32, quat_xyzw: *const f32, pos: *const f32);
-        pub fn nvh_ipc_shim_pacing(ipc: *mut c_void, slot_busy_waits: *mut u32, app_frame_ms: *mut f32, releases: *mut u64, releases_late: *mut u64);
+        pub fn nvh_ipc_shim_pacing(ipc: *mut c_void, slot_busy_waits: *mut u32, app_frame_ms: *mut f32, releases: *mut u64, releases_late: *mut u64,
+                                   gate_holds: *mut u64, gate_timeouts: *mut u64);
+        pub fn nvh_ipc_set_intake(ipc: *mut c_void, waiting: u32);
+        pub fn nvh_ipc_set_intake_gate(ipc: *mut c_void, on: u32);
         pub fn nvh_set_gpu_scheduling(cls: i32) -> i32;
     }
 }
@@ -1496,6 +1504,7 @@ fn main() {
             ipc_addr, Arc::clone(&ctx), Arc::clone(&shared), pipeline::Encoder { handle: h, live: l });
         logs::set_clock(Instant::now(), unsafe { nvh::nvh_qpc_seconds() });
         unsafe { nvh::nvh_ipc_set_pacing(ipc, args.boundary_offset_ms as f32, args.running_start_ms as f32) };
+        unsafe { nvh::nvh_ipc_set_intake_gate(ipc, if pipeline::intake_gate_enabled() { 1 } else { 0 }) };
         unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
         {
             // hand pose convention fix (see Args::hand_rotation_deg); the right hand mirrors y and z like ALVR's own offsets

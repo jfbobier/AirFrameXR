@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 18;
+constexpr uint32_t kVersion = 19;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -97,6 +97,11 @@ struct HostToShim {
     // The user's standing eye height above the floor (m), reported to games as OVR_KEY_EYE_HEIGHT. VDXR treats this LibOVR as an eye-level
     // origin runtime: LOCAL space = the head pose as published (y about 0 at the anchor), STAGE / LOCAL_FLOOR = that + this eye height. 0 = default (1.675).
     float eyeHeightM;
+    // Intake gate (the host's frame queue, pipeline.rs): intakeWaiting = frames the host holds that a compositor boundary has already
+    // passed over (a standing queue: the app runs a frame ahead of the stream, every frame a period late). With intakeGate set the shim
+    // holds the app's next release while it is > 0, so the queue drains at the next boundary without dropping a rendered frame.
+    uint32_t intakeWaiting;
+    uint32_t intakeGate;
 };
 
 struct Haptic {
@@ -125,6 +130,8 @@ struct ShimToHost {
     float appFrameMs;              // envelope of release (WaitToBeginFrame return) -> frame GPU-complete: the running-start lead
     uint64_t releases;             // WaitToBeginFrame releases
     uint64_t releasesLate;         // releases whose computed time was already past (app slower than a display period: free-running)
+    uint64_t gateHolds;            // releases the intake gate held until the host's queue drained (see HostToShim::intakeGate)
+    uint64_t gateTimeouts;         // gate holds that gave up (the host did not take the waiting frame within 1.5 periods)
 };
 
 struct IpcState {
