@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 22;
+constexpr uint32_t kVersion = 23;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -128,6 +128,8 @@ struct ShimToHost {
     uint32_t frameSeq;             // seqlock for the frame fields: odd while the shim is writing them
     uint64_t frameClientTsNs;      // client tracking timestamp of the pose the app rendered that frame with
     double frameSubmitTimeS;       // shim clock when the frame was submitted
+    float frameRenderQuat[2][4];   // orientation (x y z w, tracking space) each eye's projection layer was rendered with: the host's re-stamp rotates from it
+    uint32_t frameHasProjection;   // 1 when the frame has a projection layer (frameRenderQuat valid)
     uint64_t slotHandle[kSlots];   // legacy shared texture handles (HANDLE values)
     int32_t sbsWidth, sbsHeight;
     uint32_t sbsFormat;            // DXGI_FORMAT of the SBS slots

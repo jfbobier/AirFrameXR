@@ -1533,13 +1533,18 @@ namespace {
                         WaitGpuIdleSpin();
                         SetEvent(m_gpuDone[slot]);
                     }
-                    m_publishQueue.push_back({slot, clientTs, composeStart, m_lastReleaseS.load(), trace});
+                    PendingFrame pf{slot, clientTs, composeStart, m_lastReleaseS.load(), trace, {{0, 0, 0, 1}, {0, 0, 0, 1}}, false};
+                    FrameRenderOrientation(layers, pf.renderQ, pf.hasProjection);
+                    m_publishQueue.push_back(pf);
                     lock.unlock();
                     m_publishCv.notify_all();
                 } else {
                     // OVRSHIM_SYNC_SUBMIT=1: wait for the GPU on the app thread (previous behaviour, kill switch)
                     WaitGpuIdleSpin();
-                    PublishFrame(slot, clientTs, composeStart, m_lastReleaseS.load(), trace);
+                    float rq[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
+                    bool hasProj = false;
+                    FrameRenderOrientation(layers, rq, hasProj);
+                    PublishFrame(slot, clientTs, composeStart, m_lastReleaseS.load(), trace, rq, hasProj);
                 }
             }
 
@@ -1578,7 +1583,25 @@ namespace {
 
         // Hands a composed (GPU-complete) slot to the host. Called by exactly one thread at a time: the publisher thread, or the
         // app thread when there is no publisher.
-        void PublishFrame(uint32_t slot, uint64_t clientTs, double composeStart, double releaseS, const FrameTraceRow& tr) {
+        // The orientation each eye's projection layer was rendered with (the host re-stamps a duplicate-timestamp frame with a newer
+        // tracking sample and rotates the picture from this orientation to the sample's).
+        static void FrameRenderOrientation(const std::vector<const ovrLayerHeader*>& layers, float q[2][4], bool& hasProjection) {
+            hasProjection = false;
+            for (const ovrLayerHeader* h : layers) {
+                if (h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth)) {
+                    const auto* l = (const ovrLayerEyeFov*)h;
+                    for (int e = 0; e < 2; e++) {
+                        q[e][0] = l->RenderPose[e].Orientation.x; q[e][1] = l->RenderPose[e].Orientation.y;
+                        q[e][2] = l->RenderPose[e].Orientation.z; q[e][3] = l->RenderPose[e].Orientation.w;
+                    }
+                    hasProjection = true;
+                    return;
+                }
+            }
+        }
+
+        void PublishFrame(uint32_t slot, uint64_t clientTs, double composeStart, double releaseS, const FrameTraceRow& tr,
+                          const float renderQ[2][4], bool hasProjection) {
             auto& s = m_ipc.state->shim;
             const double nowS = QpcSeconds();
             s.lastComposeMs = (float)((nowS - composeStart) * 1000.0);
@@ -1608,6 +1631,8 @@ namespace {
             s.frameSlot = slot;
             s.frameClientTsNs = clientTs;
             s.frameSubmitTimeS = QpcSeconds();
+            memcpy(s.frameRenderQuat, renderQ, sizeof(s.frameRenderQuat));
+            s.frameHasProjection = hasProjection ? 1u : 0u;
             s.frameCounter = ++m_framesPublished;
             MemoryBarrier();
             s.frameSeq++; // even: stable
@@ -1683,7 +1708,7 @@ namespace {
                         }
                         // same 50 ms cap as the spin wait: a hung GPU must not stall the stream forever
                         WaitForSingleObject(m_gpuDone[f.slot], 50);
-                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr);
+                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr, f.renderQ, f.hasProjection);
                         {
                             std::unique_lock lock(m_publishMutex);
                             m_publishQueue.pop_front();
@@ -2585,6 +2610,8 @@ namespace {
             double composeStart;
             double releaseS; // when WaitForVsync released the app for this frame (running-start envelope)
             FrameTraceRow tr;
+            float renderQ[2][4]; // per-eye render orientation (ipc frameRenderQuat), identity when there is no projection layer
+            bool hasProjection;
         };
         ComPtr<IDXGIDevice2> m_dxgiDevice2;
         HANDLE m_gpuDone[visionalvr_ipc::kSlots]{};

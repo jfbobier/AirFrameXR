@@ -767,7 +767,8 @@ mod nvh {
         pub fn nvh_ipc_vsync(ipc: *mut c_void, interval_s: f64);
         pub fn nvh_ipc_publish_input(ipc: *mut c_void, side: i32, clicks: u32, touches: u32, trigger: f32, squeeze: f32, sx: f32, sy: f32);
         pub fn nvh_ipc_poll_haptic(ipc: *mut c_void, side: i32, seq: *mut u32, freq: *mut f32, amp: *mut f32);
-        pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64) -> i32;
+        pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64, render_q8: *mut f32, has_projection: *mut i32) -> i32;
+        pub fn nvh_set_warp(hh: *mut c_void, ipc: *mut c_void, q_render8: *const f32, q_stamp4: *const f32, on: i32);
         pub fn nvh_qpc_seconds() -> f64;
         pub fn nvh_encode_green(nvh: *mut c_void, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_ipc_shim_alive(ipc: *mut c_void) -> i32;
@@ -1206,6 +1207,8 @@ pub(crate) struct Shared {
     /// (hostname, name, ip) of the connected headset
     headset: Mutex<Option<(String, String, String)>>,
     latest_sample_ts: Mutex<Option<Duration>>,
+    /// the newest tracking sample with its head orientation (x y z w): the host-side re-stamp (pipeline.rs)
+    latest_sample: Mutex<Option<(Duration, [f32; 4])>>,
     client_connected: AtomicBool,
     restart_from_idr: AtomicBool,
     tracking_events: AtomicUsize,
@@ -1530,7 +1533,10 @@ fn main() {
         // duplicate-timestamp fix (ipc.h dupRestamp): on unless VISIONALVR_DUP_RESTAMP=0 / video.dup_restamp false; wait VISIONALVR_DUP_WAIT_MS
         // (12: a bound longer than one 100 Hz sample interval lets the second frame of a bunch get the next sample; 8 ms left 4-7 % of the
         // heavy games' frames as duplicates, 12 ms 1 %, for +0.7 ms average wait; 2026-10-13 night)
-        let restamp = std::env::var("VISIONALVR_DUP_RESTAMP").map(|v| v != "0").unwrap_or(true);
+        let host_stamp = pipeline::host_stamp_enabled();
+        // the shim's own wait-and-re-stamp is the fallback when the host does not stamp (VISIONALVR_HOST_STAMP=0)
+        let restamp = !host_stamp && std::env::var("VISIONALVR_DUP_RESTAMP").map(|v| v != "0").unwrap_or(true);
+        event(origin, "host_stamp", json!({ "on": host_stamp }));
         let dup_wait_ms = std::env::var("VISIONALVR_DUP_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(12.0).clamp(0.0, 30.0);
         unsafe { nvh::nvh_ipc_set_dup_restamp(ipc, if restamp { 1 } else { 0 }, dup_wait_ms as f32) };
         event(origin, "dup_restamp", json!({ "on": restamp, "wait_ms": dup_wait_ms }));
@@ -1703,6 +1709,7 @@ fn main() {
                                 // un-extrapolated pose anyway.
                                 let (q, mut p) = (m.pose.orientation.to_array(), m.pose.position.to_array());
                                 p[1] += height_offset;
+                                *shared.latest_sample.lock() = Some((sample_timestamp, q));
                                 let (lv, av) = ([0f32; 3], [0f32; 3]);
                                 unsafe { nvh::nvh_ipc_publish_head(ipc, sample_timestamp.as_nanos() as u64, q.as_ptr(), p.as_ptr(), lv.as_ptr(), av.as_ptr()) };
                                 telemetry::head_sample(sample_timestamp.as_nanos() as u64, q, p);

@@ -80,6 +80,9 @@ struct Arrived {
     ts_ns: u64,
     submit_s: f64,
     arrival: Instant,
+    /// per-eye orientation the projection layer was rendered with (ipc frameRenderQuat), valid when `has_projection`
+    render_q: [f32; 8],
+    has_projection: bool,
 }
 
 /// Frame-level CSV mirrors for the harness (VISIONALVR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
@@ -195,6 +198,12 @@ pub struct Pipeline {
     gate_after: u64,
     /// boundaries that left a frame behind (since start): how long queues stood, whatever drained them
     pub standing_total: AtomicU64,
+    /// host-side re-stamp (VISIONALVR_HOST_STAMP, default on): a frame whose timestamp is not newer than the last sent is stamped with the newest
+    /// tracking sample the host holds at encode time and rotated to it (nvh_set_warp), instead of the shim waiting for that sample at submit
+    host_stamp: bool,
+    pub host_restamps: AtomicU64,
+    /// duplicates left as they were: no sample newer than the last sent frame at encode time
+    pub host_restamp_left: AtomicU64,
     /// the last boundary that found no frame (the app is not keeping up): the gate and the drain stay out for VISIONALVR_KEEPUP_BOUNDARIES (30)
     /// boundaries after it. A GPU-bound game delivers in bunches (two frames at half the boundaries, none at a tenth: Cyberpunk at 88 fps on a 100 Hz
     /// display, 2026-10-13 evening); that is not a standing queue, and skipping its releases only lowered its frame rate (258 skips in 82 s, hold unchanged).
@@ -242,6 +251,11 @@ pub struct Pipeline {
     gpu_sched: Mutex<Option<(i32, i64)>>,
 }
 
+/// VISIONALVR_HOST_STAMP (default on): see `Pipeline::host_stamp`
+pub fn host_stamp_enabled() -> bool {
+    std::env::var("VISIONALVR_HOST_STAMP").map(|v| v != "0").unwrap_or(true)
+}
+
 /// VISIONALVR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
 pub fn intake_gate_enabled() -> bool {
     std::env::var("VISIONALVR_INTAKE_GATE").map(|v| v != "0").unwrap_or(true)
@@ -274,6 +288,9 @@ impl Pipeline {
             pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "drain".into()),
             intake_gate: intake_gate_enabled(),
             gate_after: std::env::var("VISIONALVR_GATE_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).max(1),
+            host_stamp: host_stamp_enabled(),
+            host_restamps: AtomicU64::new(0),
+            host_restamp_left: AtomicU64::new(0),
             last_empty_idx: AtomicU64::new(0),
             keepup_boundaries: std::env::var("VISIONALVR_KEEPUP_BOUNDARIES").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30),
             standing_total: AtomicU64::new(0),
@@ -381,7 +398,8 @@ impl Pipeline {
         let ipc = self.ipc();
         while !self.stop.load(Ordering::Relaxed) {
             let (mut counter, mut slot, mut cts, mut submit_s) = (0u64, 0u32, 0u64, 0f64);
-            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s) } == 0 {
+            let (mut render_q, mut has_proj) = ([0f32; 8], 0i32);
+            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s, render_q.as_mut_ptr(), &mut has_proj) } == 0 {
                 continue;
             }
             let now = Instant::now();
@@ -391,7 +409,7 @@ impl Pipeline {
             if crate::simrig::active() {
                 crate::simrig::on_arrival(ipc, slot, counter as u32);
             }
-            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now };
+            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now, render_q, has_projection: has_proj != 0 };
             {
                 let mut q = self.intake.lock();
                 fate(counter, "A", now, slot as u64, cts);
@@ -594,6 +612,33 @@ impl Pipeline {
                     self.idr_restarts.fetch_add(1, Ordering::Relaxed);
                     self.frame_idx.store(0, Ordering::Relaxed);
                 }
+            }
+            // Host-side re-stamp: by the boundary the host usually holds a tracking sample newer than the one the frame was rendered with.
+            // A frame that would repeat the last sent timestamp (the headset skips those) is stamped with that sample and the picture is
+            // rotated from the eyes' render orientation to it in the encode path (nvh_set_warp -> warp pass -> foveation).
+            let mut ts = ts;
+            let mut warp_set = false;
+            if let (Job::App(a), true) = (&p.job, self.host_stamp) {
+                if a.has_projection && a.ts_ns != 0 {
+                    let last = *self.last_sent_ts.lock();
+                    if last != Duration::ZERO && ts <= last {
+                        let newest = *self.shared.latest_sample.lock();
+                        match newest {
+                            Some((sts, q)) if sts > last => {
+                                unsafe { nvh::nvh_set_warp(enc.handle, ipc, a.render_q.as_ptr(), q.as_ptr(), 1) };
+                                warp_set = true;
+                                ts = sts;
+                                self.host_restamps.fetch_add(1, Ordering::Relaxed);
+                            }
+                            _ => {
+                                self.host_restamp_left.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                }
+            }
+            if !warp_set {
+                unsafe { nvh::nvh_set_warp(enc.handle, ipc, std::ptr::null(), std::ptr::null(), 0) };
             }
             let force_idr = self.frame_idx.fetch_add(1, Ordering::Relaxed) == 0;
             {
@@ -799,6 +844,9 @@ impl Pipeline {
             "intake_drains": self.intake_drains.load(Ordering::Relaxed),
             "standing_total": self.standing_total.load(Ordering::Relaxed),
             "intake_gate": self.intake_gate,
+            "host_stamp": self.host_stamp,
+            "host_restamps": self.host_restamps.load(Ordering::Relaxed),
+            "host_restamp_left": self.host_restamp_left.load(Ordering::Relaxed),
             "gate_after": self.gate_after,
             "keepup_boundaries": self.keepup_boundaries,
             "intake_depth": self.intake_depth,
