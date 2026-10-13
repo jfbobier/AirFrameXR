@@ -10,8 +10,8 @@
 Stream PC OpenXR games to **Apple Vision Pro** with the stock **ALVR** visionOS app, **without SteamVR**, on NVIDIA GPUs.
 
 > [!WARNING]
-> **ALPHA SOFTWARE (0.2): TEST AT YOUR OWN RISK.**
-> On a real headset it has been tested by one person, on one PC (RTX 5090) with one Vision Pro (plus automated tests on a
+> **ALPHA SOFTWARE (0.3): TEST AT YOUR OWN RISK.**
+> On real headsets it has been tested by one person, on one PC (RTX 5090) with one Vision Pro and one Quest 3 (plus automated tests on a
 > laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
 > (both undone by `unregister_openxr_runtime.bat`). Keep comfort in mind: a frozen or juddering image in a headset can cause
 > discomfort; take the headset off if anything looks wrong. Provided "as is", without warranty of any kind (see [LICENSE](LICENSE)).
@@ -52,15 +52,21 @@ OpenXR game
 ```
 
 ## Status
-- **Works on the real headset** (tested on RTX 5090 + Vision Pro): the vast majority of UEVR games, Luke Ross mods (Dead Space
-  Remake), native VR games, controllers (ALVR's Quest/Touch emulation), haptics, game audio, discovery/pairing with the stock app.
+- **Works on the real headset** (tested on RTX 5090 + Vision Pro, and on a Quest 3 with the Meta-store ALVR client): the vast majority of
+  UEVR games, Luke Ross mods (Dead Space Remake), native VR games, controllers (ALVR's Quest/Touch emulation), haptics, game audio,
+  discovery/pairing with the stock app.
 - **Known issues**: some games still have controller and/or crash issues (for example one Unity game crashes, one UEVR game shows
   no image, one Unity game shows its menu very small). Use SteamVR + ALVR for those. Games running elevated (e.g. Cemu) cannot
   reach the streamer.
-- **Coming in 0.3** (work in progress on the [`0.3` branch](https://github.com/jfbobier/vision-alvr/tree/0.3)): a new **autoconfigure tool**
-  that proposes the best settings for your headset, PC hardware and software, and Wi-Fi / network setup. It checks your PC, connects to
-  the headset to read what it supports, runs a checklist of tests (encoder, picture quality, network, streaming) and proposes a
-  configuration you can change. The 0.2 release keeps the simpler configure tool below.
+- **New in 0.3**: a **setup wizard** (`configure.exe`) that reads what the headset supports, offers a community profile, a pre-filled
+  manual configuration or your existing ALVR settings, then tests the result (system and NVENC, encoder speed, network at the configured
+  bitrate, a real scene streamed through the pipeline with the headset's own head pose, audio); **Find headset...** in the streamer window;
+  any NVIDIA GPU with NVENC API 12.2+ (the RTX 40 check is gone); frame pacing with an intake gate and a three-deep in-order queue;
+  the Vision Pro profile defaults to foveated encoding at 300 Mbps. The "low"/"auto" latency modes were removed (they dropped 15-30 % of
+  frames in GPU-bound games).
+- **Vision Pro known issue**: in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips
+  them (shown fps a little under the host fps). A fix exists (branch `exp/restamp-2026-10-13`) but needs a change on the visionOS
+  client side, so it is not in the release.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
@@ -157,4 +163,4 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 
 ## Documentation
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers (v0.2)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers (v0.2, extended in 0.3)
