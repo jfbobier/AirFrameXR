@@ -160,6 +160,9 @@ namespace VisionALVR
         public double TestFps;   // the refresh rate the tests ran at
         public int SplitMode;    // the encoder test's split_encode_mode and the strips per frame it measured (>= 2 means split encoding engaged)
         public double Slices;
+        // the scene test (the real pipeline with the headset's head pose)
+        public double HeadSamplesPerS, HeadGapP95Ms, HeadYawRangeDeg, HeadMoveCm, SameTsPct, SceneAppFps, SliceLive;
+        public bool SceneRan;
     }
 
     /// The configuration proposed from the handshake and the tests, with a short reason for each value.

@@ -21,9 +21,10 @@ against every profile it finds (`profiles\` shipped with the package, then `conf
 2. **Propose.** The profile's `stream` values and one **network variant** (the bitrate depends on your Wi-Fi: you pick the line that describes yours,
    for instance after a bad earlier run). The wizard shows everything and lets you change it before anything runs.
 3. **Verify.** The wizard does not search for a configuration or measure your bandwidth: it checks *this* configuration on *this* PC and gives a
-   verdict with what it saw: encode time against the frame period, a streaming test with the headset at the configured bitrate (packet loss, frame
-   rate held, network latency not rising), decode and headset queues, audio, and **whether split encoding really engaged** (engines and strips per
-   frame reported by the encoder; a GPU that cannot split is flagged).
+   verdict with what it saw: encode time against the frame period, a network check at the configured bitrate (packet loss, frame rate held, network latency not rising), a
+   **scene test** (Littlest Tokyo streamed through the real pipeline with your head pose: tracking arrives, frames, latency, decode and headset queues),
+   audio, and **whether split encoding really engaged** (its own row: engines and strips per frame from the encoder test and the live stream; a GPU that
+   cannot split is flagged).
 4. **Save.** The values go into `config\session.json` and `config\visionalvr.json`, then the profile's `session_overrides` are written into
    `session.json`.
 

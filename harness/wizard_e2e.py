@@ -36,7 +36,7 @@ client = rf"{root}\{lib.CLIENT_EXE}"
 loop = ["@echo off", "set ALVR_BIND_IP=127.0.0.2", ":loop",
         f'"{client}" --report {wd}\\mock_report.json --connect-timeout 900 --seconds 1200 --refresh 100 --real-views --poll-ms 5 --queue-max 2 --display-sim --display-hz 100 > {wd}\\mock_stdout.txt 2>&1',
         "goto loop"]
-wiz = ["@echo off", f'"{wd}\\configure.exe" --allow-any-gpu --auto --headset-ip 127.0.0.2 --headset-host {host} --report {wd}\\report.json']
+wiz = ["@echo off", f'"{wd}\\configure.exe" --auto --headset-ip 127.0.0.2 --headset-host {host} --report {wd}\\report.json']
 for name, lines in (("va_mock", loop), ("va_wiz", wiz)):
     f = live.SCRATCH / f"{name}.cmd"
     live.SCRATCH.mkdir(parents=True, exist_ok=True)

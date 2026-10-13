@@ -5,7 +5,6 @@ $root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROF
 $run = "$root\runs\$Label"
 New-Item -ItemType Directory -Force "$run\cfg" | Out-Null
 $exe = "$root\src\ALVR-v20.14.1\target\release\alvr_host.exe"
-$env:VISIONALVR_ALLOW_ANY_GPU = '1'
 if ($Debug -gt 0) { $env:VISIONALVR_BENCH_DEBUG = "$Debug" }
 $args = "--config-dir $run\cfg --session $run\session.json --force-session --benchmark-quality --bench-scene $root\bench\littlest_tokyo.vab --bq-out $run\bq.json --bq-preview $run\preview.png --bq-plan $Plan --bq-frames $Frames --bq-warmup $Warmup --bq-metric-every $Every --bq-stride $Stride --bq-ref-scale $RefScale"
 if ($Mbps -gt 0) { $args += " --bench-mbps $Mbps" }

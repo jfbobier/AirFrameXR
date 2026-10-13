@@ -19,6 +19,8 @@ Copy-Item "$root\_tmp\install\licenses\*.txt" "$pkg\licenses" -Force
 # the benchmark scene (tools/bench_scene/build.sh, uploaded by `run.py build host`)
 New-Item -ItemType Directory -Force "$pkg\bench" | Out-Null
 if (Test-Path "$root\bench\littlest_tokyo.vab") { Copy-Item "$root\bench\littlest_tokyo.vab" "$pkg\bench\littlest_tokyo.vab" -Force }
+# the OpenXR scene app of the wizard's scene test (renders that scene through the real shim path with the headset's head pose)
+if (Test-Path "$root\build\probe\xr_probe.exe") { Copy-Item "$root\build\probe\xr_probe.exe" "$pkg\bench\xr_probe.exe" -Force }
 # the wizard's community headset profiles
 New-Item -ItemType Directory -Force "$pkg\profiles" | Out-Null
 if (Test-Path "$root\_tmp\install\profiles") { Copy-Item "$root\_tmp\install\profiles\*.json" "$pkg\profiles" -Force }
@@ -39,7 +41,7 @@ $zip = "$root\out\dist\VisionALVR-$version.zip"
 # everything sits under VisionALVR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
 $ship = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'LibOVRRT64_1.dll', 'virtualdesktop-openxr.dll', 'virtualdesktop-openxr.json',
           'register_openxr_runtime.ps1', 'register_openxr_runtime.bat', 'unregister_openxr_runtime.bat', 'README.txt',
-          'config\session.default.json', 'bench\littlest_tokyo.vab', 'THIRD_PARTY_NOTICES.md', 'LICENSE.txt')
+          'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'THIRD_PARTY_NOTICES.md', 'LICENSE.txt')
 $ship += $persShip
 $ship += $persFiles
 $ship += Get-ChildItem "$pkg\profiles" -File -Filter *.json | ForEach-Object { "profiles\$($_.Name)" }
@@ -52,5 +54,5 @@ foreach ($f in $ship) {
 }
 $za.Dispose(); $fs.Dispose()
 Get-ChildItem $pkg -Recurse -File | Select-Object @{n='file';e={$_.FullName.Substring($pkg.Length + 1)}}, Length | Format-Table -AutoSize | Out-String -Width 200
-$missing = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'LibOVRRT64_1.dll', 'virtualdesktop-openxr.dll', 'virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'THIRD_PARTY_NOTICES.md', 'licenses\ALVR-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
+$missing = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'LibOVRRT64_1.dll', 'virtualdesktop-openxr.dll', 'virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'THIRD_PARTY_NOTICES.md', 'licenses\ALVR-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
 if ($missing) { Write-Host "RESULT: FAILED missing $($missing -join ', ')" } else { Write-Host "RESULT: OK $pkg ($zip)" }

@@ -763,17 +763,32 @@ const char* arch_name(unsigned a) {
 }
 } // namespace
 
-// {"nvml":1,"name":..,"driver":..,"arch":8,"arch_name":"Ada","vram_mb":..} (arch: NVML architecture number, Ada = 8, Blackwell = 10)
+// The highest NVENC API version the installed driver supports, major << 4 | minor (12.2 = 0xC2), 0 when there is no NVENC library.
+static unsigned nvencMaxApiVersion() {
+    HMODULE h = LoadLibraryA("nvEncodeAPI64.dll");
+    if (!h) return 0;
+    typedef int (__stdcall *GetMax)(uint32_t*);
+    auto f = (GetMax)GetProcAddress(h, "NvEncodeAPIGetMaxSupportedVersion");
+    uint32_t v = 0;
+    if (!f || f(&v) != 0) v = 0;
+    FreeLibrary(h);
+    return v;
+}
+
+// {"nvml":1,"name":..,"driver":..,"arch":8,"arch_name":"Ada","vram_mb":..,"nvenc_api":"12.2"} (arch: NVML architecture number, Ada = 8, Blackwell = 10;
+// nvenc_api: highest NVENC API version of the driver, "" when none; the host is built against 12.2)
 int nvh_gpu_info(char* buf, int len) {
-    if (!nvml()) { snprintf(buf, len, "{\"nvml\":0}"); return 0; }
+    const unsigned nv = nvencMaxApiVersion();
+    char nvs[16] = ""; if (nv) snprintf(nvs, sizeof nvs, "%u.%u", nv >> 4, nv & 15);
+    if (!nvml()) { snprintf(buf, len, "{\"nvml\":0,\"nvenc_api\":\"%s\"}", nvs); return 0; }
     char name[96] = "?", drv[64] = "?"; unsigned arch = 0xFFFFFFFF; NvmlMem m{};
     if (g_nvml.name) g_nvml.name(g_nvml.dev, name, sizeof name);
     if (g_nvml.driver) g_nvml.driver(drv, sizeof drv);
     if (g_nvml.arch) g_nvml.arch(g_nvml.dev, &arch);
     if (g_nvml.mem) g_nvml.mem(g_nvml.dev, &m);
     for (char* c = name; *c; c++) if (*c == '"' || *c == '\\') *c = ' ';
-    return snprintf(buf, len, "{\"nvml\":1,\"name\":\"%s\",\"driver\":\"%s\",\"arch\":%d,\"arch_name\":\"%s\",\"vram_mb\":%llu,\"chosen\":%d,\"gpus\":%s}",
-                    name, drv, arch == 0xFFFFFFFF ? -1 : (int)arch, arch_name(arch), m.total >> 20, g_nvml.chosen, g_nvml.gpus.c_str());
+    return snprintf(buf, len, "{\"nvml\":1,\"name\":\"%s\",\"driver\":\"%s\",\"arch\":%d,\"arch_name\":\"%s\",\"vram_mb\":%llu,\"chosen\":%d,\"nvenc_api\":\"%s\",\"gpus\":%s}",
+                    name, drv, arch == 0xFFFFFFFF ? -1 : (int)arch, arch_name(arch), m.total >> 20, g_nvml.chosen, nvs, g_nvml.gpus.c_str());
 }
 
 // One CSV row: gpu%,mem%,enc%,dec%,graphics MHz,memory MHz,video MHz,power W,temp C,pstate,vram used MB,clock event reasons

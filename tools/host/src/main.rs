@@ -278,7 +278,6 @@ fn parse_args() -> Result<Args, String> {
             "--dump-qpmap" => a.dump_qpmap = Some(v()?.into()),
             "--idle-rgb" => a.idle_rgb = Some(parse_rgb(&v()?)?),
             "--gpu-priority" => a.gpu_priority = Some(v()?.parse().map_err(|e| format!("{e}"))?),
-            "--allow-any-gpu" => std::env::set_var("VISIONALVR_ALLOW_ANY_GPU", "1"), // tests on an older GPU (the product needs an RTX 40 or newer)
             "--running-start-ms" => a.running_start_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--no-follow-rate" => a.follow_rate = false,
             "--head-wait-ms" => a.head_wait_ms = v()?.parse().map_err(|e| format!("{e}"))?,

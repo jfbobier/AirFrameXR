@@ -220,29 +220,29 @@ pub fn spawn_stdin_control() {
 
 // ---- system check -----------------------------------------------------------------------------------------------------------
 
-/// NVML architecture numbers: Ada (RTX 40) = 8, Hopper = 9, Blackwell (RTX 50) = 10.
-pub const MIN_ARCH: i64 = 8;
+/// The host is built against NVENC API 12.2 (split-frame encoding needs >= 12.1): the driver must support at least that.
+pub const MIN_NVENC_API: (u32, u32) = (12, 2);
 
 pub fn system_check(gpu_info: Value) -> Value {
-    let arch = gpu_info["arch"].as_i64().unwrap_or(-1);
     let name = gpu_info["name"].as_str().unwrap_or("").to_string();
-    // NVML missing or an unknown (newer) architecture: fall back on the name
-    let by_name = ["RTX 40", "RTX 50", "RTX 60", "Ada", "Blackwell"].iter().any(|k| name.contains(k));
-    let ok = arch >= MIN_ARCH || (arch < 0 && by_name);
-    let override_ = std::env::var("VISIONALVR_ALLOW_ANY_GPU").as_deref() == Ok("1");
+    let nvenc = gpu_info["nvenc_api"].as_str().unwrap_or("").to_string();
+    let api = nvenc.split_once('.').and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)));
+    let has_nvidia = gpu_info["nvml"].as_i64().unwrap_or(0) == 1 || name.to_lowercase().contains("nvidia");
+    let ok = has_nvidia && api.map_or(false, |v| v >= MIN_NVENC_API);
     json!({
         "version": VERSION,
         "alvr_protocol": alvr_common::protocol_id(),
         // what a compatible headset puts in its discovery broadcast (bytes 16..24, little endian), as a string (u64)
         "alvr_protocol_id": alvr_common::protocol_id_u64().to_string(),
         "gpu": gpu_info,
-        "gpu_supported": ok,
-        "gpu_override": override_,
-        "ok": ok || override_,
-        "reason": if ok { "".to_string() } else if gpu_info["nvml"].as_i64().unwrap_or(0) == 0 && !name.to_lowercase().contains("nvidia") {
-            format!("VisionALVR streams with NVIDIA's hardware encoder and needs an NVIDIA GeForce RTX 40 series GPU or newer; no NVIDIA GPU was found{}", if name.is_empty() { String::new() } else { format!(" ('{name}')") })
+        "nvenc_api": nvenc,
+        "ok": ok,
+        "reason": if ok { "".to_string() } else if !has_nvidia {
+            "VisionALVR streams with NVIDIA's hardware video encoder (NVENC); no NVIDIA GPU was found".to_string()
+        } else if api.is_none() {
+            "the NVIDIA video encoder library (nvEncodeAPI64.dll) was not found: install or update the NVIDIA driver".to_string()
         } else {
-            format!("needs an NVIDIA GeForce RTX 40 series or newer (Ada / Blackwell); found '{name}'")
+            format!("the NVIDIA driver supports NVENC API {nvenc}; VisionALVR needs {}.{} or newer: update the NVIDIA driver", MIN_NVENC_API.0, MIN_NVENC_API.1)
         },
     })
 }

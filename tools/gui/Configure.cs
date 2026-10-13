@@ -451,8 +451,6 @@ namespace VisionALVR
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             var args = Environment.GetCommandLineArgs();
-            // tests on an older GPU than the product supports: the streamer processes inherit the variable
-            if (args.Contains("--allow-any-gpu")) Environment.SetEnvironmentVariable("VISIONALVR_ALLOW_ANY_GPU", "1");
             Log.Write("INFO", $"configure.exe {Version.Text} start ({Paths.Dir})");
             var check = File.Exists(Paths.Host) ? SystemCheck.Run() : null;
             if (args.Contains("--advanced")) { Application.Run(new ConfigureForm(check)); return; }

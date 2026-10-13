@@ -7,11 +7,12 @@ It started as a benchmark that informs a configuration; it should become a wizar
 ## What exists and can be reused
 | Piece | Where | Reuse |
 |---|---|---|
-| GPU check | `alvr_host --system-check` -> `gpu_supported`, `reason` (NVML architecture >= Ada); `VISIONALVR_ALLOW_ANY_GPU=1` | step 0 |
+| GPU check | `alvr_host --system-check` -> `ok`, `reason`, `nvenc_api` (NVIDIA GPU + NVENC API >= 12.2) | step 0 |
 | Discovery | `alvr_host --discover <s>` (mDNS for the Vision Pro, UDP 9943 for Quest-style), `Discovery` class in Common.cs | step 1 |
 | Pairing | `Session.Pair` writes `client_connections` (+ `manual_ips`) in session.json, `headset.*` in visionalvr.json | step 1 |
 | Encoder test | `alvr_host --live --bench 300 --encode-profile X` -> `bench` event (p50/p95, fits at 90 % of the frame time) | step 3 |
 | Quality benchmark | `alvr_host --benchmark-quality` -> `bq_result` / `bq_summary` (three proposals) | step 3 |
+| Scene test | host `--shim --daemon --gui` + `bench\xr_probe.exe` (XR_PROBE_SCENE = Littlest Tokyo, runtime from this folder): the real pipeline with the headset's head pose; head samples/s, pose range seen by the app (pose csv), repeated samples, strips per packet, ALVR client stats | step 3 |
 | Network test | `alvr_host --benchmark-network 100,200,...` -> `bench_step` / `bench_result` (clean bitrate) | step 3 |
 | Settings controls | `SettingsTab()` (resolution, fps, bitrate, foveation, audio, protocol, ...) | step 5 |
 | Process/events | `HostProcess` (JSON events from a host child process) | all tests |
@@ -26,8 +27,8 @@ It started as a benchmark that informs a configuration; it should become a wizar
    shows as paired but not in the list. Fix: seed the list from the known entries at start, de-duplicate with discovery results, preselect the known
    one, and show it in both places (selected + list).
 2. **Handshake and what we learned.** Connect (the ALVR app open on the headset), capture the headset's advertised capabilities, show them, let the
-   user override, then choose **Autoconfigure (recommended)** -> step 3 or **Manual / update existing** -> step 5 (prefilled from the existing
-   session.json + visionalvr.json). Capabilities come from `VideoStreamingCapabilities` + `display_name` (server_core/src/connection.rs ~575). The
+   the read-only stats, then exactly two options, both leading to the tests (step 3): **Community profile (recommended)** (the matching or an
+   imported profile, plus the network it is for) or **Manual configuration** (values pre-filled from the stats: rate, scale, foveation). Capabilities come from `VideoStreamingCapabilities` + `display_name` (server_core/src/connection.rs ~575). The
    current host never exposes them (only the negotiated result lands in `openvr_config`), so: a small server_core patch like
    `client-stats-log.patch` (`client-caps-log.patch`: one log line with the JSON), parsed in logs.rs into a `client_capabilities` event, and a new
    `alvr_host --handshake <s>` mode that connects, emits it and disconnects (no game, no SteamVR needed).

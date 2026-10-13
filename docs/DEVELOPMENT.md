@@ -18,8 +18,8 @@ headsets are out of scope; forks that adapt it are welcome.
 
 Open a new terminal after installing so `PATH` is updated. The build scripts expect Visual Studio **Community** at its default
 path. Known-good versions (`deps.lock.json`, `toolchain_builder`): Rust 1.99, CMake 4.4, clang 23.1, NuGet 7.9, MSVC 14.44,
-Windows SDK 26100, NVIDIA driver 617.14 (NVENC SDK 12.2). Any NVENC GPU can build and run the tests; only `VisionALVR.exe`
-refuses GPUs older than RTX 40 (`VISIONALVR_ALLOW_ANY_GPU=1` lifts that check for development).
+Windows SDK 26100, NVIDIA driver 617.14 (NVENC SDK 12.2). Any NVENC GPU can build and run the tests; `VisionALVR.exe`
+only checks for an NVIDIA GPU and NVENC API >= 12.2.
 
 ## Build
 ```powershell

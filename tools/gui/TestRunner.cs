@@ -94,11 +94,9 @@ namespace VisionALVR
                     ctx.R.Driver = gpu != null && gpu.TryGetValue("driver", out var d) ? d as string ?? "" : "";
                     ctx.R.VramMb = (int)Num(gpu, "vram_mb");
                     var ok = chk != null && chk.TryGetValue("ok", out var o) && o is bool ob && ob;
-                    var overrideOn = chk != null && chk.TryGetValue("gpu_override", out var go) && go is bool gb && gb;
-                    var supported = chk != null && chk.TryGetValue("gpu_supported", out var gs) && gs is bool gsb && gsb;
                     if (!ok) throw new TestFailed(chk != null && chk.TryGetValue("reason", out var r) ? r as string : "the system check did not run");
-                    if (!supported && overrideOn) st.Warn();
-                    return $"{ctx.R.GpuName} ({ctx.R.GpuArch}), driver {ctx.R.Driver}, {ctx.R.VramMb / 1024.0:0} GB" + (!supported && overrideOn ? " - not a supported GPU, allowed for testing" : "");
+                    var nvenc = chk.TryGetValue("nvenc_api", out var nv) ? nv as string ?? "" : "";
+                    return $"{ctx.R.GpuName} ({ctx.R.GpuArch}), driver {ctx.R.Driver}, {ctx.R.VramMb / 1024.0:0} GB, NVENC API {nvenc}";
                 },
             });
 
@@ -123,14 +121,6 @@ namespace VisionALVR
                     if (error != null) throw new TestFailed(error);
                     if (result == null) throw new TestFailed("the encoder test produced no result (see logs\\VisionALVR.log)");
                     if (!ctx.R.EncodeFits) { st.Warn(); result += ctx.Profile != null ? " - too slow for this configuration: lower the resolution or the refresh rate in the setup" : " - too slow for this rate: the later tests and the proposal use a lower resolution or rate"; }
-                    if (ctx.Profile != null && ctx.Profile.SplitEncode > 0 && !ctx.Profile.Foveated)
-                    {
-                        // advanced users want to know whether split encoding really runs: the encoder reports its engines and the strips it produced per frame
-                        var engaged = ctx.R.Engines >= 2 && ctx.R.Slices >= 1.5;
-                        result += engaged ? $"; split encoding engaged ({ctx.R.Slices:0.#} strips per frame on {ctx.R.Engines} engines)"
-                                          : $"; split encoding NOT engaged ({ctx.R.Engines} NVENC engine(s), {ctx.R.Slices:0.#} strip per frame): this GPU encodes the frame in one piece, expect a longer encode time";
-                        if (!engaged) st.Warn();
-                    }
                     ctx.OnEncoderDone();
                     return result;
                 },
@@ -233,36 +223,140 @@ namespace VisionALVR
 
             steps.Add(new TestStep
             {
-                Name = "Streaming test with the headset (latency, frames, decoder)",
+                Name = "Scene test: Littlest Tokyo through the real pipeline (head tracking, frames, latency)",
                 NeedsHeadset = true,
                 Run = async (ctx, st) =>
                 {
                     if (!ctx.HeadsetAvailable) throw new TestSkipped("needs the headset connected");
-                    string error = null; bool connected = false;
+                    var probe = System.IO.Path.Combine(Paths.Dir, "bench", "xr_probe.exe");
+                    var scene = System.IO.Path.Combine(Paths.Dir, "bench", "littlest_tokyo.vab");
+                    var runtime = System.IO.Path.Combine(Paths.Dir, "virtualdesktop-openxr.json");
+                    if (!System.IO.File.Exists(probe) || !System.IO.File.Exists(scene) || !System.IO.File.Exists(runtime)) throw new TestSkipped("bench\\xr_probe.exe, bench\\littlest_tokyo.vab or the runtime is missing from this folder");
+                    var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "visionalvr_scene_test");
+                    System.IO.Directory.CreateDirectory(tmp);
+                    var poseCsv = System.IO.Path.Combine(tmp, "pose.csv");
+                    try { System.IO.File.Delete(poseCsv); } catch { }
+                    string error = null; bool connected = false, gameOn = false, gameDone = false;
+                    DateTime gameStart = DateTime.MinValue;
+                    double frames = 0, fpsW = 0, sameTs = 0, trkN = 0, gapP95 = 0, slices = 0, encMs = 0;
                     double w = 0, total = 0, game = 0, enc = 0, net = 0, dec = 0, dq = 0, vq = 0, cf = 0, df = 0, mbps = 0;
-                    void take(Dictionary<string, object> cl)
+                    var host = new HostProcess();
+                    host.OnEvent += (n, d) =>
                     {
-                        if (cl == null) return;
-                        var s = Math.Max(1, Num(cl, "samples"));
-                        w += s; total += s * Num(cl, "total_latency_ms"); game += s * Num(cl, "game_ms"); enc += s * Num(cl, "encode_ms"); net += s * Num(cl, "network_ms");
-                        dec += s * Num(cl, "decode_ms"); dq += s * Num(cl, "decoder_queue_ms"); vq += s * Num(cl, "vsync_queue_ms");
-                        cf += s * Num(cl, "client_fps"); df += s * Num(cl, "displayed_fps"); mbps += s * Num(cl, "bitrate_mbps");
+                        try
+                        {
+                            if (n == "client_connected") connected = true;
+                            else if (n == "setup_error") error = d != null && d.TryGetValue("message", out var m) ? m as string : "setup error";
+                            else if (n == "game_started") { gameOn = true; gameStart = DateTime.UtcNow; }
+                            else if (n == "game_ended") gameDone = true;
+                            else if (n == "encoder_stats" && gameOn && !gameDone && (DateTime.UtcNow - gameStart).TotalSeconds > 5 && d != null)
+                            {
+                                // the first seconds (scene loading, the encoder settling) are left out
+                                var f = Math.Max(1, Num(d, "frames"));
+                                frames += f; fpsW += f * Num(d, "fps"); sameTs += Num(d, "same_ts_frames"); encMs += f * Num(d, "encode_ms_avg");
+                                slices += f * Num(d, "slices_per_packet");
+                                var gap = Sub(d, "tracking_gap_ms");
+                                trkN += Num(gap, "n"); gapP95 = Math.Max(gapP95, Num(gap, "p95"));
+                                var cl = Sub(d, "client");
+                                if (cl != null)
+                                {
+                                    var sm = Math.Max(1, Num(cl, "samples"));
+                                    w += sm; total += sm * Num(cl, "total_latency_ms"); game += sm * Num(cl, "game_ms"); enc += sm * Num(cl, "encode_ms"); net += sm * Num(cl, "network_ms");
+                                    dec += sm * Num(cl, "decode_ms"); dq += sm * Num(cl, "decoder_queue_ms"); vq += sm * Num(cl, "vsync_queue_ms");
+                                    cf += sm * Num(cl, "client_fps"); df += sm * Num(cl, "displayed_fps"); mbps += sm * Num(cl, "bitrate_mbps");
+                                }
+                            }
+                        }
+                        catch (Exception e) { Log.Write("ERROR", "scene test event handler: " + e.Message); }
+                    };
+                    var exited = new TaskCompletionSource<int>();
+                    host.OnExit += code => exited.TrySetResult(code);
+                    var herr = host.Start($"--install-dir \"{Paths.Dir}\" --shim --daemon --gui");
+                    if (herr != null) throw new TestFailed(herr);
+                    var reg = ctx.Ct.Register(() => { host.Stop(2000); exited.TrySetCanceled(); });
+                    System.Diagnostics.Process app = null;
+                    try
+                    {
+                        ctx.Status("Scene test: waiting for the headset (open the ALVR app)...");
+                        var t0 = DateTime.UtcNow;
+                        while (!connected && error == null && !exited.Task.IsCompleted && (DateTime.UtcNow - t0).TotalSeconds < 120) await Task.Delay(300, ctx.Ct);
+                        if (error != null) throw new TestFailed(error);
+                        if (!connected) throw new TestFailed("the headset did not connect");
+                        var nFrames = (int)(ctx.Fps * 32);
+                        var psi = new System.Diagnostics.ProcessStartInfo(probe, $"\"{System.IO.Path.Combine(tmp, "scene.log")}\" {nFrames} 60 \"{poseCsv}\"")
+                        { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = tmp };
+                        psi.EnvironmentVariables["XR_RUNTIME_JSON"] = runtime;
+                        psi.EnvironmentVariables["XR_PROBE_SCENE"] = scene;
+                        try { app = System.Diagnostics.Process.Start(psi); } catch (Exception e) { throw new TestFailed("cannot start the scene app: " + e.Message); }
+                        ctx.Status("Scene test: you are inside Littlest Tokyo. Look around slowly (left, right, up, down) for about 30 seconds...");
+                        await Task.Run(() => { while (!app.HasExited && !ctx.Ct.IsCancellationRequested) System.Threading.Thread.Sleep(200); });
+                        if (error != null) throw new TestFailed(error);
                     }
-                    ctx.Status("Streaming test: waiting for the headset (open the ALVR app)...");
-                    await Host(ctx, Base + "--live --seconds 24 --connect-timeout 120", (n, d) =>
+                    finally
                     {
-                        if (n == "client_connected") { connected = true; ctx.Status("Streaming test: measuring for 24 s..."); }
-                        else if (n == "setup_error") error = d != null && d.TryGetValue("message", out var m) ? m as string : "setup error";
-                        else if (n == "encoder_stats" || n == "status") take(Sub(d, "client"));
-                    }, 240000);
-                    if (error != null) throw new TestFailed(error);
-                    if (!connected) throw new TestFailed("the headset did not connect");
-                    if (w <= 0) throw new TestFailed("the headset sent no statistics");
+                        try { if (app != null && !app.HasExited) app.Kill(); } catch { }
+                        host.Stop(4000);
+                        reg.Dispose();
+                    }
+                    ctx.Ct.ThrowIfCancellationRequested();
+                    if (frames <= 0) throw new TestFailed("the scene app streamed no frames (see logs): the runtime may be registered for another folder or the scene app could not start");
                     var r = ctx.R;
-                    r.TotalMs = total / w; r.GameMs = game / w; r.EncoderMs = enc / w; r.NetworkMs = net / w; r.DecodeMs = dec / w; r.DecoderQueueMs = dq / w; r.VsyncQueueMs = vq / w;
-                    r.ClientFps = cf / w; r.DisplayedFps = df / w; r.StreamedMbps = mbps / w;
-                    if (Reference.Latency(r.TotalMs, Targets.For(Math.Max(1, r.EncW), Math.Max(1, r.EncH), ctx.Fps)) == Rating.Poor) st.Warn();
-                    return $"latency {r.TotalMs:0.0} ms (encode {r.EncoderMs:0.0}, network {r.NetworkMs:0.0}, decode {r.DecodeMs:0.0}, headset queues {r.DecoderQueueMs + r.VsyncQueueMs:0.0}), {r.DisplayedFps:0} fps shown";
+                    r.SceneRan = true;
+                    var secs = frames / Math.Max(1, fpsW / frames);
+                    r.SceneAppFps = fpsW / frames;
+                    r.SameTsPct = 100.0 * sameTs / frames;
+                    r.HeadSamplesPerS = trkN / Math.Max(1, secs);
+                    r.HeadGapP95Ms = gapP95;
+                    r.SliceLive = slices / frames;
+                    // the head pose as the scene app received it (headset -> host -> shim -> app): its range during the test
+                    var yaw = new List<double>(); var xs = new List<double>(); var ys = new List<double>(); var zs = new List<double>();
+                    try
+                    {
+                        foreach (var line in System.IO.File.ReadAllLines(poseCsv).Skip(1))
+                        {
+                            var c = line.Split(',');
+                            if (c.Length < 5) continue;
+                            yaw.Add(double.Parse(c[1], CultureInfo.InvariantCulture)); xs.Add(double.Parse(c[2], CultureInfo.InvariantCulture)); ys.Add(double.Parse(c[3], CultureInfo.InvariantCulture)); zs.Add(double.Parse(c[4], CultureInfo.InvariantCulture));
+                        }
+                    }
+                    catch { }
+                    if (yaw.Count == 0) throw new TestFailed("the scene app received no head pose from the headset");
+                    // unwrap the yaw so a turn through +-180 is not counted as a jump
+                    double acc = yaw[0], mn = acc, mx = acc;
+                    for (int i = 1; i < yaw.Count; i++) { var dlt = yaw[i] - yaw[i - 1]; while (dlt > Math.PI) dlt -= 2 * Math.PI; while (dlt < -Math.PI) dlt += 2 * Math.PI; acc += dlt; mn = Math.Min(mn, acc); mx = Math.Max(mx, acc); }
+                    r.HeadYawRangeDeg = (mx - mn) * 180 / Math.PI;
+                    r.HeadMoveCm = 100 * Math.Max(xs.Max() - xs.Min(), Math.Max(ys.Max() - ys.Min(), zs.Max() - zs.Min()));
+                    if (w > 0)
+                    {
+                        r.TotalMs = total / w; r.GameMs = game / w; r.EncoderMs = enc / w; r.NetworkMs = net / w; r.DecodeMs = dec / w; r.DecoderQueueMs = dq / w; r.VsyncQueueMs = vq / w;
+                        r.ClientFps = cf / w; r.DisplayedFps = df / w; r.StreamedMbps = mbps / w;
+                    }
+                    var moved = r.HeadYawRangeDeg >= 5 || r.HeadMoveCm >= 3;
+                    var problems = new List<string>();
+                    if (r.HeadSamplesPerS < 0.8 * ctx.Fps) problems.Add($"head tracking arrives at only {r.HeadSamplesPerS:0}/s (expected about {ctx.Fps:0})");
+                    if (!moved) problems.Add("no head movement was seen: look around during the test to verify tracking");
+                    if (w > 0 && Reference.Latency(r.TotalMs, Targets.For(Math.Max(1, r.EncW), Math.Max(1, r.EncH), ctx.Fps)) == Rating.Poor) problems.Add("high latency");
+                    if (problems.Count > 0) st.Warn();
+                    return $"head pose reaches the scene ({r.HeadSamplesPerS:0}/s, gaps up to {r.HeadGapP95Ms:0} ms; turned {r.HeadYawRangeDeg:0} deg, moved {r.HeadMoveCm:0} cm); streamed {r.SceneAppFps:0} fps, {r.SameTsPct:0.#}% repeated head samples" +
+                           (w > 0 ? $"; latency {r.TotalMs:0.0} ms (encode {r.EncoderMs:0.0}, network {r.NetworkMs:0.0}, decode {r.DecodeMs:0.0}, headset queues {r.DecoderQueueMs + r.VsyncQueueMs:0.0}), {r.DisplayedFps:0} fps shown" : "; the headset sent no statistics") +
+                           (problems.Count > 0 ? " - " + string.Join("; ", problems) : "");
+                },
+            });
+
+            steps.Add(new TestStep
+            {
+                Name = "Split encoding (one frame cut in strips, one per NVENC engine)",
+                Run = async (ctx, st) =>
+                {
+                    await Task.Yield();
+                    var wanted = ctx.Profile != null ? ctx.Profile.SplitEncode > 0 && !ctx.Profile.Foveated : false;
+                    if (!wanted) throw new TestSkipped(ctx.Profile == null ? "not used by this configuration (foveated encoding encodes a smaller frame in one piece)" : "this profile does not use it");
+                    var r = ctx.R;
+                    var benchOn = r.Engines >= 2 && r.Slices >= 1.5;
+                    var live = r.SceneRan ? $"; the live stream carried {r.SliceLive:0.#} strips per frame" : "";
+                    if (benchOn && (!r.SceneRan || r.SliceLive >= 1.5)) return $"engaged: {r.Slices:0.#} strips per frame on {r.Engines} NVENC engines (encoder test){live}";
+                    st.Warn();
+                    return $"NOT engaged: {r.Engines} NVENC engine(s), {r.Slices:0.#} strip per frame in the encoder test{live}. This GPU encodes the whole frame in one piece: expect a longer encode time, so lower the resolution or refresh rate if the encoder test was slow.";
                 },
             });
 

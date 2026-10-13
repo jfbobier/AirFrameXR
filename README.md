@@ -16,7 +16,7 @@ Stream PC OpenXR games to **Apple Vision Pro** with the stock **ALVR** visionOS 
 > (both undone by `unregister_openxr_runtime.bat`). Keep comfort in mind: a frozen or juddering image in a headset can cause
 > discomfort; take the headset off if anything looks wrong. Provided "as is", without warranty of any kind (see [LICENSE](LICENSE)).
 
-**Main focus:** the **Windows** streamer on an **NVIDIA GeForce RTX 40 series or newer** GPU, with the **ALVR app (20.14.x) on
+**Main focus:** the **Windows** streamer on an **NVIDIA** GPU (RTX 40 series or newer recommended; any NVENC 12.2 driver runs), with the **ALVR app (20.14.x) on
 Apple Vision Pro**. That is what is built, tuned and tested here.
 
 This is a **personal project**. It targets NVIDIA because that is what I run, and the Vision Pro because that is my headset.
@@ -68,7 +68,7 @@ OpenXR game
 `docs/progress.md` is the detailed log: what is built, what is tested (and how), what is not.
 
 ## Requirements
-- Windows 10/11, **NVIDIA GeForce RTX 40 series or newer** (the runtime refuses older GPUs).
+- Windows 10/11, an **NVIDIA** GPU with a current driver (NVENC API 12.2+); RTX 40 series or newer recommended (several NVENC chips enable split encoding).
 - Apple Vision Pro with the **ALVR** app (20.14.x), PC and headset on the same LAN (Wi-Fi 6 on 5 GHz for the first Vision Pro; 6 GHz is for newer models and Quest 3). Other headsets with an ALVR client: see above.
 - SteamVR and ALVR's own launcher closed while streaming (same ports).
 

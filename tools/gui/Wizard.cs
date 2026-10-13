@@ -1,5 +1,5 @@
 // configure.exe as an autoconfigure wizard (docs/CONFIGURE_WIZARD.md):
-//   0 gate (NVIDIA RTX 40 or newer) - 1 headset - 2 handshake and what we learned - 3 tests with a checklist - 4 how the setup performs - 5 proposed configuration.
+//   0 gate (NVIDIA GPU + NVENC API 12.2) - 1 headset - 2 handshake and what we learned - 3 tests with a checklist - 4 how the setup performs - 5 proposed configuration.
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -46,7 +46,8 @@ namespace VisionALVR
         readonly Label discStatus = Ui.Line("");
         string chosenHost = "", chosenIp = "", chosenName = "";
         // handshake page
-        ComboBox rateBox; NumericUpDown scaleBox; CheckBox foveationBox; Label hsStatus; FlowLayoutPanel hsDetails; Button hsRetry, hsSkip, hsAuto, hsManual;
+        ComboBox rateBox; NumericUpDown scaleBox; CheckBox foveationBox; Label hsStatus; FlowLayoutPanel hsDetails, modePanel; Button hsRetry, hsSkip, hsGo;
+        RadioButton modeProfile, modeManual; HmdProfile matchedProfile;
         ProgressBar hsBar;
         // tests page
         ListView testList; Label testStatus; Button testCancel;
@@ -142,7 +143,6 @@ namespace VisionALVR
         void GoBack()
         {
             if (step == 3) { testCts?.Cancel(); }
-            if (step == 5 && !autoconfig) { GoTo(2); return; }
             GoTo(Math.Max(1, step - 1));
         }
 
@@ -179,7 +179,7 @@ namespace VisionALVR
             var reason = check != null && check.TryGetValue("reason", out var r) ? r as string : "the system check did not run (alvr_host.exe missing?)";
             p.Controls.Add(Ui.Line(reason));
             if (gpu != null) p.Controls.Add(Ui.Line($"Detected: {(gpu.TryGetValue("name", out var n) ? n : "?")}, driver {(gpu.TryGetValue("driver", out var d) ? d : "?")}"));
-            p.Controls.Add(Ui.Line("VisionALVR streams with NVIDIA's hardware video encoder (NVENC) on GeForce RTX 40 series GPUs and newer (Ada / Blackwell)."));
+            p.Controls.Add(Ui.Line("VisionALVR streams with NVIDIA's hardware video encoder (NVENC): it needs an NVIDIA GPU and a driver with NVENC API 12.2 or newer (any recent driver; update it from nvidia.com if this fails)."));
             return p;
         }
 
@@ -311,13 +311,9 @@ namespace VisionALVR
             p.Controls.Add(bar);
             hsDetails = new FlowLayoutPanel { AutoSize = true, Visible = false, WrapContents = false };
             p.Controls.Add(hsDetails);
-            hsAuto = new Button { Text = "Autoconfigure (recommended)", AutoSize = true, Font = Ui.Big, Padding = new Padding(10), Visible = false };
-            hsAuto.Click += (s, e) => { autoconfig = true; ApplyOverrides(); GoTo(3); };
-            hsManual = new Button { Text = "Manual configuration / update my existing settings", AutoSize = true, Visible = false };
-            hsManual.Click += (s, e) => { autoconfig = false; ApplyOverrides(); GoTo(5); };
-            var choices = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 14, 0, 0) };
-            choices.Controls.Add(hsAuto); choices.Controls.Add(hsManual);
-            p.Controls.Add(choices);
+            hsGo = new Button { Text = "Run the tests >", AutoSize = true, Font = Ui.Big, Padding = new Padding(10), Visible = false, Margin = new Padding(0, 12, 0, 0) };
+            hsGo.Click += (s, e) => ContinueToTests();
+            p.Controls.Add(hsGo);
             if (demo) ShowHandshakeResult(true); else BeginHandshake();
             return p;
         }
@@ -353,7 +349,7 @@ namespace VisionALVR
                 hs.Hostname = h != null ? h.Item1 : chosenHost; hs.Ip = chosenIp;
                 hs.DisplayName = h != null && h.Item2 != null && h.Item2.Length > 0 ? h.Item2 : chosenName;
                 ShowHandshakeResult(true);
-                if (auto) hsAuto.PerformClick();
+                if (auto) ContinueToTests();
             }));
             discovery?.Dispose();
             var err = local.Start(Base() + "--live --seconds 3 --connect-timeout 90");
@@ -365,50 +361,84 @@ namespace VisionALVR
         void ShowHandshakeResult(bool real)
         {
             hsBar.Visible = false; hsRetry.Visible = false; hsSkip.Visible = false;
-            hsStatus.Text = real ? $"Connected to {hs.DisplayName}. This is what it told us, and what the setup will be based on:" : "No headset data: the defaults of a Vision Pro are used, and the tests that need the headset are skipped.";
+            hsStatus.Text = real ? $"Connected to {hs.DisplayName}. This is what it told us:" : "No headset data: the defaults of a Vision Pro are used, and the tests that need the headset are skipped.";
             hsStatus.ForeColor = real ? Color.SeaGreen : Color.DarkOrange;
             hsDetails.Controls.Clear();
-            var g = new TableLayoutPanel { ColumnCount = 3, AutoSize = true };
-            void row(string k, string v, Control edit = null)
-            {
-                g.Controls.Add(Ui.Line(k, Ui.Bold));
-                if (edit == null) { var t = Ui.Line(v); g.Controls.Add(t); g.SetColumnSpan(t, 2); return; }
-                g.Controls.Add(edit);
-                g.Controls.Add(Ui.Line(v));
-            }
+            var g = new TableLayoutPanel { ColumnCount = 2, AutoSize = true };
+            void row(string k, string v) { g.Controls.Add(Ui.Line(k, Ui.Bold)); g.Controls.Add(Ui.Line(v)); }
             row("Headset", $"{hs.DisplayName}   ({hs.Hostname})   vendor: {hs.Vendor}");
-            profile = importedProfile ?? (real ? HmdProfiles.Match(hs, HmdProfiles.LoadAll()) : null);
-            variantBox = null;
-            if (profile != null)
-            {
-                row("Profile", $"{profile.DisplayName}{(profile.Author.Length > 0 ? ", by " + profile.Author : "")} ({profile.Source}): the setup starts from it and verifies it on this PC, it does not search for a configuration");
-                variantBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 520 };
-                foreach (var v in profile.Variants) variantBox.Items.Add($"{v.Label}: {v.Mbps:0} Mbps");
-                variantBox.SelectedIndex = Math.Max(0, profile.Variants.FindIndex(x => x.Id == profile.Variant(null).Id));
-                row("Your network", "the bitrate depends on it: pick what describes your Wi-Fi (you can change the value later)", variantBox);
-                foreach (var n in profile.Notes) row("Note", n);
-                foreach (var v in profile.Verified) row("Verified", v);
-            }
-            else row("Profile", hs.IsVisionPro && !real ? "Apple Vision Pro: tuned defaults" : "no profile matches this headset: the proposal is generic, built from what it advertised. Profiles are small files shared among users (see docs\\HMD_PROFILES.md); drop one into config\\profiles.");
-            row("Panel resolution per eye", $"{hs.PanelW} x {hs.PanelH}", null);
-            rateBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
-            foreach (var r in hs.Rates) rateBox.Items.Add(r.ToString("0.#", CultureInfo.InvariantCulture));
-            rateBox.SelectedIndex = Math.Max(0, hs.Rates.Count - 1);
-            if (profile != null) { var pi = hs.Rates.FindIndex(x => Math.Abs(x - profile.Fps) < 0.6); if (pi >= 0) rateBox.SelectedIndex = pi; }
-            row("Refresh rate to use", "the headset supports " + string.Join(", ", hs.Rates.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture))) + " Hz", rateBox);
-            scaleBox = new NumericUpDown { Minimum = 40, Maximum = 100, Increment = 5, Value = 100, Width = 70 };
-            row("Resolution scale (%)", "100% = the panel's own resolution; lower renders and streams less", scaleBox);
-            foveationBox = new CheckBox { Text = "use it", Checked = profile != null ? profile.Foveated && hs.Foveation : hs.Foveation, Enabled = hs.Foveation, AutoSize = true };
-            row("Foveated encoding", hs.Foveation ? "supported by the headset" : "not advertised by the headset", foveationBox);
+            row("Panel resolution per eye", $"{hs.PanelW} x {hs.PanelH}");
+            row("Refresh rates", string.Join(", ", hs.Rates.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture))) + " Hz");
+            row("Foveated encoding", hs.Foveation ? "supported" : "not advertised");
             row("Video codec", $"HEVC{(hs.EncHigh ? " (high profile)" : "")}{(hs.Enc10 ? ", 10-bit" : ", 8-bit")}{(hs.EncAv1 ? "; the headset also decodes AV1 (VisionALVR encodes HEVC)" : "")}");
             row("Colour", $"{(hs.PreferFull ? "full range" : "limited range")}, encoding gamma {hs.Gamma:0.00}{(hs.PreferHdr ? ", HDR preferred" : "")}");
             row("Microphone", hs.MicRate > 0 ? $"{hs.MicRate} Hz" : "none advertised");
-            var import = new Button { Text = "Import profile...", AutoSize = true };
-            import.Click += (s, e) => ImportProfile(real);
-            g.Controls.Add(import); g.SetColumnSpan(import, 3);
             hsDetails.Controls.Add(g);
+            matchedProfile = importedProfile ?? (real ? HmdProfiles.Match(hs, HmdProfiles.LoadAll()) : null);
+            // the two ways to a configuration; the tests (next page) then check it on this PC
+            hsDetails.Controls.Add(Ui.Line("How do you want to configure the stream?", Ui.Big));
+            var modes = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            modeProfile = new RadioButton { Appearance = Appearance.Button, Text = "Community profile (recommended)", AutoSize = true, Checked = true, Font = Ui.Bold, Padding = new Padding(8) };
+            modeManual = new RadioButton { Appearance = Appearance.Button, Text = "Manual configuration (pre-filled)", AutoSize = true, Font = Ui.Body, Padding = new Padding(8) };
+            modeProfile.CheckedChanged += (s, e) => { modeProfile.Font = modeProfile.Checked ? Ui.Bold : Ui.Body; modeManual.Font = modeManual.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
+            modes.Controls.Add(modeProfile); modes.Controls.Add(modeManual);
+            hsDetails.Controls.Add(modes);
+            modePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            hsDetails.Controls.Add(modePanel);
             hsDetails.Visible = true;
-            hsAuto.Visible = true; hsManual.Visible = true;
+            hsGo.Visible = true;
+            RenderMode(real);
+        }
+
+        /// The lower part of the handshake page for the chosen option: the profile (matched or imported) with the network it is for, or the pre-filled values.
+        void RenderMode(bool real)
+        {
+            modePanel.Controls.Clear();
+            variantBox = null; rateBox = null; scaleBox = null; foveationBox = null;
+            if (modeProfile.Checked)
+            {
+                profile = matchedProfile;
+                if (profile != null)
+                {
+                    modePanel.Controls.Add(Ui.Line($"{profile.DisplayName}{(profile.Author.Length > 0 ? ", by " + profile.Author : "")} ({profile.Source}): a ready configuration for this headset. The tests check it on this PC; nothing is searched.", Ui.Bold));
+                    foreach (var n in profile.Notes) modePanel.Controls.Add(Ui.Line("Note: " + n));
+                    foreach (var v in profile.Verified) modePanel.Controls.Add(Ui.Line("Verified: " + v));
+                    var net = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+                    variantBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 520 };
+                    foreach (var v in profile.Variants) variantBox.Items.Add($"{v.Label}: {v.Mbps:0} Mbps");
+                    variantBox.SelectedIndex = Math.Max(0, profile.Variants.FindIndex(x => x.Id == profile.Variant(null).Id));
+                    net.Controls.Add(Ui.Line("Your network:", Ui.Bold)); net.Controls.Add(variantBox);
+                    modePanel.Controls.Add(net);
+                    modePanel.Controls.Add(Ui.Line("The bitrate depends on it: pick what describes your Wi-Fi (you can change the value at the end)."));
+                }
+                else modePanel.Controls.Add(Ui.Line("No profile matches this headset yet. Import one shared by another user (see docs\\HMD_PROFILES.md, the VisionALVR Discord), or choose the manual configuration."));
+                var import = new Button { Text = profile != null ? "Import another profile..." : "Import a profile...", AutoSize = true };
+                import.Click += (s, e) => ImportProfile(real);
+                modePanel.Controls.Add(import);
+                hsGo.Enabled = profile != null;
+            }
+            else
+            {
+                profile = null;
+                modePanel.Controls.Add(Ui.Line("Values proposed from what the headset reported. Change what you like: the tests measure this PC and your link, and the proposal at the end adjusts what does not hold."));
+                var g = new TableLayoutPanel { ColumnCount = 3, AutoSize = true };
+                void row(string k, string v, Control edit) { g.Controls.Add(Ui.Line(k, Ui.Bold)); g.Controls.Add(edit); g.Controls.Add(Ui.Line(v)); }
+                rateBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
+                foreach (var r in hs.Rates) rateBox.Items.Add(r.ToString("0.#", CultureInfo.InvariantCulture));
+                rateBox.SelectedIndex = Math.Max(0, hs.Rates.Count - 1);
+                row("Refresh rate", "the headset supports " + string.Join(", ", hs.Rates.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture))) + " Hz", rateBox);
+                scaleBox = new NumericUpDown { Minimum = 40, Maximum = 100, Increment = 5, Value = 100, Width = 70 };
+                row("Resolution scale (%)", "100% = the panel's own resolution; lower renders and streams less", scaleBox);
+                foveationBox = new CheckBox { Text = "use it", Checked = hs.Foveation, Enabled = hs.Foveation, AutoSize = true };
+                row("Foveated encoding", hs.Foveation ? "fewer pixels at the edges; full frame needs a stronger link and GPU" : "not advertised by the headset", foveationBox);
+                modePanel.Controls.Add(g);
+                hsGo.Enabled = true;
+            }
+        }
+
+        void ContinueToTests()
+        {
+            autoconfig = true; ApplyOverrides(); GoTo(3);
         }
 
         /// "Import profile...": pick a profile file (shared by another user), show what ALVR says about this headset next to what the profile expects,
@@ -444,9 +474,19 @@ namespace VisionALVR
 
         void ApplyOverrides()
         {
-            if (rateBox != null && rateBox.SelectedItem != null) ctxFps = double.Parse((string)rateBox.SelectedItem, CultureInfo.InvariantCulture);
-            ctxScale = scaleBox != null ? (double)scaleBox.Value / 100.0 : 1.0;
-            ctxFoveation = foveationBox == null || foveationBox.Checked;
+            if (profile != null)
+            {
+                // a profile fixes the stream; the rate is the one of the headset's closest to the profile's
+                ctxFps = profile.Fps > 0 && hs.Rates.Count > 0 ? hs.Rates.OrderBy(x => Math.Abs(x - profile.Fps)).First() : (profile.Fps > 0 ? profile.Fps : 90);
+                ctxScale = 1.0;
+                ctxFoveation = profile.Foveated && hs.Foveation;
+            }
+            else
+            {
+                if (rateBox != null && rateBox.SelectedItem != null) ctxFps = double.Parse((string)rateBox.SelectedItem, CultureInfo.InvariantCulture);
+                ctxScale = scaleBox != null ? (double)scaleBox.Value / 100.0 : 1.0;
+                ctxFoveation = foveationBox == null || foveationBox.Checked;
+            }
             variantId = profile != null && variantBox != null && variantBox.SelectedIndex >= 0 ? profile.Variants[variantBox.SelectedIndex].Id : "";
         }
 
@@ -598,6 +638,11 @@ namespace VisionALVR
             add("   encoder (ALVR's view)", r.EncoderMs > 0 ? $"{r.EncoderMs:0.0} ms" : "-", "", Rating.Unknown);
             add("   headset queues", r.DecoderQueueMs + r.VsyncQueueMs > 0 ? $"{r.DecoderQueueMs + r.VsyncQueueMs:0.0} ms" : "-", "", Rating.Unknown);
             add("Frames shown / refresh rate", r.DisplayedFps > 0 ? $"{r.DisplayedFps:0} of {ctxFps:0} fps" : "-", $"{Reference.Get("fps_good_share") * 100:0}% or more", Reference.FpsShare(r.DisplayedFps > 0 ? r.DisplayedFps / ctxFps : 0));
+            if (r.SceneRan)
+            {
+                add("Head tracking (scene test)", $"{r.HeadSamplesPerS:0}/s, gaps up to {r.HeadGapP95Ms:0} ms, turned {r.HeadYawRangeDeg:0} deg", $"about {ctxFps:0} samples per second, no long gaps; the scene saw your movement", r.HeadSamplesPerS >= 0.8 * ctxFps && (r.HeadYawRangeDeg >= 5 || r.HeadMoveCm >= 3) ? Rating.Good : Rating.Ok);
+                add("Repeated head samples", $"{r.SameTsPct:0.#}% of frames", "a frame sharing the previous frame's head sample is not shown as a new picture; a few percent is normal", r.SameTsPct < 5 ? Rating.Good : r.SameTsPct < 15 ? Rating.Ok : Rating.Poor);
+            }
             add("Video codec", hs.Enc10 ? "HEVC 10-bit" : "HEVC 8-bit", prof.CodecAdvice, hs.Enc10 || !prof.Tuned ? Rating.Good : Rating.Ok);
             add("GPU", string.IsNullOrEmpty(r.GpuName) ? "-" : r.GpuName, $"{r.Engines} hardware encoder engine(s), {r.VramMb / 1024.0:0} GB", Rating.Unknown);
             p.Controls.Add(list);
@@ -729,11 +774,12 @@ namespace VisionALVR
         List<TestStep> DemoSteps()
         {
             var l = new List<TestStep>();
-            var states = new[] { (TestState.Passed, "NVIDIA GeForce RTX 5090 (Blackwell), driver 617.42, 32 GB"), (TestState.Passed, "3552x3200 encoded: p50 3.1 ms, p95 3.6 ms of 11.1 ms per frame; 3 NVENC engine(s)"),
+            var states = new[] { (TestState.Passed, "NVIDIA GeForce RTX 5090 (Blackwell), driver 617.42, 32 GB, NVENC API 13.0"), (TestState.Passed, "3552x3200 encoded: p50 3.1 ms, p95 3.6 ms of 11.1 ms per frame; 3 NVENC engine(s)"),
                 (TestState.Passed, "recommended: P3 foveated (47.1 dB, encode p95 3.6 ms)"), (TestState.Passed, "clean up to 270 Mbps (the highest clean step minus 10%)"),
-                (TestState.Warning, "latency 52.0 ms (encode 4.1, network 9.5, decode 6.2, headset queues 18.0), 89 fps shown"), (TestState.Running, "") };
+                (TestState.Warning, "head pose reaches the scene (90/s; turned 62 deg); streamed 90 fps, 1% repeated head samples; latency 52.0 ms, 89 fps shown"),
+                (TestState.Passed, "engaged: 3 strips per frame on 3 NVENC engines"), (TestState.Running, "") };
             var names = new[] { "System check (GPU, driver, hardware encoder)", "Encoder speed at the chosen resolution and refresh rate", "Picture quality benchmark (about 1.5 minutes)", "Network test with the headset",
-                "Streaming test with the headset (latency, frames, decoder)", "Audio output" };
+                "Scene test: Littlest Tokyo through the real pipeline (head tracking, frames, latency)", "Split encoding (one frame cut in strips, one per NVENC engine)", "Audio output" };
             for (int i = 0; i < names.Length; i++) l.Add(new TestStep { Name = names[i], State = states[i].Item1, Note = states[i].Item2 });
             return l;
         }

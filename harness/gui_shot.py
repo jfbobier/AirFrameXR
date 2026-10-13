@@ -20,7 +20,7 @@ Remove-Item '{wt}\\shot_{page}.png' -ErrorAction SilentlyContinue
 cmd = f'"{wt}\\{exe}" ' + ('--demo --page ' + page + ' ' if exe == 'configure.exe' else '') + f'--screenshot {wt}\\shot_{page}.png {extra}'
 live.SCRATCH.mkdir(parents=True, exist_ok=True)
 f = live.SCRATCH / "shot.cmd"
-f.write_bytes(("@echo off\r\nset VISIONALVR_ALLOW_ANY_GPU=1\r\n" + cmd + "\r\n").encode())
+f.write_bytes(("@echo off\r\n" + cmd + "\r\n").encode())
 live.put(f, f"{wt.replace(chr(92), '/')}/shot.cmd")
 live.ps(f"schtasks /delete /tn va_shot /f 2>$null | Out-Null; schtasks /create /tn va_shot /tr 'cmd /c {wt}\\shot.cmd' /sc once /st 00:00 /rl LIMITED /it /f | Out-Null; schtasks /run /tn va_shot | Out-Null")
 for _ in range(40):
