@@ -1,6 +1,6 @@
 # configure.exe as an auto-configure wizard: plan
 
-Status: built on branch opt/0.3-dev (2026-10-12): steps 0-5, the handshake patch/event, the test checklist and the proposer exist and ran end to end against the mock headset (`python3 harness/wizard_e2e.py`); the reference values of step 4 are provisional, the quality benchmark's pick now sets the proposal's resolution (its other findings - foveation level, encoder preset - are shown, not applied), Quest-class headsets have no tuned profile. Today `configure.exe` (tools/gui/Configure.cs, 460 lines, WinForms .NET 4.8 compiled by Roslyn) has three
+Status: built on branch opt/0.3-dev (2026-10-12); since 2026-10-13 the wizard has seven pages (0-6): the former step 2 is split into 2 "Your headset says" (confirm only) and 3 "Choose a setup", and the steps after it moved up by one (tests 4, results 5, configuration 6). The numbers below in the plan text and the table ("step 3.2" etc.) are the plan's original ones: read tests as 4, results as 5, configuration as 6. Original status: steps 0-5, the handshake patch/event, the test checklist and the proposer exist and ran end to end against the mock headset (`python3 harness/wizard_e2e.py`); the reference values of step 4 are provisional, the quality benchmark's pick now sets the proposal's resolution (its other findings - foveation level, encoder preset - are shown, not applied), Quest-class headsets have no tuned profile. Today `configure.exe` (tools/gui/Configure.cs, 460 lines, WinForms .NET 4.8 compiled by Roslyn) has three
 tabs: 1. Headset (pairing), 2. Benchmark (encoder test, quality benchmark, network test, each a button), 3. Settings (all the controls).
 It started as a benchmark that informs a configuration; it should become a wizard that produces one.
 
@@ -26,10 +26,12 @@ It started as a benchmark that informs a configuration; it should become a wizar
    check (ping, then the ALVR handshake). The current bug is that the list only holds what discovery reported, so a headset with a fixed IP
    shows as paired but not in the list. Fix: seed the list from the known entries at start, de-duplicate with discovery results, preselect the known
    one, and show it in both places (selected + list).
-2. **Handshake and what we learned.** Connect (the ALVR app open on the headset), capture the headset's advertised capabilities, show them, let the
-   the read-only stats, then exactly three options, all leading to the tests (step 3): **Community profile (recommended)** (the matching or an
+2. **Your headset says.** Connect (the ALVR app open on the headset), capture the headset's advertised capabilities and show them read-only, with one
+   button, "Yes, this is my headset: continue" (nothing else on the page: the stats alone took the whole width when the options sat beside them). Going
+   Back from step 3 shows them again without reconnecting.
+3. **Choose a setup.** Exactly three options, all leading to the tests (step 4), stacked top to bottom with the profile's notes wrapped below: **Community profile (recommended)** (the matching or an
    imported profile, plus the network it is for), **Manual configuration** (values pre-filled from the stats: rate, scale, foveation) or **I have an
-   existing ALVR configuration** (config\session.json + visionalvr.json used as they are and only verified; step 5 then shows them unchanged). Capabilities come from `VideoStreamingCapabilities` + `display_name` (server_core/src/connection.rs ~575). The
+   existing ALVR configuration** (config\session.json + visionalvr.json used as they are and only verified; step 6 then shows them unchanged). Capabilities come from `VideoStreamingCapabilities` + `display_name` (server_core/src/connection.rs ~575). The
    current host never exposes them (only the negotiated result lands in `openvr_config`), so: a small server_core patch like
    `client-stats-log.patch` (`client-caps-log.patch`: one log line with the JSON), parsed in logs.rs into a `client_capabilities` event, and a new
    `alvr_host --handshake <s>` mode that connects, emits it and disconnects (no game, no SteamVR needed).
@@ -42,7 +44,7 @@ It started as a benchmark that informs a configuration; it should become a wizar
    | encoder_high_profile / encoder_10_bits / encoder_av1 / prefer_10bit / prefer_full_range / prefer_hdr / preferred_encoding_gamma | codec capabilities | shown; the encode path is fixed to HEVC, 10 bit unless the headset refuses it; gamma and range follow the headset |
    | supports_foveated_encoding | yes/no | whether the foveated layout is on |
    | microphone_sample_rate | Hz | the microphone path |
-3. **Run the tests, with a checklist.** A list with an empty square in front of every item; each is ticked when done (X when failed, with the reason),
+4. **Run the tests, with a checklist.** A list with an empty square in front of every item; each is ticked when done (X when failed, with the reason),
    current one marked running; Cancel and "Skip" per item; failures do not stop independent tests. All run through `HostProcess`:
    1. system check (GPU, driver, NVENC engines, power state; the existing laptop-on-battery warning)
    2. encoder speed at the handshake's resolution and rate, foveated (the real frame budget)
@@ -51,10 +53,12 @@ It started as a benchmark that informs a configuration; it should become a wizar
    5. pipeline test (needs the headset): the host's synthetic test pattern for ~20 s at the chosen rate; reads the headset's own statistics
       (decode, decoder queue, vsync queue, network, total, repeated frames) and the phase lock's convergence
    6. audio path check (default output device present, a virtual device if the user wants one)
-   7. optional full-chain check (the bundled Littlest Tokyo probe through the runtime; needs the runtime registered)
+   7. optional full-chain check (the bundled Littlest Tokyo probe through the runtime; needs the runtime registered). The probe places the scene once, from the first
+      valid head pose (1.9 m ahead of the horizontal gaze, 0.2 m below the eyes), because a real headset's LOCAL space has an arbitrary origin and yaw
+      (a fixed placement showed the scene on the floor, behind a corner; fixed 2026-10-13, confirmed on a Quest 3)
 
-   Results are saved to `config\autoconfig_results.json` so step 4/5 and support requests can use them.
-4. **How your setup performs.** Each measured value next to a reference and a verdict (good / ok / poor):
+   Results are saved to `config\autoconfig_results.json` so steps 5/6 and support requests can use them.
+5. **How your setup performs.** Each measured value next to a reference and a verdict (good / ok / poor):
 
    | Metric | Source | Reference (TBD, see below) |
    |---|---|---|
@@ -66,7 +70,7 @@ It started as a benchmark that informs a configuration; it should become a wizar
    Plus a one-line summary ("Excellent / Good / Limited") and specific advice when something is poor (6E access point in dumb-AP mode, PC on Ethernet,
    fixed headset IP, lower resolution). **Decision needed:** the reference values. Proposal: derive them from the lab comparisons (harness/compare.py)
    on the 5090 and the 3080 Ti, with stock ALVR + SteamVR as the "baseline" row.
-5. **Proposed configuration.** The existing settings page, prefilled from the handshake and the tests, each value with a short reason (tooltip or a
+6. **Proposed configuration.** The existing settings page, prefilled from the handshake and the tests, each value with a short reason (tooltip or a
    second column): per-eye resolution (<= panel, <= what the encoder sustains), refresh rate (highest supported that the encoder fits), bitrate (the
    network test's recommendation), foveation (supported + recommended), codec / 10 bit / gamma / range (from the capabilities), and phase
    lock (defaults from the lab), audio, idle colour. For "update existing" show what differs from the user's current values. Save writes session.json and
@@ -76,7 +80,7 @@ It started as a benchmark that informs a configuration; it should become a wizar
 | Phase | Content | Size |
 |---|---|---|
 | A | Gate (`--allow-any-gpu`), known-headset merge in the list (the IP bug), test with the screenshot mode | small |
-| B | `client-caps-log.patch` + `client_capabilities` event + `--handshake`; the step 2 page with overrides | medium |
+| B | `client-caps-log.patch` + `client_capabilities` event + `--handshake`; the handshake page (now steps 2 and 3) with overrides | medium |
 | C | Test sequencer: checklist control, `TestStep` runner over `HostProcess`, results file; wire the existing three tests, add the pipeline and audio checks | medium |
 | D | Step 4 page: metrics table, thresholds file (`bench/reference.json`), advice text | medium (needs the references) |
 | E | Step 5: proposer (`Proposal.Build(handshake, results)`), prefilled settings with reasons, update-existing diff | medium |
