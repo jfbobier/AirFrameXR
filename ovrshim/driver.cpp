@@ -849,9 +849,22 @@ namespace {
                             } else {
                                 m_gateHolds++;
                                 wasGated = true;
-                                target++;
+                                // Hold the app until the host's next tick has passed: moving the target alone is not a skip when the
+                                // app is late (60-70 % of releases on the Vision Pro), because the next target's release time is already
+                                // in the past and the app would be let go at once (End of Abyss 2026-10-13 night: 87 "skips", queue still
+                                // standing, 44 drains). One real period without a release is what empties the queue.
+                                const long long tickAtHold = m_lastSignaledVsync;
+                                const auto holdDeadline = std::chrono::steady_clock::now() +
+                                    std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.5 * period));
+                                while (m_lastSignaledVsync <= tickAtHold && std::chrono::steady_clock::now() < holdDeadline) {
+                                    m_frameVsync.wait_until(lock, std::min(holdDeadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(2)));
+                                }
+                                now = QpcSeconds();
+                                while (boundaryTime(target) - lead < now - 0.0005) {
+                                    target++;
+                                }
                                 m_gateQuietUntil = target + (long long)std::ceil(lead / period) + 2;
-                                continue; // wait for the next boundary's release time
+                                continue; // release for the first boundary still ahead
                             }
                         }
                         break;
