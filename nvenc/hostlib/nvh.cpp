@@ -99,6 +99,7 @@ struct Nvh {
         std::unique_ptr<FFR> ffr;                        // foveation pass bound to `warped`
         bool failed = false;
         uint64_t frames = 0;
+        int lastWarpedSlot = -1;                         // the slot whose last encode went through the warp (the simrig viewer then shows `tex`)
     } warp;
 };
 
@@ -522,18 +523,14 @@ double nvh_encode_green(void* hh, uint32_t frame_no, uint64_t ts_ns, int force_i
 extern "C" void* nvh_sim_device(void* hh) { return ((Nvh*)hh)->render->GetDevice(); }
 extern "C" void* nvh_sim_context(void* hh) { return ((Nvh*)hh)->render->GetContext(); }
 extern "C" void* nvh_sim_slot(void* hh, void* i, uint32_t slot) {
-    auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
-    if (slot >= (uint32_t)visionalvr_ipc::kSlots) return nullptr;
-    uint64_t handle = ipc->state->shim.slotHandle[slot];
-    if (!handle) return nullptr;
-    if (n->sharedHandle[slot] != handle || !n->shared[slot]) {
-        if (n->shared[slot]) { n->shared[slot]->Release(); n->shared[slot] = nullptr; }
-        if (FAILED(n->render->GetDevice()->OpenSharedResource((HANDLE)(uintptr_t)handle, __uuidof(ID3D11Texture2D), (void**)&n->shared[slot]))) return nullptr;
-        n->sharedHandle[slot] = handle;
-        n->ffr[slot].reset();
-    }
+    auto* n = (Nvh*)hh;
+    if (!n || slot >= (uint32_t)visionalvr_ipc::kSlots) return nullptr;
+    // the picture the encoder saw: the warped texture when the last encode of this slot went through the host-side re-stamp warp
+    if (n->warp.lastWarpedSlot == (int)slot && n->warp.tex) return n->warp.tex;
+    (void)i;
     return n->shared[slot];
 }
+
 #endif
 
 // ---- host-side re-stamp warp ------------------------------------------------------------------------------------------------------
@@ -688,8 +685,9 @@ double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, ui
         FFR* ffr = n->ffr[slot].get();
         const bool warpOn = n->warp.on;
         n->warp.on = false; // per frame: nvh_set_warp before each encode
+        n->warp.lastWarpedSlot = -1;
         if (warpOn) {
-            if (FFR* wf = warpSlot(n, ipc, slot, err, errlen)) ffr = wf;
+            if (FFR* wf = warpSlot(n, ipc, slot, err, errlen)) { ffr = wf; n->warp.lastWarpedSlot = (int)slot; }
             // (on failure the frame goes out unrotated with its new stamp: the error text is left for the caller's log, the encode continues)
         }
         static const bool zeroCopy = !(getenv("VISIONALVR_ZEROCOPY") && strcmp(getenv("VISIONALVR_ZEROCOPY"), "0") == 0);
