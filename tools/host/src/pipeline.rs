@@ -184,7 +184,7 @@ pub struct Pipeline {
     left_behind: AtomicBool,
     pub queue_picks: AtomicU64,
     /// which frame a boundary takes when two wait: drain (default: in order, plus one dropped frame to resynchronise a queue that has stood
-    /// VISIONALVR_DRAIN_AFTER boundaries, at most once per VISIONALVR_DRAIN_EVERY_MS; a fallback: the intake gate normally drains the queue first,
+    /// VISIONALVR_DRAIN_AFTER (30) boundaries, at most once per VISIONALVR_DRAIN_EVERY_MS; a fallback: the intake gate normally drains the queue first,
     /// see `intake_gate`) | oldest (no drops, a standing queue stays a period late) | newest (lab only: drops the older of every pair, loses frames
     /// when the app's frame times jitter) | adaptive (newest right after an empty boundary, else oldest) | aged
     pick_policy: String,
@@ -447,7 +447,9 @@ impl Pipeline {
                     // of the time (Cyberpunk 2026-10-13: 3-4 drains in 100 s, hold 9.9 ms). With the intake gate on, the gate drains the queue first and
                     // this fires only when it could not (shim without the gate, or the app ignoring its release).
                     "drain" => {
-                        let after = std::env::var("VISIONALVR_DRAIN_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(8).max(1);
+                        // 30 boundaries (0.3 s): the gate normally clears a standing queue within a few boundaries; the drain is the last resort and must
+                        // not fire on the arrival jitter the duplicate-timestamp re-stamp adds (77 frames dropped in 206 s of End of Abyss at 8)
+                        let after = std::env::var("VISIONALVR_DRAIN_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30).max(1);
                         let every = std::env::var("VISIONALVR_DRAIN_EVERY_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1000.0).max(0.0) / 1000.0;
                         let mut last = self.drain_last.lock();
                         let due = keeps_up && self.standing.load(Ordering::Relaxed) >= after
@@ -784,8 +786,8 @@ impl Pipeline {
     pub fn stats_json(&self) -> serde_json::Value {
         let (mut waits, mut app_ms, mut releases, mut late, mut gate_holds, mut gate_suppressed) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
         unsafe { nvh::nvh_ipc_shim_pacing(self.ipc(), &mut waits, &mut app_ms, &mut releases, &mut late, &mut gate_holds, &mut gate_suppressed) };
-        let (mut restamps, mut restamp_timeouts, mut warp_max) = (0u64, 0u64, 0f32);
-        unsafe { nvh::nvh_ipc_shim_restamps(self.ipc(), &mut restamps, &mut restamp_timeouts, &mut warp_max) };
+        let (mut restamps, mut restamp_timeouts, mut warp_max, mut rwaits, mut rwait_sum, mut rwait_max) = (0u64, 0u64, 0f32, 0u64, 0f64, 0f32);
+        unsafe { nvh::nvh_ipc_shim_restamps(self.ipc(), &mut restamps, &mut restamp_timeouts, &mut warp_max, &mut rwaits, &mut rwait_sum, &mut rwait_max) };
         json!({
             "send_pacing": self.cfg.send_pacing.name(),
             "arrived": self.arrived.load(Ordering::Relaxed),
@@ -809,7 +811,8 @@ impl Pipeline {
             "encode_envelope_ms": *self.encode_env_ms.lock(),
             "gpu_scheduling": self.gpu_sched.lock().map(|(c, st)| json!({ "class": c, "status": st })),
             "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_suppressed": gate_suppressed,
-                      "restamps": restamps, "restamp_timeouts": restamp_timeouts, "restamp_warp_max_mdeg": warp_max },
+                      "restamps": restamps, "restamp_timeouts": restamp_timeouts, "restamp_warp_max_mdeg": warp_max,
+                      "restamp_waits": rwaits, "restamp_wait_sum_ms": rwait_sum, "restamp_wait_max_ms": rwait_max },
         })
     }
 }

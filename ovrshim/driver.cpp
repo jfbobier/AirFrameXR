@@ -1362,11 +1362,20 @@ namespace {
                         _mm_pause();
                     }
                 }
+                const float waitedMs = (float)((QpcSeconds() - t0) * 1000.0);
+                m_restampWaitSumMs += waitedMs;
+                m_restampWaitMaxMs = std::max(m_restampWaitMaxMs, waitedMs);
+                m_restampWaitLineSumMs += waitedMs;
+                m_restampWaitLineMaxMs = std::max(m_restampWaitLineMaxMs, waitedMs);
+                m_restampLine++;
                 if (got) {
                     stamp.warp = true;
                     stamp.head = OVR::Posef(fresh.ThePose);
                     clientTs = freshTs;
                     m_restamps++;
+                    if (waitedMs > 0.2f) {
+                        m_restampWaits++;
+                    }
                     // how far the layers are rotated (the eye's render orientation vs the stamp's)
                     for (const ovrLayerHeader* h : layers) {
                         if (h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth)) {
@@ -1461,15 +1470,19 @@ namespace {
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
                             "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), release alignment %s, dup re-stamp %s (re-stamped %llu, "
-                            "timeouts %llu, warp max %.0f mdeg), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x",
+                            "timeouts %llu, warp max %.0f mdeg, waited %llu, wait avg %.2f max %.2f ms), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
                             (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, m_ipc.state->host.alignRelease ? "on" : "off",
                             m_ipc.state->host.dupRestamp ? "on" : "off", (unsigned long long)m_restamps, (unsigned long long)m_restampTimeouts,
-                            (double)m_restampWarpMaxMdegLine, (unsigned long long)m_gpuThrottleTimeouts,
+                            (double)m_restampWarpMaxMdegLine, (unsigned long long)m_restampWaits,
+                            m_restampLine ? m_restampWaitLineSumMs / (double)m_restampLine : 0.0, (double)m_restampWaitLineMaxMs, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask);
                     m_restampWarpMaxMdegLine = 0.f;
+                    m_restampWaitLineSumMs = 0.0;
+                    m_restampWaitLineMaxMs = 0.f;
+                    m_restampLine = 0;
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
                             return 0.0f;
@@ -1574,6 +1587,9 @@ namespace {
             s.restamps = m_restamps;
             s.restampTimeouts = m_restampTimeouts;
             s.restampWarpMaxMdeg = m_restampWarpMaxMdeg;
+            s.restampWaits = m_restampWaits;
+            s.restampWaitSumMs = m_restampWaitSumMs;
+            s.restampWaitMaxMs = m_restampWaitMaxMs;
             s.frameSeq++; // odd: the host re-reads until it sees the same even value before and after
             MemoryBarrier();
             s.frameSlot = slot;
@@ -2523,6 +2539,9 @@ namespace {
         uint64_t m_lastStampTs{0};
         uint64_t m_restamps{0}, m_restampTimeouts{0};
         float m_restampWarpMaxMdeg{0.f}, m_restampWarpMaxMdegLine{0.f};
+        uint64_t m_restampWaits{0}, m_restampLine{0};
+        double m_restampWaitSumMs{0.0}, m_restampWaitLineSumMs{0.0};
+        float m_restampWaitMaxMs{0.f}, m_restampWaitLineMaxMs{0.f};
         long long m_gateQuietUntil{0};                 // boundary index until which the gate stays quiet after a skip (its effect is still in flight)
         uint32_t m_nextSlot{0};                    // round-robin position of PickSlot
         std::atomic<uint32_t> m_lastPublishedSlot{0xFFFFFFFFu};

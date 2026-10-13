@@ -791,7 +791,7 @@ mod nvh {
         pub fn nvh_ipc_set_intake_gate(ipc: *mut c_void, on: u32);
         pub fn nvh_ipc_set_align_release(ipc: *mut c_void, on: u32);
         pub fn nvh_ipc_set_dup_restamp(ipc: *mut c_void, on: u32, wait_ms: f32);
-        pub fn nvh_ipc_shim_restamps(ipc: *mut c_void, restamps: *mut u64, timeouts: *mut u64, warp_max_mdeg: *mut f32);
+        pub fn nvh_ipc_shim_restamps(ipc: *mut c_void, restamps: *mut u64, timeouts: *mut u64, warp_max_mdeg: *mut f32, waits: *mut u64, wait_sum_ms: *mut f64, wait_max_ms: *mut f32);
         pub fn nvh_set_gpu_scheduling(cls: i32) -> i32;
     }
 }

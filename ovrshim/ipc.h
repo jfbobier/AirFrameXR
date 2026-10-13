@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 21;
+constexpr uint32_t kVersion = 22;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -145,6 +145,9 @@ struct ShimToHost {
     uint64_t restamps;             // frames re-stamped with the next tracking sample (duplicate-timestamp fix, HostToShim::dupRestamp)
     uint64_t restampTimeouts;      // duplicates left as they were: no newer sample within dupWaitMs
     float restampWarpMaxMdeg;      // largest rotation applied by a re-stamp since the shim started (millidegrees)
+    uint64_t restampWaits;         // re-stamps that had to wait for the sample (more than 0.2 ms); the rest found it already there
+    double restampWaitSumMs;       // total time spent waiting (ms), re-stamps and timeouts
+    float restampWaitMaxMs;        // longest single wait since the shim started
 };
 
 struct IpcState {

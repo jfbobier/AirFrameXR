@@ -654,9 +654,10 @@ void nvh_ipc_set_dup_restamp(void* i, uint32_t on, float wait_ms) {
     h.dupWaitMs = wait_ms; MemoryBarrier(); h.dupRestamp = on;
 }
 
-void nvh_ipc_shim_restamps(void* i, uint64_t* restamps, uint64_t* timeouts, float* warp_max_mdeg) {
+void nvh_ipc_shim_restamps(void* i, uint64_t* restamps, uint64_t* timeouts, float* warp_max_mdeg, uint64_t* waits, double* wait_sum_ms, float* wait_max_ms) {
     const auto& s = ((Ipc*)i)->state->shim;
     *restamps = s.restamps; *timeouts = s.restampTimeouts; *warp_max_mdeg = s.restampWarpMaxMdeg;
+    *waits = s.restampWaits; *wait_sum_ms = s.restampWaitSumMs; *wait_max_ms = s.restampWaitMaxMs;
 }
 
 long nvh_set_gpu_scheduling(int cls) {
