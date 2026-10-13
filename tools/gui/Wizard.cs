@@ -349,7 +349,13 @@ namespace VisionALVR
                 hs.Hostname = h != null ? h.Item1 : chosenHost; hs.Ip = chosenIp;
                 hs.DisplayName = h != null && h.Item2 != null && h.Item2.Length > 0 ? h.Item2 : chosenName;
                 ShowHandshakeResult(true);
-                if (auto) ContinueToTests();
+                if (auto)
+                {
+                    // --auto-mode profile (default) | manual | existing: the three options of this page
+                    if (Arg("--auto-mode") == "manual") modeManual.Checked = true;
+                    else if (Arg("--auto-mode") == "existing") modeExisting.Checked = true;
+                    ContinueToTests();
+                }
             }));
             discovery?.Dispose();
             var err = local.Start(Base() + "--live --seconds 3 --connect-timeout 90");

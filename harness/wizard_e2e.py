@@ -14,6 +14,8 @@ wd = rf"C:\Users\{U}\wizard_e2e"
 # --local-profile <file>: a headset profile file copied to config\profiles\ so the mock headset ("Windows PC", 3552x3200, 100 Hz) matches it
 tmpl = sys.argv[sys.argv.index("--template") + 1] if "--template" in sys.argv else rf"C:\Users\{U}\VisionALVR_0.3test"
 local_profile = sys.argv[sys.argv.index("--local-profile") + 1] if "--local-profile" in sys.argv else None
+# --mode profile|manual|existing: which of the three options of the wizard's step 2 the unattended run takes (default profile)
+mode = sys.argv[sys.argv.index("--mode") + 1] if "--mode" in sys.argv else "profile"
 root = live.CLONE
 limit = int(sys.argv[sys.argv.index("--seconds") + 1]) if "--seconds" in sys.argv else 900
 host = lib.builder_client_hostname()
@@ -40,7 +42,7 @@ client = rf"{root}\{lib.CLIENT_EXE}"
 loop = ["@echo off", "set ALVR_BIND_IP=127.0.0.2", ":loop",
         f'"{client}" --report {wd}\\mock_report.json --connect-timeout 900 --seconds 1200 --refresh 100 --real-views --poll-ms 5 --queue-max 2 --display-sim --display-hz 100 > {wd}\\mock_stdout.txt 2>&1',
         "goto loop"]
-wiz = ["@echo off", f'"{wd}\\configure.exe" --auto --headset-ip 127.0.0.2 --headset-host {host} --report {wd}\\report.json']
+wiz = ["@echo off", f'"{wd}\\configure.exe" --auto --headset-ip 127.0.0.2 --headset-host {host} --auto-mode {mode} --report {wd}\\report.json']
 for name, lines in (("va_mock", loop), ("va_wiz", wiz)):
     f = live.SCRATCH / f"{name}.cmd"
     live.SCRATCH.mkdir(parents=True, exist_ok=True)

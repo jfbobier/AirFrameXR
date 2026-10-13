@@ -1,6 +1,6 @@
 # configure.exe as an auto-configure wizard: plan
 
-Status: built on branch opt/0.3-dev (2026-10-12): steps 0-5, the handshake patch/event, the test checklist and the proposer exist and ran end to end against the mock headset (`python3 harness/wizard_e2e.py`); the reference values of step 4 are provisional, the quality benchmark's proposal is shown but not yet applied, Quest-class headsets have no tuned profile. Today `configure.exe` (tools/gui/Configure.cs, 460 lines, WinForms .NET 4.8 compiled by Roslyn) has three
+Status: built on branch opt/0.3-dev (2026-10-12): steps 0-5, the handshake patch/event, the test checklist and the proposer exist and ran end to end against the mock headset (`python3 harness/wizard_e2e.py`); the reference values of step 4 are provisional, the quality benchmark's pick now sets the proposal's resolution (its other findings - foveation level, encoder preset - are shown, not applied), Quest-class headsets have no tuned profile. Today `configure.exe` (tools/gui/Configure.cs, 460 lines, WinForms .NET 4.8 compiled by Roslyn) has three
 tabs: 1. Headset (pairing), 2. Benchmark (encoder test, quality benchmark, network test, each a button), 3. Settings (all the controls).
 It started as a benchmark that informs a configuration; it should become a wizard that produces one.
 

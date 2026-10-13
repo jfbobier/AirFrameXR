@@ -153,7 +153,7 @@ namespace VisionALVR
         public string GpuName = "", GpuArch = "", Driver = "";
         public int VramMb;
         public double EncodeP50, EncodeP95, BudgetMs; public bool EncodeFits; public int EncW, EncH, Engines;
-        public string QualityLabel = ""; public double QualityEncodeP95, QualityPsnr;
+        public string QualityLabel = ""; public double QualityEncodeP95, QualityPsnr; public int QualityEyeW, QualityEyeH;
         public double CleanMbps, LossPerS;
         public double TotalMs, GameMs, EncoderMs, NetworkMs, DecodeMs, DecoderQueueMs, VsyncQueueMs, ClientFps, DisplayedFps, StreamedMbps;
         public string AudioNote = "";
@@ -219,19 +219,26 @@ namespace VisionALVR
             // resolution: the panel's, scaled down only when the encoder cannot sustain it at this rate
             double sw = hs.PanelW, sh = hs.PanelH, share = 1;
             var budget = 1000.0 / p.Fps;
-            if (r.EncodeP95 > 0 && r.EncodeP95 > Reference.Get("encode_ok") * budget)
+            if (r.QualityEyeW > 0 && r.QualityEyeH > 0)
+            {
+                // the quality benchmark measured real encodes of several resolutions on this GPU: its pick is the best picture that encodes in real time
+                p.EyeW = r.QualityEyeW; p.EyeH = r.QualityEyeH;
+                share = (double)p.EyeW / hs.PanelW;
+                p.why["resolution"] = $"{p.EyeW} x {p.EyeH} per eye ({share * 100:0}% of the panel): the quality benchmark's pick, '{r.QualityLabel}', the best picture that encodes in real time on this GPU (p95 {r.QualityEncodeP95:0.0} ms of {budget:0.0} ms)";
+            }
+            else if (r.EncodeP95 > 0 && r.EncodeP95 > Reference.Get("encode_ok") * budget)
             {
                 share = Math.Sqrt(Reference.Get("encode_ok") * budget / r.EncodeP95);   // encode time follows the pixel count
                 share = Math.Max(0.4, Math.Min(1.0, share));
             }
-            p.EyeW = Align32(sw * share);
-            p.EyeH = Align32(sh * share);
-            p.why["resolution"] = share >= 0.999
+            if (!(r.QualityEyeW > 0 && r.QualityEyeH > 0)) { p.EyeW = Align32(sw * share); p.EyeH = Align32(sh * share); }
+            if (!(r.QualityEyeW > 0 && r.QualityEyeH > 0)) p.why["resolution"] = share >= 0.999
                 ? $"the headset's panel resolution ({hs.PanelW} x {hs.PanelH} per eye): the encoder keeps up ({r.EncodeP95:0.0} ms of {budget:0.0} ms)"
                 : $"scaled to {share * 100:0}% of the panel: the encoder needs {r.EncodeP95:0.0} ms at full size, the frame time is {budget:0.0} ms (estimate: encode time follows the pixel count)";
             // bitrate: twice the rule-of-thumb target for the stream that is sent (the comfortable value with headroom), within what the link carried cleanly
-            var ew = r.EncW > 0 ? r.EncW : (int)(p.EyeW * 2 * (hs.Foveation ? 0.35 : 1.0));
-            var eh = r.EncH > 0 ? r.EncH : (int)(p.EyeH * (hs.Foveation ? 0.52 : 1.0));
+            var fromBench = r.QualityEyeW > 0;   // the encoder test ran at another resolution than the proposal: estimate the encoded size
+            var ew = r.EncW > 0 && !fromBench ? r.EncW : (int)(p.EyeW * 2 * (hs.Foveation ? 0.35 : 1.0));
+            var eh = r.EncH > 0 && !fromBench ? r.EncH : (int)(p.EyeH * (hs.Foveation ? 0.52 : 1.0));
             var tg = Targets.For(ew, eh, p.Fps);
             var want = Math.Max(60, Math.Round(2 * tg.GoodMbps / 10) * 10);
             if (r.CleanMbps > 0)

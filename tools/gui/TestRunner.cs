@@ -125,7 +125,14 @@ namespace VisionALVR
                     }, 120000);
                     if (error != null) throw new TestFailed(error);
                     if (result == null) throw new TestFailed("the encoder test produced no result (see logs\\VisionALVR.log)");
-                    if (!ctx.R.EncodeFits) { st.Warn(); result += ctx.Fixed ? " - too slow for this configuration: lower the resolution or the refresh rate in the setup" : " - too slow for this rate: the later tests and the proposal use a lower resolution or rate"; }
+                    if (!ctx.R.EncodeFits)
+                    {
+                        st.Warn();
+                        var tight = ctx.R.EncodeP95 < ctx.R.BudgetMs;   // under the frame time, but over the 90 % the host asks for
+                        var why = tight ? $"tight: p95 is {ctx.R.EncodeP95 / ctx.R.BudgetMs * 100:0}% of the frame time (under 90% leaves room for a slow frame)" : "too slow";
+                        result += ctx.Fixed ? $" - {why}: lower the resolution or the refresh rate in the setup if the stream stutters"
+                                            : $" - {why} for this rate: the later tests and the proposal use a lower resolution or rate";
+                    }
                     ctx.OnEncoderDone();
                     return result;
                 },
@@ -152,6 +159,7 @@ namespace VisionALVR
                                 {
                                     ctx.R.QualityLabel = rec.TryGetValue("label", out var l) ? l as string ?? "" : "";
                                     ctx.R.QualityPsnr = Num(Sub(rec, "psnr"), "weighted");
+                                    if (rec.TryGetValue("eye", out var eye) && eye is object[] ea && ea.Length == 2) { ctx.R.QualityEyeW = (int)Convert.ToDouble(ea[0], CultureInfo.InvariantCulture); ctx.R.QualityEyeH = (int)Convert.ToDouble(ea[1], CultureInfo.InvariantCulture); }
                                     ctx.R.QualityEncodeP95 = Num(Sub(rec, "encode_ms"), "p95");
                                     line = $"recommended: {ctx.R.QualityLabel} ({ctx.R.QualityPsnr:0.0} dB, encode p95 {ctx.R.QualityEncodeP95:0.0} ms)";
                                 }
@@ -361,7 +369,8 @@ namespace VisionALVR
                     var live = r.SceneRan ? $"; the live stream carried {r.SliceLive:0.#} strips per frame" : "";
                     if (benchOn && (!r.SceneRan || r.SliceLive >= 1.5)) return $"engaged: {r.Slices:0.#} strips per frame on {r.Engines} NVENC engines (encoder test){live}";
                     st.Warn();
-                    return $"NOT engaged: {r.Engines} NVENC engine(s), {r.Slices:0.#} strip per frame in the encoder test{live}. This GPU encodes the whole frame in one piece: expect a longer encode time, so lower the resolution or refresh rate if the encoder test was slow.";
+                    if (r.Engines < 2) return $"not available on this GPU: it has {r.Engines} NVENC engine (split encoding needs 2 or more), so every frame is encoded in one piece; the encoder speed test above shows what that costs here.";
+                    return $"NOT engaged although the GPU has {r.Engines} NVENC engines: {r.Slices:0.#} strip(s) per frame in the encoder test{live}. Expect a longer encode time (see the encoder speed test above); if the stream stutters, lower the resolution or the refresh rate.";
                 },
             });
 
