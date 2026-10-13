@@ -87,6 +87,10 @@ The stream is 100+ Mbit/s of low-latency video: the network matters more than th
 ## Install (users)
 Download the release zip, unzip it anywhere, run `register_openxr_runtime.bat` once, then `configure.exe` (pair the headset,
 benchmark, settings) and `VisionALVR.exe` (keep it open while you play). Details, settings and logs: [docs/INSTALL.md](docs/INSTALL.md).
+The headset's address does not have to be fixed: VisionALVR dials the saved address, finds a paired headset again by name on its own,
+and the **Find headset...** button in its window searches the network, pairs a new headset or takes an address you type.
+`configure.exe` offers a shared **community profile** for your headset (JSON files, import/export, see [docs/HMD_PROFILES.md](docs/HMD_PROFILES.md); the
+starter Quest and Pico profiles are not verified yet), a manual configuration or your existing ALVR configuration, then tests the result on your PC and network.
 
 ## Build from source (contributors)
 VisionALVR builds **on Windows only** (MSVC, the Windows SDK and NVENC; cross-compiling from Linux is not supported). With the
