@@ -86,7 +86,7 @@ struct Arrived {
 }
 
 /// Frame-level CSV mirrors for the harness (VISIONALVR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
-/// `fate` writes one line per event of a frame's life on the host: A arrival (slot, ts), S superseded in the intake, P picked at a
+/// `fate` writes one line per event of a frame's life on the host: A arrival (slot, ts), S superseded in the intake, D deferred to the next boundary (no newer sample to stamp with), P picked at a
 /// boundary (index), O dropped by the encoder queue.
 #[cfg(feature = "telemetry")]
 static MIRRORS: std::sync::Mutex<Option<(std::io::BufWriter<std::fs::File>, std::io::BufWriter<std::fs::File>, u32)>> = std::sync::Mutex::new(None);
@@ -202,8 +202,11 @@ pub struct Pipeline {
     /// tracking sample the host holds at encode time and rotated to it (nvh_set_warp), instead of the shim waiting for that sample at submit
     host_stamp: bool,
     pub host_restamps: AtomicU64,
-    /// duplicates left as they were: no sample newer than the last sent frame at encode time
-    pub host_restamp_left: AtomicU64,
+    /// frames dropped at encode time: not newer than the last sent frame and no newer tracking sample yet (the headset would have skipped
+    /// a repeated timestamp anyway, and a timestamp older than the previous frame's must never go out)
+    pub host_restamp_dropped: AtomicU64,
+    /// frames put back for the next boundary because no newer sample existed yet at encode time
+    pub host_restamp_deferred: AtomicU64,
     /// the last boundary that found no frame (the app is not keeping up): the gate and the drain stay out for VISIONALVR_KEEPUP_BOUNDARIES (30)
     /// boundaries after it. A GPU-bound game delivers in bunches (two frames at half the boundaries, none at a tenth: Cyberpunk at 88 fps on a 100 Hz
     /// display, 2026-10-13 evening); that is not a standing queue, and skipping its releases only lowered its frame rate (258 skips in 82 s, hold unchanged).
@@ -290,7 +293,8 @@ impl Pipeline {
             gate_after: std::env::var("VISIONALVR_GATE_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).max(1),
             host_stamp: host_stamp_enabled(),
             host_restamps: AtomicU64::new(0),
-            host_restamp_left: AtomicU64::new(0),
+            host_restamp_dropped: AtomicU64::new(0),
+            host_restamp_deferred: AtomicU64::new(0),
             last_empty_idx: AtomicU64::new(0),
             keepup_boundaries: std::env::var("VISIONALVR_KEEPUP_BOUNDARIES").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30),
             standing_total: AtomicU64::new(0),
@@ -619,19 +623,33 @@ impl Pipeline {
             let mut ts = ts;
             let mut warp_set = false;
             if let (Job::App(a), true) = (&p.job, self.host_stamp) {
-                if a.has_projection && a.ts_ns != 0 {
+                if a.ts_ns != 0 {
                     let last = *self.last_sent_ts.lock();
                     if last != Duration::ZERO && ts <= last {
-                        let newest = *self.shared.latest_sample.lock();
-                        match newest {
-                            Some((sts, q)) if sts > last => {
+                        // the oldest sample newer than the last sent frame: one sample ahead, the smallest rotation that gives a new timestamp
+                        let pick = self.shared.recent_samples.lock().iter().find(|(t, _)| *t > last).copied();
+                        match pick {
+                            Some((sts, q)) if a.has_projection => {
                                 unsafe { nvh::nvh_set_warp(enc.handle, ipc, a.render_q.as_ptr(), q.as_ptr(), 1) };
                                 warp_set = true;
                                 ts = sts;
                                 self.host_restamps.fetch_add(1, Ordering::Relaxed);
                             }
                             _ => {
-                                self.host_restamp_left.fetch_add(1, Ordering::Relaxed);
+                                // nothing newer yet: never send a repeated or older timestamp. Defer the frame to the next boundary (a newer
+                                // sample is almost always there by then: one period of latency for this frame, no hole on the headset); a frame
+                                // already two periods old, or one without a projection layer to rotate, is dropped instead.
+                                let period = self.period();
+                                if a.has_projection && a.arrival.elapsed() < period * 2 {
+                                    self.host_restamp_deferred.fetch_add(1, Ordering::Relaxed);
+                                    fate(a.counter, "D", Instant::now(), 0, 0);
+                                    self.intake.lock().push_front(*a);
+                                } else {
+                                    self.host_restamp_dropped.fetch_add(1, Ordering::Relaxed);
+                                    fate(a.counter, "S", Instant::now(), 2, 0);
+                                    unsafe { nvh::nvh_ipc_slot_busy(ipc, a.slot, 0) };
+                                }
+                                continue;
                             }
                         }
                     }
@@ -846,7 +864,8 @@ impl Pipeline {
             "intake_gate": self.intake_gate,
             "host_stamp": self.host_stamp,
             "host_restamps": self.host_restamps.load(Ordering::Relaxed),
-            "host_restamp_left": self.host_restamp_left.load(Ordering::Relaxed),
+            "host_restamp_dropped": self.host_restamp_dropped.load(Ordering::Relaxed),
+            "host_restamp_deferred": self.host_restamp_deferred.load(Ordering::Relaxed),
             "gate_after": self.gate_after,
             "keepup_boundaries": self.keepup_boundaries,
             "intake_depth": self.intake_depth,

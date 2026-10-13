@@ -1207,8 +1207,9 @@ pub(crate) struct Shared {
     /// (hostname, name, ip) of the connected headset
     headset: Mutex<Option<(String, String, String)>>,
     latest_sample_ts: Mutex<Option<Duration>>,
-    /// the newest tracking sample with its head orientation (x y z w): the host-side re-stamp (pipeline.rs)
-    latest_sample: Mutex<Option<(Duration, [f32; 4])>>,
+    /// the last tracking samples with their head orientation (x y z w), oldest first (at most 16): the host-side re-stamp (pipeline.rs) takes
+    /// the oldest one newer than the last sent frame, so the stamp runs exactly one sample ahead and the rotation stays one sample's worth
+    recent_samples: Mutex<std::collections::VecDeque<(Duration, [f32; 4])>>,
     client_connected: AtomicBool,
     restart_from_idr: AtomicBool,
     tracking_events: AtomicUsize,
@@ -1709,7 +1710,18 @@ fn main() {
                                 // un-extrapolated pose anyway.
                                 let (q, mut p) = (m.pose.orientation.to_array(), m.pose.position.to_array());
                                 p[1] += height_offset;
-                                *shared.latest_sample.lock() = Some((sample_timestamp, q));
+                                {
+                                    let mut ring = shared.recent_samples.lock();
+                                    if ring.back().map(|(t, _)| sample_timestamp > *t).unwrap_or(true) {
+                                        ring.push_back((sample_timestamp, q));
+                                        while ring.len() > 16 {
+                                            ring.pop_front();
+                                        }
+                                    } else if ring.back().map(|(t, _)| sample_timestamp + Duration::from_secs(1) < *t).unwrap_or(false) {
+                                        ring.clear(); // the client's clock restarted
+                                        ring.push_back((sample_timestamp, q));
+                                    }
+                                }
                                 let (lv, av) = ([0f32; 3], [0f32; 3]);
                                 unsafe { nvh::nvh_ipc_publish_head(ipc, sample_timestamp.as_nanos() as u64, q.as_ptr(), p.as_ptr(), lv.as_ptr(), av.as_ptr()) };
                                 telemetry::head_sample(sample_timestamp.as_nanos() as u64, q, p);
