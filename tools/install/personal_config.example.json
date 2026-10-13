@@ -14,8 +14,7 @@
   "visionalvr": {
     "video": {
       "encode_profile": "full-split",
-      "idle_rgb": "00ff00",
-      "head_in_order": false
+      "idle_rgb": "00ff00"
     },
     "debug": true,
     "display": {

@@ -41,8 +41,6 @@ pub struct Settings {
     /// head-sample policy of the shim (see main.rs Args::head_wait_ms) and the host's frame queue (pipeline.rs)
     pub head_wait_ms: Option<f64>,
     pub predict_missing_head: Option<bool>,
-    /// consume head samples in order, one per frame, waiting up to head_wait_ms for the next (no duplicate timestamps); default off while untested on the headset
-    pub head_in_order: Option<bool>,
     pub intake_depth: Option<i64>,
     pub pick_policy: Option<String>,
     /// drop one frame when the headset's decoder queue stands a whole period or more, once, with a backoff (phase::client_drain_due); default off while untested on the headset
@@ -90,7 +88,6 @@ pub fn load_settings(path: &Path) -> Settings {
         running_start_ms: video["running_start_ms"].as_f64(),
         head_wait_ms: video["head_wait_ms"].as_f64(),
         predict_missing_head: video["predict_missing_head"].as_bool(),
-        head_in_order: video["head_in_order"].as_bool(),
         intake_depth: video["intake_depth"].as_i64(),
         pick_policy: video["pick_policy"].as_str().map(str::to_string),
         client_queue_drain: video["client_queue_drain"].as_bool(),
