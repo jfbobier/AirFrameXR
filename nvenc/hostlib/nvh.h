@@ -76,7 +76,7 @@ void nvh_ipc_set_eye_height(void* ipc, float eye_height_m);   // the eye height 
 void nvh_ipc_set_hand_offset(void* ipc, int side, const float* quat_xyzw, const float* pos);
 // Shim pacing diagnostics (see ipc.h ShimToHost).
 void nvh_ipc_shim_pacing(void* ipc, uint32_t* slot_busy_waits, float* app_frame_ms, uint64_t* releases, uint64_t* releases_late,
-                         uint64_t* gate_holds, uint64_t* gate_timeouts);
+                         uint64_t* gate_holds, uint64_t* gate_suppressed);
 // Intake gate (ipc.h HostToShim::intakeWaiting / intakeGate): frames a boundary passed over and still held, and whether the shim holds releases for them.
 void nvh_ipc_set_intake(void* ipc, uint32_t waiting);
 void nvh_ipc_set_intake_gate(void* ipc, uint32_t on);

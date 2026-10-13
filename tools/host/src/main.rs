@@ -771,7 +771,7 @@ mod nvh {
         pub fn nvh_ipc_set_eye_height(ipc: *mut c_void, eye_height_m: f32);
         pub fn nvh_ipc_set_hand_offset(ipc: *mut c_void, side: i32, quat_xyzw: *const f32, pos: *const f32);
         pub fn nvh_ipc_shim_pacing(ipc: *mut c_void, slot_busy_waits: *mut u32, app_frame_ms: *mut f32, releases: *mut u64, releases_late: *mut u64,
-                                   gate_holds: *mut u64, gate_timeouts: *mut u64);
+                                   gate_holds: *mut u64, gate_suppressed: *mut u64);
         pub fn nvh_ipc_set_intake(ipc: *mut c_void, waiting: u32);
         pub fn nvh_ipc_set_intake_gate(ipc: *mut c_void, on: u32);
         pub fn nvh_set_gpu_scheduling(cls: i32) -> i32;

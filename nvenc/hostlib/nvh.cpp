@@ -631,10 +631,10 @@ void nvh_ipc_set_hand_offset(void* i, int side, const float* q, const float* p) 
 }
 
 void nvh_ipc_shim_pacing(void* i, uint32_t* slot_busy_waits, float* app_frame_ms, uint64_t* releases, uint64_t* releases_late,
-                         uint64_t* gate_holds, uint64_t* gate_timeouts) {
+                         uint64_t* gate_holds, uint64_t* gate_suppressed) {
     const auto& s = ((Ipc*)i)->state->shim;
     *slot_busy_waits = s.slotBusyWaits; *app_frame_ms = s.appFrameMs; *releases = s.releases; *releases_late = s.releasesLate;
-    *gate_holds = s.gateHolds; *gate_timeouts = s.gateTimeouts;
+    *gate_holds = s.gateHolds; *gate_suppressed = s.gateSuppressed;
 }
 
 void nvh_ipc_set_intake(void* i, uint32_t waiting) {

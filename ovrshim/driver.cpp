@@ -36,6 +36,7 @@
 #include "ipc_win.h"
 
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <mmdeviceapi.h>
 
@@ -824,13 +825,14 @@ namespace {
                     const double plannedRelease = alignedRelease(boundaryTime(target) - lead);
                     // Intake gate: the host reports frames a compositor boundary has passed over and still holds (intakeWaiting). That is a
                     // standing queue: the app runs a frame ahead of the stream and every frame waits a period more than it needs to. The
-                    // queue cannot drain while the app keeps delivering one frame per period, so the release is held until the next
-                    // boundary has taken the waiting frame (the stream shows it, no hole, nothing rendered is dropped) and the app is then
-                    // released for the boundary after. The cost is one render period of the app's time, which it would have spent on a
-                    // frame that only added latency. A hold gives up after 1.5 periods (host stalled).
+                    // queue cannot drain while the app keeps delivering one frame per period, so one release is skipped: the app renders
+                    // one frame fewer, and when that gap reaches the host's intake (the lead later: release -> complete, often more than a
+                    // period for a pipelined engine) the boundary takes the waiting frame and the queue is empty. The stream shows every
+                    // rendered frame and no hole reaches the headset; the app spends one period less on a frame that only added latency.
+                    // After a skip the gate stays quiet until the gap has arrived (lead / period + 2 boundaries), so it never skips twice
+                    // for the same queue.
                     const bool gateOn = m_ipc.state->host.intakeGate != 0 && m_ipc.state->host.clientConnected != 0;
-                    double gateDeadline = 0.0;
-                    bool gateHeld = false, gateGaveUp = false, wasGated = false;
+                    bool wasGated = false;
                     for (;;) {
                         now = QpcSeconds();
                         const double releaseAt = alignedRelease(boundaryTime(target) - lead); // ticks arriving meanwhile refine the grid
@@ -840,28 +842,16 @@ namespace {
                             m_frameVsync.wait_until(lock, std::chrono::steady_clock::now() + waitFor);
                             continue;
                         }
-                        if (gateOn && !gateGaveUp && *(volatile uint32_t*)&m_ipc.state->host.intakeWaiting > 0) {
-                            if (!gateHeld) {
-                                gateHeld = true;
-                                gateDeadline = now + 1.5 * period;
+                        if (gateOn && !wasGated && *(volatile uint32_t*)&m_ipc.state->host.intakeWaiting > 0) {
+                            if (target <= m_gateQuietUntil) {
+                                m_gateSuppressed++;
+                            } else {
                                 m_gateHolds++;
-                            }
-                            if (now < gateDeadline) {
-                                // the host takes the frame at its boundary (tick + offset): poll every ms, the tick event also wakes us
-                                m_frameVsync.wait_until(lock, std::chrono::steady_clock::now() + std::chrono::milliseconds(1));
-                                continue;
-                            }
-                            m_gateTimeouts++;
-                            gateGaveUp = true;
-                        }
-                        if (gateHeld) {
-                            // released later than planned: aim at the first boundary whose release time is still ahead (or just passed)
-                            gateHeld = false;
-                            wasGated = true;
-                            while (boundaryTime(target) - lead < now - 0.0005) {
+                                wasGated = true;
                                 target++;
+                                m_gateQuietUntil = target + (long long)std::ceil(lead / period) + 2;
+                                continue; // wait for the next boundary's release time
                             }
-                            continue; // wait for that boundary's release time, re-checking the gate
                         }
                         break;
                     }
@@ -1344,11 +1334,11 @@ namespace {
                             m_lastSignaledVsync, (unsigned long long)m_waitCalls, (unsigned long long)m_waitWaited,
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
-                            "(late %llu), intake gate %s (holds %llu, timeouts %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x",
+                            "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
-                            (unsigned long long)m_gateHolds, (unsigned long long)m_gateTimeouts, (unsigned long long)m_gpuThrottleTimeouts,
+                            (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask);
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
@@ -1450,7 +1440,7 @@ namespace {
             s.releases = m_releases.load();
             s.releasesLate = m_releasesLate.load();
             s.gateHolds = m_gateHolds;
-            s.gateTimeouts = m_gateTimeouts;
+            s.gateSuppressed = m_gateSuppressed;
             s.frameSeq++; // odd: the host re-reads until it sees the same even value before and after
             MemoryBarrier();
             s.frameSlot = slot;
@@ -2395,7 +2385,8 @@ namespace {
         double m_latestTickS{0.0};                 // shim-clock time of the host's latest display tick (under m_frameMutex)
         std::atomic<uint64_t> m_releases{0}, m_releasesLate{0}, m_slotBusyWaits{0};
         uint64_t m_gpuThrottleTimeouts{0};
-        uint64_t m_gateHolds{0}, m_gateTimeouts{0}; // intake gate (WaitForVsync): releases held for a standing host queue, holds that gave up
+        uint64_t m_gateHolds{0}, m_gateSuppressed{0}; // intake gate (WaitForVsync): releases skipped for a standing host queue, standing seen while quiet
+        long long m_gateQuietUntil{0};                 // boundary index until which the gate stays quiet after a skip (its effect is still in flight)
         uint32_t m_nextSlot{0};                    // round-robin position of PickSlot
         std::atomic<uint32_t> m_lastPublishedSlot{0xFFFFFFFFu};
         // head poses the app read, with their client timestamps (guarded by m_lastHeadMutex)

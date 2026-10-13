@@ -130,8 +130,8 @@ struct ShimToHost {
     float appFrameMs;              // envelope of release (WaitToBeginFrame return) -> frame GPU-complete: the running-start lead
     uint64_t releases;             // WaitToBeginFrame releases
     uint64_t releasesLate;         // releases whose computed time was already past (app slower than a display period: free-running)
-    uint64_t gateHolds;            // releases the intake gate held until the host's queue drained (see HostToShim::intakeGate)
-    uint64_t gateTimeouts;         // gate holds that gave up (the host did not take the waiting frame within 1.5 periods)
+    uint64_t gateHolds;            // releases the intake gate skipped for a standing host queue (see HostToShim::intakeGate)
+    uint64_t gateSuppressed;       // standing queue seen while the gate was quiet after a skip (its effect still in flight)
 };
 
 struct IpcState {

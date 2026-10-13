@@ -11,8 +11,14 @@
     ]
   },
   "stream": {
+    "eye_resolution": [
+      1832,
+      1920
+    ],
     "fps": 90,
     "codec": "hevc",
+    "bit_depth": 10,
+    "full_range": true,
     "foveated": true
   },
   "network": {
@@ -31,6 +37,10 @@
     ]
   },
   "session_overrides": {
+    "session_settings.video.foveated_encoding.content.center_size_x": 0.8,
+    "session_settings.video.foveated_encoding.content.center_size_y": 0.8,
+    "session_settings.video.foveated_encoding.content.edge_ratio_x": 8.0,
+    "session_settings.video.foveated_encoding.content.edge_ratio_y": 8.0,
     "session_settings.video.passthrough.content.RgbChromaKey.blue": 0,
     "session_settings.video.passthrough.content.RgbChromaKey.distance_threshold": 50,
     "session_settings.video.passthrough.content.RgbChromaKey.feathering": 0.19999999,
@@ -41,6 +51,7 @@
   },
   "notes": [
     "Starting point compiled from public guidance, NOT verified by the VisionALVR project on this headset (no `verified` entry). VisionALVR's support for headsets other than the Apple Vision Pro is best effort.",
+    "Quest 2, 3 and 3S share this profile except for the panel size (1832 x 1920 per eye here): they all stream HEVC with ALVR's Android client and a Qualcomm Snapdragon XR2 decoder (Quest 3 and 3S: XR2 Gen 2; Quest 2: XR2 Gen 1). Against the Apple Vision Pro profile (3552 x 3200, 300 Mbps, split encoding) the stream has 2-2.4x fewer pixels and needs about half the bitrate. Same as on the Vision Pro: 90 Hz, HEVC 10-bit (the default session forces it; ALVR's Quest client advertises 10-bit support), full colour range, chroma-key passthrough on pure green. Foveation is ALVR's 'Light' preset (centre 0.80 x 0.80, edge ratio 8 x 8): nearly the whole view stays at full resolution, the saving is small on purpose.",
     "ALVR's wiki (Settings tutorial, v20): on a good wireless router use the medium resolution preset (the default) with sharpening 1.0 and HEVC at a constant 100-150 Mbps; HEVC is usually the best codec when bitrate is limited; turn foveated encoding on and tune it from the statistics graph.",
     "Resolution, gamma and the encoder details are left out on purpose: the headset's own default (what ALVR reports at the handshake) is used. Change them in the wizard if you know better.",
     "Panel about 1832 x 1920 per eye (Meta's specification); refresh rates 72/80/90/120 Hz. ALVR's wiki: 120 Hz has to be enabled in the Quest 2's own settings; this profile uses 90 Hz, the commonly recommended balance (72 Hz is the stable fallback)."

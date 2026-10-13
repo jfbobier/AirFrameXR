@@ -764,8 +764,8 @@ impl Pipeline {
 
     /// Counters for the 2 s statistics windows (deltas are taken by the caller) and the end-of-run report.
     pub fn stats_json(&self) -> serde_json::Value {
-        let (mut waits, mut app_ms, mut releases, mut late, mut gate_holds, mut gate_timeouts) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
-        unsafe { nvh::nvh_ipc_shim_pacing(self.ipc(), &mut waits, &mut app_ms, &mut releases, &mut late, &mut gate_holds, &mut gate_timeouts) };
+        let (mut waits, mut app_ms, mut releases, mut late, mut gate_holds, mut gate_suppressed) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
+        unsafe { nvh::nvh_ipc_shim_pacing(self.ipc(), &mut waits, &mut app_ms, &mut releases, &mut late, &mut gate_holds, &mut gate_suppressed) };
         json!({
             "send_pacing": self.cfg.send_pacing.name(),
             "arrived": self.arrived.load(Ordering::Relaxed),
@@ -786,7 +786,7 @@ impl Pipeline {
             "idr_restarts": self.idr_restarts.load(Ordering::Relaxed),
             "encode_envelope_ms": *self.encode_env_ms.lock(),
             "gpu_scheduling": self.gpu_sched.lock().map(|(c, st)| json!({ "class": c, "status": st })),
-            "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_timeouts": gate_timeouts },
+            "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_suppressed": gate_suppressed },
         })
     }
 }
