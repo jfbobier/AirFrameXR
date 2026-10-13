@@ -66,6 +66,7 @@ struct Args {
     /// head-sample policy (shim): wait for a late sample this long, then reuse the last (false) or predict it (true)
     head_wait_ms: f64,
     predict_missing_head: bool,
+    head_in_order: bool,
     /// follow the client's display rate (see vision::RateEstimator)
     follow_rate: bool,
     /// compositor boundary = display tick + this offset
@@ -152,6 +153,7 @@ fn parse_args() -> Result<Args, String> {
         running_start_ms: 2.0,
         head_wait_ms: 3.0,
         predict_missing_head: false,
+        head_in_order: false,
         follow_rate: true,
         boundary_offset_ms: 0.0,
         gpu_sched_class: 5,
@@ -283,6 +285,7 @@ fn parse_args() -> Result<Args, String> {
             "--no-follow-rate" => a.follow_rate = false,
             "--head-wait-ms" => a.head_wait_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--predict-missing-head" => a.predict_missing_head = true,
+            "--head-in-order" => a.head_in_order = true,
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
             "--auto-input" => {
@@ -380,6 +383,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if let Some(v) = st.predict_missing_head {
         a.predict_missing_head = a.predict_missing_head || v;
+    }
+    if let Some(v) = st.head_in_order {
+        a.head_in_order = a.head_in_order || v;
     }
     // frame-queue policy, read by the pipeline (an explicit environment variable wins)
     if let Some(v) = st.intake_depth {
@@ -765,6 +771,7 @@ mod nvh {
         pub fn nvh_ipc_set_pacing(ipc: *mut c_void, boundary_offset_ms: f32, running_start_ms: f32);
         pub fn nvh_ipc_set_head_policy(ipc: *mut c_void, wait_ms: f32, predict: f32);
         pub fn nvh_ipc_set_eye_height(ipc: *mut c_void, eye_height_m: f32);
+        pub fn nvh_ipc_set_head_in_order(ipc: *mut c_void, in_order: f32);
         pub fn nvh_ipc_set_hand_offset(ipc: *mut c_void, side: i32, quat_xyzw: *const f32, pos: *const f32);
         pub fn nvh_ipc_shim_pacing(ipc: *mut c_void, slot_busy_waits: *mut u32, app_frame_ms: *mut f32, releases: *mut u64, releases_late: *mut u64);
         pub fn nvh_set_gpu_scheduling(cls: i32) -> i32;
@@ -1497,7 +1504,10 @@ fn main() {
             ipc_addr, Arc::clone(&ctx), Arc::clone(&shared), pipeline::Encoder { handle: h, live: l });
         logs::set_clock(Instant::now(), unsafe { nvh::nvh_qpc_seconds() });
         unsafe { nvh::nvh_ipc_set_pacing(ipc, args.boundary_offset_ms as f32, args.running_start_ms as f32) };
-        unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
+        // in-order head samples wait longer than the legacy policy's 3 ms: lab (real Cyberpunk head trace, bunching app) duplicates 244 -> 52 at 3 ms, 11 at 8 ms
+        let head_wait = if args.head_in_order && (args.head_wait_ms - 3.0).abs() < 1e-9 { 8.0 } else { args.head_wait_ms };
+        unsafe { nvh::nvh_ipc_set_head_policy(ipc, head_wait as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
+        unsafe { nvh::nvh_ipc_set_head_in_order(ipc, if args.head_in_order { 1.0 } else { 0.0 }) };
         {
             // hand pose convention fix (see Args::hand_rotation_deg); the right hand mirrors y and z like ALVR's own offsets
             fn apply_hand_offset(ipc: *mut std::ffi::c_void, rot_deg: [f32; 3], pos_m: [f32; 3]) {
@@ -1540,7 +1550,7 @@ fn main() {
         p.set_gpu_scheduling(args.gpu_sched_class);
         p.start();
         event(origin, "pacing_config", json!({ "send_pacing": args.send_pacing.name(), "running_start_ms": args.running_start_ms,
-            "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6 }));
+            "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "head_in_order": args.head_in_order, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6 }));
         #[cfg(feature = "simrig")]
         if let Some(dir) = &args.simrig {
             simrig::set_ipc(ipc_addr);

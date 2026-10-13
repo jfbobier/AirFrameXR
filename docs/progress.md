@@ -368,3 +368,13 @@ seemed to do nothing. Now (IPC v16 `eyeHeightM`, `nvh_ipc_set_eye_height`, shim 
 movement on top, hands in the same frame) and the setting is the eye height reported to games (0 = the headset's y at the anchor). Measured after: LOCAL y = 0.000, STAGE y = 1.300 /
 2.000 / 1.500 for 1.3 / 2.0 / 0. Live: a new height re-anchors at the current head position and changes the eye height at once (VDXR reads it on every locate); a game that cached
 its player height at start keeps it. Launcher label/hint: "Eye height". Probe: `XR_PROBE_SPACE=stage`; harness: `host.height_m`. Not yet tried on the headset.
+
+2026-10-13 (duplicate timestamps, follow-the-frames, lab): scenario `exp/dup_heavy_real_trace` = a GPU-bound bunching app (CPU 3 ms, 30 GPU copies, jitter 45 %) under the recorded REAL Cyberpunk
+head trace. Real headset (personal session, release host): frames the headset does not display = frames sharing the previous frame's head-sample timestamp (`same_ts_frames`/s: Cyberpunk 12.0, Dead Space 16.2, Silas 6.0,
+End of Abyss 1.5; gap host fps - headset fps 12.5 / 17.5 / 6.2 / 1.5). frames.py on the lab baseline: 447 of 3600 game frames (12.4 %) read the same head sample as the previous frame; the game reads its pose in
+bursts (interval p05 7.9 ms, p50 10.2, p95 24.5 ms; reads happen up to 15 ms BEFORE the shim's release), so two reads fall in one 10 ms sample interval. Policies (2 runs each, display side): latest sample (the
+default until now) dup 244 / 301, pose-to-display p50 35.8 / 35.7 ms, repeats 0.7 %; in-order wait 3 ms: dup 52 / 52, 36.2 / 35.4; in-order wait 8 ms: dup 11 / 12, 32.1 / 32.1 ms, repeats 0.9 %; release alignment alone: no
+effect (240 / 271); in-order 8 ms + alignment: dup 19 / 17, 28.0 / 30.8 ms, repeats 1.2 / 0.9 %. Pose read to shown 30.0 -> 26.3 ms (frames.py). New setting `video.head_in_order` (host `--head-in-order`, IPC v17 `headInOrder`;
+wait 8 ms unless `video.head_wait_ms` is set): confirmed through the config path (dup 15, 29.0 ms with the default drain policy). NOT the default: the 2026-10-11 headset test of in-order mode used a 3 ms wait and
+repeated the sample on 20-60 % of frames; this lab uses the real uplink timing of a real session, but only the headset can confirm. The personal build ships it on. To judge on the headset: `same_ts_frames`
+in encoder_stats (should fall from 12-16/s to ~1/s in Cyberpunk / Dead Space), displayed fps next to host fps, and how head tracking feels (a waiting frame delays the game thread up to 8 ms).

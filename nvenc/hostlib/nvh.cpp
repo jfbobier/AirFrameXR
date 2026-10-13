@@ -620,6 +620,9 @@ void nvh_ipc_set_head_policy(void* i, float wait_ms, float predict) {
     auto& h = ((Ipc*)i)->state->host;
     h.headWaitMs = wait_ms; MemoryBarrier(); h.predictMissingHead = predict;
 }
+void nvh_ipc_set_head_in_order(void* i, float in_order) {
+    ((Ipc*)i)->state->host.headInOrder = in_order;
+}
 void nvh_ipc_set_eye_height(void* i, float eye_height_m) {
     ((Ipc*)i)->state->host.eyeHeightM = eye_height_m;
 }

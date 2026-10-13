@@ -2157,7 +2157,7 @@ namespace {
             // not there yet (20-60 % of frames waited then repeated) and a predicted timestamp matches one of the client's own only
             // 16 % of the time (its timestamps jitter by tens of ns), so the client reprojects with the wrong pose.
             static const bool inOrderEnv = EnvSet("OVRSHIM_INORDER_POSE");
-            const bool legacyPose = !(inOrderEnv || (m_ipc.state && m_ipc.state->host.predictMissingHead > 0.f));
+            const bool legacyPose = !(inOrderEnv || (m_ipc.state && (m_ipc.state->host.predictMissingHead > 0.f || m_ipc.state->host.headInOrder > 0.f)));
             if (legacyPose ? ReadHostHead(latched, clientTs) : SelectHostHead(latched, clientTs, absTime)) {
                 // Remember which client tracking sample the app is about to render with: the frame it submits
                 // must carry this timestamp so the headset can reproject against the right pose.
