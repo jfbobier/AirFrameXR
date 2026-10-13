@@ -195,6 +195,11 @@ pub struct Pipeline {
     gate_after: u64,
     /// boundaries that left a frame behind (since start): how long queues stood, whatever drained them
     pub standing_total: AtomicU64,
+    /// the last boundary that found no frame (the app is not keeping up): the gate and the drain stay out for VISIONALVR_KEEPUP_BOUNDARIES (30)
+    /// boundaries after it. A GPU-bound game delivers in bunches (two frames at half the boundaries, none at a tenth: Cyberpunk at 88 fps on a 100 Hz
+    /// display, 2026-10-13 evening); that is not a standing queue, and skipping its releases only lowered its frame rate (258 skips in 82 s, hold unchanged).
+    last_empty_idx: AtomicU64,
+    keepup_boundaries: u64,
     last_empty: AtomicBool,
     /// `drain` pick policy: consecutive boundaries that left a frame behind in the intake (a standing queue: the app delivers exactly as fast as the
     /// display consumes, so every frame waits a period more than it needs to), and when it last dropped one
@@ -267,6 +272,8 @@ impl Pipeline {
             pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "drain".into()),
             intake_gate: intake_gate_enabled(),
             gate_after: std::env::var("VISIONALVR_GATE_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).max(1),
+            last_empty_idx: AtomicU64::new(0),
+            keepup_boundaries: std::env::var("VISIONALVR_KEEPUP_BOUNDARIES").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30),
             standing_total: AtomicU64::new(0),
             last_empty: AtomicBool::new(false),
             standing: AtomicU64::new(0),
@@ -424,6 +431,8 @@ impl Pipeline {
             }
             return;
         }
+        // the app keeps up when no boundary has been empty lately (see `last_empty_idx`): only then is a queue a standing queue
+        let keeps_up = idx.wrapping_sub(self.last_empty_idx.load(Ordering::Relaxed)) > self.keepup_boundaries;
         let newest = {
             let mut q = self.intake.lock();
             // two waiting: send the older now and the newer at the next boundary (the stream runs one period late until an empty
@@ -441,7 +450,7 @@ impl Pipeline {
                         let after = std::env::var("VISIONALVR_DRAIN_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(8).max(1);
                         let every = std::env::var("VISIONALVR_DRAIN_EVERY_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1000.0).max(0.0) / 1000.0;
                         let mut last = self.drain_last.lock();
-                        let due = self.standing.load(Ordering::Relaxed) >= after
+                        let due = keeps_up && self.standing.load(Ordering::Relaxed) >= after
                             && last.map(|t| boundary.saturating_duration_since(t).as_secs_f64() >= every).unwrap_or(true);
                         if due {
                             *last = Some(boundary);
@@ -478,7 +487,7 @@ impl Pipeline {
                 // probe showed depth 2 at every third boundary and never twice in a row); in order, both are shown and nothing is lost. A queue
                 // that stands VISIONALVR_GATE_AFTER (3) boundaries in a row is the app running a frame ahead of the stream (Cyberpunk: 95 % of
                 // boundaries): only then does the shim skip one release (see `intake_gate`). Gating on a single boundary skipped 16 % of releases.
-                let waiting = if standing >= self.gate_after { q.len() as u32 } else { 0 };
+                let waiting = if keeps_up && standing >= self.gate_after { q.len() as u32 } else { 0 };
                 unsafe { nvh::nvh_ipc_set_intake(ipc, waiting) };
             }
             a
@@ -504,6 +513,7 @@ impl Pipeline {
             }
             None if alive => {
                 self.last_empty.store(true, Ordering::Relaxed);
+                self.last_empty_idx.store(idx, Ordering::Relaxed);
                 self.slots_empty.fetch_add(1, Ordering::Relaxed);
                 return;
             }
@@ -784,6 +794,7 @@ impl Pipeline {
             "standing_total": self.standing_total.load(Ordering::Relaxed),
             "intake_gate": self.intake_gate,
             "gate_after": self.gate_after,
+            "keepup_boundaries": self.keepup_boundaries,
             "intake_depth": self.intake_depth,
             "pick_policy": self.pick_policy,
             "slots_filled": self.slots_filled.load(Ordering::Relaxed),

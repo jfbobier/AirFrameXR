@@ -789,7 +789,8 @@ namespace {
                     // m_phaseDelayMax of the running-start margin (fresh pose, the usual case), else slightly before it (stable,
                     // one period older pose). Moving from one side to the other happens only when the wanted phase has moved by
                     // more than that, so the sample choice flips rarely instead of on every wobble.
-                    static const bool noAlign = !EnvSet("OVRSHIM_ALIGN_RELEASE"); // opt-in: see SelectHostHead
+                    static const bool envAlign = EnvSet("OVRSHIM_ALIGN_RELEASE"); // lab switch; the product uses the host's setting (ipc alignRelease)
+                    const bool noAlign = !envAlign && m_ipc.state->host.alignRelease == 0;
                     auto alignedRelease = [&](double releaseAt) {
                         if (noAlign) {
                             return releaseAt;
@@ -1334,11 +1335,11 @@ namespace {
                             m_lastSignaledVsync, (unsigned long long)m_waitCalls, (unsigned long long)m_waitWaited,
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
-                            "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x",
+                            "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), release alignment %s, GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
-                            (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
+                            (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, m_ipc.state->host.alignRelease ? "on" : "off", (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask);
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {

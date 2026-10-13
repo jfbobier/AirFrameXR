@@ -48,6 +48,8 @@ pub struct Settings {
     /// the shim holds the game's next release while the host's queue holds a frame a boundary passed over (drains a standing queue without
     /// dropping a rendered frame; pipeline.rs / ovrshim WaitForVsync); default on
     pub intake_gate: Option<bool>,
+    /// the shim places the game's release just after the tracking sample's arrival (duplicate-timestamp fix); default on
+    pub align_release: Option<bool>,
     /// slide the host's display grid so frames arrive just before the headset's tick (phase.rs); default on
     pub phase_lock: Option<bool>,
     /// follow the client's display rate (detected from its sample timestamps) instead of the 90 Hz grid (default on)
@@ -95,6 +97,7 @@ pub fn load_settings(path: &Path) -> Settings {
         pick_policy: video["pick_policy"].as_str().map(str::to_string),
         client_queue_drain: video["client_queue_drain"].as_bool(),
         intake_gate: video["intake_gate"].as_bool(),
+        align_release: video["align_release"].as_bool(),
         phase_lock: video["phase_lock"].as_bool(),
         follow_client_rate: video["follow_client_rate"].as_bool(),
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),

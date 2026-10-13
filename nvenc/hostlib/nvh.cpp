@@ -645,6 +645,10 @@ void nvh_ipc_set_intake_gate(void* i, uint32_t on) {
     ((Ipc*)i)->state->host.intakeGate = on;
 }
 
+void nvh_ipc_set_align_release(void* i, uint32_t on) {
+    ((Ipc*)i)->state->host.alignRelease = on;
+}
+
 long nvh_set_gpu_scheduling(int cls) {
     typedef long(APIENTRY * PFN)(HANDLE, int);
     HMODULE gdi = LoadLibraryW(L"gdi32.dll");

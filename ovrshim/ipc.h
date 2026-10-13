@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 19;
+constexpr uint32_t kVersion = 20;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -103,6 +103,10 @@ struct HostToShim {
     // drains when that gap reaches the host, without dropping a rendered frame.
     uint32_t intakeWaiting;
     uint32_t intakeGate;
+    // Release alignment (WaitForVsync): keep the app's running-start release just after the tracking sample's arrival instead of wherever the
+    // host grid puts it, so consecutive frames do not read the same sample when release and arrival coincide (duplicate timestamps the
+    // headset skips). The headset's samples arrive on its own clock; the host grid slides (phase lock), so the phase between the two drifts.
+    uint32_t alignRelease;
 };
 
 struct Haptic {

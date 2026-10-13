@@ -401,6 +401,11 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
             std::env::set_var("VISIONALVR_INTAKE_GATE", if v { "1" } else { "0" });
         }
     }
+    if let Some(v) = st.align_release {
+        if std::env::var_os("VISIONALVR_ALIGN_RELEASE").is_none() {
+            std::env::set_var("VISIONALVR_ALIGN_RELEASE", if v { "1" } else { "0" });
+        }
+    }
     phase::configure(st.phase_lock.unwrap_or(true));
     if let Some(v) = st.boundary_offset_ms {
         a.boundary_offset_ms = v;
@@ -774,6 +779,7 @@ mod nvh {
                                    gate_holds: *mut u64, gate_suppressed: *mut u64);
         pub fn nvh_ipc_set_intake(ipc: *mut c_void, waiting: u32);
         pub fn nvh_ipc_set_intake_gate(ipc: *mut c_void, on: u32);
+        pub fn nvh_ipc_set_align_release(ipc: *mut c_void, on: u32);
         pub fn nvh_set_gpu_scheduling(cls: i32) -> i32;
     }
 }
@@ -1505,6 +1511,10 @@ fn main() {
         logs::set_clock(Instant::now(), unsafe { nvh::nvh_qpc_seconds() });
         unsafe { nvh::nvh_ipc_set_pacing(ipc, args.boundary_offset_ms as f32, args.running_start_ms as f32) };
         unsafe { nvh::nvh_ipc_set_intake_gate(ipc, if pipeline::intake_gate_enabled() { 1 } else { 0 }) };
+        // release alignment to the tracking sample (ipc.h alignRelease): on unless VISIONALVR_ALIGN_RELEASE=0 / video.align_release false
+        let align = std::env::var("VISIONALVR_ALIGN_RELEASE").map(|v| v != "0").unwrap_or(true);
+        unsafe { nvh::nvh_ipc_set_align_release(ipc, if align { 1 } else { 0 }) };
+        event(origin, "release_alignment", json!({ "on": align }));
         unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
         {
             // hand pose convention fix (see Args::hand_rotation_deg); the right hand mirrors y and z like ALVR's own offsets
