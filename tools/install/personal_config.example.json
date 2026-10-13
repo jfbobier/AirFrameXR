@@ -15,7 +15,7 @@
     "video": {
       "encode_profile": "full-split",
       "idle_rgb": "00ff00",
-      "head_in_order": true
+      "head_in_order": false
     },
     "debug": true,
     "display": {
