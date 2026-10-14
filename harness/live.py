@@ -122,6 +122,11 @@ def build(what, simrig=False, release=False):
         # the OpenXR test app (harness/simrig scenes): rebuilt from the working tree like the others
         "probe": [("tools/probe/xr_probe.cpp", "tools/probe/"), ("nvenc/hostlib/bench_scene.h", "nvenc/hostlib/"), ("build.ps1", "")]
                  + [(f"tools/remote/{p.name}", "tools/remote/") for p in (ROOT / "tools/remote").glob("*.ps1")],
+        # the launcher / wizard (C#): a compile check of GUI changes
+        "gui": [(f"tools/gui/{p.name}", "tools/gui/") for p in sorted((ROOT / "tools/gui").iterdir()) if p.is_file()]
+               + [(f"tools/gui/res/{p.name}", "tools/gui/res/") for p in sorted((ROOT / "tools/gui/res").iterdir()) if p.is_file()]
+               + [(f"profiles/{p.name}", "profiles/") for p in sorted((ROOT / "profiles").glob("*.json"))] + [("build.ps1", "")]
+               + [(f"tools/remote/{p.name}", "tools/remote/") for p in (ROOT / "tools/remote").glob("*.ps1")],
     }
     targets = ["host", "shim"] if what == "all" else [what]
     for t in targets:
