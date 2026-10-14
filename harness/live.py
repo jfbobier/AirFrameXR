@@ -125,6 +125,9 @@ def build(what, simrig=False, release=False):
     }
     targets = ["host", "shim"] if what == "all" else [what]
     for t in targets:
+        # the destination folders first (a new folder in the tree, e.g. third_party/nvof, does not exist in the PC's clone yet)
+        dirs = sorted({d.rstrip("/") for _, d in files[t] if d})
+        ps("\n".join(f"New-Item -ItemType Directory -Force '{CLONE}\\{d.replace(chr(47), chr(92))}' | Out-Null" for d in dirs))
         for f, d in files[t]:
             put(ROOT / f if not str(f).startswith("/") else f, f"{CLONE}/{d}".replace("\\", "/"))
     bld = " ".join(targets)
