@@ -401,7 +401,11 @@ pub fn encode_fg(nvh_handle: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, q
         s.started.store(true, Ordering::Relaxed);
     }
     let ms = unsafe { nvh::nvh_fg_encode(nvh_handle, ipc, mode, t, q_out.as_ptr(), counter, ts_ns, force_idr as i32, err, errlen) };
-    let ring = if ms >= 0.0 && s.started.load(Ordering::Relaxed) { unsafe { sv_capture(viewer, nvh_handle, ipc, 0, counter.wrapping_mul(3).wrapping_add(mode as u32)) } } else { -1 };
+    // every output its own ring slot: a rendered frame goes out more than once (R then Q) and the viewer may still hold the earlier picture
+    // in its queue when the next one is captured (keying by frame counter overwrote it: a one-period error on R/Q frames, 2026-10-14)
+    static FG_CAPTURES: AtomicUsize = AtomicUsize::new(0);
+    let key = FG_CAPTURES.fetch_add(1, Ordering::Relaxed) as u32;
+    let ring = if ms >= 0.0 && s.started.load(Ordering::Relaxed) { unsafe { sv_capture(viewer, nvh_handle, ipc, 0, key) } } else { -1 };
     LAST_RING.store(if ring >= 0 { ring as usize } else { usize::MAX }, Ordering::Relaxed);
     ms
 }
