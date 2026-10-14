@@ -101,5 +101,10 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
   falls back to the crossfade (two half-bright copies). The rig's marker (a white rectangle on black, ~9 px per app frame at 1024 px per eye)
   is lost in 11 % of the synthetic frames, 33 % at its top speed; game content is softer, but HUD elements and particles will show this.
   A softer confidence, or the engine's cost alone, is the first thing to try.
+- **Sharpness.** Every output is a resample of the rendered frame at sub-pixel offsets (the rotation to the stamp sample; the flow displacement
+  for synthetic frames), which the first headset session saw as a lower resolution. Since a1dfeb3 the colour fetches are Catmull-Rom (5 bilinear
+  taps) and a rendered frame whose stamp orientation is within 0.02 deg of its render orientation is copied as is (`gen.copies`). If it still
+  reads softer than the game, the next steps are a sharpening term in the output pass or sending rendered frames unwarped once the client can
+  take their own stamp.
 - **Game motion vectors** (DLSS inputs) would replace the flow where they exist, allow extrapolation (no added period) and depth-aware
   reprojection: design note docs/MOTION_VECTORS.md (in-process NGX tap at session creation, not an OptiScaler fork).
