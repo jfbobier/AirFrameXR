@@ -1533,8 +1533,9 @@ fn main() {
         logs::set_clock(Instant::now(), unsafe { nvh::nvh_qpc_seconds() });
         unsafe { nvh::nvh_ipc_set_pacing(ipc, args.boundary_offset_ms as f32, args.running_start_ms as f32) };
         unsafe { nvh::nvh_ipc_set_intake_gate(ipc, if pipeline::intake_gate_enabled() { 1 } else { 0 }) };
-        // release alignment to the tracking sample (ipc.h alignRelease): on unless VISIONALVR_ALIGN_RELEASE=0 / video.align_release false
-        let align = std::env::var("VISIONALVR_ALIGN_RELEASE").map(|v| v != "0").unwrap_or(true);
+        // release alignment to the tracking sample (ipc.h alignRelease): OFF unless VISIONALVR_ALIGN_RELEASE=1 / video.align_release true (as on main,
+        // where it is the lab-only OVRSHIM_ALIGN_RELEASE: no effect on duplicates; the parked branch had it on by default)
+        let align = std::env::var("VISIONALVR_ALIGN_RELEASE").map(|v| v == "1").unwrap_or(false);
         unsafe { nvh::nvh_ipc_set_align_release(ipc, if align { 1 } else { 0 }) };
         event(origin, "release_alignment", json!({ "on": align }));
         // re-stamp path (docs/TELEMETRY.md): off unless configured (video.restamp_mode / VISIONALVR_RESTAMP_MODE=off|shim|host, or the older
