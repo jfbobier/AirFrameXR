@@ -411,6 +411,11 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
             std::env::set_var("VISIONALVR_DUP_RESTAMP", if v { "1" } else { "0" });
         }
     }
+    if let Some(v) = &st.restamp_mode {
+        if std::env::var_os("VISIONALVR_RESTAMP_MODE").is_none() {
+            std::env::set_var("VISIONALVR_RESTAMP_MODE", v);
+        }
+    }
     if let Some(v) = st.dup_wait_ms {
         if std::env::var_os("VISIONALVR_DUP_WAIT_MS").is_none() {
             std::env::set_var("VISIONALVR_DUP_WAIT_MS", v.to_string());
@@ -1531,15 +1536,19 @@ fn main() {
         let align = std::env::var("VISIONALVR_ALIGN_RELEASE").map(|v| v != "0").unwrap_or(true);
         unsafe { nvh::nvh_ipc_set_align_release(ipc, if align { 1 } else { 0 }) };
         event(origin, "release_alignment", json!({ "on": align }));
-        // duplicate-timestamp fix (ipc.h dupRestamp): on unless VISIONALVR_DUP_RESTAMP=0 / video.dup_restamp false; wait VISIONALVR_DUP_WAIT_MS
-        // (12: a bound longer than one 100 Hz sample interval lets the second frame of a bunch get the next sample; 8 ms left 4-7 % of the
-        // heavy games' frames as duplicates, 12 ms 1 %, for +0.7 ms average wait; 2026-10-13 night)
-        let host_stamp = pipeline::host_stamp_enabled();
-        // the shim's own wait-and-re-stamp is the fallback when the host does not stamp (VISIONALVR_HOST_STAMP=0)
-        let restamp = !host_stamp && std::env::var("VISIONALVR_DUP_RESTAMP").map(|v| v != "0").unwrap_or(true);
+        // re-stamp path (docs/TELEMETRY.md): off unless configured (video.restamp_mode / VISIONALVR_RESTAMP_MODE=off|shim|host, or the older
+        // VISIONALVR_HOST_STAMP=1 / VISIONALVR_DUP_RESTAMP=1). "shim": ipc.h dupRestamp, the shim waits up to VISIONALVR_DUP_WAIT_MS for the
+        // next tracking sample (12: a bound longer than one 100 Hz sample interval lets the second frame of a bunch get the next sample; 8 ms left
+        // 4-7 % of the heavy games' frames as duplicates, 12 ms 1 %, for +0.7 ms average wait; 2026-10-13 night). "host": the pipeline stamps and
+        // warps at encode time. A telemetry client's schedule switches between them live (telemetry.rs); the shim flag is read per frame.
+        let restamp_mode = telemetry::base_mode_from_env();
+        let host_stamp = restamp_mode == telemetry::Mode::Host;
+        let restamp = restamp_mode == telemetry::Mode::Shim;
         event(origin, "host_stamp", json!({ "on": host_stamp }));
         let dup_wait_ms = std::env::var("VISIONALVR_DUP_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(12.0).clamp(0.0, 30.0);
         unsafe { nvh::nvh_ipc_set_dup_restamp(ipc, if restamp { 1 } else { 0 }, dup_wait_ms as f32) };
+        telemetry::configure(ipc as usize, restamp_mode, dup_wait_ms as f32);
+        event(origin, "restamp_mode", json!({ "mode": restamp_mode.name() }));
         event(origin, "dup_restamp", json!({ "on": restamp, "wait_ms": dup_wait_ms }));
         unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
         {

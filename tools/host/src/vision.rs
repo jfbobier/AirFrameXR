@@ -53,6 +53,8 @@ pub struct Settings {
     /// duplicate-timestamp fix: a frame rendered with the sample the previous frame left with waits up to dup_wait_ms for the next sample,
     /// is stamped with it and its layers rotated to it (shim SubmitFrame); default on, 8 ms
     pub dup_restamp: Option<bool>,
+    /// live-switchable re-stamp path: "off" (default), "shim" (the shim waits for the next sample) or "host" (the host stamps and warps at encode time)
+    pub restamp_mode: Option<String>,
     pub dup_wait_ms: Option<f64>,
     /// slide the host's display grid so frames arrive just before the headset's tick (phase.rs); default on
     pub phase_lock: Option<bool>,
@@ -103,6 +105,7 @@ pub fn load_settings(path: &Path) -> Settings {
         intake_gate: video["intake_gate"].as_bool(),
         align_release: video["align_release"].as_bool(),
         dup_restamp: video["dup_restamp"].as_bool(),
+        restamp_mode: video["restamp_mode"].as_str().map(|s| s.to_string()),
         dup_wait_ms: video["dup_wait_ms"].as_f64(),
         phase_lock: video["phase_lock"].as_bool(),
         follow_client_rate: video["follow_client_rate"].as_bool(),

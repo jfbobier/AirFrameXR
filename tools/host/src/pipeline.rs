@@ -157,6 +157,8 @@ struct Outgoing {
     encoded_at: Instant,
     /// CSV columns up to the send time (frame,ts_ns,slot,t_boundary,t_arrival,t_encode_start,encode_ms)
     row: String,
+    /// telemetry run columns (seg,mode,frame,orig_ts_ns,final_ts_ns,restamped,warp_mdeg,queue_wait_ms), empty when no run is armed
+    tel: String,
     bytes: usize,
     #[cfg(feature = "simrig")]
     sim_ring: i32,
@@ -267,10 +269,10 @@ fn quat_angle_mdeg(a: &[f32], b: &[f32]) -> f64 {
     2.0 * dot.acos() * 57295.78
 }
 
-/// VISIONALVR_HOST_STAMP (default OFF since 2026-10-13 night: the host-side re-stamp trembles on the Vision Pro with foveation on while
-/// the lab finds its rotation exact with foveation off; the shim-side re-stamp is the default until that is understood): see `Pipeline::host_stamp`
+/// The configured re-stamp path is the host's when VISIONALVR_RESTAMP_MODE=host / VISIONALVR_HOST_STAMP=1 (off by default: the host-side re-stamp trembles
+/// on the Vision Pro, the lab finds its rotation exact; docs/TELEMETRY.md): see `Pipeline::host_stamp`
 pub fn host_stamp_enabled() -> bool {
-    std::env::var("VISIONALVR_HOST_STAMP").map(|v| v == "1").unwrap_or(false)
+    crate::telemetry::base_mode_from_env() == crate::telemetry::Mode::Host
 }
 
 /// VISIONALVR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
@@ -638,9 +640,16 @@ impl Pipeline {
             // Host-side re-stamp: by the boundary the host usually holds a tracking sample newer than the one the frame was rendered with.
             // A frame that would repeat the last sent timestamp (the headset skips those) is stamped with that sample and the picture is
             // rotated from the eyes' render orientation to it in the encode path (nvh_set_warp -> warp pass -> foveation).
+            let orig_ts = ts;
             let mut ts = ts;
             let mut warp_set = false;
-            if let (Job::App(a), true) = (&p.job, self.host_stamp) {
+            let (mut tel_restamped, mut tel_warp_mdeg) = (false, 0.0f64);
+            // the scheduled mode of a telemetry run overrides the configured one, per frame (live switching)
+            let host_stamp_now = match crate::telemetry::armed_mode() {
+                Some(m) => m == crate::telemetry::Mode::Host,
+                None => self.host_stamp,
+            };
+            if let (Job::App(a), true) = (&p.job, host_stamp_now) {
                 if a.ts_ns != 0 {
                     let last = *self.last_sent_ts.lock();
                     if last != Duration::ZERO && ts <= last {
@@ -672,6 +681,7 @@ impl Pipeline {
                                     let mut d = self.diag_layer_vs_sample_mdeg.lock();
                                     d.0 += lv; d.1 = d.1.max(lv); d.2 += 1;
                                     let w = quat_angle_mdeg(&rq, &q);
+                                    tel_warp_mdeg = w;
                                     let mut e = self.diag_warp_mdeg.lock();
                                     e.0 += w; e.1 = e.1.max(w); e.2 += 1;
                                 }
@@ -680,6 +690,7 @@ impl Pipeline {
                                     warp_set = true;
                                 }
                                 ts = sts;
+                                tel_restamped = true;
                                 self.host_restamps.fetch_add(1, Ordering::Relaxed);
                             }
                             _ => {
@@ -701,6 +712,14 @@ impl Pipeline {
                         }
                     }
                 }
+            }
+            if !warp_set && slot.is_some() && crate::telemetry::take_prewarm() {
+                // a telemetry run's warm-up: an identity warp on a few frames creates the warp pass, its views and its foveation instance now,
+                // so the first host-mode segment does not pay for them (the picture is unchanged)
+                const ID8: [f32; 8] = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+                const ID4: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+                unsafe { nvh::nvh_set_warp(enc.handle, ipc, ID8.as_ptr(), ID4.as_ptr(), 1) };
+                warp_set = true;
             }
             if !warp_set {
                 unsafe { nvh::nvh_set_warp(enc.handle, ipc, std::ptr::null(), std::ptr::null(), 0) };
@@ -797,6 +816,20 @@ impl Pipeline {
             };
             let row = format!("{},{},{},{:.6},{:.6},{:.6},{:.3}", if slot.is_some() { counter as i64 } else { -1 }, ts.as_nanos(), slot_s,
                 logs::qpc_at(p.boundary), arrival_s, logs::qpc_at(t0), ms);
+            let tel = if slot.is_some() && crate::telemetry::segment() >= 0 {
+                let qwait_ms = match &p.job {
+                    Job::App(a) => t0.saturating_duration_since(a.arrival).as_secs_f64() * 1000.0,
+                    Job::Green => 0.0,
+                };
+                let mode = match crate::telemetry::armed_mode() {
+                    Some(m) => m.name(),
+                    None => if self.host_stamp { "host" } else { "off" },
+                };
+                format!("{},{},{},{},{},{},{:.1},{:.3},{:.3}", crate::telemetry::segment(), mode, counter, orig_ts.as_nanos(), ts.as_nanos(),
+                    tel_restamped as u8, tel_warp_mdeg, qwait_ms, ms)
+            } else {
+                String::new()
+            };
             let bytes = l.packet_bytes;
             #[allow(unused_mut)]
             let mut pending: Vec<_> = l.pending.drain(..).collect();
@@ -830,7 +863,8 @@ impl Pipeline {
             let mut q = self.outgoing.lock();
             for (k, (pts, frame, is_idr, config)) in pending.into_iter().enumerate() {
                 q.push_back(Outgoing { release_at, boundary: p.boundary, ts: pts, frame, is_idr, config, encoded_at,
-                    row: if k + 1 == n { row.clone() } else { String::new() }, bytes,
+                    row: if k + 1 == n { row.clone() } else { String::new() },
+                    tel: if k + 1 == n { tel.clone() } else { String::new() }, bytes,
                     #[cfg(feature = "simrig")] sim_ring });
             }
             drop(q);
@@ -878,6 +912,11 @@ impl Pipeline {
                 push_bounded(&SEND_PHASE_MS, now.saturating_duration_since(o.boundary).as_secs_f64() * 1000.0);
                 mirror_sent(&format!("{},{:.6},{:.3},{},{}", o.row, logs::qpc_at(now), o.release_at.saturating_duration_since(o.encoded_at).as_secs_f64() * 1000.0,
                     o.bytes, o.is_idr as u8));
+                if !o.tel.is_empty() {
+                    crate::telemetry::host_frame(&format!("{:.6},{},{:.3},{},{},{},{}", logs::qpc_at(now), o.tel,
+                        o.release_at.saturating_duration_since(o.encoded_at).as_secs_f64() * 1000.0, o.bytes, o.is_idr as u8,
+                        self.host_restamp_deferred.load(Ordering::Relaxed), self.host_restamp_dropped.load(Ordering::Relaxed)));
+                }
                 #[cfg(feature = "telemetry")]
                 {
                     logs::csv("host_frames.csv", "frame,ts_ns,slot,t_boundary,t_arrival,t_encode_start,encode_ms,t_send,hold_ms,bytes,idr",
@@ -915,7 +954,8 @@ impl Pipeline {
             "intake_drains": self.intake_drains.load(Ordering::Relaxed),
             "standing_total": self.standing_total.load(Ordering::Relaxed),
             "intake_gate": self.intake_gate,
-            "host_stamp": self.host_stamp,
+            "host_stamp": crate::telemetry::armed_mode().map(|m| m == crate::telemetry::Mode::Host).unwrap_or(self.host_stamp),
+            "telemetry_seg": crate::telemetry::segment(),
             "host_restamps": self.host_restamps.load(Ordering::Relaxed),
             "host_restamp_dropped": self.host_restamp_dropped.load(Ordering::Relaxed),
             "host_restamp_deferred": self.host_restamp_deferred.load(Ordering::Relaxed),

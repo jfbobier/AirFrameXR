@@ -178,6 +178,16 @@ pub fn csv(name: &str, header: &str, row: &str) {
     }
 }
 
+/// Flushes every per-frame CSV (the end of a telemetry run: the 90-row flush interval would leave the last rows in the buffer).
+pub fn csv_flush_all() {
+    use std::io::Write;
+    if let Ok(mut files) = CSVS.lock() {
+        for (_, w, _) in files.iter_mut() {
+            let _ = w.flush();
+        }
+    }
+}
+
 /// A host event (already a JSON line) into the debug session's `host_events.jsonl`.
 pub fn event_line(line: &str) {
     let mut s = state().lock();
@@ -210,6 +220,14 @@ impl log::Log for AlvrLogger {
             return;
         }
         let msg = format!("{}", record.args());
+        // Telemetry-flavour client lines (client log channel: "Client <host>: [<level>] [ALVR NATIVE] [pt] ..."): captured as they are with the
+        // host's receive time into telemetry_client.log, and kept out of the other logs (hundreds of lines per minute).
+        if msg.starts_with("Client ") {
+            if let Some(i) = msg.find("[pt] ") {
+                crate::telemetry::client_line(qpc_now(), &msg[i..]);
+                return;
+            }
+        }
         // The headset's raw per-frame report (patched into server_core's report_statistics: tools/patches/client-stats-log.patch):
         // one CSV row per frame the headset displayed, keyed by the frame's timestamp so it joins with host_frames.csv.
         // What the headset advertised at the handshake (tools/patches/client-caps-log.patch): the configure wizard's `client_capabilities` event.
