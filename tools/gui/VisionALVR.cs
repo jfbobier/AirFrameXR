@@ -32,7 +32,7 @@ namespace VisionALVR
         class Knob { public string Name; public TrackBar Bar; public Label Value; public double Def; public Func<double> Get; public Action<double> Set; }
         readonly List<Knob> knobs = new List<Knob>();
         readonly CheckBox debug = new CheckBox { Text = "Debug logging (files in logs\\debug\\)", AutoSize = true, Font = Ui.Body };
-        readonly CheckBox frameGen = new CheckBox { Text = "Frame generation: the game renders at half the display rate, the streamer fills the frame in between (for games that cannot hold 70-75 fps; applies at once)", AutoSize = true, Font = Ui.Body, MaximumSize = new Size(620, 0) };
+        readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3) };
         readonly Label footer = Ui.Line("", new Font("Segoe UI", 8.5f));
         string pairedName = "", pairedIp = "";
         bool closing;
@@ -99,8 +99,14 @@ namespace VisionALVR
             lt.SetColumnSpan(reset, 2);
             lt.Controls.Add(debug);
             lt.SetColumnSpan(debug, 4);
-            lt.Controls.Add(frameGen);
-            lt.SetColumnSpan(frameGen, 6);
+            var fgRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
+            fgRow.Controls.Add(frameGen);
+            var fgText = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
+            fgText.Controls.Add(new Label { Text = "Frame generation", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 4, 0, 0) });
+            fgText.Controls.Add(new Label { Text = "The game renders at half the display rate and the streamer fills the frame in between. For games that cannot hold 70-75 fps; applies at once.", AutoSize = true, Font = Ui.Body, ForeColor = Color.DimGray, MaximumSize = new Size(560, 0), Margin = new Padding(0) });
+            fgRow.Controls.Add(fgText);
+            lt.Controls.Add(fgRow);
+            lt.SetColumnSpan(fgRow, 6);
             live.Controls.Add(lt);
             body.Controls.Add(live);
 

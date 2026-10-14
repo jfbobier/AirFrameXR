@@ -419,6 +419,61 @@ namespace VisionALVR
         }
     }
 
+    /// An iOS-style toggle: a pill whose knob slides, green when on. Click or Space flips it. For the one setting that should be readable
+    /// from across the room (frame generation in the streamer window); the rest of the GUI keeps plain checkboxes.
+    public class ToggleSwitch : Control
+    {
+        bool on;
+        float pos;
+        readonly System.Windows.Forms.Timer anim = new System.Windows.Forms.Timer { Interval = 15 };
+        public event EventHandler CheckedChanged;
+        public bool Checked
+        {
+            get => on;
+            set { if (on == value) return; on = value; anim.Start(); CheckedChanged?.Invoke(this, EventArgs.Empty); }
+        }
+        public ToggleSwitch()
+        {
+            Size = new Size(54, 30);
+            DoubleBuffered = true;
+            Cursor = Cursors.Hand;
+            TabStop = true;
+            anim.Tick += (s, e) =>
+            {
+                pos = Math.Max(0f, Math.Min(1f, pos + (on ? 0.18f : -0.18f)));
+                if (pos <= 0f || pos >= 1f) anim.Stop();
+                Invalidate();
+            };
+        }
+        protected override void OnClick(EventArgs e) { Checked = !Checked; base.OnClick(e); }
+        protected override void OnKeyDown(KeyEventArgs e) { if (e.KeyCode == Keys.Space) Checked = !Checked; base.OnKeyDown(e); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(BackColor);
+            int h = Height - 2, w = Width - 2;
+            var off = Color.FromArgb(0xE9, 0xE9, 0xEB);
+            var onC = Color.FromArgb(0x34, 0xC7, 0x59);
+            var c = Color.FromArgb((int)(off.R + (onC.R - off.R) * pos), (int)(off.G + (onC.G - off.G) * pos), (int)(off.B + (onC.B - off.B) * pos));
+            using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+            {
+                int r = h;
+                path.AddArc(1, 1, r, r, 90, 180);
+                path.AddArc(1 + w - r, 1, r, r, 270, 180);
+                path.CloseFigure();
+                using (var b = new SolidBrush(c)) g.FillPath(b, path);
+                if (Focused) using (var p = new Pen(Ui.Accent, 1.5f)) g.DrawPath(p, path);
+            }
+            int d = h - 4;
+            int x = 3 + (int)Math.Round(pos * (w - d - 4));
+            using (var sh = new SolidBrush(Color.FromArgb(40, 0, 0, 0))) g.FillEllipse(sh, x, 4, d, d);
+            g.FillEllipse(Brushes.White, x, 3, d, d);
+        }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+    }
+
     public static class Ui
     {
         public static readonly Font Body = new Font("Segoe UI", 9.5f);
