@@ -300,6 +300,10 @@ pub struct Pipeline {
     pub fg_errors: AtomicU64,
     /// nvh_fg_stats JSON, refreshed by the encoder thread (the statistics window must not lock the encoder)
     fg_stats: Mutex<String>,
+    /// how long a boundary may wait for a tracking sample newer than the last sent frame (see `fg_pick_sample`)
+    fg_sample_wait: Mutex<Duration>,
+    pub fg_sample_waits: AtomicU64,
+    pub fg_sample_wait_us: AtomicU64,
 }
 
 /// VISIONALVR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
@@ -383,6 +387,10 @@ impl Pipeline {
             fg_pairs_skipped: AtomicU64::new(0),
             fg_errors: AtomicU64::new(0),
             fg_stats: Mutex::new(String::from("{\"on\":0}")),
+            fg_sample_wait: Mutex::new(Duration::from_secs_f64(
+                std::env::var("VISIONALVR_FG_SAMPLE_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(3.0).clamp(0.0, 20.0) / 1000.0)),
+            fg_sample_waits: AtomicU64::new(0),
+            fg_sample_wait_us: AtomicU64::new(0),
         })
     }
 
@@ -400,10 +408,38 @@ impl Pipeline {
     }
 
     /// the newest tracking sample newer than the last sent frame: the stamp (and the rotation target) of a generated frame
-    fn fg_pick_sample(&self) -> Option<(Duration, [f32; 4])> {
+    fn fg_pick_sample_now(&self) -> Option<(Duration, [f32; 4])> {
         let last = *self.last_sent_ts.lock();
         let ring = self.shared.recent_samples.lock();
         ring.back().filter(|(t, _)| *t > last).copied()
+    }
+
+    /// Like `fg_pick_sample_now`, waiting up to VISIONALVR_FG_SAMPLE_WAIT_MS (3) for one to arrive: the headset's samples arrive once per
+    /// period with Wi-Fi jitter, and a boundary that finds none would otherwise send nothing (a repeat on the headset).
+    fn fg_pick_sample(&self) -> Option<(Duration, [f32; 4])> {
+        if let Some(s) = self.fg_pick_sample_now() {
+            return Some(s);
+        }
+        let wait = *self.fg_sample_wait.lock();
+        if wait <= Duration::ZERO {
+            return None;
+        }
+        let t0 = Instant::now();
+        let deadline = t0 + wait;
+        self.fg_sample_waits.fetch_add(1, Ordering::Relaxed);
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+            crate::sleep_spin_until((now + Duration::from_micros(250)).min(deadline));
+            if let Some(s) = self.fg_pick_sample_now() {
+                self.fg_sample_wait_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
+                return Some(s);
+            }
+        }
+        self.fg_sample_wait_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
+        None
     }
 
     /// A rendered frame arrived (frame generation on): what this boundary encodes. Releases the slot.
@@ -1042,6 +1078,8 @@ impl Pipeline {
                 "repeats": self.fg_repeats.load(Ordering::Relaxed), "holds": self.fg_holds.load(Ordering::Relaxed), "no_sample": self.fg_no_sample.load(Ordering::Relaxed),
                 "dropped": self.fg_dropped.load(Ordering::Relaxed), "pairs_skipped": self.fg_pairs_skipped.load(Ordering::Relaxed), "errors": self.fg_errors.load(Ordering::Relaxed),
                 "passthrough": self.fg.try_lock().map(|s| s.passthrough).unwrap_or(0),
+                "sample_waits": self.fg_sample_waits.load(Ordering::Relaxed), "sample_wait_ms_sum": self.fg_sample_wait_us.load(Ordering::Relaxed) as f64 / 1000.0,
+                "sample_wait_ms": self.fg_sample_wait.lock().as_secs_f64() * 1000.0,
                 "gen": serde_json::from_str::<serde_json::Value>(&self.fg_stats.lock()).unwrap_or(serde_json::Value::Null),
             },
             "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_suppressed": gate_suppressed },
