@@ -708,7 +708,10 @@ impl Pipeline {
             let mut q = self.intake.lock();
             // two waiting: send the older now and the newer at the next boundary (the stream runs one period late until an empty
             // boundary drains the queue; a third frame arriving first drops the oldest, see intake_loop)
-            let take_older = q.len() >= 2
+            // frame generation: the shim's half-rate pacing runs open loop (the intake gate does not apply) and the generator consumes exactly one
+            // frame per two boundaries, so a queue that once formed never drains by itself: the newest frame wins, the older ones are superseded
+            // (2026-10-14: the in-order pick kept 2-3 frames standing, 40 ms of latency; the synthetic frame then spans two app frames once)
+            let take_older = !self.fg_on.load(Ordering::Relaxed) && q.len() >= 2
                 && match self.pick_policy.as_str() {
                     "newest" => false,
                     "adaptive" => !self.last_empty.load(Ordering::Relaxed),
