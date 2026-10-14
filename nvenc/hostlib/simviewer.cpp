@@ -124,9 +124,10 @@ struct Viewer {
     std::vector<uint64_t> sampleOrder;
     std::vector<Q4> truth; double truthT0 = 0, truthDt = 1e6;
     std::thread th; std::atomic<bool> stop{false}; std::atomic<bool> started{false};
-    FILE* dots = nullptr; FILE* tlog = nullptr;
+    FILE* dots = nullptr; FILE* tlog = nullptr; FILE* moving = nullptr;
     int ticks = 0, shown = 0, repeats = 0, missingPose = 0;
     double yHorizon = 0.5;
+    double yMoving[2] = { 0.6, 0.6 };   // the row 4 deg below the horizon, per eye (the probe's XR_PROBE_MOVING rectangle)
 
     Q4 truthAt(double ts_ns) {
         std::lock_guard<std::mutex> l(m);
@@ -168,11 +169,18 @@ struct Viewer {
         D3D11_TEXTURE2D_DESC st = td; st.Width = ow; st.Height = 13; st.Usage = D3D11_USAGE_STAGING; st.BindFlags = 0; st.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         if (FAILED(dev->CreateTexture2D(&st, nullptr, &stage))) return false;
         yHorizon = cfg.fov8[2] / (cfg.fov8[2] + cfg.fov8[3]);
+        for (int e = 0; e < 2; e++) {
+            const double tu = cfg.fov8[e * 4 + 2], tdn = cfg.fov8[e * 4 + 3];
+            yMoving[e] = 1.0 - (tdn - std::tan(4.0 * 3.14159265358979 / 180.0)) / (tu + tdn);
+        }
         if (cfg.show) makeWindow();
         char path[600];
         snprintf(path, sizeof path, "%s\\dots.csv", cfg.out_dir);
         dots = fopen(path, "w");
         if (dots) fprintf(dots, "tick,t_s,shown_ts,reproj,yaw_deg,eye,n,x...\n");
+        snprintf(path, sizeof path, "%s\\moving.csv", cfg.out_dir);
+        moving = fopen(path, "w");
+        if (moving) fprintf(moving, "tick,t_s,shown_ts,reproj,yaw_deg,eye,n,x...\n");
         snprintf(path, sizeof path, "%s\\ticks.csv", cfg.out_dir);
         tlog = fopen(path, "w");
         if (tlog) fprintf(tlog, "tick,fresh,ring,shown_ts,ts_disp,qd_x,qd_y,qd_z,qd_w,qf_x,qf_y,qf_z,qf_w,haveF,queue,app_frame,late_ms\n");
@@ -241,10 +249,10 @@ struct Viewer {
         ctx->Draw(3, 0);
     }
 
-    // the dots of one eye: centres (pixels, in the eye image) of the white runs on the equator row
-    void measure(int eye, std::vector<double>& xs) {
+    // the dots of one eye: centres (pixels, in the eye image) of the white runs on a row (rowV: the equator, or the moving marker's row)
+    void measure(int eye, std::vector<double>& xs, double rowV) {
         const int ow = cfg.out_eye_w, oh = cfg.out_eye_h;
-        int y0 = std::max(0, (int)(yHorizon * oh) - 6);
+        int y0 = std::max(0, (int)(rowV * oh) - 6);
         D3D11_BOX box{ (UINT)(eye * ow), (UINT)y0, 0, (UINT)(eye * ow + ow), (UINT)std::min(oh, y0 + 13), 1 };
         ctx->CopySubresourceRegion(stage, 0, 0, 0, 0, rt, 0, &box);
         D3D11_MAPPED_SUBRESOURCE mp{};
@@ -380,10 +388,18 @@ struct Viewer {
             const double yawDisp = -std::atan2(-Rd[6], Rd[8]) * 180.0 / 3.14159265358979;   // counted to the right (OpenXR yaw about +Y turns left): the judge's convention
             if (dots) {
                 for (int eye = 0; eye < 2; eye++) {
-                    std::vector<double> xs; measure(eye, xs);
+                    std::vector<double> xs; measure(eye, xs, yHorizon);
                     fprintf(dots, "%d,%.6f,%llu,%d,%.6f,%d,%d", k, tk, (unsigned long long)cur.ts, (cfg.reproject != 0 && haveF) ? 1 : 0, yawDisp, eye, (int)xs.size());
                     for (double x : xs) fprintf(dots, ",%.3f", x);
                     fprintf(dots, "\n");
+                }
+            }
+            if (moving) {
+                for (int eye = 0; eye < 2; eye++) {
+                    std::vector<double> xs; measure(eye, xs, yMoving[eye]);
+                    fprintf(moving, "%d,%.6f,%llu,%d,%.6f,%d,%d", k, tk, (unsigned long long)cur.ts, (cfg.reproject != 0 && haveF) ? 1 : 0, yawDisp, eye, (int)xs.size());
+                    for (double x : xs) fprintf(moving, ",%.3f", x);
+                    fprintf(moving, "\n");
                 }
             }
             if (sc && scRtv) {
@@ -399,6 +415,7 @@ struct Viewer {
             if (cur.ts) lastShownTs = cur.ts;
         }
         if (dots) { fflush(dots); fclose(dots); dots = nullptr; }
+        if (moving) { fflush(moving); fclose(moving); moving = nullptr; }
         if (tlog) { fclose(tlog); tlog = nullptr; }
         char path[600]; snprintf(path, sizeof path, "%s\\viewer_summary.json", cfg.out_dir);
         if (FILE* f = fopen(path, "w")) { fprintf(f, "{\"ticks\": %d, \"fresh\": %d, \"repeats\": %d, \"missing_pose\": %d}\n", ticks, shown, repeats, missingPose); fclose(f); }

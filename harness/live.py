@@ -112,12 +112,16 @@ def check():
 def build(what, simrig=False, release=False):
     files = {
         "host": [(f"tools/host/src/{m}", "tools/host/src/") for m in sorted(p.name for p in (ROOT / "tools/host/src").glob("*.rs"))]
-                + [("nvenc/hostlib/nvh.cpp", "nvenc/hostlib/"), ("nvenc/hostlib/simviewer.cpp", "nvenc/hostlib/"), ("nvenc/hostlib/nvh.h", "nvenc/hostlib/"), ("tools/host/build.rs", "tools/host/"),
-                   ("tools/host/Cargo.toml", "tools/host/"),
+                + [(f"nvenc/hostlib/{p.name}", "nvenc/hostlib/") for p in sorted((ROOT / "nvenc/hostlib").iterdir()) if p.is_file()]
+                + [(f"third_party/nvof/{p.name}", "third_party/nvof/") for p in sorted((ROOT / "third_party/nvof").glob("*.h"))]
+                + [("tools/host/build.rs", "tools/host/"), ("tools/host/Cargo.toml", "tools/host/"),
                    ("ovrshim/ipc.h", "ovrshim/"), ("ovrshim/ipc_win.h", "ovrshim/"), ("build.ps1", "")]
                 + [(f"tools/patches/{p.name}", "tools/patches/") for p in (ROOT / "tools/patches").glob("*.patch")]
                 + [(f"tools/remote/{p.name}", "tools/remote/") for p in (ROOT / "tools/remote").glob("*.ps1")],
         "shim": [(f, "ovrshim/") for f in sorted(glob.glob(str(ROOT / "ovrshim" / "*"))) if Path(f).is_file()],
+        # the OpenXR test app (harness/simrig scenes): rebuilt from the working tree like the others
+        "probe": [("tools/probe/xr_probe.cpp", "tools/probe/"), ("nvenc/hostlib/bench_scene.h", "nvenc/hostlib/"), ("build.ps1", "")]
+                 + [(f"tools/remote/{p.name}", "tools/remote/") for p in (ROOT / "tools/remote").glob("*.ps1")],
     }
     targets = ["host", "shim"] if what == "all" else [what]
     for t in targets:
