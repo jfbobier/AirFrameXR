@@ -1929,6 +1929,7 @@ fn main() {
     let mut idx = 0usize;
     let mut next = Instant::now();
     let mut connected_at: Option<Instant> = None;
+    let mut ready_since: Option<Instant> = None;
     let mut dropped_no_ts = 0usize;
     #[derive(Clone, Copy)]
     struct HapticState {
@@ -2147,7 +2148,17 @@ fn main() {
         }
         let connected = shared.client_connected.load(Ordering::SeqCst);
         if let Some(p) = &pipeline {
-            p.active.store(connected && shared.stream_ready.load(Ordering::SeqCst), Ordering::Relaxed);
+            let ready = connected && shared.stream_ready.load(Ordering::SeqCst);
+            if ready {
+                ready_since.get_or_insert_with(Instant::now);
+            } else {
+                ready_since = None;
+            }
+            // Frames wait for the first tracking sample (at most 300 ms, for a client that sends none before its first decoded frame): a green frame
+            // sent earlier is stamped with the host's clock, which is unrelated to the client's, so the first app frame (stamped with a client
+            // sample) can then go out with an OLDER stamp. A race of a few ms at every session start; seen in the baseline scenario.
+            let sampled = shared.latest_sample_ts.lock().is_some() || ready_since.map(|t| t.elapsed() > Duration::from_millis(300)).unwrap_or(false);
+            p.active.store(ready && sampled, Ordering::Relaxed);
         }
         if connected && connected_at.is_none() {
             connected_at = Some(Instant::now());
