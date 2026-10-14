@@ -67,6 +67,9 @@ OpenXR game
 - **Vision Pro known issue**: in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips
   them (shown fps a little under the host fps). A fix exists (branch `exp/restamp-2026-10-13`) but needs a change on the visionOS
   client side, so it is not in the release.
+- **Experimental, off by default: frame generation** (Settings > Frame generation, `video.frame_gen`): for games stuck at 50-70 fps the game is
+  paced at half the display rate and the streamer fills the frame in between from the GPU's optical flow (NVIDIA Optical Flow engine, Turing or
+  later), see [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md). Costs one display period of latency; not yet judged on a headset.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
@@ -164,3 +167,4 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers (v0.2, extended in 0.3)
+- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation (optical flow; experimental, off by default): half-rate pacing + interpolated frames
