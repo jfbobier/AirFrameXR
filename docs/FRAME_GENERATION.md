@@ -39,7 +39,7 @@ generation itself (3080 Ti at 2048x1024: flow 3.3 ms, synthesis 0.2 ms; the RTX 
 | Host glue | `nvenc/hostlib/nvh.cpp` `nvh_fg_*` | own foveation pass on the output, encode tail shared with the slot path, stats JSON |
 | Decision per boundary | `tools/host/src/pipeline.rs` `FgState`, `fg_plan_app`, `fg_plan_hold` | synth / real / repeat, sample stamping, counters |
 | Sample ring | `tools/host/src/main.rs` `Shared::recent_samples`, `push_recent_sample` | the last 48 tracking samples with their head orientation |
-| Settings | `config/visionalvr.json` `video.frame_gen` (+ `frame_gen_flow_scale`, `frame_gen_perf`), `--frame-gen on|off`, `VISIONALVR_FRAME_GEN=1/0` | CLI > env > settings; GUI checkbox "Frame generation" in Settings |
+| Settings | `config/visionalvr.json` `video.frame_gen` (+ `frame_gen_flow_scale`, `frame_gen_perf`), `--frame-gen on|off`, `VISIONALVR_FRAME_GEN=1/0`; live: GUI command `frame_gen on|off` | CLI > env > settings; checkbox "Frame generation" in the streamer window (applies at once: generator created or dropped under the encoder lock, shim pacing follows) and in Settings |
 | Headers | `third_party/nvof/` | `nvOpticalFlowCommon.h`, `nvOpticalFlowD3D11.h` (MIT notice; nothing of NVIDIA's is redistributed) |
 
 Rules of the per-boundary decision (`FgState`): the output schedule is a strict alternation, synthetic then rendered. A rendered frame
@@ -92,8 +92,8 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
   on the 5090 at the foveated size: flow 2.3 ms, synthesis 0.13 ms.
 - Interpolation only (t = 0.5): `--frame-gen-t` exists for experiments; extrapolation (t > 1) would remove the added period at the cost of
   disocclusion artefacts.
-- Always half rate when on: no automatic engagement yet (a game that could run at the display rate is held at half rate). An "auto" mode
-  (engage when the app's frame-time envelope exceeds the period) is the next step once the headset verdict is in.
+- Always half rate when on, by design: no automatic engagement (the user's call: a game holding a steady 70-75 fps is often better left at full
+  rate; the checkbox in the streamer window switches live).
 - Quad/cylinder layers are composed into the frame by the shim before the generator sees them, so HUD quads are interpolated like the
   scene (OFXR-Bridge copies them verbatim instead).
 - The flow runs on gamma-encoded colour at 50 %; `frame_gen_flow_scale` and `frame_gen_perf` (fast | medium | slow) are the two knobs.

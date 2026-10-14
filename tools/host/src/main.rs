@@ -2061,6 +2061,33 @@ fn main() {
                 push_user(ipc, user_gamma, debug_on);
                 event(origin, "user_settings", json!({ "gamma": user_gamma, "debug": debug_on, "debug_dir": logs::debug_dir() }));
             }
+            // frame generation on/off from VisionALVR.exe: the generator is created or dropped on the running encoder (under the encoder lock, so
+            // never while a frame is being encoded) and the shim's pacing follows at the next boundary; the setting is also what the next start reads
+            let fgr = vision::FRAME_GEN_REQ.swap(-1, Ordering::SeqCst);
+            if fgr >= 0 {
+                let want = fgr == 1;
+                args.frame_gen = Some(want);
+                if let Some(p) = pipeline.as_ref() {
+                    if want != fg_active {
+                        if !want {
+                            p.set_frame_gen(false, args.fg_t);   // the encoder thread plans plain frames from here on
+                        }
+                        let g = p.enc.lock();
+                        if want {
+                            fg_active = enable_frame_gen(origin, g.handle, &args);
+                        } else {
+                            let mut err = [0 as std::ffi::c_char; 256];
+                            unsafe { nvh::nvh_fg_enable(g.handle, 0, args.fg_flow_scale, args.fg_perf, args.fg_grid, err.as_mut_ptr(), 256) };
+                            fg_active = false;
+                            logs::general("INFO", "frame generation OFF (live setting): full-rate pacing");
+                            event(origin, "frame_gen", json!({ "requested": false, "on": false }));
+                        }
+                        drop(g);
+                        p.set_frame_gen(fg_active, args.fg_t);
+                        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active { 2 } else { 1 }) };
+                    }
+                }
+            }
             // game start / end, for the general log and the GUI
             let alive = app_alive();
             if alive && game.is_none() {

@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "0.3-alpha";
+pub const VERSION: &str = "0.4-alpha";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
 /// `config/` (session.json, visionalvr.json) and `logs/` inside it.
@@ -188,11 +188,13 @@ pub static HEIGHT_REQ: AtomicU32 = AtomicU32::new(0);
 pub static GAMMA_REQ: AtomicU32 = AtomicU32::new(0);
 /// -1 nothing pending, 0 debug off, 1 debug on
 pub static DEBUG_REQ: AtomicI32 = AtomicI32::new(-1);
+/// frame generation on/off from VisionALVR.exe (-1 none, 0 off, 1 on); applied by the main loop to the running encoder and the shim's pacing
+pub static FRAME_GEN_REQ: AtomicI32 = AtomicI32::new(-1);
 /// colour correction (brightness, contrast, saturation, sharpening as f32 bits) and its "pending" flag
 pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 
-/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `color <brightness> <contrast> <saturation> <sharpening>`,
+/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
 pub fn spawn_stdin_control() {
@@ -209,6 +211,7 @@ pub fn spawn_stdin_control() {
                     }
                 }
                 (Some("debug"), Some(v)) => DEBUG_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
+                (Some("frame_gen"), Some(v)) => FRAME_GEN_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("height"), Some(h)) => {
                     if let Ok(h) = h.parse::<f32>() {
                         HEIGHT_REQ.store(if h <= 0.0 { f32::MIN_POSITIVE } else { h.clamp(0.5, 2.5) }.to_bits(), Ordering::SeqCst);
