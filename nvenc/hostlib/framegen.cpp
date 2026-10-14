@@ -167,7 +167,7 @@ struct FrameGen::Impl {
     ID3D11Texture2D* costTex = nullptr; ID3D11ShaderResourceView* costSrv = nullptr;
     NvOFGPUBufferHandle hIn[2] = {}, hFlow = nullptr, hCost = nullptr;
     // timings
-    ID3D11Query* qDisjoint = nullptr; ID3D11Query* qT[4] = {};
+    ID3D11Query* qDisjoint = nullptr; ID3D11Query* qDisjointR = nullptr; ID3D11Query* qT[4] = {};
     bool flowTimed = false, synthTimed = false;
     float fov8[8] = {};
 };
@@ -185,7 +185,7 @@ FrameGen::~FrameGen() {
     if (I.dll) FreeLibrary(I.dll);
     for (int k = 0; k < 2; k++) { rel(I.realSrv[k]); rel(I.real[k]); rel(I.flowInRtv[k]); rel(I.flowIn[k]); }
     rel(I.flowOutSrv); rel(I.flowOut); rel(I.costSrv); rel(I.costTex); rel(I.outRtv); rel(m_out);
-    rel(I.vs); rel(I.psPrep); rel(I.psOut); rel(I.cb); rel(I.smp); rel(I.qDisjoint);
+    rel(I.vs); rel(I.psPrep); rel(I.psOut); rel(I.cb); rel(I.smp); rel(I.qDisjoint); rel(I.qDisjointR);
     for (auto& q : I.qT) rel(q);
     delete m_i;
 }
@@ -214,6 +214,7 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     if (!I.vs || !I.psPrep || !I.psOut || !I.cb || !I.smp) { seterr(err, errlen, "frame generation pipeline objects"); return false; }
     D3D11_QUERY_DESC qd{ D3D11_QUERY_TIMESTAMP_DISJOINT, 0 }, qt{ D3D11_QUERY_TIMESTAMP, 0 };
     m_dev->CreateQuery(&qd, &I.qDisjoint);
+    m_dev->CreateQuery(&qd, &I.qDisjointR);
     for (auto& q : I.qT) m_dev->CreateQuery(&qt, &q);
 
     // the optical-flow engine (driver library; absent on non-NVIDIA or pre-Turing systems)
@@ -373,6 +374,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const f
     if (m_have < 1 || !m_out) { seterr(err, errlen, "frame generation: no rendered frame yet"); return nullptr; }
     if (mode == 1 && m_have < 2) mode = 0;
     const int prev = 1 - I.cur;
+    m_ctx->Begin(I.qDisjointR);
     m_ctx->End(I.qT[2]);
     m_ctx->OMSetRenderTargets(1, &I.outRtv, nullptr);
     m_ctx->IASetInputLayout(nullptr); m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -401,6 +403,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const f
     ID3D11ShaderResourceView* nulls[4] = {}; m_ctx->PSSetShaderResources(0, 4, nulls);
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     m_ctx->End(I.qT[3]);
+    m_ctx->End(I.qDisjointR);
     I.synthTimed = true;
     if (mode == 1) stats.synths++; else stats.reals++;
     return m_out;
@@ -408,15 +411,16 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const f
 
 void FrameGen::CollectTimings() {
     Impl& I = *m_i;
-    if (!I.flowTimed && !I.synthTimed) return;
-    D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj{};
-    if (m_ctx->GetData(I.qDisjoint, &dj, sizeof dj, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK || dj.Disjoint || !dj.Frequency) return;
-    UINT64 t[4] = {};
-    for (int k = 0; k < 4; k++) if (m_ctx->GetData(I.qT[k], &t[k], 8, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) return;
-    const double toMs = 1000.0 / (double)dj.Frequency;
-    if (I.flowTimed && t[1] > t[0]) { stats.lastFlowMs = (float)((t[1] - t[0]) * toMs); stats.flowMsSum += stats.lastFlowMs; stats.flowN++; }
-    if (I.synthTimed && t[3] > t[2]) { stats.lastSynthMs = (float)((t[3] - t[2]) * toMs); stats.synthMsSum += stats.lastSynthMs; stats.synthN++; }
-    I.flowTimed = I.synthTimed = false;
+    auto pair = [&](ID3D11Query* dis, ID3D11Query* a, ID3D11Query* b, float* last, double* sum, uint64_t* n) {
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj{};
+        if (m_ctx->GetData(dis, &dj, sizeof dj, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) return false;
+        UINT64 t0 = 0, t1 = 0;
+        if (m_ctx->GetData(a, &t0, 8, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK || m_ctx->GetData(b, &t1, 8, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) return false;
+        if (!dj.Disjoint && dj.Frequency && t1 > t0) { *last = (float)((t1 - t0) * 1000.0 / (double)dj.Frequency); *sum += *last; (*n)++; }
+        return true;
+    };
+    if (I.flowTimed && pair(I.qDisjoint, I.qT[0], I.qT[1], &stats.lastFlowMs, &stats.flowMsSum, &stats.flowN)) I.flowTimed = false;
+    if (I.synthTimed && pair(I.qDisjointR, I.qT[2], I.qT[3], &stats.lastSynthMs, &stats.synthMsSum, &stats.synthN)) I.synthTimed = false;
 }
 
 void FrameGen::ResetHistory() {
