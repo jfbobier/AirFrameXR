@@ -25,8 +25,9 @@ animation) stutters. With frame generation on:
    itself never sees head rotation (A is aligned into B's camera before the engine runs), so fast turns do not produce flow artefacts.
    Translation (parallax) is not compensated, like the headset's reprojection.
 
-Cost: one display period of added latency for the rendered frames (an interpolated picture is shown before each of them), plus the
-generation itself (flow ~2-4 ms expected on an RTX 5090 at 3552x1600 input, synthesis ~1 ms at the full 7104x3200 frame, to be measured).
+Cost: one display period of added latency for the rendered frames (an interpolated picture is shown before each of them), one more when the
+app publishes before the previous rendered frame has gone out (the arrival waits for the next boundary rather than displacing it), plus the
+generation itself (3080 Ti at 2048x1024: flow 3.3 ms, synthesis 0.2 ms; the RTX 5090 at the foveated size to be measured).
 
 ## Where it lives
 
@@ -48,7 +49,8 @@ only then repeats the rendered frame. Both rules exist because an app released a
 them the schedule flipped between "just before" and "just after" (a frame dropped, then one frozen) at 6 % of the boundaries in the rig's
 ideal-timing case. A boundary with no tracking sample newer than the last sent frame sends nothing (`fg_no_sample`); a frame without a
 projection layer (quad-only loading screens) goes out as is; a frame still due when the encoder overran is dropped for the synthetic frame
-between the two newest (`fg_dropped`).
+between the two newest (`fg_dropped`). With the generator on the newest waiting frame always wins a pick (older ones superseded): the shim's
+half-rate pacing runs open loop and the generator consumes one frame per two boundaries, so a standing queue would never drain otherwise.
 When the GPU/driver has no flow engine the host logs a WARN, streams as without the feature and keeps the game at full rate.
 
 ## Telemetry
@@ -61,11 +63,14 @@ sent, `R` rendered frame sent, `Q` rendered frame re-sent; `host_frames.csv` slo
 ## Lab (headset-less)
 
 `harness/simrig`: `python3 harness/simrig/run_sim.py build` then `run stutter,stutter_fg` (head still, app frame time drawn from 50-70 fps,
-moving marker) and `run stutter_turn,stutter_turn_fg` (head turning 45 deg/s); `steady` (generator off, ideal timing) is the motion
-metric's floor. The probe's `XR_PROBE_MOVING=25:0.25` draws a rectangle
-swinging in world yaw 7 deg below the ring; the viewer measures it (`moving.csv`) and `judge.py` reports `motion`: hf rms of its world angle
-after a local quadratic fit, frozen ticks (repeated frames), step regularity; verdict SMOOTH / JUDDER next to the usual CLEAN / TREMBLE of
-the head-rotation path. `steady_fg` is the generator's null case (ideal timing, must be CLEAN + SMOOTH). Generated frames are always
+moving marker) and `run stutter_turn,stutter_turn_fg` (head turning 45 deg/s); `steady` (generator off, ideal timing) is the generator-off
+reference (the rig's own ~6 % empty boundaries read as frozen periods there). The probe's `XR_PROBE_MOVING=25:0.25` draws a rectangle
+swinging in world yaw 7 deg below the ring; the viewer measures it (`moving.csv`) and `judge.py` reports `motion`, measured per distinct shown
+frame against the frame's timestamp (the rig's viewer wakes up late, so per-tick measurements were luck): hf rms of its world angle after a
+local quadratic fit in time, frozen display periods (a new frame whose marker did not move, or a timestamp gap the host did not fill: frames the
+viewer missed are cross-checked against `host_frames.csv` and counted apart), step regularity; verdict SMOOTH (hf <= 0.10 deg, frozen <= 5 %) /
+JUDDER next to the usual CLEAN / TREMBLE of the head-rotation path. The marker's measurement also doubles as a ghosting probe: a synthetic frame
+whose marker is doubled or lost to the crossfade fallback shows no single rectangle (`visible_pct`). `steady_fg` is the generator's null case (ideal timing, must be CLEAN + SMOOTH). Generated frames are always
 rendered and encoded for real in the rig (the viewer shows the encoder's input).
 
 Live harness: variant setting `{"frame_gen": true}`; scenario key `frame_gen` in `harness/scenarios/*.json`.
@@ -91,3 +96,7 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
 - Quad/cylinder layers are composed into the frame by the shim before the generator sees them, so HUD quads are interpolated like the
   scene (OFXR-Bridge copies them verbatim instead).
 - The flow runs on gamma-encoded colour at 50 %; `frame_gen_flow_scale` and `frame_gen_perf` (fast | medium | slow) are the two knobs.
+- **Small fast high-contrast objects ghost.** The confidence saturate(1 - 6 max|dRGB|) is zero at any misaligned hard edge, so such an object
+  falls back to the crossfade (two half-bright copies). The rig's marker (a white rectangle on black, ~9 px per app frame at 1024 px per eye)
+  is lost in 11 % of the synthetic frames, 33 % at its top speed; game content is softer, but HUD elements and particles will show this.
+  A softer confidence, or the engine's cost alone, is the first thing to try.
