@@ -46,7 +46,7 @@ SCENARIOS = {
     "steady_fg":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:VISIONALVR_FRAME_GEN": "1",
                     "note": "ideal timing, light app, frame generation on: the generator's null case (expect CLEAN + SMOOTH)"},
     "steady":      {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25",
-                    "note": "ideal timing, light app, generator off: the motion metric's floor (expect CLEAN + SMOOTH)"},
+                    "note": "ideal timing, light app, generator off: the motion metric's reference (the rig's own empty boundaries, ~6 %, read as frozen periods)"},
 }
 
 
