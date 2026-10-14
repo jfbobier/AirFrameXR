@@ -261,6 +261,7 @@ fn arm() {
     let scale = time_scale();
     let (warmup, segment, prewarm_at) = (WARMUP_S * scale, SEGMENT_S * scale, PREWARM_AT_S * scale);
     write_line(crate::logs::qpc_now(), &format!("[tel] armed warmup_s={warmup:.1} segment_s={segment:.1} segments={} scale={scale}", SCHEDULE.len()));
+    crate::logs::general("INFO", &format!("telemetry run armed by the client: warm-up {warmup:.0} s, then {} segments of {segment:.0} s (docs/TELEMETRY.md)", SCHEDULE.len()));
     set_mode(Mode::Off);
     SEG.store(0, Ordering::SeqCst);
     apply_shim(Mode::Off);
@@ -285,6 +286,7 @@ fn arm() {
                 if idx >= SCHEDULE.len() {
                     write_line(crate::logs::qpc_now(), &format!("[tel] end t={:.6}", crate::logs::qpc_now()));
                     sim_end();
+                    crate::logs::general("INFO", "telemetry run finished: you can stop playing");
                     disarm();
                     return;
                 }
@@ -297,6 +299,7 @@ fn arm() {
                 set_mode(mode);
                 SEG.store(seg, Ordering::SeqCst);
                 write_line(crate::logs::qpc_now(), &format!("[tel] cond seg={seg} mode={} t={:.6}", mode.name(), crate::logs::qpc_now()));
+                crate::logs::general("INFO", &format!("telemetry segment {seg}/{} re-stamp mode {}", SCHEDULE.len(), mode.name()));
             }
         }
     });
