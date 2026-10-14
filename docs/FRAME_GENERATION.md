@@ -85,10 +85,11 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
 
 ## Known limits and open questions (2026-10-14)
 
-- **Vision Pro re-stamp question.** Every output is stamped with a sample it was not rendered with and rotated to it. The Quest 3 showed such
-  frames cleanly; the Vision Pro trembled slightly with host-side re-stamping on 2026-10-13 (mechanism unknown, parked). Frame generation
-  re-stamps *every* frame, so the staleness is uniform rather than alternating; whether the Vision Pro is happy with that is the first
-  thing the headset test decides.
+- **Vision Pro re-stamp question: answered, fine.** Every output is stamped with a sample it was not rendered with and rotated to it; the
+  Vision Pro trembled with the alternating host-side re-stamping of 2026-10-13, but with every frame treated the same (uniform staleness)
+  the first headset session (2026-10-14, Callisto Protocol, 5090) was visually good, no tremble, 1.1 % missed display periods against 38 %
+  without the generator, total latency 57 ms against 86 ms (the half-rate budget removes the GPU-bound game's standing queue). Generator cost
+  on the 5090 at the foveated size: flow 2.3 ms, synthesis 0.13 ms.
 - Interpolation only (t = 0.5): `--frame-gen-t` exists for experiments; extrapolation (t > 1) would remove the added period at the cost of
   disocclusion artefacts.
 - Always half rate when on: no automatic engagement yet (a game that could run at the display rate is held at half rate). An "auto" mode
