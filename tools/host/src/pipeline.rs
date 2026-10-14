@@ -146,8 +146,8 @@ enum Job {
 
 /// Frame generation (docs/FRAME_GENERATION.md): what the encoder thread owes the stream. The game is paced at half the display rate
 /// (ipc appPeriodMul 2). Rendered frame B arrives: if a previous frame A exists, the boundary gets the interpolated frame S(A, B) and B
-/// itself is due at the next boundary (`real_due`); B arriving while the previous frame is still due sends that one first and skips the
-/// synthetic frame for this pair (two arrivals, two outputs: the app runs faster than half rate). A boundary with nothing due re-sends B
+/// itself is due at the next boundary (`real_due`); C arriving while B is still due drops B (the boundary gets S(B, C), C is due next: the
+/// motion stays continuous, see `fg_plan_app`). A boundary with nothing due re-sends B
 /// rotated to the new head sample (the headset would repeat it anyway; the rotation keeps head turns smooth). Every output is stamped with
 /// the newest tracking sample newer than the last sent frame and rotated to it; with no such sample the boundary is skipped (`fg_no_sample`).
 struct FgState {
@@ -293,9 +293,10 @@ pub struct Pipeline {
     pub fg_holds: AtomicU64,
     /// boundaries skipped because no tracking sample newer than the last sent frame had arrived
     pub fg_no_sample: AtomicU64,
-    /// rendered frames never shown: due when the next one arrived and no sample to stamp them with
+    /// rendered frames never shown: still due when the next one arrived (the encoder missed a boundary, or the app ran faster than half rate):
+    /// the boundary gets the synthetic frame between the two newest instead, so the motion never stalls
     pub fg_dropped: AtomicU64,
-    /// synthetic frames not generated because the previous rendered frame was still due (app faster than half rate)
+    /// (unused since the drop policy; kept for the statistics layout)
     pub fg_pairs_skipped: AtomicU64,
     pub fg_errors: AtomicU64,
     /// nvh_fg_stats JSON, refreshed by the encoder thread (the statistics window must not lock the encoder)
@@ -453,20 +454,11 @@ impl Pipeline {
             return Plan::Slot(a);
         }
         let mut st = self.fg.lock();
-        let mut plan = Plan::Skip;
         if st.real_due && self.fg_have_frame.load(Ordering::Relaxed) {
-            // the previous rendered frame is still due: it goes out now, before the new one replaces it in the history; no synthetic frame
-            // for this pair (the app delivered faster than half rate: two frames, two boundaries)
-            match self.fg_pick_sample() {
-                Some((sts, q)) => {
-                    plan = Plan::Fg { mode: 0, t: 0.0, q, ts: sts, counter: st.last_counter, submit_s: st.last_submit_s, arrival: st.last_arrival, kind: FgKind::Real };
-                    self.fg_pairs_skipped.fetch_add(1, Ordering::Relaxed);
-                }
-                None => {
-                    self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
-                    self.fg_dropped.fetch_add(1, Ordering::Relaxed);
-                }
-            }
+            // The previous rendered frame B is still due (the encoder missed a boundary, or the app runs faster than half rate) and the new
+            // frame C is here: B is dropped and this boundary gets S(B, C), C next. Sending B now and C twice (the first version) froze the
+            // scene for a tick and then jumped (the rig's moving marker, 2026-10-14); dropping B keeps the motion continuous (0.5 -> 1.5 -> 2).
+            self.fg_dropped.fetch_add(1, Ordering::Relaxed);
             st.real_due = false;
             st.synth_due = false;
         }
@@ -481,16 +473,12 @@ impl Pipeline {
                 logs::general("WARN", &format!("frame generation: ingest failed ({n}): {msg}"));
                 event(self.cfg.origin, "frame_gen_error", json!({ "stage": "ingest", "message": msg, "n": n }));
             }
-            return plan;
+            return Plan::Skip;
         }
         self.fg_have_frame.store(true, Ordering::Relaxed);
         st.last_counter = a.counter;
         st.last_submit_s = a.submit_s;
         st.last_arrival = Some(a.arrival);
-        if !matches!(plan, Plan::Skip) {
-            st.real_due = true; // the new frame is due at the next boundary
-            return plan;
-        }
         match self.fg_pick_sample() {
             Some((sts, q)) => {
                 if r == 1 {

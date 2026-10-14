@@ -450,24 +450,6 @@ int main(int argc, char** argv) {
                                 dr.right = std::min<LONG>(dr.right, (LONG)dt.Width); dr.bottom = std::min<LONG>(dr.bottom, (LONG)dt.Height);
                                 if (dr.right > dr.left && dr.bottom > dr.top) dc->ClearView(rtv, white, &dr, 1);
                             }
-                            if (movingAmp > 0 && movingHz > 0) {
-                                if (movingT0 == 0) movingT0 = (long long)fs.predictedDisplayTime;
-                                const double ts = (double)((long long)fs.predictedDisplayTime - movingT0) * 1e-9;
-                                const double th = movingAmp * sin(2.0 * 3.14159265358979 * movingHz * ts) * 3.14159265358979 / 180.0;
-                                const double drop = 3.0 * tan(7.0 * 3.14159265358979 / 180.0);   // 7 deg below the ring's centre (the ring's rectangles reach 4 deg down)
-                                const XMVECTOR wp = XMVectorSet((float)(3.0 * sin(th)), (float)(dp.position.y - drop), (float)(-3.0 * cos(th)), 1.f);
-                                const XMVECTOR vv = XMVector3TransformCoord(wp, dview);
-                                const float vx = XMVectorGetX(vv), vy = XMVectorGetY(vv), vz = XMVectorGetZ(vv);
-                                if (vz < -0.1f) {
-                                    const float tx = vx / -vz, ty = vy / -vz;
-                                    const float cx = (tx + dtl) * pxPerTanX, cy = (1.f - (ty + dtd) / (dtu + dtd)) * (float)dt.Height;
-                                    const float hw = std::max(2.f, 0.35f * 0.0174533f * pxPerTanX), hh = 2.f * 0.0174533f * pxPerTanY;
-                                    D3D11_RECT dr{ (LONG)(cx - hw), (LONG)(cy - hh), (LONG)(cx + hw), (LONG)(cy + hh) };
-                                    dr.left = std::max<LONG>(dr.left, 0); dr.top = std::max<LONG>(dr.top, 0);
-                                    dr.right = std::min<LONG>(dr.right, (LONG)dt.Width); dr.bottom = std::min<LONG>(dr.bottom, (LONG)dt.Height);
-                                    if (dr.right > dr.left && dr.bottom > dr.top) dc->ClearView(rtv, white, &dr, 1);
-                                }
-                            }
                             dc->Release();
                         }
                     }
@@ -494,6 +476,36 @@ int main(int argc, char** argv) {
                             mr.right = std::min<LONG>(mr.right, (LONG)mt.Width); mr.bottom = std::min<LONG>(mr.bottom, (LONG)mt.Height);
                             if (mr.right > mr.left && mr.bottom > mr.top) mc->ClearView(rtv, magenta, &mr, 1);
                             mc->Release();
+                        }
+                    }
+                    if (dotsOn && movingAmp > 0 && movingHz > 0 && i < 2) {
+                        // drawn after the magenta reference square (XR_PROBE_MARKERS_CSV), which would otherwise hide it near the centre
+                        D3D11_TEXTURE2D_DESC dt{}; imgs[i][idx].texture->GetDesc(&dt);
+                        const XrPosef& dp = views[i].pose; const XrFovf& df = views[i].fov;
+                        const XMVECTOR dq = XMVectorSet(dp.orientation.x, dp.orientation.y, dp.orientation.z, dp.orientation.w);
+                        const XMMATRIX dview = XMMatrixInverse(nullptr, XMMatrixRotationQuaternion(dq) * XMMatrixTranslation(dp.position.x, dp.position.y, dp.position.z));
+                        const float dtl = -tanf(df.angleLeft), dtr = tanf(df.angleRight), dtu = tanf(df.angleUp), dtd = -tanf(df.angleDown);
+                        const float pxPerTanX = (float)dt.Width / (dtl + dtr), pxPerTanY = (float)dt.Height / (dtu + dtd);
+                        ID3D11DeviceContext1* dc = nullptr;
+                        if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&dc))) {
+                            const float white[4] = { 1, 1, 1, 1 };
+                                if (movingT0 == 0) movingT0 = (long long)fs.predictedDisplayTime;
+                                const double ts = (double)((long long)fs.predictedDisplayTime - movingT0) * 1e-9;
+                                const double th = movingAmp * sin(2.0 * 3.14159265358979 * movingHz * ts) * 3.14159265358979 / 180.0;
+                                const double drop = 3.0 * tan(7.0 * 3.14159265358979 / 180.0);   // 7 deg below the ring's centre (the ring's rectangles reach 4 deg down)
+                                const XMVECTOR wp = XMVectorSet((float)(3.0 * sin(th)), (float)(dp.position.y - drop), (float)(-3.0 * cos(th)), 1.f);
+                                const XMVECTOR vv = XMVector3TransformCoord(wp, dview);
+                                const float vx = XMVectorGetX(vv), vy = XMVectorGetY(vv), vz = XMVectorGetZ(vv);
+                                if (vz < -0.1f) {
+                                    const float tx = vx / -vz, ty = vy / -vz;
+                                    const float cx = (tx + dtl) * pxPerTanX, cy = (1.f - (ty + dtd) / (dtu + dtd)) * (float)dt.Height;
+                                    const float hw = std::max(2.f, 0.35f * 0.0174533f * pxPerTanX), hh = 2.f * 0.0174533f * pxPerTanY;
+                                    D3D11_RECT dr{ (LONG)(cx - hw), (LONG)(cy - hh), (LONG)(cx + hw), (LONG)(cy + hh) };
+                                    dr.left = std::max<LONG>(dr.left, 0); dr.top = std::max<LONG>(dr.top, 0);
+                                    dr.right = std::min<LONG>(dr.right, (LONG)dt.Width); dr.bottom = std::min<LONG>(dr.bottom, (LONG)dt.Height);
+                                    if (dr.right > dr.left && dr.bottom > dr.top) dc->ClearView(rtv, white, &dr, 1);
+                                }
+                            dc->Release();
                         }
                     }
                     ID3D11DeviceContext1* c1 = nullptr;
