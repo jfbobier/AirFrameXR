@@ -283,6 +283,8 @@ pub struct Pipeline {
     gpu_sched: Mutex<Option<(i32, i64)>>,
     // frame generation (see `FgState`)
     fg: Mutex<FgState>,
+    /// mirror of `FgState::on` for the clock thread (which must never wait on the encoder thread's mutex)
+    fg_on: AtomicBool,
     /// a rendered frame is in the generator's history (set by the encoder thread, read by the clock thread)
     fg_have_frame: AtomicBool,
     pub fg_synths: AtomicU64,
@@ -370,6 +372,7 @@ impl Pipeline {
             last_green_boundary: AtomicU64::new(0),
             gpu_sched: Mutex::new(None),
             fg: Mutex::new(FgState { on: false, t: 0.5, synth_due: false, real_due: false, last_counter: 0, last_submit_s: 0.0, last_arrival: None, passthrough: 0 }),
+            fg_on: AtomicBool::new(false),
             fg_have_frame: AtomicBool::new(false),
             fg_synths: AtomicU64::new(0),
             fg_reals: AtomicU64::new(0),
@@ -387,6 +390,7 @@ impl Pipeline {
     pub fn set_frame_gen(&self, on: bool, t: f64) {
         let mut st = self.fg.lock();
         st.on = on;
+        self.fg_on.store(on, Ordering::Relaxed);
         st.t = t.clamp(0.05, 0.95);
         st.synth_due = false;
         st.real_due = false;
@@ -697,7 +701,7 @@ impl Pipeline {
             None if alive => {
                 self.last_empty.store(true, Ordering::Relaxed);
                 self.last_empty_idx.store(idx, Ordering::Relaxed);
-                if self.fg_have_frame.load(Ordering::Relaxed) && self.fg.lock().on {
+                if self.fg_have_frame.load(Ordering::Relaxed) && self.fg_on.load(Ordering::Relaxed) {
                     // frame generation: the host fills this boundary from the rendered frames it holds (by design every other boundary)
                     self.fg_holds.fetch_add(1, Ordering::Relaxed);
                     Job::FgHold
@@ -756,7 +760,7 @@ impl Pipeline {
             }
             let handle = enc.handle;
             // ---- what this boundary encodes: the picked slot, the green idle frame, or (frame generation) a generated picture
-            let fg_on = self.fg.lock().on;
+            let fg_on = self.fg_on.load(Ordering::Relaxed);
             let plan = match (&p.job, fg_on) {
                 (Job::Green, _) => Plan::Green,
                 (Job::App(a), false) => Plan::Slot(*a),
@@ -1034,10 +1038,10 @@ impl Pipeline {
             "encode_envelope_ms": *self.encode_env_ms.lock(),
             "gpu_scheduling": self.gpu_sched.lock().map(|(c, st)| json!({ "class": c, "status": st })),
             "frame_gen": {
-                "on": self.fg.lock().on, "synths": self.fg_synths.load(Ordering::Relaxed), "reals": self.fg_reals.load(Ordering::Relaxed),
+                "on": self.fg_on.load(Ordering::Relaxed), "synths": self.fg_synths.load(Ordering::Relaxed), "reals": self.fg_reals.load(Ordering::Relaxed),
                 "repeats": self.fg_repeats.load(Ordering::Relaxed), "holds": self.fg_holds.load(Ordering::Relaxed), "no_sample": self.fg_no_sample.load(Ordering::Relaxed),
                 "dropped": self.fg_dropped.load(Ordering::Relaxed), "pairs_skipped": self.fg_pairs_skipped.load(Ordering::Relaxed), "errors": self.fg_errors.load(Ordering::Relaxed),
-                "passthrough": self.fg.lock().passthrough,
+                "passthrough": self.fg.try_lock().map(|s| s.passthrough).unwrap_or(0),
                 "gen": serde_json::from_str::<serde_json::Value>(&self.fg_stats.lock()).unwrap_or(serde_json::Value::Null),
             },
             "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_suppressed": gate_suppressed },
