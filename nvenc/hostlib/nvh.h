@@ -49,7 +49,11 @@ void nvh_ipc_publish_input(void* ipc, int side, uint32_t clicks, uint32_t touche
 // Latest haptic command the app sent for a hand (seq changes on every ovr_SetControllerVibration).
 void nvh_ipc_poll_haptic(void* ipc, int side, uint32_t* seq, float* frequency, float* amplitude);
 // Waits up to timeout_ms for a frame from the shim. Returns 1 and the newest frame's info, 0 on timeout.
-int nvh_ipc_wait_frame(void* ipc, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit);
+// render_q8: the two eyes' render orientations (x y z w each); has_projection: 1 when the frame has a projection layer
+int nvh_ipc_wait_frame(void* ipc, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit, float* render_q8, int* has_projection);
+// Host-side re-stamp: rotate the next encoded shared slot from the eyes' render orientations (q_render8) to the stamp orientation (q_stamp4),
+// a per-eye homography in the host's eye FoV (ipc eyeFovTan), before the foveation pass; on = 0 clears it. Applies to the next nvh_encode_shared only.
+void nvh_set_warp(void* hh, void* ipc, const float* q_render8, const float* q_stamp4, int on);
 // QPC seconds, the clock the shim stamps frames with.
 double nvh_qpc_seconds(void);
 // Instrumentation: the shim's compose+GPU-wait time for the last frame, and the GPU time of the last foveation pass (0 if off).
@@ -80,6 +84,9 @@ void nvh_ipc_shim_pacing(void* ipc, uint32_t* slot_busy_waits, float* app_frame_
 // Intake gate (ipc.h HostToShim::intakeWaiting / intakeGate): frames a boundary passed over and still held, and whether the shim holds releases for them.
 void nvh_ipc_set_intake(void* ipc, uint32_t waiting);
 void nvh_ipc_set_intake_gate(void* ipc, uint32_t on);
+void nvh_ipc_set_align_release(void* ipc, uint32_t on);
+void nvh_ipc_set_dup_restamp(void* ipc, uint32_t on, float wait_ms);
+void nvh_ipc_shim_restamps(void* ipc, uint64_t* restamps, uint64_t* timeouts, float* warp_max_mdeg, uint64_t* waits, double* wait_sum_ms, float* wait_max_ms);
 // Process-wide GPU scheduling class (D3DKMT): 0 idle .. 4 high, 5 realtime (needs the increase-base-priority privilege, i.e. an
 // elevated host). SteamVR's compositor runs realtime, so its copy/encode never queues behind the game's GPU work. Returns the
 // NTSTATUS (0 = success).

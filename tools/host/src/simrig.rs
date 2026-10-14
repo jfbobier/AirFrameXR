@@ -287,6 +287,7 @@ pub fn init(out_dir: &str, ipc: usize, nvh_handle: *mut c_void, shared: &Arc<Sha
     // the client side: connected, stream ready, views, the display period the host's clock follows
     vsync_period_ns.store(SIM.get().unwrap().cfg.period_ns as u64, Ordering::Relaxed);
     crate::FOLLOW_RATE.store(true, Ordering::Relaxed);
+    let _ = SIM_SHARED.set(Arc::clone(shared));
     *shared.pending_views.lock() = Some((FOV8, OFF6));
     shared.client_connected.store(true, Ordering::SeqCst);
     shared.stream_ready.store(true, Ordering::SeqCst);
@@ -337,12 +338,24 @@ fn head_generator() {
             next_gen = t0 + k as f64 * s.cfg.period_ns * 1e-9 + s.cfg.tick_jitter_ns * 1e-9 * rng.gauss();
         } else if let Some((_, ts, qf)) = pending.pop_front() {
             let (p, z) = ([0f32, 1.6, 0.0], [0f32; 3]);
+            if let Some(sh) = SIM_SHARED.get() {
+                let d = std::time::Duration::from_nanos(ts);
+                let mut ring = sh.recent_samples.lock();
+                if ring.back().map(|(t, _)| d > *t).unwrap_or(true) {
+                    ring.push_back((d, qf));
+                    while ring.len() > 48 {
+                        ring.pop_front();
+                    }
+                }
+            }
             unsafe { nvh::nvh_ipc_publish_head(ipc, ts, qf.as_ptr(), p.as_ptr(), z.as_ptr(), z.as_ptr()) };
         }
     }
 }
 
 static NVH: AtomicUsize = AtomicUsize::new(0);
+/// the host's shared state: the synthetic samples also feed `recent_samples`, so the host-side re-stamp (pipeline.rs) runs in the rig
+static SIM_SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
 static IPC: AtomicUsize = AtomicUsize::new(0);
 
 pub fn set_ipc(ipc: usize) {
