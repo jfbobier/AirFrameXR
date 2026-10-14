@@ -2,7 +2,7 @@
 """Runs the simrig (host built with the cargo feature `simrig`, see docs/DEVELOPMENT.md) on the PC and judges the result.
 
     python3 harness/simrig/run_sim.py build                 # builds the simrig host on the PC (python3 harness/live.py build host --simrig does the same)
-    python3 harness/simrig/run_sim.py run <scenario>[,<scenario>...] [--seconds 30] [--show 0] [--real-encode 1] [--seed 7] [--eye-w 1760] [--fg] [--env K=V]
+    python3 harness/simrig/run_sim.py run <scenario>[,<scenario>...] [--seconds 30] [--show 0] [--real-encode 0] [--seed 7] [--eye-w 1760] [--fg] [--env K=V]
     python3 harness/simrig/run_sim.py list
 
 Frame generation (docs/FRAME_GENERATION.md): `run stutter,stutter_fg` compares a 50-70 fps app without and with the generator; the judge's "motion"
@@ -110,7 +110,8 @@ Get-Item '{live.INSTALL}\\{SIMEXE}' | Select-Object Name, Length, LastWriteTime 
 def run_one(name, seconds, extra):
     sc = dict(SCENARIOS[name])
     note = sc.pop("note", "")
-    env = {"SECONDS": seconds, "SEED": 1, "SHOW": 1}
+    # REAL_ENCODE 1: the viewer reads the slot through the encoder's device, which only the real encode path opens (a timer-only encode shows black)
+    env = {"SECONDS": seconds, "SEED": 1, "SHOW": 1, "REAL_ENCODE": 1}
     env.update(sc)
     env.update(extra)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
