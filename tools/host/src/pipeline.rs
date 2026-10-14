@@ -80,11 +80,15 @@ struct Arrived {
     ts_ns: u64,
     submit_s: f64,
     arrival: Instant,
+    /// per-eye orientation the projection layer was rendered with (ipc frameRenderQuat), valid when `has_projection`
+    render_q: [f32; 8],
+    has_projection: bool,
 }
 
 /// Frame-level CSV mirrors for the harness (VISIONALVR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
 /// `fate` writes one line per event of a frame's life on the host: A arrival (slot, ts), S superseded in the intake, D deferred to the next boundary (no newer sample to stamp with), P picked at a
-/// boundary (index), O dropped by the encoder queue.
+/// boundary (index), O dropped by the encoder queue; frame generation: I ingested (1 = a pair exists), G synthetic frame sent, R the rendered frame sent
+/// (rotated to its stamp sample), Q the rendered frame sent again (a boundary with nothing new); for G/R/Q the counter is the newest rendered frame's.
 #[cfg(feature = "telemetry")]
 static MIRRORS: std::sync::Mutex<Option<(std::io::BufWriter<std::fs::File>, std::io::BufWriter<std::fs::File>, u32)>> = std::sync::Mutex::new(None);
 #[cfg(feature = "telemetry")]
@@ -136,6 +140,43 @@ pub fn mirror_flush() {
 enum Job {
     App(Arrived),
     Green,
+    /// frame generation: a boundary without a new rendered frame while a rendered frame exists (the host fills it, see `FgState`)
+    FgHold,
+}
+
+/// Frame generation (docs/FRAME_GENERATION.md): what the encoder thread owes the stream. The game is paced at half the display rate
+/// (ipc appPeriodMul 2). Rendered frame B arrives: if a previous frame A exists, the boundary gets the interpolated frame S(A, B) and B
+/// itself is due at the next boundary (`real_due`); B arriving while the previous frame is still due sends that one first and skips the
+/// synthetic frame for this pair (two arrivals, two outputs: the app runs faster than half rate). A boundary with nothing due re-sends B
+/// rotated to the new head sample (the headset would repeat it anyway; the rotation keeps head turns smooth). Every output is stamped with
+/// the newest tracking sample newer than the last sent frame and rotated to it; with no such sample the boundary is skipped (`fg_no_sample`).
+struct FgState {
+    on: bool,
+    /// the synthetic frame's position between the two rendered frames (0.5 = midpoint)
+    t: f64,
+    synth_due: bool,
+    real_due: bool,
+    /// the newest rendered frame's identity for the statistics rows
+    last_counter: u64,
+    last_submit_s: f64,
+    last_arrival: Option<Instant>,
+    /// the shim slot of the newest rendered frame could not be used (no projection layer): the slot went out as is
+    passthrough: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FgKind {
+    Synth,
+    Real,
+    Repeat,
+}
+
+/// what one boundary encodes
+enum Plan {
+    Skip,
+    Green,
+    Slot(Arrived),
+    Fg { mode: i32, t: f64, q: [f32; 4], ts: Duration, counter: u64, submit_s: f64, arrival: Option<Instant>, kind: FgKind },
 }
 
 struct Picked {
@@ -240,6 +281,23 @@ pub struct Pipeline {
     green_active: AtomicBool,
     last_green_boundary: AtomicU64,
     gpu_sched: Mutex<Option<(i32, i64)>>,
+    // frame generation (see `FgState`)
+    fg: Mutex<FgState>,
+    /// a rendered frame is in the generator's history (set by the encoder thread, read by the clock thread)
+    fg_have_frame: AtomicBool,
+    pub fg_synths: AtomicU64,
+    pub fg_reals: AtomicU64,
+    pub fg_repeats: AtomicU64,
+    pub fg_holds: AtomicU64,
+    /// boundaries skipped because no tracking sample newer than the last sent frame had arrived
+    pub fg_no_sample: AtomicU64,
+    /// rendered frames never shown: due when the next one arrived and no sample to stamp them with
+    pub fg_dropped: AtomicU64,
+    /// synthetic frames not generated because the previous rendered frame was still due (app faster than half rate)
+    pub fg_pairs_skipped: AtomicU64,
+    pub fg_errors: AtomicU64,
+    /// nvh_fg_stats JSON, refreshed by the encoder thread (the statistics window must not lock the encoder)
+    fg_stats: Mutex<String>,
 }
 
 /// VISIONALVR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
@@ -311,7 +369,127 @@ impl Pipeline {
             green_active: AtomicBool::new(false),
             last_green_boundary: AtomicU64::new(0),
             gpu_sched: Mutex::new(None),
+            fg: Mutex::new(FgState { on: false, t: 0.5, synth_due: false, real_due: false, last_counter: 0, last_submit_s: 0.0, last_arrival: None, passthrough: 0 }),
+            fg_have_frame: AtomicBool::new(false),
+            fg_synths: AtomicU64::new(0),
+            fg_reals: AtomicU64::new(0),
+            fg_repeats: AtomicU64::new(0),
+            fg_holds: AtomicU64::new(0),
+            fg_no_sample: AtomicU64::new(0),
+            fg_dropped: AtomicU64::new(0),
+            fg_pairs_skipped: AtomicU64::new(0),
+            fg_errors: AtomicU64::new(0),
+            fg_stats: Mutex::new(String::from("{\"on\":0}")),
         })
+    }
+
+    /// Frame generation on/off (before `start`, or whenever the encoder is rebuilt); `t` = the synthetic frame's position between the rendered frames.
+    pub fn set_frame_gen(&self, on: bool, t: f64) {
+        let mut st = self.fg.lock();
+        st.on = on;
+        st.t = t.clamp(0.05, 0.95);
+        st.synth_due = false;
+        st.real_due = false;
+        if !on {
+            self.fg_have_frame.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// the newest tracking sample newer than the last sent frame: the stamp (and the rotation target) of a generated frame
+    fn fg_pick_sample(&self) -> Option<(Duration, [f32; 4])> {
+        let last = *self.last_sent_ts.lock();
+        let ring = self.shared.recent_samples.lock();
+        ring.back().filter(|(t, _)| *t > last).copied()
+    }
+
+    /// A rendered frame arrived (frame generation on): what this boundary encodes. Releases the slot.
+    fn fg_plan_app(&self, handle: *mut std::ffi::c_void, ipc: *mut std::ffi::c_void, a: Arrived) -> Plan {
+        if !a.has_projection {
+            // no projection layer (a loading screen made of quads): the slot goes out as is, nothing to interpolate
+            let mut st = self.fg.lock();
+            st.passthrough += 1;
+            st.real_due = false;
+            st.synth_due = false;
+            return Plan::Slot(a);
+        }
+        let mut st = self.fg.lock();
+        let mut plan = Plan::Skip;
+        if st.real_due && self.fg_have_frame.load(Ordering::Relaxed) {
+            // the previous rendered frame is still due: it goes out now, before the new one replaces it in the history; no synthetic frame
+            // for this pair (the app delivered faster than half rate: two frames, two boundaries)
+            match self.fg_pick_sample() {
+                Some((sts, q)) => {
+                    plan = Plan::Fg { mode: 0, t: 0.0, q, ts: sts, counter: st.last_counter, submit_s: st.last_submit_s, arrival: st.last_arrival, kind: FgKind::Real };
+                    self.fg_pairs_skipped.fetch_add(1, Ordering::Relaxed);
+                }
+                None => {
+                    self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
+                    self.fg_dropped.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            st.real_due = false;
+            st.synth_due = false;
+        }
+        let mut err = [0 as std::ffi::c_char; 256];
+        let r = unsafe { nvh::nvh_fg_ingest(handle, ipc, a.slot, a.render_q.as_ptr(), err.as_mut_ptr(), 256) };
+        unsafe { nvh::nvh_ipc_slot_busy(ipc, a.slot, 0) };
+        fate(a.counter, "I", Instant::now(), r as u64, 0);
+        if r < 0 {
+            let n = self.fg_errors.fetch_add(1, Ordering::Relaxed) + 1;
+            let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();
+            if n <= 3 || n % 300 == 0 {
+                logs::general("WARN", &format!("frame generation: ingest failed ({n}): {msg}"));
+                event(self.cfg.origin, "frame_gen_error", json!({ "stage": "ingest", "message": msg, "n": n }));
+            }
+            return plan;
+        }
+        self.fg_have_frame.store(true, Ordering::Relaxed);
+        st.last_counter = a.counter;
+        st.last_submit_s = a.submit_s;
+        st.last_arrival = Some(a.arrival);
+        if !matches!(plan, Plan::Skip) {
+            st.real_due = true; // the new frame is due at the next boundary
+            return plan;
+        }
+        match self.fg_pick_sample() {
+            Some((sts, q)) => {
+                if r == 1 {
+                    st.real_due = true;
+                    Plan::Fg { mode: 1, t: st.t, q, ts: sts, counter: a.counter, submit_s: a.submit_s, arrival: Some(a.arrival), kind: FgKind::Synth }
+                } else {
+                    st.real_due = false;
+                    Plan::Fg { mode: 0, t: 0.0, q, ts: sts, counter: a.counter, submit_s: a.submit_s, arrival: Some(a.arrival), kind: FgKind::Real }
+                }
+            }
+            None => {
+                st.synth_due = r == 1;
+                st.real_due = true;
+                self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
+                Plan::Skip
+            }
+        }
+    }
+
+    /// A boundary without a new rendered frame (frame generation on): the synthetic or the rendered frame still due, else the rendered frame again.
+    fn fg_plan_hold(&self) -> Plan {
+        if !self.fg_have_frame.load(Ordering::Relaxed) {
+            return Plan::Skip;
+        }
+        let mut st = self.fg.lock();
+        let Some((sts, q)) = self.fg_pick_sample() else {
+            self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
+            return Plan::Skip;
+        };
+        let (counter, submit_s, arrival) = (st.last_counter, st.last_submit_s, st.last_arrival);
+        if st.synth_due {
+            st.synth_due = false;
+            Plan::Fg { mode: 1, t: st.t, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Synth }
+        } else if st.real_due {
+            st.real_due = false;
+            Plan::Fg { mode: 0, t: 0.0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Real }
+        } else {
+            Plan::Fg { mode: 0, t: 0.0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Repeat }
+        }
     }
 
     fn ipc(&self) -> *mut std::ffi::c_void {
@@ -381,7 +559,8 @@ impl Pipeline {
         let ipc = self.ipc();
         while !self.stop.load(Ordering::Relaxed) {
             let (mut counter, mut slot, mut cts, mut submit_s) = (0u64, 0u32, 0u64, 0f64);
-            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s) } == 0 {
+            let (mut render_q, mut has_proj) = ([0f32; 8], 0i32);
+            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s, render_q.as_mut_ptr(), &mut has_proj) } == 0 {
                 continue;
             }
             let now = Instant::now();
@@ -391,7 +570,7 @@ impl Pipeline {
             if crate::simrig::active() {
                 crate::simrig::on_arrival(ipc, slot, counter as u32);
             }
-            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now };
+            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now, render_q, has_projection: has_proj != 0 };
             {
                 let mut q = self.intake.lock();
                 fate(counter, "A", now, slot as u64, cts);
@@ -518,8 +697,14 @@ impl Pipeline {
             None if alive => {
                 self.last_empty.store(true, Ordering::Relaxed);
                 self.last_empty_idx.store(idx, Ordering::Relaxed);
-                self.slots_empty.fetch_add(1, Ordering::Relaxed);
-                return;
+                if self.fg_have_frame.load(Ordering::Relaxed) && self.fg.lock().on {
+                    // frame generation: the host fills this boundary from the rendered frames it holds (by design every other boundary)
+                    self.fg_holds.fetch_add(1, Ordering::Relaxed);
+                    Job::FgHold
+                } else {
+                    self.slots_empty.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
             }
             None => {
                 let every = (self.cfg.fps / 30.0).round().max(1.0) as u64;
@@ -550,6 +735,7 @@ impl Pipeline {
         let ipc = self.ipc();
         let origin = self.cfg.origin;
         let mut consecutive_errors = 0usize;
+        let mut fg_encodes = 0u64;
         loop {
             let p = {
                 let mut g = self.picked.lock();
@@ -568,24 +754,39 @@ impl Pipeline {
                 }
                 continue;
             }
-            // timestamp: the pose the app rendered with (client tracking timestamp); green frames carry no pose and are
-            // stamped clearly in the past, never behind the last frame sent
-            let (ts, slot, counter) = match &p.job {
-                Job::App(a) => {
+            let handle = enc.handle;
+            // ---- what this boundary encodes: the picked slot, the green idle frame, or (frame generation) a generated picture
+            let fg_on = self.fg.lock().on;
+            let plan = match (&p.job, fg_on) {
+                (Job::Green, _) => Plan::Green,
+                (Job::App(a), false) => Plan::Slot(*a),
+                (Job::App(a), true) => self.fg_plan_app(handle, ipc, *a),
+                (Job::FgHold, true) => self.fg_plan_hold(),
+                (Job::FgHold, false) => Plan::Skip,
+            };
+            if matches!(plan, Plan::Skip) {
+                continue;
+            }
+            // timestamp: the pose the app rendered with (client tracking timestamp); generated frames carry the sample they were rotated
+            // to; green frames carry no pose and are stamped clearly in the past, never behind the last frame sent
+            let (ts, slot, counter, submit_s) = match &plan {
+                Plan::Slot(a) => {
                     let ts = if a.ts_ns != 0 {
                         Duration::from_nanos(a.ts_ns)
                     } else {
                         self.frames_before_first_tracking.fetch_add(1, Ordering::Relaxed);
                         self.shared.latest_sample_ts.lock().unwrap_or_default()
                     };
-                    (ts, Some(a.slot), a.counter)
+                    (ts, Some(a.slot), a.counter, a.submit_s)
                 }
-                Job::Green => {
+                Plan::Fg { ts, counter, submit_s, .. } => (*ts, None, *counter, *submit_s),
+                Plan::Green | Plan::Skip => {
                     let ts = self.shared.latest_sample_ts.lock().map(|t| t.saturating_sub(Duration::from_millis(50)))
                         .unwrap_or_else(|| origin.elapsed()).max(*self.last_sent_ts.lock());
-                    (ts, None, 0)
+                    (ts, None, 0, 0.0)
                 }
             };
+            let is_green = matches!(plan, Plan::Green);
             {
                 let mut last_idr = self.last_idr_restart.lock();
                 if self.shared.restart_from_idr.load(Ordering::SeqCst) && last_idr.elapsed() >= Duration::from_millis(100) {
@@ -598,42 +799,47 @@ impl Pipeline {
             let force_idr = self.frame_idx.fetch_add(1, Ordering::Relaxed) == 0;
             {
                 let mut last = self.last_sent_ts.lock();
-                if slot.is_some() && ts != Duration::ZERO && ts == *last {
+                if !is_green && ts != Duration::ZERO && ts == *last {
                     SAME_TS_FRAMES.fetch_add(1, Ordering::Relaxed);
                 }
                 *last = (*last).max(ts);
             }
-            let handle = enc.handle;
             let l = &mut *enc.live;
             l.packet_bytes = 0;
             l.packet_idr = false;
             l.pending.clear();
             l.hold_now = true; // packets are queued for the sender thread
-            match &p.job {
-                Job::App(a) => {
-                    // real timings for ALVR's statistics: the app presented at submit_s, the shim finished composing then
-                    let since_submit = Duration::from_secs_f64((unsafe { nvh::nvh_qpc_seconds() } - a.submit_s).max(0.0));
-                    self.ctx.report_present(ts, since_submit);
-                    self.ctx.report_composed(ts, since_submit);
-                    self.green_active.store(false, Ordering::Relaxed);
+            if is_green {
+                self.ctx.report_present(ts, Duration::ZERO);
+                self.ctx.report_composed(ts, Duration::ZERO);
+                if !self.green_active.swap(true, Ordering::Relaxed) {
+                    unsafe { nvh::nvh_release_shared(handle) }; // the app's ring is gone: free its VRAM (and the generator's frame history)
+                    self.fg_have_frame.store(false, Ordering::Relaxed);
+                    let mut st = self.fg.lock();
+                    st.real_due = false;
+                    st.synth_due = false;
                 }
-                Job::Green => {
-                    self.ctx.report_present(ts, Duration::ZERO);
-                    self.ctx.report_composed(ts, Duration::ZERO);
-                    if !self.green_active.swap(true, Ordering::Relaxed) {
-                        unsafe { nvh::nvh_release_shared(handle) }; // the app's ring is gone: free its VRAM
-                    }
-                }
+            } else {
+                // real timings for ALVR's statistics: the app presented at submit_s, the shim finished composing then
+                let since_submit = Duration::from_secs_f64((unsafe { nvh::nvh_qpc_seconds() } - submit_s).max(0.0));
+                self.ctx.report_present(ts, since_submit);
+                self.ctx.report_composed(ts, since_submit);
+                self.green_active.store(false, Ordering::Relaxed);
             }
             let t0 = Instant::now();
             let mut err = [0 as std::ffi::c_char; 256];
-            let ms = match (&p.job, slot) {
+            let ms = match &plan {
                 #[cfg(feature = "simrig")]
-                (Job::App(_), Some(s)) if crate::simrig::active() => crate::simrig::encode(handle, ipc, s, counter as u32, ts.as_nanos() as u64, force_idr, err.as_mut_ptr(), 256),
-                (Job::App(_), Some(s)) => unsafe {
-                    nvh::nvh_encode_shared(handle, ipc, s, counter as u32, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256)
+                Plan::Slot(a) if crate::simrig::active() => crate::simrig::encode(handle, ipc, a.slot, counter as u32, ts.as_nanos() as u64, force_idr, err.as_mut_ptr(), 256),
+                Plan::Slot(a) => unsafe {
+                    nvh::nvh_encode_shared(handle, ipc, a.slot, counter as u32, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256)
                 },
-                _ => unsafe { nvh::nvh_encode_green(handle, 0, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256) },
+                #[cfg(feature = "simrig")]
+                Plan::Fg { mode, t, q, .. } if crate::simrig::active() => crate::simrig::encode_fg(handle, ipc, *mode, *t, q, counter as u32, ts.as_nanos() as u64, force_idr, err.as_mut_ptr(), 256),
+                Plan::Fg { mode, t, q, .. } => unsafe {
+                    nvh::nvh_fg_encode(handle, ipc, *mode, *t, q.as_ptr(), counter as u32, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256)
+                },
+                Plan::Green | Plan::Skip => unsafe { nvh::nvh_encode_green(handle, 0, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256) },
             };
             if let Some(s) = slot {
                 // the foveation pass consumed the slot (Transmit returns after the packet is out): the shim may reuse it
@@ -645,7 +851,7 @@ impl Pipeline {
                 let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();
                 let total = self.encode_errors.fetch_add(1, Ordering::Relaxed) + 1;
                 consecutive_errors += 1;
-                event(origin, "encode_error", json!({ "message": msg, "consecutive": consecutive_errors, "total": total }));
+                event(origin, "encode_error", json!({ "message": msg, "consecutive": consecutive_errors, "total": total, "generated": matches!(plan, Plan::Fg { .. }) }));
                 if consecutive_errors == 1 || consecutive_errors >= 30 {
                     logs::general("ERROR", &format!("encode failed ({consecutive_errors} in a row): {msg}"));
                 }
@@ -654,10 +860,25 @@ impl Pipeline {
                     return;
                 }
                 unsafe { nvh::nvh_release_shared(handle) };
+                self.fg_have_frame.store(false, Ordering::Relaxed);
                 self.shared.restart_from_idr.store(true, Ordering::SeqCst);
                 continue;
             }
             consecutive_errors = 0;
+            if let Plan::Fg { kind, mode, .. } = &plan {
+                match kind {
+                    FgKind::Synth => self.fg_synths.fetch_add(1, Ordering::Relaxed),
+                    FgKind::Real => self.fg_reals.fetch_add(1, Ordering::Relaxed),
+                    FgKind::Repeat => self.fg_repeats.fetch_add(1, Ordering::Relaxed),
+                };
+                fate(counter, match kind { FgKind::Synth => "G", FgKind::Real => "R", FgKind::Repeat => "Q" }, t0, *mode as u64, ts.as_nanos() as u64);
+                fg_encodes += 1;
+                if fg_encodes % 10 == 1 {
+                    let mut buf = [0 as std::ffi::c_char; 768];
+                    unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 768) };
+                    *self.fg_stats.lock() = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
+                }
+            }
             let period_ms = self.period().as_secs_f64() * 1000.0;
             let lead_ms = {
                 // envelope of the encode time (fast attack, slow decay: 0.05 ms per frame), the send lead in phase pacing
@@ -681,17 +902,19 @@ impl Pipeline {
                     }
                 }
             };
-            let (arrival_s, slot_s) = match &p.job {
-                Job::App(a) => (logs::qpc_at(a.arrival), a.slot as i64),
-                Job::Green => (0.0, -1),
+            // CSV identity: the slot (app frames), -1 (green), -2 (synthetic), -3 (a rendered frame re-stamped by the generator)
+            let (arrival_s, slot_s) = match &plan {
+                Plan::Slot(a) => (logs::qpc_at(a.arrival), a.slot as i64),
+                Plan::Fg { arrival, kind, .. } => (arrival.map(logs::qpc_at).unwrap_or(0.0), if *kind == FgKind::Synth { -2 } else { -3 }),
+                Plan::Green | Plan::Skip => (0.0, -1),
             };
-            let row = format!("{},{},{},{:.6},{:.6},{:.6},{:.3}", if slot.is_some() { counter as i64 } else { -1 }, ts.as_nanos(), slot_s,
+            let row = format!("{},{},{},{:.6},{:.6},{:.6},{:.3}", if is_green { -1 } else { counter as i64 }, ts.as_nanos(), slot_s,
                 logs::qpc_at(p.boundary), arrival_s, logs::qpc_at(t0), ms);
             let bytes = l.packet_bytes;
             #[allow(unused_mut)]
             let mut pending: Vec<_> = l.pending.drain(..).collect();
             #[cfg(feature = "simrig")]
-            let sim_ring = if crate::simrig::active() && slot.is_some() {
+            let sim_ring = if crate::simrig::active() && !is_green {
                 if pending.is_empty() {
                     pending.push((ts, vec![0u8], force_idr, None)); // the simulated encode produces no bitstream: a token for the sender
                 }
@@ -708,11 +931,11 @@ impl Pipeline {
                     let enc_g = self.enc.lock();
                     d.ffr_ms.push(unsafe { nvh::nvh_last_ffr_gpu_ms(enc_g.handle) } as f64);
                     d.ffr_wait_ms.push(unsafe { nvh::nvh_last_ffr_wait_ms(enc_g.handle) } as f64);
-                    d.frame_rows.push(format!("{},{},{},{},{ms:.2}", if slot.is_some() { counter as i64 } else { -1 }, ts.as_nanos(), bytes, 0));
+                    d.frame_rows.push(format!("{},{},{},{},{ms:.2}", if is_green { -1 } else { counter as i64 }, ts.as_nanos(), bytes, 0));
                     d.sent_ts.push(ts.as_nanos() as u64);
                 }
             }
-            if slot.is_none() {
+            if is_green {
                 self.green_frames.fetch_add(1, Ordering::Relaxed);
             }
             self.shared.bytes_sent.fetch_add(bytes as u64, Ordering::Relaxed);
@@ -810,6 +1033,13 @@ impl Pipeline {
             "idr_restarts": self.idr_restarts.load(Ordering::Relaxed),
             "encode_envelope_ms": *self.encode_env_ms.lock(),
             "gpu_scheduling": self.gpu_sched.lock().map(|(c, st)| json!({ "class": c, "status": st })),
+            "frame_gen": {
+                "on": self.fg.lock().on, "synths": self.fg_synths.load(Ordering::Relaxed), "reals": self.fg_reals.load(Ordering::Relaxed),
+                "repeats": self.fg_repeats.load(Ordering::Relaxed), "holds": self.fg_holds.load(Ordering::Relaxed), "no_sample": self.fg_no_sample.load(Ordering::Relaxed),
+                "dropped": self.fg_dropped.load(Ordering::Relaxed), "pairs_skipped": self.fg_pairs_skipped.load(Ordering::Relaxed), "errors": self.fg_errors.load(Ordering::Relaxed),
+                "passthrough": self.fg.lock().passthrough,
+                "gen": serde_json::from_str::<serde_json::Value>(&self.fg_stats.lock()).unwrap_or(serde_json::Value::Null),
+            },
             "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_suppressed": gate_suppressed },
         })
     }

@@ -48,8 +48,9 @@ void nvh_ipc_vsync(void* ipc, double interval_s);
 void nvh_ipc_publish_input(void* ipc, int side, uint32_t clicks, uint32_t touches, float trigger, float squeeze, float stick_x, float stick_y);
 // Latest haptic command the app sent for a hand (seq changes on every ovr_SetControllerVibration).
 void nvh_ipc_poll_haptic(void* ipc, int side, uint32_t* seq, float* frequency, float* amplitude);
-// Waits up to timeout_ms for a frame from the shim. Returns 1 and the newest frame's info, 0 on timeout.
-int nvh_ipc_wait_frame(void* ipc, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit);
+// Waits up to timeout_ms for a frame from the shim. Returns 1 and the newest frame's info, 0 on timeout. render_q8 (8 floats, may be null):
+// the per-eye orientation the frame's projection layer was rendered with; has_projection: 0 when the frame has no projection layer.
+int nvh_ipc_wait_frame(void* ipc, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit, float* render_q8, int* has_projection);
 // QPC seconds, the clock the shim stamps frames with.
 double nvh_qpc_seconds(void);
 // Instrumentation: the shim's compose+GPU-wait time for the last frame, and the GPU time of the last foveation pass (0 if off).
@@ -64,6 +65,24 @@ double nvh_encode_green(void* nvh, uint32_t frame_no, uint64_t ts_ns, int force_
 double nvh_encode_shared(void* nvh, void* ipc, uint32_t slot, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
 // Drops the opened shim slots (and their foveation passes): an app that exited leaves ~4 full frames of VRAM otherwise.
 void nvh_release_shared(void* nvh);
+// ---- Frame generation (nvenc/hostlib/framegen.cpp, docs/FRAME_GENERATION.md) -------------------------------------------------
+// Creates the optical-flow session for the stream's composed frame (2 x eye width by eye height). flow_scale: the flow input is the frame
+// downscaled by this (0.25..1); perf_level: 5 slow / 10 medium / 20 fast; grid: 1, 2 or 4. Returns 1, or 0 with the reason in err (no
+// optical-flow engine on this GPU/driver: the feature must stay off). on = 0 releases everything.
+int nvh_fg_enable(void* nvh, int on, double flow_scale, int perf_level, int grid, char* err, int errlen);
+// Takes the shim slot into the frame history (previous <- current <- slot) and computes the flow between the two; q_render8 = the per-eye
+// orientations the frame was rendered with (ipc frameRenderQuat). Returns 1 when two frames exist (interpolation possible), 0 after the
+// first frame, -1 on error. The slot may be released as soon as this returns.
+int nvh_fg_ingest(void* nvh, void* ipc, uint32_t slot, const float* q_render8, char* err, int errlen);
+// Encodes a generated frame through the foveation pass + NVENC: mode 0 = the newest rendered frame rotated to q_out4 (x y z w, the head
+// orientation of the tracking sample the frame is stamped with), mode 1 = the frame at fraction t between the two newest rendered frames
+// (0.5 = midpoint), rotated likewise. Returns the time in ms (render + encode), < 0 on error.
+double nvh_fg_encode(void* nvh, void* ipc, int mode, double t, const float* q_out4, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
+int nvh_fg_has_pair(void* nvh);
+int nvh_fg_has_frame(void* nvh);
+void nvh_fg_reset(void* nvh);   // the app is gone: forget the frame history
+// JSON: {"on","ready","info","ingests","pairs","synths","reals","flow_errors","render_errors","flow_ms","flow_ms_avg","synth_ms","synth_ms_avg","flow_size","blocks"}
+int nvh_fg_stats(void* nvh, char* buf, int len);
 // Shim diagnostics: submit mode (0 GPU wait on the app thread, 1 publisher thread) and how frame timestamps were chosen.
 void nvh_ipc_shim_stats(void* ipc, uint32_t* submit_mode, uint32_t* ts_matched, uint32_t* ts_fallback);
 // Ring-slot ownership (ipc.h slotBusyMask): set while the host holds a slot (newest published frame, or being read by the encoder).
@@ -80,6 +99,8 @@ void nvh_ipc_shim_pacing(void* ipc, uint32_t* slot_busy_waits, float* app_frame_
 // Intake gate (ipc.h HostToShim::intakeWaiting / intakeGate): frames a boundary passed over and still held, and whether the shim holds releases for them.
 void nvh_ipc_set_intake(void* ipc, uint32_t waiting);
 void nvh_ipc_set_intake_gate(void* ipc, uint32_t on);
+// Frame generation pacing (ipc.h appPeriodMul): 2 = the game is released every other compositor boundary; 1 = every boundary.
+void nvh_ipc_set_app_period_mul(void* ipc, uint32_t mul);
 // Process-wide GPU scheduling class (D3DKMT): 0 idle .. 4 high, 5 realtime (needs the increase-base-priority privilege, i.e. an
 // elevated host). SteamVR's compositor runs realtime, so its copy/encode never queues behind the game's GPU work. Returns the
 // NTSTATUS (0 = success).

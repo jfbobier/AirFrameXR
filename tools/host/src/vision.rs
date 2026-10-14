@@ -54,6 +54,11 @@ pub struct Settings {
     pub follow_client_rate: Option<bool>,
     /// compositor boundary offset after the display tick, ms
     pub boundary_offset_ms: Option<f64>,
+    /// frame generation (docs/FRAME_GENERATION.md): half-rate pacing + optical-flow interpolated frames; default off
+    pub frame_gen: Option<bool>,
+    pub frame_gen_flow_scale: Option<f64>,
+    /// "fast" (default) | "medium" | "slow": the optical-flow engine's preset
+    pub frame_gen_perf: Option<String>,
     /// D3DKMT process scheduling class to ask for (5 realtime .. 2; 0 = leave)
     pub gpu_sched_class: Option<i64>,
     pub debug: Option<bool>,
@@ -98,6 +103,9 @@ pub fn load_settings(path: &Path) -> Settings {
         phase_lock: video["phase_lock"].as_bool(),
         follow_client_rate: video["follow_client_rate"].as_bool(),
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),
+        frame_gen: video["frame_gen"].as_bool(),
+        frame_gen_flow_scale: video["frame_gen_flow_scale"].as_f64(),
+        frame_gen_perf: video["frame_gen_perf"].as_str().map(str::to_string),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),

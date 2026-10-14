@@ -6,6 +6,7 @@
 | ALVR encoder sources (v20.14.1) | `nvenc/upstream/` | MIT, Copyright (c) 2018-2019 polygraphene, (c) 2020-2024 alvr-org: `third_party/licenses/ALVR-LICENSE.txt` | vendored unmodified (`nvenc/upstream.sha256`), patched at build time by `tools/host/build.rs`; `nvenc/shim/` replaces ALVR's logger/settings glue |
 | NVIDIA Video Codec SDK header `nvEncodeAPI.h` (12.2, and the older copy inside `nvenc/upstream`) | `nvenc/shim122/alvr_server/` | MIT-style notice in the header, Copyright (c) 2010-2024 NVIDIA Corporation | |
 | OVRShim (fork of VDXR's OVRNull) | `ovrshim/` | MIT, Copyright (c) Matthieu Bucchianeri: `third_party/licenses/VirtualDesktop-OpenXR-LICENSE.txt` | files that came from VDXR keep their MIT header; built inside the VDXR checkout (its LibOVR headers are not vendored here) |
+| NVIDIA Optical Flow SDK headers (5.0.7) | `third_party/nvof/` | MIT-style notice in the headers, Copyright (c) 2019-2023 NVIDIA Corporation | frame generation: the flow engine is in the display driver (`nvofapi64.dll`, Turing and later), loaded at runtime; no NVIDIA binary is shipped |
 | cgltf 1.14 | `third_party/cgltf/` | MIT (in the header) | offline scene converter only |
 | stb_image 2.30 | `third_party/stb/` | public domain / MIT (in the header) | host benchmark renderer |
 | ALVR source patch (test only) | `tools/patches/loopback-client.patch` | MIT (ALVR) | applied to the builder's ALVR checkout |

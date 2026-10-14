@@ -287,6 +287,7 @@ pub fn init(out_dir: &str, ipc: usize, nvh_handle: *mut c_void, shared: &Arc<Sha
     // the client side: connected, stream ready, views, the display period the host's clock follows
     vsync_period_ns.store(SIM.get().unwrap().cfg.period_ns as u64, Ordering::Relaxed);
     crate::FOLLOW_RATE.store(true, Ordering::Relaxed);
+    let _ = SIM_SHARED.set(Arc::clone(shared));
     *shared.pending_views.lock() = Some((FOV8, OFF6));
     shared.client_connected.store(true, Ordering::SeqCst);
     shared.stream_ready.store(true, Ordering::SeqCst);
@@ -337,12 +338,17 @@ fn head_generator() {
             next_gen = t0 + k as f64 * s.cfg.period_ns * 1e-9 + s.cfg.tick_jitter_ns * 1e-9 * rng.gauss();
         } else if let Some((_, ts, qf)) = pending.pop_front() {
             let (p, z) = ([0f32, 1.6, 0.0], [0f32; 3]);
+            if let Some(sh) = SIM_SHARED.get() {
+                crate::push_recent_sample(sh, Duration::from_nanos(ts), qf); // the frame generator stamps from this ring
+            }
             unsafe { nvh::nvh_ipc_publish_head(ipc, ts, qf.as_ptr(), p.as_ptr(), z.as_ptr(), z.as_ptr()) };
         }
     }
 }
 
 static NVH: AtomicUsize = AtomicUsize::new(0);
+/// the host's shared state: the synthetic samples also feed `recent_samples` (frame generation stamps from it)
+static SIM_SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
 static IPC: AtomicUsize = AtomicUsize::new(0);
 
 pub fn set_ipc(ipc: usize) {
@@ -377,6 +383,25 @@ pub fn encode(nvh_handle: *mut c_void, ipc: *mut c_void, slot: u32, counter: u32
     } else {
         -1
     };
+    LAST_RING.store(if ring >= 0 { ring as usize } else { usize::MAX }, Ordering::Relaxed);
+    ms
+}
+
+/// Replaces `nvh_fg_encode` (frame generation): the generated picture is always rendered and encoded for real (the viewer must see it),
+/// then captured for the viewer like a slot (nvh_sim_slot returns the generator's output after such an encode).
+pub fn encode_fg(nvh_handle: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, q_out: &[f32; 4], counter: u32, ts_ns: u64, force_idr: bool, err: *mut c_char, errlen: i32) -> f64 {
+    let s = SIM.get().unwrap();
+    let now = qpc();
+    let first = *s.first_frame_at.lock().unwrap().get_or_insert(now);
+    let viewer = s.viewer as *mut c_void;
+    if !s.started.load(Ordering::Relaxed) && now - first >= s.cfg.settle_s {
+        let k = ((now + 0.2 - s.t0_qpc) / (s.cfg.period_ns * 1e-9)).ceil();
+        let t0v = s.t0_qpc + k * s.cfg.period_ns * 1e-9;
+        unsafe { sv_start(viewer, t0v, s.ts_base + (k * s.cfg.period_ns) as u64) };
+        s.started.store(true, Ordering::Relaxed);
+    }
+    let ms = unsafe { nvh::nvh_fg_encode(nvh_handle, ipc, mode, t, q_out.as_ptr(), counter, ts_ns, force_idr as i32, err, errlen) };
+    let ring = if ms >= 0.0 && s.started.load(Ordering::Relaxed) { unsafe { sv_capture(viewer, nvh_handle, ipc, 0, counter.wrapping_mul(3).wrapping_add(mode as u32)) } } else { -1 };
     LAST_RING.store(if ring >= 0 { ring as usize } else { usize::MAX }, Ordering::Relaxed);
     ms
 }
