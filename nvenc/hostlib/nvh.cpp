@@ -641,9 +641,9 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
     char info[200]; int k = 0;
     for (const char* c = s.nvofInfo; *c && k < 190; c++) { if (*c == '"' || *c == '\\') info[k++] = ' '; else info[k++] = *c; }
     info[k] = 0;
-    return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"synths\":%llu,\"reals\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
+    return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"synths\":%llu,\"reals\":%llu,\"copies\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
                     "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d]}",
-                    s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.synths, (unsigned long long)s.reals,
+                    s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.synths, (unsigned long long)s.reals, (unsigned long long)s.copies,
                     (unsigned long long)s.flowErrors, (unsigned long long)s.renderErrors, s.lastFlowMs, s.flowN ? s.flowMsSum / s.flowN : 0.0, s.lastSynthMs,
                     s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH);
 }

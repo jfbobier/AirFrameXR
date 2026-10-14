@@ -80,18 +80,45 @@ float costAt(float2 px) {
     int2 c = clamp(int2(round(fc)), blocks.xy, blocks.zw);
     return float(cost.Load(int3(c, 0)) & 0xffu) / 255.0;
 }
+// Catmull-Rom (bicubic) fetch of a colour texture at an SBS uv, 5 bilinear taps (corner taps dropped, weights renormalised). The output is a
+// resample of the rendered frame at sub-pixel offsets on every frame (the rotation to the stamp sample, the flow displacement); bilinear
+// made every output visibly softer than the game (headset session 2026-10-14). Taps are kept inside this eye's column of the SBS texture.
+float3 fetchCR(Texture2D tex, float2 uvS) {
+    float2 size = eyeRect.zw;
+    float2 inv = 1.0 / size;
+    float2 pos = uvS * size;
+    float2 tc1 = floor(pos - 0.5) + 0.5;
+    float2 f = pos - tc1;
+    float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    float2 w3 = f * f * (-0.5 + 0.5 * f);
+    float2 w12 = w1 + w2;
+    float2 off12 = w2 / w12;
+    float2 t0 = (tc1 - 1.0) * inv, t3 = (tc1 + 2.0) * inv, t12 = (tc1 + off12) * inv;
+    float2 lo = float2(eyeRect.x, 0) + 0.5 * inv, hi = float2(eyeRect.x + eyeRect.y, 1) - 0.5 * inv;
+    float3 r = 0;
+    float wsum = 0;
+    float w;
+    w = w12.x * w0.y;  r += tex.SampleLevel(smp, clamp(float2(t12.x, t0.y), lo, hi), 0).rgb * w;  wsum += w;
+    w = w0.x * w12.y;  r += tex.SampleLevel(smp, clamp(float2(t0.x, t12.y), lo, hi), 0).rgb * w;  wsum += w;
+    w = w12.x * w12.y; r += tex.SampleLevel(smp, clamp(t12, lo, hi), 0).rgb * w;                   wsum += w;
+    w = w3.x * w12.y;  r += tex.SampleLevel(smp, clamp(float2(t3.x, t12.y), lo, hi), 0).rgb * w;  wsum += w;
+    w = w12.x * w3.y;  r += tex.SampleLevel(smp, clamp(float2(t12.x, t3.y), lo, hi), 0).rgb * w;  wsum += w;
+    return saturate(r / wsum);
+}
 // the previous frame at a point given in the current camera (eye-local uv)
 bool samplePrev(float2 uvCur, out float3 c) {
     float2 uvP;
     c = float3(0, 0, 0);
     if (!projectTo(rot(pA, pB, pC, dirOf(uvCur)), uvP)) return false;
-    c = prev.SampleLevel(smp, sbs(uvP), 0).rgb;
+    c = fetchCR(prev, sbs(uvP));
     return true;
 }
 float4 PSOut(VSOut i) : SV_Target {
     float2 uvB;
     if (!projectTo(rot(oA, oB, oC, dirOf(i.uv)), uvB)) return float4(0, 0, 0, 1);
-    float3 curHere = cur.SampleLevel(smp, sbs(uvB), 0).rgb;
+    float3 curHere = fetchCR(cur, sbs(uvB));
     if (mode.x < 0.5) return float4(curHere, 1);
     float t = flowP.w;
     float3 prevHere;
@@ -105,7 +132,7 @@ float4 PSOut(VSOut i) : SV_Target {
     bool okC = all(uvC >= 0) && all(uvC <= 1);
     bool okP = all(uvPb >= 0) && all(uvPb <= 1) && samplePrev(uvPb, pc);
     if (!(okC && okP)) return float4(stable, 1);
-    float3 cc = cur.SampleLevel(smp, sbs(uvC), 0).rgb;
+    float3 cc = fetchCR(cur, sbs(uvC));
     float3 mid = lerp(pc, cc, t);
     float dis = max(abs(pc.r - cc.r), max(abs(pc.g - cc.g), abs(pc.b - cc.b)));
     float conf = saturate(1 - dis * mode.z) * saturate(1 - costAt(pB));
@@ -374,6 +401,21 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const f
     if (m_have < 1 || !m_out) { seterr(err, errlen, "frame generation: no rendered frame yet"); return nullptr; }
     if (mode == 1 && m_have < 2) mode = 0;
     const int prev = 1 - I.cur;
+    if (mode == 0) {
+        // The stamp sample's orientation equals the render orientation within 0.02 deg (0.7 px at 3552 px per 100 deg; the head is still): copy
+        // the rendered frame as is. The resample through the rotation warp costs sharpness on every frame otherwise (headset session 2026-10-14).
+        float worst = 0.f;
+        for (int e = 0; e < 2; e++) {
+            const float* a = I.realQ[I.cur] + e * 4;
+            float d = fabsf(a[0] * qOut4[0] + a[1] * qOut4[1] + a[2] * qOut4[2] + a[3] * qOut4[3]);
+            worst = std::max(worst, 2.f * acosf(std::min(1.f, d)) * 57.29578f);
+        }
+        if (worst < I.cfg.copyDeg) {
+            m_ctx->CopyResource(m_out, I.real[I.cur]);
+            stats.reals++; stats.copies++;
+            return m_out;
+        }
+    }
     m_ctx->Begin(I.qDisjointR);
     m_ctx->End(I.qT[2]);
     m_ctx->OMSetRenderTargets(1, &I.outRtv, nullptr);

@@ -16,10 +16,11 @@ struct FrameGenConfig {
     int grid = 4;             // output vector grid (1, 2, 4)
     float maxFlowPx = 512.f;  // clamp on a flow vector, full-resolution pixels
     float confGain = 6.f;     // confidence = saturate(1 - gain * max |A - B|) at the matched points
+    float copyDeg = 0.02f;    // a rendered frame whose stamp orientation is within this angle of its render orientation is copied, not resampled
 };
 
 struct FrameGenStats {
-    uint64_t ingests = 0, pairs = 0, synths = 0, reals = 0, flowErrors = 0, renderErrors = 0;
+    uint64_t ingests = 0, pairs = 0, synths = 0, reals = 0, copies = 0, flowErrors = 0, renderErrors = 0;
     float lastFlowMs = 0, lastSynthMs = 0, lastIngestMs = 0;   // GPU time of the last flow pass (prep + engine), the last output pass, the last ingest copy
     double flowMsSum = 0, synthMsSum = 0; uint64_t flowN = 0, synthN = 0;
     int flowW = 0, flowH = 0, blocksW = 0, blocksH = 0;
