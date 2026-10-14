@@ -41,22 +41,28 @@ generation itself (flow ~2-4 ms expected on an RTX 5090 at 3552x1600 input, synt
 | Settings | `config/visionalvr.json` `video.frame_gen` (+ `frame_gen_flow_scale`, `frame_gen_perf`), `--frame-gen on|off`, `VISIONALVR_FRAME_GEN=1/0` | CLI > env > settings; GUI checkbox "Frame generation" in Settings |
 | Headers | `third_party/nvof/` | `nvOpticalFlowCommon.h`, `nvOpticalFlowD3D11.h` (MIT notice; nothing of NVIDIA's is redistributed) |
 
-Rules of the per-boundary decision (`FgState`): a rendered frame arriving while the previous one is still due sends the previous one and
-skips the synthetic frame for that pair (the app ran faster than half rate: two frames, two boundaries); a boundary with no sample newer
-than the last sent frame sends nothing (`fg_no_sample`); a frame without a projection layer (quad-only loading screens) goes out as is.
+Rules of the per-boundary decision (`FgState`): the output schedule is a strict alternation, synthetic then rendered. A rendered frame
+that arrives while the previous one is still due waits in the intake for one boundary (`fg_queued`); a boundary with nothing due waits up to
+`VISIONALVR_FG_ARRIVAL_WAIT_MS` (4) past the boundary for the frame the app is about to publish (`fg_arrival_waits` / `fg_arrival_hits`) and
+only then repeats the rendered frame. Both rules exist because an app released at a boundary publishes its frame near a boundary: without
+them the schedule flipped between "just before" and "just after" (a frame dropped, then one frozen) at 6 % of the boundaries in the rig's
+ideal-timing case. A boundary with no tracking sample newer than the last sent frame sends nothing (`fg_no_sample`); a frame without a
+projection layer (quad-only loading screens) goes out as is; a frame still due when the encoder overran is dropped for the synthetic frame
+between the two newest (`fg_dropped`).
 When the GPU/driver has no flow engine the host logs a WARN, streams as without the feature and keeps the game at full rate.
 
 ## Telemetry
 
 `encoder_stats.pipeline.frame_gen`: `synths`, `reals`, `repeats`, `holds` (boundaries filled by the generator), `no_sample`, `dropped`,
-`pairs_skipped`, `errors`, `passthrough`, and `gen` = `nvh_fg_stats` (flow/synthesis GPU ms, flow size, engine info). Event `frame_gen`
+`queued`, `arrival_waits` / `arrival_hits` / `arrival_wait_ms_sum`, `sample_waits`, `pairs_skipped`, `errors`, `passthrough`, and `gen` = `nvh_fg_stats` (flow/synthesis GPU ms, flow size, engine info). Event `frame_gen`
 at start (and at every encoder rebuild). Frame fates (debug flavour, `host_pipeline_fates.csv`): `I` ingested (1 = pair), `G` synthetic
 sent, `R` rendered frame sent, `Q` rendered frame re-sent; `host_frames.csv` slot column -2 (synthetic) / -3 (re-stamped rendered).
 
 ## Lab (headset-less)
 
 `harness/simrig`: `python3 harness/simrig/run_sim.py build` then `run stutter,stutter_fg` (head still, app frame time drawn from 50-70 fps,
-moving marker) and `run stutter_turn,stutter_turn_fg` (head turning 45 deg/s). The probe's `XR_PROBE_MOVING=25:0.25` draws a rectangle
+moving marker) and `run stutter_turn,stutter_turn_fg` (head turning 45 deg/s); `steady` (generator off, ideal timing) is the motion
+metric's floor. The probe's `XR_PROBE_MOVING=25:0.25` draws a rectangle
 swinging in world yaw 7 deg below the ring; the viewer measures it (`moving.csv`) and `judge.py` reports `motion`: hf rms of its world angle
 after a local quadratic fit, frozen ticks (repeated frames), step regularity; verdict SMOOTH / JUDDER next to the usual CLEAN / TREMBLE of
 the head-rotation path. `steady_fg` is the generator's null case (ideal timing, must be CLEAN + SMOOTH). Generated frames are always

@@ -146,8 +146,9 @@ enum Job {
 
 /// Frame generation (docs/FRAME_GENERATION.md): what the encoder thread owes the stream. The game is paced at half the display rate
 /// (ipc appPeriodMul 2). Rendered frame B arrives: if a previous frame A exists, the boundary gets the interpolated frame S(A, B) and B
-/// itself is due at the next boundary (`real_due`); C arriving while B is still due drops B (the boundary gets S(B, C), C is due next: the
-/// motion stays continuous, see `fg_plan_app`). A boundary with nothing due re-sends B
+/// itself is due at the next boundary (`real_due`); C arriving while B is still due waits in the intake (`on_boundary` does not pick it): B
+/// goes out, then S(B, C), then C, so the schedule never shifts. A boundary with nothing due first waits briefly for the expected rendered
+/// frame (`fg_wait_arrival`) and otherwise re-sends B
 /// rotated to the new head sample (the headset would repeat it anyway; the rotation keeps head turns smooth). Every output is stamped with
 /// the newest tracking sample newer than the last sent frame and rotated to it; with no such sample the boundary is skipped (`fg_no_sample`).
 struct FgState {
@@ -293,11 +294,20 @@ pub struct Pipeline {
     pub fg_holds: AtomicU64,
     /// boundaries skipped because no tracking sample newer than the last sent frame had arrived
     pub fg_no_sample: AtomicU64,
-    /// rendered frames never shown: still due when the next one arrived (the encoder missed a boundary, or the app ran faster than half rate):
-    /// the boundary gets the synthetic frame between the two newest instead, so the motion never stalls
+    /// rendered frames never shown: still due when the next one was encoded (an encoder overrun; `on_boundary` otherwise keeps the arrival
+    /// waiting): the boundary gets the synthetic frame between the two newest instead, so the motion never stalls
     pub fg_dropped: AtomicU64,
     /// (unused since the drop policy; kept for the statistics layout)
     pub fg_pairs_skipped: AtomicU64,
+    /// mirror of `FgState::real_due` for the clock thread: while a rendered frame is due, a new arrival waits in the intake (see `on_boundary`)
+    fg_real_due: AtomicBool,
+    /// boundaries at which an arrived frame was left waiting because the previous rendered frame was still due
+    pub fg_queued: AtomicU64,
+    /// how long a boundary with nothing due waits for the expected rendered frame (VISIONALVR_FG_ARRIVAL_WAIT_MS, default 4)
+    fg_arrival_wait: Duration,
+    pub fg_arrival_waits: AtomicU64,
+    pub fg_arrival_hits: AtomicU64,
+    pub fg_arrival_wait_us: AtomicU64,
     pub fg_errors: AtomicU64,
     /// nvh_fg_stats JSON, refreshed by the encoder thread (the statistics window must not lock the encoder)
     fg_stats: Mutex<String>,
@@ -386,6 +396,13 @@ impl Pipeline {
             fg_no_sample: AtomicU64::new(0),
             fg_dropped: AtomicU64::new(0),
             fg_pairs_skipped: AtomicU64::new(0),
+            fg_real_due: AtomicBool::new(false),
+            fg_queued: AtomicU64::new(0),
+            fg_arrival_wait: Duration::from_secs_f64(
+                std::env::var("VISIONALVR_FG_ARRIVAL_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(4.0).clamp(0.0, 10.0) / 1000.0),
+            fg_arrival_waits: AtomicU64::new(0),
+            fg_arrival_hits: AtomicU64::new(0),
+            fg_arrival_wait_us: AtomicU64::new(0),
             fg_errors: AtomicU64::new(0),
             fg_stats: Mutex::new(String::from("{\"on\":0}")),
             fg_sample_wait: Mutex::new(Duration::from_secs_f64(
@@ -397,6 +414,7 @@ impl Pipeline {
 
     /// Frame generation on/off (before `start`, or whenever the encoder is rebuilt); `t` = the synthetic frame's position between the rendered frames.
     pub fn set_frame_gen(&self, on: bool, t: f64) {
+        self.fg_real_due.store(false, Ordering::Relaxed);
         let mut st = self.fg.lock();
         st.on = on;
         self.fg_on.store(on, Ordering::Relaxed);
@@ -455,9 +473,9 @@ impl Pipeline {
         }
         let mut st = self.fg.lock();
         if st.real_due && self.fg_have_frame.load(Ordering::Relaxed) {
-            // The previous rendered frame B is still due (the encoder missed a boundary, or the app runs faster than half rate) and the new
-            // frame C is here: B is dropped and this boundary gets S(B, C), C next. Sending B now and C twice (the first version) froze the
-            // scene for a tick and then jumped (the rig's moving marker, 2026-10-14); dropping B keeps the motion continuous (0.5 -> 1.5 -> 2).
+            // The previous rendered frame B is still due and the new frame C is here. `on_boundary` leaves C waiting while B is due, so this
+            // is the encoder-overrun fallback (a boundary was replaced before it was encoded): B is dropped and this boundary gets S(B, C),
+            // C next, which keeps the motion continuous (0.5 -> 1.5 -> 2) where sending B and then C twice froze a tick and jumped.
             self.fg_dropped.fetch_add(1, Ordering::Relaxed);
             st.real_due = false;
             st.synth_due = false;
@@ -495,6 +513,43 @@ impl Pipeline {
                 self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
                 Plan::Skip
             }
+        }
+    }
+
+    /// A boundary with nothing due (frame generation on; the next output would repeat the rendered frame): the next rendered frame is expected
+    /// about now (the app publishes every other period and, released at a boundary, lands near one), so wait for it until
+    /// VISIONALVR_FG_ARRIVAL_WAIT_MS (4) past the boundary and take it as this boundary's arrival. Without the wait the schedule flipped
+    /// between "arrived just before" and "just after" the boundary: a frame dropped, then one repeated, 6 % of the boundaries in the rig's
+    /// ideal-timing case (2026-10-14).
+    fn fg_wait_arrival(&self, boundary: Instant) -> Option<Arrived> {
+        {
+            let st = self.fg.lock();
+            if st.real_due || st.synth_due {
+                return None;
+            }
+        }
+        let deadline = boundary + self.fg_arrival_wait;
+        let t0 = Instant::now();
+        let mut waited = false;
+        loop {
+            if let Some(a) = self.intake.lock().pop_front() {
+                if waited {
+                    self.fg_arrival_hits.fetch_add(1, Ordering::Relaxed);
+                    self.fg_arrival_wait_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
+                }
+                return Some(a);
+            }
+            if Instant::now() >= deadline {
+                if waited {
+                    self.fg_arrival_wait_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
+                }
+                return None;
+            }
+            if !waited {
+                waited = true;
+                self.fg_arrival_waits.fetch_add(1, Ordering::Relaxed);
+            }
+            std::thread::sleep(Duration::from_micros(200));
         }
     }
 
@@ -642,7 +697,14 @@ impl Pipeline {
         }
         // the app keeps up when no boundary has been empty lately (see `last_empty_idx`): only then is a queue a standing queue
         let keeps_up = idx.wrapping_sub(self.last_empty_idx.load(Ordering::Relaxed)) > self.keepup_boundaries;
-        let newest = {
+        // frame generation: while a rendered frame is still due, a frame that has already arrived waits one boundary (the stream shows
+        // B, S(B, C), C in order rather than dropping or doubling one; see `FgState`)
+        let fg_queue = self.fg_on.load(Ordering::Relaxed) && self.fg_have_frame.load(Ordering::Relaxed) && self.fg_real_due.load(Ordering::Relaxed)
+            && !self.intake.lock().is_empty();
+        let newest = if fg_queue {
+            self.fg_queued.fetch_add(1, Ordering::Relaxed);
+            None
+        } else {
             let mut q = self.intake.lock();
             // two waiting: send the older now and the newer at the next boundary (the stream runs one period late until an empty
             // boundary drains the queue; a third frame arriving first drops the oldest, see intake_loop)
@@ -789,9 +851,19 @@ impl Pipeline {
                 (Job::Green, _) => Plan::Green,
                 (Job::App(a), false) => Plan::Slot(*a),
                 (Job::App(a), true) => self.fg_plan_app(handle, ipc, *a),
-                (Job::FgHold, true) => self.fg_plan_hold(),
+                (Job::FgHold, true) => match self.fg_wait_arrival(p.boundary) {
+                    Some(a) => {
+                        fate(a.counter, "P", p.boundary, p.boundary_idx, 1);
+                        self.slots_filled.fetch_add(1, Ordering::Relaxed);
+                        self.fg_plan_app(handle, ipc, a)
+                    }
+                    None => self.fg_plan_hold(),
+                },
                 (Job::FgHold, false) => Plan::Skip,
             };
+            if fg_on {
+                self.fg_real_due.store(self.fg.lock().real_due, Ordering::Relaxed);
+            }
             if matches!(plan, Plan::Skip) {
                 continue;
             }
@@ -846,6 +918,7 @@ impl Pipeline {
                     let mut st = self.fg.lock();
                     st.real_due = false;
                     st.synth_due = false;
+                    self.fg_real_due.store(false, Ordering::Relaxed);
                 }
             } else {
                 // real timings for ALVR's statistics: the app presented at submit_s, the shim finished composing then
@@ -1068,6 +1141,9 @@ impl Pipeline {
                 "passthrough": self.fg.try_lock().map(|s| s.passthrough).unwrap_or(0),
                 "sample_waits": self.fg_sample_waits.load(Ordering::Relaxed), "sample_wait_ms_sum": self.fg_sample_wait_us.load(Ordering::Relaxed) as f64 / 1000.0,
                 "sample_wait_ms": self.fg_sample_wait.lock().as_secs_f64() * 1000.0,
+                "queued": self.fg_queued.load(Ordering::Relaxed), "arrival_waits": self.fg_arrival_waits.load(Ordering::Relaxed),
+                "arrival_hits": self.fg_arrival_hits.load(Ordering::Relaxed), "arrival_wait_ms_sum": self.fg_arrival_wait_us.load(Ordering::Relaxed) as f64 / 1000.0,
+                "arrival_wait_ms": self.fg_arrival_wait.as_secs_f64() * 1000.0,
                 "gen": serde_json::from_str::<serde_json::Value>(&self.fg_stats.lock()).unwrap_or(serde_json::Value::Null),
             },
             "shim": { "slot_busy_waits": waits, "app_frame_ms": app_ms, "releases": releases, "releases_late": late, "gate_holds": gate_holds, "gate_suppressed": gate_suppressed },
