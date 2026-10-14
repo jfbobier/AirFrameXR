@@ -19,7 +19,7 @@ namespace VisionALVR
 {
     public static class Version
     {
-        public const string Text = "0.3 alpha";
+        public const string Text = "0.4 alpha";
     }
 
     /// The portable folder: everything next to the exe, config/ and logs/ inside it.
@@ -175,6 +175,8 @@ namespace VisionALVR
         /// NVENC split-frame encoding ("3" = one strip per engine, up to 3; "off"): on by default, the reason the project exists on a multi-engine GPU
         public bool SplitEncode { get => Json.Str(Root, "video.split_encode", "3") != "off"; set => Json.Set(Root, "video.split_encode", value ? "3" : "off"); }
         public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", "00ff00"); set => Json.Set(Root, "video.idle_rgb", value); }
+        /// frame generation (docs/FRAME_GENERATION.md): the game renders every other frame, the streamer interpolates the one in between (off by default)
+        public bool FrameGen { get => Json.Bool(Root, "video.frame_gen", false); set => Json.Set(Root, "video.frame_gen", value); }
         public bool Debug { get => Json.Bool(Root, "debug", true); set => Json.Set(Root, "debug", value); }
         /// display (live in VisionALVR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral
         public const double DefaultGamma = 1.2;

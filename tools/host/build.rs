@@ -182,7 +182,9 @@ void FFR::RenderTo(ID3D11Texture2D* target) {\n\
         .include(nvenc.join("hostlib"))
         .include(nvenc.join("../ovrshim"))
         .include(nvenc.join("../third_party/stb"))
+        .include(nvenc.join("../third_party/nvof")) // NVIDIA Optical Flow API headers (MIT notice); the engine is in the driver (nvofapi64.dll)
         .file(nvenc.join("hostlib/nvh.cpp"))
+        .file(nvenc.join("hostlib/framegen.cpp"))
         .file(nvenc.join("hostlib/bench.cpp"))
         .file(nvenc.join("shim/shim.cpp"))
         .file(&enc_cpp_path)
@@ -208,6 +210,7 @@ void FFR::RenderTo(ID3D11Texture2D* target) {\n\
     }
     println!("cargo:rerun-if-changed={}", nvenc.display());
     println!("cargo:rerun-if-changed={}", nvenc.join("../third_party/stb").display());
+    println!("cargo:rerun-if-changed={}", nvenc.join("../third_party/nvof").display());
 }
 
 /// Maps the SDK 12.0 bit-depth fields used by ALVR's encoder files to the SDK 12.2 ones (exact-text replacements; the build

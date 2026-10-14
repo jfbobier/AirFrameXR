@@ -30,11 +30,11 @@ fh = fh.replace('    ID3D11Texture2D* GetOutputTexture();', '    ID3D11Texture2D
 fh = fh.replace('    std::vector<d3d_render_utils::RenderPipeline> mPipelines;', '    std::vector<d3d_render_utils::RenderPipeline> mPipelines;\n    Microsoft::WRL::ComPtr<ID3D11Buffer> mFovBuffer;\n    Microsoft::WRL::ComPtr<ID3D11Texture2D> mComposition;\n    std::map<ID3D11Texture2D*, d3d_render_utils::RenderPipeline> mDirect;').replace('#pragma once', '#pragma once\n#include <map>', 1)
 open(out + '/FFR.h', 'w').write(fh)
 PY
-for f in nvh.cpp bench.cpp simviewer.cpp; do   # (STBI_NO_SIMD below: stb_image.h's cpuid probe trips clang-cl; MSVC builds it as is)
+for f in nvh.cpp framegen.cpp bench.cpp simviewer.cpp; do   # (STBI_NO_SIMD below: stb_image.h's cpuid probe trips clang-cl; MSVC builds it as is)
   echo "== nvenc/hostlib/$f"
   clang-cl /std:c++17 /EHsc -fsyntax-only /DNOMINMAX /DSTBI_NO_SIMD /DVISIONALVR_SIMRIG -Wno-everything /I"$D/nvhinc" /I"$R/nvenc/shim122" /I"$R/nvenc/shim" /I"$R/nvenc/upstream" \
     /I"$R/nvenc/upstream/platform/win32/d3d-render-utils" /I"$R/nvenc/upstream/platform/win32" /I"$R/nvenc" /I"$R/nvenc/hostlib" /I"$R/ovrshim" \
-    /I"$R/third_party/stb" $W "$R/nvenc/hostlib/$f" || rc=1
+    /I"$R/third_party/stb" /I"$R/third_party/nvof" $W "$R/nvenc/hostlib/$f" || rc=1
 done
 echo "== tools/probe/xr_probe.cpp"
 clang-cl /std:c++17 /EHsc -fsyntax-only /DNOMINMAX /DSTBI_NO_SIMD -Wno-everything /I"$R/external/VDXR/external/OpenXR-SDK/include" /I"$R/nvenc/hostlib" /I"$R/third_party/stb" $W "$R/tools/probe/xr_probe.cpp" || rc=1

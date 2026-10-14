@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 24;
+constexpr uint32_t kVersion = 25;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -103,6 +103,10 @@ struct HostToShim {
     // drains when that gap reaches the host, without dropping a rendered frame.
     uint32_t intakeWaiting;
     uint32_t intakeGate;
+    // Frame generation (host pipeline.rs / nvenc/hostlib/framegen.cpp): the app is paced at 1 / appPeriodMul of the display rate (2 = every
+    // other compositor boundary; the host interpolates the frame in between from the optical flow of the last two rendered frames) and its
+    // predicted display time moves one display period later (an interpolated frame is shown before each rendered one). 0 or 1 = every boundary.
+    uint32_t appPeriodMul;
 };
 
 struct Haptic {
@@ -119,6 +123,8 @@ struct ShimToHost {
     uint32_t frameSeq;             // seqlock for the frame fields: odd while the shim is writing them
     uint64_t frameClientTsNs;      // client tracking timestamp of the pose the app rendered that frame with
     double frameSubmitTimeS;       // shim clock when the frame was submitted
+    float frameRenderQuat[2][4];   // orientation (x y z w, tracking space) each eye's projection layer was rendered with (frame generation rotates from it)
+    uint32_t frameHasProjection;   // 1 when the frame has a projection layer (frameRenderQuat valid)
     uint64_t slotHandle[kSlots];   // legacy shared texture handles (HANDLE values)
     int32_t sbsWidth, sbsHeight;
     uint32_t sbsFormat;            // DXGI_FORMAT of the SBS slots

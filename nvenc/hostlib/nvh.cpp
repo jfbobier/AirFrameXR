@@ -6,6 +6,7 @@
 #include "shim.h"
 #include "ipc_win.h"
 #include "FFR.h"
+#include "framegen.h"
 #include <dxgi.h>
 #include <algorithm>
 #include <cmath>
@@ -86,6 +87,11 @@ struct Nvh {
     std::unique_ptr<KeepAlive> keepAlive;
     int gpuPriority = 0; long gpuPriorityHr = 0;   // IDXGIDevice::SetGPUThreadPriority on the encoder device (0 = not set)
     std::vector<ID3D11Texture2D*> noiseTex;          // noise == 2: independent random frames (nothing for motion search to reuse)
+    // frame generation (framegen.h): the flow + synthesis module, a foveation pass bound to its output texture, and whether the last encode came from it
+    std::unique_ptr<FrameGen> fg;
+    std::unique_ptr<FFR> fgFfr;
+    ID3D11Texture2D* fgFfrTex = nullptr;
+    bool fgLast = false;
 };
 
 // host options that are not ALVR settings
@@ -446,7 +452,7 @@ float nvh_ipc_last_compose_ms(void* i) { return ((Ipc*)i)->state->shim.lastCompo
 float nvh_last_ffr_gpu_ms(void* hh) { return ((Nvh*)hh)->lastFfrMs; }
 float nvh_last_ffr_wait_ms(void* hh) { return ((Nvh*)hh)->lastFfrWaitMs; }
 
-int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit) {
+int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit, float* render_q8, int* has_projection) {
     auto* ipc = (Ipc*)i;
     static uint64_t last = 0;
     auto& s = ipc->state->shim;
@@ -465,6 +471,8 @@ int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slo
         if (q1 & 1) { YieldProcessor(); continue; }
         MemoryBarrier();
         *counter = s.frameCounter; *slot = s.frameSlot; *ts = s.frameClientTsNs; *submit = s.frameSubmitTimeS;
+        if (render_q8) memcpy(render_q8, s.frameRenderQuat, sizeof(float) * 8);
+        if (has_projection) *has_projection = (int)s.frameHasProjection;
         MemoryBarrier();
         if (*(volatile uint32_t*)&s.frameSeq == q1) break;
     }
@@ -509,30 +517,30 @@ extern "C" void* nvh_sim_slot(void* hh, void* i, uint32_t slot) {
     auto* n = (Nvh*)hh;
     if (!n || slot >= (uint32_t)visionalvr_ipc::kSlots) return nullptr;
     (void)i;
+    // the picture the encoder saw: the frame generation output when the last encode came from it (rotated or interpolated frame)
+    if (n->fgLast && n->fg && n->fg->Output()) return n->fg->Output();
     return n->shared[slot];
 }
 
 #endif
 
-double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
-    auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
-    if (slot >= (uint32_t)visionalvr_ipc::kSlots) { seterr(err, errlen, "bad slot"); return -1; }
+// Opens (once) the shim's shared slot on the encoder device. Returns the texture, nullptr with err on failure.
+static ID3D11Texture2D* openSlot(Nvh* n, Ipc* ipc, uint32_t slot, char* err, int errlen) {
+    if (slot >= (uint32_t)visionalvr_ipc::kSlots) { seterr(err, errlen, "bad slot"); return nullptr; }
     uint64_t handle = ipc->state->shim.slotHandle[slot];
-    if (!handle) { seterr(err, errlen, "no shared handle"); return -1; }
+    if (!handle) { seterr(err, errlen, "no shared handle"); return nullptr; }
     if (n->sharedHandle[slot] != handle || !n->shared[slot]) {
         if (n->shared[slot]) { n->shared[slot]->Release(); n->shared[slot] = nullptr; }
         HRESULT hr = n->render->GetDevice()->OpenSharedResource((HANDLE)(uintptr_t)handle, __uuidof(ID3D11Texture2D), (void**)&n->shared[slot]);
-        if (FAILED(hr)) { char b[96]; snprintf(b, sizeof b, "OpenSharedResource failed 0x%08x", (unsigned)hr); seterr(err, errlen, b); return -1; }
+        if (FAILED(hr)) { char b[96]; snprintf(b, sizeof b, "OpenSharedResource failed 0x%08x", (unsigned)hr); seterr(err, errlen, b); return nullptr; }
         n->sharedHandle[slot] = handle;
         n->ffr[slot].reset();
     }
-    // ALVR's own foveation pass (CompressAxisAligned) when negotiated; otherwise the slot goes to the encoder as is.
-    // The pass renders into its own texture on this device, in order with the encoder's input copy.
-    if (!n->ffr[slot]) {
-        try { n->ffr[slot] = std::make_unique<FFR>(n->render->GetDevice()); n->ffr[slot]->Initialize(n->shared[slot]); }
-        catch (Exception& e) { n->ffr[slot].reset(); seterr(err, errlen, e.what()); return -1; }
-        catch (std::exception& e) { n->ffr[slot].reset(); seterr(err, errlen, e.what()); return -1; }
-    }
+    return n->shared[slot];
+}
+
+// The foveation pass (bound to its source texture) + NVENC. Returns the encode time in ms (<0 on error).
+static double encodeWithFfr(Nvh* n, FFR* ffr, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
     auto ctx = n->render->GetContext();
     if (!n->qDisjoint) {
         D3D11_QUERY_DESC qd{ D3D11_QUERY_TIMESTAMP_DISJOINT, 0 }, qt{ D3D11_QUERY_TIMESTAMP, 0 }, qe{ D3D11_QUERY_EVENT, 0 };
@@ -542,7 +550,6 @@ double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, ui
     double a = nowMs();
     try {
         ctx->Begin(n->qDisjoint); ctx->End(n->qT0);
-        FFR* ffr = n->ffr[slot].get();
         static const bool zeroCopy = !(getenv("VISIONALVR_ZEROCOPY") && strcmp(getenv("VISIONALVR_ZEROCOPY"), "0") == 0);
         if (zeroCopy && ffr->CanRenderDirect()) {
             // zero copy: the foveation pass renders straight into the encoder's next input frame; Transmit skips its copy
@@ -553,11 +560,11 @@ double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, ui
             struct Reset { ~Reset() { g_nvh_prepared_input = nullptr; } } reset;
             n->enc->Transmit(nullptr, frame_no, ts_ns, force_idr != 0);
         } else {
-        ffr->Render();
-        ctx->End(n->qT1); ctx->End(n->qDisjoint);
-        // (No CPU wait here to measure queueing: waiting for this pass before Transmit makes its input copy queue behind other
-        // GPU work a second time; measured +5.7 ms per frame under the harness's GPU keep-alive load.)
-        n->enc->Transmit(ffr->GetOutputTexture(), frame_no, ts_ns, force_idr != 0);
+            ffr->Render();
+            ctx->End(n->qT1); ctx->End(n->qDisjoint);
+            // (No CPU wait here to measure queueing: waiting for this pass before Transmit makes its input copy queue behind other
+            // GPU work a second time; measured +5.7 ms per frame under the harness's GPU keep-alive load.)
+            n->enc->Transmit(ffr->GetOutputTexture(), frame_no, ts_ns, force_idr != 0);
         }
         // Transmit returns after the packet is out, so the queries are resolved
         D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj{}; UINT64 t0 = 0, t1 = 0;
@@ -567,6 +574,78 @@ double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, ui
     catch (Exception& e) { seterr(err, errlen, e.what()); return -1; }
     catch (std::exception& e) { seterr(err, errlen, e.what()); return -1; }
     return nowMs() - a;
+}
+
+double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
+    auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
+    if (!openSlot(n, ipc, slot, err, errlen)) return -1;
+    // ALVR's own foveation pass (CompressAxisAligned) when negotiated; otherwise the slot goes to the encoder as is.
+    // The pass renders into its own texture on this device, in order with the encoder's input copy.
+    if (!n->ffr[slot]) {
+        try { n->ffr[slot] = std::make_unique<FFR>(n->render->GetDevice()); n->ffr[slot]->Initialize(n->shared[slot]); }
+        catch (Exception& e) { n->ffr[slot].reset(); seterr(err, errlen, e.what()); return -1; }
+        catch (std::exception& e) { n->ffr[slot].reset(); seterr(err, errlen, e.what()); return -1; }
+    }
+    n->fgLast = false;
+    return encodeWithFfr(n, n->ffr[slot].get(), frame_no, ts_ns, force_idr, err, errlen);
+}
+
+// ---- frame generation (framegen.cpp) -------------------------------------------------------------------------------------------
+int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid, char* err, int errlen) {
+    auto* n = (Nvh*)hh; if (!n) return 0;
+    n->fgFfr.reset(); n->fgFfrTex = nullptr; n->fg.reset(); n->fgLast = false;
+    if (!on) return 1;
+    auto fg = std::make_unique<FrameGen>(n->render->GetDevice(), n->render->GetContext());
+    FrameGenConfig c;
+    c.flowScale = (float)flow_scale; c.perfLevel = perf_level; c.grid = grid;
+    // the frame the shim composes: 2 x eye width by eye height (the encoder's own size may be the foveated one)
+    const auto& S = Settings::Instance();
+    if (!fg->Init((int)S.m_renderWidth, (int)S.m_renderHeight, c, err, errlen)) return 0;
+    n->fg = std::move(fg);
+    return 1;
+}
+
+int nvh_fg_ingest(void* hh, void* i, uint32_t slot, const float* q_render8, char* err, int errlen) {
+    auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
+    if (!n || !n->fg) { seterr(err, errlen, "frame generation off"); return -1; }
+    ID3D11Texture2D* src = openSlot(n, ipc, slot, err, errlen);
+    if (!src) return -1;
+    return n->fg->Ingest(src, q_render8, &ipc->state->host.eyeFovTan[0][0], err, errlen);
+}
+
+double nvh_fg_encode(void* hh, void* i, int mode, double t, const float* q_out4, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
+    auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
+    if (!n || !n->fg) { seterr(err, errlen, "frame generation off"); return -1; }
+    const double a = nowMs();
+    ID3D11Texture2D* tex = n->fg->Render(mode, (float)t, q_out4, &ipc->state->host.eyeFovTan[0][0], err, errlen);
+    if (!tex) { n->fg->stats.renderErrors++; return -1; }
+    if (!n->fgFfr || n->fgFfrTex != tex) {
+        try { n->fgFfr = std::make_unique<FFR>(n->render->GetDevice()); n->fgFfr->Initialize(tex); n->fgFfrTex = tex; }
+        catch (Exception& e) { n->fgFfr.reset(); n->fgFfrTex = nullptr; seterr(err, errlen, e.what()); return -1; }
+        catch (std::exception& e) { n->fgFfr.reset(); n->fgFfrTex = nullptr; seterr(err, errlen, e.what()); return -1; }
+    }
+    n->fgLast = true;
+    const double ms = encodeWithFfr(n, n->fgFfr.get(), frame_no, ts_ns, force_idr, err, errlen);
+    n->fg->CollectTimings();
+    return ms < 0 ? ms : nowMs() - a;
+}
+
+int nvh_fg_has_pair(void* hh) { auto* n = (Nvh*)hh; return n && n->fg && n->fg->HasPair() ? 1 : 0; }
+int nvh_fg_has_frame(void* hh) { auto* n = (Nvh*)hh; return n && n->fg && n->fg->HasFrame() ? 1 : 0; }
+void nvh_fg_reset(void* hh) { auto* n = (Nvh*)hh; if (n && n->fg) n->fg->ResetHistory(); if (n) n->fgLast = false; }
+
+int nvh_fg_stats(void* hh, char* buf, int len) {
+    auto* n = (Nvh*)hh;
+    if (!n || !n->fg) { snprintf(buf, len, "{\"on\":0}"); return 0; }
+    const auto& s = n->fg->stats;
+    char info[200]; int k = 0;
+    for (const char* c = s.nvofInfo; *c && k < 190; c++) { if (*c == '"' || *c == '\\') info[k++] = ' '; else info[k++] = *c; }
+    info[k] = 0;
+    return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"synths\":%llu,\"reals\":%llu,\"copies\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
+                    "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d]}",
+                    s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.synths, (unsigned long long)s.reals, (unsigned long long)s.copies,
+                    (unsigned long long)s.flowErrors, (unsigned long long)s.renderErrors, s.lastFlowMs, s.flowN ? s.flowMsSum / s.flowN : 0.0, s.lastSynthMs,
+                    s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH);
 }
 
 void nvh_ipc_set_user(void* i, float user_gamma, int debug_on, const wchar_t* debug_dir) {
@@ -591,6 +670,8 @@ int nvh_ipc_app_exe(void* i, char* buf, int len) {
 
 void nvh_release_shared(void* hh) {
     auto* n = (Nvh*)hh; if (!n) return;
+    if (n->fg) n->fg->ResetHistory();
+    n->fgLast = false;
     for (auto& f : n->ffr) f.reset();
     for (int k = 0; k < visionalvr_ipc::kSlots; k++) { if (n->shared[k]) { n->shared[k]->Release(); n->shared[k] = nullptr; } n->sharedHandle[k] = 0; }
 }
@@ -640,6 +721,10 @@ void nvh_ipc_set_intake_gate(void* i, uint32_t on) {
     ((Ipc*)i)->state->host.intakeGate = on;
 }
 
+void nvh_ipc_set_app_period_mul(void* i, uint32_t mul) {
+    ((Ipc*)i)->state->host.appPeriodMul = mul;
+}
+
 long nvh_set_gpu_scheduling(int cls) {
     typedef long(APIENTRY * PFN)(HANDLE, int);
     HMODULE gdi = LoadLibraryW(L"gdi32.dll");
@@ -671,6 +756,7 @@ int nvh_describe(void* hh, char* buf, int buflen) {
 void nvh_destroy(void* hh) {
     auto* n = (Nvh*)hh;
     if (!n) return;
+    n->fgFfr.reset(); n->fg.reset();
     for (auto& f : n->ffr) f.reset();
     for (auto& t : n->shared) if (t) { t->Release(); t = nullptr; }
     if (n->green) n->green->Release();

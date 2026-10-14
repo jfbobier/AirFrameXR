@@ -72,6 +72,15 @@ struct Args {
     boundary_offset_ms: f64,
     /// D3DKMT process scheduling class asked for (5 realtime .. 2; 0 = leave)
     gpu_sched_class: i32,
+    /// frame generation (docs/FRAME_GENERATION.md): the game is paced at half the display rate and the host interpolates the frame in
+    /// between from the optical flow of the last two rendered frames. None = settings file (`video.frame_gen`, default off); env
+    /// VISIONALVR_FRAME_GEN=1/0 and `--frame-gen on|off` win over it.
+    frame_gen: Option<bool>,
+    fg_flow_scale: f64,
+    fg_perf: i32,
+    fg_grid: i32,
+    /// the synthetic frame's position between the two rendered frames (0.5 = midpoint)
+    fg_t: f64,
     /// scripted controller input for unattended runs (harness): (seconds after game start, hand, click mask, trigger)
     auto_input: Vec<(f64, usize, u32, f32)>,
     qp_map: Option<bool>,
@@ -155,6 +164,11 @@ fn parse_args() -> Result<Args, String> {
         follow_rate: true,
         boundary_offset_ms: 0.0,
         gpu_sched_class: 5,
+        frame_gen: None,
+        fg_flow_scale: 0.5,
+        fg_perf: 20,
+        fg_grid: 4,
+        fg_t: 0.5,
         auto_input: vec![],
         send_pacing_explicit: false,
         qp_map: None,
@@ -284,6 +298,11 @@ fn parse_args() -> Result<Args, String> {
             "--predict-missing-head" => a.predict_missing_head = true,
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
+            "--frame-gen-flow-scale" => a.fg_flow_scale = v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.1, 1.0),
+            "--frame-gen-perf" => a.fg_perf = parse_fg_perf(&v()?)?,
+            "--frame-gen-grid" => a.fg_grid = v()?.parse::<i32>().map_err(|e| format!("{e}"))?,
+            "--frame-gen-t" => a.fg_t = v()?.parse::<f64>().map_err(|e| format!("{e}"))?,
             "--auto-input" => {
                 // "20:rA,26:rA,40:lT": at 20 s and 26 s after the game starts press A on the right controller, at 40 s the left
                 // trigger. Buttons: A/X primary, B/Y secondary, S thumbstick, M menu, H system, T trigger.
@@ -337,6 +356,20 @@ fn parse_args() -> Result<Args, String> {
             a.profile_explicit = true;
         }
     }
+    if a.frame_gen.is_none() {
+        if let Ok(v) = std::env::var("VISIONALVR_FRAME_GEN") {
+            a.frame_gen = Some(v != "0" && !v.eq_ignore_ascii_case("off") && !v.eq_ignore_ascii_case("false"));
+        }
+    }
+    if let Some(v) = std::env::var("VISIONALVR_FG_T").ok().and_then(|v| v.parse::<f64>().ok()) {
+        a.fg_t = v;
+    }
+    if let Some(v) = std::env::var("VISIONALVR_FG_FLOW_SCALE").ok().and_then(|v| v.parse::<f64>().ok()) {
+        a.fg_flow_scale = v.clamp(0.1, 1.0);
+    }
+    if let Some(v) = std::env::var("VISIONALVR_FG_PERF").ok().and_then(|v| parse_fg_perf(&v).ok()) {
+        a.fg_perf = v;
+    }
     if !a.live && a.file.as_os_str().is_empty() && !a.system_check && !a.bench_quality && a.discover.is_none() {
         return Err("--file <annexb.hevc> is required unless --live".into());
     }
@@ -348,6 +381,27 @@ fn parse_args() -> Result<Args, String> {
 fn read_encoding_gamma(session_path: &std::path::Path) -> f32 {
     fs::read_to_string(session_path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .and_then(|s| s["openvr_config"]["encoding_gamma"].as_f64()).filter(|g| *g > 0.1 && *g < 10.0).unwrap_or(1.0) as f32
+}
+
+fn parse_on_off(flag: &str, v: &str) -> Result<bool, String> {
+    match v.to_ascii_lowercase().as_str() {
+        "on" | "1" | "true" | "yes" => Ok(true),
+        "off" | "0" | "false" | "no" => Ok(false),
+        o => Err(format!("{flag} on|off, got {o}")),
+    }
+}
+
+/// optical-flow engine preset: fast (default) | medium | slow (best quality), or the NV_OF_PERF_LEVEL number
+fn parse_fg_perf(v: &str) -> Result<i32, String> {
+    Ok(match v.to_ascii_lowercase().as_str() {
+        "fast" => 20,
+        "medium" => 10,
+        "slow" => 5,
+        o => match o.parse::<i32>() {
+            Ok(n) if n == 5 || n == 10 || n == 20 => n,
+            _ => return Err(format!("--frame-gen-perf fast|medium|slow, got {o}")),
+        },
+    })
 }
 
 fn parse_split(v: &str) -> Result<i64, String> {
@@ -404,6 +458,15 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     phase::configure(st.phase_lock.unwrap_or(true));
     if let Some(v) = st.boundary_offset_ms {
         a.boundary_offset_ms = v;
+    }
+    if a.frame_gen.is_none() {
+        a.frame_gen = st.frame_gen;
+    }
+    if let Some(v) = st.frame_gen_flow_scale {
+        a.fg_flow_scale = v.clamp(0.1, 1.0);
+    }
+    if let Some(v) = st.frame_gen_perf.as_deref().and_then(|v| parse_fg_perf(v).ok()) {
+        a.fg_perf = v;
     }
     if let Some(v) = st.gpu_sched_class {
         a.gpu_sched_class = v as i32;
@@ -752,7 +815,12 @@ mod nvh {
         pub fn nvh_ipc_vsync(ipc: *mut c_void, interval_s: f64);
         pub fn nvh_ipc_publish_input(ipc: *mut c_void, side: i32, clicks: u32, touches: u32, trigger: f32, squeeze: f32, sx: f32, sy: f32);
         pub fn nvh_ipc_poll_haptic(ipc: *mut c_void, side: i32, seq: *mut u32, freq: *mut f32, amp: *mut f32);
-        pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64) -> i32;
+        pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64, render_q8: *mut f32, has_projection: *mut i32) -> i32;
+        pub fn nvh_fg_enable(nvh: *mut c_void, on: i32, flow_scale: f64, perf_level: i32, grid: i32, err: *mut c_char, errlen: i32) -> i32;
+        pub fn nvh_fg_ingest(nvh: *mut c_void, ipc: *mut c_void, slot: u32, q_render8: *const f32, err: *mut c_char, errlen: i32) -> i32;
+        pub fn nvh_fg_encode(nvh: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, q_out4: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
+        pub fn nvh_fg_stats(nvh: *mut c_void, buf: *mut c_char, len: i32) -> i32;
+        pub fn nvh_ipc_set_app_period_mul(ipc: *mut c_void, mul: u32);
         pub fn nvh_qpc_seconds() -> f64;
         pub fn nvh_encode_green(nvh: *mut c_void, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_ipc_shim_alive(ipc: *mut c_void) -> i32;
@@ -1188,6 +1256,9 @@ pub(crate) struct Shared {
     /// (hostname, name, ip) of the connected headset
     headset: Mutex<Option<(String, String, String)>>,
     latest_sample_ts: Mutex<Option<Duration>>,
+    /// the last tracking samples with their head orientation (x y z w), oldest first (at most 48, half a second): frame generation
+    /// (pipeline.rs) stamps every generated frame with the newest one newer than the last sent frame and rotates the picture to it
+    pub(crate) recent_samples: Mutex<std::collections::VecDeque<(Duration, [f32; 4])>>,
     client_connected: AtomicBool,
     restart_from_idr: AtomicBool,
     tracking_events: AtomicUsize,
@@ -1195,6 +1266,41 @@ pub(crate) struct Shared {
     frames_sent: AtomicUsize,
     bytes_sent: AtomicU64,
     config_sent: AtomicUsize,
+}
+
+/// Keeps the last tracking samples for the frame generator (see `Shared::recent_samples`); a clock restart (the headset reconnected) clears it.
+pub(crate) fn push_recent_sample(shared: &Shared, ts: Duration, q: [f32; 4]) {
+    let mut ring = shared.recent_samples.lock();
+    if ring.back().map(|(t, _)| ts > *t).unwrap_or(true) {
+        ring.push_back((ts, q));
+        while ring.len() > 48 {
+            ring.pop_front();
+        }
+    } else if ring.back().map(|(t, _)| ts + Duration::from_secs(1) < *t).unwrap_or(false) {
+        ring.clear();
+        ring.push_back((ts, q));
+    }
+}
+
+/// Creates the generator on the encoder (after nvh_create, the stream's frame size being known): true when it runs; false (logged) when the
+/// GPU or driver has no optical-flow engine, in which case the stream runs as without the feature.
+fn enable_frame_gen(origin: Instant, handle: *mut std::ffi::c_void, args: &Args) -> bool {
+    let mut err = [0 as std::ffi::c_char; 256];
+    let ok = unsafe { nvh::nvh_fg_enable(handle, 1, args.fg_flow_scale, args.fg_perf, args.fg_grid, err.as_mut_ptr(), 256) } != 0;
+    let mut buf = [0 as std::ffi::c_char; 768];
+    unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 768) };
+    let stats = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
+    if ok {
+        logs::general("INFO", &format!("frame generation ON: half-rate pacing, flow scale {:.2}, perf {}, grid {}, t {:.2}; {}", args.fg_flow_scale, args.fg_perf, args.fg_grid, args.fg_t,
+            serde_json::from_str::<serde_json::Value>(&stats).ok().and_then(|v| v["info"].as_str().map(str::to_string)).unwrap_or_default()));
+    } else {
+        let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();
+        logs::general("WARN", &format!("frame generation requested but unavailable, streaming without it: {msg}"));
+    }
+    event(origin, "frame_gen", json!({ "requested": true, "on": ok, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf, "grid": args.fg_grid, "t": args.fg_t,
+        "error": if ok { None } else { Some(unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string()) },
+        "gen": serde_json::from_str::<serde_json::Value>(&stats).unwrap_or(serde_json::Value::Null) }));
+    ok
 }
 
 fn main() {
@@ -1496,6 +1602,7 @@ fn main() {
     // Shim mode: the staged pipeline owns the encoder from here on (intake / clock pick / encoder / sender threads).
     let mut pipeline: Option<Arc<pipeline::Pipeline>> = None;
     let vsync_period_ns = Arc::new(AtomicU64::new((1e9 / args.fps) as u64));
+    let mut fg_active = false;
     if args.shim {
         let l = live.take().expect("live encoder context");
         let h = std::mem::replace(&mut enc_handle, std::ptr::null_mut());
@@ -1546,9 +1653,16 @@ fn main() {
             });
         }
         p.set_gpu_scheduling(args.gpu_sched_class);
+        // frame generation: the generator lives on the encoder; the shim paces the game at half rate only while it runs
+        if args.frame_gen.unwrap_or(false) {
+            fg_active = enable_frame_gen(origin, p.enc.lock().handle, &args);
+            p.set_frame_gen(fg_active, args.fg_t);
+        }
+        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active { 2 } else { 1 }) };
         p.start();
         event(origin, "pacing_config", json!({ "send_pacing": args.send_pacing.name(), "running_start_ms": args.running_start_ms,
-            "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6 }));
+            "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6,
+            "frame_gen": fg_active, "app_period_mul": if fg_active { 2 } else { 1 } }));
         #[cfg(feature = "simrig")]
         if let Some(dir) = &args.simrig {
             simrig::set_ipc(ipc_addr);
@@ -1674,6 +1788,7 @@ fn main() {
                                 // un-extrapolated pose anyway.
                                 let (q, mut p) = (m.pose.orientation.to_array(), m.pose.position.to_array());
                                 p[1] += height_offset;
+                                push_recent_sample(&shared, sample_timestamp, q);
                                 let (lv, av) = ([0f32; 3], [0f32; 3]);
                                 unsafe { nvh::nvh_ipc_publish_head(ipc, sample_timestamp.as_nanos() as u64, q.as_ptr(), p.as_ptr(), lv.as_ptr(), av.as_ptr()) };
                                 telemetry::head_sample(sample_timestamp.as_nanos() as u64, q, p);
@@ -1946,6 +2061,33 @@ fn main() {
                 push_user(ipc, user_gamma, debug_on);
                 event(origin, "user_settings", json!({ "gamma": user_gamma, "debug": debug_on, "debug_dir": logs::debug_dir() }));
             }
+            // frame generation on/off from VisionALVR.exe: the generator is created or dropped on the running encoder (under the encoder lock, so
+            // never while a frame is being encoded) and the shim's pacing follows at the next boundary; the setting is also what the next start reads
+            let fgr = vision::FRAME_GEN_REQ.swap(-1, Ordering::SeqCst);
+            if fgr >= 0 {
+                let want = fgr == 1;
+                args.frame_gen = Some(want);
+                if let Some(p) = pipeline.as_ref() {
+                    if want != fg_active {
+                        if !want {
+                            p.set_frame_gen(false, args.fg_t);   // the encoder thread plans plain frames from here on
+                        }
+                        let g = p.enc.lock();
+                        if want {
+                            fg_active = enable_frame_gen(origin, g.handle, &args);
+                        } else {
+                            let mut err = [0 as std::ffi::c_char; 256];
+                            unsafe { nvh::nvh_fg_enable(g.handle, 0, args.fg_flow_scale, args.fg_perf, args.fg_grid, err.as_mut_ptr(), 256) };
+                            fg_active = false;
+                            logs::general("INFO", "frame generation OFF (live setting): full-rate pacing");
+                            event(origin, "frame_gen", json!({ "requested": false, "on": false }));
+                        }
+                        drop(g);
+                        p.set_frame_gen(fg_active, args.fg_t);
+                        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active { 2 } else { 1 }) };
+                    }
+                }
+            }
             // game start / end, for the general log and the GUI
             let alive = app_alive();
             if alive && game.is_none() {
@@ -2044,6 +2186,13 @@ fn main() {
                     }
                     if let Some(duty) = args.gpu_keepalive {
                         unsafe { nvh::nvh_keepalive(g.handle, 1, duty) };
+                    }
+                    if args.frame_gen.unwrap_or(false) {
+                        // a new encoder: the generator is created again for the new frame size
+                        fg_active = enable_frame_gen(origin, g.handle, &args);
+                        let p = pipeline.as_ref().expect("pipeline");
+                        p.set_frame_gen(fg_active, args.fg_t);
+                        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active { 2 } else { 1 }) };
                     }
                     nvenc_cfg = describe_encoder(origin, g.handle, &args.dump_qpmap);
                     logs::general("INFO", &format!("encoder rebuilt for the negotiated stream: {ew}x{eh} (was {}x{})", enc_size.0, enc_size.1));

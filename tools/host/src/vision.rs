@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "0.3-alpha";
+pub const VERSION: &str = "0.4-alpha";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
 /// `config/` (session.json, visionalvr.json) and `logs/` inside it.
@@ -54,6 +54,11 @@ pub struct Settings {
     pub follow_client_rate: Option<bool>,
     /// compositor boundary offset after the display tick, ms
     pub boundary_offset_ms: Option<f64>,
+    /// frame generation (docs/FRAME_GENERATION.md): half-rate pacing + optical-flow interpolated frames; default off
+    pub frame_gen: Option<bool>,
+    pub frame_gen_flow_scale: Option<f64>,
+    /// "fast" (default) | "medium" | "slow": the optical-flow engine's preset
+    pub frame_gen_perf: Option<String>,
     /// D3DKMT process scheduling class to ask for (5 realtime .. 2; 0 = leave)
     pub gpu_sched_class: Option<i64>,
     pub debug: Option<bool>,
@@ -98,6 +103,9 @@ pub fn load_settings(path: &Path) -> Settings {
         phase_lock: video["phase_lock"].as_bool(),
         follow_client_rate: video["follow_client_rate"].as_bool(),
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),
+        frame_gen: video["frame_gen"].as_bool(),
+        frame_gen_flow_scale: video["frame_gen_flow_scale"].as_f64(),
+        frame_gen_perf: video["frame_gen_perf"].as_str().map(str::to_string),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
@@ -180,11 +188,13 @@ pub static HEIGHT_REQ: AtomicU32 = AtomicU32::new(0);
 pub static GAMMA_REQ: AtomicU32 = AtomicU32::new(0);
 /// -1 nothing pending, 0 debug off, 1 debug on
 pub static DEBUG_REQ: AtomicI32 = AtomicI32::new(-1);
+/// frame generation on/off from VisionALVR.exe (-1 none, 0 off, 1 on); applied by the main loop to the running encoder and the shim's pacing
+pub static FRAME_GEN_REQ: AtomicI32 = AtomicI32::new(-1);
 /// colour correction (brightness, contrast, saturation, sharpening as f32 bits) and its "pending" flag
 pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 
-/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `color <brightness> <contrast> <saturation> <sharpening>`,
+/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
 pub fn spawn_stdin_control() {
@@ -201,6 +211,7 @@ pub fn spawn_stdin_control() {
                     }
                 }
                 (Some("debug"), Some(v)) => DEBUG_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
+                (Some("frame_gen"), Some(v)) => FRAME_GEN_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("height"), Some(h)) => {
                     if let Ok(h) = h.parse::<f32>() {
                         HEIGHT_REQ.store(if h <= 0.0 { f32::MIN_POSITIVE } else { h.clamp(0.5, 2.5) }.to_bits(), Ordering::SeqCst);

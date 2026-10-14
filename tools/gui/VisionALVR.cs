@@ -32,6 +32,7 @@ namespace VisionALVR
         class Knob { public string Name; public TrackBar Bar; public Label Value; public double Def; public Func<double> Get; public Action<double> Set; }
         readonly List<Knob> knobs = new List<Knob>();
         readonly CheckBox debug = new CheckBox { Text = "Debug logging (files in logs\\debug\\)", AutoSize = true, Font = Ui.Body };
+        readonly CheckBox frameGen = new CheckBox { Text = "Frame generation: the game renders at half the display rate, the streamer fills the frame in between (for games that cannot hold 70-75 fps; applies at once)", AutoSize = true, Font = Ui.Body, MaximumSize = new Size(620, 0) };
         readonly Label footer = Ui.Line("", new Font("Segoe UI", 8.5f));
         string pairedName = "", pairedIp = "";
         bool closing;
@@ -98,6 +99,8 @@ namespace VisionALVR
             lt.SetColumnSpan(reset, 2);
             lt.Controls.Add(debug);
             lt.SetColumnSpan(debug, 4);
+            lt.Controls.Add(frameGen);
+            lt.SetColumnSpan(frameGen, 6);
             live.Controls.Add(lt);
             body.Controls.Add(live);
 
@@ -122,6 +125,14 @@ namespace VisionALVR
                 host.Send("debug " + (debug.Checked ? "on" : "off"));
                 settings.Debug = debug.Checked;
                 settings.Save();
+            };
+            frameGen.Checked = settings.FrameGen;
+            frameGen.CheckedChanged += (s, e) =>
+            {
+                host.Send("frame_gen " + (frameGen.Checked ? "on" : "off"));   // the running streamer switches at the next boundary; the setting is read at start too
+                settings.FrameGen = frameGen.Checked;
+                settings.Save();
+                Log.Write("INFO", "frame generation " + (frameGen.Checked ? "on" : "off"));
             };
 
             host.OnEvent += (name, data) => BeginInvoke((Action)(() => HostEvent(name, data)));

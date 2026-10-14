@@ -10,7 +10,7 @@
 Stream PC OpenXR games to **Apple Vision Pro** with the stock **ALVR** visionOS app, **without SteamVR**, on NVIDIA GPUs.
 
 > [!WARNING]
-> **ALPHA SOFTWARE (0.3): TEST AT YOUR OWN RISK.**
+> **ALPHA SOFTWARE (0.4): TEST AT YOUR OWN RISK.**
 > On real headsets it has been tested by one person, on one PC (RTX 5090) with one Vision Pro and one Quest 3 (plus automated tests on a
 > laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
 > (both undone by `unregister_openxr_runtime.bat`). Keep comfort in mind: a frozen or juddering image in a headset can cause
@@ -67,6 +67,12 @@ OpenXR game
 - **Vision Pro known issue**: in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips
   them (shown fps a little under the host fps). A fix exists (branch `exp/restamp-2026-10-13`) but needs a change on the visionOS
   client side, so it is not in the release.
+- **New in 0.4: frame generation** (checkbox in the streamer window and in Settings, `video.frame_gen`, off by default): for games that cannot
+  hold the display rate, the game is paced at half of it and the streamer fills the frame in between from the GPU's optical flow (NVIDIA Optical
+  Flow engine, Turing or later), every output rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz with an RTX 5090: missed
+  display periods 38 % -> 1 %, lower total latency on GPU-bound games (the half-rate budget removes their standing queue), no visible loss of
+  sharpness. Costs one display period of latency; small fast HUD elements may ghost. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md).
+  Not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
@@ -164,3 +170,4 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers (v0.2, extended in 0.3)
+- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation (optical flow, 0.4): half-rate pacing + interpolated frames; [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md): the DLSS motion-vector design
