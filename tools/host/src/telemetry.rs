@@ -66,9 +66,18 @@ pub fn head_sample(ts_ns: u64, q: [f32; 4], p: [f32; 3]) {
         }
     }
 }
+/// Release flavour (no `telemetry` feature): the samples are still written while a telemetry run is armed (the report needs the arrival
+/// gaps and the poses of the stamps); otherwise nothing.
 #[cfg(not(feature = "telemetry"))]
-#[inline(always)]
-pub fn head_sample(_ts_ns: u64, _q: [f32; 4], _p: [f32; 3]) {}
+#[inline]
+pub fn head_sample(ts_ns: u64, q: [f32; 4], p: [f32; 3]) {
+    if SEG.load(Ordering::Relaxed) < 0 {
+        return;
+    }
+    let t = crate::logs::qpc_at(Instant::now());
+    crate::logs::csv("head_samples.csv", "t,ts_ns,qx,qy,qz,qw,px,py,pz",
+        &format!("{:.6},{},{:.7},{:.7},{:.7},{:.7},{:.5},{:.5},{:.5}", t, ts_ns, q[0], q[1], q[2], q[3], p[0], p[1], p[2]));
+}
 
 // ---- AVP telemetry session: the host half of the automated A/B schedule (docs/TELEMETRY.md) ------------------------------------------
 //
@@ -134,11 +143,11 @@ pub const SCHEDULE: [Mode; 20] = [
     Mode::Off, Mode::Off, Mode::Shim, Mode::Shim,
     Mode::Shim, Mode::Shim, Mode::Off, Mode::Off,
 ];
-pub const WARMUP_S: u64 = 120;
-pub const SEGMENT_S: u64 = 45;
+pub const WARMUP_S: f64 = 120.0;
+pub const SEGMENT_S: f64 = 45.0;
 /// when, inside the warm-up, the host-side warp resources are created (identity warp on a few frames): the first host-mode frame
 /// would otherwise compile the warp shader and create its views mid-segment
-const PREWARM_AT_S: u64 = 30;
+const PREWARM_AT_S: f64 = 30.0;
 const PREWARM_FRAMES: i32 = 16;
 
 const NOT_ARMED: u8 = 255;
@@ -242,9 +251,16 @@ fn disarm() {
     crate::logs::csv_flush_all();
 }
 
+/// VISIONALVR_TELEMETRY_SCALE (lab only): multiplies every schedule duration (0.08: a 17 minute run in 82 s).
+fn time_scale() -> f64 {
+    std::env::var("VISIONALVR_TELEMETRY_SCALE").ok().and_then(|v| v.parse::<f64>().ok()).filter(|v| *v > 0.0 && *v <= 1.0).unwrap_or(1.0)
+}
+
 fn arm() {
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-    write_line(crate::logs::qpc_now(), &format!("[tel] armed warmup_s={WARMUP_S} segment_s={SEGMENT_S} segments={}", SCHEDULE.len()));
+    let scale = time_scale();
+    let (warmup, segment, prewarm_at) = (WARMUP_S * scale, SEGMENT_S * scale, PREWARM_AT_S * scale);
+    write_line(crate::logs::qpc_now(), &format!("[tel] armed warmup_s={warmup:.1} segment_s={segment:.1} segments={} scale={scale}", SCHEDULE.len()));
     set_mode(Mode::Off);
     SEG.store(0, Ordering::SeqCst);
     apply_shim(Mode::Off);
@@ -257,17 +273,18 @@ fn arm() {
             if GENERATION.load(Ordering::SeqCst) != generation {
                 return; // re-armed (a new client session) or disarmed
             }
-            let e = t0.elapsed().as_secs();
-            if e >= PREWARM_AT_S && !prewarmed {
+            let e = t0.elapsed().as_secs_f64();
+            if e >= prewarm_at && !prewarmed {
                 prewarmed = true;
                 PREWARM_LEFT.store(PREWARM_FRAMES, Ordering::SeqCst);
             }
-            let (seg, mode) = if e < WARMUP_S {
+            let (seg, mode) = if e < warmup {
                 (0, Mode::Off)
             } else {
-                let idx = ((e - WARMUP_S) / SEGMENT_S) as usize;
+                let idx = ((e - warmup) / segment) as usize;
                 if idx >= SCHEDULE.len() {
                     write_line(crate::logs::qpc_now(), &format!("[tel] end t={:.6}", crate::logs::qpc_now()));
+                    sim_end();
                     disarm();
                     return;
                 }
@@ -293,6 +310,91 @@ pub fn host_frame(row: &str) {
     if SEG.load(Ordering::Relaxed) < 0 {
         return;
     }
+    if SIM_ON.load(Ordering::Relaxed) {
+        let f: Vec<&str> = row.split(',').collect();
+        if let (Some(t), Some(seg), Some(ts)) = (f.get(0).and_then(|v| v.parse::<f64>().ok()), f.get(1).and_then(|v| v.parse::<i32>().ok()), f.get(5).and_then(|v| v.parse::<u64>().ok())) {
+            sim_frame(t, seg, ts);
+        }
+    }
     crate::logs::csv("telemetry_host.csv",
         "t_send,seg,mode,frame,orig_ts_ns,final_ts_ns,restamped,warp_mdeg,queue_wait_ms,encode_ms,hold_ms,bytes,idr,deferred_total,dropped_total", row);
+}
+
+
+// ---- lab hook: the simrig has no client, so the host plays its part (VISIONALVR_TELEMETRY_SIM=1) --------------------------------------
+// After a few seconds it sends `[pt] start` through the same entry as a real client line, and for every frame the sender puts on the wire
+// it writes client rows in the real format (stamp = the host's final stamp, repeat = same stamp as the previous row, synthetic residuals),
+// plus `cond`, 1 Hz `sum` and `end` lines, so the whole chain (capture, schedule, live mode switches, CSV, report) runs on real frames.
+
+static SIM_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SIM: Mutex<SimState> = Mutex::new(SimState { rows: Vec::new(), last_stamp: 0, seg: -1, n: 100, last_sum: 0.0 });
+
+struct SimState {
+    rows: Vec<String>,
+    last_stamp: u64,
+    seg: i32,
+    n: u64,
+    last_sum: f64,
+}
+
+pub fn sim_start() {
+    if std::env::var("VISIONALVR_TELEMETRY_SIM").map(|v| v == "1").unwrap_or(false) {
+        SIM_ON.store(true, Ordering::SeqCst);
+        let _ = std::thread::Builder::new().name("telemetry_sim_client".into()).spawn(|| {
+            std::thread::sleep(Duration::from_secs(8));
+            client_line(crate::logs::qpc_now(), "[pt] start n=1 ver=1 build=sim renderer=sim telemetry=1");
+        });
+    }
+}
+
+const SIM_COLS: &str = "present_s,timestamp_ns,age_ms,repeated,had_send,walkback_ms,anchor_minus_used_ms,fallback,extrap_deg,extrap_mm,comp_deg,comp_mm,dcomp_deg,dcomp_mm,head_deg_s,gpu_ms,decode_ms,queue_ms";
+
+fn sim_frame(t_send: f64, seg: i32, final_ts: u64) {
+    let mut st = SIM.lock().unwrap();
+    let repeated = (final_ts == st.last_stamp) as u8;
+    st.last_stamp = final_ts;
+    // residuals made up from the stamp so the numbers are deterministic but not constant
+    let k = (final_ts / 1000 % 997) as f64 / 997.0;
+    st.rows.push(format!("{t_send:.6},{final_ts},{:.3},{repeated},1,0.0,0.1,0,{:.3},{:.3},{:.3},{:.3},{:.4},{:.3},{:.2},3.0,6.0,2.0",
+        92.0 + k * 4.0, k * 0.3, k * 2.0, 0.2 + k * 0.5, 0.5 + k, k * 0.01, k * 0.4, 10.0 + k * 40.0));
+    if st.seg != seg {
+        let n = st.n + 1;
+        st.n = n;
+        st.seg = seg;
+        let line = format!("[pt] cond n={n} seg={seg} focal=0 pick=oldest t={t_send:.3}");
+        drop(st);
+        client_line(crate::logs::qpc_now(), &line);
+        st = SIM.lock().unwrap();
+    }
+    if st.rows.len() >= 12 {
+        let n = st.n + 1;
+        st.n = n;
+        let line = format!("[pt] rows n={n} seg={seg} cols={SIM_COLS} | {}", st.rows.join(";"));
+        st.rows.clear();
+        let sum = if t_send - st.last_sum >= 1.0 {
+            st.last_sum = t_send;
+            st.n += 1;
+            Some(format!("[pt] sum n={} seg={seg} frames=90 repeat=3 nosend=0 walkback=0 fallback=0 age_p50=93.0 age_p95=95.0 ctrlL_hz=90.0 ctrlR_hz=90.0 thermal=0 gpu_ms_p95=3.5 decode_ms_p95=7.0", st.n))
+        } else {
+            None
+        };
+        drop(st);
+        client_line(crate::logs::qpc_now(), &line);
+        if let Some(l) = sum {
+            client_line(crate::logs::qpc_now(), &l);
+        }
+    }
+}
+
+/// Lab only: the schedule's end also ends the simulated client.
+fn sim_end() {
+    if SIM_ON.load(Ordering::Relaxed) {
+        let n = {
+            let mut st = SIM.lock().unwrap();
+            st.n += 1;
+            st.n
+        };
+        // `client_line("end")` would disarm; the scheduler already did when it got here
+        write_line(crate::logs::qpc_now(), &format!("[pt] end n={n}"));
+    }
 }

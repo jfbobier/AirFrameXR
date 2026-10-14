@@ -7,6 +7,7 @@
 //!
 //! Exit codes: 0 = pass (client connected and --min-frames sent), 1 = connected but fewer frames, 2 = no client
 //! within --connect-timeout, 3 = bad arguments.
+#![recursion_limit = "256"] // the statistics json! in pipeline.rs
 use alvr_common::{parking_lot::Mutex, ButtonType, BUTTON_INFO, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID};
 use alvr_packets::{ButtonValue, Haptics};
 use alvr_server_core::{ServerCoreContext, ServerCoreEvent};
@@ -1599,6 +1600,7 @@ fn main() {
             simrig::set_ipc(ipc_addr);
             simrig::init(&dir.to_string_lossy(), ipc_addr, p.enc.lock().handle, &shared, &vsync_period_ns, read_encoding_gamma(&layout.session()));
         }
+        telemetry::sim_start();
         pipeline = Some(p);
     }
     let app_alive = || pipeline.as_ref().map(|p| p.app_alive.load(Ordering::Relaxed)).unwrap_or(false);
