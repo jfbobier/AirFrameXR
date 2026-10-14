@@ -57,7 +57,7 @@ sent, `R` rendered frame sent, `Q` rendered frame re-sent; `host_frames.csv` slo
 
 `harness/simrig`: `python3 harness/simrig/run_sim.py build` then `run stutter,stutter_fg` (head still, app frame time drawn from 50-70 fps,
 moving marker) and `run stutter_turn,stutter_turn_fg` (head turning 45 deg/s). The probe's `XR_PROBE_MOVING=25:0.25` draws a rectangle
-swinging in world yaw below the ring; the viewer measures it (`moving.csv`) and `judge.py` reports `motion`: hf rms of its world angle
+swinging in world yaw 7 deg below the ring; the viewer measures it (`moving.csv`) and `judge.py` reports `motion`: hf rms of its world angle
 after a local quadratic fit, frozen ticks (repeated frames), step regularity; verdict SMOOTH / JUDDER next to the usual CLEAN / TREMBLE of
 the head-rotation path. `steady_fg` is the generator's null case (ideal timing, must be CLEAN + SMOOTH). Generated frames are always
 rendered and encoded for real in the rig (the viewer shows the encoder's input).

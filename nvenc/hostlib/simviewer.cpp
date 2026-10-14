@@ -127,7 +127,7 @@ struct Viewer {
     FILE* dots = nullptr; FILE* tlog = nullptr; FILE* moving = nullptr;
     int ticks = 0, shown = 0, repeats = 0, missingPose = 0;
     double yHorizon = 0.5;
-    double yMoving[2] = { 0.6, 0.6 };   // the row 4 deg below the horizon, per eye (the probe's XR_PROBE_MOVING rectangle)
+    double yMoving[2] = { 0.6, 0.6 };   // the row 7 deg below the horizon, per eye (the probe's XR_PROBE_MOVING rectangle)
 
     Q4 truthAt(double ts_ns) {
         std::lock_guard<std::mutex> l(m);
@@ -171,7 +171,7 @@ struct Viewer {
         yHorizon = cfg.fov8[2] / (cfg.fov8[2] + cfg.fov8[3]);
         for (int e = 0; e < 2; e++) {
             const double tu = cfg.fov8[e * 4 + 2], tdn = cfg.fov8[e * 4 + 3];
-            yMoving[e] = 1.0 - (tdn - std::tan(4.0 * 3.14159265358979 / 180.0)) / (tu + tdn);
+            yMoving[e] = 1.0 - (tdn - std::tan(7.0 * 3.14159265358979 / 180.0)) / (tu + tdn);
         }
         if (cfg.show) makeWindow();
         char path[600];

@@ -125,7 +125,7 @@ int main(int argc, char** argv) {
     // pose the app located: the simplest scene whose motion is known exactly: the follow-the-frames "judge" of a constant head rotation reads them)
     const bool dotsOn = getenv("XR_PROBE_SCENE") && strcmp(getenv("XR_PROBE_SCENE"), "dots") == 0;
     const double dotDeg = getenv("XR_PROBE_DOT_DEG") ? atof(getenv("XR_PROBE_DOT_DEG")) : 10.0;
-    // XR_PROBE_MOVING=<amplitude deg>:<Hz>: a moving rectangle 4 deg below the horizon ring, swinging in world yaw as amp * sin(2 pi f t) with t =
+    // XR_PROBE_MOVING=<amplitude deg>:<Hz>: a moving rectangle 7 deg below the horizon ring, swinging in world yaw as amp * sin(2 pi f t) with t =
     // the frame's predicted display time (so its motion is smooth in display time whatever the frame rate): the simrig viewer measures it on its own row and
     // harness/simrig/judge.py scores how smoothly in-scene motion reaches the display (repeated frames freeze it, generated frames should not)
     double movingAmp = 0, movingHz = 0;
@@ -454,7 +454,7 @@ int main(int argc, char** argv) {
                                 if (movingT0 == 0) movingT0 = (long long)fs.predictedDisplayTime;
                                 const double ts = (double)((long long)fs.predictedDisplayTime - movingT0) * 1e-9;
                                 const double th = movingAmp * sin(2.0 * 3.14159265358979 * movingHz * ts) * 3.14159265358979 / 180.0;
-                                const double drop = 3.0 * tan(4.0 * 3.14159265358979 / 180.0);   // 4 deg below the ring
+                                const double drop = 3.0 * tan(7.0 * 3.14159265358979 / 180.0);   // 7 deg below the ring's centre (the ring's rectangles reach 4 deg down)
                                 const XMVECTOR wp = XMVectorSet((float)(3.0 * sin(th)), (float)(dp.position.y - drop), (float)(-3.0 * cos(th)), 1.f);
                                 const XMVECTOR vv = XMVector3TransformCoord(wp, dview);
                                 const float vx = XMVectorGetX(vv), vy = XMVectorGetY(vv), vz = XMVectorGetZ(vv);
