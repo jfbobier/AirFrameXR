@@ -362,9 +362,9 @@ namespace VisionALVR
                 Run = async (ctx, st) =>
                 {
                     await Task.Yield();
-                    var wanted = ctx.Profile != null ? ctx.Profile.SplitEncode > 0 && !ctx.Profile.Foveated : ctx.Existing && ctx.ExistingEncodeProfile == "full-split";
-                    if (!wanted) throw new TestSkipped(!ctx.Fixed || ctx.Existing ? "not used by this configuration (foveated encoding encodes a smaller frame in one piece)" : "this profile does not use it");
                     var r = ctx.R;
+                    // split encoding matters for the foveated frame too (forced 3 strips: 6.9 -> 2.5 ms at 4224x1664 on an RTX 5090), so every configuration is judged
+                    if (r.SplitMode == 15 && r.Engines >= 2) { st.Warn(); return $"OFF: split encoding is turned off (video.split_encode is \"off\" in config\\visionalvr.json, or the Split encoding box in step 6), so every frame is encoded in one piece although this GPU has {r.Engines} NVENC engines. Tick the box in the last step to use them."; }
                     var benchOn = r.Engines >= 2 && r.Slices >= 1.5;
                     var live = r.SceneRan ? $"; the live stream carried {r.SliceLive:0.#} strips per frame" : "";
                     if (benchOn && (!r.SceneRan || r.SliceLive >= 1.5)) return $"engaged: {r.Slices:0.#} strips per frame on {r.Engines} NVENC engines (encoder test){live}";

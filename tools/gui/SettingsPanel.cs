@@ -19,6 +19,7 @@ namespace VisionALVR
         public readonly ComboBox Fps = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         public readonly RadioButton ProfFov = new RadioButton { Text = "Foveated (ALVR foveated encoding; recommended)", AutoSize = true };
         public readonly RadioButton ProfFull = new RadioButton { Text = "Full frame + split encode (experimental: 3x the pixels, needs a strong Wi-Fi link)", AutoSize = true };
+        public readonly CheckBox Split = new CheckBox { Text = "Split encoding: one strip per NVENC engine (recommended; needs a GPU with 2 or more engines)", AutoSize = true };
         public readonly NumericUpDown Fcx = Dec(0.1m, 1m), Fcy = Dec(0.1m, 1m), Fsx = Dec(-1m, 1m), Fsy = Dec(-1m, 1m), Frx = Dec(1m, 10m), Fry = Dec(1m, 10m);
         readonly Button idle = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
         public readonly CheckBox Audio = new CheckBox { Text = "Stream game audio (Windows default output)", AutoSize = true };
@@ -64,6 +65,7 @@ namespace VisionALVR
             prof.Controls.Add(ProfFov);
             prof.Controls.Add(ProfFull);
             row("Encoding", prof, ProfFov);
+            row("Split encoding", Split, Split);
             row("Foveation center size", flow(Fcx, Fcy), Fcx);
             row("Foveation center shift", flow(Fsx, Fsy), Fsx);
             row("Foveation edge ratio", flow(Frx, Fry, Ui.Line("(higher = fewer pixels at the edges)")), Frx);
@@ -121,6 +123,7 @@ namespace VisionALVR
             Fps.SelectedItem = f;
             Bitrate.Value = Clamp(Bitrate, Json.Num(s, V + "bitrate.mode.ConstantMbps", 250));
             (settings.EncodeProfile == "full-split" ? ProfFull : ProfFov).Checked = true;
+            Split.Checked = settings.SplitEncode;
             Fcx.Value = Clamp(Fcx, Json.Num(s, V + "foveated_encoding.content.center_size_x", 0.45));
             Fcy.Value = Clamp(Fcy, Json.Num(s, V + "foveated_encoding.content.center_size_y", 0.4));
             Fsx.Value = Clamp(Fsx, Json.Num(s, V + "foveated_encoding.content.center_shift_x", 0.4));
@@ -148,6 +151,7 @@ namespace VisionALVR
             Fps.SelectedItem = f; SetReason(Fps, p.Why("fps"));
             num(Bitrate, p.BitrateMbps, p.Why("bitrate"));
             (p.Foveated ? ProfFov : ProfFull).Checked = true; SetReason(ProfFov, p.Why("foveation"));
+            Split.Checked = true; SetReason(Split, "on by default: it cut the encode of the foveated frame from 6.9 to 2.5 ms on an RTX 5090 (a GPU with one engine simply ignores it)");
             Audio.Checked = p.Audio; SetReason(Audio, p.Why("audio"));
         }
 
@@ -190,6 +194,7 @@ namespace VisionALVR
             try { Json.Save(Paths.Session, s); }
             catch (Exception e) { error = "Cannot write config\\session.json: " + e.Message; return false; }
             settings.EncodeProfile = ProfFull.Checked ? "full-split" : "foveated";
+            settings.SplitEncode = Split.Checked || ProfFull.Checked;   // the full-frame profile forces 3 strips whatever this says
             settings.IdleRgb = $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}";
             settings.Debug = DebugDefault.Checked;
             settings.Save();

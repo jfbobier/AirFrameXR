@@ -346,6 +346,21 @@ def run(variants_file, only=None, seconds=None):
         variants = [v for v in variants if v["name"] in only]
     RESULTS.mkdir(parents=True, exist_ok=True)
     results = []
+    # the variants overwrite the INSTALL's config\\visionalvr.json (headset, display, split...): keep the user's file and put it back at the end,
+    # or a variant's leftovers (e.g. split_encode "off") silently become the user's configuration
+    keep = f"{INSTALL}\\config\\visionalvr.json"
+    ps(f"if ((Test-Path '{keep}') -and -not (Test-Path '{keep}.user-live')) {{ Copy-Item '{keep}' '{keep}.user-live' -Force }}")
+    try:
+        _run_variants(variants, results, seconds)
+    finally:
+        ps(f"if (Test-Path '{keep}.user-live') {{ Copy-Item '{keep}.user-live' '{keep}' -Force }}")
+    print("\nSUMMARY (SteamVR + ALVR reference: send_p95 11.7, client_repeats 3.4%, dwell 9-11 ms)")
+    print(" | ".join(SUMMARY_COLS))
+    for k in results:
+        print(" | ".join(str(k.get(c, "")) for c in SUMMARY_COLS))
+
+
+def _run_variants(variants, results, seconds):
     for v in variants:
         name, game = v["name"], v.get("game", "synthetic")
         secs = seconds or v.get("seconds", 60)
@@ -381,10 +396,6 @@ def run(variants_file, only=None, seconds=None):
         (RESULTS / f"{time.strftime('%Y%m%d-%H%M%S')}_{name}.json").write_text(json.dumps(k, indent=2))
         results.append(k)
         print("  " + " ".join(f"{c}={k.get(c)}" for c in SUMMARY_COLS if c in k))
-    print("\nSUMMARY (SteamVR + ALVR reference: send_p95 11.7, client_repeats 3.4%, dwell 9-11 ms)")
-    print(" | ".join(SUMMARY_COLS))
-    for k in results:
-        print(" | ".join(str(k.get(c, "")) for c in SUMMARY_COLS))
 
 
 def main(argv):

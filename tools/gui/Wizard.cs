@@ -678,7 +678,7 @@ namespace VisionALVR
                 var cfgMbps = ctx != null ? ctx.ConfigMbps : 0;
                 add("Network at your configured bitrate", cfgMbps <= 0 ? "-" : (r.CleanMbps > 0 ? $"{cfgMbps:0} Mbps: clean" : $"{cfgMbps:0} Mbps: NOT clean"), "no packet loss, the headset keeps its frame rate, the latency does not rise (one step at the configured value, nothing is searched)",
                     cfgMbps <= 0 ? Rating.Unknown : (r.CleanMbps > 0 ? Rating.Good : Rating.Poor), $"Your link did not carry {cfgMbps:0} Mbps cleanly: choose a lower network variant or bitrate in the setup, or improve the Wi-Fi: {prof.WifiAdvice}.");
-                if (!proposal.Foveated && profile.SplitEncode > 0)
+                if (profile.SplitEncode > 0)
                     add("Split encoding", r.Slices <= 0 ? "-" : (r.Engines >= 2 && r.Slices >= 1.5 ? $"engaged ({r.Slices:0.#} strips, {r.Engines} engines)" : $"not engaged ({r.Engines} engine(s))"), "engaged when the GPU has two or more NVENC engines",
                         r.Slices <= 0 ? Rating.Unknown : (r.Engines >= 2 && r.Slices >= 1.5 ? Rating.Good : Rating.Ok));
             }
