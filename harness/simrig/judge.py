@@ -15,8 +15,10 @@ Verdict: TREMBLE if hf rms > the hf threshold (default 0.04 deg, about 0.7 px on
 In-scene motion (frame generation, docs/FRAME_GENERATION.md): with XR_PROBE_MOVING the probe draws a rectangle swinging smoothly in world yaw on a row below
 the ring and the viewer writes moving.csv. Its world angle per tick (measured angle + displayed yaw) should move smoothly whatever the game's frame rate; a
 repeated frame freezes it for a tick (a step of ~0.4 deg at 40 deg/s and 100 Hz) and a generated frame should not. Reported under "motion": hf rms (deg),
-p99 of the hf residual, frozen ticks (|step| < 20 % of the local speed, where the marker moves) and the spread of step / speed (0 = perfectly regular); verdict
-field "motion": SMOOTH if hf rms <= the motion threshold (default 0.05 deg) and frozen <= 5 %, else JUDDER. Independent of the TREMBLE/CLEAN verdict."""
+p99 of the hf residual, frozen display periods (a new frame whose marker did not move, or a timestamp gap the host did not fill) and the spread of
+step / speed (0 = perfectly regular), all measured per distinct shown frame against its timestamp (the rig's viewer wakes up late); verdict
+field "motion": SMOOTH if hf rms <= the motion threshold (default 0.10 deg: the generator-off 90 fps reference on the 3080 Ti rig reads 0.07) and
+frozen <= 5 %, else JUDDER. Independent of the TREMBLE/CLEAN verdict."""
 import csv, json, math, sys
 from pathlib import Path
 import numpy as np
@@ -75,12 +77,23 @@ def hf(series, w=9):
     return s - sm[:len(s)]
 
 
-def motion(d, meta, skip=150, thr_hf=0.05, thr_frozen=5.0):
-    """The moving marker's smoothness (see the module doc). None when the run had no marker."""
+def motion(d, meta, skip=150, thr_hf=0.10, thr_frozen=5.0):
+    """The moving marker's smoothness (see the module doc). None when the run had no marker.
+
+    Measured per distinct shown frame against the frame's own timestamp, not per viewer tick: the rig's viewer wakes up 4-5 ms late on
+    average (GPU contention), so what it catches at a tick is a matter of luck (the ideal 90 fps control read 5.5 % frozen and 46 double
+    steps that way, 2026-10-14). Frozen display periods: a new frame whose marker did not move (a host repeat), and a timestamp gap of
+    k periods (k-1 periods the headset would have repeated), unless the host did send frames inside the gap (../debug/host_frames.csv: the
+    viewer missed them, counted as viewer_missed). A residual over 1.5 deg is a measurement glitch (the marker never moves that far in a
+    period) and is counted apart."""
     f = Path(d) / "moving.csv"
     if not f.exists():
         return None
     rows = list(csv.reader(open(f)))[1:]
+    sent = None
+    hf_file = Path(d).parent / "debug" / "host_frames.csv"
+    if hf_file.exists():
+        sent = np.array(sorted(int(r["ts_ns"]) for r in csv.DictReader(open(hf_file)) if r.get("ts_ns")))
     W = meta["eye_w"]
     tl, tr = meta["tl"], meta["tr"]
     ppt = W / (tl + tr)
@@ -90,30 +103,59 @@ def motion(d, meta, skip=150, thr_hf=0.05, thr_frozen=5.0):
     for eye in (0, 1):
         etl = meta["tl_eye"][eye] if "tl_eye" in meta else tl
         eppt = meta["ppt_eye"][eye] if "ppt_eye" in meta else ppt
-        ts, ang = [], []
+        first, total = {}, 0
+        t0 = t1 = None
         for r in rows:
-            tick, t_s, yaw, e, n = int(r[0]), float(r[1]), float(r[4]), int(r[5]), int(r[6])
-            if e != eye or tick < skip or n != 1:
+            tick, shown, yaw, e, n = int(r[0]), int(r[2]), float(r[4]), int(r[5]), int(r[6])
+            if e != eye or tick < skip:
                 continue
-            x = float(r[7])
-            ts.append(t_s)
-            ang.append(math.degrees(math.atan(x / eppt - etl)) + yaw)   # world angle of the marker
-        if len(ang) < 40:
+            total += 1
+            if t0 is None:
+                t0 = (tick, shown)
+            t1 = (tick, shown)
+            if n != 1 or shown in first:
+                continue
+            first[shown] = math.degrees(math.atan(float(r[7]) / eppt - etl)) + yaw   # world angle of the marker
+        if len(first) < 40 or t1[0] == t0[0]:
             continue
         any_eye = True
-        a = np.array(ang)
-        # the smooth motion: a local quadratic fit (Savitzky-Golay, 9 ticks, order 2) follows the swing's curvature, which a moving average would not
-        sg = np.array([-21, 14, 39, 54, 59, 54, 39, 14, -21], dtype=float) / 231.0
-        sm = np.convolve(np.pad(a, (4, 4), mode="edge"), sg, mode="valid")[:len(a)]
+        period = (t1[1] - t0[1]) / (t1[0] - t0[0])       # one display period in timestamp units (the viewer runs at the display rate)
+        ts = np.array(sorted(first))
+        a = np.array([first[k] for k in ts])
+        t = (ts - ts[0]) / period                        # time in display periods
+        n = len(a)
+        sm, vel = np.empty(n), np.empty(n)
+        for i in range(n):                                # local quadratic in time: follows the swing's curvature, unbent by gaps
+            lo, hi = max(0, i - 4), min(n, i + 5)
+            x = t[lo:hi] - t[i]
+            p = np.polyfit(x, a[lo:hi], 2) if hi - lo >= 4 else np.array([0.0, 0.0, a[i]])
+            sm[i], vel[i] = p[2], p[1]
         h = a - sm
+        glitch = np.abs(h) > 1.5
+        hc = h[~glitch]
+        dt = np.diff(t)
         steps = np.abs(np.diff(a))
-        speed = np.abs(np.diff(sm))                      # how much the marker should move per tick, locally
-        med = float(np.median(speed)) if len(speed) else 0.0
-        moving_mask = speed > 0.5 * med                  # the ends of the swing (speed near 0) say nothing about repeats
-        frozen = float(np.mean(steps[moving_mask] < 0.2 * speed[moving_mask]) * 100) if med > 0 and moving_mask.sum() > 20 else 0.0
-        cv = float(np.std(steps[moving_mask] / speed[moving_mask])) if moving_mask.sum() > 20 else 0.0
-        out[f"eye{eye}"] = {"ticks": int(len(a)), "hf_rms_deg": float(np.sqrt(np.mean(h ** 2))), "hf_p99_deg": float(np.percentile(np.abs(h), 99)),
-                            "step_median_deg": med, "frozen_pct": frozen, "step_cv": cv, "visible_pct": float(len(a)) / max(1, len([r for r in rows if int(r[5]) == eye and int(r[0]) >= skip])) * 100}
+        speed = np.abs(vel[1:]) * dt                      # how much the marker should have moved between the two frames
+        ok = ~glitch[1:] & ~glitch[:-1]
+        med = float(np.median(speed[ok])) if ok.sum() else 0.0
+        moving = ok & (speed > 0.5 * med)                 # the ends of the swing (speed near 0) say nothing about repeats
+        adjacent = dt < 1.5
+        content_frozen = int(np.sum(moving & adjacent & (steps < 0.2 * speed))) if med > 0 else 0
+        gap_periods, viewer_missed = 0, 0
+        for i in np.nonzero(~adjacent)[0]:
+            k = int(round(dt[i])) - 1
+            if sent is not None:
+                inside = int(np.sum((sent > ts[i]) & (sent < ts[i + 1])))
+                viewer_missed += min(inside, k)
+                k -= min(inside, k)
+            gap_periods += max(k, 0)
+        periods = n + gap_periods + viewer_missed
+        frozen = (content_frozen + gap_periods) / max(1, periods) * 100
+        cv = float(np.std(steps[moving & adjacent] / speed[moving & adjacent])) if (moving & adjacent).sum() > 20 else 0.0
+        out[f"eye{eye}"] = {"frames": int(n), "periods": int(periods), "glitches": int(glitch.sum()), "content_frozen": content_frozen, "gap_periods": gap_periods,
+                            "viewer_missed": viewer_missed, "hf_rms_deg": float(np.sqrt(np.mean(hc ** 2))) if len(hc) else 0.0,
+                            "hf_p99_deg": float(np.percentile(np.abs(hc), 99)) if len(hc) else 0.0, "step_median_deg": med, "frozen_pct": float(frozen),
+                            "step_cv": cv, "visible_pct": float(len(first)) / max(1, len({int(r[2]) for r in rows if int(r[5]) == eye and int(r[0]) >= skip})) * 100}
         worst_hf = max(worst_hf, out[f"eye{eye}"]["hf_rms_deg"])
         worst_frozen = max(worst_frozen, frozen)
     if not any_eye:
