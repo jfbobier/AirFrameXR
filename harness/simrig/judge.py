@@ -10,7 +10,13 @@ rectangles every `dot_deg` degrees). meta.json carries the eye width and the FoV
 analytic ones; the residual series (degrees) says how far the picture is from a perfect rotation:
   rms / p99     the size of the error      hf   its high-frequency part (the residual minus a 9-tick moving average): what the eye sees as trembling
   disparity     the right eye's residual minus the left's: a stereo inconsistency (the two eyes rendered from different poses)
-Verdict: TREMBLE if hf rms > the hf threshold (default 0.04 deg, about 0.7 px on the Vision Pro) or p99 |residual| > the p99 threshold (0.15 deg)."""
+Verdict: TREMBLE if hf rms > the hf threshold (default 0.04 deg, about 0.7 px on the Vision Pro) or p99 |residual| > the p99 threshold (0.15 deg).
+
+In-scene motion (frame generation, docs/FRAME_GENERATION.md): with XR_PROBE_MOVING the probe draws a rectangle swinging smoothly in world yaw on a row below
+the ring and the viewer writes moving.csv. Its world angle per tick (measured angle + displayed yaw) should move smoothly whatever the game's frame rate; a
+repeated frame freezes it for a tick (a step of ~0.4 deg at 40 deg/s and 100 Hz) and a generated frame should not. Reported under "motion": hf rms (deg),
+p99 of the hf residual, frozen ticks (|step| < 20 % of the local speed, where the marker moves) and the spread of step / speed (0 = perfectly regular); verdict
+field "motion": SMOOTH if hf rms <= the motion threshold (default 0.05 deg) and frozen <= 5 %, else JUDDER. Independent of the TREMBLE/CLEAN verdict."""
 import csv, json, math, sys
 from pathlib import Path
 import numpy as np
@@ -69,6 +75,55 @@ def hf(series, w=9):
     return s - sm[:len(s)]
 
 
+def motion(d, meta, skip=150, thr_hf=0.05, thr_frozen=5.0):
+    """The moving marker's smoothness (see the module doc). None when the run had no marker."""
+    f = Path(d) / "moving.csv"
+    if not f.exists():
+        return None
+    rows = list(csv.reader(open(f)))[1:]
+    W = meta["eye_w"]
+    tl, tr = meta["tl"], meta["tr"]
+    ppt = W / (tl + tr)
+    out = {}
+    worst_hf, worst_frozen = 0.0, 0.0
+    any_eye = False
+    for eye in (0, 1):
+        etl = meta["tl_eye"][eye] if "tl_eye" in meta else tl
+        eppt = meta["ppt_eye"][eye] if "ppt_eye" in meta else ppt
+        ts, ang = [], []
+        for r in rows:
+            tick, t_s, yaw, e, n = int(r[0]), float(r[1]), float(r[4]), int(r[5]), int(r[6])
+            if e != eye or tick < skip or n != 1:
+                continue
+            x = float(r[7])
+            ts.append(t_s)
+            ang.append(math.degrees(math.atan(x / eppt - etl)) + yaw)   # world angle of the marker
+        if len(ang) < 40:
+            continue
+        any_eye = True
+        a = np.array(ang)
+        # the smooth motion: a local quadratic fit (Savitzky-Golay, 9 ticks, order 2) follows the swing's curvature, which a moving average would not
+        sg = np.array([-21, 14, 39, 54, 59, 54, 39, 14, -21], dtype=float) / 231.0
+        sm = np.convolve(np.pad(a, (4, 4), mode="edge"), sg, mode="valid")[:len(a)]
+        h = a - sm
+        steps = np.abs(np.diff(a))
+        speed = np.abs(np.diff(sm))                      # how much the marker should move per tick, locally
+        med = float(np.median(speed)) if len(speed) else 0.0
+        moving_mask = speed > 0.5 * med                  # the ends of the swing (speed near 0) say nothing about repeats
+        frozen = float(np.mean(steps[moving_mask] < 0.2 * speed[moving_mask]) * 100) if med > 0 and moving_mask.sum() > 20 else 0.0
+        cv = float(np.std(steps[moving_mask] / speed[moving_mask])) if moving_mask.sum() > 20 else 0.0
+        out[f"eye{eye}"] = {"ticks": int(len(a)), "hf_rms_deg": float(np.sqrt(np.mean(h ** 2))), "hf_p99_deg": float(np.percentile(np.abs(h), 99)),
+                            "step_median_deg": med, "frozen_pct": frozen, "step_cv": cv, "visible_pct": float(len(a)) / max(1, len([r for r in rows if int(r[5]) == eye and int(r[0]) >= skip])) * 100}
+        worst_hf = max(worst_hf, out[f"eye{eye}"]["hf_rms_deg"])
+        worst_frozen = max(worst_frozen, frozen)
+    if not any_eye:
+        out["verdict"] = "NO MARKER (moving.csv has no single-rectangle rows: XR_PROBE_MOVING off, or the marker out of view)"
+        return out
+    out["verdict"] = "SMOOTH" if (worst_hf <= thr_hf and worst_frozen <= thr_frozen) else "JUDDER"
+    out["thresholds"] = {"hf": thr_hf, "frozen_pct": thr_frozen}
+    return out
+
+
 def judge(d, thr=None, skip=150):
     thr = thr or {"hf": 0.04, "p99": 0.15}
     meta, ticks = load(d)
@@ -103,6 +158,9 @@ def judge(d, thr=None, skip=150):
     worst_p99 = 0 if not spiky and worst_hf <= thr["hf"] else worst_p99
     out["verdict"] = "INVALID (no dots measured: the scene or the frames are wrong)" if not allr else "TREMBLE" if (worst_hf > thr["hf"] or spiky or worst_p99 > thr["p99"]) else "CLEAN"
     out["thresholds"] = thr
+    m = motion(d, meta, skip)
+    if m is not None:
+        out["motion"] = m
     return out
 
 
@@ -129,13 +187,28 @@ def selftest():
                             xs.append((math.tan(math.radians(a)) + meta["tl"]) * ppt)
                     w.writerow([k, k * 0.01, k, 1, yaw, eye, len(xs)] + [f"{x:.2f}" for x in xs])
         return d
+    # the moving marker (head still, yaw 0): a 25 deg / 0.25 Hz swing sampled every tick, or every other tick repeated (a 50 fps game on a 100 Hz display)
+    def make_moving(d, repeat_every=0, noise_deg=0.01):
+        with open(d / "moving.csv", "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["tick", "t_s", "shown_ts", "reproj", "yaw_deg", "eye", "n", "x..."])
+            for k in range(600):
+                kk = k - (k % repeat_every) if repeat_every else k
+                a = 25.0 * math.sin(2 * math.pi * 0.25 * kk * 0.01) + rng.normal(0, noise_deg)
+                for eye in (0, 1):
+                    w.writerow([k, k * 0.01, kk, 1, 0.0, eye, 1, f"{(math.tan(math.radians(a)) + meta['tl']) * ppt:.2f}"])
     results = {}
     for name, nz, eo in (("ideal", 0.0, 0.0), ("quant_only", 0.02, 0.0), ("tremble_0.1deg", 0.10, 0.0), ("stereo_inconsistent", 0.0, 0.15)):
         results[name] = judge(make(nz, eo))
+    d = make(0.0); make_moving(d); results["motion_smooth"] = judge(d)
+    d = make(0.0); make_moving(d, repeat_every=2); results["motion_repeat2"] = judge(d)
     ok = (results["ideal"]["verdict"] == "CLEAN" and results["quant_only"]["verdict"] == "CLEAN"
-          and results["tremble_0.1deg"]["verdict"] == "TREMBLE" and results["stereo_inconsistent"]["verdict"] == "TREMBLE")
+          and results["tremble_0.1deg"]["verdict"] == "TREMBLE" and results["stereo_inconsistent"]["verdict"] == "TREMBLE"
+          and results["motion_smooth"]["motion"]["verdict"] == "SMOOTH" and results["motion_repeat2"]["motion"]["verdict"] == "JUDDER")
     for k, v in results.items():
-        print(f"  {k:22s} {v['verdict']:8s} eye0 hf {v.get('eye0',{}).get('hf_rms_deg',0):.4f} p99 {v.get('eye0',{}).get('p99_deg',0):.4f}  eye1 hf {v.get('eye1',{}).get('hf_rms_deg',0):.4f}  disparity {v.get('disparity_rms_deg',0):.4f}")
+        m = v.get("motion") or {}
+        print(f"  {k:22s} {v['verdict']:8s} eye0 hf {v.get('eye0',{}).get('hf_rms_deg',0):.4f} p99 {v.get('eye0',{}).get('p99_deg',0):.4f}  eye1 hf {v.get('eye1',{}).get('hf_rms_deg',0):.4f}  disparity {v.get('disparity_rms_deg',0):.4f}"
+              + (f"  motion {m.get('verdict')} hf {m.get('eye0',{}).get('hf_rms_deg',0):.4f} frozen {m.get('eye0',{}).get('frozen_pct',0):.1f}%" if m else ""))
     print("selftest", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 

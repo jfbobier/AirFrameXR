@@ -2,8 +2,12 @@
 """Runs the simrig (host built with the cargo feature `simrig`, see docs/DEVELOPMENT.md) on the PC and judges the result.
 
     python3 harness/simrig/run_sim.py build                 # builds the simrig host on the PC (python3 harness/live.py build host --simrig does the same)
-    python3 harness/simrig/run_sim.py run <scenario>[,<scenario>...] [--seconds 30] [--show 0] [--real-encode 1] [--seed 7] [--eye-w 1760]
+    python3 harness/simrig/run_sim.py run <scenario>[,<scenario>...] [--seconds 30] [--show 0] [--real-encode 1] [--seed 7] [--eye-w 1760] [--fg] [--env K=V]
     python3 harness/simrig/run_sim.py list
+
+Frame generation (docs/FRAME_GENERATION.md): `run stutter,stutter_fg` compares a 50-70 fps app without and with the generator; the judge's "motion"
+verdict (the moving marker) is the smoothness of in-scene motion at the display, the usual verdict the head-rotation path. The generated frames are
+rendered and encoded for real whatever --real-encode says (the viewer must see them).
 
 The probe (XR_PROBE_SCENE=dots, black sphere, white rectangles every 10 deg on the horizon) runs through the installed OpenXR runtime and the
 real shim; the host runs the real pipeline against a synthetic client (constant rotation or still, timing from a recorded profile) and the
@@ -29,11 +33,23 @@ SCENARIOS = {
     "still0":      {"PROFILE": "real_games_pred0.json", "MODE": "still", "note": "head still, no prediction"},
     "noreproject": {"PROFILE": "real_games_pred0.json", "REPROJECT": 0, "note": "the frames as they come: what the stream alone does"},
     "inject":      {"PROFILE": "real_games_pred0.json", "STAMP_ERROR": 0.2, "note": "20% of the frames shown with a neighbouring sample's pose: the judge must say TREMBLE"},
+    # frame generation (docs/FRAME_GENERATION.md): a game stuck between 50 and 70 fps (frame time drawn per frame) on the 100 Hz display, the moving marker
+    # (XR_PROBE_MOVING) measured by the judge's "motion" verdict; _fg = the same with the generator on (VISIONALVR_FRAME_GEN=1: half-rate pacing + interpolation)
+    "stutter":     {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
+                    "note": "head still, app at 50-70 fps (jittery), moving marker: today's stream (expect motion JUDDER: repeated frames)"},
+    "stutter_fg":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "note": "the same with frame generation (expect motion SMOOTH, head CLEAN)"},
+    "stutter_turn": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
+                    "note": "head turning 45 deg/s, app at 50-70 fps: the head-rotation path (dots) with a stuttering app"},
+    "stutter_turn_fg": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "note": "the same with frame generation (the generated frames must not make the head rotation tremble)"},
+    "steady_fg":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:VISIONALVR_FRAME_GEN": "1",
+                    "note": "ideal timing, light app, frame generation on: the generator's null case (expect CLEAN + SMOOTH)"},
 }
 
 
 def host_cmd(rd, env, seconds):
-    lines = ["@echo off"] + [f"set VISIONALVR_SIM_{k}={v}" for k, v in env.items() if not k.startswith("ENV:")] \
+    lines = ["@echo off"] + [f"set VISIONALVR_SIM_{k}={v}" for k, v in env.items() if not (k.startswith("ENV:") or k.startswith("PROBE:"))] \
         + [f"set {k[4:]}={v}" for k, v in env.items() if k.startswith("ENV:")] + [
         f'"{live.INSTALL}\\{SIMEXE}" --install-dir "{live.INSTALL}" --shim --simrig {rd}\\out --seconds {seconds + 90} --debug --connect-timeout 30 --report {rd}\\host_report.json > {rd}\\host_stdout.txt 2>&1']
     return lines
@@ -82,6 +98,7 @@ def kill():
 def build(copy_as=None):
     live.build("host", simrig=True)
     live.build("shim")
+    live.build("probe")
     live.ps(f"""
 $src = '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe'
 Copy-Item $src '{live.INSTALL}\\{copy_as or SIMEXE}' -Force
@@ -110,7 +127,9 @@ def run_one(name, seconds, extra):
     try:
         task("simrig_host", host_cmd(rd, env, seconds), rd, elevated=True)
         time.sleep(8)
-        probe = ["@echo off", f'set XR_RUNTIME_JSON={live.INSTALL}\\virtualdesktop-openxr.json', "set XR_PROBE_SCENE=dots", "set XR_PROBE_CPU_MS=0", "set XR_PROBE_LOAD=steady", f"set XR_PROBE_MARKERS_CSV={rd}\\app_markers.csv",
+        probe_env = {"XR_PROBE_SCENE": "dots", "XR_PROBE_CPU_MS": "0", "XR_PROBE_LOAD": "steady", "XR_PROBE_MARKERS_CSV": f"{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{rd}\\app_timing.csv"}
+        probe_env.update({k[6:]: v for k, v in env.items() if k.startswith("PROBE:")})   # scenario keys "PROBE:XR_PROBE_...": the app's load and scene
+        probe = ["@echo off", f'set XR_RUNTIME_JSON={live.INSTALL}\\virtualdesktop-openxr.json'] + [f"set {k}={v}" for k, v in probe_env.items()] + [
                  f"cd /d {live.INSTALL}", f'"{live.CLONE}\\build\\probe\\xr_probe.exe" {rd}\\probe.log 200000 {seconds + 60} - - > {rd}\\probe_stdout.txt 2>&1']
         task("simrig_probe", probe, rd)
         t0 = time.time()
@@ -157,6 +176,8 @@ def main(a):
             set_stream(a[a.index("--eye") + 1], fps)
             extra["PERIOD_MS"] = f"{1000.0 / float(fps):.4f}"
         seconds = int(a[a.index("--seconds") + 1]) if "--seconds" in a else 30
+        if "--fg" in a:   # frame generation on for every named scenario (the _fg scenarios carry it themselves)
+            extra["ENV:VISIONALVR_FRAME_GEN"] = "1"
         for flag, key in (("--show", "SHOW"), ("--real-encode", "REAL_ENCODE"), ("--seed", "SEED"), ("--eye-w", "EYE_W"), ("--omega", "OMEGA_DPS"),
                           ("--predict-ms", "PREDICT_MS"), ("--dump-every", "DUMP_EVERY"), ("--capture", "CAPTURE")):
             if flag in a:

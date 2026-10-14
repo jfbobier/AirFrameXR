@@ -6,6 +6,7 @@
 // XR_PROBE_LOAD shapes both over time: steady (default) | jitter:<pct> (uniform +-pct per frame) | spikes:<every>:<factor> (every
 // n-th frame costs factor x) | fps:<lo>:<hi> (each frame's CPU time is 1000/uniform(lo,hi) ms; use XR_PROBE_CPU_MS=1) | ramp:<s> (0 -> 2x over s seconds, then back) | burst:<on_s>:<off_s> (full load / none alternating).
 // XR_PROBE_TIMING_CSV = per-frame timing (frame, t_wait_return_ms, t_end_ms, load_factor): the game side of the pacing analysis.
+// XR_PROBE_MOVING=<amp deg>:<Hz>: with XR_PROBE_SCENE=dots, a rectangle swinging below the horizon ring (in-scene motion for the simrig judge).
 // With input_csv it also reads Touch-profile input actions every frame (trigger/squeeze/buttons/thumbstick/grip pose) and
 // fires haptics on both hands periodically.
 // Each rendered frame stamps (frame_index+1) as 16 white/black 64x64 blocks in the top-left 1024x64 of the left eye
@@ -124,6 +125,12 @@ int main(int argc, char** argv) {
     // pose the app located: the simplest scene whose motion is known exactly: the follow-the-frames "judge" of a constant head rotation reads them)
     const bool dotsOn = getenv("XR_PROBE_SCENE") && strcmp(getenv("XR_PROBE_SCENE"), "dots") == 0;
     const double dotDeg = getenv("XR_PROBE_DOT_DEG") ? atof(getenv("XR_PROBE_DOT_DEG")) : 10.0;
+    // XR_PROBE_MOVING=<amplitude deg>:<Hz>: a moving rectangle 4 deg below the horizon ring, swinging in world yaw as amp * sin(2 pi f t) with t =
+    // the frame's predicted display time (so its motion is smooth in display time whatever the frame rate): the simrig viewer measures it on its own row and
+    // harness/simrig/judge.py scores how smoothly in-scene motion reaches the display (repeated frames freeze it, generated frames should not)
+    double movingAmp = 0, movingHz = 0;
+    if (const char* mv = getenv("XR_PROBE_MOVING")) { movingAmp = atof(mv); if (const char* c = strchr(mv, ':')) movingHz = atof(c + 1); }
+    long long movingT0 = 0;
     if (const char* scenePath = dotsOn ? nullptr : getenv("XR_PROBE_SCENE")) {
         std::string err;
         sceneOn = LoadScene(dev, ctx, scenePath, scene, err);
@@ -442,6 +449,24 @@ int main(int argc, char** argv) {
                                 dr.left = std::max<LONG>(dr.left, 0); dr.top = std::max<LONG>(dr.top, 0);
                                 dr.right = std::min<LONG>(dr.right, (LONG)dt.Width); dr.bottom = std::min<LONG>(dr.bottom, (LONG)dt.Height);
                                 if (dr.right > dr.left && dr.bottom > dr.top) dc->ClearView(rtv, white, &dr, 1);
+                            }
+                            if (movingAmp > 0 && movingHz > 0) {
+                                if (movingT0 == 0) movingT0 = (long long)fs.predictedDisplayTime;
+                                const double ts = (double)((long long)fs.predictedDisplayTime - movingT0) * 1e-9;
+                                const double th = movingAmp * sin(2.0 * 3.14159265358979 * movingHz * ts) * 3.14159265358979 / 180.0;
+                                const double drop = 3.0 * tan(4.0 * 3.14159265358979 / 180.0);   // 4 deg below the ring
+                                const XMVECTOR wp = XMVectorSet((float)(3.0 * sin(th)), (float)(dp.position.y - drop), (float)(-3.0 * cos(th)), 1.f);
+                                const XMVECTOR vv = XMVector3TransformCoord(wp, dview);
+                                const float vx = XMVectorGetX(vv), vy = XMVectorGetY(vv), vz = XMVectorGetZ(vv);
+                                if (vz < -0.1f) {
+                                    const float tx = vx / -vz, ty = vy / -vz;
+                                    const float cx = (tx + dtl) * pxPerTanX, cy = (1.f - (ty + dtd) / (dtu + dtd)) * (float)dt.Height;
+                                    const float hw = std::max(2.f, 0.35f * 0.0174533f * pxPerTanX), hh = 2.f * 0.0174533f * pxPerTanY;
+                                    D3D11_RECT dr{ (LONG)(cx - hw), (LONG)(cy - hh), (LONG)(cx + hw), (LONG)(cy + hh) };
+                                    dr.left = std::max<LONG>(dr.left, 0); dr.top = std::max<LONG>(dr.top, 0);
+                                    dr.right = std::min<LONG>(dr.right, (LONG)dt.Width); dr.bottom = std::min<LONG>(dr.bottom, (LONG)dt.Height);
+                                    if (dr.right > dr.left && dr.bottom > dr.top) dc->ClearView(rtv, white, &dr, 1);
+                                }
                             }
                             dc->Release();
                         }
