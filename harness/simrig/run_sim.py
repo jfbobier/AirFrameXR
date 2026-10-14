@@ -96,6 +96,7 @@ def kill():
 
 
 def build(copy_as=None):
+    kill()   # a running probe or host would keep the exes locked (LNK1104 / copy failures)
     live.build("host", simrig=True)
     live.build("shim")
     live.build("probe")
