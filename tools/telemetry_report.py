@@ -10,6 +10,10 @@ Session dir = logs/debug/<yyyymmdd-hhmmss>/ of the host. Reads
 and writes telemetry_client_rows.csv (every client row, with the host-side columns joined by stamp) and telemetry_report.csv
 (the per-condition numbers printed below). Standard library only.
 
+Host-only mode (a manual start, no telemetry client: `[tel] start manual=1` in the log, no `[pt] rows`): the report runs from telemetry_host.csv, the
+host's client_frames.csv (what the official client reports for every displayed frame) and tracking.csv / head_samples.csv (head speed, arrival gaps),
+and says which tables need the telemetry client's rows (the residuals, walk-back, focal depth and pick policy conditions).
+
 Joins: client rows and host rows meet on the stamp (client `timestamp_ns` = host `final_ts_ns`), so the clocks of the two sides
 never have to agree. The first --trim seconds after each condition change are dropped (the client's rows by their own clock, the host's
 rows by theirs). A row whose client segment and host segment disagree is dropped (the two schedules are offset by a second at most).
@@ -66,7 +70,7 @@ def read_client_log(path):
             out["lines"] += 1
             if text.startswith("[tel] "):
                 verb, kv = parse_tokens(text[6:])
-                out["tel"].append({"t": t, "verb": verb, **kv})
+                out["tel"].append({**kv, "host_t": t, "verb": verb})
                 continue
             body = text[5:]
             if body.startswith("rows"):
@@ -148,6 +152,174 @@ def fmt(v, nd=2):
     return "-" if v is None else f"{v:.{nd}f}"
 
 
+
+def head_speed_by_stamp(d, heads):
+    """stamp (ts_ns string) -> head angular speed in deg/s, from tracking.csv (step_mdeg per sample) or head_samples.csv (quaternions)."""
+    speed = {}
+    tr = read_csv(os.path.join(d, "tracking.csv"))
+    prev_ts = None
+    for r in tr:
+        try:
+            ts = int(r["ts_ns"])
+        except (KeyError, ValueError):
+            continue
+        if prev_ts is not None and ts > prev_ts:
+            speed[str(ts)] = (fnum(r.get("step_mdeg")) or 0.0) / 1000.0 / ((ts - prev_ts) / 1e9)
+        prev_ts = ts
+    if speed:
+        return speed, "tracking.csv"
+    prev = None
+    for r in heads:
+        try:
+            ts = int(r["ts_ns"])
+            q = [float(r[k]) for k in ("qx", "qy", "qz", "qw")]
+        except (KeyError, ValueError):
+            continue
+        if prev is not None and ts > prev[0]:
+            speed[str(ts)] = quat_deg(prev[1], q) / ((ts - prev[0]) / 1e9)
+        prev = (ts, q)
+    return speed, "head_samples.csv" if speed else "none"
+
+
+def host_only(d, cl, host, heads, trim):
+    """Report from host-side data only (manual start: the official client sends no telemetry rows)."""
+    conds = sorted((fnum(e.get("t")) or e["host_t"], int(e["seg"]), e.get("mode", "?")) for e in cl["tel"] if e["verb"] == "cond" and "seg" in e)
+    start_t = {seg: t for t, seg, _ in conds}
+    seg_mode = {seg: m for _, seg, m in conds}
+    cf = read_csv(os.path.join(d, "client_frames.csv"))
+    speed, speed_src = head_speed_by_stamp(d, heads or read_csv(os.path.join(d, "tracking.csv")))
+    print(f"session {d}")
+    manual = any(e["verb"] == "start" and e.get("manual") == "1" for e in cl["tel"])
+    print(f"HOST-ONLY report (no telemetry client rows; start was {'manual' if manual else 'not announced'}): host frames {len(host)}, "
+          f"official-client frame reports {len(cf)}, head speed from {speed_src}, trim {trim:g} s after each change")
+    print("tables that need the telemetry client's rows and are NOT available here: residual the reprojection hides (comp deg/mm), tremble metric (dcomp),")
+    print("  pose age, walk-back / fallback / lookup misses, controller rates, thermal, and the focal-depth / pick-policy conditions (the run varies only the host re-stamp mode)")
+    print()
+
+    def ok_host(r):
+        t = fnum(r.get("t_send"))
+        try:
+            seg = int(r["seg"])
+        except (KeyError, ValueError):
+            return False
+        return t is not None and seg in start_t and t >= start_t[seg] + trim
+
+    hostk = [r for r in host if ok_host(r)]
+    by_mode = defaultdict(list)
+    for r in hostk:
+        by_mode[r["mode"]].append(r)
+
+    def seg_span(rows, key):
+        per = defaultdict(list)
+        for r in rows:
+            v = fnum(r.get(key))
+            if v is not None:
+                per[r.get("seg")].append(v)
+        return sum(max(v) - min(v) for v in per.values() if len(v) > 1)
+
+    print("== host side per re-stamp mode (frames the host sent)")
+    hdr = ("mode", "frames", "dur s", "host fps", "distinct stamp fps", "repeated stamp %", "restamped %", "queue wait p50/p95", "encode p50/p95", "hold p95")
+    lines = [hdr]
+    for mode in ("off", "shim", "host"):
+        rows = by_mode.get(mode, [])
+        if not rows:
+            continue
+        dur = seg_span(rows, "t_send")
+        rep = 0
+        last = None
+        for r in rows:
+            rep += r["final_ts_ns"] == last
+            last = r["final_ts_ns"]
+        n = len(rows)
+        lines.append((mode, str(n), fmt(dur, 0), fmt(n / dur if dur else None, 1), fmt((n - rep) / dur if dur else None, 1), fmt(100.0 * rep / n, 1),
+                      fmt(100.0 * sum(1 for r in rows if r.get("restamped") == "1") / n, 1),
+                      f"{fmt(pct([fnum(r['queue_wait_ms']) for r in rows], .5), 1)}/{fmt(pct([fnum(r['queue_wait_ms']) for r in rows], .95), 1)}",
+                      f"{fmt(pct([fnum(r['encode_ms']) for r in rows], .5), 1)}/{fmt(pct([fnum(r['encode_ms']) for r in rows], .95), 1)}",
+                      fmt(pct([fnum(r['hold_ms']) for r in rows], .95), 1)))
+    widths = [max(len(l[i]) for l in lines) for i in range(len(hdr))]
+    for l in lines:
+        print("  ".join(c.ljust(widths[i]) for i, c in enumerate(l)))
+
+    # headset-reported frames: mode by stamp, else by the segment the report arrived in
+    mode_by_stamp = {r["final_ts_ns"]: r["mode"] for r in hostk}
+    cfk = []
+    for r in cf:
+        m = mode_by_stamp.get(r.get("ts_ns"))
+        t = fnum(r.get("t_recv"))
+        if m and t is not None:
+            r["mode"] = m
+            r["t"] = t
+            r["head_deg_s"] = speed.get(r["ts_ns"])
+            cfk.append(r)
+    print()
+    print("== headset side per re-stamp mode (official client's per-frame report: what the headset displayed)")
+    if not cfk:
+        print("  no client_frames.csv rows joinable by stamp (the host's client-stats log needs the debug session folder)")
+    else:
+        hdr = ("mode", "shown frames", "shown fps", "interval p50/p95/p99", ">15 ms %", "decode p50/p95", "dec.queue p50/p95", "vsync q p50/p95", "total p50/p95")
+        lines = [hdr]
+        for mode in ("off", "shim", "host"):
+            rows = [r for r in cfk if r["mode"] == mode]
+            if not rows:
+                continue
+            ivals = [fnum(r["frame_interval_ms"]) for r in rows]
+            ivals = [v for v in ivals if v is not None and 0 < v < 1000]
+            per_seg = defaultdict(list)
+            for r in rows:
+                per_seg[mode_seg_of(r, start_t)].append(r["t"])
+            dur = sum(max(v) - min(v) for v in per_seg.values() if len(v) > 1)
+            pc = lambda k, p: fmt(pct([fnum(r[k]) for r in rows], p), 1)
+            lines.append((mode, str(len(rows)), fmt(len(rows) / dur if dur else None, 1),
+                          f"{fmt(pct(ivals, .5), 1)}/{fmt(pct(ivals, .95), 1)}/{fmt(pct(ivals, .99), 1)}",
+                          fmt(100.0 * sum(1 for v in ivals if v > 15) / len(ivals), 1) if ivals else "-",
+                          f"{pc('decode_ms', .5)}/{pc('decode_ms', .95)}", f"{pc('decoder_queue_ms', .5)}/{pc('decoder_queue_ms', .95)}",
+                          f"{pc('vsync_queue_ms', .5)}/{pc('vsync_queue_ms', .95)}", f"{pc('total_ms', .5)}/{pc('total_ms', .95)}"))
+        widths = [max(len(l[i]) for l in lines) for i in range(len(hdr))]
+        for l in lines:
+            print("  ".join(c.ljust(widths[i]) for i, c in enumerate(l)))
+
+        print()
+        print("== by head speed (still < 5, slow 5-30, fast > 30 deg/s; the speed of the frame's own tracking sample): shown-frame intervals > 15 ms")
+        hdr = ("mode", "speed", "shown frames", ">15 ms %", "interval p95")
+        lines = [hdr]
+        for mode in ("off", "shim", "host"):
+            for name, lo, hi in BUCKETS:
+                rows = [r for r in cfk if r["mode"] == mode and r.get("head_deg_s") is not None and lo <= r["head_deg_s"] < hi]
+                iv = [fnum(r["frame_interval_ms"]) for r in rows]
+                iv = [v for v in iv if v is not None and 0 < v < 1000]
+                if len(iv) < 30:
+                    continue
+                lines.append((mode, name, str(len(iv)), fmt(100.0 * sum(1 for v in iv if v > 15) / len(iv), 1), fmt(pct(iv, .95), 1)))
+        widths = [max(len(l[i]) for l in lines) for i in range(len(hdr))]
+        for l in lines:
+            print("  ".join(c.ljust(widths[i]) for i, c in enumerate(l)))
+
+    print()
+    print("== tracking-sample arrival gaps at the host (Wi-Fi uplink / AWDL)")
+    tr = read_csv(os.path.join(d, "tracking.csv"))
+    if tr and "t_arrival" in tr[0]:
+        rows = [{"t": r["t_arrival"]} for r in tr]
+    else:
+        rows = heads
+    hs = head_sample_stats(rows)
+    if hs["n"]:
+        periodic = hs["ac_peak"] is not None and hs["ac_peak"] > 0.3
+        print(f"  samples {hs['n']}  gap p50 {fmt(hs['gap_p50'], 1)} ms  p99 {fmt(hs['gap_p99'], 1)} ms  max {fmt(hs['gap_max'], 0)} ms  >20 ms: {hs['late20']}  "
+              f"autocorr peak {fmt(hs['ac_peak'], 2)} at {fmt(hs['ac_lag_s'], 2)} s  -> {'PERIODIC (AWDL-like)' if periodic else 'not periodic'}")
+    else:
+        print("  no tracking.csv / head_samples.csv in the session folder")
+    return 0
+
+
+def mode_seg_of(r, start_t):
+    """The scheduled segment a headset report belongs to (by its host receive time)."""
+    seg = 0
+    for sg, t in start_t.items():
+        if r["t"] >= t and sg >= seg:
+            seg = sg
+    return seg
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("session")
@@ -158,6 +330,8 @@ def main():
     cl = read_client_log(os.path.join(d, "telemetry_client.log"))
     host = read_csv(os.path.join(d, "telemetry_host.csv"))
     heads = read_csv(os.path.join(d, "head_samples.csv"))
+    if not cl["rows"] and host:
+        return host_only(d, cl, host, heads, args.trim)
     if not cl["rows"]:
         print(f"no client rows in {d}/telemetry_client.log ({cl['lines']} telemetry lines): did the telemetry client run?")
         return 1

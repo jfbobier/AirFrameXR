@@ -26,22 +26,27 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--awdl", action="store_true")
     ap.add_argument("--seconds-scale", type=float, default=1.0)
+    ap.add_argument("--host-only", action="store_true", help="manual start: no [pt] lines, the official client's client_frames.csv + tracking.csv instead")
     a = ap.parse_args()
     random.seed(7)
     os.makedirs(a.out, exist_ok=True)
     warm, seg_s = WARMUP * a.seconds_scale, SEG * a.seconds_scale
     host_t0, client_t0 = 5000.0, 90000.0  # QPC seconds on the host, the headset's clock
     fps = 90.0
-    log, host, heads = [], [], []
+    log, host, heads, cframes, tracking = [], [], [], [], []
     n = 0
 
     def pt(host_t, text):
         nonlocal n
+        if a.host_only:
+            return
         n += 1
         verb, _, rest = text.partition(" ")
         log.append(f"{host_t:.6f} [pt] {verb} n={n} {rest}".rstrip())
 
     pt(host_t0, "start ver=1 build=synth0 renderer=rk telemetry=1")
+    if a.host_only:
+        log.append(f"{host_t0:.6f} [tel] start manual=1")
     log.append(f"{host_t0 + 0.01:.6f} [tel] armed warmup_s={WARMUP} segment_s={SEG} segments=20")
     log.append(f"{host_t0 + 0.01:.6f} [tel] cond seg=0 mode=off t={host_t0 + 0.01:.6f}")
     pt(host_t0, f"cond seg=0 focal=0 pick=oldest t={client_t0:.3f}")
@@ -112,6 +117,9 @@ def main():
         host.append(f"{host_t0 + t + 0.02:.6f},{seg},{mode},{host_n},{orig_ts},{final_ts},{restamped},{warp_mdeg:.1f},{random.random() * 3:.3f},"
                     f"{4.0 + random.random():.3f},{random.random():.3f},{20000 + int(random.random() * 9000)},0,{deferred},0")
         host_n += 1
+        if a.host_only:
+            gap = 11.1 + (random.random() * 2) + (14 if random.random() < {"off": 0.07, "shim": 0.02, "host": 0.03}[mode] else 0)
+            cframes.append(f"{host_t0 + t + 0.09:.6f},{final_ts},{gap:.3f},{6 + random.random():.3f},{4 + random.random() * 3:.3f},0.000,{20 + random.random() * 4:.3f},{90 + random.random() * 8:.3f}")
     flush(cur_seg, host_t0 + total)
     pt(host_t0 + total, "end")
     log.append(f"{host_t0 + total:.6f} [tel] end t={host_t0 + total:.6f}")
@@ -125,6 +133,7 @@ def main():
             arr += delay
         delay *= 0.5
         q = [0.0, math.sin(k / fps * 0.05) * 0.1, 0.0, math.sqrt(1 - (math.sin(k / fps * 0.05) * 0.1) ** 2)]
+        tracking.append(f"{arr:.6f},{1_000_000_000_000 + k * 11_111_111},{abs(math.sin(k / fps * 0.7)) * 40 * 11.1 * (0.3 + abs(math.sin(k / fps * 0.13))):.1f},{0.3:.3f},0.5")
         heads.append(f"{arr:.6f},{1_000_000_000_000 + k * 11_111_111},{q[0]:.6f},{q[1]:.6f},{q[2]:.6f},{q[3]:.6f},{0.01 + 0.001 * (k % 7):.5f},1.6,0.02")
         k += 1
 
@@ -133,6 +142,12 @@ def main():
     with open(os.path.join(a.out, "telemetry_host.csv"), "w") as f:
         f.write("t_send,seg,mode,frame,orig_ts_ns,final_ts_ns,restamped,warp_mdeg,queue_wait_ms,encode_ms,hold_ms,bytes,idr,deferred_total,dropped_total\n")
         f.write("\n".join(host) + "\n")
+    if a.host_only:
+        with open(os.path.join(a.out, "client_frames.csv"), "w") as f:
+            f.write("t_recv,ts_ns,frame_interval_ms,decode_ms,decoder_queue_ms,client_comp_ms,vsync_queue_ms,total_ms\n" + "\n".join(cframes) + "\n")
+        with open(os.path.join(a.out, "tracking.csv"), "w") as f:
+            f.write("t_arrival,ts_ns,step_mdeg,step_mm,pll_residual_ms\n" + "\n".join(tracking) + "\n")
+        heads = []
     with open(os.path.join(a.out, "head_samples.csv"), "w") as f:
         f.write("t,ts_ns,qx,qy,qz,qw,px,py,pz\n")
         f.write("\n".join(heads) + "\n")

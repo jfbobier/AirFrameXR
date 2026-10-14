@@ -39,6 +39,18 @@ Normal clients are unaffected: nothing below runs unless the client announces it
    and an AWDL signature (arrival-gap p99 and the autocorrelation of > 20 ms gaps at 0.2-1.2 s). Writes `telemetry_client_rows.csv` and
    `telemetry_report.csv`. `tools/telemetry_synth.py` makes a synthetic session in the same formats (a fixture for the report).
 
+## Manual start (no telemetry client)
+
+For a session with the official client the same schedule can run from the host's own clock (host-only data):
+- while the headset is streaming, create the flag file `<config dir>\telemetry_start.flag` (portable install: `<install>\config`), e.g. in cmd
+  `type nul > "D:\_VR\VisionALVR-telemetry\config\telemetry_start.flag"` or in PowerShell `New-Item "...\config\telemetry_start.flag"`. The host deletes
+  it, logs `[tel] start manual=1` and starts the clock (a flag created before the headset connects waits for it). `telemetry_stop.flag` stops a run.
+- or start the host with `VISIONALVR_TELEMETRY_AUTOSTART=1`: the clock starts 10 s after the headset connected.
+Without the file or the variable nothing changes. The report then runs in host-only mode: per re-stamp mode the host's frames (fps, repeated stamps,
+restamped %, queue wait, encode), the headset's own per-frame report (`client_frames.csv`: shown fps, interval p50/p95/p99 and share over 15 ms,
+decode, decoder queue, vsync queue, total) also by head speed (`tracking.csv` or `head_samples.csv`), and the arrival-gap / AWDL signature. It states which tables need the telemetry
+client's rows (residuals and tremble metric, pose age, walk-back, controller rates, focal-depth and pick-policy conditions).
+
 ## Client line formats
 
 All lines start with `[pt] <verb> n=<seq>` then `key=value` tokens: `start ver=1 build=<sha> renderer=<rk|metal> telemetry=1`,

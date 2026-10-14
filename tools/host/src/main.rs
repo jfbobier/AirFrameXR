@@ -1601,6 +1601,10 @@ fn main() {
             simrig::init(&dir.to_string_lossy(), ipc_addr, p.enc.lock().handle, &shared, &vsync_period_ns, read_encoding_gamma(&layout.session()));
         }
         telemetry::sim_start();
+        {
+            let sh = Arc::clone(&shared);
+            telemetry::watch(args.config_dir.clone(), Box::new(move || sh.client_connected.load(Ordering::SeqCst)));
+        }
         pipeline = Some(p);
     }
     let app_alive = || pipeline.as_ref().map(|p| p.app_alive.load(Ordering::Relaxed)).unwrap_or(false);

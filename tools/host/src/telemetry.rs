@@ -157,6 +157,7 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 static IPC_ADDR: AtomicUsize = AtomicUsize::new(0);
 static PREWARM_LEFT: AtomicI32 = AtomicI32::new(0);
 static BASE: Mutex<Option<(Mode, f32)>> = Mutex::new(None);
+static MANUAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The shared-memory block of the shim (set once the host owns it) and the configured mode / shim wait (applied again when a run ends).
 pub fn configure(ipc: usize, base: Mode, dup_wait_ms: f32) {
@@ -231,7 +232,10 @@ pub fn client_line(t: f64, text: &str) {
     write_line(t, text);
     let verb = text.strip_prefix("[pt] ").and_then(|r| r.split_whitespace().next()).unwrap_or("");
     match verb {
-        "start" => arm(),
+        "start" => {
+            MANUAL.store(false, Ordering::SeqCst); // a telemetry client takes over from a manual start
+            arm()
+        }
         "end" => {
             // the client finished (or was told to stop): stop scheduling, back to the configured mode
             write_line(crate::logs::qpc_now(), "[tel] client_end");
@@ -399,4 +403,65 @@ fn sim_end() {
         // `client_line("end")` would disarm; the scheduler already did when it got here
         write_line(crate::logs::qpc_now(), &format!("[pt] end n={n}"));
     }
+}
+
+
+// ---- manual start (no telemetry client): the same schedule from the host's own clock --------------------------------------------------
+// For a session with the official client (host-only data: telemetry_host.csv + the host's client_frames.csv / head samples). Either create
+// the flag file `<config dir>\telemetry_start.flag` while the headset streams (the host deletes it and starts the clock; `telemetry_stop.flag`
+// stops a run), or start the host with VISIONALVR_TELEMETRY_AUTOSTART=1 (the clock starts 10 s after the headset connected). The host logs
+// `[tel] start manual=1`. Default behaviour is unchanged: without the file or the variable nothing watches anything but the file's existence.
+
+pub fn start_manual() {
+    open_client_log();
+    MANUAL.store(true, Ordering::SeqCst);
+    write_line(crate::logs::qpc_now(), "[tel] start manual=1");
+    arm();
+}
+
+/// Watches for the flag files (every 500 ms) and the autostart variable. `connected` tells whether the headset is connected.
+pub fn watch(config_dir: std::path::PathBuf, connected: Box<dyn Fn() -> bool + Send>) {
+    let _ = std::thread::Builder::new().name("telemetry_watch".into()).spawn(move || {
+        let start_flag = config_dir.join("telemetry_start.flag");
+        let stop_flag = config_dir.join("telemetry_stop.flag");
+        let autostart = std::env::var("VISIONALVR_TELEMETRY_AUTOSTART").map(|v| v == "1").unwrap_or(false);
+        let (mut connected_since, mut auto_done, mut waiting_logged) = (None::<Instant>, false, false);
+        loop {
+            std::thread::sleep(Duration::from_millis(500));
+            let up = connected();
+            if up {
+                connected_since.get_or_insert_with(Instant::now);
+            } else {
+                connected_since = None;
+            }
+            if stop_flag.exists() {
+                let _ = std::fs::remove_file(&stop_flag);
+                if SEG.load(Ordering::Relaxed) >= 0 {
+                    write_line(crate::logs::qpc_now(), "[tel] stop manual=1");
+                    crate::logs::general("INFO", "telemetry run stopped by telemetry_stop.flag");
+                    disarm();
+                }
+            }
+            if start_flag.exists() {
+                if up {
+                    let _ = std::fs::remove_file(&start_flag);
+                    crate::logs::general("INFO", "telemetry run started by telemetry_start.flag (manual, host clock)");
+                    start_manual();
+                    waiting_logged = false;
+                } else if !waiting_logged {
+                    waiting_logged = true;
+                    crate::logs::general("INFO", "telemetry_start.flag found: waiting for the headset to connect");
+                }
+            }
+            if autostart && !auto_done {
+                if let Some(t) = connected_since {
+                    if t.elapsed() >= Duration::from_secs(10) {
+                        auto_done = true;
+                        crate::logs::general("INFO", "telemetry run started by VISIONALVR_TELEMETRY_AUTOSTART (manual, host clock)");
+                        start_manual();
+                    }
+                }
+            }
+        }
+    });
 }
