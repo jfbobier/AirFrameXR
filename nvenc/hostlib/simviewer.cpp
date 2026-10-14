@@ -250,7 +250,7 @@ struct Viewer {
     }
 
     // the dots of one eye: centres (pixels, in the eye image) of the white runs on a row (rowV: the equator, or the moving marker's row)
-    void measure(int eye, std::vector<double>& xs, double rowV) {
+    void measure(int eye, std::vector<double>& xs, double rowV, bool whiteOnly = false) {
         const int ow = cfg.out_eye_w, oh = cfg.out_eye_h;
         int y0 = std::max(0, (int)(rowV * oh) - 6);
         D3D11_BOX box{ (UINT)(eye * ow), (UINT)y0, 0, (UINT)(eye * ow + ow), (UINT)std::min(oh, y0 + 13), 1 };
@@ -261,7 +261,11 @@ struct Viewer {
         const int rows = (int)(box.bottom - box.top);
         for (int r = 0; r < rows; r++) {
             const uint8_t* p = (const uint8_t*)mp.pData + (size_t)r * mp.RowPitch;
-            for (int x = 0; x < ow; x++) col[x] = std::max(col[x], p[x * 4] / 255.f);
+            for (int x = 0; x < ow; x++) {
+                // whiteOnly: all three channels (the moving marker's row also crosses the probe's magenta reference square)
+                const float v = whiteOnly ? std::min(p[x * 4], std::min(p[x * 4 + 1], p[x * 4 + 2])) / 255.f : p[x * 4] / 255.f;
+                col[x] = std::max(col[x], v);
+            }
         }
         ctx->Unmap(stage, 0);
         int x = 0;
@@ -396,7 +400,7 @@ struct Viewer {
             }
             if (moving) {
                 for (int eye = 0; eye < 2; eye++) {
-                    std::vector<double> xs; measure(eye, xs, yMoving[eye]);
+                    std::vector<double> xs; measure(eye, xs, yMoving[eye], true);
                     fprintf(moving, "%d,%.6f,%llu,%d,%.6f,%d,%d", k, tk, (unsigned long long)cur.ts, (cfg.reproject != 0 && haveF) ? 1 : 0, yawDisp, eye, (int)xs.size());
                     for (double x : xs) fprintf(moving, ",%.3f", x);
                     fprintf(moving, "\n");
