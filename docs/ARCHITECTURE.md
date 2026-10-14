@@ -19,7 +19,7 @@ VR stack does (SteamVR's running start, Meta's Phase Sync, the OpenXR `xrWaitFra
 | `alvr_host.exe` | the streamer (`tools/host`): compositor boundary clock, encoder (ALVR's foveation pass + NVENC), ALVR's `server_core` for the connection, tracking, audio and the network |
 | `VisionALVR.exe` / `configure.exe` | GUIs (C#): launch, status, pairing; discovery is done by the host (`--discover`) |
 
-Shim and host share one memory block (`ovrshim/ipc.h`, IPC v12): host → shim config, poses, display ticks, compositor
+Shim and host share one memory block (`ovrshim/ipc.h`, IPC v12; v25 on the telemetry branch): host → shim config, poses, display ticks, compositor
 pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock), heartbeat, haptics, diagnostics.
 
 ## Threads (v0.2)
@@ -39,6 +39,7 @@ pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock
 | Game audio capture → audio packets | ALVR game-audio thread (`server_core`, WASAPI loopback callback) | the audio device clock (10 ms batches) | nothing |
 | Headset discovery (mDNS `_alvr._tcp` + UDP 9943) → `headset_seen` events | host discovery thread (`discovery.rs`) | | nothing |
 | Settings, haptics, connect / reconfigure, status and statistics windows, scripted input | host main thread | 2 ms loop | nothing in the frame path |
+| Telemetry run (only when a telemetry client says `[pt] start`): re-stamp mode per segment, `telemetry_client.log` / `telemetry_host.csv` (docs/TELEMETRY.md) | `telemetry_schedule` thread (100 ms tick, `telemetry.rs`) | wall clock since `[pt] start` | nothing: the shim flag (`dupRestamp`, read per frame) and an atomic the encoder reads per frame |
 
 Compared with v0.1, where one host thread at normal priority did IPC wait → synchronous encode (p95 12 ms, more than a display
 period under GPU contention) → send → statistics, so a long encode blinded the intake and shifted the whole chain's phase: now
