@@ -268,7 +268,6 @@ fn arm() {
     let _ = std::thread::Builder::new().name("telemetry_schedule".into()).spawn(move || {
         let t0 = Instant::now();
         let (mut last_seg, mut prewarmed) = (-1i32, false);
-        write_line(crate::logs::qpc_now(), &format!("[tel] cond seg=0 mode=off t={:.6}", crate::logs::qpc_now()));
         loop {
             std::thread::sleep(Duration::from_millis(100));
             if GENERATION.load(Ordering::SeqCst) != generation {

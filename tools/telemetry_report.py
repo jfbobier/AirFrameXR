@@ -288,7 +288,7 @@ def main():
     if cl["start"]:
         print("client:", " ".join(f"{k}={v}" for k, v in cl["start"].items() if k != "host_t"))
     print()
-    print("== per condition (host re-stamp mode | focal depth | pick policy)  [trim %.0f s]" % args.trim)
+    print("== per condition (host re-stamp mode | focal depth | pick policy)  [trim %g s]" % args.trim)
     hdr = ("condition", "frames", "dur s", "rpt%", "shown fps", "age p50/p95", "comp deg p50/p95", "comp mm p50/p95",
            "dcomp deg p95", "dcomp mm p95", "walkbk%", "nosend", "queue p50/p95", "restamp%")
     lines = [hdr]
@@ -370,7 +370,7 @@ def main():
         print(f"  samples {hs['n']}  gap p50 {fmt(hs['gap_p50'], 1)} ms  p99 {fmt(hs['gap_p99'], 1)} ms  max {fmt(hs['gap_max'], 0)} ms  "
               f">20 ms: {hs['late20']}  autocorr peak {fmt(hs['ac_peak'], 2)} at {fmt(hs['ac_lag_s'], 2)} s  -> {'PERIODIC (AWDL-like)' if periodic else 'not periodic'}")
     else:
-        print("  no head_samples.csv (needs the debug session folder; the telemetry feature is on in the release build)")
+        print("  no head_samples.csv in the session folder (the host writes it while a telemetry run is armed; the simrig does not feed it)")
 
     # ---- exports
     os.makedirs(outd, exist_ok=True)
