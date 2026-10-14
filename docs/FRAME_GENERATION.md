@@ -100,3 +100,5 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
   falls back to the crossfade (two half-bright copies). The rig's marker (a white rectangle on black, ~9 px per app frame at 1024 px per eye)
   is lost in 11 % of the synthetic frames, 33 % at its top speed; game content is softer, but HUD elements and particles will show this.
   A softer confidence, or the engine's cost alone, is the first thing to try.
+- **Game motion vectors** (DLSS inputs) would replace the flow where they exist, allow extrapolation (no added period) and depth-aware
+  reprojection: design note docs/MOTION_VECTORS.md (in-process NGX tap at session creation, not an OptiScaler fork).
