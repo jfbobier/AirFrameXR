@@ -1373,6 +1373,19 @@ namespace {
                     m_ngx.SetEnabled(false);
                 }
 
+                // the display time the app rendered this frame for (its content time: what its animation and camera were computed for), shim clock
+                double displayS = 0.0;
+                for (const ovrLayerHeader* lh : layers) {
+                    if (lh && (lh->Type == ovrLayerType_EyeFov || lh->Type == ovrLayerType_EyeFovDepth)) {
+                        const double st = ((const ovrLayerEyeFov*)lh)->SensorSampleTime;
+                        if (st > 0.0) {
+                            LARGE_INTEGER qn{};
+                            QueryPerformanceCounter(&qn);
+                            displayS = QpcSeconds() + (st - QpcToOvrTime(qn));
+                        }
+                        break;
+                    }
+                }
                 FrameTraceRow trace;
 #ifdef VISIONALVR_TELEMETRY
                 trace.tSubmit = tSubmitStart;
@@ -1476,6 +1489,7 @@ namespace {
                     PendingFrame pf{slot, clientTs, composeStart, m_lastReleaseS.load(), trace};
                     FrameRenderOrientation(layers, pf.renderQ, pf.hasProjection);
                     pf.motion = motion;
+                    pf.displayS = displayS;
                     m_publishQueue.push_back(pf);
                     lock.unlock();
                     m_publishCv.notify_all();
@@ -1485,7 +1499,7 @@ namespace {
                     float renderQ[2][4];
                     bool hasProjection = false;
                     FrameRenderOrientation(layers, renderQ, hasProjection);
-                    PublishFrame(slot, clientTs, composeStart, m_lastReleaseS.load(), trace, renderQ, hasProjection, motion);
+                    PublishFrame(slot, clientTs, composeStart, m_lastReleaseS.load(), trace, renderQ, hasProjection, motion, displayS);
                 }
             }
 
@@ -1546,7 +1560,7 @@ namespace {
         // Hands a composed (GPU-complete) slot to the host. Called by exactly one thread at a time: the publisher thread, or the
         // app thread when there is no publisher.
         void PublishFrame(uint32_t slot, uint64_t clientTs, double composeStart, double releaseS, const FrameTraceRow& tr,
-                          const float renderQ[2][4], bool hasProjection, const visionalvr_ipc::MotionSlot& motion) {
+                          const float renderQ[2][4], bool hasProjection, const visionalvr_ipc::MotionSlot& motion, double displayS) {
             auto& s = m_ipc.state->shim;
             const double nowS = QpcSeconds();
             s.lastComposeMs = (float)((nowS - composeStart) * 1000.0);
@@ -1570,6 +1584,7 @@ namespace {
             s.frameSlot = slot;
             s.frameClientTsNs = clientTs;
             s.frameSubmitTimeS = QpcSeconds();
+            s.frameDisplayTimeS = displayS;
             memcpy(s.frameRenderQuat, renderQ, sizeof(s.frameRenderQuat));
             s.frameHasProjection = hasProjection ? 1u : 0u;
             s.motion[slot] = motion;
@@ -1651,7 +1666,7 @@ namespace {
                         }
                         // same 50 ms cap as the spin wait: a hung GPU must not stall the stream forever
                         WaitForSingleObject(m_gpuDone[f.slot], 50);
-                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr, f.renderQ, f.hasProjection, f.motion);
+                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr, f.renderQ, f.hasProjection, f.motion, f.displayS);
                         {
                             std::unique_lock lock(m_publishMutex);
                             m_publishQueue.pop_front();
@@ -2557,6 +2572,7 @@ namespace {
             float renderQ[2][4]; // per-eye render orientation (ipc frameRenderQuat), identity when there is no projection layer
             bool hasProjection;
             visionalvr_ipc::MotionSlot motion; // the game's DLSS vectors for this frame (ngxtap.h), zero when there are none
+            double displayS;                   // the display time the app rendered for (shim clock), 0 when there is no projection layer
         };
         ComPtr<IDXGIDevice2> m_dxgiDevice2;
         HANDLE m_gpuDone[visionalvr_ipc::kSlots]{};

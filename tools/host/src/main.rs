@@ -856,7 +856,7 @@ mod nvh {
         pub fn nvh_ipc_vsync(ipc: *mut c_void, interval_s: f64);
         pub fn nvh_ipc_publish_input(ipc: *mut c_void, side: i32, clicks: u32, touches: u32, trigger: f32, squeeze: f32, sx: f32, sy: f32);
         pub fn nvh_ipc_poll_haptic(ipc: *mut c_void, side: i32, seq: *mut u32, freq: *mut f32, amp: *mut f32);
-        pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64, render_q8: *mut f32, has_projection: *mut i32) -> i32;
+        pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64, render_q8: *mut f32, has_projection: *mut i32, display_s: *mut f64) -> i32;
         pub fn nvh_fg_enable(nvh: *mut c_void, on: i32, flow_scale: f64, perf_level: i32, grid: i32, err: *mut c_char, errlen: i32) -> i32;
         pub fn nvh_fg_ingest(nvh: *mut c_void, ipc: *mut c_void, slot: u32, q_render8: *const f32, err: *mut c_char, errlen: i32) -> i32;
         pub fn nvh_fg_encode(nvh: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, age: i32, q_out4: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;

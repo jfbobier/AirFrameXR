@@ -83,6 +83,8 @@ struct Arrived {
     /// per-eye orientation the projection layer was rendered with (ipc frameRenderQuat), valid when `has_projection`
     render_q: [f32; 8],
     has_projection: bool,
+    /// the display time the app rendered the frame for (shim/host QPC clock, s); 0 = unknown. The uncapped generation's content time.
+    display_s: f64,
 }
 
 /// Frame-level CSV mirrors for the harness (VISIONALVR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
@@ -168,8 +170,9 @@ struct FgState {
     /// time falls at (t = 1: the newest frame itself, then repeats of it while the next one is late). Content time = the tracking timestamp
     /// the game rendered the frame with; the lag = `lag_override` or the game's measured frame period plus half a display period.
     uncapped: bool,
-    /// content timestamps of the generator's frame history, newest last (at most FrameGen::kHist = 4; the generator's ring is kept in step)
-    hist: Vec<Duration>,
+    /// content times (the display time each frame was rendered for, QPC s) of the generator's frame history, newest last (at most
+    /// FrameGen::kHist = 4; the generator's ring is kept in step)
+    hist: Vec<f64>,
     /// automatic lag: envelope of (headset time at a frame's arrival - the previous frame's content time), fast attack, slow decay
     lag_auto_s: f64,
     unc_age_sum: u64,
@@ -525,15 +528,15 @@ impl Pipeline {
         let period = self.period().as_secs_f64();
         let lag = if st.lag_override_s > 0.0 { st.lag_override_s } else if st.lag_auto_s > 0.0 { st.lag_auto_s } else { st.game_period_s.max(period) * 2.0 + 0.5 * period }.min(0.080);
         st.last_lag_s = lag;
-        let content = sts.as_secs_f64() - lag;
+        let now = unsafe { nvh::nvh_qpc_seconds() };
+        let content = now - lag;
         let n = st.hist.len();
-        let (hist0_ns, gp_ms) = (st.hist[0].as_nanos(), st.game_period_s * 1000.0);
+        let (hist0, gp_ms) = (st.hist[0], st.game_period_s * 1000.0);
         let csv_row = move |kind: &str, t: f64, age: i32| {
-            logs::csv("fg_uncapped.csv", "time,kind,t,age,lag_ms,content_minus_newest_ms,sample_ts_ns,hist_oldest_ns,ts_newest_ns,history,game_period_ms",
-                &format!("{:.6},{kind},{t:.3},{age},{:.2},{:.2},{},{},{},{n},{:.2}", logs::qpc_at(Instant::now()), lag * 1000.0, (content - cur.as_secs_f64()) * 1000.0,
-                    sts.as_nanos(), hist0_ns, cur.as_nanos(), gp_ms));
+            logs::csv("fg_uncapped.csv", "time,kind,t,age,lag_ms,content_minus_newest_ms,now_s,hist_oldest_s,newest_s,history,game_period_ms",
+                &format!("{:.6},{kind},{t:.3},{age},{:.2},{:.2},{now:.6},{hist0:.6},{cur:.6},{n},{:.2}", logs::qpc_at(Instant::now()), lag * 1000.0, (content - cur) * 1000.0, gp_ms));
         };
-        if content >= cur.as_secs_f64() || n < 2 {
+        if content >= cur || n < 2 {
             // the content time has reached the newest frame: the frame itself, then repeats until the next one arrives
             st.last_t = 1.0;
             if st.real_sent {
@@ -550,7 +553,7 @@ impl Pipeline {
         let mut t = 0.0;
         let mut found = false;
         for i in (1..n).rev() {
-            let (a, b) = (st.hist[i - 1].as_secs_f64(), st.hist[i].as_secs_f64());
+            let (a, b) = (st.hist[i - 1], st.hist[i]);
             if content >= a && b > a {
                 age = (n - 1 - i) as i32;
                 t = (content - a) / (b - a);
@@ -642,13 +645,16 @@ impl Pipeline {
         st.last_submit_s = a.submit_s;
         st.last_arrival = Some(a.arrival);
         if st.uncapped {
-            let ts = Duration::from_nanos(a.ts_ns);
+            // content time = the display time the app rendered the frame for (what its animation was computed for); the tracking timestamp
+            // is not usable here: the shim hands samples out in order, one per frame, so their spacing is the display period whatever the
+            // app's real frame time (the first lab run interpolated at the wrong fractions: JUDDER)
+            let ts = if a.display_s > 0.0 { a.display_s } else { a.submit_s };
             let period = self.period().as_secs_f64();
-            // "now" on the headset's clock = the newest tracking sample; the lag must cover (now - previous frame's content time) at every arrival,
-            // or the headset sees a repeat before this frame is usable: envelope with a fast attack and a slow decay (0.2 ms per arrival)
-            let now_ts = self.fg_pick_sample_now().or_else(|| self.shared.recent_samples.lock().back().copied()).map(|(t, _)| t);
-            if let (Some(now_ts), Some(&prev)) = (now_ts, st.hist.last()) {
-                let need = now_ts.as_secs_f64() - prev.as_secs_f64();
+            // the lag must cover (now - the previous frame's content time) at every arrival, or the headset sees a repeat before this frame is
+            // usable: an envelope with a fast attack and a slow decay (0.2 ms per arrival)
+            let now = unsafe { nvh::nvh_qpc_seconds() };
+            if let Some(&prev) = st.hist.last() {
+                let need = now - prev;
                 if need > 0.0 && need < 0.2 {
                     let want = (need + 0.5 * period).min(0.080);
                     st.lag_auto_s = if st.lag_auto_s <= 0.0 { want } else { want.max(st.lag_auto_s - 0.0002) };
@@ -663,7 +669,7 @@ impl Pipeline {
             }
             match st.hist.last() {
                 Some(&cur) if ts > cur => {
-                    let d = (ts - cur).as_secs_f64();
+                    let d = ts - cur;
                     if d < 0.1 {
                         st.game_period_s = if st.game_period_s > 0.0 { st.game_period_s * 0.9 + d * 0.1 } else { d };
                         if st.unc_interval_ms.len() < 4096 {
@@ -671,7 +677,7 @@ impl Pipeline {
                         }
                     }
                 }
-                Some(_) => st.hist.clear(),   // not newer than the frame before (a duplicate stamp): the history restarts here
+                Some(_) => st.hist.clear(),   // not newer than the frame before (a repeated display time): the history restarts here
                 None => {}
             }
             st.hist.push(ts);
@@ -835,7 +841,8 @@ impl Pipeline {
         while !self.stop.load(Ordering::Relaxed) {
             let (mut counter, mut slot, mut cts, mut submit_s) = (0u64, 0u32, 0u64, 0f64);
             let (mut render_q, mut has_proj) = ([0f32; 8], 0i32);
-            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s, render_q.as_mut_ptr(), &mut has_proj) } == 0 {
+            let mut display_s = 0f64;
+            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s, render_q.as_mut_ptr(), &mut has_proj, &mut display_s) } == 0 {
                 continue;
             }
             let now = Instant::now();
@@ -845,7 +852,7 @@ impl Pipeline {
             if crate::simrig::active() {
                 crate::simrig::on_arrival(ipc, slot, counter as u32);
             }
-            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now, render_q, has_projection: has_proj != 0 };
+            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now, render_q, has_projection: has_proj != 0, display_s };
             {
                 let mut q = self.intake.lock();
                 fate(counter, "A", now, slot as u64, cts);

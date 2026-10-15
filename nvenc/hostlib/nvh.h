@@ -50,7 +50,7 @@ void nvh_ipc_publish_input(void* ipc, int side, uint32_t clicks, uint32_t touche
 void nvh_ipc_poll_haptic(void* ipc, int side, uint32_t* seq, float* frequency, float* amplitude);
 // Waits up to timeout_ms for a frame from the shim. Returns 1 and the newest frame's info, 0 on timeout. render_q8 (8 floats, may be null):
 // the per-eye orientation the frame's projection layer was rendered with; has_projection: 0 when the frame has no projection layer.
-int nvh_ipc_wait_frame(void* ipc, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit, float* render_q8, int* has_projection);
+int nvh_ipc_wait_frame(void* ipc, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit, float* render_q8, int* has_projection, double* display_s);
 // QPC seconds, the clock the shim stamps frames with.
 double nvh_qpc_seconds(void);
 // Instrumentation: the shim's compose+GPU-wait time for the last frame, and the GPU time of the last foveation pass (0 if off).
