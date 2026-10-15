@@ -526,7 +526,12 @@ impl Pipeline {
             return Plan::Fg { mode: 0, t: 0.0, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Repeat };
         };
         let period = self.period().as_secs_f64();
-        let lag = if st.lag_override_s > 0.0 { st.lag_override_s } else if st.lag_auto_s > 0.0 { st.lag_auto_s } else { st.game_period_s.max(period) * 2.0 + 0.5 * period }.min(0.080);
+        // The content clock is now - lag: a lag that jumps makes the content stall or leap (the first lab runs: the envelope's fast attack froze
+        // the marker for a period at every late frame, JUDDER). So the lag in force slews toward its target by at most 5 % of a display
+        // period per boundary (content speed within 0.95..1.05 of real time); a frame later than the lag in force costs one repeat instead.
+        let target = if st.lag_override_s > 0.0 { st.lag_override_s } else if st.lag_auto_s > 0.0 { st.lag_auto_s } else { st.game_period_s.max(period) * 2.0 + 0.5 * period }.min(0.080);
+        let max_step = period * 0.05;
+        let lag = if st.last_lag_s <= 0.0 || st.lag_override_s > 0.0 { target } else { st.last_lag_s + (target - st.last_lag_s).clamp(-max_step, max_step) };
         st.last_lag_s = lag;
         let now = unsafe { nvh::nvh_qpc_seconds() };
         let content = now - lag;
