@@ -30,4 +30,12 @@ Versions, sources and checksums: `third_party/README.md`, `deps.lock.json`.
   **CC-BY-4.0** (https://creativecommons.org/licenses/by/4.0/), from the three.js examples (r169). Changes: converted to
   VisionALVR's format (meshes decompressed, simplified shading), shown inside a room tiled with the scene's own texture.
 
-VisionALVR is not affiliated with or endorsed by the ALVR project, Apple, NVIDIA, Virtual Desktop or Glen Fox.
+## Related projects (not in this repository, not in the zip)
+- **OFXR-Bridge** (MIT, github.com/tig3rmast3r/OFXR-Bridge): the frame-generation synthesis recipe and safety rules were studied from its
+  code and re-implemented in `nvenc/hostlib/framegen.cpp`; no code copied. Its DLSS provider ABI is the model for VisionALVR's motion-vector
+  interface.
+- **OptiScaler** (GPL-3.0, github.com/optiscaler/OptiScaler): the DLSS motion-vector tap is a separate fork, github.com/jfbobier/VisionALVR-OptiScaler,
+  under GPL-3.0 with its own source and releases; it is loaded by the game, not by VisionALVR, and communicates through shared textures and a
+  documented interface. Nothing of it is linked into or shipped with VisionALVR.
+
+VisionALVR is not affiliated with or endorsed by the ALVR project, Apple, NVIDIA, Virtual Desktop or Glen Fox. OFXR-Bridge and OptiScaler are independent projects; VisionALVR is not affiliated with them either.

@@ -157,12 +157,19 @@ VisionALVR stands on two projects that did the hard work:
 - **[VirtualDesktop-OpenXR (VDXR)](https://github.com/mbucchia/VirtualDesktop-OpenXR)** (MIT) by Matthieu Bucchianeri and its
   contributors: the excellent, highly optimized OpenXR runtime every game here runs on; OVRShim started as its OVRNull sample.
   Thanks also for the many other OpenXR tools from the same author that the PC VR community relies on.
-- NVIDIA Video Codec SDK header (MIT). cgltf (MIT), stb_image (public domain / MIT), Draco (Apache-2.0, offline converter only).
+- **[OFXR-Bridge](https://github.com/tig3rmast3r/OFXR-Bridge)** (MIT) by tig3rmast3r: the frame-generation synthesis recipe
+  (rotation-compensated residual flow, midpoint sampling, confidence and crossfade fallback) and its never-block safety rules were
+  studied from its code and re-implemented here; its DLSS provider interface is the model for ours.
+- **[OptiScaler](https://github.com/optiscaler/OptiScaler)** (GPL-3.0) and its contributors: the DLSS motion-vector tap for frame
+  generation is a separate fork, [VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler), kept under GPL-3.0 and
+  shipped as its own DLL; VisionALVR talks to it only through shared textures and a small documented interface. Years of
+  game-compatibility work live in that project.
+- NVIDIA Video Codec SDK and Optical Flow SDK headers (MIT). cgltf (MIT), stb_image (public domain / MIT), Draco (Apache-2.0, offline converter only).
 - Benchmark scene: "Littlest Tokyo" by Glen Fox ([glenatron](https://sketchfab.com/glenatron)), CC-BY-4.0, converted and placed
   in a textured room.
 
 Details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). VisionALVR is not affiliated with or endorsed by the ALVR project,
-Apple, NVIDIA or Virtual Desktop. Apple Vision Pro and visionOS are trademarks of Apple Inc.
+Apple, NVIDIA, Virtual Desktop, OFXR-Bridge or OptiScaler. Apple Vision Pro and visionOS are trademarks of Apple Inc.
 
 ## License
 MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
