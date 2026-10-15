@@ -211,5 +211,33 @@ Both SMOOTH. With vectors: no glitches, the marker is found in nearly every fram
 and frozen periods drop to a quarter; head still, the smoothness is the same within noise. The probe's vectors are exact, so this is
 the ceiling of the method on this scene; a game's vectors carry no transparency or particle motion (the flow fallback covers them).
 
-Next: the real-game check on the 5090 with the fork DLL (D3D12 Unreal title, then D3D11): `motion_tap` event attached, `mv.frames`
-counting, `used_eyes` rising, the headset verdict; then extrapolation mode and the depth-aware re-stamp.
+## Step 3: the first real-game night, and the shared-copy fix (2026-10-15 / 16, RTX 5090)
+
+The tap attached in every DLSS title the user ran (Lies of P, Mortal Shell II, Carma, Valor Mortis, The Sinking City 2 through
+`dxgi.dll` next to the UEVR game's exe; Dead Space through `WINMM.dll` / `VERSION.dll`), saw the evaluates (one stream per eye, D3D12,
+R16G16_FLOAT vectors at the output size, R32G8X24_TYPELESS depth at the render size, flags 0x49) and **copied nothing**: every copy failed
+with E_INVALIDARG, so no stream was ever kept, `mv.frames` stayed 0 all night and the generator ran on optical flow in every game. The
+"vectors" sessions the user judged artefact-free were flow. Two defects, both fixed on the branch:
+
+1. **D3D11 opens a D3D12 shared texture only if it was created with `D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET`** (plus simultaneous access).
+   The tap created the shared copy with simultaneous access alone, which `CreateCommittedResource` and `CreateSharedHandle` accept and
+   `ID3D11Device1::OpenSharedResource1` rejects. Pinned with `tools/interop_test` on the 5090 (every flag combination; the render-target one
+   is the only one that opens), then the whole path verified bit-exact there: upload a pattern into a UE-like source (RT | UAV flags, left in
+   NON_PIXEL_SHADER_RESOURCE), copy on a D3D12 list into the shared RT | simultaneous-access texture, open it in D3D11, read it back. A render
+   target cannot be a depth or typeless-depth format, so depth is now copied into a typed colour twin: D32 -> R32_FLOAT, D16 -> R16_UNORM,
+   the packed depth-stencil formats as their depth plane (plane 0 via `CopyTextureRegion`, verified for D32_FLOAT_S8X24 -> R32_FLOAT) on
+   D3D12; on D3D11 a cross-family copy is not allowed, so packed depth-stencil is skipped there (one log line). Typed copies also spare the
+   host a typed view. The lab never exercised this: the probe's synthetic provider is D3D11 (`p.api = 11`), so `Copy12` met its first real
+   D3D12 resource in a game.
+2. A stream whose copies failed published nothing, so `Harvest` dropped it as idle and the next evaluate recreated it and logged the failure
+   again: three lines per evaluate, 23 000 lines in Lies of P's shim log. A stream is now marked seen at every publication, copied or not;
+   a failed source is logged once; the 900-frame summary line counts `sources not copied`.
+
+The failure line now names the step (`shared copy failed at OpenSharedResource1 0x80070057`). What the next session must show, per DLSS game:
+shim log `motion vectors: vectors WxH format 34 -> shared copy (format 34)` and `N DLSS stream(s) ... 0 sources not copied`, host `fg_perf`
+/ stats `mv.frames` and `used_eyes` rising, and the headset verdict with the tick on versus off (first real A/B of vectors against flow).
+
+Also learned that night: Luke Ross's mods (Dead Space, Cyberpunk 2077, Avatar) crash with the fork DLL under any proxy name, since the mod
+hooks NGX itself for its own DLSS use; titles with anti-cheat reject the DLL. Vectors are therefore a UEVR (and native DLSS game) feature.
+
+Next: the real-game vector verdict, then extrapolation mode and the depth-aware re-stamp.

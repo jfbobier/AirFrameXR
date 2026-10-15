@@ -1,6 +1,6 @@
 # Frame generation, uncapped: every output synthesised (2026-10-15)
 
-Status: implemented on branch `fg/uncapped` (host pipeline, shim cap, GUI, logs), lab-checked on the 3080 Ti simrig; first headset night to come.
+Status: implemented on branch `fg/uncapped` (host pipeline, shim cap, GUI, logs), lab-checked on the 3080 Ti simrig, first headset night 2026-10-15 (verdict below).
 Builds on `docs/FRAME_GENERATION.md` (half rate, optical flow) and `docs/MOTION_VECTORS.md` (the game's DLSS vectors). Replaces the 2/3-ratio
 plan of `docs/FRAME_GENERATION_RATIOS.md` (kept as the record of why ratios are not the answer).
 
@@ -113,7 +113,65 @@ is a little rougher than half rate (every output is a resample of a pair at an a
 frozen periods with generation off to 1.3 %. The lag the envelope settles on is 25-60 ms on this rig (two app frames plus the margin, the
 app being CPU-paced at 50-70 fps): the latency price of interpolation, to be read from `fg_perf` on real games and removed by extrapolation.
 
+## Headset night 1 (2026-10-15, RTX 5090, Vision Pro at 100 Hz, build 0124c87)
+
+User verdict: "it works as intended"; capping at 70 fps felt better than free-running in every game that could exceed it ("fully uncapped it
+becomes slower"); uncapped did not obviously beat half rate on smoothness. The logs (general log perf lines, `fg_uncapped.csv`, NVML samples,
+client intervals; nine games, 16 runs) agree and say why. Vectors were off all night by accident (the shared-copy bug, `docs/MOTION_VECTORS.md`
+step 3), so every run below is optical flow.
+
+| game (mod) | mode | app fps | GPU % / W | repeats | lag in force | game frames in flight at output | client intervals > 15 ms |
+|---|---|---|---|---|---|---|---|
+| Dead Space (Luke Ross) | uncapped free | 80 | 98 / 538 | 0 % | 62 ms | 35 ms = 2.8 periods | 2.9 % |
+| Dead Space | uncapped cap 70 | 67 | 98 / 527 | 0 % | 41 -> 31 ms | 13 ms = 0.9 | 1.1 % |
+| Avatar (Luke Ross) | uncapped free | 98 | 67-98 / 312-559 | 0 % | 22-61 ms (swinging with load) | 16 ms = 1.6 | 1.0 % |
+| Avatar | uncapped cap 70 | 67 | 84 / 491 | 0 % | 30 ms | 10 ms = 0.7 | 1.8 % |
+| Cyberpunk 2077 (Luke Ross) | uncapped free | 89 | 97 / 532 | 0 % | 61 ms after 25 s | 31 ms = 2.6 | 2.9 % |
+| Cyberpunk 2077 | uncapped cap 70 | 67 | 86 / 493 | 0 % | 33 ms | 11 ms = 0.8 | 1.6 % |
+| Callisto Protocol (UEVR) | uncapped free | 67 (77 with generation off) | 99 / 521 | 5.4 % | 52 ms | 32 ms = 2.2 | 0.8 % |
+| Lies of P (UEVR) | uncapped free | 74, dips to 49 | 98 / 574 | 7-9 % | 49 ms | 30 ms = 2.3 | 2.5 % |
+| Lies of P | half | 50 | 63 / 423 | 4.4 % | | | 1.8 % |
+| Mortal Shell II (UEVR) | uncapped free | 50 | 95 / 509 | 3.4 % | 68 ms | 45 ms = 2.2 | 1.1 % |
+| Mortal Shell II | half | 50 | 90 / 499 | 3.4 % | | | 1.4 % |
+| Carma (UEVR, UE5) | uncapped free | 41 | 96 / 576 | 4.5 % | 80 ms (the ceiling) | 56 ms = 2.3 | 1.5 % |
+| Carma | half | 40, dips to 24 | 96 / 575 | 25 % | | | 4.9 % |
+| Valor Mortis (UEVR, UE5) | uncapped free / cap 70 | 40 / 41 | 97 / 507 | 10 % / 1.2 % (5 min) | 78 ms | 54 ms = 2.3 | 1.2 / 1.6 % |
+| Valor Mortis | half | 41 | 98 / 508 | 16 % | | | 3.5 % |
+| The Sinking City 2 (UEVR, UE5) | half (27 s) | 36 | 98 / 395 | 38 % | | | 2.2 % |
+
+"Repeats" = repeated outputs over all outputs; "frames in flight" = `now - newest` in `fg_uncapped.csv`: how old the newest rendered frame
+already is when an output is made (the game's render queue plus the transfer), in display-side milliseconds and in game periods. Client
+intervals > 15 ms were 1 to 3 % in every mode (30 to 38 % with generation off in yesterday's jittery cases). The flow + synthesis cost
+2.6 to 3.3 ms + 0.4 ms per output on the 5090 at 3552x1600 flow input.
+
+What the night decided:
+
+1. **The latency price of free-running is the game's own render queue, not the generator.** A GPU-bound game keeps 2.2 to 2.8 frames in
+   flight (30 to 56 ms); the lag has to cover that plus its own margin, so it settles at 50 to 80 ms (Dead Space 62, Cyberpunk 61, Mortal
+   Shell 68, Carma at the 80 ms ceiling). Held a little under its GPU-bound rate the queue collapses to under one period (10 to 13 ms) and
+   the lag follows (Dead Space 62 -> 31, Cyberpunk 61 -> 33, Avatar steady at 30). That is what "cap at 70 feels better" is: the cap is a
+   frame-rate limiter in the Reflex sense (the CPU stops running ahead of the GPU), 20 to 30 ms of latency back, and the GPU leaves the
+   97-99 % / 520-576 W power-capped regime (clocks at 2385 MHz in Carma and Lies of P against 2650 elsewhere) for 84-86 % / 490 W.
+2. **The cap must sit relative to the game's rate.** 70 did nothing for Carma and Valor Mortis (40 fps, 2.3 frames in flight, lag 78-80
+   either way); those need about 37. The night's data supports an automatic cap = a little under the sustained app fps while the shim
+   reports most releases late (the GPU-bound signature: 90-96 % late in every free run, 0 % when capped), which is the "90 % of the measured
+   rate" rule the design left open. The user's call (manual toggles are the house rule): the manual knob works and the number per game is
+   now known from the perf line (`app fps` with `releases late` near all).
+3. **Uncapped against half rate** (the "not sure I get better precision" remark): the gain is real where the game is not at 50. Above 50:
+   more rendered frames (Lies of P 74 against 50, Callisto 67, the Luke Ross titles 80-98). Below 50: no half-rate repeats (Carma 25 -> 4.5 %,
+   Valor Mortis 16 -> 1-10 %; The Sinking City 2 at 38 % repeats in half rate is the obvious next uncapped candidate). At exactly 50 (Mortal
+   Shell II) uncapped changes nothing and adds the lag: half rate stays the right mode there, and the headset cannot tell the two apart on
+   interval statistics (1-3 % either way). Smoothness differences will need the flow-vs-vectors A/B once the vectors arrive.
+4. **The lag rule is tight enough.** `lag - frames in flight` was 17 to 30 ms (about two game periods: the envelope's `need` includes the
+   frame's own interval, plus the half-period margin and the attack on spikes), slack p5 3.5-4 ms, p50 8-15 ms: the lag follows what the
+   arrivals need with little to spare. Trimming it buys 5-10 ms at the cost of repeats; the 20-30 ms lever is the cap, the rest is
+   extrapolation. The 80 ms ceiling is just enough for a 40 fps game with 2.3 frames in flight (3.3 periods); below 35 fps it would clamp.
+   The lag reacted to load swings within seconds in Avatar (22 <-> 61 ms with 0-2 repeats), as intended.
+5. Vectors: the tap attached in every DLSS title but copied nothing (fixed, step 3 of the motion-vector note). Luke Ross's mods crash with
+   the fork DLL (the mod hooks NGX itself); anti-cheat titles reject it. The 5-second launches of Dead Space, Cyberpunk and Avatar in the
+   log are those attempts.
+
 ## Next
 
-The headset night decides the automatic lag and whether the cap is needed. Then extrapolation from the vectors (no wait for the later frame:
-the latency of the unthrottled game) and, with it, the lag goes away.
+Vector verdict on real games (the fixed tap), then extrapolation from the vectors (no wait for the later frame: the latency of the
+unthrottled game) and, with it, the lag goes away. The automatic cap is a few lines once the user wants it (rule above).

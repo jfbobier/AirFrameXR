@@ -126,7 +126,7 @@ struct MotionEye {
     uint32_t flags;                 // NVSDK_NGX_DLSS_Feature_Flags: 1 IsHDR, 2 MVLowRes, 4 MVJittered, 8 DepthInverted, 16 DoSharpening, 32 AutoExposure
     uint64_t frame;                 // the stream's evaluate counter
     uint64_t mvHandle, depthHandle; // shared texture handles (0 = none)
-    uint32_t mvFormat, depthFormat; // DXGI_FORMAT of the copies (a depth copy is the typeless twin of the game's depth format)
+    uint32_t mvFormat, depthFormat; // DXGI_FORMAT of the copies (typed: vectors as the game has them, depth as R32_FLOAT / R16_UNORM, the depth plane of packed depth-stencil)
     uint32_t mvWidth, mvHeight, depthWidth, depthHeight;
     uint32_t renderW, renderH, outputW, outputH;   // DLSS input (render) and output (display) sizes
     uint32_t mvX, mvY, depthX, depthY;             // subrect bases

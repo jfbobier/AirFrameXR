@@ -64,12 +64,20 @@ constexpr int kRing = 3;          // copies per stream: the game may evaluate th
 constexpr double kStreamIdleS = 2.0;
 
 // The sharable twin of a texture format: depth formats cannot be shared or copied across devices, their typeless family can.
-inline DXGI_FORMAT SharedFormat(DXGI_FORMAT f) {
+// The format of the shared copy. D3D11 opens a D3D12 shared texture only when it was created with the render-target flag (5090, 2026-10-16:
+// every copy failed E_INVALIDARG with simultaneous access alone), and a render target cannot be typeless-depth or depth-stencil: depth is copied
+// into a typed colour twin (D32 -> R32_FLOAT, D16 -> R16_UNORM; the packed depth-stencil formats as their depth plane on D3D12, not copied on D3D11,
+// where a cross-family copy is not allowed). UNKNOWN = not copied.
+inline DXGI_FORMAT SharedFormat(DXGI_FORMAT f, bool api12) {
     switch (f) {
-    case DXGI_FORMAT_D32_FLOAT: case DXGI_FORMAT_R32_FLOAT: case DXGI_FORMAT_R32_TYPELESS: return DXGI_FORMAT_R32_TYPELESS;
-    case DXGI_FORMAT_D24_UNORM_S8_UINT: case DXGI_FORMAT_R24G8_TYPELESS: case DXGI_FORMAT_R24_UNORM_X8_TYPELESS: return DXGI_FORMAT_R24G8_TYPELESS;
-    case DXGI_FORMAT_D32_FLOAT_S8X24_UINT: case DXGI_FORMAT_R32G8X24_TYPELESS: case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS: return DXGI_FORMAT_R32G8X24_TYPELESS;
-    case DXGI_FORMAT_D16_UNORM: case DXGI_FORMAT_R16_TYPELESS: return DXGI_FORMAT_R16_TYPELESS;
+    case DXGI_FORMAT_D32_FLOAT: case DXGI_FORMAT_R32_FLOAT: case DXGI_FORMAT_R32_TYPELESS: return DXGI_FORMAT_R32_FLOAT;
+    case DXGI_FORMAT_D32_FLOAT_S8X24_UINT: case DXGI_FORMAT_R32G8X24_TYPELESS: case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+        return api12 ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_UNKNOWN;
+    case DXGI_FORMAT_D24_UNORM_S8_UINT: case DXGI_FORMAT_R24G8_TYPELESS: case DXGI_FORMAT_R24_UNORM_X8_TYPELESS: return DXGI_FORMAT_UNKNOWN;
+    case DXGI_FORMAT_D16_UNORM: case DXGI_FORMAT_R16_TYPELESS: case DXGI_FORMAT_R16_UNORM: return DXGI_FORMAT_R16_UNORM;
+    case DXGI_FORMAT_R16G16_TYPELESS: return DXGI_FORMAT_R16G16_FLOAT;
+    case DXGI_FORMAT_R32G32_TYPELESS: return DXGI_FORMAT_R32G32_FLOAT;
+    case DXGI_FORMAT_R16G16B16A16_TYPELESS: return DXGI_FORMAT_R16G16B16A16_FLOAT;
     default: return f;
     }
 }
@@ -142,6 +150,7 @@ public:
     bool Attached() const { return m_attached; }
     uint32_t State() const { return m_state; }
     uint64_t Publications() const { return m_publications; }
+    uint64_t CopyFailures() const { return m_copyFailures; }
     void SetEnabled(bool on) { m_enabled = on; }
 
     // After the frame is composed into `slot` (same context, before its GPU-done event): copies the newest vectors of each eye into the slot's
@@ -244,6 +253,7 @@ private:
             Log("motion vectors: stream %u (%s) render %ux%u output %ux%u mv %s depth %s flags 0x%x scale %.2f %.2f", p->stream, p->api == 12 ? "dx12" : "dx11",
                 p->render_w, p->render_h, p->output_w, p->output_h, p->motion_vectors ? "yes" : "no", p->depth ? "yes" : "no", p->flags, p->mv_scale_x, p->mv_scale_y);
         }
+        s->lastS = visionalvr_ipc::QpcSeconds();   // seen, copied or not: a stream whose copies fail stays known (and logged once) instead of being dropped and recreated
         const int ring = (s->ring + 1) % kRing;
         bool ok;
         if (p->api == 12) {
@@ -263,7 +273,6 @@ private:
             return;
         }
         s->ring = ring;
-        s->lastS = visionalvr_ipc::QpcSeconds();
         visionalvr_ipc::MotionEye& i = s->info;
         i = {};
         i.api = p->api;
@@ -290,12 +299,15 @@ private:
             return false;
         }
         const D3D12_RESOURCE_DESC d = src->GetDesc();
-        if (!c.r12 || c.w != d.Width || c.h != d.Height || c.fmt != SharedFormat(d.Format)) {
+        const DXGI_FORMAT sf = SharedFormat(d.Format, true);
+        if (!c.r12 || c.w != d.Width || c.h != d.Height || c.fmt != sf) {
             c.r12.Reset();
             c.view.Reset();
-            if (d.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || d.SampleDesc.Count != 1 || !m_subDev1) {
+            if (d.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || d.SampleDesc.Count != 1 || !m_subDev1 || sf == DXGI_FORMAT_UNKNOWN) {
                 c.failed = true;
-                Log("motion vectors: %s not copied: dimension %d, samples %u, device1 %d", what, (int)d.Dimension, d.SampleDesc.Count, m_subDev1 ? 1 : 0);
+                m_copyFailures++;
+                Log("motion vectors: %s %ux%u format %u not copied: dimension %d, samples %u, device1 %d, shareable %d", what, (unsigned)d.Width, d.Height, (unsigned)d.Format,
+                    (int)d.Dimension, d.SampleDesc.Count, m_subDev1 ? 1 : 0, sf != DXGI_FORMAT_UNKNOWN);
                 return false;
             }
             ComPtr<ID3D12Device> dev;
@@ -308,25 +320,31 @@ private:
             nd.MipLevels = 1;
             nd.DepthOrArraySize = 1;
             nd.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            nd.Format = SharedFormat(d.Format);
-            nd.Flags = D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS;
+            nd.Format = sf;
+            // render target + simultaneous access: the pair D3D11 accepts on OpenSharedResource1 (bit-exact round trip verified on the 5090 for
+            // R16G16_FLOAT vectors, D32 depth and the depth plane of D32_S8X24, tools/interop_test 2026-10-16)
+            nd.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS;
             D3D12_HEAP_PROPERTIES hp{};
             hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+            const char* step = "CreateCommittedResource";
             HRESULT hr = dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_SHARED, &nd, D3D12_RESOURCE_STATE_COMMON, nullptr, __uuidof(ID3D12Resource),
                                                       (void**)c.r12.ReleaseAndGetAddressOf());
             HANDLE h = nullptr;
             if (SUCCEEDED(hr)) {
+                step = "CreateSharedHandle";
                 hr = dev->CreateSharedHandle(c.r12.Get(), nullptr, GENERIC_ALL, nullptr, &h);
             }
             if (SUCCEEDED(hr)) {
+                step = "OpenSharedResource1";
                 hr = m_subDev1->OpenSharedResource1(h, __uuidof(ID3D11Texture2D), (void**)c.view.ReleaseAndGetAddressOf());
                 CloseHandle(h);
             }
             if (FAILED(hr)) {
                 c.failed = true;
+                m_copyFailures++;
                 c.r12.Reset();
                 c.view.Reset();
-                Log("motion vectors: %s %ux%u format %u: shared copy failed 0x%08x", what, (unsigned)d.Width, d.Height, (unsigned)d.Format, (unsigned)hr);
+                Log("motion vectors: %s %ux%u format %u: shared copy failed at %s 0x%08x", what, (unsigned)d.Width, d.Height, (unsigned)d.Format, step, (unsigned)hr);
                 return false;
             }
             c.w = (uint32_t)d.Width;
@@ -371,19 +389,22 @@ private:
         }
         D3D11_TEXTURE2D_DESC d{};
         tex->GetDesc(&d);
-        if (!c.t11 || c.w != d.Width || c.h != d.Height || c.fmt != SharedFormat(d.Format)) {
+        const DXGI_FORMAT sf = SharedFormat(d.Format, false);
+        if (!c.t11 || c.w != d.Width || c.h != d.Height || c.fmt != sf) {
             c.t11.Reset();
             c.view.Reset();
             ComPtr<ID3D11Device> dev;
             ctx->GetDevice(dev.ReleaseAndGetAddressOf());
-            if (!dev || d.SampleDesc.Count != 1) {
+            if (!dev || d.SampleDesc.Count != 1 || sf == DXGI_FORMAT_UNKNOWN) {
                 c.failed = true;
+                m_copyFailures++;
+                Log("motion vectors: %s %ux%u format %u not copied: samples %u, shareable %d", what, d.Width, d.Height, (unsigned)d.Format, d.SampleDesc.Count, sf != DXGI_FORMAT_UNKNOWN);
                 return false;
             }
             D3D11_TEXTURE2D_DESC nd = d;
             nd.MipLevels = 1;
             nd.ArraySize = 1;
-            nd.Format = SharedFormat(d.Format);
+            nd.Format = sf;
             nd.Usage = D3D11_USAGE_DEFAULT;
             nd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
             nd.CPUAccessFlags = 0;
@@ -406,6 +427,7 @@ private:
             }
             if (FAILED(hr)) {
                 c.failed = true;
+                m_copyFailures++;
                 c.t11.Reset();
                 c.view.Reset();
                 Log("motion vectors: %s %ux%u format %u: shared copy failed 0x%08x", what, d.Width, d.Height, (unsigned)d.Format, (unsigned)hr);
@@ -489,6 +511,7 @@ private:
     std::atomic<bool> m_enabled{true};
     uint32_t m_state = 0;
     uint64_t m_publications = 0;
+    uint64_t m_copyFailures = 0;      // sources whose shared copy could not be made (each logged once)
     D3D12_RESOURCE_STATES m_srcState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;   // what DLSS requires of its inputs
     std::vector<Stream> m_streams;
     SlotTex m_slotTex[visionalvr_ipc::kSlots][2][2];   // [slot][eye][0 vectors, 1 depth]

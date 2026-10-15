@@ -1446,8 +1446,8 @@ namespace {
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
                             m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds);
                     if (m_ngx.Attached()) {
-                        ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, tap %s", m_ngx.ActiveStreams(),
-                                (unsigned long long)m_ngx.Publications(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)");
+                        ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, %llu sources not copied, tap %s", m_ngx.ActiveStreams(),
+                                (unsigned long long)m_ngx.Publications(), (unsigned long long)m_ngx.CopyFailures(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)");
                     }
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
