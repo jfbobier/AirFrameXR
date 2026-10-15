@@ -84,6 +84,7 @@ struct Nvh {
     std::string gpuName;
     ID3D11Texture2D* shared[visionalvr_ipc::kSlots] = {};   // opened shim slots (by slot index)
     uint64_t sharedHandle[visionalvr_ipc::kSlots] = {};
+    std::map<uint64_t, ID3D11Texture2D*> mvShared;            // opened motion-vector / depth companions of the slots (by shared handle)
     std::unique_ptr<KeepAlive> keepAlive;
     int gpuPriority = 0; long gpuPriorityHr = 0;   // IDXGIDevice::SetGPUThreadPriority on the encoder device (0 = not set)
     std::vector<ID3D11Texture2D*> noiseTex;          // noise == 2: independent random frames (nothing for motion search to reuse)
@@ -605,12 +606,42 @@ int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid,
     return 1;
 }
 
+// Opens (once per handle) a motion-vector or depth companion the shim published with a frame (ipc.h MotionEye). The shim keeps one per slot and
+// eye and recreates it when the game's size changes, so the set stays small; it is emptied when it grows past that.
+static ID3D11Texture2D* openMvHandle(Nvh* n, uint64_t handle) {
+    if (!handle) return nullptr;
+    auto it = n->mvShared.find(handle);
+    if (it != n->mvShared.end()) return it->second;
+    if (n->mvShared.size() >= 4 * visionalvr_ipc::kSlots) { for (auto& kv : n->mvShared) if (kv.second) kv.second->Release(); n->mvShared.clear(); }
+    ID3D11Texture2D* t = nullptr;
+    if (FAILED(n->render->GetDevice()->OpenSharedResource((HANDLE)(uintptr_t)handle, __uuidof(ID3D11Texture2D), (void**)&t))) t = nullptr;
+    n->mvShared[handle] = t;   // a failure is remembered too (the handle is dead until the shim replaces it)
+    return t;
+}
+
 int nvh_fg_ingest(void* hh, void* i, uint32_t slot, const float* q_render8, char* err, int errlen) {
     auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
     if (!n || !n->fg) { seterr(err, errlen, "frame generation off"); return -1; }
     ID3D11Texture2D* src = openSlot(n, ipc, slot, err, errlen);
     if (!src) return -1;
-    return n->fg->Ingest(src, q_render8, &ipc->state->host.eyeFovTan[0][0], err, errlen);
+    const int r = n->fg->Ingest(src, q_render8, &ipc->state->host.eyeFovTan[0][0], err, errlen);
+    // the game's DLSS vectors published with this slot (ipc.h MotionSlot), attached to the frame just taken into the history
+    if (n->fg->HasFrame() && slot < (uint32_t)visionalvr_ipc::kSlots) {
+        const visionalvr_ipc::MotionSlot ms = ipc->state->shim.motion[slot];
+        for (int e = 0; e < 2; e++) {
+            const auto& me = ms.eye[e];
+            if (!me.valid || !me.mvHandle) continue;
+            ID3D11Texture2D* mv = openMvHandle(n, me.mvHandle);
+            if (!mv) { n->fg->stats.mvErrors++; continue; }
+            FrameGenVectors v;
+            v.api = me.api; v.flags = me.flags; v.frame = me.frame; v.renderW = me.renderW; v.renderH = me.renderH; v.outputW = me.outputW; v.outputH = me.outputH;
+            v.mvX = me.mvX; v.mvY = me.mvY; v.depthX = me.depthX; v.depthY = me.depthY;
+            v.jitterX = me.jitterX; v.jitterY = me.jitterY; v.mvScaleX = me.mvScaleX; v.mvScaleY = me.mvScaleY; v.reset = me.reset;
+            char e2[160];
+            n->fg->IngestVectors(e, mv, openMvHandle(n, me.depthHandle), v, e2, sizeof e2);
+        }
+    }
+    return r;
 }
 
 double nvh_fg_encode(void* hh, void* i, int mode, double t, const float* q_out4, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
@@ -642,10 +673,22 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
     for (const char* c = s.nvofInfo; *c && k < 190; c++) { if (*c == '"' || *c == '\\') info[k++] = ' '; else info[k++] = *c; }
     info[k] = 0;
     return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"synths\":%llu,\"reals\":%llu,\"copies\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
-                    "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d]}",
+                    "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d],"
+                    "\"mv\":{\"frames\":%llu,\"eyes\":%llu,\"used_eyes\":%llu,\"depth\":%llu,\"errors\":%llu,\"size\":[%d,%d],\"format\":%u,\"flags\":%u,\"api\":%u,\"scale\":[%.3f,%.3f]}}",
                     s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.synths, (unsigned long long)s.reals, (unsigned long long)s.copies,
                     (unsigned long long)s.flowErrors, (unsigned long long)s.renderErrors, s.lastFlowMs, s.flowN ? s.flowMsSum / s.flowN : 0.0, s.lastSynthMs,
-                    s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH);
+                    s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH,
+                    (unsigned long long)s.mvFrames, (unsigned long long)s.mvEyes, (unsigned long long)s.mvUsedEyes, (unsigned long long)s.mvDepth, (unsigned long long)s.mvErrors, s.mvW, s.mvH, s.mvFormat, s.mvFlags, s.mvApi,
+                    s.mvScale[0], s.mvScale[1]);
+}
+
+void nvh_ipc_set_game_mv(void* i, uint32_t on) { ((Ipc*)i)->state->host.gameMotionVectors = on ? 1u : 0u; }
+
+void nvh_ipc_motion_tap(void* i, uint32_t* tap, uint32_t* streams, uint64_t* publications) {
+    const auto& s = ((Ipc*)i)->state->shim;
+    if (tap) *tap = s.motionTap;
+    if (streams) *streams = s.motionStreams;
+    if (publications) *publications = s.motionPublications;
 }
 
 void nvh_ipc_set_user(void* i, float user_gamma, int debug_on, const wchar_t* debug_dir) {
@@ -674,6 +717,8 @@ void nvh_release_shared(void* hh) {
     n->fgLast = false;
     for (auto& f : n->ffr) f.reset();
     for (int k = 0; k < visionalvr_ipc::kSlots; k++) { if (n->shared[k]) { n->shared[k]->Release(); n->shared[k] = nullptr; } n->sharedHandle[k] = 0; }
+    for (auto& kv : n->mvShared) if (kv.second) kv.second->Release();
+    n->mvShared.clear();
 }
 
 void nvh_ipc_shim_stats(void* i, uint32_t* submit_mode, uint32_t* ts_matched, uint32_t* ts_fallback) {

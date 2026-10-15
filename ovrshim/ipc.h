@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 25;
+constexpr uint32_t kVersion = 26;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -107,6 +107,34 @@ struct HostToShim {
     // other compositor boundary; the host interpolates the frame in between from the optical flow of the last two rendered frames) and its
     // predicted display time moves one display period later (an interpolated frame is shown before each rendered one). 0 or 1 = every boundary.
     uint32_t appPeriodMul;
+    // Game motion vectors (docs/MOTION_VECTORS.md, ovrshim/ngxtap.h): 1 = when the VisionALVR-OptiScaler provider is loaded in the game, copy
+    // the motion vectors and depth of every DLSS evaluate and publish them with the frame (ShimToHost::motion). 0 = leave the tap idle.
+    uint32_t gameMotionVectors;
+};
+
+// The DLSS inputs of one eye for the frame in a ring slot: the shim's copies of the motion vectors and depth the game handed DLSS,
+// as legacy shared D3D11 textures (one pair per slot and eye, reused while their size holds; the host opens them like the slots).
+// Sizes follow NGX: the vectors cover renderW x renderH pixels from (mvX, mvY) of a mvWidth x mvHeight texture; one vector = the
+// pixel's displacement from the previous frame in the vectors' own pixels times mvScale (NGX convention: where the pixel came from).
+struct MotionEye {
+    uint32_t valid;                 // 1: this eye's vectors exist for the frame in the slot
+    uint32_t api;                   // 11 or 12: the API the game evaluated DLSS in
+    uint32_t stream;                // DLSS feature id in the game (one per eye in VR titles)
+    uint32_t flags;                 // NVSDK_NGX_DLSS_Feature_Flags: 1 IsHDR, 2 MVLowRes, 4 MVJittered, 8 DepthInverted, 16 DoSharpening, 32 AutoExposure
+    uint64_t frame;                 // the stream's evaluate counter
+    uint64_t mvHandle, depthHandle; // shared texture handles (0 = none)
+    uint32_t mvFormat, depthFormat; // DXGI_FORMAT of the copies (a depth copy is the typeless twin of the game's depth format)
+    uint32_t mvWidth, mvHeight, depthWidth, depthHeight;
+    uint32_t renderW, renderH, outputW, outputH;   // DLSS input (render) and output (display) sizes
+    uint32_t mvX, mvY, depthX, depthY;             // subrect bases
+    float jitterX, jitterY, mvScaleX, mvScaleY;    // NGX jitter offset (render pixels) and MV scale
+    int32_t reset;                  // the game asked for a history reset (camera cut)
+    uint32_t pad;
+};
+struct MotionSlot {
+    uint32_t streams;               // DLSS streams active in the game (2 = one per eye, 1 = a single evaluate: eye[0] only)
+    uint32_t pad;
+    MotionEye eye[2];               // left, right (streams ordered by first appearance)
 };
 
 struct Haptic {
@@ -139,6 +167,11 @@ struct ShimToHost {
     uint64_t releasesLate;         // releases whose computed time was already past (app slower than a display period: free-running)
     uint64_t gateHolds;            // releases the intake gate skipped for a standing host queue (see HostToShim::intakeGate)
     uint64_t gateSuppressed;       // standing queue seen while the gate was quiet after a skip (its effect still in flight)
+    // Game motion vectors (HostToShim::gameMotionVectors): tap state and the per-slot publications (written with the frame fields).
+    uint32_t motionTap;            // 0 no provider in the game, 1 attached, 2 provider found with another ABI version, 3 attach failed
+    uint32_t motionStreams;        // DLSS streams seen in the last two seconds
+    uint64_t motionPublications;   // DLSS evaluates the tap has seen
+    MotionSlot motion[kSlots];
 };
 
 struct IpcState {

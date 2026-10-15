@@ -19,8 +19,23 @@ struct FrameGenConfig {
     float copyDeg = 0.02f;    // a rendered frame whose stamp orientation is within this angle of its render orientation is copied, not resampled
 };
 
+// The game's DLSS motion vectors of one eye, as published with a rendered frame (ipc.h MotionEye, docs/MOTION_VECTORS.md). NGX conventions:
+// the vectors cover renderW x renderH pixels from (mvX, mvY) of the texture; a vector is the displacement from the previous frame in the
+// vectors' own pixels times mvScale (where the pixel came from); the colour was rendered with the jitter offset (render pixels).
+struct FrameGenVectors {
+    uint32_t api = 0, flags = 0;                            // 11 / 12; NVSDK_NGX_DLSS_Feature_Flags (2 MVLowRes, 4 MVJittered, 8 DepthInverted)
+    uint64_t frame = 0;                                     // the game's evaluate counter for this eye's DLSS feature
+    uint32_t renderW = 0, renderH = 0, outputW = 0, outputH = 0;
+    uint32_t mvX = 0, mvY = 0, depthX = 0, depthY = 0;
+    float jitterX = 0, jitterY = 0, mvScaleX = 1, mvScaleY = 1;
+    int reset = 0;
+};
+
 struct FrameGenStats {
     uint64_t ingests = 0, pairs = 0, synths = 0, reals = 0, copies = 0, flowErrors = 0, renderErrors = 0;
+    uint64_t mvFrames = 0, mvEyes = 0, mvDepth = 0, mvErrors = 0;   // game motion vectors: frames with vectors for at least one eye, eye ingests, with depth, failures
+    uint64_t mvUsedEyes = 0;                                         // eye passes synthesised from the game's vectors (the flow fills what they do not cover)
+    int mvW = 0, mvH = 0; uint32_t mvFormat = 0, mvFlags = 0, mvApi = 0; float mvScale[2] = {1.f, 1.f};   // the last vectors seen
     float lastFlowMs = 0, lastSynthMs = 0, lastIngestMs = 0;   // GPU time of the last flow pass (prep + engine), the last output pass, the last ingest copy
     double flowMsSum = 0, synthMsSum = 0; uint64_t flowN = 0, synthN = 0;
     int flowW = 0, flowH = 0, blocksW = 0, blocksH = 0;
@@ -37,6 +52,9 @@ public:
     // Takes a rendered frame into the history (previous <- current <- src) and computes the flow between the two. qRender8: the per-eye
     // orientation (x y z w) the frame was rendered with; fov8: per eye {l, r, u, d} tangents (the host's eye FoV). 1 = two frames exist, 0 = one, -1 error.
     int Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen);
+    // Attaches the game's DLSS vectors (and depth, may be null) of one eye to the frame just ingested: copies them into this object's own
+    // textures (the shim reuses its slot companions). VISIONALVR_FG_MV_DUMP=<dir> writes the first ingests as PPM images for a look.
+    int IngestVectors(int eye, ID3D11Texture2D* mv, ID3D11Texture2D* depth, const FrameGenVectors& v, char* err, int errlen);
     // Renders the output for a boundary: mode 0 = the newest rendered frame rotated to qOut4, 1 = the frame at fraction t (0..1) between the
     // previous and the newest rendered frame (midpoint = 0.5), rotated to qOut4. Returns the output texture (owned by this object), nullptr on error.
     ID3D11Texture2D* Render(int mode, float t, const float* qOut4, const float* fov8, char* err, int errlen);

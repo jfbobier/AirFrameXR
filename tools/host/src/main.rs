@@ -76,6 +76,8 @@ struct Args {
     /// between from the optical flow of the last two rendered frames. None = settings file (`video.frame_gen`, default off); env
     /// VISIONALVR_FRAME_GEN=1/0 and `--frame-gen on|off` win over it.
     frame_gen: Option<bool>,
+    /// the game's DLSS motion vectors (docs/MOTION_VECTORS.md): the shim copies them with every frame when the provider is loaded; settings `video.game_motion_vectors`
+    game_motion_vectors: bool,
     fg_flow_scale: f64,
     fg_perf: i32,
     fg_grid: i32,
@@ -165,6 +167,7 @@ fn parse_args() -> Result<Args, String> {
         boundary_offset_ms: 0.0,
         gpu_sched_class: 5,
         frame_gen: None,
+        game_motion_vectors: true,
         fg_flow_scale: 0.5,
         fg_perf: 20,
         fg_grid: 4,
@@ -461,6 +464,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if a.frame_gen.is_none() {
         a.frame_gen = st.frame_gen;
+    }
+    if let Some(v) = st.game_motion_vectors {
+        a.game_motion_vectors = v;
     }
     if let Some(v) = st.frame_gen_flow_scale {
         a.fg_flow_scale = v.clamp(0.1, 1.0);
@@ -821,6 +827,8 @@ mod nvh {
         pub fn nvh_fg_encode(nvh: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, q_out4: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_fg_stats(nvh: *mut c_void, buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_ipc_set_app_period_mul(ipc: *mut c_void, mul: u32);
+        pub fn nvh_ipc_set_game_mv(ipc: *mut c_void, on: u32);
+        pub fn nvh_ipc_motion_tap(ipc: *mut c_void, tap: *mut u32, streams: *mut u32, publications: *mut u64);
         pub fn nvh_qpc_seconds() -> f64;
         pub fn nvh_encode_green(nvh: *mut c_void, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_ipc_shim_alive(ipc: *mut c_void) -> i32;
@@ -1659,6 +1667,7 @@ fn main() {
             p.set_frame_gen(fg_active, args.fg_t);
         }
         unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active { 2 } else { 1 }) };
+        unsafe { nvh::nvh_ipc_set_game_mv(ipc, if args.game_motion_vectors { 1 } else { 0 }) };
         p.start();
         event(origin, "pacing_config", json!({ "send_pacing": args.send_pacing.name(), "running_start_ms": args.running_start_ms,
             "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6,
@@ -2023,6 +2032,7 @@ fn main() {
         a.wrapping_add(b)
     };
     let mut status_at = Instant::now();
+    let mut motion_tap_seen = (0u32, 0u32);   // (tap state, streams) last reported: the shim's DLSS motion-vector tap (docs/MOTION_VECTORS.md)
     struct BenchState {
         i: usize,
         start: Instant,
@@ -2144,6 +2154,16 @@ fn main() {
             }));
             (st_frames, st_bytes, st_submitted, st_lost) = (frames, bytes, submitted, lost);
             status_at = Instant::now();
+            if !ipc.is_null() {
+                let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
+                unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
+                if (tap, streams) != motion_tap_seen {
+                    motion_tap_seen = (tap, streams);
+                    let state = match tap { 0 => "no provider in the game", 1 => "attached", 2 => "provider has another ABI version", _ => "provider refused the consumer" };
+                    logs::general("INFO", &format!("game motion vectors: {state}, {streams} DLSS stream(s), {pubs} evaluates seen"));
+                    event(origin, "motion_tap", json!({ "state": tap, "streams": streams, "evaluates": pubs }));
+                }
+            }
         }
         if args.shim {
             // Connect: ALVR persisted the negotiated stream (openvr_config) before it reported ClientConnected, so the encoder is

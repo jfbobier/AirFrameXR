@@ -47,12 +47,16 @@ SCENARIOS = {
                     "note": "ideal timing, light app, frame generation on: the generator's null case (expect CLEAN + SMOOTH)"},
     "steady":      {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25",
                     "note": "ideal timing, light app, generator off: the motion metric's reference (the rig's own empty boundaries, ~6 %, read as frozen periods)"},
+    # game motion vectors (docs/MOTION_VECTORS.md): the probe stands in for the DLSS provider (XR_PROBE_MV=synthetic, known vector pattern), the shim's
+    # tap copies them with every frame, the host attaches them to the generator's history and dumps the first ones (mv_*.ppm / .txt in the results)
+    "steady_mv":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MV": "synthetic", "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_MV_DUMP": "{rd}",
+                    "note": "steady_fg + synthetic DLSS vectors from the probe: the tap's plumbing (check mv_*.ppm against the probe's formula, fg stats mv.frames)"},
 }
 
 
 def host_cmd(rd, env, seconds):
     lines = ["@echo off"] + [f"set VISIONALVR_SIM_{k}={v}" for k, v in env.items() if not (k.startswith("ENV:") or k.startswith("PROBE:"))] \
-        + [f"set {k[4:]}={v}" for k, v in env.items() if k.startswith("ENV:")] + [
+        + [f"set {k[4:]}={str(v).replace('{rd}', rd)}" for k, v in env.items() if k.startswith("ENV:")] + [
         f'"{live.INSTALL}\\{SIMEXE}" --install-dir "{live.INSTALL}" --shim --simrig {rd}\\out --seconds {seconds + 90} --debug --connect-timeout 30 --report {rd}\\host_report.json > {rd}\\host_stdout.txt 2>&1']
     return lines
 

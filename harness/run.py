@@ -106,7 +106,7 @@ def build(what):
             continue
         if w == "shim":      # OVRShim: fork of VDXR's OVRNull (ovrshim/), built next to it in the builder's VDXR checkout
             lib.b_run("if not exist _tmp\\ovrshim mkdir _tmp\\ovrshim")
-            for f in ("driver.cpp", "ipc.h", "ipc_win.h", "constantsbuffer.h", "layerconstants.h", "ReprojectVS.hlsl", "ReprojectPS.hlsl", "LayerVS.hlsl", "LayerPS.hlsl", "LayerCubePS.hlsl"):
+            for f in ("driver.cpp", "ipc.h", "ipc_win.h", "ngxtap.h", "constantsbuffer.h", "layerconstants.h", "ReprojectVS.hlsl", "ReprojectPS.hlsl", "LayerVS.hlsl", "LayerPS.hlsl", "LayerCubePS.hlsl"):
                 lib.b_put(lib.ROOT / "ovrshim" / f, f"_tmp/ovrshim/{f}")
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage11_ovrshim.ps1"], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")

@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace {
 const char* kShader = R"(
@@ -25,12 +26,15 @@ cbuffer CB : register(b0) {
     float4 eyeRect;         // x: u0 of this eye in the SBS textures, y: u width, z: full-res SBS width (px), w: height (px)
     float4 flowP;           // x, y: flow input scale (small / full), z: grid, w: t
     int4   blocks;          // x0 y0 x1 y1: block bounds of this eye in the flow texture (inclusive)
-    float4 mode;            // x: pass mode, y: max flow (full-res px), z: confidence gain, w: unused
+    float4 mode;            // x: pass mode, y: max flow (full-res px), z: confidence gain, w: 1 = the game's vectors are bound (t4) for this eye
+    float4 mvRect;          // game vectors: x, y: first texel of the used rectangle, z, w: its size (texels; the vectors are in these pixels)
+    float4 mvInfo;          // x, y: unused, z, w: NGX MV scale
 };
 Texture2D cur : register(t0);
 Texture2D prev : register(t1);
 Texture2D<int2> flow : register(t2);
 Texture2D<uint> cost : register(t3);
+Texture2D<float4> mvec : register(t4);
 SamplerState smp : register(s0);
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 VSOut VS(uint id : SV_VertexID) {
@@ -107,6 +111,25 @@ float3 fetchCR(Texture2D tex, float2 uvS) {
     w = w12.x * w3.y;  r += tex.SampleLevel(smp, clamp(float2(t12.x, t3.y), lo, hi), 0).rgb * w;  wsum += w;
     return saturate(r / wsum);
 }
+// The game's motion vector (docs/MOTION_VECTORS.md) at an eye-local uv of the current frame B, as the residual backward flow in B's camera in
+// full-res pixels (what flowAt gives from the optical flow): NGX vectors point from the pixel to where it was in the previous frame A, in
+// the vectors' own pixels times the scale, and include the camera motion; the point in A is rotated into B's camera (the transpose of
+// M_prev) and the flow is the displacement from there to the pixel. false where there is no usable vector (outside the view, out of range).
+bool vecFlowAt(float2 uvB, out float2 f) {
+    f = float2(0, 0);
+    int2 tx = int2(floor(mvRect.xy + uvB * mvRect.zw));
+    tx = clamp(tx, int2(mvRect.xy), int2(mvRect.xy + mvRect.zw) - int2(1, 1));
+    float2 mv = mvec.Load(int3(tx, 0)).xy * mvInfo.zw;
+    if (any(isnan(mv)) || any(abs(mv) > mvRect.zw)) return false;
+    float2 uvA = uvB + mv / mvRect.zw;
+    if (any(uvA < 0) || any(uvA > 1)) return false;
+    float3 dA = dirOf(uvA);
+    float3 dB = float3(pA.x * dA.x + pB.x * dA.y + pC.x * dA.z, pA.y * dA.x + pB.y * dA.y + pC.y * dA.z, pA.z * dA.x + pB.z * dA.y + pC.z * dA.z);
+    float2 uvAinB;
+    if (!projectTo(dB, uvAinB)) return false;
+    f = uvToPx(uvAinB) - uvToPx(uvB);
+    return length(f) <= mode.y;
+}
 // the previous frame at a point given in the current camera (eye-local uv)
 bool samplePrev(float2 uvCur, out float3 c) {
     float2 uvP;
@@ -125,7 +148,9 @@ float4 PSOut(VSOut i) : SV_Target {
     bool havePrev = samplePrev(uvB, prevHere);
     float3 stable = havePrev ? lerp(prevHere, curHere, t) : curHere;
     float2 pB = uvToPx(uvB);
-    float2 f = flowAt(pB);
+    float2 f;
+    bool vec = mode.w > 0.5 && vecFlowAt(uvB, f);   // the game's vectors where they exist, the optical flow elsewhere
+    if (!vec) f = flowAt(pB);
     float2 uvC = pxToUv(pB - f * t);
     float2 uvPb = pxToUv(pB + f * (1 - t));
     float3 pc;
@@ -135,7 +160,7 @@ float4 PSOut(VSOut i) : SV_Target {
     float3 cc = fetchCR(cur, sbs(uvC));
     float3 mid = lerp(pc, cc, t);
     float dis = max(abs(pc.r - cc.r), max(abs(pc.g - cc.g), abs(pc.b - cc.b)));
-    float conf = saturate(1 - dis * mode.z) * saturate(1 - costAt(pB));
+    float conf = saturate(1 - dis * mode.z) * (vec ? 1.0 : saturate(1 - costAt(pB)));
     return float4(lerp(stable, mid, conf), 1);
 }
 )";
@@ -148,6 +173,8 @@ struct Cb {
     float flowP[4];
     int blocks[4];
     float mode[4];
+    float mvRect[4];
+    float mvInfo[4];
 };
 
 void qmatRow(const float* q, double m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w)
@@ -181,6 +208,13 @@ struct FrameGen::Impl {
     // frame history: two copies of rendered frames and their per-eye render orientations
     ID3D11Texture2D* real[2] = {}; ID3D11ShaderResourceView* realSrv[2] = {};
     float realQ[2][8] = {};
+    // the game's DLSS vectors (and depth) per history frame and eye, when the shim published them with the frame (ipc.h MotionSlot)
+    ID3D11Texture2D* mvTex[2][2] = {}; ID3D11ShaderResourceView* mvSrv[2][2] = {};
+    ID3D11Texture2D* depthTex[2][2] = {};
+    bool mvValid[2][2] = {};
+    FrameGenVectors mvInfo[2][2] = {};
+    int mvDumps = 0; const char* mvDumpDir = nullptr;
+    bool useVectors = true;           // VISIONALVR_FG_USE_MV=0: ingest the vectors but synthesise from the flow alone (A/B)
     int cur = 0;                      // index of the newest rendered frame in real[]
     DXGI_FORMAT fmt = DXGI_FORMAT_UNKNOWN;
     ID3D11RenderTargetView* outRtv = nullptr;
@@ -211,6 +245,7 @@ FrameGen::~FrameGen() {
     }
     if (I.dll) FreeLibrary(I.dll);
     for (int k = 0; k < 2; k++) { rel(I.realSrv[k]); rel(I.real[k]); rel(I.flowInRtv[k]); rel(I.flowIn[k]); }
+    for (int k = 0; k < 2; k++) for (int e = 0; e < 2; e++) { rel(I.mvSrv[k][e]); rel(I.mvTex[k][e]); rel(I.depthTex[k][e]); }
     rel(I.flowOutSrv); rel(I.flowOut); rel(I.costSrv); rel(I.costTex); rel(I.outRtv); rel(m_out);
     rel(I.vs); rel(I.psPrep); rel(I.psOut); rel(I.cb); rel(I.smp); rel(I.qDisjoint); rel(I.qDisjointR);
     for (auto& q : I.qT) rel(q);
@@ -219,6 +254,7 @@ FrameGen::~FrameGen() {
 
 bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errlen) {
     Impl& I = *m_i;
+    if (const char* u = getenv("VISIONALVR_FG_USE_MV")) I.useVectors = atoi(u) != 0;
     I.cfg = cfg;
     m_w = w; m_h = h;
     // shaders
@@ -341,6 +377,7 @@ int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* f
     if (!stats.nvofReady) { seterr(err, errlen, "frame generation not initialised"); return -1; }
     if (!ensureFrames(src, err, errlen)) return -1;
     const int next = m_have == 0 ? 0 : 1 - I.cur;
+    I.mvValid[next][0] = I.mvValid[next][1] = false;   // vectors arrive with IngestVectors right after, or not at all for this frame
     m_ctx->CopyResource(I.real[next], src);
     memcpy(I.realQ[next], qRender8, sizeof(float) * 8);
     memcpy(I.fov8, fov8, sizeof(float) * 8);
@@ -396,6 +433,102 @@ int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* f
     return 1;
 }
 
+// A copy of `src` in `dst` (recreated when the size or format differs), shader-readable; `srv` optional.
+static bool copyLike(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Texture2D* src, ID3D11Texture2D*& dst, ID3D11ShaderResourceView** srv, char* err, int errlen) {
+    D3D11_TEXTURE2D_DESC sd{}; src->GetDesc(&sd);
+    if (dst) {
+        D3D11_TEXTURE2D_DESC dd{}; dst->GetDesc(&dd);
+        if (dd.Width != sd.Width || dd.Height != sd.Height || dd.Format != sd.Format) { rel(dst); if (srv) rel(*srv); }
+    }
+    if (!dst) {
+        D3D11_TEXTURE2D_DESC d = sd;
+        d.MipLevels = 1; d.ArraySize = 1; d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_SHADER_RESOURCE; d.CPUAccessFlags = 0; d.MiscFlags = 0;
+        HRESULT hr = dev->CreateTexture2D(&d, nullptr, &dst);
+        if (FAILED(hr)) { char b[96]; snprintf(b, sizeof b, "vector texture %ux%u format %u: 0x%08x", d.Width, d.Height, (unsigned)d.Format, (unsigned)hr); seterr(err, errlen, b); return false; }
+        if (srv) {
+            // typeless depth copies get a readable view; everything else its own format
+            D3D11_SHADER_RESOURCE_VIEW_DESC vd{}; vd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; vd.Texture2D.MipLevels = 1;
+            vd.Format = d.Format == DXGI_FORMAT_R32_TYPELESS ? DXGI_FORMAT_R32_FLOAT : d.Format == DXGI_FORMAT_R24G8_TYPELESS ? DXGI_FORMAT_R24_UNORM_X8_TYPELESS
+                      : d.Format == DXGI_FORMAT_R32G8X24_TYPELESS ? DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS : d.Format == DXGI_FORMAT_R16_TYPELESS ? DXGI_FORMAT_R16_UNORM : d.Format;
+            if (FAILED(dev->CreateShaderResourceView(dst, &vd, srv))) *srv = nullptr;
+        }
+    }
+    ctx->CopyResource(dst, src);
+    return true;
+}
+
+static float halfToFloat(uint16_t h) {
+    const uint32_t s = (h >> 15) & 1, e = (h >> 10) & 0x1f, m = h & 0x3ff;
+    float v;
+    if (e == 0) v = ldexpf((float)m, -24);
+    else if (e == 31) v = m ? NAN : INFINITY;
+    else v = ldexpf((float)(m + 1024), (int)e - 25);
+    return s ? -v : v;
+}
+
+// Debug look at the vectors (VISIONALVR_FG_MV_DUMP=<dir>): mv_<n>_eye<e>.ppm with R/G = 128 + 4 * (vx, vy) in texture pixels, B = 128; the
+// sidecar .txt holds the parameters. A GPU stall (Map) each time: the first few ingests only.
+static void dumpVectors(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const FrameGenVectors& v, const char* dir, int n, int eye) {
+    D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
+    if (d.Format != DXGI_FORMAT_R16G16_FLOAT && d.Format != DXGI_FORMAT_R32G32_FLOAT) return;
+    D3D11_TEXTURE2D_DESC sd = d; sd.Usage = D3D11_USAGE_STAGING; sd.BindFlags = 0; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; sd.MiscFlags = 0;
+    ID3D11Texture2D* st = nullptr;
+    if (FAILED(dev->CreateTexture2D(&sd, nullptr, &st))) return;
+    ctx->CopyResource(st, tex);
+    D3D11_MAPPED_SUBRESOURCE m{};
+    if (SUCCEEDED(ctx->Map(st, 0, D3D11_MAP_READ, 0, &m))) {
+        char path[520]; snprintf(path, sizeof path, "%s/mv_%d_eye%d.ppm", dir, n, eye);
+        if (FILE* f = fopen(path, "wb")) {
+            fprintf(f, "P6\n%u %u\n255\n", d.Width, d.Height);
+            std::vector<unsigned char> row(d.Width * 3);
+            for (UINT y = 0; y < d.Height; y++) {
+                const unsigned char* src = (const unsigned char*)m.pData + y * m.RowPitch;
+                for (UINT x = 0; x < d.Width; x++) {
+                    float vx, vy;
+                    if (d.Format == DXGI_FORMAT_R16G16_FLOAT) { const uint16_t* p = (const uint16_t*)src + x * 2; vx = halfToFloat(p[0]); vy = halfToFloat(p[1]); }
+                    else { const float* p = (const float*)src + x * 2; vx = p[0]; vy = p[1]; }
+                    auto q = [](float a) { a = 128.f + 4.f * a; return (unsigned char)(a < 0 ? 0 : a > 255 ? 255 : a); };
+                    row[x * 3] = q(vx); row[x * 3 + 1] = q(vy); row[x * 3 + 2] = 128;
+                }
+                fwrite(row.data(), 1, row.size(), f);
+            }
+            fclose(f);
+        }
+        snprintf(path, sizeof path, "%s/mv_%d_eye%d.txt", dir, n, eye);
+        if (FILE* f = fopen(path, "w")) {
+            fprintf(f, "api %u flags 0x%x frame %llu texture %ux%u format %u render %ux%u output %ux%u mv base %u,%u depth base %u,%u jitter %.4f %.4f scale %.4f %.4f reset %d\n",
+                    v.api, v.flags, (unsigned long long)v.frame, d.Width, d.Height, (unsigned)d.Format, v.renderW, v.renderH, v.outputW, v.outputH, v.mvX, v.mvY, v.depthX, v.depthY,
+                    v.jitterX, v.jitterY, v.mvScaleX, v.mvScaleY, v.reset);
+            fclose(f);
+        }
+        ctx->Unmap(st, 0);
+    }
+    st->Release();
+}
+
+int FrameGen::IngestVectors(int eye, ID3D11Texture2D* mv, ID3D11Texture2D* depth, const FrameGenVectors& v, char* err, int errlen) {
+    Impl& I = *m_i;
+    if (eye < 0 || eye > 1 || !mv) { seterr(err, errlen, "bad vectors"); stats.mvErrors++; return -1; }
+    if (m_have < 1) { seterr(err, errlen, "no frame to attach the vectors to"); stats.mvErrors++; return -1; }
+    if (!copyLike(m_dev, m_ctx, mv, I.mvTex[I.cur][eye], &I.mvSrv[I.cur][eye], err, errlen)) { stats.mvErrors++; return -1; }
+    bool hasDepth = false;
+    if (depth) {
+        char e2[128];
+        hasDepth = copyLike(m_dev, m_ctx, depth, I.depthTex[I.cur][eye], nullptr, e2, sizeof e2);
+    }
+    I.mvValid[I.cur][eye] = true;
+    I.mvInfo[I.cur][eye] = v;
+    stats.mvEyes++;
+    if (hasDepth) stats.mvDepth++;
+    if (eye == 0 || !I.mvValid[I.cur][0]) stats.mvFrames++;
+    D3D11_TEXTURE2D_DESC d{}; mv->GetDesc(&d);
+    stats.mvW = (int)d.Width; stats.mvH = (int)d.Height; stats.mvFormat = (uint32_t)d.Format; stats.mvFlags = v.flags; stats.mvApi = v.api;
+    stats.mvScale[0] = v.mvScaleX; stats.mvScale[1] = v.mvScaleY;
+    if (I.mvDumps == 0 && !I.mvDumpDir) { const char* dd = getenv("VISIONALVR_FG_MV_DUMP"); I.mvDumpDir = dd && *dd ? _strdup(dd) : ""; }
+    if (I.mvDumpDir && *I.mvDumpDir && I.mvDumps < 6) { dumpVectors(m_dev, m_ctx, I.mvTex[I.cur][eye], v, I.mvDumpDir, I.mvDumps / 2, eye); I.mvDumps++; }
+    return 1;
+}
+
 ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const float* fov8, char* err, int errlen) {
     Impl& I = *m_i;
     if (m_have < 1 || !m_out) { seterr(err, errlen, "frame generation: no rendered frame yet"); return nullptr; }
@@ -426,6 +559,18 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const f
     m_ctx->PSSetShaderResources(0, 4, srvs);
     for (int e = 0; e < 2; e++) {
         Cb c{};
+        // the game's vectors of the current frame for this eye (docs/MOTION_VECTORS.md), when the shim published them
+        ID3D11ShaderResourceView* mvSrv = (mode == 1 && I.useVectors && I.mvValid[I.cur][e]) ? I.mvSrv[I.cur][e] : nullptr;
+        m_ctx->PSSetShaderResources(4, 1, &mvSrv);
+        if (mvSrv) {
+            const FrameGenVectors& v = I.mvInfo[I.cur][e];
+            const bool lowRes = (v.flags & 2u) != 0;   // MVLowRes: vectors at the render size, else at the output size
+            c.mvRect[0] = (float)v.mvX; c.mvRect[1] = (float)v.mvY;
+            c.mvRect[2] = (float)(lowRes ? v.renderW : v.outputW); c.mvRect[3] = (float)(lowRes ? v.renderH : v.outputH);
+            c.mvInfo[2] = v.mvScaleX; c.mvInfo[3] = v.mvScaleY;
+            c.mode[3] = 1.f;
+            stats.mvUsedEyes++;
+        }
         float m[9];
         relRot(I.realQ[I.cur] + e * 4, qOut4, m);           // direction in the output (stamp) view -> the current frame's view
         rows(m, c.oA, c.oB, c.oC);
@@ -442,7 +587,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const f
         m_ctx->RSSetViewports(1, &vp);
         m_ctx->Draw(3, 0);
     }
-    ID3D11ShaderResourceView* nulls[4] = {}; m_ctx->PSSetShaderResources(0, 4, nulls);
+    ID3D11ShaderResourceView* nulls[5] = {}; m_ctx->PSSetShaderResources(0, 5, nulls);
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     m_ctx->End(I.qT[3]);
     m_ctx->End(I.qDisjointR);
@@ -467,4 +612,5 @@ void FrameGen::CollectTimings() {
 
 void FrameGen::ResetHistory() {
     m_have = 0;
+    for (int k = 0; k < 2; k++) m_i->mvValid[k][0] = m_i->mvValid[k][1] = false;
 }

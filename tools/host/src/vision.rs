@@ -59,6 +59,8 @@ pub struct Settings {
     pub frame_gen_flow_scale: Option<f64>,
     /// "fast" (default) | "medium" | "slow": the optical-flow engine's preset
     pub frame_gen_perf: Option<String>,
+    /// tap the game's DLSS motion vectors when the VisionALVR-OptiScaler provider is loaded (docs/MOTION_VECTORS.md); default on
+    pub game_motion_vectors: Option<bool>,
     /// D3DKMT process scheduling class to ask for (5 realtime .. 2; 0 = leave)
     pub gpu_sched_class: Option<i64>,
     pub debug: Option<bool>,
@@ -106,6 +108,7 @@ pub fn load_settings(path: &Path) -> Settings {
         frame_gen: video["frame_gen"].as_bool(),
         frame_gen_flow_scale: video["frame_gen_flow_scale"].as_f64(),
         frame_gen_perf: video["frame_gen_perf"].as_str().map(str::to_string),
+        game_motion_vectors: video["game_motion_vectors"].as_bool(),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),

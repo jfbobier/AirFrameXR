@@ -58,6 +58,64 @@ static const char* stateName(XrSessionState s) {
     default: return "?"; }
 }
 
+// XR_PROBE_MV=synthetic: the probe stands in for the game's DLSS proxy (docs/MOTION_VECTORS.md). It exports the provider ABI of
+// VisionALVR-OptiScaler (VaProvider.h v1, mirrored in ovrshim/ngxtap.h) so the shim finds and registers with it, and once per eye and frame
+// publishes a motion-vector texture (R16G16_FLOAT at half the eye size: the DLSS render size) and a depth texture (D32_FLOAT, a depth-stencil
+// target like a game's) on the app's immediate context. Known content: vx = 8 sin(2 pi y / h), vy = 4 cos(2 pi x / w), the right eye negated,
+// and the 16 x 16 block at the origin holds vx = frame % 32; the depth is cleared to 0.25 (even frames) or 0.75 (odd). The host's
+// VISIONALVR_FG_MV_DUMP images can be checked against these formulas.
+extern "C" {
+struct VisionALVR_PublicationV1 {
+    uint32_t struct_size, version, api, stream; uint64_t frame;
+    void* cmd; void* color; void* motion_vectors; void* depth; void* output; void* exposure;
+    uint32_t render_w, render_h, output_w, output_h, color_x, color_y, mv_x, mv_y, depth_x, depth_y;
+    float jitter_x, jitter_y, mv_scale_x, mv_scale_y; int32_t reset; uint32_t flags; void* params;
+};
+typedef void (*VisionALVR_ConsumerV1)(const VisionALVR_PublicationV1*, void*);
+static VisionALVR_ConsumerV1 g_mvConsumer = nullptr; static void* g_mvConsumerUser = nullptr;
+__declspec(dllexport) uint32_t VisionALVR_ProviderVersion() { return 1; }
+__declspec(dllexport) int VisionALVR_SetConsumerV1(VisionALVR_ConsumerV1 c, void* u) { g_mvConsumer = c; g_mvConsumerUser = u; return 1; }
+}
+struct SyntheticMv {
+    ID3D11Texture2D* mv[2] = {}; ID3D11Texture2D* depth[2] = {}; ID3D11DepthStencilView* dsv[2] = {};
+    UINT w = 0, h = 0; uint64_t frame = 0; uint64_t published = 0;
+    static uint16_t half(float f) {   // float -> IEEE half (round to nearest, values here are small)
+        uint32_t x; memcpy(&x, &f, 4); const uint32_t sign = (x >> 16) & 0x8000; int e = (int)((x >> 23) & 0xff) - 127 + 15; uint32_t m = x & 0x7fffff;
+        if (e <= 0) return (uint16_t)sign; if (e >= 31) return (uint16_t)(sign | 0x7c00);
+        return (uint16_t)(sign | (e << 10) | ((m + 0x1000) >> 13));
+    }
+    bool init(ID3D11Device* dev, UINT eyeW, UINT eyeH) {
+        w = eyeW / 2; h = eyeH / 2;
+        std::vector<uint16_t> px(w * h * 2);
+        for (int eye = 0; eye < 2; eye++) {
+            for (UINT y = 0; y < h; y++) for (UINT x = 0; x < w; x++) {
+                const float sgn = eye ? -1.f : 1.f;
+                px[(y * w + x) * 2] = half(sgn * 8.f * sinf(6.2831853f * y / h)); px[(y * w + x) * 2 + 1] = half(sgn * 4.f * cosf(6.2831853f * x / w));
+            }
+            D3D11_TEXTURE2D_DESC d{}; d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1; d.Format = DXGI_FORMAT_R16G16_FLOAT; d.SampleDesc.Count = 1;
+            d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+            D3D11_SUBRESOURCE_DATA sd{ px.data(), w * 4, 0 };
+            if (FAILED(dev->CreateTexture2D(&d, &sd, &mv[eye]))) return false;
+            D3D11_TEXTURE2D_DESC dd = d; dd.Format = DXGI_FORMAT_D32_FLOAT; dd.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+            if (FAILED(dev->CreateTexture2D(&dd, nullptr, &depth[eye])) || FAILED(dev->CreateDepthStencilView(depth[eye], nullptr, &dsv[eye]))) return false;
+        }
+        return true;
+    }
+    void publish(ID3D11DeviceContext* ctx, int eye, UINT outW, UINT outH) {
+        if (!g_mvConsumer || !mv[eye]) return;
+        uint16_t block[16 * 16 * 2];
+        for (int i = 0; i < 256; i++) { block[i * 2] = half((float)(frame % 32)); block[i * 2 + 1] = half(0.f); }
+        D3D11_BOX box{ 0, 0, 0, 16, 16, 1 };
+        ctx->UpdateSubresource(mv[eye], 0, &box, block, 16 * 4, 0);
+        ctx->ClearDepthStencilView(dsv[eye], D3D11_CLEAR_DEPTH, frame % 2 ? 0.75f : 0.25f, 0);
+        VisionALVR_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye; p.frame = frame; p.cmd = ctx;
+        p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = w; p.render_h = h; p.output_w = outW; p.output_h = outH;
+        p.mv_scale_x = p.mv_scale_y = 1.f; p.reset = frame == 0 ? 1 : 0; p.flags = 0x2 | 0x8;   // MVLowRes, DepthInverted
+        g_mvConsumer(&p, g_mvConsumerUser);
+        published++;
+    }
+};
+
 int main(int argc, char** argv) {
     const char* logPath = argc > 1 ? argv[1] : "xr_probe.log";
     int frames = argc > 2 ? atoi(argv[2]) : 60;
@@ -226,6 +284,11 @@ int main(int argc, char** argv) {
     std::vector<XrViewConfigurationView> vcv(n, { XR_TYPE_VIEW_CONFIGURATION_VIEW });
     CK(xrEnumerateViewConfigurationViews(inst, sys, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, n, &n, vcv.data()));
     L("views: %u, recommended %ux%u", n, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight);
+    SyntheticMv synMv; const bool synMvOn = getenv("XR_PROBE_MV") && strcmp(getenv("XR_PROBE_MV"), "synthetic") == 0;
+    if (synMvOn) {
+        if (synMv.init(dev, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight)) L("ok   synthetic motion vectors %ux%u per eye (provider ABI exported)", synMv.w, synMv.h);
+        else L("FAIL synthetic motion vectors: textures");
+    }
 
     CK(xrEnumerateSwapchainFormats(sess, 0, &n, nullptr));
     std::vector<int64_t> fmts(n);
@@ -382,6 +445,10 @@ int main(int argc, char** argv) {
             }
             SceneFrame sceneFrame;
             if (sceneOn) BeginSceneFrame(scene, ctx, (qpcMs() - loopStartMs) / 1000.0, sceneFrame, scenePlace);
+            if (synMvOn) {   // the "DLSS evaluate" of each eye, left first, before the frame is submitted (as a game's render pass would)
+                for (int e = 0; e < 2 && e < (int)vcv.size(); e++) synMv.publish(ctx, e, vcv[e].recommendedImageRectWidth, vcv[e].recommendedImageRectHeight);
+                synMv.frame++;
+            }
             for (size_t i = 0; i < vcv.size(); i++) {
                 XrSwapchainImageAcquireInfo ai{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO }; uint32_t idx;
                 r = xrAcquireSwapchainImage(sc[i], &ai, &idx); if (XR_FAILED(r)) return fail("xrAcquireSwapchainImage", r);
@@ -593,6 +660,7 @@ int main(int argc, char** argv) {
         done++;
     }
     L("loop done: frames=%d ready=%d synchronized=%d", done, sawReady, sawSync);
+    if (synMvOn) L("synthetic motion vectors: %llu publications, consumer %s", (unsigned long long)synMv.published, g_mvConsumer ? "registered" : "never registered");
     if (done > 1) L("app fps %.2f over %d frames", (done - 1) * 1000.0 / (qpcMs() - loopStartMs), done - 1);
     if (rc == 0 && done < frames) rc = 4;
     if (running) { xrRequestExitSession(sess); }

@@ -101,6 +101,10 @@ void nvh_ipc_set_intake(void* ipc, uint32_t waiting);
 void nvh_ipc_set_intake_gate(void* ipc, uint32_t on);
 // Frame generation pacing (ipc.h appPeriodMul): 2 = the game is released every other compositor boundary; 1 = every boundary.
 void nvh_ipc_set_app_period_mul(void* ipc, uint32_t mul);
+// Game motion vectors (docs/MOTION_VECTORS.md): on = the shim taps the game's DLSS inputs when the provider is loaded and publishes them with the frames.
+void nvh_ipc_set_game_mv(void* ipc, uint32_t on);
+// The tap's state as the shim reports it: tap 0 none / 1 attached / 2 ABI mismatch / 3 refused, DLSS streams seen lately, evaluates seen.
+void nvh_ipc_motion_tap(void* ipc, uint32_t* tap, uint32_t* streams, uint64_t* publications);
 // Process-wide GPU scheduling class (D3DKMT): 0 idle .. 4 high, 5 realtime (needs the increase-base-priority privilege, i.e. an
 // elevated host). SteamVR's compositor runs realtime, so its copy/encode never queues behind the game's GPU work. Returns the
 // NTSTATUS (0 = success).

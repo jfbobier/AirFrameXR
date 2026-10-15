@@ -157,6 +157,29 @@ Facts established:
 - **Harness target**: the DLSS sample app is a deterministic DLSS application for the lab (D3D11 and D3D12 by flag); the probe's own DLSS mode
   (direct NGX SDK, `NVIDIA/DLSS` clone, D3D11) remains the ground-truth path.
 
-Next (in order): the shim consumer (find the module by export, register, copy motion vectors and depth into shared textures on the game's
-command list / context inside the callback, publish the sidecar over the existing IPC), the host's generator input and shader variant, the
-lab scenario with the sample app, then the probe DLSS mode and the PSNR judge.
+## Step 1: the tap in the shim and the host (2026-10-15)
+
+Implemented (IPC version 26):
+- **Shim consumer** `ovrshim/ngxtap.h` (MIT, header-only): finds the provider among the loaded modules by its export
+  (`VisionALVR_SetConsumerV1`), checks the ABI version, registers. At every DLSS evaluate, inside the call: a copy of the motion vectors and the
+  depth recorded on the game's own command list (D3D12: committed resources with `D3D12_HEAP_FLAG_SHARED` and simultaneous access, opened on
+  the shim's D3D11 submission device through the NT handle; a transition barrier around the copy with the state DLSS requires of its inputs,
+  `OVRSHIM_MV_STATE=<int>` overrides it like OptiScaler's `MVResourceBarrier`) or context (D3D11: shared textures on the game's device). Three
+  copies per stream. Depth copies use the typeless twin of the depth format. At SubmitFrame the newest copy of each eye (streams ordered by
+  first appearance: Unreal evaluates the left view first) is copied once more into the frame's slot companions, so the slot's GPU-done event
+  covers vectors and picture together. The attach is retried every two seconds while the host has `gameMotionVectors` set; `OVRSHIM_MV_OFF=1`
+  is the kill switch. Streams idle for two seconds are forgotten (level change).
+- **IPC** (`ovrshim/ipc.h`): `HostToShim::gameMotionVectors` (settings `video.game_motion_vectors`, default on), `ShimToHost::motion[slot]`
+  (`MotionSlot`: per eye the handles, formats, sizes, render/output sizes, subrect bases, jitter, MV scale, flags, reset, the stream's frame
+  counter), `motionTap` state, `motionStreams`, `motionPublications`.
+- **Host** (`nvenc/hostlib/nvh.cpp`, `framegen.cpp`): `nvh_fg_ingest` attaches the slot's vectors (and depth) to the frame it just took into
+  the history (`FrameGen::IngestVectors`: own copies per history frame and eye, `FrameGenVectors` parameters); `nvh_fg_stats` gained an `mv`
+  object (frames, eyes, depth, errors, size, format, flags, api, scale); the host logs the tap's state changes (`motion_tap` event);
+  `VISIONALVR_FG_MV_DUMP=<dir>` writes the first vector ingests as `mv_<n>_eye<e>.ppm` (R/G = 128 + 4 x vector) with a `.txt` sidecar.
+  The synthesis does not use the vectors yet (step 2).
+- **Lab**: the probe stands in for the DLSS provider (`XR_PROBE_MV=synthetic`: it exports the provider ABI itself and publishes a known
+  vector pattern and a cleared depth target per eye and frame on its immediate context, D3D11); simrig scenario `steady_mv` runs it with
+  the generator on and fetches the dumps.
+
+Next: step 2, vector-driven synthesis (the shader reads the vectors where valid, the flow elsewhere), then the real-game check on the 5090
+with the fork DLL (D3D12 Unreal title, then D3D11), then extrapolation.

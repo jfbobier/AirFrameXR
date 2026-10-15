@@ -34,6 +34,7 @@
 #include "LayerCubePS.h"
 #include "layerconstants.h"
 #include "ipc_win.h"
+#include "ngxtap.h"
 
 #include <algorithm>
 #include <cmath>
@@ -323,6 +324,7 @@ namespace {
         ~HostDriver() override {
             TraceLocalActivity(local);
             TraceLoggingWriteStart(local, "HostDriver_Dtor");
+            m_ngx.Detach();
 
             if (m_serverThread.joinable()) {
                 m_terminateServerThread = true;
@@ -1351,6 +1353,20 @@ namespace {
                     ok &= ComposeLayers(layers, m_sbsRTV[slot].Get(), m_sbsWidth, m_sbsHeight, TargetMode::DirectEncode);
                 }
 
+                // Game motion vectors (ngxtap.h): the newest DLSS vectors of each eye ride along in the slot's companion textures, copied on
+                // the same context as the picture so the slot's GPU-done event covers them too.
+                visionalvr_ipc::MotionSlot motion{};
+                if (m_ipc.state->host.gameMotionVectors) {
+                    m_ngx.SetEnabled(true);
+                    if (!m_ngx.Attached() && m_framesSubmitted >= m_ngxNextTry) {
+                        m_ngx.TryAttach();   // the provider may load after the session exists; look every two seconds until it is there
+                        m_ngxNextTry = m_framesSubmitted + 180;
+                    }
+                    motion = m_ngx.Harvest(m_submissionContext.Get(), slot, QpcSeconds());
+                } else {
+                    m_ngx.SetEnabled(false);
+                }
+
                 FrameTraceRow trace;
 #ifdef VISIONALVR_TELEMETRY
                 trace.tSubmit = tSubmitStart;
@@ -1408,6 +1424,10 @@ namespace {
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
                             (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask);
+                    if (m_ngx.Attached()) {
+                        ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, tap %s", m_ngx.ActiveStreams(),
+                                (unsigned long long)m_ngx.Publications(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)");
+                    }
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
                             return 0.0f;
@@ -1447,6 +1467,7 @@ namespace {
                     }
                     PendingFrame pf{slot, clientTs, composeStart, m_lastReleaseS.load(), trace};
                     FrameRenderOrientation(layers, pf.renderQ, pf.hasProjection);
+                    pf.motion = motion;
                     m_publishQueue.push_back(pf);
                     lock.unlock();
                     m_publishCv.notify_all();
@@ -1456,7 +1477,7 @@ namespace {
                     float renderQ[2][4];
                     bool hasProjection = false;
                     FrameRenderOrientation(layers, renderQ, hasProjection);
-                    PublishFrame(slot, clientTs, composeStart, m_lastReleaseS.load(), trace, renderQ, hasProjection);
+                    PublishFrame(slot, clientTs, composeStart, m_lastReleaseS.load(), trace, renderQ, hasProjection, motion);
                 }
             }
 
@@ -1517,7 +1538,7 @@ namespace {
         // Hands a composed (GPU-complete) slot to the host. Called by exactly one thread at a time: the publisher thread, or the
         // app thread when there is no publisher.
         void PublishFrame(uint32_t slot, uint64_t clientTs, double composeStart, double releaseS, const FrameTraceRow& tr,
-                          const float renderQ[2][4], bool hasProjection) {
+                          const float renderQ[2][4], bool hasProjection, const visionalvr_ipc::MotionSlot& motion) {
             auto& s = m_ipc.state->shim;
             const double nowS = QpcSeconds();
             s.lastComposeMs = (float)((nowS - composeStart) * 1000.0);
@@ -1543,6 +1564,10 @@ namespace {
             s.frameSubmitTimeS = QpcSeconds();
             memcpy(s.frameRenderQuat, renderQ, sizeof(s.frameRenderQuat));
             s.frameHasProjection = hasProjection ? 1u : 0u;
+            s.motion[slot] = motion;
+            s.motionTap = m_ngx.State();
+            s.motionStreams = motion.streams;
+            s.motionPublications = m_ngx.Publications();
             s.frameCounter = ++m_framesPublished;
             MemoryBarrier();
             s.frameSeq++; // even: stable
@@ -1618,7 +1643,7 @@ namespace {
                         }
                         // same 50 ms cap as the spin wait: a hung GPU must not stall the stream forever
                         WaitForSingleObject(m_gpuDone[f.slot], 50);
-                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr, f.renderQ, f.hasProjection);
+                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr, f.renderQ, f.hasProjection, f.motion);
                         {
                             std::unique_lock lock(m_publishMutex);
                             m_publishQueue.pop_front();
@@ -1992,6 +2017,11 @@ namespace {
             }
             D3D11_QUERY_DESC qd{D3D11_QUERY_EVENT, 0};
             winrt::check_hresult(m_submissionDevice->CreateQuery(&qd, m_doneQuery.ReleaseAndGetAddressOf()));
+            // the DLSS motion-vector tap (ngxtap.h): attach now if the game loaded the provider, otherwise SubmitFrame keeps looking
+            m_ngx.Init(m_submissionDevice.Get(), [](const char* line) { ShimLog("%s", line); });
+            if (m_ipc.state->host.gameMotionVectors) {
+                m_ngx.TryAttach();
+            }
             m_ipc.state->shim.sbsWidth = (int32_t)m_sbsWidth;
             m_ipc.state->shim.sbsHeight = (int32_t)m_sbsHeight;
             m_ipc.state->shim.sbsFormat = (uint32_t)fmt;
@@ -2396,6 +2426,8 @@ namespace {
         LUID m_adapterLuid{};
         ComPtr<ID3D11Device> m_submissionDevice;
         ComPtr<ID3D11DeviceContext> m_submissionContext;
+        ngxtap::NgxTap m_ngx;          // the game's DLSS motion vectors (docs/MOTION_VECTORS.md)
+        uint64_t m_ngxNextTry = 0;
         ComPtr<ID3D11VertexShader> m_reprojectVS;
         ComPtr<ID3D11PixelShader> m_reprojectPS;
         ComPtr<ID3D11VertexShader> m_layerVS;
@@ -2515,6 +2547,7 @@ namespace {
             FrameTraceRow tr;
             float renderQ[2][4]; // per-eye render orientation (ipc frameRenderQuat), identity when there is no projection layer
             bool hasProjection;
+            visionalvr_ipc::MotionSlot motion; // the game's DLSS vectors for this frame (ngxtap.h), zero when there are none
         };
         ComPtr<IDXGIDevice2> m_dxgiDevice2;
         HANDLE m_gpuDone[visionalvr_ipc::kSlots]{};
