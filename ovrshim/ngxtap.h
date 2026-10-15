@@ -62,6 +62,7 @@ typedef int (*SetConsumerV1Fn)(ConsumerV1 consumer, void* user);
 
 constexpr int kRing = 3;          // copies per stream: the game may evaluate the next frame before the shim read the previous copy
 constexpr double kStreamIdleS = 2.0;
+constexpr double kRetireS = 3.0;      // how long a retired shared copy is kept alive after it was replaced or its stream dropped
 
 // The sharable twin of a texture format: depth formats cannot be shared or copied across devices, their typeless family can.
 // The format of the shared copy. D3D11 opens a D3D12 shared texture only when it was created with the render-target flag (5090, 2026-10-16:
@@ -99,6 +100,7 @@ public:
             m_srcState = (D3D12_RESOURCE_STATES)atoi(v);   // the state the game leaves the vectors in (override, like OptiScaler's MVResourceBarrier)
         }
         m_off = GetEnvironmentVariableA("OVRSHIM_MV_OFF", v, sizeof(v)) > 0 && atoi(v) != 0;
+        m_depth = GetEnvironmentVariableA("OVRSHIM_MV_DEPTH", v, sizeof(v)) > 0 && atoi(v) != 0;   // the generator does not read depth yet: off by default
     }
 
     // Finds the provider among the loaded modules (by its export) and registers the consumer. Cheap when there is none; call until it returns true.
@@ -134,7 +136,7 @@ public:
             m_set = set;
             m_attached = true;
             m_state = 1;
-            Log("motion vectors: attached to %s (ABI %u)", path, v);
+            Log("motion vectors: attached to %s (ABI %u), depth copies %s", path, v, m_depth ? "on" : "off");
             return true;
         }
         return false;
@@ -164,7 +166,19 @@ public:
         // drop idle streams (a level change recreates the DLSS features with new ids)
         for (size_t i = 0; i < m_streams.size();) {
             if (nowS - m_streams[i].lastS > kStreamIdleS) {
+                for (int r = 0; r < kRing; r++) {
+                    Retire(m_streams[i].mv[r]);
+                    Retire(m_streams[i].depth[r]);
+                }
                 m_streams.erase(m_streams.begin() + i);
+            } else {
+                i++;
+            }
+        }
+        // free retired copies only once every GPU that could still reference them (the game's list, the submission context) is long done
+        for (size_t i = 0; i < m_retired.size();) {
+            if (nowS - m_retired[i].atS > kRetireS) {
+                m_retired.erase(m_retired.begin() + i);
             } else {
                 i++;
             }
@@ -214,6 +228,27 @@ private:
         Copy mv[kRing], depth[kRing];
         visionalvr_ipc::MotionEye info{};
     };
+    // a copy taken out of service: its D3D12 resource may still be referenced by a game command list not yet executed, its D3D11 view by a
+    // queued copy on the submission context; neither API defers the other's destruction, so retired copies live on for kRetireS (the shim's
+    // submission device died with an SM page fault seconds after copies were replaced or streams dropped, 2026-10-16)
+    struct Retired {
+        ComPtr<ID3D12Resource> r12;
+        ComPtr<ID3D11Texture2D> t11, view;
+        double atS = 0;
+    };
+    void Retire(Copy& c) {
+        if (c.r12 || c.t11 || c.view) {
+            Retired r;
+            r.r12 = c.r12;
+            r.t11 = c.t11;
+            r.view = c.view;
+            r.atS = visionalvr_ipc::QpcSeconds();
+            m_retired.push_back(r);
+        }
+        c.r12.Reset();
+        c.t11.Reset();
+        c.view.Reset();
+    }
     struct SlotTex {
         ComPtr<ID3D11Texture2D> tex;
         uint64_t handle = 0;
@@ -259,13 +294,13 @@ private:
         if (p->api == 12) {
             auto* cmd = (ID3D12GraphicsCommandList*)p->cmd;
             ok = Copy12(cmd, s->mv[ring], (ID3D12Resource*)p->motion_vectors, "vectors");
-            if (p->depth) {
+            if (p->depth && m_depth) {
                 Copy12(cmd, s->depth[ring], (ID3D12Resource*)p->depth, "depth");
             }
         } else {
             auto* ctx = (ID3D11DeviceContext*)p->cmd;
             ok = Copy11(ctx, s->mv[ring], (ID3D11Resource*)p->motion_vectors, "vectors");
-            if (p->depth) {
+            if (p->depth && m_depth) {
                 Copy11(ctx, s->depth[ring], (ID3D11Resource*)p->depth, "depth");
             }
         }
@@ -301,8 +336,7 @@ private:
         const D3D12_RESOURCE_DESC d = src->GetDesc();
         const DXGI_FORMAT sf = SharedFormat(d.Format, true);
         if (!c.r12 || c.w != d.Width || c.h != d.Height || c.fmt != sf) {
-            c.r12.Reset();
-            c.view.Reset();
+            Retire(c);
             if (d.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || d.SampleDesc.Count != 1 || !m_subDev1 || sf == DXGI_FORMAT_UNKNOWN) {
                 c.failed = true;
                 m_copyFailures++;
@@ -391,8 +425,7 @@ private:
         tex->GetDesc(&d);
         const DXGI_FORMAT sf = SharedFormat(d.Format, false);
         if (!c.t11 || c.w != d.Width || c.h != d.Height || c.fmt != sf) {
-            c.t11.Reset();
-            c.view.Reset();
+            Retire(c);
             ComPtr<ID3D11Device> dev;
             ctx->GetDevice(dev.ReleaseAndGetAddressOf());
             if (!dev || d.SampleDesc.Count != 1 || sf == DXGI_FORMAT_UNKNOWN) {
@@ -450,6 +483,12 @@ private:
             return 0;
         }
         if (!st.tex || st.w != c.w || st.h != c.h || st.fmt != c.fmt) {
+            if (st.tex) {
+                Retired r;
+                r.t11 = st.tex;
+                r.atS = visionalvr_ipc::QpcSeconds();
+                m_retired.push_back(r);
+            }
             st.tex.Reset();
             st.handle = 0;
             D3D11_TEXTURE2D_DESC nd{};
@@ -473,7 +512,13 @@ private:
             }
             if (FAILED(hr)) {
                 st.tex.Reset();
-                Log("motion vectors: slot companion %ux%u format %u failed 0x%08x", c.w, c.h, (unsigned)c.fmt, (unsigned)hr);
+                if (hr == DXGI_ERROR_DEVICE_REMOVED && !m_removedLogged) {
+                    m_removedLogged = true;
+                    Log("motion vectors: the submission device is removed, reason 0x%08x: no more copies this session", (unsigned)m_subDev->GetDeviceRemovedReason());
+                }
+                if (!m_removedLogged) {
+                    Log("motion vectors: slot companion %ux%u format %u failed 0x%08x", c.w, c.h, (unsigned)c.fmt, (unsigned)hr);
+                }
                 fmtOut = 0; wOut = 0; hOut = 0;
                 return 0;
             }
@@ -511,7 +556,10 @@ private:
     std::atomic<bool> m_enabled{true};
     uint32_t m_state = 0;
     uint64_t m_publications = 0;
-    uint64_t m_copyFailures = 0;      // sources whose shared copy could not be made (each logged once)
+    uint64_t m_copyFailures = 0;
+    std::vector<Retired> m_retired;
+    bool m_depth = false;
+    bool m_removedLogged = false;      // sources whose shared copy could not be made (each logged once)
     D3D12_RESOURCE_STATES m_srcState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;   // what DLSS requires of its inputs
     std::vector<Stream> m_streams;
     SlotTex m_slotTex[visionalvr_ipc::kSlots][2][2];   // [slot][eye][0 vectors, 1 depth]
