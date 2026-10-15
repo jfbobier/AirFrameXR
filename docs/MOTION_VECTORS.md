@@ -151,6 +151,9 @@ Facts established:
   the consumer is called synchronously at every evaluate with a `VisionALVR_PublicationV1`; no allocation, no copy, no blocking; a structured
   exception in the consumer removes it instead of taking the game down), two hook lines, compiled defaults (DLSS backend on D3D11/D3D12/Vulkan,
   overlay off, DXGI spoofing off) so no ini is needed, `VISIONALVR.md`. No stripping yet: make it work, then make it lean.
+- **Smoke test of the fork** (efe4f5f, built on the 5090, log-only ini): the sample app in D3D12 and D3D11 runs DLSS through the DLSS backend with the
+  compiled defaults, and the provider reports at every evaluate `stream 1000000 (dx12|dx11) render 1280x710 output 2560x1421 mv true depth true
+  flags 0x3` (IsHDR, MVLowRes), ~1000 evaluates/s, zero errors, no consumer registered yet. Built DLL kept at private/dist/VisionALVR-OptiScaler-efe4f5f.dll.
 - **Harness target**: the DLSS sample app is a deterministic DLSS application for the lab (D3D11 and D3D12 by flag); the probe's own DLSS mode
   (direct NGX SDK, `NVIDIA/DLSS` clone, D3D11) remains the ground-truth path.
 
