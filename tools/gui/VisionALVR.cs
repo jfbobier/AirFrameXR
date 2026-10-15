@@ -33,6 +33,11 @@ namespace VisionALVR
         readonly List<Knob> knobs = new List<Knob>();
         readonly CheckBox debug = new CheckBox { Text = "Debug logging (files in logs\\debug\\)", AutoSize = true, Font = Ui.Body };
         readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3) };
+        readonly RadioButton fgHalf = new RadioButton { Text = "Half", AutoSize = true, Margin = new Padding(0, 3, 6, 0) };
+        readonly RadioButton fgUncapped = new RadioButton { Text = "Uncapped", AutoSize = true, Margin = new Padding(0, 3, 14, 0) };
+        readonly CheckBox fgMv = new CheckBox { Text = "DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0) };
+        readonly NumericUpDown fgCap = new NumericUpDown { Minimum = 0, Maximum = 240, Increment = 5, Width = 56, Margin = new Padding(0, 2, 0, 0) };
+        readonly NumericUpDown fgLag = new NumericUpDown { Minimum = 0, Maximum = 100, Increment = 1, Width = 52, Margin = new Padding(0, 2, 0, 0) };
         readonly Label footer = Ui.Line("", new Font("Segoe UI", 8.5f));
         string pairedName = "", pairedIp = "";
         bool closing;
@@ -107,6 +112,24 @@ namespace VisionALVR
             fgRow.Controls.Add(fgText);
             lt.Controls.Add(fgRow);
             lt.SetColumnSpan(fgRow, 6);
+            // the generation's knobs (docs/FRAME_GENERATION_UNCAPPED.md): rate, the game's motion vectors, an fps cap and the content lag of the uncapped mode.
+            // Every change is sent to the running streamer, saved, and logged by both sides.
+            var fgOpts = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(44, 2, 0, 0) };
+            fgOpts.Controls.Add(new Label { Text = "Game rate", AutoSize = true, Font = Ui.Body, Margin = new Padding(0, 6, 6, 0) });
+            fgOpts.Controls.Add(fgHalf);
+            fgOpts.Controls.Add(fgUncapped);
+            fgOpts.Controls.Add(fgMv);
+            fgOpts.Controls.Add(new Label { Text = "fps cap", AutoSize = true, Font = Ui.Body, Margin = new Padding(14, 6, 4, 0) });
+            fgOpts.Controls.Add(fgCap);
+            fgOpts.Controls.Add(new Label { Text = "lag ms", AutoSize = true, Font = Ui.Body, Margin = new Padding(10, 6, 4, 0) });
+            fgOpts.Controls.Add(fgLag);
+            lt.Controls.Add(fgOpts);
+            lt.SetColumnSpan(fgOpts, 6);
+            tips.SetToolTip(fgHalf, "The game renders at half the display rate; every other frame is synthesised (today's mode).");
+            tips.SetToolTip(fgUncapped, "The game renders as fast as it can; every frame sent is interpolated between its two newest frames.");
+            tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the VisionALVR-OptiScaler DLL is in the game folder (else optical flow).");
+            tips.SetToolTip(fgCap, "Uncapped mode: hold the game to this many fps (0 = none) to leave the streamer GPU headroom.");
+            tips.SetToolTip(fgLag, "Uncapped mode: how far the shown content trails the newest frame (0 = automatic: one game frame + half a display period).");
             live.Controls.Add(lt);
             body.Controls.Add(live);
 
@@ -133,12 +156,53 @@ namespace VisionALVR
                 settings.Save();
             };
             frameGen.Checked = settings.FrameGen;
+            Action fgEnable = () => { fgHalf.Enabled = fgUncapped.Enabled = frameGen.Checked; fgCap.Enabled = fgLag.Enabled = frameGen.Checked && fgUncapped.Checked; };
             frameGen.CheckedChanged += (s, e) =>
             {
                 host.Send("frame_gen " + (frameGen.Checked ? "on" : "off"));   // the running streamer switches at the next boundary; the setting is read at start too
                 settings.FrameGen = frameGen.Checked;
                 settings.Save();
+                fgEnable();
                 Log.Write("INFO", "frame generation " + (frameGen.Checked ? "on" : "off"));
+            };
+            (settings.FrameGenRate == "uncapped" ? fgUncapped : fgHalf).Checked = true;
+            fgMv.Checked = settings.GameMotionVectors;
+            fgCap.Value = Math.Max(fgCap.Minimum, Math.Min(fgCap.Maximum, settings.FrameGenCapFps));
+            fgLag.Value = Math.Max(fgLag.Minimum, Math.Min(fgLag.Maximum, settings.FrameGenLagMs));
+            fgEnable();
+            EventHandler rateChanged = (s, e) =>
+            {
+                if (!fgUncapped.Checked && !fgHalf.Checked) return;
+                var rate = fgUncapped.Checked ? "uncapped" : "half";
+                if (rate == settings.FrameGenRate) { fgEnable(); return; }
+                host.Send("frame_gen_rate " + rate);
+                settings.FrameGenRate = rate;
+                settings.Save();
+                fgEnable();
+                Log.Write("INFO", "frame generation rate " + rate);
+            };
+            fgHalf.CheckedChanged += rateChanged;
+            fgUncapped.CheckedChanged += rateChanged;
+            fgMv.CheckedChanged += (s, e) =>
+            {
+                host.Send("game_mv " + (fgMv.Checked ? "on" : "off"));
+                settings.GameMotionVectors = fgMv.Checked;
+                settings.Save();
+                Log.Write("INFO", "game motion vectors " + (fgMv.Checked ? "on" : "off"));
+            };
+            fgCap.ValueChanged += (s, e) =>
+            {
+                host.Send("frame_gen_cap " + (int)fgCap.Value);
+                settings.FrameGenCapFps = (int)fgCap.Value;
+                settings.Save();
+                Log.Write("INFO", "frame generation fps cap " + (int)fgCap.Value);
+            };
+            fgLag.ValueChanged += (s, e) =>
+            {
+                host.Send("frame_gen_lag " + (int)fgLag.Value);
+                settings.FrameGenLagMs = (int)fgLag.Value;
+                settings.Save();
+                Log.Write("INFO", "frame generation lag " + (int)fgLag.Value + " ms");
             };
 
             host.OnEvent += (name, data) => BeginInvoke((Action)(() => HostEvent(name, data)));

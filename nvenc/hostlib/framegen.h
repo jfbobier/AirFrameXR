@@ -45,6 +45,8 @@ struct FrameGenStats {
 
 class FrameGen {
 public:
+    // rendered frames kept (newest first by `age`): the uncapped mode shows content up to a few game frames behind the newest one
+    static constexpr int kHist = 4;
     FrameGen(ID3D11Device* dev, ID3D11DeviceContext* ctx);
     ~FrameGen();
     // Creates the optical-flow session for frames of w x h (the stream's side-by-side frame). false + err: no flow engine (keep the feature off).
@@ -55,14 +57,18 @@ public:
     // Attaches the game's DLSS vectors (and depth, may be null) of one eye to the frame just ingested: copies them into this object's own
     // textures (the shim reuses its slot companions). VISIONALVR_FG_MV_DUMP=<dir> writes the first ingests as PPM images for a look.
     int IngestVectors(int eye, ID3D11Texture2D* mv, ID3D11Texture2D* depth, const FrameGenVectors& v, char* err, int errlen);
-    // Renders the output for a boundary: mode 0 = the newest rendered frame rotated to qOut4, 1 = the frame at fraction t (0..1) between the
-    // previous and the newest rendered frame (midpoint = 0.5), rotated to qOut4. Returns the output texture (owned by this object), nullptr on error.
-    ID3D11Texture2D* Render(int mode, float t, const float* qOut4, const float* fov8, char* err, int errlen);
+    // Synthesise from the game's vectors when a frame carries them (default on; VISIONALVR_FG_USE_MV=0 at start, the GUI tick live).
+    void SetUseVectors(bool on);
+    // Renders the output for a boundary: mode 0 = the rendered frame `age` frames before the newest (0 = the newest) rotated to qOut4, 1 = the
+    // frame at fraction t (0..1) between that frame's predecessor and it (midpoint = 0.5), rotated to qOut4. Returns the output texture (owned
+    // by this object), nullptr on error.
+    ID3D11Texture2D* Render(int mode, float t, int age, const float* qOut4, const float* fov8, char* err, int errlen);
     // Reads back the GPU timings of the last passes when they are available (call after the encode of the frame).
     void CollectTimings();
     void ResetHistory();            // the app is gone (or changed): forget the frames
     bool HasFrame() const { return m_have >= 1; }
     bool HasPair() const { return m_have >= 2; }
+    int History() const { return m_have; }
     ID3D11Texture2D* Output() const { return m_out; }
     int Width() const { return m_w; }
     int Height() const { return m_h; }

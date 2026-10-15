@@ -61,6 +61,13 @@ pub struct Settings {
     pub frame_gen_perf: Option<String>,
     /// tap the game's DLSS motion vectors when the VisionALVR-OptiScaler provider is loaded (docs/MOTION_VECTORS.md); default on
     pub game_motion_vectors: Option<bool>,
+    /// "half" (default) | "uncapped": the game paced at half the display rate with strict alternation, or at the display rate with every
+    /// output interpolated (docs/FRAME_GENERATION_UNCAPPED.md)
+    pub frame_gen_rate: Option<String>,
+    /// uncapped mode: content lag behind the newest tracking sample, ms (0 = the game's measured frame period + half a display period)
+    pub frame_gen_lag_ms: Option<f64>,
+    /// uncapped mode: minimum spacing of the game's releases as an fps cap (0 = none): headroom for the host's own GPU work
+    pub frame_gen_cap_fps: Option<f64>,
     /// D3DKMT process scheduling class to ask for (5 realtime .. 2; 0 = leave)
     pub gpu_sched_class: Option<i64>,
     pub debug: Option<bool>,
@@ -109,6 +116,9 @@ pub fn load_settings(path: &Path) -> Settings {
         frame_gen_flow_scale: video["frame_gen_flow_scale"].as_f64(),
         frame_gen_perf: video["frame_gen_perf"].as_str().map(str::to_string),
         game_motion_vectors: video["game_motion_vectors"].as_bool(),
+        frame_gen_rate: video["frame_gen_rate"].as_str().map(str::to_string),
+        frame_gen_lag_ms: video["frame_gen_lag_ms"].as_f64(),
+        frame_gen_cap_fps: video["frame_gen_cap_fps"].as_f64(),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
@@ -193,11 +203,20 @@ pub static GAMMA_REQ: AtomicU32 = AtomicU32::new(0);
 pub static DEBUG_REQ: AtomicI32 = AtomicI32::new(-1);
 /// frame generation on/off from VisionALVR.exe (-1 none, 0 off, 1 on); applied by the main loop to the running encoder and the shim's pacing
 pub static FRAME_GEN_REQ: AtomicI32 = AtomicI32::new(-1);
+/// frame generation rate from VisionALVR.exe (-1 none, 0 half, 1 uncapped)
+pub static FG_RATE_REQ: AtomicI32 = AtomicI32::new(-1);
+/// the game's DLSS motion vectors on/off (-1 none)
+pub static GAME_MV_REQ: AtomicI32 = AtomicI32::new(-1);
+/// fps cap of the game's releases (uncapped mode), -1 none, 0 = no cap
+pub static FG_CAP_REQ: AtomicI32 = AtomicI32::new(-1);
+/// uncapped mode content lag in tenths of ms (-1 none, 0 = automatic)
+pub static FG_LAG_REQ: AtomicI32 = AtomicI32::new(-1);
 /// colour correction (brightness, contrast, saturation, sharpening as f32 bits) and its "pending" flag
 pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 
-/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `color <brightness> <contrast> <saturation> <sharpening>`,
+/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate half|uncapped`, `game_mv on|off`,
+/// `frame_gen_cap <fps>` (0 = none), `frame_gen_lag <ms>` (0 = automatic), `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
 pub fn spawn_stdin_control() {
@@ -215,6 +234,18 @@ pub fn spawn_stdin_control() {
                 }
                 (Some("debug"), Some(v)) => DEBUG_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("frame_gen"), Some(v)) => FRAME_GEN_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
+                (Some("frame_gen_rate"), Some(v)) => FG_RATE_REQ.store((v == "uncapped") as i32, Ordering::SeqCst),
+                (Some("game_mv"), Some(v)) => GAME_MV_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
+                (Some("frame_gen_cap"), Some(v)) => {
+                    if let Ok(f) = v.parse::<f64>() {
+                        FG_CAP_REQ.store(f.clamp(0.0, 240.0).round() as i32, Ordering::SeqCst);
+                    }
+                }
+                (Some("frame_gen_lag"), Some(v)) => {
+                    if let Ok(f) = v.parse::<f64>() {
+                        FG_LAG_REQ.store((f.clamp(0.0, 100.0) * 10.0).round() as i32, Ordering::SeqCst);
+                    }
+                }
                 (Some("height"), Some(h)) => {
                     if let Ok(h) = h.parse::<f32>() {
                         HEIGHT_REQ.store(if h <= 0.0 { f32::MIN_POSITIVE } else { h.clamp(0.5, 2.5) }.to_bits(), Ordering::SeqCst);

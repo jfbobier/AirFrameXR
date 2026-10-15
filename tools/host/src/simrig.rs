@@ -389,7 +389,7 @@ pub fn encode(nvh_handle: *mut c_void, ipc: *mut c_void, slot: u32, counter: u32
 
 /// Replaces `nvh_fg_encode` (frame generation): the generated picture is always rendered and encoded for real (the viewer must see it),
 /// then captured for the viewer like a slot (nvh_sim_slot returns the generator's output after such an encode).
-pub fn encode_fg(nvh_handle: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, q_out: &[f32; 4], counter: u32, ts_ns: u64, force_idr: bool, err: *mut c_char, errlen: i32) -> f64 {
+pub fn encode_fg(nvh_handle: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, age: i32, q_out: &[f32; 4], counter: u32, ts_ns: u64, force_idr: bool, err: *mut c_char, errlen: i32) -> f64 {
     let s = SIM.get().unwrap();
     let now = qpc();
     let first = *s.first_frame_at.lock().unwrap().get_or_insert(now);
@@ -400,7 +400,7 @@ pub fn encode_fg(nvh_handle: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, q
         unsafe { sv_start(viewer, t0v, s.ts_base + (k * s.cfg.period_ns) as u64) };
         s.started.store(true, Ordering::Relaxed);
     }
-    let ms = unsafe { nvh::nvh_fg_encode(nvh_handle, ipc, mode, t, q_out.as_ptr(), counter, ts_ns, force_idr as i32, err, errlen) };
+    let ms = unsafe { nvh::nvh_fg_encode(nvh_handle, ipc, mode, t, age, q_out.as_ptr(), counter, ts_ns, force_idr as i32, err, errlen) };
     // every output its own ring slot: a rendered frame goes out more than once (R then Q) and the viewer may still hold the earlier picture
     // in its queue when the next one is captured (keying by frame counter overwrote it: a one-period error on R/Q frames, 2026-10-14)
     static FG_CAPTURES: AtomicUsize = AtomicUsize::new(0);

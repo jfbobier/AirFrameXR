@@ -644,11 +644,11 @@ int nvh_fg_ingest(void* hh, void* i, uint32_t slot, const float* q_render8, char
     return r;
 }
 
-double nvh_fg_encode(void* hh, void* i, int mode, double t, const float* q_out4, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
+double nvh_fg_encode(void* hh, void* i, int mode, double t, int age, const float* q_out4, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
     auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
     if (!n || !n->fg) { seterr(err, errlen, "frame generation off"); return -1; }
     const double a = nowMs();
-    ID3D11Texture2D* tex = n->fg->Render(mode, (float)t, q_out4, &ipc->state->host.eyeFovTan[0][0], err, errlen);
+    ID3D11Texture2D* tex = n->fg->Render(mode, (float)t, age, q_out4, &ipc->state->host.eyeFovTan[0][0], err, errlen);
     if (!tex) { n->fg->stats.renderErrors++; return -1; }
     if (!n->fgFfr || n->fgFfrTex != tex) {
         try { n->fgFfr = std::make_unique<FFR>(n->render->GetDevice()); n->fgFfr->Initialize(tex); n->fgFfrTex = tex; }
@@ -683,6 +683,8 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
 }
 
 void nvh_ipc_set_game_mv(void* i, uint32_t on) { ((Ipc*)i)->state->host.gameMotionVectors = on ? 1u : 0u; }
+void nvh_ipc_set_app_min_period(void* i, uint32_t us) { ((Ipc*)i)->state->host.appMinPeriodUs = us; }
+void nvh_fg_use_mv(void* hh, int on) { auto* n = (Nvh*)hh; if (n && n->fg) n->fg->SetUseVectors(on != 0); }
 
 void nvh_ipc_motion_tap(void* i, uint32_t* tap, uint32_t* streams, uint64_t* publications) {
     const auto& s = ((Ipc*)i)->state->shim;

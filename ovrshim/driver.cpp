@@ -843,9 +843,15 @@ namespace {
                     // for the same queue.
                     const bool gateOn = m_ipc.state->host.intakeGate != 0 && m_ipc.state->host.clientConnected != 0;
                     bool wasGated = false;
+                    // fps cap (ipc appMinPeriodUs, uncapped frame generation): the release never comes sooner than the cap's period after the last one
+                    const double minPeriod = (double)(*(volatile uint32_t*)&m_ipc.state->host.appMinPeriodUs) * 1e-6;
+                    const double capRelease = minPeriod > 0 ? m_lastReleaseS.load() + minPeriod : 0.0;
+                    if (capRelease > 0) {
+                        m_capHolds += capRelease > alignedRelease(boundaryTime(target) - lead) ? 1 : 0;
+                    }
                     for (;;) {
                         now = QpcSeconds();
-                        const double releaseAt = alignedRelease(boundaryTime(target) - lead); // ticks arriving meanwhile refine the grid
+                        const double releaseAt = std::max(alignedRelease(boundaryTime(target) - lead), capRelease); // ticks arriving meanwhile refine the grid
                         if (releaseAt > now) {
                             const auto waitFor = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                 std::chrono::duration<double>(std::min(releaseAt - now, 0.1)));
@@ -891,7 +897,7 @@ namespace {
                         m_lastWaitedFrame = std::max(m_lastWaitedFrame, frameIndex);
                         m_rsDisplayTimeOwned = true;
                     }
-                    if (!wasGated && plannedRelease < now - 0.0005) {
+                    if (!wasGated && capRelease <= plannedRelease && plannedRelease < now - 0.0005) {
                         m_releasesLate++;
                     }
                 } else {
@@ -1418,12 +1424,14 @@ namespace {
                             m_lastSignaledVsync, (unsigned long long)m_waitCalls, (unsigned long long)m_waitWaited,
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
-                            "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x",
+                            "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x, "
+                            "period mul %u, fps cap %.1f (holds %llu)",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
                             (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
-                            (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask);
+                            (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
+                            m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds);
                     if (m_ngx.Attached()) {
                         ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, tap %s", m_ngx.ActiveStreams(),
                                 (unsigned long long)m_ngx.Publications(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)");
@@ -2509,6 +2517,7 @@ namespace {
         uint64_t m_framesSubmitted{0}; // frames composed (picks the ring slot)
         // Running start (see WaitForVsync): the app is released appTime + margin before the host's next compositor boundary.
         std::atomic<double> m_lastReleaseS{0.0};   // shim clock when WaitForVsync last released the app
+        uint64_t m_capHolds{0};                    // releases the fps cap (ipc appMinPeriodUs) pushed past their boundary
         std::atomic<double> m_appTimeS{0.004};     // envelope of release -> frame GPU-complete (published), seconds
         long long m_lastTargetBoundary{0};         // boundary (tick index) the last release aimed at: one release per boundary
         double m_latestTickS{0.0};                 // shim-clock time of the host's latest display tick (under m_frameMutex)

@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 26;
+constexpr uint32_t kVersion = 27;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -110,6 +110,9 @@ struct HostToShim {
     // Game motion vectors (docs/MOTION_VECTORS.md, ovrshim/ngxtap.h): 1 = when the VisionALVR-OptiScaler provider is loaded in the game, copy
     // the motion vectors and depth of every DLSS evaluate and publish them with the frame (ShimToHost::motion). 0 = leave the tap idle.
     uint32_t gameMotionVectors;
+    // Uncapped frame generation (docs/FRAME_GENERATION_UNCAPPED.md): the app is paced at every boundary (appPeriodMul 1) and may be held to a
+    // minimum spacing between releases (an fps cap chosen by the user: headroom for the host's own GPU work). 0 = no cap.
+    uint32_t appMinPeriodUs;
 };
 
 // The DLSS inputs of one eye for the frame in a ring slot: the shim's copies of the motion vectors and depth the game handed DLSS,

@@ -77,7 +77,7 @@ int nvh_fg_ingest(void* nvh, void* ipc, uint32_t slot, const float* q_render8, c
 // Encodes a generated frame through the foveation pass + NVENC: mode 0 = the newest rendered frame rotated to q_out4 (x y z w, the head
 // orientation of the tracking sample the frame is stamped with), mode 1 = the frame at fraction t between the two newest rendered frames
 // (0.5 = midpoint), rotated likewise. Returns the time in ms (render + encode), < 0 on error.
-double nvh_fg_encode(void* nvh, void* ipc, int mode, double t, const float* q_out4, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
+double nvh_fg_encode(void* nvh, void* ipc, int mode, double t, int age, const float* q_out4, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
 int nvh_fg_has_pair(void* nvh);
 int nvh_fg_has_frame(void* nvh);
 void nvh_fg_reset(void* nvh);   // the app is gone: forget the frame history
@@ -103,6 +103,10 @@ void nvh_ipc_set_intake_gate(void* ipc, uint32_t on);
 void nvh_ipc_set_app_period_mul(void* ipc, uint32_t mul);
 // Game motion vectors (docs/MOTION_VECTORS.md): on = the shim taps the game's DLSS inputs when the provider is loaded and publishes them with the frames.
 void nvh_ipc_set_game_mv(void* ipc, uint32_t on);
+// Uncapped frame generation: the minimum spacing of the game's releases (us, 0 = none): an fps cap that leaves the host GPU headroom.
+void nvh_ipc_set_app_min_period(void* ipc, uint32_t min_period_us);
+// The generator synthesises from the game's vectors when present (1) or from the flow alone (0): the GUI tick, live.
+void nvh_fg_use_mv(void* nvh, int on);
 // The tap's state as the shim reports it: tap 0 none / 1 attached / 2 ABI mismatch / 3 refused, DLSS streams seen lately, evaluates seen.
 void nvh_ipc_motion_tap(void* ipc, uint32_t* tap, uint32_t* streams, uint64_t* publications);
 // Process-wide GPU scheduling class (D3DKMT): 0 idle .. 4 high, 5 realtime (needs the increase-base-priority privilege, i.e. an

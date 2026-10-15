@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! alvr_host: SteamVR-free ALVR streamer host (skeleton).
 //!
 //! Embeds `alvr_server_core` with an isolated config dir. Video comes from a `VideoSource`; the only source
@@ -78,6 +79,13 @@ struct Args {
     frame_gen: Option<bool>,
     /// the game's DLSS motion vectors (docs/MOTION_VECTORS.md): the shim copies them with every frame when the provider is loaded; settings `video.game_motion_vectors`
     game_motion_vectors: bool,
+    /// frame generation rate (docs/FRAME_GENERATION_UNCAPPED.md): Some(true) = uncapped (every output interpolated, the game paced at the display
+    /// rate), Some(false) = half rate; None = settings `video.frame_gen_rate` ("half" default). `--frame-gen-rate`, env VISIONALVR_FG_RATE.
+    fg_uncapped: Option<bool>,
+    /// uncapped mode: content lag behind the newest tracking sample, ms; 0 = automatic (the game's frame period + half a display period)
+    fg_lag_ms: Option<f64>,
+    /// uncapped mode: fps cap on the game's releases (0 = none), headroom for the host's own GPU work
+    fg_cap_fps: Option<f64>,
     fg_flow_scale: f64,
     fg_perf: i32,
     fg_grid: i32,
@@ -168,6 +176,9 @@ fn parse_args() -> Result<Args, String> {
         gpu_sched_class: 5,
         frame_gen: None,
         game_motion_vectors: true,
+        fg_uncapped: None,
+        fg_lag_ms: None,
+        fg_cap_fps: None,
         fg_flow_scale: 0.5,
         fg_perf: 20,
         fg_grid: 4,
@@ -302,6 +313,10 @@ fn parse_args() -> Result<Args, String> {
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
+            "--frame-gen-rate" => a.fg_uncapped = Some(v()?.eq_ignore_ascii_case("uncapped")),
+            "--frame-gen-lag-ms" => a.fg_lag_ms = Some(v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.0, 100.0)),
+            "--frame-gen-cap" => a.fg_cap_fps = Some(v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.0, 240.0)),
+            "--game-motion-vectors" => a.game_motion_vectors = parse_on_off("--game-motion-vectors", &v()?)?,
             "--frame-gen-flow-scale" => a.fg_flow_scale = v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.1, 1.0),
             "--frame-gen-perf" => a.fg_perf = parse_fg_perf(&v()?)?,
             "--frame-gen-grid" => a.fg_grid = v()?.parse::<i32>().map_err(|e| format!("{e}"))?,
@@ -363,6 +378,17 @@ fn parse_args() -> Result<Args, String> {
         if let Ok(v) = std::env::var("VISIONALVR_FRAME_GEN") {
             a.frame_gen = Some(v != "0" && !v.eq_ignore_ascii_case("off") && !v.eq_ignore_ascii_case("false"));
         }
+    }
+    if a.fg_uncapped.is_none() {
+        if let Ok(v) = std::env::var("VISIONALVR_FG_RATE") {
+            a.fg_uncapped = Some(v.eq_ignore_ascii_case("uncapped"));
+        }
+    }
+    if a.fg_lag_ms.is_none() {
+        a.fg_lag_ms = std::env::var("VISIONALVR_FG_LAG_MS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 100.0));
+    }
+    if a.fg_cap_fps.is_none() {
+        a.fg_cap_fps = std::env::var("VISIONALVR_FG_CAP_FPS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 240.0));
     }
     if let Some(v) = std::env::var("VISIONALVR_FG_T").ok().and_then(|v| v.parse::<f64>().ok()) {
         a.fg_t = v;
@@ -467,6 +493,15 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if let Some(v) = st.game_motion_vectors {
         a.game_motion_vectors = v;
+    }
+    if a.fg_uncapped.is_none() {
+        a.fg_uncapped = st.frame_gen_rate.as_deref().map(|v| v.eq_ignore_ascii_case("uncapped"));
+    }
+    if a.fg_lag_ms.is_none() {
+        a.fg_lag_ms = st.frame_gen_lag_ms.map(|v| v.clamp(0.0, 100.0));
+    }
+    if a.fg_cap_fps.is_none() {
+        a.fg_cap_fps = st.frame_gen_cap_fps.map(|v| v.clamp(0.0, 240.0));
     }
     if let Some(v) = st.frame_gen_flow_scale {
         a.fg_flow_scale = v.clamp(0.1, 1.0);
@@ -824,10 +859,12 @@ mod nvh {
         pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64, render_q8: *mut f32, has_projection: *mut i32) -> i32;
         pub fn nvh_fg_enable(nvh: *mut c_void, on: i32, flow_scale: f64, perf_level: i32, grid: i32, err: *mut c_char, errlen: i32) -> i32;
         pub fn nvh_fg_ingest(nvh: *mut c_void, ipc: *mut c_void, slot: u32, q_render8: *const f32, err: *mut c_char, errlen: i32) -> i32;
-        pub fn nvh_fg_encode(nvh: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, q_out4: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
+        pub fn nvh_fg_encode(nvh: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, age: i32, q_out4: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_fg_stats(nvh: *mut c_void, buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_ipc_set_app_period_mul(ipc: *mut c_void, mul: u32);
         pub fn nvh_ipc_set_game_mv(ipc: *mut c_void, on: u32);
+        pub fn nvh_ipc_set_app_min_period(ipc: *mut c_void, min_period_us: u32);
+        pub fn nvh_fg_use_mv(nvh: *mut c_void, on: i32);
         pub fn nvh_ipc_motion_tap(ipc: *mut c_void, tap: *mut u32, streams: *mut u32, publications: *mut u64);
         pub fn nvh_qpc_seconds() -> f64;
         pub fn nvh_encode_green(nvh: *mut c_void, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
@@ -1290,11 +1327,32 @@ pub(crate) fn push_recent_sample(shared: &Shared, ts: Duration, q: [f32; 4]) {
     }
 }
 
+/// The shim's minimum release spacing (us) for the fps cap of the uncapped mode; 0 = none (cap off, half rate, or generation off).
+fn fg_cap_us(uncapped_active: bool, cap_fps: Option<f64>) -> u32 {
+    match cap_fps {
+        Some(f) if uncapped_active && f > 0.0 => (1_000_000.0 / f).round() as u32,
+        _ => 0,
+    }
+}
+
+/// Every frame-generation choice, logged whenever one changes (the night's tests are read back from these lines).
+fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
+    let rate = if args.fg_uncapped.unwrap_or(false) { "uncapped" } else { "half" };
+    let cap = args.fg_cap_fps.unwrap_or(0.0);
+    let lag = args.fg_lag_ms.unwrap_or(0.0);
+    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms",
+        if fg_active { "ON" } else { "off" }, if args.game_motion_vectors { "on" } else { "off" }, if cap > 0.0 { format!("{cap:.0}") } else { "none".into() },
+        if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }));
+    event(origin, "frame_gen_config", json!({ "why": why, "on": fg_active, "rate": rate, "game_motion_vectors": args.game_motion_vectors,
+        "cap_fps": cap, "lag_ms": lag, "t": args.fg_t, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf }));
+}
+
 /// Creates the generator on the encoder (after nvh_create, the stream's frame size being known): true when it runs; false (logged) when the
 /// GPU or driver has no optical-flow engine, in which case the stream runs as without the feature.
 fn enable_frame_gen(origin: Instant, handle: *mut std::ffi::c_void, args: &Args) -> bool {
     let mut err = [0 as std::ffi::c_char; 256];
     let ok = unsafe { nvh::nvh_fg_enable(handle, 1, args.fg_flow_scale, args.fg_perf, args.fg_grid, err.as_mut_ptr(), 256) } != 0;
+    unsafe { nvh::nvh_fg_use_mv(handle, args.game_motion_vectors as i32) };
     let mut buf = [0 as std::ffi::c_char; 768];
     unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 768) };
     let stats = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
@@ -1666,8 +1724,11 @@ fn main() {
             fg_active = enable_frame_gen(origin, p.enc.lock().handle, &args);
             p.set_frame_gen(fg_active, args.fg_t);
         }
-        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active { 2 } else { 1 }) };
+        p.set_frame_gen_rate(args.fg_uncapped.unwrap_or(false), args.fg_lag_ms.unwrap_or(0.0));
+        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active && !args.fg_uncapped.unwrap_or(false) { 2 } else { 1 }) };
         unsafe { nvh::nvh_ipc_set_game_mv(ipc, if args.game_motion_vectors { 1 } else { 0 }) };
+        unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && args.fg_uncapped.unwrap_or(false), args.fg_cap_fps)) };
+        log_fg_config(origin, &args, fg_active, "start");
         p.start();
         event(origin, "pacing_config", json!({ "send_pacing": args.send_pacing.name(), "running_start_ms": args.running_start_ms,
             "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6,
@@ -2032,7 +2093,8 @@ fn main() {
         a.wrapping_add(b)
     };
     let mut status_at = Instant::now();
-    let mut motion_tap_seen = (0u32, 0u32);   // (tap state, streams) last reported: the shim's DLSS motion-vector tap (docs/MOTION_VECTORS.md)
+    let mut motion_tap_seen = (0u32, 0u32);
+    let (mut perf_rel, mut perf_late) = (0u64, 0u64);   // shim release counters at the last fg_perf line   // (tap state, streams) last reported: the shim's DLSS motion-vector tap (docs/MOTION_VECTORS.md)
     struct BenchState {
         i: usize,
         start: Instant,
@@ -2094,9 +2156,47 @@ fn main() {
                         }
                         drop(g);
                         p.set_frame_gen(fg_active, args.fg_t);
-                        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active { 2 } else { 1 }) };
+                        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active && !args.fg_uncapped.unwrap_or(false) { 2 } else { 1 }) };
+                        unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && args.fg_uncapped.unwrap_or(false), args.fg_cap_fps)) };
+                        log_fg_config(origin, &args, fg_active, "frame_gen");
                     }
                 }
+            }
+            // frame generation rate, the game's motion vectors, the fps cap and the content lag from VisionALVR.exe (live; the settings are read at start too)
+            let rate = vision::FG_RATE_REQ.swap(-1, Ordering::SeqCst);
+            if rate >= 0 {
+                let unc = rate == 1;
+                args.fg_uncapped = Some(unc);
+                if let Some(p) = pipeline.as_ref() {
+                    p.set_frame_gen_rate(unc, args.fg_lag_ms.unwrap_or(0.0));
+                    unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active && !unc { 2 } else { 1 }) };
+                    unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && unc, args.fg_cap_fps)) };
+                }
+                log_fg_config(origin, &args, fg_active, "frame_gen_rate");
+            }
+            let mv = vision::GAME_MV_REQ.swap(-1, Ordering::SeqCst);
+            if mv >= 0 {
+                args.game_motion_vectors = mv == 1;
+                unsafe { nvh::nvh_ipc_set_game_mv(ipc, mv as u32) };
+                if let Some(p) = pipeline.as_ref() {
+                    let g = p.enc.lock();
+                    unsafe { nvh::nvh_fg_use_mv(g.handle, mv) };
+                }
+                log_fg_config(origin, &args, fg_active, "game_mv");
+            }
+            let cap = vision::FG_CAP_REQ.swap(-1, Ordering::SeqCst);
+            if cap >= 0 {
+                args.fg_cap_fps = Some(cap as f64);
+                unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && args.fg_uncapped.unwrap_or(false), args.fg_cap_fps)) };
+                log_fg_config(origin, &args, fg_active, "frame_gen_cap");
+            }
+            let lag = vision::FG_LAG_REQ.swap(-1, Ordering::SeqCst);
+            if lag >= 0 {
+                args.fg_lag_ms = Some(lag as f64 / 10.0);
+                if let Some(p) = pipeline.as_ref() {
+                    p.set_frame_gen_rate(args.fg_uncapped.unwrap_or(false), args.fg_lag_ms.unwrap_or(0.0));
+                }
+                log_fg_config(origin, &args, fg_active, "frame_gen_lag");
             }
             // game start / end, for the general log and the GUI
             let alive = app_alive();
@@ -2154,6 +2254,29 @@ fn main() {
             }));
             (st_frames, st_bytes, st_submitted, st_lost) = (frames, bytes, submitted, lost);
             status_at = Instant::now();
+            if fg_active {
+                // bottleneck log for frame generation: the game's own pace (shim envelope, late releases = free-running), the generator's
+                // GPU times, the uncapped mode's lag and repeats, and the GPU's utilisation and clocks (NVML)
+                if let Some(p) = pipeline.as_ref() {
+                    let u = p.fg_uncapped_stats();
+                    let (mut waits, mut app_ms, mut rel, mut late, mut gh, mut gs) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
+                    unsafe { nvh::nvh_ipc_shim_pacing(ipc, &mut waits, &mut app_ms, &mut rel, &mut late, &mut gh, &mut gs) };
+                    let mut gb = [0 as std::ffi::c_char; 512];
+                    let gpu = if unsafe { nvh::nvh_gpu_sample(gb.as_mut_ptr(), gb.len() as i32) } > 0 {
+                        unsafe { std::ffi::CStr::from_ptr(gb.as_ptr()) }.to_string_lossy().to_string()
+                    } else { String::new() };
+                    let gen = p.fg_stats_json();
+                    let (d_rel, d_late) = (rel.wrapping_sub(perf_rel), late.wrapping_sub(perf_late));
+                    (perf_rel, perf_late) = (rel, late);
+                    logs::general("INFO", &format!("frame generation perf: app {:.1} fps (envelope {app_ms:.1} ms, {d_late}/{d_rel} releases late), stream {:.1} fps, game period {:.1} ms (p50 {:.1} p95 {:.1} max {:.1}), lag {:.1} ms (slack p5 {:.1} p50 {:.1}), mean t {:.2} mean age {:.2}, behind {} ahead {}, gpu [{gpu}]",
+                        rendered as f64 / secs, streamed as f64 / secs, u.game_period_ms, u.interval_p50, u.interval_p95, u.interval_max, u.lag_ms, u.slack_p5, u.slack_p50, u.mean_t, u.mean_age, u.behind, u.ahead));
+                    event(origin, "fg_perf", json!({ "app_fps": rendered as f64 / secs, "stream_fps": streamed as f64 / secs, "app_envelope_ms": app_ms,
+                        "releases": d_rel, "releases_late": d_late, "slot_waits": waits, "game_period_ms": u.game_period_ms, "lag_ms": u.lag_ms, "mean_t": u.mean_t,
+                        "unc_synths": u.synths, "mean_age": u.mean_age, "behind": u.behind, "ahead": u.ahead, "arrivals": u.arrivals, "slack_ms_p5": u.slack_p5, "slack_ms_p50": u.slack_p50,
+                        "interval_ms_p50": u.interval_p50, "interval_ms_p95": u.interval_p95, "interval_ms_max": u.interval_max, "gpu_csv": gpu,
+                        "gen": serde_json::from_str::<serde_json::Value>(&gen).unwrap_or(serde_json::Value::Null) }));
+                }
+            }
             if !ipc.is_null() {
                 let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
                 unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
@@ -2212,7 +2335,8 @@ fn main() {
                         fg_active = enable_frame_gen(origin, g.handle, &args);
                         let p = pipeline.as_ref().expect("pipeline");
                         p.set_frame_gen(fg_active, args.fg_t);
-                        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active { 2 } else { 1 }) };
+                        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active && !args.fg_uncapped.unwrap_or(false) { 2 } else { 1 }) };
+                        unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && args.fg_uncapped.unwrap_or(false), args.fg_cap_fps)) };
                     }
                     nvenc_cfg = describe_encoder(origin, g.handle, &args.dump_qpmap);
                     logs::general("INFO", &format!("encoder rebuilt for the negotiated stream: {ew}x{eh} (was {}x{})", enc_size.0, enc_size.1));
