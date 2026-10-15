@@ -181,5 +181,35 @@ Implemented (IPC version 26):
   vector pattern and a cleared depth target per eye and frame on its immediate context, D3D11); simrig scenario `steady_mv` runs it with
   the generator on and fetches the dumps.
 
-Next: step 2, vector-driven synthesis (the shader reads the vectors where valid, the flow elsewhere), then the real-game check on the 5090
-with the fork DLL (D3D12 Unreal title, then D3D11), then extrapolation.
+## Step 2: synthesis from the vectors (2026-10-15, lab)
+
+In the generator's output pass (`framegen.cpp`), per eye, when the frame carries vectors:
+- `PSVec`: per vector texel, the **residual backward flow** in full-resolution pixels: the NGX vector gives the pixel's position in the
+  previous frame A (`uvA = uvB + mv * scale / size`); that direction is rotated into B's camera (the transpose of the frame-to-frame rotation
+  the flow path already uses) and projected; the displacement from there to the pixel is the in-scene motion with the head rotation removed,
+  the same quantity the optical flow estimates. Invalid (outside the view, NaN, over the clamp) is flagged.
+- `PSDilate` (horizontal then vertical): the strongest valid residual within 1 % of the vectors' height. Exact vectors cover only the
+  object's own pixels in B, nothing around it: a pixel the object moves over at the midpoint can lie outside its rectangle in B. A plain
+  pull warp therefore thinned the lab's 5 px marker and biased it toward B (hf 0.05 -> 0.08 deg, frozen 2.3 -> 4.3 %). The dilated field
+  offers the nearby mover as a candidate source, accepted when its own vector lands on the output pixel within a pixel (what a forward
+  splat does); the pixel's own vector is the baseline. (A sparse 17-tap neighbourhood search was tried first: it missed thin movers and
+  cost 1.8 ms.)
+- `PSOut`: `vecSource` replaces `flowAt` where a vector exists; the flow stays for everything else (UI quads, no-vector games); the
+  colour-disagreement confidence stays, the engine's cost term does not apply to vectors. `VISIONALVR_FG_USE_MV=0` ingests but ignores
+  the vectors (A/B). Stats `mv.used_eyes`.
+
+Lab (3080 Ti, 40 s each, the probe's exact vectors `XR_PROBE_MV=truth`, 50-70 fps app on the 100 Hz display, moving marker):
+
+| scenario | source | glitches | hf rms (deg) | frozen % | marker visible % | synth ms |
+|---|---|---|---|---|---|---|
+| stutter_fg | flow | 9 / 0 | 0.050 / 0.050 | 2.3 | 88.8 / 91.2 | 0.22 |
+| stutter_mv | vectors | 0 / 0 | 0.055 / 0.056 | 3.1 | 98.6 / 98.6 | 0.73 |
+| stutter_turn_fg | flow | 0 / 0 | 0.078 / 0.088 | 3.1 | 23.4 / 23.8 | |
+| stutter_turn_mv | vectors | 0 / 0 | 0.038 / 0.039 | 0.8 | 33.1 / 33.1 | 0.43 |
+
+Both SMOOTH. With vectors: no glitches, the marker is found in nearly every frame, and with the head turning the smoothness doubles
+and frozen periods drop to a quarter; head still, the smoothness is the same within noise. The probe's vectors are exact, so this is
+the ceiling of the method on this scene; a game's vectors carry no transparency or particle motion (the flow fallback covers them).
+
+Next: the real-game check on the 5090 with the fork DLL (D3D12 Unreal title, then D3D11): `motion_tap` event attached, `mv.frames`
+counting, `used_eyes` rising, the headset verdict; then extrapolation mode and the depth-aware re-stamp.

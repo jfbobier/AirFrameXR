@@ -28,13 +28,15 @@ cbuffer CB : register(b0) {
     int4   blocks;          // x0 y0 x1 y1: block bounds of this eye in the flow texture (inclusive)
     float4 mode;            // x: pass mode, y: max flow (full-res px), z: confidence gain, w: 1 = the game's vectors are bound (t4) for this eye
     float4 mvRect;          // game vectors: x, y: first texel of the used rectangle, z, w: its size (texels; the vectors are in these pixels)
-    float4 mvInfo;          // x, y: unused, z, w: NGX MV scale
+    float4 mvInfo;          // x, y: vector texture size (texels), z, w: NGX MV scale
 };
 Texture2D cur : register(t0);
 Texture2D prev : register(t1);
 Texture2D<int2> flow : register(t2);
 Texture2D<uint> cost : register(t3);
 Texture2D<float4> mvec : register(t4);
+Texture2D<float4> resid : register(t5);   // per vector texel: residual flow (full-res px) in xy, z = valid
+Texture2D<float4> dil : register(t6);     // the strongest valid residual within the dilation radius
 SamplerState smp : register(s0);
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 VSOut VS(uint id : SV_VertexID) {
@@ -130,6 +132,52 @@ bool vecFlowAt(float2 uvB, out float2 f) {
     f = uvToPx(uvAinB) - uvToPx(uvB);
     return length(f) <= mode.y;
 }
+// Vector path, per vector texel (PSVec, into `resid`): the residual flow of the game's vector; PSDilate (two passes, horizontal then
+// vertical) keeps the strongest valid residual within blocks.x texels (`dil`). The game's vectors are exact but only cover the object's
+// own pixels in B (nothing is smeared around it the way the block flow is), so a pixel the object moves over at time t may lie outside
+// its rectangle in B: the dilated field offers the nearby mover as a candidate source, accepted when its own vector lands on pB (what a
+// forward splat does); the pixel's own vector (background, or an object standing on it) is the baseline.
+float4 PSVec(VSOut i) : SV_Target {
+    float2 texel = i.uv * mvInfo.xy;
+    float2 uvB = (texel - mvRect.xy) / mvRect.zw;
+    if (any(uvB < 0) || any(uvB >= 1)) return float4(0, 0, 0, 0);
+    float2 f;
+    bool ok = vecFlowAt(uvB, f);
+    return float4(f, ok ? 1 : 0, 0);
+}
+float4 PSDilate(VSOut i) : SV_Target {
+    int2 c = int2(i.uv * mvInfo.xy);
+    int2 hi = int2(mvInfo.xy) - 1;
+    float4 best = resid.Load(int3(c, 0));
+    float bm = best.z > 0 ? length(best.xy) : -1;
+    int R = blocks.x;
+    for (int k = -R; k <= R; k++) {
+        int2 q = clamp(c + (mode.x < 0.5 ? int2(k, 0) : int2(0, k)), int2(0, 0), hi);
+        float4 v = resid.Load(int3(q, 0));
+        float m = v.z > 0 ? length(v.xy) : -1;
+        if (m > bm) { bm = m; best = v; }
+    }
+    return best;
+}
+int2 texelOf(float2 px) {
+    float2 uv = pxToUv(px);
+    return clamp(int2(mvRect.xy + uv * mvRect.zw), int2(mvRect.xy), int2(mvRect.xy + mvRect.zw) - int2(1, 1));
+}
+bool vecSource(float2 pB, float t, out float2 b, out float2 f) {
+    int2 tx = texelOf(pB);
+    float4 r0 = resid.Load(int3(tx, 0));
+    float4 rd = dil.Load(int3(tx, 0));
+    b = pB; f = float2(0, 0);
+    bool found = false;
+    float best = -1;
+    if (r0.z > 0) { b = pB - r0.xy * t; f = r0.xy; found = true; best = length(r0.xy); }
+    if (rd.z > 0 && length(rd.xy) > best + 0.5) {
+        float2 cand = pB - rd.xy * t;
+        float4 rc = resid.Load(int3(texelOf(cand), 0));
+        if (rc.z > 0 && length(cand - (pB - rc.xy * t)) <= 1.0) { b = cand; f = rc.xy; found = true; }
+    }
+    return found;
+}
 // the previous frame at a point given in the current camera (eye-local uv)
 bool samplePrev(float2 uvCur, out float3 c) {
     float2 uvP;
@@ -148,11 +196,11 @@ float4 PSOut(VSOut i) : SV_Target {
     bool havePrev = samplePrev(uvB, prevHere);
     float3 stable = havePrev ? lerp(prevHere, curHere, t) : curHere;
     float2 pB = uvToPx(uvB);
-    float2 f;
-    bool vec = mode.w > 0.5 && vecFlowAt(uvB, f);   // the game's vectors where they exist, the optical flow elsewhere
+    float2 f, b;
+    bool vec = mode.w > 0.5 && vecSource(pB, t, b, f);   // the game's vectors where they exist, the optical flow elsewhere
     if (!vec) f = flowAt(pB);
-    float2 uvC = pxToUv(pB - f * t);
-    float2 uvPb = pxToUv(pB + f * (1 - t));
+    float2 uvC = pxToUv(vec ? b : pB - f * t);
+    float2 uvPb = pxToUv(vec ? b + f : pB + f * (1 - t));
     float3 pc;
     bool okC = all(uvC >= 0) && all(uvC <= 1);
     bool okP = all(uvPb >= 0) && all(uvPb <= 1) && samplePrev(uvPb, pc);
@@ -211,6 +259,9 @@ struct FrameGen::Impl {
     // the game's DLSS vectors (and depth) per history frame and eye, when the shim published them with the frame (ipc.h MotionSlot)
     ID3D11Texture2D* mvTex[2][2] = {}; ID3D11ShaderResourceView* mvSrv[2][2] = {};
     ID3D11Texture2D* depthTex[2][2] = {};
+    // per eye: the residual-flow texture and the dilation ping-pong (the size of the eye's vector texture)
+    ID3D11Texture2D* resTex[2][3] = {}; ID3D11ShaderResourceView* resSrv[2][3] = {}; ID3D11RenderTargetView* resRtv[2][3] = {};
+    ID3D11PixelShader* psVec = nullptr; ID3D11PixelShader* psDilate = nullptr;
     bool mvValid[2][2] = {};
     FrameGenVectors mvInfo[2][2] = {};
     int mvDumps = 0; const char* mvDumpDir = nullptr;
@@ -246,6 +297,8 @@ FrameGen::~FrameGen() {
     if (I.dll) FreeLibrary(I.dll);
     for (int k = 0; k < 2; k++) { rel(I.realSrv[k]); rel(I.real[k]); rel(I.flowInRtv[k]); rel(I.flowIn[k]); }
     for (int k = 0; k < 2; k++) for (int e = 0; e < 2; e++) { rel(I.mvSrv[k][e]); rel(I.mvTex[k][e]); rel(I.depthTex[k][e]); }
+    for (int e = 0; e < 2; e++) for (int k = 0; k < 3; k++) { rel(I.resSrv[e][k]); rel(I.resRtv[e][k]); rel(I.resTex[e][k]); }
+    rel(I.psVec); rel(I.psDilate);
     rel(I.flowOutSrv); rel(I.flowOut); rel(I.costSrv); rel(I.costTex); rel(I.outRtv); rel(m_out);
     rel(I.vs); rel(I.psPrep); rel(I.psOut); rel(I.cb); rel(I.smp); rel(I.qDisjoint); rel(I.qDisjointR);
     for (auto& q : I.qT) rel(q);
@@ -258,10 +311,12 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     I.cfg = cfg;
     m_w = w; m_h = h;
     // shaders
-    ID3DBlob *vb = nullptr, *p1 = nullptr, *p2 = nullptr, *e = nullptr;
+    ID3DBlob *vb = nullptr, *p1 = nullptr, *p2 = nullptr, *p3 = nullptr, *p4 = nullptr, *e = nullptr;
     if (FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vb, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSPrep", "ps_5_0", 0, 0, &p1, &e)) ||
-        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSOut", "ps_5_0", 0, 0, &p2, &e))) {
+        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSOut", "ps_5_0", 0, 0, &p2, &e)) ||
+        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSVec", "ps_5_0", 0, 0, &p3, &e)) ||
+        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSDilate", "ps_5_0", 0, 0, &p4, &e))) {
         seterr(err, errlen, e ? (const char*)e->GetBufferPointer() : "frame generation shader compile failed");
         if (e) e->Release();
         return false;
@@ -269,7 +324,9 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     m_dev->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &I.vs);
     m_dev->CreatePixelShader(p1->GetBufferPointer(), p1->GetBufferSize(), nullptr, &I.psPrep);
     m_dev->CreatePixelShader(p2->GetBufferPointer(), p2->GetBufferSize(), nullptr, &I.psOut);
-    vb->Release(); p1->Release(); p2->Release();
+    m_dev->CreatePixelShader(p3->GetBufferPointer(), p3->GetBufferSize(), nullptr, &I.psVec);
+    m_dev->CreatePixelShader(p4->GetBufferPointer(), p4->GetBufferSize(), nullptr, &I.psDilate);
+    vb->Release(); p1->Release(); p2->Release(); p3->Release(); p4->Release();
     D3D11_BUFFER_DESC bd{}; bd.ByteWidth = sizeof(Cb); bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     m_dev->CreateBuffer(&bd, nullptr, &I.cb);
     D3D11_SAMPLER_DESC sd{}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sd.MaxLOD = D3D11_FLOAT32_MAX;
@@ -516,6 +573,24 @@ int FrameGen::IngestVectors(int eye, ID3D11Texture2D* mv, ID3D11Texture2D* depth
         char e2[128];
         hasDepth = copyLike(m_dev, m_ctx, depth, I.depthTex[I.cur][eye], nullptr, e2, sizeof e2);
     }
+    {
+        // the residual / dilation textures of this eye follow the vector texture's size
+        D3D11_TEXTURE2D_DESC md{}; I.mvTex[I.cur][eye]->GetDesc(&md);
+        D3D11_TEXTURE2D_DESC rd{};
+        if (I.resTex[eye][0]) I.resTex[eye][0]->GetDesc(&rd);
+        if (!I.resTex[eye][0] || rd.Width != md.Width || rd.Height != md.Height) {
+            for (int k = 0; k < 3; k++) { rel(I.resSrv[eye][k]); rel(I.resRtv[eye][k]); rel(I.resTex[eye][k]); }
+            D3D11_TEXTURE2D_DESC td{}; td.Width = md.Width; td.Height = md.Height; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+            for (int k = 0; k < 3; k++) {
+                if (FAILED(m_dev->CreateTexture2D(&td, nullptr, &I.resTex[eye][k])) || FAILED(m_dev->CreateShaderResourceView(I.resTex[eye][k], nullptr, &I.resSrv[eye][k])) ||
+                    FAILED(m_dev->CreateRenderTargetView(I.resTex[eye][k], nullptr, &I.resRtv[eye][k]))) {
+                    for (int j = 0; j < 3; j++) { rel(I.resSrv[eye][j]); rel(I.resRtv[eye][j]); rel(I.resTex[eye][j]); }
+                    seterr(err, errlen, "residual flow textures"); stats.mvErrors++; return -1;
+                }
+            }
+        }
+    }
     I.mvValid[I.cur][eye] = true;
     I.mvInfo[I.cur][eye] = v;
     stats.mvEyes++;
@@ -551,6 +626,52 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const f
     }
     m_ctx->Begin(I.qDisjointR);
     m_ctx->End(I.qT[2]);
+    // the game's vectors (docs/MOTION_VECTORS.md): per eye the residual-flow texel pass and the two dilation passes, before the output pass
+    bool vecEye[2] = {};
+    if (mode == 1 && I.useVectors) {
+        m_ctx->IASetInputLayout(nullptr); m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        m_ctx->VSSetShader(I.vs, nullptr, 0); m_ctx->PSSetConstantBuffers(0, 1, &I.cb);
+        for (int e = 0; e < 2; e++) {
+            if (!I.mvValid[I.cur][e] || !I.mvSrv[I.cur][e] || !I.resTex[e][0]) continue;
+            const FrameGenVectors& v = I.mvInfo[I.cur][e];
+            D3D11_TEXTURE2D_DESC md{}; I.mvTex[I.cur][e]->GetDesc(&md);
+            Cb c{};
+            float m[9];
+            relRot(I.realQ[m_have >= 2 ? prev : I.cur] + e * 4, I.realQ[I.cur] + e * 4, m);
+            rows(m, c.pA, c.pB, c.pC);
+            memcpy(c.tanF, fov8 + e * 4, sizeof(float) * 4);
+            c.eyeRect[0] = e ? 0.5f : 0.f; c.eyeRect[1] = 0.5f; c.eyeRect[2] = (float)m_w; c.eyeRect[3] = (float)m_h;
+            const bool lowRes = (v.flags & 2u) != 0;
+            c.mvRect[0] = (float)v.mvX; c.mvRect[1] = (float)v.mvY;
+            c.mvRect[2] = (float)(lowRes ? v.renderW : v.outputW); c.mvRect[3] = (float)(lowRes ? v.renderH : v.outputH);
+            c.mvInfo[0] = (float)md.Width; c.mvInfo[1] = (float)md.Height; c.mvInfo[2] = v.mvScaleX; c.mvInfo[3] = v.mvScaleY;
+            c.mode[1] = I.cfg.maxFlowPx;
+            c.blocks[0] = std::max(2, (int)(c.mvRect[3] * 0.01f + 0.5f));   // dilation radius: 1 % of the vectors' height (8 texels at 800)
+            D3D11_VIEWPORT vp{}; vp.Width = (float)md.Width; vp.Height = (float)md.Height; vp.MaxDepth = 1.f;
+            m_ctx->RSSetViewports(1, &vp);
+            ID3D11ShaderResourceView* nul = nullptr;
+            // residual per texel
+            c.mode[0] = 0.f;
+            m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c, 0, 0);
+            m_ctx->OMSetRenderTargets(1, &I.resRtv[e][0], nullptr);
+            m_ctx->PSSetShader(I.psVec, nullptr, 0);
+            m_ctx->PSSetShaderResources(4, 1, &I.mvSrv[I.cur][e]);
+            m_ctx->Draw(3, 0);
+            m_ctx->PSSetShaderResources(4, 1, &nul);
+            // dilation: horizontal into [1], vertical into [2]
+            m_ctx->PSSetShader(I.psDilate, nullptr, 0);
+            for (int pass = 0; pass < 2; pass++) {
+                c.mode[0] = (float)pass;
+                m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c, 0, 0);
+                m_ctx->OMSetRenderTargets(1, &I.resRtv[e][pass + 1], nullptr);
+                m_ctx->PSSetShaderResources(5, 1, &I.resSrv[e][pass]);
+                m_ctx->Draw(3, 0);
+                m_ctx->PSSetShaderResources(5, 1, &nul);
+            }
+            vecEye[e] = true;
+        }
+        ID3D11RenderTargetView* nullRtv0 = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv0, nullptr);
+    }
     m_ctx->OMSetRenderTargets(1, &I.outRtv, nullptr);
     m_ctx->IASetInputLayout(nullptr); m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_ctx->VSSetShader(I.vs, nullptr, 0); m_ctx->PSSetShader(I.psOut, nullptr, 0);
@@ -560,14 +681,15 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const f
     for (int e = 0; e < 2; e++) {
         Cb c{};
         // the game's vectors of the current frame for this eye (docs/MOTION_VECTORS.md), when the shim published them
-        ID3D11ShaderResourceView* mvSrv = (mode == 1 && I.useVectors && I.mvValid[I.cur][e]) ? I.mvSrv[I.cur][e] : nullptr;
-        m_ctx->PSSetShaderResources(4, 1, &mvSrv);
-        if (mvSrv) {
+        ID3D11ShaderResourceView* vsrv[3] = { vecEye[e] ? I.mvSrv[I.cur][e] : nullptr, vecEye[e] ? I.resSrv[e][0] : nullptr, vecEye[e] ? I.resSrv[e][2] : nullptr };
+        m_ctx->PSSetShaderResources(4, 3, vsrv);
+        if (vecEye[e]) {
             const FrameGenVectors& v = I.mvInfo[I.cur][e];
+            D3D11_TEXTURE2D_DESC md{}; I.mvTex[I.cur][e]->GetDesc(&md);
             const bool lowRes = (v.flags & 2u) != 0;   // MVLowRes: vectors at the render size, else at the output size
             c.mvRect[0] = (float)v.mvX; c.mvRect[1] = (float)v.mvY;
             c.mvRect[2] = (float)(lowRes ? v.renderW : v.outputW); c.mvRect[3] = (float)(lowRes ? v.renderH : v.outputH);
-            c.mvInfo[2] = v.mvScaleX; c.mvInfo[3] = v.mvScaleY;
+            c.mvInfo[0] = (float)md.Width; c.mvInfo[1] = (float)md.Height; c.mvInfo[2] = v.mvScaleX; c.mvInfo[3] = v.mvScaleY;
             c.mode[3] = 1.f;
             stats.mvUsedEyes++;
         }
@@ -587,7 +709,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, const float* qOut4, const f
         m_ctx->RSSetViewports(1, &vp);
         m_ctx->Draw(3, 0);
     }
-    ID3D11ShaderResourceView* nulls[5] = {}; m_ctx->PSSetShaderResources(0, 5, nulls);
+    ID3D11ShaderResourceView* nulls[7] = {}; m_ctx->PSSetShaderResources(0, 7, nulls);
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     m_ctx->End(I.qT[3]);
     m_ctx->End(I.qDisjointR);

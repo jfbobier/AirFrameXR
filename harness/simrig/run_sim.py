@@ -49,8 +49,12 @@ SCENARIOS = {
                     "note": "ideal timing, light app, generator off: the motion metric's reference (the rig's own empty boundaries, ~6 %, read as frozen periods)"},
     # game motion vectors (docs/MOTION_VECTORS.md): the probe stands in for the DLSS provider (XR_PROBE_MV=synthetic, known vector pattern), the shim's
     # tap copies them with every frame, the host attaches them to the generator's history and dumps the first ones (mv_*.ppm / .txt in the results)
-    "steady_mv":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MV": "synthetic", "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_MV_DUMP": "{rd}",
+    "steady_mv":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MV": "synthetic", "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_MV_DUMP": "{rd}", "ENV:VISIONALVR_FG_USE_MV": "0",
                     "note": "steady_fg + synthetic DLSS vectors from the probe: the tap's plumbing (check mv_*.ppm against the probe's formula, fg stats mv.frames)"},
+    "stutter_mv":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "PROBE:XR_PROBE_MV": "truth", "note": "stutter_fg with the probe's exact vectors (XR_PROBE_MV=truth): synthesis from the game's vectors (compare with stutter_fg)"},
+    "stutter_turn_mv": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "PROBE:XR_PROBE_MV": "truth", "note": "stutter_turn_fg with exact vectors: camera motion in the vectors must cancel against the rotation compensation"},
 }
 
 

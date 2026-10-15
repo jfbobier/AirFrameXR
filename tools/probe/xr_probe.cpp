@@ -58,12 +58,15 @@ static const char* stateName(XrSessionState s) {
     default: return "?"; }
 }
 
-// XR_PROBE_MV=synthetic: the probe stands in for the game's DLSS proxy (docs/MOTION_VECTORS.md). It exports the provider ABI of
+// XR_PROBE_MV=synthetic|truth: the probe stands in for the game's DLSS proxy (docs/MOTION_VECTORS.md). It exports the provider ABI of
 // VisionALVR-OptiScaler (VaProvider.h v1, mirrored in ovrshim/ngxtap.h) so the shim finds and registers with it, and once per eye and frame
 // publishes a motion-vector texture (R16G16_FLOAT at half the eye size: the DLSS render size) and a depth texture (D32_FLOAT, a depth-stencil
-// target like a game's) on the app's immediate context. Known content: vx = 8 sin(2 pi y / h), vy = 4 cos(2 pi x / w), the right eye negated,
-// and the 16 x 16 block at the origin holds vx = frame % 32; the depth is cleared to 0.25 (even frames) or 0.75 (odd). The host's
-// VISIONALVR_FG_MV_DUMP images can be checked against these formulas.
+// target like a game's) on the app's immediate context.
+// `synthetic` (plumbing check): vx = 8 sin(2 pi y / h), vy = 4 cos(2 pi x / w), the right eye negated, the 16 x 16 block at the origin holds
+// vx = frame % 32; the depth is cleared to 0.25 (even frames) or 0.75 (odd). The host's VISIONALVR_FG_MV_DUMP images can be checked against these.
+// `truth` (ground truth for the synthesis): the exact NGX-convention vectors of the dots scene, rendered by a pixel shader per eye: the camera
+// motion of the world-fixed background (where each pixel's direction projected in the previous frame's view, minus its position) and, inside
+// the moving marker, the marker's own displacement; both in render-size pixels, previous minus current.
 extern "C" {
 struct VisionALVR_PublicationV1 {
     uint32_t struct_size, version, api, stream; uint64_t frame;
@@ -77,8 +80,85 @@ __declspec(dllexport) uint32_t VisionALVR_ProviderVersion() { return 1; }
 __declspec(dllexport) int VisionALVR_SetConsumerV1(VisionALVR_ConsumerV1 c, void* u) { g_mvConsumer = c; g_mvConsumerUser = u; return 1; }
 }
 struct SyntheticMv {
-    ID3D11Texture2D* mv[2] = {}; ID3D11Texture2D* depth[2] = {}; ID3D11DepthStencilView* dsv[2] = {};
+    ID3D11Texture2D* mv[2] = {}; ID3D11Texture2D* depth[2] = {}; ID3D11DepthStencilView* dsv[2] = {}; ID3D11RenderTargetView* rtv[2] = {};
     UINT w = 0, h = 0; uint64_t frame = 0; uint64_t published = 0;
+    bool truth = false;
+    // truth mode: the shader and the per-eye state of the previous frame
+    ID3D11VertexShader* vs = nullptr; ID3D11PixelShader* ps = nullptr; ID3D11Buffer* cb = nullptr;
+    struct TruthCb { float tanF[4]; float mA[4], mB[4], mC[4]; float marker[4]; float disp[4]; };
+    float prevQ[2][4] = {}; bool prevValid[2] = {};
+    float markerC[2][2] = {}; bool markerValid[2] = {}, prevMarkerValid[2] = {}; float prevMarkerC[2][2] = {}; float markerHalf[2][2] = {};
+    static void rotRows(const float* q, float m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w): world = R * local
+        const float x = q[0], y = q[1], z = q[2], w = q[3];
+        m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y - z * w);     m[2] = 2 * (x * z + y * w);
+        m[3] = 2 * (x * y + z * w);     m[4] = 1 - 2 * (x * x + z * z); m[5] = 2 * (y * z - x * w);
+        m[6] = 2 * (x * z - y * w);     m[7] = 2 * (y * z + x * w);     m[8] = 1 - 2 * (x * x + y * y);
+    }
+    bool initTruth(ID3D11Device* dev, std::string& err) {
+        static const char* src = R"(
+cbuffer CB : register(b0) { float4 tanF; float4 mA, mB, mC; float4 marker; float4 disp; };
+struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
+VSOut VS(uint id : SV_VertexID) { VSOut o; float2 p = float2((id << 1) & 2, id & 2); o.pos = float4(p * float2(2, -2) + float2(-1, 1), 0, 1); o.uv = p; return o; }
+float2 PS(VSOut i) : SV_Target {
+    float2 px = i.uv * disp.zw;
+    if (all(px >= marker.xy) && all(px < marker.zw)) return disp.xy;
+    float3 d = float3(lerp(-tanF.x, tanF.y, i.uv.x), lerp(tanF.z, -tanF.w, i.uv.y), -1);
+    float3 dp = float3(dot(mA.xyz, d), dot(mB.xyz, d), dot(mC.xyz, d));   // the same direction in the previous frame's view
+    if (dp.z > -1e-4) return float2(0, 0);
+    float2 tt = dp.xy / -dp.z;
+    float2 uvP = float2((tt.x + tanF.x) / (tanF.x + tanF.y), 1 - (tt.y + tanF.w) / (tanF.z + tanF.w));
+    return (uvP - i.uv) * disp.zw;
+})";
+        ComPtr<ID3DBlob> bvs, bps;
+        if (!compile(src, "VS", "vs_5_0", bvs, err) || !compile(src, "PS", "ps_5_0", bps, err)) return false;
+        if (FAILED(dev->CreateVertexShader(bvs->GetBufferPointer(), bvs->GetBufferSize(), nullptr, &vs)) ||
+            FAILED(dev->CreatePixelShader(bps->GetBufferPointer(), bps->GetBufferSize(), nullptr, &ps))) { err = "truth shaders"; return false; }
+        D3D11_BUFFER_DESC bd{}; bd.ByteWidth = sizeof(TruthCb); bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        if (FAILED(dev->CreateBuffer(&bd, nullptr, &cb))) { err = "truth cb"; return false; }
+        for (int e = 0; e < 2; e++) if (FAILED(dev->CreateRenderTargetView(mv[e], nullptr, &rtv[e]))) { err = "truth rtv"; return false; }
+        truth = true;
+        return true;
+    }
+    // The marker of this frame for one eye (full eye pixels: centre and half sizes), recorded by the dots renderer before publishTruth.
+    void setMarker(int eye, bool visible, float cx, float cy, float hw, float hh) {
+        markerValid[eye] = visible; markerC[eye][0] = cx; markerC[eye][1] = cy; markerHalf[eye][0] = hw; markerHalf[eye][1] = hh;
+    }
+    void publishTruth(ID3D11DeviceContext* ctx, int eye, UINT outW, UINT outH, const float tanF[4], const float q[4]) {
+        if (!g_mvConsumer || !mv[eye] || !truth) return;
+        TruthCb c{};
+        memcpy(c.tanF, tanF, sizeof c.tanF);
+        float rc[9], rp[9];
+        rotRows(q, rc); rotRows(prevValid[eye] ? prevQ[eye] : q, rp);
+        // direction in the current view -> world (R_cur) -> previous view (R_prev^T): M = R_prev^T R_cur
+        for (int r = 0; r < 3; r++) for (int k = 0; k < 3; k++) {
+            float v = 0; for (int j = 0; j < 3; j++) v += rp[j * 3 + r] * rc[j * 3 + k];
+            (r == 0 ? c.mA : r == 1 ? c.mB : c.mC)[k] = v;
+        }
+        if (markerValid[eye] && prevMarkerValid[eye]) {
+            c.marker[0] = (markerC[eye][0] - markerHalf[eye][0]) * 0.5f; c.marker[1] = (markerC[eye][1] - markerHalf[eye][1]) * 0.5f;
+            c.marker[2] = (markerC[eye][0] + markerHalf[eye][0]) * 0.5f; c.marker[3] = (markerC[eye][1] + markerHalf[eye][1]) * 0.5f;
+            c.disp[0] = (prevMarkerC[eye][0] - markerC[eye][0]) * 0.5f; c.disp[1] = (prevMarkerC[eye][1] - markerC[eye][1]) * 0.5f;
+        } else { c.marker[0] = c.marker[1] = -1.f; c.marker[2] = c.marker[3] = -2.f; }
+        c.disp[2] = (float)w; c.disp[3] = (float)h;
+        ctx->UpdateSubresource(cb, 0, nullptr, &c, 0, 0);
+        ctx->OMSetRenderTargets(1, &rtv[eye], nullptr);
+        ctx->OMSetBlendState(nullptr, nullptr, 0xffffffff); ctx->OMSetDepthStencilState(nullptr, 0); ctx->RSSetState(nullptr);
+        D3D11_VIEWPORT vp{}; vp.Width = (float)w; vp.Height = (float)h; vp.MaxDepth = 1.f; ctx->RSSetViewports(1, &vp);
+        ctx->IASetInputLayout(nullptr); ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        ctx->VSSetShader(vs, nullptr, 0); ctx->PSSetShader(ps, nullptr, 0); ctx->PSSetConstantBuffers(0, 1, &cb);
+        ctx->Draw(3, 0);
+        ID3D11RenderTargetView* nullRtv = nullptr; ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
+        ctx->ClearDepthStencilView(dsv[eye], D3D11_CLEAR_DEPTH, 0.5f, 0);
+        VisionALVR_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye; p.frame = frame; p.cmd = ctx;
+        p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = w; p.render_h = h; p.output_w = outW; p.output_h = outH;
+        p.mv_scale_x = p.mv_scale_y = 1.f; p.reset = prevValid[eye] ? 0 : 1; p.flags = 0x2 | 0x8;
+        g_mvConsumer(&p, g_mvConsumerUser);
+        published++;
+        memcpy(prevQ[eye], q, sizeof prevQ[eye]); prevValid[eye] = true;
+        prevMarkerValid[eye] = markerValid[eye]; prevMarkerC[eye][0] = markerC[eye][0]; prevMarkerC[eye][1] = markerC[eye][1];
+        markerValid[eye] = false;
+        if (eye == 1) frame++;
+    }
     static uint16_t half(float f) {   // float -> IEEE half (round to nearest, values here are small)
         uint32_t x; memcpy(&x, &f, 4); const uint32_t sign = (x >> 16) & 0x8000; int e = (int)((x >> 23) & 0xff) - 127 + 15; uint32_t m = x & 0x7fffff;
         if (e <= 0) return (uint16_t)sign; if (e >= 31) return (uint16_t)(sign | 0x7c00);
@@ -285,9 +365,12 @@ int main(int argc, char** argv) {
     CK(xrEnumerateViewConfigurationViews(inst, sys, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, n, &n, vcv.data()));
     L("views: %u, recommended %ux%u", n, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight);
     SyntheticMv synMv; const bool synMvOn = getenv("XR_PROBE_MV") && strcmp(getenv("XR_PROBE_MV"), "synthetic") == 0;
-    if (synMvOn) {
-        if (synMv.init(dev, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight)) L("ok   synthetic motion vectors %ux%u per eye (provider ABI exported)", synMv.w, synMv.h);
-        else L("FAIL synthetic motion vectors: textures");
+    const bool truthMvOn = getenv("XR_PROBE_MV") && strcmp(getenv("XR_PROBE_MV"), "truth") == 0;
+    if (synMvOn || truthMvOn) {
+        std::string merr;
+        if (!synMv.init(dev, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight)) L("FAIL motion vectors: textures");
+        else if (truthMvOn && !synMv.initTruth(dev, merr)) L("FAIL motion vectors (truth): %s", merr.c_str());
+        else L("ok   %s motion vectors %ux%u per eye (provider ABI exported)", truthMvOn ? "ground-truth" : "synthetic", synMv.w, synMv.h);
     }
 
     CK(xrEnumerateSwapchainFormats(sess, 0, &n, nullptr));
@@ -571,9 +654,17 @@ int main(int argc, char** argv) {
                                     dr.left = std::max<LONG>(dr.left, 0); dr.top = std::max<LONG>(dr.top, 0);
                                     dr.right = std::min<LONG>(dr.right, (LONG)dt.Width); dr.bottom = std::min<LONG>(dr.bottom, (LONG)dt.Height);
                                     if (dr.right > dr.left && dr.bottom > dr.top) dc->ClearView(rtv, white, &dr, 1);
+                                    synMv.setMarker((int)i, true, cx, cy, hw, hh);
                                 }
                             dc->Release();
                         }
+                    }
+                    if (truthMvOn && i < 2) {   // the eye's "DLSS evaluate": exact vectors of this view against the previous frame's
+                        const XrFovf& tf = views[i].fov;
+                        const float tanF[4] = { -tanf(tf.angleLeft), tanf(tf.angleRight), tanf(tf.angleUp), -tanf(tf.angleDown) };
+                        const float q[4] = { views[i].pose.orientation.x, views[i].pose.orientation.y, views[i].pose.orientation.z, views[i].pose.orientation.w };
+                        D3D11_TEXTURE2D_DESC ot{}; imgs[i][idx].texture->GetDesc(&ot);
+                        synMv.publishTruth(ctx, (int)i, ot.Width, ot.Height, tanF, q);
                     }
                     ID3D11DeviceContext1* c1 = nullptr;
                     if (i == 0 && SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
@@ -660,7 +751,7 @@ int main(int argc, char** argv) {
         done++;
     }
     L("loop done: frames=%d ready=%d synchronized=%d", done, sawReady, sawSync);
-    if (synMvOn) L("synthetic motion vectors: %llu publications, consumer %s", (unsigned long long)synMv.published, g_mvConsumer ? "registered" : "never registered");
+    if (synMvOn || truthMvOn) L("motion vectors: %llu publications, consumer %s", (unsigned long long)synMv.published, g_mvConsumer ? "registered" : "never registered");
     if (done > 1) L("app fps %.2f over %d frames", (done - 1) * 1000.0 / (qpcMs() - loopStartMs), done - 1);
     if (rc == 0 && done < frames) rc = 4;
     if (running) { xrRequestExitSession(sess); }
