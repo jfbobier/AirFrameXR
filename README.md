@@ -67,12 +67,17 @@ OpenXR game
 - **Vision Pro known issue**: in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips
   them (shown fps a little under the host fps). A fix exists (branch `exp/restamp-2026-10-13`) but needs a change on the visionOS
   client side, so it is not in the release.
-- **New in 0.4: frame generation** (checkbox in the streamer window and in Settings, `video.frame_gen`, off by default): for games that cannot
-  hold the display rate, the game is paced at half of it and the streamer fills the frame in between from the GPU's optical flow (NVIDIA Optical
-  Flow engine, Turing or later), every output rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz with an RTX 5090: missed
-  display periods 38 % -> 1 %, lower total latency on GPU-bound games (the half-rate budget removes their standing queue), no visible loss of
-  sharpness. Costs one display period of latency; small fast HUD elements may ghost. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md).
-  Not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
+- **New in 0.4: frame generation** (toggle in the streamer window and in Settings, `video.frame_gen`, off by default): for games that cannot
+  hold the display rate. **Half rate** paces the game at half the display rate and the streamer fills the frame in between; **Uncapped** lets
+  the game run free (an optional **fps cap** holds it a little under its sustained rate, which keeps its render queue short) and synthesises
+  every output at the right fraction between the two newest rendered frames. In-scene motion comes from the game's own **DLSS motion vectors**
+  when the [VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler) DLL sits next to the game's executable (download it from
+  that repository's Releases page, rename it `dxgi.dll`, tick *DLSS motion vectors*), else from the GPU's optical-flow engine (NVIDIA Optical
+  Flow, Turing or later). Every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz with an RTX 5090: missed
+  display periods 38 % -> 1 % at half rate; uncapped keeps a 70 fps game at 70. Costs latency by construction (interpolation: one display
+  period at half rate, about two game periods uncapped); small fast HUD elements may ghost without vectors. See
+  [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md) and
+  [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md). Not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
@@ -177,4 +182,4 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers (v0.2, extended in 0.3)
-- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation (optical flow, 0.4): half-rate pacing + interpolated frames; [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md): the DLSS motion-vector design
+- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation (0.4): half-rate pacing + interpolated frames; [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md): the uncapped mode, cap and lag, headset-night verdicts; [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md): the DLSS motion-vector tap (OptiScaler fork) and synthesis from vectors
