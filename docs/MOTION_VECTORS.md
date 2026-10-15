@@ -240,4 +240,14 @@ shim log `motion vectors: vectors WxH format 34 -> shared copy (format 34)` and 
 Also learned that night: Luke Ross's mods (Dead Space, Cyberpunk 2077, Avatar) crash with the fork DLL under any proxy name, since the mod
 hooks NGX itself for its own DLSS use; titles with anti-cheat reject the DLL. Vectors are therefore a UEVR (and native DLSS game) feature.
 
-Next: the real-game vector verdict, then extrapolation mode and the depth-aware re-stamp.
+Real-game verdict (2026-10-16 01:03, fixed tap, Valor Mortis and Carma): every synthetic eye pass from the game's vectors, 0 errors, no
+device loss; user: "DLSS is FIXED. Looks great." A second defect had surfaced in between: the runtime's D3D11 device died with SM page faults
+when the tap destroyed shared copies that a pending game command list or a queued copy could still reference (feature re-creation at a level
+change); copies are now retired for 3 s instead (2ff3f81), depth copies are opt-in (`OVRSHIM_MV_DEPTH=1`) until the generator reads depth.
+
+Lab debt (user ask, 2026-10-16): both defects passed the lab because the probe's provider is D3D11-only, owns typed resources, and never
+recreates streams or destroys resources. Before the next tap change: a D3D12 provider mode in the probe with Unreal-like resource descs,
+stream-id and size churn, resources destroyed right after publication, the D3D12 debug layer on, and a hard lab verdict on `mv.frames`,
+`used_eyes`, `sources not copied` and device loss (`check_mv.py`).
+
+Next: extrapolation mode and the depth-aware re-stamp.
