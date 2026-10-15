@@ -268,6 +268,10 @@ int main(int argc, char** argv) {
     // harness/simrig/judge.py scores how smoothly in-scene motion reaches the display (repeated frames freeze it, generated frames should not)
     double movingAmp = 0, movingHz = 0;
     if (const char* mv = getenv("XR_PROBE_MOVING")) { movingAmp = atof(mv); if (const char* c = strchr(mv, ':')) movingHz = atof(c + 1); }
+    // XR_PROBE_MOVING_CLOCK=wall: the marker's time is the wall clock at the frame's start (what a game engine's delta-time animation does), not the
+    // predicted display time (quantised to the display grid; two frames can share one). The uncapped generation is judged against the former.
+    const bool movingWall = getenv("XR_PROBE_MOVING_CLOCK") && strcmp(getenv("XR_PROBE_MOVING_CLOCK"), "wall") == 0;
+    double movingWallT0 = 0.0, movingFrameStartMs = 0.0;
     long long movingT0 = 0;
     if (const char* scenePath = dotsOn ? nullptr : getenv("XR_PROBE_SCENE")) {
         std::string err;
@@ -464,6 +468,7 @@ int main(int argc, char** argv) {
         if (XR_FAILED(r)) return fail("xrBeginFrame", r);
         if (done == 0) loopStartMs = qpcMs();
         const double tWaitRet = qpcMs();
+        movingFrameStartMs = tWaitRet;
         const double lf = loadFactor(done, (tWaitRet - loopStartMs) / 1000.0);
         if (loadCpuMs > 0 && lf > 0) { const double t = qpcMs(); while (qpcMs() - t < loadCpuMs * lf) YieldProcessor(); }
         if (loadTex[0] && loadTex[1]) { const int n = (int)(loadGpuCopies * lf + 0.5); for (int k = 0; k < n; k++) ctx->CopyResource(loadTex[(k + 1) & 1], loadTex[k & 1]); }
@@ -640,7 +645,8 @@ int main(int argc, char** argv) {
                         if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&dc))) {
                             const float white[4] = { 1, 1, 1, 1 };
                                 if (movingT0 == 0) movingT0 = (long long)fs.predictedDisplayTime;
-                                const double ts = (double)((long long)fs.predictedDisplayTime - movingT0) * 1e-9;
+                                if (movingWall && movingWallT0 == 0.0) movingWallT0 = movingFrameStartMs;
+                                const double ts = movingWall ? (movingFrameStartMs - movingWallT0) * 1e-3 : (double)((long long)fs.predictedDisplayTime - movingT0) * 1e-9;
                                 const double th = movingAmp * sin(2.0 * 3.14159265358979 * movingHz * ts) * 3.14159265358979 / 180.0;
                                 const double drop = 3.0 * tan(7.0 * 3.14159265358979 / 180.0);   // 7 deg below the ring's centre (the ring's rectangles reach 4 deg down)
                                 const XMVECTOR wp = XMVectorSet((float)(3.0 * sin(th)), (float)(dp.position.y - drop), (float)(-3.0 * cos(th)), 1.f);

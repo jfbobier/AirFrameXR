@@ -83,8 +83,10 @@ struct Arrived {
     /// per-eye orientation the projection layer was rendered with (ipc frameRenderQuat), valid when `has_projection`
     render_q: [f32; 8],
     has_projection: bool,
-    /// the display time the app rendered the frame for (shim/host QPC clock, s); 0 = unknown. The uncapped generation's content time.
+    /// the display time the app rendered the frame for (shim/host QPC clock, s); 0 = unknown
     display_s: f64,
+    /// shim clock when the app was released for this frame (its start): the uncapped generation's content time (a wall-clock engine animates from it)
+    release_s: f64,
 }
 
 /// Frame-level CSV mirrors for the harness (VISIONALVR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
@@ -650,10 +652,10 @@ impl Pipeline {
         st.last_submit_s = a.submit_s;
         st.last_arrival = Some(a.arrival);
         if st.uncapped {
-            // content time = the display time the app rendered the frame for (what its animation was computed for); the tracking timestamp
-            // is not usable here: the shim hands samples out in order, one per frame, so their spacing is the display period whatever the
-            // app's real frame time (the first lab run interpolated at the wrong fractions: JUDDER)
-            let ts = if a.display_s > 0.0 { a.display_s } else { a.submit_s };
+            // content time = the shim clock when the app was released for the frame (its start: a wall-clock engine's animation time). Not the
+            // tracking timestamp (handed out one per frame, so spaced by the display period whatever the app's real frame time) and not the
+            // layer's SensorSampleTime (VDXR's label did not follow the app's display time one-to-one in the lab): both made JUDDER.
+            let ts = if a.release_s > 0.0 { a.release_s } else if a.display_s > 0.0 { a.display_s } else { a.submit_s };
             let period = self.period().as_secs_f64();
             // the lag must cover (now - the previous frame's content time) at every arrival, or the headset sees a repeat before this frame is
             // usable: an envelope with a fast attack and a slow decay (0.2 ms per arrival)
@@ -846,8 +848,8 @@ impl Pipeline {
         while !self.stop.load(Ordering::Relaxed) {
             let (mut counter, mut slot, mut cts, mut submit_s) = (0u64, 0u32, 0u64, 0f64);
             let (mut render_q, mut has_proj) = ([0f32; 8], 0i32);
-            let mut display_s = 0f64;
-            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s, render_q.as_mut_ptr(), &mut has_proj, &mut display_s) } == 0 {
+            let (mut display_s, mut release_s) = (0f64, 0f64);
+            if unsafe { nvh::nvh_ipc_wait_frame(ipc, 2, &mut counter, &mut slot, &mut cts, &mut submit_s, render_q.as_mut_ptr(), &mut has_proj, &mut display_s, &mut release_s) } == 0 {
                 continue;
             }
             let now = Instant::now();
@@ -857,7 +859,7 @@ impl Pipeline {
             if crate::simrig::active() {
                 crate::simrig::on_arrival(ipc, slot, counter as u32);
             }
-            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now, render_q, has_projection: has_proj != 0, display_s };
+            let a = Arrived { counter, slot, ts_ns: cts, submit_s, arrival: now, render_q, has_projection: has_proj != 0, display_s, release_s };
             {
                 let mut q = self.intake.lock();
                 fate(counter, "A", now, slot as u64, cts);

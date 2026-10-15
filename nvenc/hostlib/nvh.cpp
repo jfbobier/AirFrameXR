@@ -453,7 +453,7 @@ float nvh_ipc_last_compose_ms(void* i) { return ((Ipc*)i)->state->shim.lastCompo
 float nvh_last_ffr_gpu_ms(void* hh) { return ((Nvh*)hh)->lastFfrMs; }
 float nvh_last_ffr_wait_ms(void* hh) { return ((Nvh*)hh)->lastFfrWaitMs; }
 
-int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit, float* render_q8, int* has_projection, double* display_s) {
+int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slot, uint64_t* ts, double* submit, float* render_q8, int* has_projection, double* display_s, double* release_s) {
     auto* ipc = (Ipc*)i;
     static uint64_t last = 0;
     auto& s = ipc->state->shim;
@@ -473,6 +473,7 @@ int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slo
         MemoryBarrier();
         *counter = s.frameCounter; *slot = s.frameSlot; *ts = s.frameClientTsNs; *submit = s.frameSubmitTimeS;
         if (display_s) *display_s = s.frameDisplayTimeS;
+        if (release_s) *release_s = s.frameReleaseTimeS;
         if (render_q8) memcpy(render_q8, s.frameRenderQuat, sizeof(float) * 8);
         if (has_projection) *has_projection = (int)s.frameHasProjection;
         MemoryBarrier();

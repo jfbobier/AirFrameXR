@@ -1585,6 +1585,7 @@ namespace {
             s.frameClientTsNs = clientTs;
             s.frameSubmitTimeS = QpcSeconds();
             s.frameDisplayTimeS = displayS;
+            s.frameReleaseTimeS = releaseS;
             memcpy(s.frameRenderQuat, renderQ, sizeof(s.frameRenderQuat));
             s.frameHasProjection = hasProjection ? 1u : 0u;
             s.motion[slot] = motion;

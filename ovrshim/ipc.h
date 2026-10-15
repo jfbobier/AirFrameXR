@@ -155,6 +155,7 @@ struct ShimToHost {
     uint64_t frameClientTsNs;      // client tracking timestamp of the pose the app rendered that frame with
     double frameSubmitTimeS;       // shim clock when the frame was submitted
     double frameDisplayTimeS;      // the display time the app rendered the frame for (its projection layer's SensorSampleTime, shim clock); 0 = none
+    double frameReleaseTimeS;      // shim clock when WaitToBeginFrame released the app for this frame: the frame's start, what a wall-clock engine animates from
     float frameRenderQuat[2][4];   // orientation (x y z w, tracking space) each eye's projection layer was rendered with (frame generation rotates from it)
     uint32_t frameHasProjection;   // 1 when the frame has a projection layer (frameRenderQuat valid)
     uint64_t slotHandle[kSlots];   // legacy shared texture handles (HANDLE values)
