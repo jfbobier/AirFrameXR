@@ -170,11 +170,12 @@ bool vecSource(float2 pB, float t, out float2 b, out float2 f) {
     b = pB; f = float2(0, 0);
     bool found = false;
     float best = -1;
-    if (r0.z > 0) { b = pB - r0.xy * t; f = r0.xy; found = true; best = length(r0.xy); }
+    // content at B-pixel b sits at b + f(b) in A and at b + f(b) (1 - t) at time t (0 = A, 1 = B): the source of output pixel pB is b = pB - f (1 - t)
+    if (r0.z > 0) { b = pB - r0.xy * (1 - t); f = r0.xy; found = true; best = length(r0.xy); }
     if (rd.z > 0 && length(rd.xy) > best + 0.5) {
-        float2 cand = pB - rd.xy * t;
+        float2 cand = pB - rd.xy * (1 - t);
         float4 rc = resid.Load(int3(texelOf(cand), 0));
-        if (rc.z > 0 && length(cand - (pB - rc.xy * t)) <= 1.0) { b = cand; f = rc.xy; found = true; }
+        if (rc.z > 0 && length(cand - (pB - rc.xy * (1 - t))) <= 1.0) { b = cand; f = rc.xy; found = true; }
     }
     return found;
 }
@@ -199,8 +200,10 @@ float4 PSOut(VSOut i) : SV_Target {
     float2 f, b;
     bool vec = mode.w > 0.5 && vecSource(pB, t, b, f);   // the game's vectors where they exist, the optical flow elsewhere
     if (!vec) f = flowAt(pB);
-    float2 uvC = pxToUv(vec ? b : pB - f * t);
-    float2 uvPb = pxToUv(vec ? b + f : pB + f * (1 - t));
+    // t = 0 is the previous frame A, 1 the newest B. The content shown at pB comes from B-pixel b = pB - f (1 - t) and from its A position b + f = pB + f t
+    // (the half-rate mode only ever used t = 0.5, where this and the swapped form coincide; the uncapped mode exposed the swap: JUDDER, 2026-10-15).
+    float2 uvC = pxToUv(vec ? b : pB - f * (1 - t));
+    float2 uvPb = pxToUv(vec ? b + f : pB + f * t);
     float3 pc;
     bool okC = all(uvC >= 0) && all(uvC <= 1);
     bool okP = all(uvPb >= 0) && all(uvPb <= 1) && samplePrev(uvPb, pc);
