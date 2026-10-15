@@ -1,6 +1,6 @@
 # Game motion vectors for frame generation (design note, 2026-10-14)
 
-Branch `fg/optical-flow`. Status: design only, nothing built. Follows docs/FRAME_GENERATION.md (optical-flow generator, lab-verified
+Status 2026-10-15: recon done, fork built and load-tested (see "Recon" below); consumer and host side not started. Follows docs/FRAME_GENERATION.md (optical-flow generator, lab-verified
 2026-10-14) and the OFXR-Bridge analysis. Target games: Unreal Engine titles, native OpenXR and UEVR-injected (the user's main use).
 
 ## Why
@@ -127,3 +127,33 @@ Effort: several days to step 1 on one title; the pacing, stamping, synthesis pas
   the safe start.
 - The future visionOS client could do the warp itself with the vectors and depth streamed as a side channel (the OFXR layer and ASW
   both warp on the display side); the tap and the IPC are the same either way.
+
+## Recon (2026-10-15 night, RTX 5090)
+
+Decision taken with the user: no own NGX tap; a **fork of OptiScaler** (GPL-3.0 kept, separate repository
+[VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler), branch `visionalvr`) publishes the DLSS inputs to the shim
+in-process, the way OFXR-Bridge's fork does. OFXR's own fork is not public (GitHub code search finds the provider export only in OFXR-Bridge),
+so the provider is ours, modelled on OFXR's ABI.
+
+Facts established:
+- **Build**: one Visual Studio 2022 project (v143), prebuilt libraries committed, submodules for FidelityFX, XeSS, nvapi, spdlog; `msbuild
+  OptiScaler.sln /p:Configuration=Release /p:Platform=x64` works out of the box on the 5090; the DLL (26 MB) lands in `x64\Release\a\`.
+- **Loading**: OptiScaler is not named `nvngx.dll`; it is dropped next to the game's executable under a proxy name (`dxgi.dll`, `winmm.dll`,
+  `version.dll`, `dbghelp.dll`, `winhttp.dll`, `wininet.dll`) and intercepts the NGX SDK's own lookup of `nvngx.dll` in the app folder, serving
+  itself and satisfying the signature check from a signed file. **No registry key.** The real NGX core is loaded from the driver store.
+- **Load test**: NVIDIA's DLSS sample app (`ngx_dlss_demo.exe` from the DLSS SDK release) with the DLL as `dxgi.dll` and a pinned ini: D3D11 and
+  D3D12 both run DLSS Super Resolution through OptiScaler's DLSS backend (`DLSSFeatureDx11/Dx12`, handle 1000000), ~800 evaluates/s, zero errors.
+- **D3D11 answer**: OptiScaler's DLSS backend is native D3D11 (no D3D12 interop), so D3D11 titles publish D3D11 resources directly.
+- **Tap point**: `DLSSFeatureDx12::EvaluateInternal` and `DLSSFeatureDx11::EvaluateInternal`, right before the native evaluate: the game's
+  parameter object with colour, motion vectors, depth, output, exposure, jitter, MV scale, reset, subrects, plus the feature's flags and sizes,
+  and the game's command list / device context.
+- **Fork changes** (two commits): `OptiScaler/visionalvr/VaProvider.{h,cpp}` (C ABI `VisionALVR_ProviderVersion`, `VisionALVR_SetConsumerV1`;
+  the consumer is called synchronously at every evaluate with a `VisionALVR_PublicationV1`; no allocation, no copy, no blocking; a structured
+  exception in the consumer removes it instead of taking the game down), two hook lines, compiled defaults (DLSS backend on D3D11/D3D12/Vulkan,
+  overlay off, DXGI spoofing off) so no ini is needed, `VISIONALVR.md`. No stripping yet: make it work, then make it lean.
+- **Harness target**: the DLSS sample app is a deterministic DLSS application for the lab (D3D11 and D3D12 by flag); the probe's own DLSS mode
+  (direct NGX SDK, `NVIDIA/DLSS` clone, D3D11) remains the ground-truth path.
+
+Next (in order): the shim consumer (find the module by export, register, copy motion vectors and depth into shared textures on the game's
+command list / context inside the callback, publish the sidecar over the existing IPC), the host's generator input and shader variant, the
+lab scenario with the sample app, then the probe DLSS mode and the PSNR judge.
