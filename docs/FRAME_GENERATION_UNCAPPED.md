@@ -27,6 +27,15 @@ rate). A 5090 rendering Callisto at 76 fps keeps its 76 instead of being held to
   `need + half a display period` with a fast attack and a decay of 0.2 ms per arrival, at most 80 ms. This is a jitter buffer: a late frame
   raises it at once, a quiet stretch lowers it slowly. A longer lag means fewer repeats and more latency; the logs give both.
 
+What the lab iterations taught (2026-10-15, five rounds on the 3080 Ti simrig, each JUDDER until the last):
+1. the content time must be the frame's **release time** on the shim clock (`frameReleaseTimeS`, what a wall-clock engine animates from).
+   The tracking timestamp is handed out one per frame, so its spacing is the display period whatever the app's real frame time; VDXR's
+   `SensorSampleTime` did not follow the app's display time one-to-one. The probe animates on the wall clock for these scenarios
+   (`XR_PROBE_MOVING_CLOCK=wall`), as an engine does.
+2. the lag in force must move slowly (5 % of a period per boundary): a jumping lag stalls or leaps the content clock.
+3. the generator's sampling offsets for a fraction t other than 0.5 were swapped (the newer frame sampled at `pB - f t` instead of
+   `pB - f (1 - t)`): half rate only ever used 0.5, where both coincide, so the bug was invisible until every t was used.
+
 Why the ring (lab, 2026-10-15): with two frames only, the lag that avoids repeats (about two game frames: interval plus render latency)
 is longer than one game interval, so the content time fell before the older frame on a tenth of the outputs, which were then clamped to it:
 t = 0 repeats, frozen 12 %, verdict JUDDER on the stutter scenario against 2 % for half rate. Four frames cover three intervals.
@@ -86,10 +95,23 @@ show a stable rule, an automatic cap (for instance 90 % of the measured game rat
 is small, the knob stays manual. Not tried on purpose: reserving GPU time (no such API on Windows beyond the scheduling class), or holding
 frames back in the shim at submit time (that is the cap, in a worse place).
 
-## Lab (`harness/simrig`)
+## Lab (`harness/simrig`, 3080 Ti, 2026-10-15, build 0124c87)
 
-Scenarios `stutter_unc` (flow), `stutter_unc_mv` and `stutter_turn_unc_mv` (the probe's exact vectors), `steady_unc`; compare with
-`stutter_fg` / `stutter_mv` (half rate). The judge's motion verdict and the `fg_perf` lines in `host_stdout.txt`.
+Scenarios `stutter_unc` (flow), `stutter_unc_mv` (the probe's exact vectors), `jitter_unc` (about 75 fps with +-30 % frame-time jitter),
+`steady_unc`; the marker on the wall clock; 100 Hz display, 40 s each. Half rate `stutter_fg` as the reference.
+
+| scenario | mode | hf rms (deg) | frozen % | step cv | marker visible % | lag in force (ms) |
+|---|---|---|---|---|---|---|
+| stutter_fg | half rate, flow | 0.043 / 0.045 | 1.4 | 0.19 | 90.6 | |
+| stutter_unc | uncapped, flow | 0.064 / 0.061 | 1.8 | 0.38 | 94.5 / 96.4 | 25-70 |
+| stutter_unc_mv | uncapped, vectors | 0.049 / 0.050 | 2.1 | 0.32 | 99.7 | 25-66 |
+| jitter_unc | uncapped, flow | 0.056 / 0.052 | 1.3 | 0.29 | 94.8 / 95.9 | 25-59 |
+| jitter (reference, generation off) | | 0.130 | 29.9 | 0.52 | 100 | |
+
+All four SMOOTH. Uncapped with the game's vectors matches half rate on smoothness with the marker found in every frame; the flow-only uncapped
+is a little rougher than half rate (every output is a resample of a pair at an arbitrary fraction); the jittery 75 fps app goes from 30 %
+frozen periods with generation off to 1.3 %. The lag the envelope settles on is 25-60 ms on this rig (two app frames plus the margin, the
+app being CPU-paced at 50-70 fps): the latency price of interpolation, to be read from `fg_perf` on real games and removed by extrapolation.
 
 ## Next
 
