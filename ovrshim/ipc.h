@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 27;
+constexpr uint32_t kVersion = 28;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -113,6 +113,11 @@ struct HostToShim {
     // Uncapped frame generation (docs/FRAME_GENERATION_UNCAPPED.md): the app is paced at every boundary (appPeriodMul 1) and may be held to a
     // minimum spacing between releases (an fps cap chosen by the user: headroom for the host's own GPU work). 0 = no cap.
     uint32_t appMinPeriodUs;
+    // Game release pacing (ovrshim/driver.cpp WaitForVsync): 0 = the queue throttle alone (a release when at most one submitted frame is
+    // still on the GPU; a GPU-bound game then keeps 2-3 frames in flight, 20-56 ms on the 5090, 2026-10-15/16), 1 = just in time: the release
+    // is also held until the newest submitted frame is predicted to finish on the GPU minus the game's CPU time, so the GPU never idles and
+    // at most one frame is in flight (the idea of NVIDIA Reflex, done by the runtime).
+    uint32_t appPacingJit;
 };
 
 // The DLSS inputs of one eye for the frame in a ring slot: the shim's copies of the motion vectors and depth the game handed DLSS,

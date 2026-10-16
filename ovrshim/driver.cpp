@@ -920,6 +920,38 @@ namespace {
                     if (!m_publishCv.wait_for(plock, 50ms, [&] { return m_publishQueue.size() <= 1; })) {
                         m_gpuThrottleTimeouts++;
                     }
+                    if (m_ipc.state && *(volatile uint32_t*)&m_ipc.state->host.appPacingJit) {
+                        // Just in time (ipc appPacingJit): with a frame still on the GPU, hold the release until that frame is predicted to
+                        // finish minus the app's CPU time (and a 1 ms lead), so the frame the app starts now reaches the GPU as it frees up:
+                        // no idle GPU, at most one frame in flight. A GPU-bound game otherwise keeps 2-3 frames queued (20-56 ms of
+                        // latency measured on the 5090); with the GPU idle (CPU-bound game) nothing is held.
+                        const double lead = 0.001;
+                        bool held = false;
+                        double holdStart = 0;
+                        for (;;) {
+                            const size_t pend = m_publishQueue.size();
+                            const double gpuDur = m_gpuDurS.load();
+                            if (pend == 0 || gpuDur <= 0) {
+                                break;
+                            }
+                            const double predictedDone = std::max(m_lastGpuDoneS.load(), m_publishQueue.back().composeStart) + (double)pend * gpuDur;
+                            const double releaseAt = predictedDone - m_cpuTimeS.load() - lead;
+                            const double nowS = QpcSeconds();
+                            if (releaseAt <= nowS) {
+                                break;
+                            }
+                            if (!held) {
+                                held = true;
+                                holdStart = nowS;
+                                m_jitHolds++;
+                            }
+                            m_publishCv.wait_for(plock, std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                                            std::chrono::duration<double>(std::min(releaseAt - nowS, 0.002))));
+                        }
+                        if (held) {
+                            m_jitHoldSumS += QpcSeconds() - holdStart;
+                        }
+                    }
                 }
                 lock.lock();
                 m_lastReleaseS = QpcSeconds();
@@ -1438,13 +1470,15 @@ namespace {
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
                             "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x, "
-                            "period mul %u, fps cap %.1f (holds %llu)",
+                            "period mul %u, fps cap %.1f (holds %llu), pacing %s (holds %llu, mean %.1f ms), app cpu %.1f ms, gpu %.1f ms/frame",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
                             (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
-                            m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds);
+                            m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds,
+                            m_ipc.state->host.appPacingJit ? "just-in-time" : "queue", (unsigned long long)m_jitHolds,
+                            m_jitHolds ? m_jitHoldSumS / (double)m_jitHolds * 1000.0 : 0.0, m_cpuTimeS.load() * 1000.0, m_gpuDurS.load() * 1000.0);
                     if (m_ngx.Attached()) {
                         ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, %llu sources not copied, tap %s", m_ngx.ActiveStreams(),
                                 (unsigned long long)m_ngx.Publications(), (unsigned long long)m_ngx.CopyFailures(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)");
@@ -1490,6 +1524,15 @@ namespace {
                     FrameRenderOrientation(layers, pf.renderQ, pf.hasProjection);
                     pf.motion = motion;
                     pf.displayS = displayS;
+                    pf.tapSeq = m_ngx.HarvestSeq();
+                    {
+                        // the app's CPU time for this frame (release -> submit), envelope with a fast attack and a slow decay (0.1 ms per frame)
+                        const double cpu = composeStart - m_lastReleaseS.load();
+                        if (cpu > 0 && cpu < 0.1) {
+                            const double est = std::max(cpu, m_cpuTimeS.load() - 0.0001);
+                            m_cpuTimeS = std::min(std::max(est, 0.0005), 0.05);
+                        }
+                    }
                     m_publishQueue.push_back(pf);
                     lock.unlock();
                     m_publishCv.notify_all();
@@ -1667,6 +1710,19 @@ namespace {
                         }
                         // same 50 ms cap as the spin wait: a hung GPU must not stall the stream forever
                         WaitForSingleObject(m_gpuDone[f.slot], 50);
+                        {
+                            // the GPU finished this frame: its time per frame when the GPU was busy since the previous one (what the just-in-time
+                            // release predicts with), and the tap may free copies retired before this frame's harvest
+                            const double doneS = QpcSeconds();
+                            const double prev = m_lastGpuDoneS.load();
+                            const double dur = doneS - std::max(prev, f.composeStart);
+                            if (prev > 0 && dur > 0 && dur < 0.2) {
+                                const double old = m_gpuDurS.load();
+                                m_gpuDurS = old > 0 ? old * 0.8 + dur * 0.2 : dur;
+                            }
+                            m_lastGpuDoneS = doneS;
+                            m_ngx.GpuDone(f.tapSeq);
+                        }
                         PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr, f.renderQ, f.hasProjection, f.motion, f.displayS);
                         {
                             std::unique_lock lock(m_publishMutex);
@@ -2533,6 +2589,11 @@ namespace {
         uint64_t m_framesSubmitted{0}; // frames composed (picks the ring slot)
         // Running start (see WaitForVsync): the app is released appTime + margin before the host's next compositor boundary.
         std::atomic<double> m_lastReleaseS{0.0};   // shim clock when WaitForVsync last released the app
+        // just-in-time release (ipc appPacingJit): envelope of the app's CPU time (release -> submit), EMA of its GPU time per frame (from the
+        // GPU-done events, saturated GPU), the last GPU completion, and the holds applied
+        std::atomic<double> m_cpuTimeS{0.0}, m_gpuDurS{0.0}, m_lastGpuDoneS{0.0};
+        uint64_t m_jitHolds{0};
+        double m_jitHoldSumS{0.0};
         uint64_t m_capHolds{0};                    // releases the fps cap (ipc appMinPeriodUs) pushed past their boundary
         std::atomic<double> m_appTimeS{0.004};     // envelope of release -> frame GPU-complete (published), seconds
         long long m_lastTargetBoundary{0};         // boundary (tick index) the last release aimed at: one release per boundary
@@ -2574,6 +2635,7 @@ namespace {
             bool hasProjection;
             visionalvr_ipc::MotionSlot motion; // the game's DLSS vectors for this frame (ngxtap.h), zero when there are none
             double displayS;                   // the display time the app rendered for (shim clock), 0 when there is no projection layer
+            uint64_t tapSeq;                   // the tap's harvest number of this frame: its GPU completion frees the tap's retired copies (ngxtap.h GpuDone)
         };
         ComPtr<IDXGIDevice2> m_dxgiDevice2;
         HANDLE m_gpuDone[visionalvr_ipc::kSlots]{};

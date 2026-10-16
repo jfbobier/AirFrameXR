@@ -33,6 +33,7 @@ struct FrameGenVectors {
 
 struct FrameGenStats {
     uint64_t ingests = 0, pairs = 0, synths = 0, reals = 0, copies = 0, flowErrors = 0, renderErrors = 0;
+    uint64_t flowSkipped = 0;                                        // synthetic outputs rendered without running the flow engine (both eyes had game vectors)
     uint64_t mvFrames = 0, mvEyes = 0, mvDepth = 0, mvErrors = 0;   // game motion vectors: frames with vectors for at least one eye, eye ingests, with depth, failures
     uint64_t mvUsedEyes = 0;                                         // eye passes synthesised from the game's vectors (the flow fills what they do not cover)
     int mvW = 0, mvH = 0; uint32_t mvFormat = 0, mvFlags = 0, mvApi = 0; float mvScale[2] = {1.f, 1.f};   // the last vectors seen
@@ -54,6 +55,7 @@ public:
     // Takes a rendered frame into the history (previous <- current <- src) and computes the flow between the two. qRender8: the per-eye
     // orientation (x y z w) the frame was rendered with; fov8: per eye {l, r, u, d} tangents (the host's eye FoV). 1 = two frames exist, 0 = one, -1 error.
     int Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen);
+    bool computeFlow(int n, char* err, int errlen);
     // Attaches the game's DLSS vectors (and depth, may be null) of one eye to the frame just ingested: copies them into this object's own
     // textures (the shim reuses its slot companions). VISIONALVR_FG_MV_DUMP=<dir> writes the first ingests as PPM images for a look.
     int IngestVectors(int eye, ID3D11Texture2D* mv, ID3D11Texture2D* depth, const FrameGenVectors& v, char* err, int errlen);

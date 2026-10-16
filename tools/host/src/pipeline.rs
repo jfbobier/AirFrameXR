@@ -379,6 +379,9 @@ pub struct Pipeline {
     pub fg_holds: AtomicU64,
     /// boundaries skipped because no tracking sample newer than the last sent frame had arrived
     pub fg_no_sample: AtomicU64,
+    /// boundaries stamped with a tracking sample predicted one period past the newest one (no fresh sample arrived in time; see `fg_pick_sample`)
+    pub fg_predicted: AtomicU64,
+    fg_predict: bool,
     /// rendered frames never shown: still due when the next one was encoded (an encoder overrun; `on_boundary` otherwise keeps the arrival
     /// waiting): the boundary gets the synthetic frame between the two newest instead, so the motion never stalls
     pub fg_dropped: AtomicU64,
@@ -483,6 +486,8 @@ impl Pipeline {
             fg_repeats: AtomicU64::new(0),
             fg_holds: AtomicU64::new(0),
             fg_no_sample: AtomicU64::new(0),
+            fg_predicted: AtomicU64::new(0),
+            fg_predict: std::env::var("VISIONALVR_FG_PREDICT_SAMPLE").map(|v| v != "0").unwrap_or(true),
             fg_dropped: AtomicU64::new(0),
             fg_pairs_skipped: AtomicU64::new(0),
             fg_real_due: AtomicBool::new(false),
@@ -660,7 +665,62 @@ impl Pipeline {
             }
         }
         self.fg_sample_wait_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
-        None
+        self.fg_predict_sample()
+    }
+
+    /// No sample newer than the last sent frame arrived in time (the headset's samples land at a phase of our boundaries that the wait does
+    /// not cover: 1-2 % of boundaries on the headset, up to 13 % in the lab): the pose one display period past the last sent timestamp,
+    /// extrapolated from the two newest samples (the rotation between them scaled to the gap), with that timestamp. The headset resolves a
+    /// pose for any timestamp (the Vision Pro's device anchor query, the Quest client's history), and a predicted pose is consistent with
+    /// its timestamp, unlike a stale pose relabelled (the 2026-10-13 tremble). VISIONALVR_FG_PREDICT_SAMPLE=0 keeps the old skip.
+    fn fg_predict_sample(&self) -> Option<(Duration, [f32; 4])> {
+        if !self.fg_predict {
+            return None;
+        }
+        let ring = self.shared.recent_samples.lock();
+        let n = ring.len();
+        if n < 2 {
+            return None;
+        }
+        let (t2, q2) = ring[n - 1];
+        let (t1, q1) = ring[n - 2];
+        let last = *self.last_sent_ts.lock();
+        let period = self.period();
+        if t2 <= t1 || t2 > last || last.saturating_sub(t2) > period * 2 || t2 - t1 > period * 3 {
+            return None;
+        }
+        let ts = last + period;
+        let k = (ts - t2).as_secs_f64() / (t2 - t1).as_secs_f64();
+        if !(k > 0.0 && k <= 4.0) {
+            return None;
+        }
+        // delta = q2 * conj(q1): the rotation from sample 1 to sample 2; scaled by k and applied to q2
+        let conj = |q: [f32; 4]| [-q[0], -q[1], -q[2], q[3]];
+        let mul = |a: [f32; 4], b: [f32; 4]| [
+            a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+            a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+            a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+            a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+        ];
+        let mut d = mul(q2, conj(q1));
+        if d[3] < 0.0 {
+            for v in d.iter_mut() { *v = -*v; }
+        }
+        let sin_half = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let scaled = if sin_half < 1e-6 {
+            [0.0, 0.0, 0.0, 1.0]
+        } else {
+            let half = (sin_half.min(1.0) as f64).atan2(d[3].max(-1.0).min(1.0) as f64) as f32 * k as f32;
+            let s = half.sin() / sin_half;
+            [d[0] * s, d[1] * s, d[2] * s, half.cos()]
+        };
+        let mut q = mul(scaled, q2);
+        let norm = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+        if norm > 0.0 {
+            for v in q.iter_mut() { *v /= norm; }
+        }
+        self.fg_predicted.fetch_add(1, Ordering::Relaxed);
+        Some((ts, q))
     }
 
     /// A rendered frame arrived (frame generation on): what this boundary encodes. Releases the slot.
@@ -1414,7 +1474,7 @@ impl Pipeline {
             "gpu_scheduling": self.gpu_sched.lock().map(|(c, st)| json!({ "class": c, "status": st })),
             "frame_gen": {
                 "on": self.fg_on.load(Ordering::Relaxed), "synths": self.fg_synths.load(Ordering::Relaxed), "reals": self.fg_reals.load(Ordering::Relaxed),
-                "repeats": self.fg_repeats.load(Ordering::Relaxed), "holds": self.fg_holds.load(Ordering::Relaxed), "no_sample": self.fg_no_sample.load(Ordering::Relaxed),
+                "repeats": self.fg_repeats.load(Ordering::Relaxed), "holds": self.fg_holds.load(Ordering::Relaxed), "no_sample": self.fg_no_sample.load(Ordering::Relaxed), "predicted_samples": self.fg_predicted.load(Ordering::Relaxed),
                 "dropped": self.fg_dropped.load(Ordering::Relaxed), "pairs_skipped": self.fg_pairs_skipped.load(Ordering::Relaxed), "errors": self.fg_errors.load(Ordering::Relaxed),
                 "passthrough": self.fg.try_lock().map(|s| s.passthrough).unwrap_or(0),
                 "uncapped": self.fg_uncapped.load(Ordering::Relaxed),

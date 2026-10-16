@@ -674,10 +674,10 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
     char info[200]; int k = 0;
     for (const char* c = s.nvofInfo; *c && k < 190; c++) { if (*c == '"' || *c == '\\') info[k++] = ' '; else info[k++] = *c; }
     info[k] = 0;
-    return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"synths\":%llu,\"reals\":%llu,\"copies\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
+    return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"flow_skipped\":%llu,\"synths\":%llu,\"reals\":%llu,\"copies\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
                     "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d],"
                     "\"mv\":{\"frames\":%llu,\"eyes\":%llu,\"used_eyes\":%llu,\"depth\":%llu,\"errors\":%llu,\"size\":[%d,%d],\"format\":%u,\"flags\":%u,\"api\":%u,\"scale\":[%.3f,%.3f]}}",
-                    s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.synths, (unsigned long long)s.reals, (unsigned long long)s.copies,
+                    s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.flowSkipped, (unsigned long long)s.synths, (unsigned long long)s.reals, (unsigned long long)s.copies,
                     (unsigned long long)s.flowErrors, (unsigned long long)s.renderErrors, s.lastFlowMs, s.flowN ? s.flowMsSum / s.flowN : 0.0, s.lastSynthMs,
                     s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH,
                     (unsigned long long)s.mvFrames, (unsigned long long)s.mvEyes, (unsigned long long)s.mvUsedEyes, (unsigned long long)s.mvDepth, (unsigned long long)s.mvErrors, s.mvW, s.mvH, s.mvFormat, s.mvFlags, s.mvApi,
@@ -686,6 +686,7 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
 
 void nvh_ipc_set_game_mv(void* i, uint32_t on) { ((Ipc*)i)->state->host.gameMotionVectors = on ? 1u : 0u; }
 void nvh_ipc_set_app_min_period(void* i, uint32_t us) { ((Ipc*)i)->state->host.appMinPeriodUs = us; }
+void nvh_ipc_set_app_pacing(void* i, uint32_t jit) { ((Ipc*)i)->state->host.appPacingJit = jit; }
 void nvh_fg_use_mv(void* hh, int on) { auto* n = (Nvh*)hh; if (n && n->fg) n->fg->SetUseVectors(on != 0); }
 
 void nvh_ipc_motion_tap(void* i, uint32_t* tap, uint32_t* streams, uint64_t* publications) {

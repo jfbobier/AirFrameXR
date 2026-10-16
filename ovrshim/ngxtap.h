@@ -163,6 +163,7 @@ public:
             return out;
         }
         std::lock_guard<std::mutex> g(m_mutex);
+        m_harvestSeq++;
         // drop idle streams (a level change recreates the DLSS features with new ids)
         for (size_t i = 0; i < m_streams.size();) {
             if (nowS - m_streams[i].lastS > kStreamIdleS) {
@@ -175,7 +176,7 @@ public:
                 i++;
             }
         }
-        // free retired copies only once every GPU that could still reference them (the game's list, the submission context) is long done
+        // retired copies are freed by GpuDone (the GPU completion of the frame after their last use); the age limit is the fallback
         for (size_t i = 0; i < m_retired.size();) {
             if (nowS - m_retired[i].atS > kRetireS) {
                 m_retired.erase(m_retired.begin() + i);
@@ -204,6 +205,22 @@ public:
             out.eye[e] = info;
         }
         return out;
+    }
+
+    /// The harvest number of the frame being composed (PendingFrame::tapSeq): hand it back in GpuDone when that frame's GPU work completed.
+    uint64_t HarvestSeq() const { return m_harvestSeq; }
+
+    /// The GPU completed the frame harvested as `seq` (the shim's per-slot GPU-done event, after the runtime's fence wait for a D3D12 game's
+    /// work): every copy retired before that harvest is no longer referenced by any command list or context and is freed here.
+    void GpuDone(uint64_t seq) {
+        std::lock_guard<std::mutex> g(m_mutex);
+        for (size_t i = 0; i < m_retired.size();) {
+            if (m_retired[i].seq < seq) {
+                m_retired.erase(m_retired.begin() + i);
+            } else {
+                i++;
+            }
+        }
     }
 
     uint32_t ActiveStreams() const {
@@ -235,6 +252,7 @@ private:
         ComPtr<ID3D12Resource> r12;
         ComPtr<ID3D11Texture2D> t11, view;
         double atS = 0;
+        uint64_t seq = 0;   // the harvest number current when it was retired: the GPU completion of harvest seq + 1 frees it (GpuDone)
     };
     void Retire(Copy& c) {
         if (c.r12 || c.t11 || c.view) {
@@ -243,6 +261,7 @@ private:
             r.t11 = c.t11;
             r.view = c.view;
             r.atS = visionalvr_ipc::QpcSeconds();
+            r.seq = m_harvestSeq;
             m_retired.push_back(r);
         }
         c.r12.Reset();
@@ -487,6 +506,7 @@ private:
                 Retired r;
                 r.t11 = st.tex;
                 r.atS = visionalvr_ipc::QpcSeconds();
+                r.seq = m_harvestSeq;
                 m_retired.push_back(r);
             }
             st.tex.Reset();
@@ -558,6 +578,7 @@ private:
     uint64_t m_publications = 0;
     uint64_t m_copyFailures = 0;
     std::vector<Retired> m_retired;
+    uint64_t m_harvestSeq = 0;
     bool m_depth = false;
     bool m_removedLogged = false;      // sources whose shared copy could not be made (each logged once)
     D3D12_RESOURCE_STATES m_srcState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;   // what DLSS requires of its inputs

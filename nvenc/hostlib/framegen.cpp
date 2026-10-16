@@ -269,6 +269,10 @@ struct FrameGen::Impl {
     ID3D11Texture2D* resTex[2][3] = {}; ID3D11ShaderResourceView* resSrv[2][3] = {}; ID3D11RenderTargetView* resRtv[2][3] = {};
     ID3D11PixelShader* psVec = nullptr; ID3D11PixelShader* psDilate = nullptr;
     bool mvValid[H][2] = {};
+    // the pair's flow is computed at render time, only when an eye has no game vectors (item 2 of docs/PERFORMANCE_FINDINGS.md, 2026-10-16)
+    bool pairFlowValid[H] = {};
+    ID3D11Texture2D* zeroFlow = nullptr; ID3D11ShaderResourceView* zeroFlowSrv = nullptr;   // flow-less synthesis: zero flow, maximum cost
+    ID3D11Texture2D* maxCost = nullptr; ID3D11ShaderResourceView* maxCostSrv = nullptr;
     FrameGenVectors mvInfo[H][2] = {};
     int mvDumps = 0; const char* mvDumpDir = nullptr;
     bool useVectors = true;           // VISIONALVR_FG_USE_MV=0: ingest the vectors but synthesise from the flow alone (A/B)
@@ -307,6 +311,7 @@ FrameGen::~FrameGen() {
     for (int e = 0; e < 2; e++) for (int k = 0; k < 3; k++) { rel(I.resSrv[e][k]); rel(I.resRtv[e][k]); rel(I.resTex[e][k]); }
     rel(I.psVec); rel(I.psDilate);
     rel(I.flowOutSrv); rel(I.flowOut); rel(I.costSrv); rel(I.costTex); rel(I.outRtv); rel(m_out);
+    rel(I.zeroFlowSrv); rel(I.zeroFlow); rel(I.maxCostSrv); rel(I.maxCost);
     rel(I.vs); rel(I.psPrep); rel(I.psOut); rel(I.cb); rel(I.smp); rel(I.qDisjoint); rel(I.qDisjointR);
     for (auto& q : I.qT) rel(q);
     delete m_i;
@@ -407,6 +412,18 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     if (!tex(I.blocksW, I.blocksH, DXGI_FORMAT_R32_UINT, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET | D3D11_BIND_UNORDERED_ACCESS, &I.costTex) ||
         FAILED(m_dev->CreateShaderResourceView(I.costTex, nullptr, &I.costSrv))) { seterr(err, errlen, "flow cost texture"); return false; }
     if (I.api.nvOFRegisterResourceD3D11(I.of, I.costTex, &I.hCost) != NV_OF_SUCCESS) { seterr(err, errlen, "nvOFRegisterResourceD3D11 (cost)"); return false; }
+    {
+        // flow-less synthesis (both eyes carry the game's vectors, or the engine failed): zero flow and the maximum cost bound to the flow slots,
+        // so the flow path of the output pass falls back to the crossfade wherever a vector does not decide
+        std::vector<uint8_t> z((size_t)I.blocksW * I.blocksH * 4, 0), mx((size_t)I.blocksW * I.blocksH * 4, 0xFF);
+        D3D11_TEXTURE2D_DESC zd{}; zd.Width = I.blocksW; zd.Height = I.blocksH; zd.MipLevels = 1; zd.ArraySize = 1; zd.SampleDesc.Count = 1;
+        zd.Usage = D3D11_USAGE_IMMUTABLE; zd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA zi{ z.data(), (UINT)(I.blocksW * 4), 0 }, mi{ mx.data(), (UINT)(I.blocksW * 4), 0 };
+        zd.Format = DXGI_FORMAT_R16G16_SINT;
+        if (FAILED(m_dev->CreateTexture2D(&zd, &zi, &I.zeroFlow)) || FAILED(m_dev->CreateShaderResourceView(I.zeroFlow, nullptr, &I.zeroFlowSrv))) { seterr(err, errlen, "zero flow texture"); return false; }
+        zd.Format = DXGI_FORMAT_R32_UINT;
+        if (FAILED(m_dev->CreateTexture2D(&zd, &mi, &I.maxCost)) || FAILED(m_dev->CreateShaderResourceView(I.maxCost, nullptr, &I.maxCostSrv))) { seterr(err, errlen, "max cost texture"); return false; }
+    }
     for (int k = 0; k < Impl::H; k++) {   // the flow of each history pair (the engine writes one output; it is copied per pair)
         if (!tex(I.blocksW, I.blocksH, DXGI_FORMAT_R16G16_SINT, D3D11_BIND_SHADER_RESOURCE, &I.pairFlow[k]) || FAILED(m_dev->CreateShaderResourceView(I.pairFlow[k], nullptr, &I.pairFlowSrv[k])) ||
             !tex(I.blocksW, I.blocksH, DXGI_FORMAT_R32_UINT, D3D11_BIND_SHADER_RESOURCE, &I.pairCost[k]) || FAILED(m_dev->CreateShaderResourceView(I.pairCost[k], nullptr, &I.pairCostSrv[k]))) {
@@ -456,7 +473,16 @@ int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* f
     stats.ingests++;
     if (m_have < 2) return 0;
     stats.pairs++;
-    const int prev = (I.cur + Impl::H - 1) % Impl::H;
+    I.pairFlowValid[I.cur] = false;   // computed by the first render of this pair that needs it (computeFlow)
+    return 1;
+}
+
+// The optical flow of pair (n-1, n), the previous frame aligned into the current camera first: run by the first render of the pair that has an eye
+// without game vectors (both eyes with vectors: never, the engine stays idle; docs/MOTION_VECTORS.md).
+bool FrameGen::computeFlow(int n, char* err, int errlen) {
+    Impl& I = *m_i;
+    const float* fov8 = I.fov8;
+    const int prev = (n + Impl::H - 1) % Impl::H;
     // prep: flowIn[0] = the previous frame seen from the current camera, flowIn[1] = the current frame (both downscaled)
     m_ctx->Begin(I.qDisjoint);
     m_ctx->End(I.qT[0]);
@@ -465,13 +491,13 @@ int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* f
     m_ctx->PSSetSamplers(0, 1, &I.smp); m_ctx->PSSetConstantBuffers(0, 1, &I.cb);
     ID3D11ShaderResourceView* nulls[4] = {};
     for (int pass = 0; pass < 2; pass++) {   // 0: previous (rotated), 1: current
-        const int frame = pass == 0 ? prev : I.cur;
+        const int frame = pass == 0 ? prev : n;
         m_ctx->OMSetRenderTargets(1, &I.flowInRtv[pass], nullptr);
         m_ctx->PSSetShaderResources(0, 1, &I.realSrv[frame]);
         for (int e = 0; e < 2; e++) {
             Cb c{};
             float m[9];
-            relRot(I.realQ[prev] + e * 4, I.realQ[I.cur] + e * 4, m);   // direction in the current view -> the previous view
+            relRot(I.realQ[prev] + e * 4, I.realQ[n] + e * 4, m);   // direction in the current view -> the previous view
             rows(m, c.pA, c.pB, c.pC);
             memcpy(c.tanF, fov8 + e * 4, sizeof(float) * 4);
             c.eyeRect[0] = e ? 0.5f : 0.f; c.eyeRect[1] = 0.5f; c.eyeRect[2] = (float)m_w; c.eyeRect[3] = (float)m_h;
@@ -490,7 +516,7 @@ int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* f
     NV_OF_EXECUTE_OUTPUT_PARAMS out{};
     out.outputBuffer = I.hFlow; out.outputCostBuffer = I.hCost;
     const NV_OF_STATUS st = I.api.nvOFExecute(I.of, &in, &out);
-    if (st == NV_OF_SUCCESS) { m_ctx->CopyResource(I.pairFlow[I.cur], I.flowOut); m_ctx->CopyResource(I.pairCost[I.cur], I.costTex); }
+    if (st == NV_OF_SUCCESS) { m_ctx->CopyResource(I.pairFlow[n], I.flowOut); m_ctx->CopyResource(I.pairCost[n], I.costTex); I.pairFlowValid[n] = true; }
     m_ctx->End(I.qT[1]);
     m_ctx->End(I.qDisjoint);
     I.flowTimed = true;
@@ -499,9 +525,9 @@ int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* f
         char le[MIN_ERROR_STRING_SIZE + 1] = ""; uint32_t ls = MIN_ERROR_STRING_SIZE; I.api.nvOFGetLastError(I.of, le, &ls);
         char b[160]; snprintf(b, sizeof b, "nvOFExecute failed: status %d %s", (int)st, le);
         seterr(err, errlen, b);
-        return -1;
+        return false;
     }
-    return 1;
+    return true;
 }
 
 // A copy of `src` in `dst` (recreated when the size or format differs), shader-readable; `srv` optional.
@@ -641,6 +667,17 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
             return m_out;
         }
     }
+    // the pair's optical flow only when an eye has no game vectors to synthesise from: with vectors for both eyes the flow engine and its
+    // two preparation passes are skipped (2.2-3.3 ms of GPU timeline per rendered frame on the 5090, on the critical path of the first output)
+    if (mode == 1 && havePair) {
+        const bool bothVectors = I.useVectors && I.mvValid[n][0] && I.mvValid[n][1] && I.mvSrv[n][0] && I.mvSrv[n][1] && I.resTex[0][0] && I.resTex[1][0];
+        if (bothVectors) {
+            stats.flowSkipped++;
+        } else if (!I.pairFlowValid[n]) {
+            char e2[160];
+            computeFlow(n, e2, sizeof e2);   // a failure leaves the zero flow bound below: the crossfade fallback
+        }
+    }
     m_ctx->Begin(I.qDisjointR);
     m_ctx->End(I.qT[2]);
     // the game's vectors (docs/MOTION_VECTORS.md): per eye the residual-flow texel pass and the two dilation passes, before the output pass
@@ -693,7 +730,8 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     m_ctx->IASetInputLayout(nullptr); m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_ctx->VSSetShader(I.vs, nullptr, 0); m_ctx->PSSetShader(I.psOut, nullptr, 0);
     m_ctx->PSSetSamplers(0, 1, &I.smp); m_ctx->PSSetConstantBuffers(0, 1, &I.cb);
-    ID3D11ShaderResourceView* srvs[4] = { I.realSrv[n], havePair ? I.realSrv[prev] : I.realSrv[n], I.pairFlowSrv[n], I.pairCostSrv[n] };
+    const bool flowOk = havePair && I.pairFlowValid[n];
+    ID3D11ShaderResourceView* srvs[4] = { I.realSrv[n], havePair ? I.realSrv[prev] : I.realSrv[n], flowOk ? I.pairFlowSrv[n] : I.zeroFlowSrv, flowOk ? I.pairCostSrv[n] : I.maxCostSrv };
     m_ctx->PSSetShaderResources(0, 4, srvs);
     for (int e = 0; e < 2; e++) {
         Cb c{};

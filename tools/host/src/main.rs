@@ -74,6 +74,10 @@ struct Args {
     boundary_offset_ms: f64,
     /// D3DKMT process scheduling class asked for (5 realtime .. 2; 0 = leave)
     gpu_sched_class: i32,
+    /// the shim's release pacing of the game: true = just in time (release held until the newest frame on the GPU is predicted to finish
+    /// minus the app's CPU time: one frame in flight, the Reflex idea), false = the queue throttle alone. Settings `video.game_pacing`
+    /// "jit" | "queue", `--game-pacing`, env VISIONALVR_GAME_PACING.
+    game_pacing_jit: bool,
     /// frame generation (docs/FRAME_GENERATION.md): the game is paced at half the display rate and the host interpolates the frame in
     /// between from the optical flow of the last two rendered frames. None = settings file (`video.frame_gen`, default off); env
     /// VISIONALVR_FRAME_GEN=1/0 and `--frame-gen on|off` win over it.
@@ -173,6 +177,7 @@ fn parse_args() -> Result<Args, String> {
         follow_rate: true,
         boundary_offset_ms: 0.0,
         gpu_sched_class: 5,
+        game_pacing_jit: true,
         frame_gen: None,
         game_motion_vectors: true,
         fg_rate: None,
@@ -310,6 +315,7 @@ fn parse_args() -> Result<Args, String> {
             "--predict-missing-head" => a.predict_missing_head = true,
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--game-pacing" => a.game_pacing_jit = match v()?.to_ascii_lowercase().as_str() { "jit" => true, "queue" => false, _ => return Err("--game-pacing jit|queue".into()) },
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
             "--frame-gen-lag-ms" => a.fg_lag_ms = Some(v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.0, 100.0)),
@@ -380,6 +386,9 @@ fn parse_args() -> Result<Args, String> {
         if let Ok(v) = std::env::var("VISIONALVR_FG_RATE") {
             a.fg_rate = FgRate::parse(&v);
         }
+    }
+    if let Ok(v) = std::env::var("VISIONALVR_GAME_PACING") {
+        a.game_pacing_jit = !v.eq_ignore_ascii_case("queue");
     }
     if a.fg_lag_ms.is_none() {
         a.fg_lag_ms = std::env::var("VISIONALVR_FG_LAG_MS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 100.0));
@@ -490,6 +499,11 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if a.fg_rate.is_none() {
         a.fg_rate = st.frame_gen_rate.as_deref().and_then(FgRate::parse);
+    }
+    if std::env::var("VISIONALVR_GAME_PACING").is_err() {
+        if let Some(v) = st.game_pacing.as_deref() {
+            a.game_pacing_jit = !v.eq_ignore_ascii_case("queue");
+        }
     }
     if a.fg_lag_ms.is_none() {
         a.fg_lag_ms = st.frame_gen_lag_ms.map(|v| v.clamp(0.0, 100.0));
@@ -858,6 +872,7 @@ mod nvh {
         pub fn nvh_ipc_set_app_period_mul(ipc: *mut c_void, mul: u32);
         pub fn nvh_ipc_set_game_mv(ipc: *mut c_void, on: u32);
         pub fn nvh_ipc_set_app_min_period(ipc: *mut c_void, min_period_us: u32);
+        pub fn nvh_ipc_set_app_pacing(ipc: *mut c_void, jit: u32);
         pub fn nvh_fg_use_mv(nvh: *mut c_void, on: i32);
         pub fn nvh_ipc_motion_tap(ipc: *mut c_void, tap: *mut u32, streams: *mut u32, publications: *mut u64);
         pub fn nvh_qpc_seconds() -> f64;
@@ -1738,11 +1753,14 @@ fn main() {
         p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half), args.fg_lag_ms.unwrap_or(0.0));
         apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
         unsafe { nvh::nvh_ipc_set_game_mv(ipc, if args.game_motion_vectors { 1 } else { 0 }) };
+        unsafe { nvh::nvh_ipc_set_app_pacing(ipc, args.game_pacing_jit as u32) };
+        logs::general("INFO", &format!("game pacing: {}", if args.game_pacing_jit { "just-in-time release (the game's next frame starts when its frame on the GPU is about to finish: one frame in flight)" } else { "queue throttle (up to two frames in flight)" }));
         log_fg_config(origin, &args, fg_active, "start");
         p.start();
         event(origin, "pacing_config", json!({ "send_pacing": args.send_pacing.name(), "running_start_ms": args.running_start_ms,
             "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6,
-            "frame_gen": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "app_period_mul": fg_pacing(&args, fg_active, 1.0 / args.fps).0 }));
+            "frame_gen": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "app_period_mul": fg_pacing(&args, fg_active, 1.0 / args.fps).0,
+            "game_pacing": if args.game_pacing_jit { "jit" } else { "queue" } }));
         #[cfg(feature = "simrig")]
         if let Some(dir) = &args.simrig {
             simrig::set_ipc(ipc_addr);

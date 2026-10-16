@@ -70,6 +70,8 @@ pub struct Settings {
     pub frame_gen_cap_fps: Option<f64>,
     /// D3DKMT process scheduling class to ask for (5 realtime .. 2; 0 = leave)
     pub gpu_sched_class: Option<i64>,
+    /// "jit" (default) | "queue": the shim's release pacing of the game (ipc appPacingJit; docs/PERFORMANCE_FINDINGS.md)
+    pub game_pacing: Option<String>,
     pub debug: Option<bool>,
     pub gamma: Option<f32>,
     /// headset height above the floor handed to games (m); 0 = the headset's own floor estimate
@@ -120,6 +122,7 @@ pub fn load_settings(path: &Path) -> Settings {
         frame_gen_lag_ms: video["frame_gen_lag_ms"].as_f64(),
         frame_gen_cap_fps: video["frame_gen_cap_fps"].as_f64(),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
+        game_pacing: video["game_pacing"].as_str().map(str::to_string),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
         height_m: v["headset"]["height_m"].as_f64().map(|g| g as f32),

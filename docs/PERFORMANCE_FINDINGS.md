@@ -100,3 +100,33 @@ with the rotation).
 
 Plan when the client is recompiled: bring the shim-side path back from `exp/restamp-2026-10-13` first (clean on both headsets), then the
 host-side one only if the shim-side wait's arrival jitter still matters.
+
+## Branch fg-performance (2026-10-16): four changes from the latency and GPU-time assessment
+
+Measured basis (RTX 5090, Vision Pro 100 Hz, nights of 2026-10-15/16): a GPU-bound game keeps 2 to 3 frames in its render queue (20 to 56 ms,
+`fg_uncapped.csv` now - newest); the host's own GPU share per output is small (flow 2.2-3.3 ms of timeline, synthesis 0.4-1 ms, FFR + encode
+about 3 ms, a copy about 50 us at 45 MB); the headset's tracking samples miss 1-2 % of boundaries (up to 13 % in the lab, where the phase is
+random per run). Bandwidth is not the lever, serialization and queue depth are.
+
+1. **Just-in-time release** (`ipc.h appPacingJit`, settings `video.game_pacing` jit | queue, default jit; `--game-pacing`, `VISIONALVR_GAME_PACING`).
+   The shim's queue throttle let the game start a frame while one was still on the GPU, so a GPU-bound game ran 2-3 frames ahead. Now the
+   release is also held until the newest submitted frame is predicted to finish on the GPU (last GPU completion + frames pending x the EMA of
+   the GPU time per frame, measured from the per-slot GPU-done events) minus the app's CPU time envelope (release -> submit) and a 1 ms lead:
+   the frame the app starts reaches the GPU as it frees up, one frame in flight, no idle GPU. With the GPU idle nothing is held. The shim's
+   pacing line reports `pacing just-in-time (holds N, mean X ms), app cpu, gpu ms/frame`. This is what the manual fps cap approximated.
+2. **Flow only without vectors** (`FrameGen::computeFlow`): the optical flow of a pair is computed by the first render that has an eye without
+   game vectors, not at ingest; with vectors for both eyes the two preparation passes and the engine are skipped (`gen.flow_skipped`), zero
+   flow and maximum cost are bound so the flow path falls back to the crossfade where a vector does not decide.
+3. **Tap copies retired by GPU completion** (`NgxTap::GpuDone`): a replaced or dropped shared copy is freed when the frame after its last use
+   completed on the GPU (the shim's GPU-done event, which for a D3D12 game sits after the runtime's fence wait on the game's queue), the 3 s
+   age limit stays as the fallback. Deterministic where the timer was a guess.
+4. **Predicted sample on a miss** (`fg_predict_sample`, `VISIONALVR_FG_PREDICT_SAMPLE=0` restores the skip): a boundary with no tracking sample
+   newer than the last sent frame within the 3 ms wait stamps the output with the pose one display period past the last timestamp,
+   extrapolated from the two newest samples (rotation between them scaled to the gap). A predicted pose is consistent with its timestamp,
+   unlike the relabelled stale pose that trembled on the Vision Pro in October; the headset resolves any timestamp (device anchor query,
+   pose history). Counter `predicted_samples` next to `no_sample`.
+
+Lab A/Bs: `stutter_unc_queue` against `stutter_unc` (frames in flight), `third_mv_nopredict` against `third_mv` (skips against predictions);
+the full scenario suite is the regression gate. Headset check: the shim pacing line's holds and `app cpu` / `gpu` numbers, the
+`frame generation perf` line's in-flight proxy, and the feel against the 2026-10-15/16 recordings.
+
