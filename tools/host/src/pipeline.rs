@@ -487,7 +487,9 @@ impl Pipeline {
             fg_holds: AtomicU64::new(0),
             fg_no_sample: AtomicU64::new(0),
             fg_predicted: AtomicU64::new(0),
-            fg_predict: std::env::var("VISIONALVR_FG_PREDICT_SAMPLE").map(|v| v != "0").unwrap_or(true),
+            // opt-in (VISIONALVR_FG_PREDICT_SAMPLE=1): the lab's viewer matches poses by exact timestamp and cannot judge a predicted one, and the
+            // Quest client's lookup for an unsent timestamp is unverified; the Vision Pro resolves any timestamp. Default: the drop rule.
+            fg_predict: std::env::var("VISIONALVR_FG_PREDICT_SAMPLE").map(|v| v == "1").unwrap_or(false),
             fg_dropped: AtomicU64::new(0),
             fg_pairs_skipped: AtomicU64::new(0),
             fg_real_due: AtomicBool::new(false),
@@ -671,8 +673,9 @@ impl Pipeline {
     /// No sample newer than the last sent frame arrived in time (the headset's samples land at a phase of our boundaries that the wait does
     /// not cover: 1-2 % of boundaries on the headset, up to 13 % in the lab): the pose one display period past the last sent timestamp,
     /// extrapolated from the two newest samples (the rotation between them scaled to the gap), with that timestamp. The headset resolves a
-    /// pose for any timestamp (the Vision Pro's device anchor query, the Quest client's history), and a predicted pose is consistent with
-    /// its timestamp, unlike a stale pose relabelled (the 2026-10-13 tremble). VISIONALVR_FG_PREDICT_SAMPLE=0 keeps the old skip.
+    /// pose for any timestamp on the Vision Pro (device anchor query), and a predicted pose is consistent with its timestamp, unlike a
+    /// stale pose relabelled (the 2026-10-13 tremble). Opt-in with VISIONALVR_FG_PREDICT_SAMPLE=1: the lab's viewer matches poses by exact
+    /// timestamp (it reported one period of head motion as error under a turn), and the Quest client's lookup is unverified.
     fn fg_predict_sample(&self) -> Option<(Duration, [f32; 4])> {
         if !self.fg_predict {
             return None;
@@ -683,15 +686,21 @@ impl Pipeline {
             return None;
         }
         let (t2, q2) = ring[n - 1];
-        let (t1, q1) = ring[n - 2];
-        let last = *self.last_sent_ts.lock();
+        // the angular velocity over a baseline of about four periods, not the two adjacent samples: with adjacent samples the extrapolation
+        // scales the samples' noise by one to four and the head path trembled in the lab (hf 0.015 -> 0.09 deg turning, 0.05 still)
         let period = self.period();
-        if t2 <= t1 || t2 > last || last.saturating_sub(t2) > period * 2 || t2 - t1 > period * 3 {
+        let mut j = n - 2;
+        while j > 0 && t2.saturating_sub(ring[j].0) < period * 4 {
+            j -= 1;
+        }
+        let (t1, q1) = ring[j];
+        let last = *self.last_sent_ts.lock();
+        if t2 <= t1 || t2 > last || last.saturating_sub(t2) > period * 2 || t2 - t1 > period * 12 || t2 - t1 < period / 2 {
             return None;
         }
         let ts = last + period;
         let k = (ts - t2).as_secs_f64() / (t2 - t1).as_secs_f64();
-        if !(k > 0.0 && k <= 4.0) {
+        if !(k > 0.0 && k <= 2.0) {
             return None;
         }
         // delta = q2 * conj(q1): the rotation from sample 1 to sample 2; scaled by k and applied to q2
@@ -710,7 +719,8 @@ impl Pipeline {
         let scaled = if sin_half < 1e-6 {
             [0.0, 0.0, 0.0, 1.0]
         } else {
-            let half = (sin_half.min(1.0) as f64).atan2(d[3].max(-1.0).min(1.0) as f64) as f32 * k as f32;
+            // the extrapolated rotation, at most 2 degrees (about 170 deg/s over a period: beyond that the samples are not a turn)
+            let half = ((sin_half.min(1.0) as f64).atan2(d[3].max(-1.0).min(1.0) as f64) as f32 * k as f32).min(1.0f32.to_radians());
             let s = half.sin() / sin_half;
             [d[0] * s, d[1] * s, d[2] * s, half.cos()]
         };

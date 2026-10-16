@@ -120,13 +120,18 @@ random per run). Bandwidth is not the lever, serialization and queue depth are.
 3. **Tap copies retired by GPU completion** (`NgxTap::GpuDone`): a replaced or dropped shared copy is freed when the frame after its last use
    completed on the GPU (the shim's GPU-done event, which for a D3D12 game sits after the runtime's fence wait on the game's queue), the 3 s
    age limit stays as the fallback. Deterministic where the timer was a guess.
-4. **Predicted sample on a miss** (`fg_predict_sample`, `VISIONALVR_FG_PREDICT_SAMPLE=0` restores the skip): a boundary with no tracking sample
-   newer than the last sent frame within the 3 ms wait stamps the output with the pose one display period past the last timestamp,
-   extrapolated from the two newest samples (rotation between them scaled to the gap). A predicted pose is consistent with its timestamp,
-   unlike the relabelled stale pose that trembled on the Vision Pro in October; the headset resolves any timestamp (device anchor query,
-   pose history). Counter `predicted_samples` next to `no_sample`.
+4. **Predicted sample on a miss** (`fg_predict_sample`, opt-in `VISIONALVR_FG_PREDICT_SAMPLE=1`): a boundary with no tracking sample newer
+   than the last sent frame within the 3 ms wait stamps the output with the pose one display period past the last timestamp, extrapolated
+   from the angular velocity over a four-period baseline (two adjacent samples amplified their noise: hf 0.015 -> 0.09 deg in the lab) and
+   clamped to 2 degrees. Counter `predicted_samples` next to `no_sample`. Lab: it removed every skipped boundary and halved frozen ticks
+   in the pattern modes, but the lab's viewer matches poses by exact timestamp and therefore shows one period of head motion as error under
+   a 45 deg/s turn (CLEAN -> TREMBLE), which is what a client without pose interpolation would show. The Vision Pro resolves any timestamp
+   (ARKit device anchor query); the Quest client's lookup of an unsent timestamp is unverified. Default off until a headset A/B; the drop
+   rule (main) stays the default behaviour. The alternative, sliding the host grid to the sample phase, conflicts with the existing phase
+   lock to the headset's display ticks and was not built.
 
-Lab A/Bs: `stutter_unc_queue` against `stutter_unc` (frames in flight), `third_mv_nopredict` against `third_mv` (skips against predictions);
-the full scenario suite is the regression gate. Headset check: the shim pacing line's holds and `app cpu` / `gpu` numbers, the
+Lab A/Bs: `stutter_unc_queue` against `stutter_unc` (frames in flight: inconclusive, the probe's GPU load blocks its render thread so the
+shim sees it as CPU time and never holds; item 1 is headset-verified only), `third_mv_nopredict` against `third_mv`; the full scenario suite
+is the regression gate (2026-10-16: every verdict equal or better than before with items 1-3 in, flow skipped on 100 % of vector outputs). Headset check: the shim pacing line's holds and `app cpu` / `gpu` numbers, the
 `frame generation perf` line's in-flight proxy, and the feel against the 2026-10-15/16 recordings.
 

@@ -149,12 +149,18 @@ def build(copy_as=None):
     live.build("host", simrig=True)
     live.build("shim")
     live.build("probe")
-    live.ps(f"""
+    out = live.ps(f"""
 $src = '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe'
-Copy-Item $src '{live.INSTALL}\\{copy_as or SIMEXE}' -Force
-Copy-Item '{live.CLONE}\\src\\VDXR\\bin-shim\\x64\\Release\\LibOVRRT64_1.dll' '{live.INSTALL}\\LibOVRRT64_1.dll' -Force
-Get-Item '{live.INSTALL}\\{SIMEXE}' | Select-Object Name, Length, LastWriteTime | Out-String
+$dst = '{live.INSTALL}\\{copy_as or SIMEXE}'
+try {{ Copy-Item $src $dst -Force -ErrorAction Stop }} catch {{ 'COPY FAILED: ' + $_.Exception.Message }}
+try {{ Copy-Item '{live.CLONE}\\src\\VDXR\\bin-shim\\x64\\Release\\LibOVRRT64_1.dll' '{live.INSTALL}\\LibOVRRT64_1.dll' -Force -ErrorAction Stop }} catch {{ 'COPY FAILED: ' + $_.Exception.Message }}
+# the installed exe must be the one just built: a locked or skipped copy left the lab running an old binary for two hours (2026-10-16)
+if ((Get-Item $src).LastWriteTime -ne (Get-Item $dst).LastWriteTime) {{ 'COPY FAILED: ' + $dst + ' is not the build just made' }}
+Get-Item $dst | Select-Object Name, Length, LastWriteTime | Out-String
 """)
+    print(out)
+    if "COPY FAILED" in out:
+        sys.exit("lab install copy failed: " + out)
 
 
 def run_one(name, seconds, extra):
