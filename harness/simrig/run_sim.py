@@ -100,6 +100,10 @@ SCENARIOS = {
     # 3080 Ti) under Auto starting at 1/2: expect a step down at the peak and a step up after it, logged as "frame generation auto:" lines
     "auto_ramp":   {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "ramp:40", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "45", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "half", "ENV:VISIONALVR_FG_AUTO": "1", "note": "GPU cost ramping 12 -> 24 -> 12 ms over 40 s, automatic rate from 1/2 (run 90 s or more)"},
+    # the back-off: a GPU cost alternating 24 ms / 2 ms every 30 s (burst:30:30, 90 copies) under Auto: down at +5 s, up at +50 s (20 s dwell), down again at
+    # +65 s doubles the dwell to 40 s, which the 30 s quiet half no longer meets: the controller settles at 1/3 instead of switching every half minute
+    "auto_burst":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "burst:30:30", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "90", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "half", "ENV:VISIONALVR_FG_AUTO": "1", "note": "GPU cost 24 ms / 2 ms alternating every 30 s, automatic rate from 1/2: the back-off should stop the switching (run 180 s)"},
     "third_slow":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.12", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "the 1/3 rate with the marker at half speed: the planner's test; at full speed the 5 px marker moves 14 px per 30 ms game step, past the flow's 8 px blocks (the thin-mover limit, not the planner)"},
     "third_mv":    {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
@@ -161,12 +165,25 @@ def kill():
 def build(copy_as=None):
     kill()   # a running probe or host would keep the exes locked (LNK1104 / copy failures)
     live.build("host", simrig=True)
+    # the build must postdate every host source just uploaded: cargo skipped a rebuild once (2026-10-16, stale binary, verdicts void). Checked here,
+    # before the shim and probe uploads touch nvenc/hostlib files again.
+    stale = live.ps(f"""
+$exe = Get-Item '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe'
+$newest = (Get-ChildItem '{live.CLONE}\\tools\\host\\src\\*.rs', '{live.CLONE}\\nvenc\\hostlib\\*', '{live.CLONE}\\ovrshim\\ipc.h' | Sort-Object LastWriteTime | Select-Object -Last 1)
+if ($newest.LastWriteTime -gt $exe.LastWriteTime) {{ 'STALE BUILD: host binary (' + $exe.LastWriteTime + ') is older than ' + $newest.FullName + ' (' + $newest.LastWriteTime + ')' }} else {{ 'host binary ' + $exe.LastWriteTime + ' is newer than every host source' }}
+""")
+    print(stale)
+    if "STALE BUILD" in stale:
+        sys.exit("lab host build is stale: " + stale)
     live.build("shim")
     live.build("probe")
     out = live.ps(f"""
 $src = '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe'
 $dst = '{live.INSTALL}\\{copy_as or SIMEXE}'
-try {{ Copy-Item $src $dst -Force -ErrorAction Stop }} catch {{ 'COPY FAILED: ' + $_.Exception.Message }}
+# the fresh exe can still be locked for a moment after cargo wrote it (antivirus scan): retry before giving up
+$copied = $false
+for ($i = 0; $i -lt 10 -and -not $copied; $i++) {{ try {{ Copy-Item $src $dst -Force -ErrorAction Stop; $copied = $true }} catch {{ Start-Sleep -Seconds 1 }} }}
+if (-not $copied) {{ 'COPY FAILED: ' + $dst + ' could not be overwritten (locked?)' }}
 try {{ Copy-Item '{live.CLONE}\\src\\VDXR\\bin-shim\\x64\\Release\\LibOVRRT64_1.dll' '{live.INSTALL}\\LibOVRRT64_1.dll' -Force -ErrorAction Stop }} catch {{ 'COPY FAILED: ' + $_.Exception.Message }}
 # the installed exe must be the one just built: a locked or skipped copy left the lab running an old binary for two hours (2026-10-16)
 if ((Get-Item $src).LastWriteTime -ne (Get-Item $dst).LastWriteTime) {{ 'COPY FAILED: ' + $dst + ' is not the build just made' }}
@@ -180,6 +197,8 @@ Get-Item $dst | Select-Object Name, Length, LastWriteTime | Out-String
 def run_one(name, seconds, extra):
     sc = dict(SCENARIOS[name])
     note = sc.pop("note", "")
+    # every run starts from a blank per-game memory: the automatic rate would otherwise start where the previous scenario left the probe
+    live.ps(f"Remove-Item '{live.INSTALL}\\config\\games.json' -Force -ErrorAction SilentlyContinue")
     # REAL_ENCODE 1: the viewer reads the slot through the encoder's device, which only the real encode path opens (a timer-only encode shows black)
     env = {"SECONDS": seconds, "SEED": 1, "SHOW": 1, "REAL_ENCODE": 1}
     env.update(sc)

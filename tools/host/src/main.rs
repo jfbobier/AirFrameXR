@@ -1411,6 +1411,10 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
 /// 60 s is logged as a resolution-scaling game (the budget is spent on pixels; a faster rate cannot be judged from the cost).
 struct AutoRate {
     last_switch: Instant,
+    /// the dwell a step up needs (s): 20 at first; doubled (to 320 at most) every time a step up is reverted within 60 s, so a game whose cost
+    /// swings around a budget settles at the slower rate instead of adjusting every half minute; remembered per game (games.json up_dwell_s)
+    up_dwell_s: f64,
+    last_up: Option<Instant>,
     up_since: Option<Instant>,
     tracking_since: Option<Instant>,
     tracking_logged: bool,
@@ -1422,10 +1426,11 @@ struct AutoRate {
 impl AutoRate {
     fn new() -> Self {
         let now = Instant::now();
-        AutoRate { last_switch: now, up_since: None, tracking_since: None, tracking_logged: false, window: Default::default(), last_eval: now }
+        AutoRate { last_switch: now, up_dwell_s: 20.0, last_up: None, up_since: None, tracking_since: None, tracking_logged: false, window: Default::default(), last_eval: now }
     }
-    fn reset(&mut self) {
+    fn reset(&mut self, up_dwell_s: f64) {
         *self = AutoRate::new();
+        self.up_dwell_s = up_dwell_s.clamp(20.0, 320.0);
     }
     /// One evaluation per second while a game runs: Some(new rate) when a switch is due. `outputs` = synths + reals so far, `repeats` so far.
     fn evaluate(&mut self, rate: FgRate, period_s: f64, cost_p95_ms: f32, outputs: u64, repeats: u64, origin: Instant) -> Option<FgRate> {
@@ -1449,12 +1454,21 @@ impl AutoRate {
         let since_switch = now.duration_since(self.last_switch);
         let slower = match rate { FgRate::TwoThirds => Some(FgRate::Half), FgRate::Half => Some(FgRate::Third), _ => None };
         let faster = match rate { FgRate::Third => Some(FgRate::Half), FgRate::Half => Some(FgRate::TwoThirds), _ => None };
-        if repeat_share > 0.05 && since_switch >= Duration::from_secs(5) {
+        // over budget: repeats at the fixed patterns; at 2/3 the content-clock planner turns a slow game into lag rather than repeats, so the
+        // cost itself decides there (15 % over the budget)
+        let over_budget = rate == FgRate::TwoThirds && (cost_p95_ms as f64) > 1.15 * budget_ms(rate);
+        if (repeat_share > 0.05 || over_budget) && since_switch >= Duration::from_secs(5) {
             self.up_since = None;
             if let Some(next) = slower {
-                logs::general("INFO", &format!("frame generation auto: {} -> {} (repeats {:.1} % over 5 s, frame cost p95 {cost_p95_ms:.1} ms of a {:.1} ms budget)",
-                    rate.name(), next.name(), repeat_share * 100.0, budget_ms(rate)));
-                event(origin, "fg_auto", json!({ "from": rate.name(), "to": next.name(), "why": "repeats", "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(rate) }));
+                // a step up reverted within a minute: the game's cost swings around this budget; wait longer before the next attempt
+                let reverted = self.last_up.map_or(false, |t| now.duration_since(t) < Duration::from_secs(60));
+                if reverted {
+                    self.up_dwell_s = (self.up_dwell_s * 2.0).min(320.0);
+                }
+                logs::general("INFO", &format!("frame generation auto: {} -> {} ({}repeats {:.1} % over 5 s, frame cost p95 {cost_p95_ms:.1} ms of a {:.1} ms budget{})",
+                    rate.name(), next.name(), if over_budget { "over budget: " } else { "" }, repeat_share * 100.0, budget_ms(rate),
+                    if reverted { format!("; the step up did not hold, next attempt after {:.0} s of headroom", self.up_dwell_s) } else { String::new() }));
+                event(origin, "fg_auto", json!({ "from": rate.name(), "to": next.name(), "why": if over_budget { "over_budget" } else { "repeats" }, "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(rate), "up_dwell_s": self.up_dwell_s }));
                 self.last_switch = now;
                 return Some(next);
             }
@@ -1469,11 +1483,12 @@ impl AutoRate {
             let factor = if next == FgRate::TwoThirds { 0.75 } else { 0.8 };
             if (cost_p95_ms as f64) < factor * budget_ms(next) && repeat_share < 0.02 {
                 let since = *self.up_since.get_or_insert(now);
-                if now.duration_since(since) >= Duration::from_secs(20) && since_switch >= Duration::from_secs(20) {
-                    logs::general("INFO", &format!("frame generation auto: {} -> {} (frame cost p95 {cost_p95_ms:.1} ms under {:.0} % of the {:.1} ms budget for 20 s, repeats {:.1} %)",
-                        rate.name(), next.name(), factor * 100.0, budget_ms(next), repeat_share * 100.0));
-                    event(origin, "fg_auto", json!({ "from": rate.name(), "to": next.name(), "why": "headroom", "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(next) }));
+                if now.duration_since(since).as_secs_f64() >= self.up_dwell_s && since_switch >= Duration::from_secs(20) {
+                    logs::general("INFO", &format!("frame generation auto: {} -> {} (frame cost p95 {cost_p95_ms:.1} ms under {:.0} % of the {:.1} ms budget for {:.0} s, repeats {:.1} %)",
+                        rate.name(), next.name(), factor * 100.0, budget_ms(next), self.up_dwell_s, repeat_share * 100.0));
+                    event(origin, "fg_auto", json!({ "from": rate.name(), "to": next.name(), "why": "headroom", "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(next), "up_dwell_s": self.up_dwell_s }));
                     self.last_switch = now;
+                    self.last_up = Some(now);
                     self.up_since = None;
                     self.tracking_since = None;
                     return Some(next);
@@ -1508,10 +1523,10 @@ fn games_memory_load(args: &Args) -> serde_json::Value {
     std::fs::read_to_string(games_memory_path(args)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}))
 }
 
-fn games_memory_update(args: &Args, exe: &str, rate: FgRate, cost_p95_ms: f32, vectors: bool, why: &str) {
+fn games_memory_update(args: &Args, exe: &str, rate: FgRate, cost_p95_ms: f32, vectors: bool, why: &str, up_dwell_s: f64) {
     let mut all = games_memory_load(args);
     let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    all[exe] = json!({ "rate": rate.name(), "cost_p95_ms": cost_p95_ms, "vectors": vectors, "updated": unix, "why": why });
+    all[exe] = json!({ "rate": rate.name(), "cost_p95_ms": cost_p95_ms, "vectors": vectors, "updated": unix, "why": why, "up_dwell_s": up_dwell_s });
     if let Ok(t) = serde_json::to_string_pretty(&all) {
         let _ = std::fs::create_dir_all(args.config_dir.as_path());
         let _ = std::fs::write(games_memory_path(args), t);
@@ -2347,19 +2362,19 @@ fn main() {
                 }
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_rate");
-                auto_rate.reset();
+                auto_rate.reset(auto_rate.up_dwell_s);
                 if let Some(g) = &game {
                     if fg_active && !ipc.is_null() {
                         let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
                         unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
-                        games_memory_update(&args, &g.exe, r, game_cost_p95, tap == 1 && pubs > 0, "user");
+                        games_memory_update(&args, &g.exe, r, game_cost_p95, tap == 1 && pubs > 0, "user", auto_rate.up_dwell_s);
                     }
                 }
             }
             let au = vision::FG_AUTO_REQ.swap(-1, Ordering::SeqCst);
             if au >= 0 {
                 args.fg_auto = au == 1;
-                auto_rate.reset();
+                auto_rate.reset(auto_rate.up_dwell_s);
                 log_fg_config(origin, &args, fg_active, "frame_gen_auto");
             }
             let pr = vision::FG_PREDICT_REQ.swap(-1, Ordering::SeqCst);
@@ -2409,11 +2424,11 @@ fn main() {
                 let exe = if exe.is_empty() { "(unknown app)".to_string() } else { exe };
                 logs::general("INFO", &format!("game started: {exe}"));
                 event(origin, "game_started", json!({ "exe": exe }));
-                auto_rate.reset();
                 game_cost_p95 = 0.0;
+                let mem = games_memory_load(&args);
+                auto_rate.reset(mem[&exe]["up_dwell_s"].as_f64().unwrap_or(20.0));
                 if args.fg_auto && fg_active {
                     // a known game starts at the rate that held last time (games.json), the controller takes it from there
-                    let mem = games_memory_load(&args);
                     if let Some(r) = mem[&exe]["rate"].as_str().and_then(FgRate::parse) {
                         if Some(r) != args.fg_rate && r != FgRate::Uncapped {
                             logs::general("INFO", &format!("frame generation auto: {exe} starts at {} (remembered from {})", r.name(), mem[&exe]["why"].as_str().unwrap_or("?")));
@@ -2439,7 +2454,7 @@ fn main() {
                 if fg_active && secs > 20.0 {
                     let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
                     unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
-                    games_memory_update(&args, &g.exe, args.fg_rate.unwrap_or(FgRate::Half), game_cost_p95, tap == 1 && pubs > 0, "game end");
+                    games_memory_update(&args, &g.exe, args.fg_rate.unwrap_or(FgRate::Half), game_cost_p95, tap == 1 && pubs > 0, "game end", auto_rate.up_dwell_s);
                 }
             }
             if let Some(g) = &game {
@@ -2461,7 +2476,7 @@ fn main() {
                                 log_fg_config(origin, &args, fg_active, "auto");
                                 let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
                                 unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
-                                games_memory_update(&args, &g.exe, next, c95, tap == 1 && pubs > 0, "auto");
+                                games_memory_update(&args, &g.exe, next, c95, tap == 1 && pubs > 0, "auto", auto_rate.up_dwell_s);
                             }
                         }
                     }

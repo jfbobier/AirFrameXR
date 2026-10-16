@@ -85,7 +85,15 @@ budget (1/3 = three display periods, 1/2 = two, 2/3 = one and a half), and the *
 | p95 cost under 80 % of the next faster budget (75 % for 2/3) for 20 s, repeats under 2 % | step up |
 | cost above 90 % of the budget with no repeats for 60 s | logged once as a resolution-scaling game: the budget is spent on pixels, a faster rate cannot be judged from the cost |
 
-Never two switches within 20 s. Every decision is a log line `frame generation auto: 1/2 -> 1/3 (repeats 7.2 % over 5 s, frame cost p95 24.1 ms
+Never two switches within 20 s, and a **back-off**: a step up that has to be reverted within a minute doubles the dwell the next step up
+needs (20 -> 40 -> 80 s, 320 at most), per game and remembered, so a game whose cost swings around a budget settles at the slower rate
+instead of adjusting every half minute (the user's pacing concern; lab scenario `auto_burst`, cost 24 / 2 ms alternating every 30 s).
+At 2/3 the content-clock planner turns a slow game into lag rather than repeats, so the step down there triggers on the cost itself (15 %
+over the budget). With resolution scaling off in the game, as the user runs them, the frame cost is a true measure and the rules above are
+the whole story. Lab `auto_burst` (cost 24 / 2 ms alternating every 30 s, from 1/2): down at 13 s, up at 41 s, up to 2/3 at 63 s, back down
+at 68 s (over budget, dwell doubled to 40 s) and 73 s (repeats, dwell 80 s), then no switch for the remaining 140 s: settled at 1/3, the
+80 s dwell no longer met by the 30 s quiet half. `auto_ramp` (cost 12 -> 24 -> 12 ms over 40 s): one step down near the peak, one up after it, per cycle.
+Every decision is a log line `frame generation auto: 1/2 -> 1/3 (repeats 7.2 % over 5 s, frame cost p95 24.1 ms
 of a 20.0 ms budget)` and an `fg_auto` event, and a `frame generation config (auto)` line. **Per-game memory** `config/games.json`: the rate that
 held, the frame cost and whether vectors were found, keyed by the executable; written at every rate change (auto or by hand) and at game end;
 a known game starts at its remembered rate (`auto_start`). The launcher's slider follows the host and the line under it reads the **headroom**:
