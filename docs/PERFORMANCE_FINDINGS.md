@@ -120,15 +120,10 @@ random per run). Bandwidth is not the lever, serialization and queue depth are.
 3. **Tap copies retired by GPU completion** (`NgxTap::GpuDone`): a replaced or dropped shared copy is freed when the frame after its last use
    completed on the GPU (the shim's GPU-done event, which for a D3D12 game sits after the runtime's fence wait on the game's queue), the 3 s
    age limit stays as the fallback. Deterministic where the timer was a guess.
-4. **Predicted sample on a miss** (`fg_predict_sample`, opt-in `VISIONALVR_FG_PREDICT_SAMPLE=1`): a boundary with no tracking sample newer
-   than the last sent frame within the 3 ms wait stamps the output with the pose one display period past the last timestamp, extrapolated
-   from the angular velocity over a four-period baseline (two adjacent samples amplified their noise: hf 0.015 -> 0.09 deg in the lab) and
-   clamped to 2 degrees. Counter `predicted_samples` next to `no_sample`. Lab: it removed every skipped boundary and halved frozen ticks
-   in the pattern modes, but the lab's viewer matches poses by exact timestamp and therefore shows one period of head motion as error under
-   a 45 deg/s turn (CLEAN -> TREMBLE), which is what a client without pose interpolation would show. The Vision Pro resolves any timestamp
-   (ARKit device anchor query); the Quest client's lookup of an unsent timestamp is unverified. Default off until a headset A/B; the drop
-   rule (main) stays the default behaviour. The alternative, sliding the host grid to the sample phase, conflicts with the existing phase
-   lock to the headset's display ticks and was not built.
+4. **Predicted sample on a miss** (removed 2026-10-16 evening): a boundary with no tracking sample within the wait stamped the output with a
+   pose extrapolated one period past the last timestamp. The lab showed it as TREMBLE under a turn (its viewer matches poses by exact
+   timestamp); the headset showed jitter with it on (user, 2026-10-16: "it induces jitter"). Removed with its setting, tick and live
+   command. The cause of the misses was found instead, see "Headset night 2026-10-16" below.
 
 Lab A/Bs. Item 1 needs a GPU-bound app: the `fps:lo:hi` scenarios are a CPU busy-wait (a CPU-bound game, where the rule correctly holds
 nothing), so `gpu_unc` / `gpu_unc_queue` / `gpu` / `gpu_queue` drive the probe with 2 ms of CPU and 50 x 128 MB GPU copies per frame
@@ -141,7 +136,36 @@ nothing), so `gpu_unc` / `gpu_unc_queue` / `gpu` / `gpu_queue` drive the probe w
 
 Same frame rate, one game period less in the queue, 12-13 ms less content lag at 13 ms frames (it scales with the frame time: Carma's
 25 ms frames would give back about 25 ms). Generation off, the same app: 25.0 ms (queue) against 15.0 ms (just in time), 80 fps either way.
-`third_mv_nopredict` against `third_mv` for item 4. The full scenario suite is the regression gate (2026-10-16: every verdict equal or
+The full scenario suite is the regression gate (2026-10-16: every verdict equal or
 better than before with items 1-3 in, flow skipped on 100 % of vector outputs). Headset check: the shim pacing line's holds and `app cpu` / `gpu` numbers, the
 `frame generation perf` line's in-flight proxy, and the feel against the 2026-10-15/16 recordings.
 
+
+## Headset night 2026-10-16: the regression and the tracking-sample rule
+
+Every mode of the build above (rates 1/3 and 1/2, auto, just-in-time or queue pacing) was judged inferior to the night before on the
+5090 + Vision Pro. The logs (`logs/debug/20261016-174349`) gave the mechanism:
+
+- The headset sends one tracking sample per display period (90 Hz, exact on its own clock) and Wi-Fi delivers them bunched: at the host,
+  with no game running, the spacing between samples was p50 11.0 ms, p95 18-20 ms, max 23-38 ms, and 25-30 % of the gaps were over
+  15 ms (night 1 on the 15th: p95 16.3, 17 % over 15 ms; so the character is the headset's, the degree the evening's).
+- The pipeline stamped each output with the newest sample newer than the last sent frame and waited up to 3 ms for one. Taking the
+  newest sample as it lands leaves nothing for the next boundary, which then depends on the next sample arriving within 3 ms: 15-30 % of
+  the boundaries waited (mean 2.6 ms) and 7-14 % found none and were skipped (`no_sample` 12-24 per 180 boundaries at 1/2, 11-33 at
+  1/3; 94-168 during a UEVR shader compilation that starved the receive thread).
+- The rates commit of the morning (879094b) had made a skipped synthetic output dropped rather than delayed (the lab's 1/3 case): on
+  the headset each miss became a frozen frame and then a double step (the rendered frame right after the repeat), where the night
+  before each miss was one repeat with the pattern sliding a boundary. At 1/2 the generator produced 396 synthetic frames for 424
+  rendered ones in 10 s, at 1/3 505 for 570 owed; the stream ran at 79-85 fps against a 90 Hz display.
+- The predicted-sample tick (item 4) removed the skips (0-1 per 180) at the price of 70-141 predicted stamps per 180: jitter.
+- Not the cause: the just-in-time release held nothing in the UE games (their CPU time, release to submit, 25-46 ms, exceeds their GPU
+  time, so the rule has nothing to hold); the lazy flow and the tap lifetime left no trace (0 errors, vectors used on 100 % of eyes).
+
+Fix (same evening): one sample in hand (`fg_pick_sample_now`: when two samples at the display cadence are waiting, the older one is
+stamped and the newest kept for the next boundary; a miss then needs a sample a whole period late), the delayed output is back for the
+rare miss, the predicted sample is gone, and the misses are logged (`frame generation samples` line, game summary). A side finding on the
+shim's frame cost: `PendingFrame.releaseS` took the last release at compose time, which for a pipelined engine (UE submits frame N after
+frame N+1's release) is the wrong release; the cost read 2 ms at 1/3 and Auto stepped up on it. The releases are now queued and matched to
+the frames in order. For a pipelined engine the cost (release to GPU done) is then about two of its frame intervals, which is its real
+latency; Auto's step up compares it with the next budget and will not fire for such engines (conservative), the step down on repeats is
+unaffected.

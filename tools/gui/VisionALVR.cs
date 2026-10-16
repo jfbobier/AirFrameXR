@@ -42,7 +42,6 @@ namespace VisionALVR
         readonly TrackBar fgRate = new TrackBar { Minimum = 0, Maximum = 2, TickFrequency = 1, SmallChange = 1, LargeChange = 1, Width = 110, AutoSize = false, Height = 30, Margin = new Padding(0, 0, 0, 0) };
         readonly Label fgRateText = Ui.Line("");
         readonly CheckBox fgMv = new CheckBox { Text = "DLSS motion vectors", AutoSize = true, Margin = new Padding(14, 3, 0, 0) };
-        readonly CheckBox fgPredict = new CheckBox { Text = "Predicted sample", AutoSize = true, Margin = new Padding(10, 3, 0, 0) };
         readonly CheckBox gamePacing = new CheckBox { Text = "Just-in-time pacing", AutoSize = true, Margin = new Padding(10, 3, 0, 0) };
         readonly CheckBox fgAuto = new CheckBox { Text = "Auto", AutoSize = true, Margin = new Padding(8, 3, 0, 0) };
         bool fgRateFromHost;   // the slider follows the host's rate in auto mode: no command back
@@ -130,7 +129,6 @@ namespace VisionALVR
             fgOpts.Controls.Add(new Label { Text = "2/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(2, 6, 0, 0) });
             fgOpts.Controls.Add(fgAuto);
             fgOpts.Controls.Add(fgMv);
-            fgOpts.Controls.Add(fgPredict);
             fgOpts.Controls.Add(gamePacing);
             lt.Controls.Add(fgOpts);
             lt.SetColumnSpan(fgOpts, 6);
@@ -141,7 +139,6 @@ namespace VisionALVR
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
             tips.SetToolTip(fgAuto, "The streamer picks the rate from the game's measured frame cost and repeats (down fast, up slowly), remembers it per game; the slider follows.");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the VisionALVR-OptiScaler DLL is in the game folder (else optical flow).");
-            tips.SetToolTip(fgPredict, "A frame boundary with no fresh tracking sample is stamped with a predicted pose instead of being skipped (test: off by default).");
             tips.SetToolTip(gamePacing, "The game's next frame starts when its frame on the GPU is about to finish (one frame in flight); off = the queue throttle (two).");
             live.Controls.Add(lt);
             body.Controls.Add(live);
@@ -169,7 +166,7 @@ namespace VisionALVR
                 settings.Save();
             };
             frameGen.Checked = settings.FrameGen;
-            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !fgAuto.Checked; fgAuto.Enabled = fgMv.Enabled = fgPredict.Enabled = frameGen.Checked; };
+            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !fgAuto.Checked; fgAuto.Enabled = fgMv.Enabled = frameGen.Checked; };
             frameGen.CheckedChanged += (s, e) =>
             {
                 host.Send("frame_gen " + (frameGen.Checked ? "on" : "off"));   // the running streamer switches at the next boundary; the setting is read at start too
@@ -184,7 +181,6 @@ namespace VisionALVR
             fgRateText.Text = settings.FrameGenRate == "uncapped" ? "uncapped (config): the game runs free, every frame sent is interpolated" : FgRateText[fgRate.Value];
             fgMv.Checked = settings.GameMotionVectors;
             fgAuto.Checked = settings.FrameGenAuto;
-            fgPredict.Checked = settings.FrameGenPredictSample;
             gamePacing.Checked = settings.GamePacingJit;
             fgEnable();
             fgRate.ValueChanged += (s, e) =>
@@ -211,13 +207,6 @@ namespace VisionALVR
                 settings.Save();
                 fgEnable();
                 Log.Write("INFO", "frame generation auto rate " + (fgAuto.Checked ? "on" : "off"));
-            };
-            fgPredict.CheckedChanged += (s, e) =>
-            {
-                host.Send("frame_gen_predict " + (fgPredict.Checked ? "on" : "off"));
-                settings.FrameGenPredictSample = fgPredict.Checked;
-                settings.Save();
-                Log.Write("INFO", "frame generation predicted sample " + (fgPredict.Checked ? "on" : "off"));
             };
             gamePacing.CheckedChanged += (s, e) =>
             {

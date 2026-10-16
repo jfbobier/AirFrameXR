@@ -49,7 +49,11 @@ that arrives while the previous one is still due waits in the intake for one bou
 `VISIONALVR_FG_ARRIVAL_WAIT_MS` (4) past the boundary for the frame the app is about to publish (`fg_arrival_waits` / `fg_arrival_hits`) and
 only then repeats the rendered frame. Both rules exist because an app released at a boundary publishes its frame near a boundary: without
 them the schedule flipped between "just before" and "just after" (a frame dropped, then one frozen) at 6 % of the boundaries in the rig's
-ideal-timing case. A boundary with no tracking sample newer than the last sent frame sends nothing (`fg_no_sample`); a frame without a
+ideal-timing case. Every output is stamped with a tracking sample newer than the last sent frame, and when two are waiting the older of
+the two is taken so that one stays in hand for the next boundary (`fg_in_hand`; the Vision Pro sends one sample per display period and
+Wi-Fi delivers them bunched, a quarter of the gaps over 15 ms, so a boundary that takes the newest sample as it lands leaves the next
+boundary waiting for a late one: 7-14 % skipped boundaries on 2026-10-16, each a frozen frame). A boundary that still finds none sends
+nothing and what it owed stays owed (`fg_no_sample`, the pattern slides one boundary); a frame without a
 projection layer (quad-only loading screens) goes out as is; a frame still due when the encoder overran is dropped for the synthetic frame
 between the two newest (`fg_dropped`). With the generator on the newest waiting frame always wins a pick (older ones superseded): the shim's
 half-rate pacing runs open loop and the generator consumes one frame per two boundaries, so a standing queue would never drain otherwise.
@@ -110,18 +114,21 @@ Lab for the rates (3080 Ti simrig, 2026-10-16, 40 s each, marker on the wall clo
   8 px blocks resolve, so the synthetic frames under-move it and the rendered frame catches up (steps small, small, big). With the probe's
   exact vectors the steps are uniform (4.0 / 4.0 / 4.0 px) except where a boundary had no fresh tracking sample. The 1/3 rate is where the
   per-frame motion is largest, which is the case the vectors exist for; a 1/3 verdict with flow is a thin-object verdict, not a planner one.
-- Two rules came out of it. (a) A synthetic output whose boundary finds no fresh tracking sample is dropped, not delayed: delaying it pushed
-  the whole pattern back, the rendered frame went out late, the next arrival queued and a newer one superseded it (7 % of the game's
-  frames lost at 1/3 before the rule; also half rate, where it delayed the rendered frame a period). The rendered frame stays owed.
-  (b) The lab's sample misses depend on the random phase between the host's boundary grid and the simulated headset's sample delivery
-  (2 ms + a mostly constant uplink), from 1 % to 13 % of boundaries between runs, and the judge counts each as a frozen tick: verdicts on
-  the fixed-pattern rates need the counters (`no_sample`, `superseded`) read next to them until the lab aligns or jitters the sample
-  phase, or the host locks its grid to the samples. Headset sessions show 1-2 % misses.
+- The sample misses. The lab's misses depended on the random phase between the host's boundary grid and the simulated headset's sample
+  delivery (1 % to 13 % of boundaries between runs), and a rule was tried that dropped the synthetic output of a missed boundary instead
+  of delaying it (delaying slid the pattern, the next arrival queued and a newer one superseded it: 7 % of the game's frames at 1/3 in
+  the lab). On the headset (2026-10-16) the misses were 7-14 % of the boundaries in every mode, the headset's samples arriving bunched
+  over Wi-Fi, and the drop rule turned each miss into a frozen frame followed by a double step: a regression in every rate against the
+  night before. Both are gone with the one-sample-in-hand stamping above (the miss needs a sample a whole period late) and the delayed
+  output is back (a rare miss then costs one repeat, not a jump). The `frame generation samples` log line every 10 s and the game summary
+  carry the skipped boundaries, the waits and the headset's sample spacing, so a bad Wi-Fi night is read from the log, not guessed.
 
 ## Telemetry
 
-`encoder_stats.pipeline.frame_gen`: `synths`, `reals`, `repeats`, `holds` (boundaries filled by the generator), `no_sample`, `dropped`,
-`queued`, `arrival_waits` / `arrival_hits` / `arrival_wait_ms_sum`, `sample_waits`, `pairs_skipped`, `errors`, `passthrough`, and `gen` = `nvh_fg_stats` (flow/synthesis GPU ms, flow size, engine info). Event `frame_gen`
+`encoder_stats.pipeline.frame_gen`: `synths`, `reals`, `repeats`, `holds` (boundaries filled by the generator), `no_sample`, `in_hand`, `dropped`,
+`queued`, `arrival_waits` / `arrival_hits` / `arrival_wait_ms_sum`, `sample_waits` / `sample_wait_ms_sum`, `pairs_skipped`, `errors`, `passthrough`, and `gen` = `nvh_fg_stats` (flow/synthesis GPU ms, flow size, engine info).
+General log every 10 s with generation on: `frame generation samples: N outputs, S boundaries skipped for want of a tracking sample (x %), W waited for one (mean m ms), H stamped
+with one in hand; tracking spacing p95 / max (gaps over 15 ms)`; the `game ended` line carries the game's skipped boundaries. Event `frame_gen`
 at start (and at every encoder rebuild). Frame fates (debug flavour, `host_pipeline_fates.csv`): `I` ingested (1 = pair), `G` synthetic
 sent, `R` rendered frame sent, `Q` rendered frame re-sent; `host_frames.csv` slot column -2 (synthetic) / -3 (re-stamped rendered).
 

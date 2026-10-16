@@ -78,9 +78,6 @@ struct Args {
     /// minus the app's CPU time: one frame in flight, the Reflex idea), false = the queue throttle alone. Settings `video.game_pacing`
     /// "jit" | "queue", `--game-pacing`, env VISIONALVR_GAME_PACING.
     game_pacing_jit: bool,
-    /// frame generation: a boundary without a fresh tracking sample is stamped with a predicted one instead of being skipped (default off).
-    /// Settings `video.frame_gen_predict_sample`, `--frame-gen-predict on|off`, env VISIONALVR_FG_PREDICT_SAMPLE=1.
-    fg_predict: bool,
     /// automatic frame-generation rate (docs/FRAME_GENERATION.md "Auto"): steps 1/3 <-> 1/2 <-> 2/3 from the game's measured frame cost
     /// (shim ipc frameCostP95Ms) and the repeat share; starts a known game at its remembered rate (config/games.json). Settings
     /// `video.frame_gen_auto`, `--frame-gen-auto on|off`, env VISIONALVR_FG_AUTO=1. Off by default.
@@ -185,7 +182,6 @@ fn parse_args() -> Result<Args, String> {
         boundary_offset_ms: 0.0,
         gpu_sched_class: 5,
         game_pacing_jit: true,
-        fg_predict: false,
         fg_auto: false,
         frame_gen: None,
         game_motion_vectors: true,
@@ -325,7 +321,6 @@ fn parse_args() -> Result<Args, String> {
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
             "--game-pacing" => a.game_pacing_jit = match v()?.to_ascii_lowercase().as_str() { "jit" => true, "queue" => false, _ => return Err("--game-pacing jit|queue".into()) },
-            "--frame-gen-predict" => a.fg_predict = parse_on_off("--frame-gen-predict", &v()?)?,
             "--frame-gen-auto" => a.fg_auto = parse_on_off("--frame-gen-auto", &v()?)?,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
@@ -400,9 +395,6 @@ fn parse_args() -> Result<Args, String> {
     }
     if let Ok(v) = std::env::var("VISIONALVR_GAME_PACING") {
         a.game_pacing_jit = !v.eq_ignore_ascii_case("queue");
-    }
-    if let Ok(v) = std::env::var("VISIONALVR_FG_PREDICT_SAMPLE") {
-        a.fg_predict = v == "1";
     }
     if let Ok(v) = std::env::var("VISIONALVR_FG_AUTO") {
         a.fg_auto = v == "1";
@@ -520,11 +512,6 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if std::env::var("VISIONALVR_GAME_PACING").is_err() {
         if let Some(v) = st.game_pacing.as_deref() {
             a.game_pacing_jit = !v.eq_ignore_ascii_case("queue");
-        }
-    }
-    if std::env::var("VISIONALVR_FG_PREDICT_SAMPLE").is_err() {
-        if let Some(v) = st.frame_gen_predict_sample {
-            a.fg_predict = v;
         }
     }
     if std::env::var("VISIONALVR_FG_AUTO").is_err() {
@@ -653,6 +640,8 @@ static SEND_PHASE_MS: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::ne
 static HOLD_MS: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
 /// spacing of the headset's tracking packets arriving at the host
 static TRACKING_GAP_MS: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
+/// the last statistics window's tracking spacing (p95 ms, max ms, gaps over 15 ms, gaps) for the frame generation perf line
+static TRACKING_GAP_LAST: Mutex<(f64, f64, u64, u64)> = Mutex::new((0.0, 0.0, 0, 0));
 static LAST_TRACKING_NS: AtomicU64 = AtomicU64::new(0);
 
 fn push_bounded(m: &std::sync::Mutex<Vec<f64>>, v: f64) {
@@ -734,7 +723,9 @@ impl StatsWindow {
         if let Ok(mut g) = TRACKING_GAP_MS.lock() {
             if !g.is_empty() {
                 let mut v = std::mem::take(&mut *g);
-                e["tracking_gap_ms"] = pct_json(&mut v, &[("over_12ms", 12.0), ("over_15ms", 15.0)]);
+                let j = pct_json(&mut v, &[("over_12ms", 12.0), ("over_15ms", 15.0)]);
+                *TRACKING_GAP_LAST.lock() = (j["p95"].as_f64().unwrap_or(0.0), j["max"].as_f64().unwrap_or(0.0), j["over_15ms"].as_u64().unwrap_or(0), j["n"].as_u64().unwrap_or(0));
+                e["tracking_gap_ms"] = j;
             }
         }
         if let Ok(mut g) = SEND_PHASE_MS.lock() {
@@ -1394,12 +1385,12 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
     let rate = args.fg_rate.unwrap_or(FgRate::Half).name();
     let cap = args.fg_cap_fps.unwrap_or(0.0);
     let lag = args.fg_lag_ms.unwrap_or(0.0);
-    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms, predicted sample {}, game pacing {}, auto rate {}",
+    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms, game pacing {}, auto rate {}",
         if fg_active { "ON" } else { "off" }, if args.game_motion_vectors { "on" } else { "off" }, if cap > 0.0 { format!("{cap:.0}") } else { "none".into() },
-        if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }, if args.fg_predict { "on" } else { "off" }, if args.game_pacing_jit { "jit" } else { "queue" },
+        if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }, if args.game_pacing_jit { "jit" } else { "queue" },
         if args.fg_auto { "on" } else { "off" }));
     event(origin, "frame_gen_config", json!({ "why": why, "on": fg_active, "rate": rate, "game_motion_vectors": args.game_motion_vectors,
-        "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf, "predict_sample": args.fg_predict,
+        "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf,
         "game_pacing": if args.game_pacing_jit { "jit" } else { "queue" }, "auto_rate": args.fg_auto }));
 }
 
@@ -1911,7 +1902,6 @@ fn main() {
             p.set_frame_gen(fg_active);
         }
         p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half), args.fg_lag_ms.unwrap_or(0.0));
-        p.set_fg_predict(args.fg_predict);
         apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
         unsafe { nvh::nvh_ipc_set_game_mv(ipc, if args.game_motion_vectors { 1 } else { 0 }) };
         unsafe { nvh::nvh_ipc_set_app_pacing(ipc, args.game_pacing_jit as u32) };
@@ -2269,7 +2259,17 @@ fn main() {
         start: Instant,
         frames0: usize,
         submitted0: u32,
+        /// frame generation counters at the start: boundaries skipped for want of a tracking sample, outputs (synthetic + rendered)
+        skips0: u64,
+        outputs0: u64,
     }
+    // (boundaries skipped for want of a tracking sample, outputs) so far, for the game summaries
+    let fg_counts = |p: &Option<Arc<pipeline::Pipeline>>| p.as_ref().map(|p| (p.fg_no_sample.load(Ordering::Relaxed), p.fg_synths.load(Ordering::Relaxed) + p.fg_reals.load(Ordering::Relaxed))).unwrap_or((0, 0));
+    let skipped_text = |g: &GameRun, p: &Option<Arc<pipeline::Pipeline>>| {
+        let (s, o) = fg_counts(p);
+        let (s, o) = (s.wrapping_sub(g.skips0), o.wrapping_sub(g.outputs0));
+        if s + o > 0 { format!(", {s} boundaries skipped for want of a tracking sample ({:.1} %)", 100.0 * s as f64 / (s + o) as f64) } else { String::new() }
+    };
     let mut game: Option<GameRun> = None;
     let mut auto_rate = AutoRate::new();
     let mut game_cost_p95 = 0f32;   // the newest frame cost p95 seen for the running game (games.json at game end)
@@ -2285,7 +2285,9 @@ fn main() {
     };
     let mut status_at = Instant::now();
     let mut motion_tap_seen = (0u32, 0u32);
-    let (mut perf_rel, mut perf_late) = (0u64, 0u64);   // shim release counters at the last fg_perf line   // (tap state, streams) last reported: the shim's DLSS motion-vector tap (docs/MOTION_VECTORS.md)
+    let (mut perf_rel, mut perf_late) = (0u64, 0u64);   // shim release counters at the last fg_perf line
+    let mut perf_fg = [0u64; 6];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand
+    // (tap state, streams) last reported: the shim's DLSS motion-vector tap (docs/MOTION_VECTORS.md)
     struct BenchState {
         i: usize,
         start: Instant,
@@ -2377,14 +2379,6 @@ fn main() {
                 auto_rate.reset(auto_rate.up_dwell_s);
                 log_fg_config(origin, &args, fg_active, "frame_gen_auto");
             }
-            let pr = vision::FG_PREDICT_REQ.swap(-1, Ordering::SeqCst);
-            if pr >= 0 {
-                args.fg_predict = pr == 1;
-                if let Some(p) = pipeline.as_ref() {
-                    p.set_fg_predict(args.fg_predict);
-                }
-                log_fg_config(origin, &args, fg_active, "frame_gen_predict");
-            }
             let gp = vision::GAME_PACING_REQ.swap(-1, Ordering::SeqCst);
             if gp >= 0 {
                 args.game_pacing_jit = gp == 1;
@@ -2441,15 +2435,16 @@ fn main() {
                         }
                     }
                 }
-                game = Some(GameRun { exe, start: Instant::now(), frames0: shared.frames_sent.load(Ordering::Relaxed), submitted0: shim_submitted(ipc) });
+                let (skips0, outputs0) = fg_counts(&pipeline);
+                game = Some(GameRun { exe, start: Instant::now(), frames0: shared.frames_sent.load(Ordering::Relaxed), submitted0: shim_submitted(ipc), skips0, outputs0 });
             } else if !alive && game.is_some() {
                 let g = game.take().unwrap();
                 let secs = g.start.elapsed().as_secs_f64();
                 let frames = shared.frames_sent.load(Ordering::Relaxed) - g.frames0;
                 let submitted = shim_submitted(ipc).wrapping_sub(g.submitted0);
                 logs::general("INFO", &format!(
-                    "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps)",
-                    g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3)));
+                    "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps){}",
+                    g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline)));
                 event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames }));
                 if fg_active && secs > 20.0 {
                     let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
@@ -2542,7 +2537,21 @@ fn main() {
                         args.fg_rate.unwrap_or(FgRate::Half).name(), budget - c95 as f64, if args.fg_auto { " (auto)" } else { "" }));
                     logs::general("INFO", &format!("frame generation perf: app {:.1} fps (envelope {app_ms:.1} ms, {d_late}/{d_rel} releases late), stream {:.1} fps, game period {:.1} ms (p50 {:.1} p95 {:.1} max {:.1}), lag {:.1} ms (slack p5 {:.1} p50 {:.1}), mean t {:.2} mean age {:.2}, behind {} ahead {}, gpu [{gpu}]",
                         rendered as f64 / secs, streamed as f64 / secs, u.game_period_ms, u.interval_p50, u.interval_p95, u.interval_max, u.lag_ms, u.slack_p5, u.slack_p50, u.mean_t, u.mean_age, u.behind, u.ahead));
+                    // the tracking samples the outputs are stamped with: skipped boundaries (none newer than the last sent frame), waits for one,
+                    // stamps that left one in hand, and the spacing of the headset's samples at the host (the cause of the misses, 2026-10-16)
+                    let now_fg = [p.fg_synths.load(Ordering::Relaxed), p.fg_reals.load(Ordering::Relaxed), p.fg_no_sample.load(Ordering::Relaxed),
+                        p.fg_sample_waits.load(Ordering::Relaxed), p.fg_sample_wait_us.load(Ordering::Relaxed), p.fg_in_hand.load(Ordering::Relaxed)];
+                    let d: Vec<u64> = now_fg.iter().zip(perf_fg.iter()).map(|(a, b)| a.wrapping_sub(*b)).collect();
+                    perf_fg = now_fg;
+                    let outputs = d[0] + d[1];
+                    let (gap_p95, gap_max, gap_over15, gap_n) = *TRACKING_GAP_LAST.lock();
+                    if outputs + d[2] > 0 {
+                        logs::general("INFO", &format!("frame generation samples: {} outputs, {} boundaries skipped for want of a tracking sample ({:.1} %), {} waited for one (mean {:.1} ms), {} stamped with one in hand; tracking spacing p95 {gap_p95:.1} ms max {gap_max:.1} ({gap_over15}/{gap_n} gaps over 15 ms)",
+                            outputs, d[2], 100.0 * d[2] as f64 / (outputs + d[2]) as f64, d[3], if d[3] > 0 { d[4] as f64 / 1000.0 / d[3] as f64 } else { 0.0 }, d[5]));
+                    }
                     event(origin, "fg_perf", json!({ "app_fps": rendered as f64 / secs, "stream_fps": streamed as f64 / secs, "app_envelope_ms": app_ms,
+                        "outputs": outputs, "no_sample": d[2], "sample_waits": d[3], "sample_wait_ms_sum": d[4] as f64 / 1000.0, "in_hand": d[5],
+                        "tracking_gap_p95_ms": gap_p95, "tracking_gap_max_ms": gap_max, "tracking_gaps_over_15ms": gap_over15, "tracking_gaps": gap_n,
                         "releases": d_rel, "releases_late": d_late, "slot_waits": waits, "game_period_ms": u.game_period_ms, "lag_ms": u.lag_ms, "mean_t": u.mean_t,
                         "unc_synths": u.synths, "mean_age": u.mean_age, "behind": u.behind, "ahead": u.ahead, "arrivals": u.arrivals, "slack_ms_p5": u.slack_p5, "slack_ms_p50": u.slack_p50,
                         "interval_ms_p50": u.interval_p50, "interval_ms_p95": u.interval_p95, "interval_ms_max": u.interval_max, "gpu_csv": gpu,
@@ -2854,8 +2863,8 @@ fn main() {
         let frames = shared.frames_sent.load(Ordering::Relaxed) - g.frames0;
         let submitted = shim_submitted(ipc).wrapping_sub(g.submitted0);
         logs::general("INFO", &format!(
-            "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps) (streamer stopping)",
-            g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3)));
+            "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps){} (streamer stopping)",
+            g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline)));
         event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames, "host_stopping": true }));
     }
     let frames = shared.frames_sent.load(Ordering::Relaxed);

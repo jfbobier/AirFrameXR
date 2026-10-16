@@ -72,8 +72,6 @@ pub struct Settings {
     pub gpu_sched_class: Option<i64>,
     /// "jit" (default) | "queue": the shim's release pacing of the game (ipc appPacingJit; docs/PERFORMANCE_FINDINGS.md)
     pub game_pacing: Option<String>,
-    /// frame generation: stamp a boundary without a fresh tracking sample with a predicted one (default off; docs/PERFORMANCE_FINDINGS.md item 4)
-    pub frame_gen_predict_sample: Option<bool>,
     /// frame generation: the automatic rate (1/3 <-> 1/2 <-> 2/3 from the game's measured frame cost and repeats; default off)
     pub frame_gen_auto: Option<bool>,
     pub debug: Option<bool>,
@@ -127,7 +125,6 @@ pub fn load_settings(path: &Path) -> Settings {
         frame_gen_cap_fps: video["frame_gen_cap_fps"].as_f64(),
         gpu_sched_class: video["gpu_sched_class"].as_i64(),
         game_pacing: video["game_pacing"].as_str().map(str::to_string),
-        frame_gen_predict_sample: video["frame_gen_predict_sample"].as_bool(),
         frame_gen_auto: video["frame_gen_auto"].as_bool(),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
@@ -220,8 +217,6 @@ pub static GAME_MV_REQ: AtomicI32 = AtomicI32::new(-1);
 pub static FG_CAP_REQ: AtomicI32 = AtomicI32::new(-1);
 /// uncapped mode content lag in tenths of ms (-1 none, 0 = automatic)
 pub static FG_LAG_REQ: AtomicI32 = AtomicI32::new(-1);
-/// predicted tracking sample on a miss (-1 none, 0 off, 1 on)
-pub static FG_PREDICT_REQ: AtomicI32 = AtomicI32::new(-1);
 /// the shim's game release pacing (-1 none, 0 queue, 1 just in time)
 pub static GAME_PACING_REQ: AtomicI32 = AtomicI32::new(-1);
 /// automatic frame-generation rate (-1 none, 0 off, 1 on)
@@ -231,7 +226,7 @@ pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), At
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`, `game_mv on|off`,
-/// `frame_gen_cap <fps>` (0 = none), `frame_gen_lag <ms>` (0 = automatic), `frame_gen_predict on|off`, `game_pacing jit|queue`, `frame_gen_auto on|off`,
+/// `frame_gen_cap <fps>` (0 = none), `frame_gen_lag <ms>` (0 = automatic), `game_pacing jit|queue`, `frame_gen_auto on|off`,
 /// `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
@@ -256,7 +251,6 @@ pub fn spawn_stdin_control() {
                     }
                 }
                 (Some("game_mv"), Some(v)) => GAME_MV_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
-                (Some("frame_gen_predict"), Some(v)) => FG_PREDICT_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("game_pacing"), Some(v)) => GAME_PACING_REQ.store((v == "jit" || v == "1") as i32, Ordering::SeqCst),
                 (Some("frame_gen_auto"), Some(v)) => FG_AUTO_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("frame_gen_cap"), Some(v)) => {

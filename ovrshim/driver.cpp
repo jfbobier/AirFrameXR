@@ -956,6 +956,15 @@ namespace {
                 }
                 lock.lock();
                 m_lastReleaseS = QpcSeconds();
+                {
+                    // the release that starts the frame composed next (a pipelined engine submits frame N after frame N+1's release: the
+                    // frame cost read m_lastReleaseS at compose and measured the wrong release, 2 ms "frames" at 1/3, 2026-10-16)
+                    std::lock_guard rq(m_releaseQueueMutex);
+                    m_releaseQueue.push_back(m_lastReleaseS.load());
+                    while (m_releaseQueue.size() > 4) {
+                        m_releaseQueue.pop_front();
+                    }
+                }
                 m_lastWaitedFrame = std::max(m_lastWaitedFrame, frameIndex);
 
                 TraceLoggingWriteStop(wait,
@@ -1521,14 +1530,15 @@ namespace {
                         WaitGpuIdleSpin();
                         SetEvent(m_gpuDone[slot]);
                     }
-                    PendingFrame pf{slot, clientTs, composeStart, m_lastReleaseS.load(), trace};
+                    const double releaseS = TakeFrameRelease();
+                    PendingFrame pf{slot, clientTs, composeStart, releaseS, trace};
                     FrameRenderOrientation(layers, pf.renderQ, pf.hasProjection);
                     pf.motion = motion;
                     pf.displayS = displayS;
                     pf.tapSeq = m_ngx.HarvestSeq();
                     {
                         // the app's CPU time for this frame (release -> submit), envelope with a fast attack and a slow decay (0.1 ms per frame)
-                        const double cpu = composeStart - m_lastReleaseS.load();
+                        const double cpu = composeStart - releaseS;
                         if (cpu > 0 && cpu < 0.1) {
                             const double est = std::max(cpu, m_cpuTimeS.load() - 0.0001);
                             m_cpuTimeS = std::min(std::max(est, 0.0005), 0.05);
@@ -1543,7 +1553,7 @@ namespace {
                     float renderQ[2][4];
                     bool hasProjection = false;
                     FrameRenderOrientation(layers, renderQ, hasProjection);
-                    PublishFrame(slot, clientTs, composeStart, m_lastReleaseS.load(), trace, renderQ, hasProjection, motion, displayS);
+                    PublishFrame(slot, clientTs, composeStart, TakeFrameRelease(), trace, renderQ, hasProjection, motion, displayS);
                 }
             }
 
@@ -2602,6 +2612,19 @@ namespace {
         uint64_t m_framesSubmitted{0}; // frames composed (picks the ring slot)
         // Running start (see WaitForVsync): the app is released appTime + margin before the host's next compositor boundary.
         std::atomic<double> m_lastReleaseS{0.0};   // shim clock when WaitForVsync last released the app
+        // the releases not yet matched to a composed frame, oldest first (frames are composed in release order): the frame's own release
+        // for its cost (release -> GPU done) and CPU time, right for a pipelined engine too
+        std::mutex m_releaseQueueMutex;
+        std::deque<double> m_releaseQueue;
+        double TakeFrameRelease() {
+            std::lock_guard rq(m_releaseQueueMutex);
+            if (m_releaseQueue.empty()) {
+                return m_lastReleaseS.load();
+            }
+            const double r = m_releaseQueue.front();
+            m_releaseQueue.pop_front();
+            return r;
+        }
         // just-in-time release (ipc appPacingJit): envelope of the app's CPU time (release -> submit), EMA of its GPU time per frame (from the
         // GPU-done events, saturated GPU), the last GPU completion, and the holds applied
         std::atomic<double> m_cpuTimeS{0.0}, m_gpuDurS{0.0}, m_lastGpuDoneS{0.0};

@@ -199,7 +199,8 @@ impl FgRate {
 /// anything is due waits in the intake (`on_boundary` does not pick it): B goes out, then S(B, C, 1/m)..., then C, so the schedule never
 /// shifts. A boundary with nothing due first waits briefly for the expected rendered frame (`fg_wait_arrival`) and otherwise re-sends B
 /// rotated to the new head sample (the headset would repeat it anyway; the rotation keeps head turns smooth). Every output is stamped with
-/// the newest tracking sample newer than the last sent frame and rotated to it; with no such sample the boundary is skipped (`fg_no_sample`).
+/// a tracking sample newer than the last sent frame (`fg_pick_sample_now`: one kept in hand) and rotated to it; with no such sample the
+/// boundary is skipped and what it owed stays owed (`fg_no_sample`).
 struct FgState {
     on: bool,
     rate: FgRate,
@@ -379,9 +380,8 @@ pub struct Pipeline {
     pub fg_holds: AtomicU64,
     /// boundaries skipped because no tracking sample newer than the last sent frame had arrived
     pub fg_no_sample: AtomicU64,
-    /// boundaries stamped with a tracking sample predicted one period past the newest one (no fresh sample arrived in time; see `fg_pick_sample`)
-    pub fg_predicted: AtomicU64,
-    fg_predict: AtomicBool,
+    /// stamps that took the older of two waiting samples and left the newest in hand for the next boundary (see `fg_pick_sample_now`)
+    pub fg_in_hand: AtomicU64,
     /// rendered frames never shown: still due when the next one was encoded (an encoder overrun; `on_boundary` otherwise keeps the arrival
     /// waiting): the boundary gets the synthetic frame between the two newest instead, so the motion never stalls
     pub fg_dropped: AtomicU64,
@@ -486,8 +486,7 @@ impl Pipeline {
             fg_repeats: AtomicU64::new(0),
             fg_holds: AtomicU64::new(0),
             fg_no_sample: AtomicU64::new(0),
-            fg_predicted: AtomicU64::new(0),
-            fg_predict: AtomicBool::new(false),   // set_fg_predict (settings video.frame_gen_predict_sample, live command frame_gen_predict)
+            fg_in_hand: AtomicU64::new(0),
             fg_dropped: AtomicU64::new(0),
             fg_pairs_skipped: AtomicU64::new(0),
             fg_real_due: AtomicBool::new(false),
@@ -519,11 +518,6 @@ impl Pipeline {
         if !on {
             self.fg_have_frame.store(false, Ordering::Relaxed);
         }
-    }
-
-    /// Predicted tracking sample on a miss (see `fg_predict_sample`): off = the drop rule. Live.
-    pub fn set_fg_predict(&self, on: bool) {
-        self.fg_predict.store(on, Ordering::Relaxed);
     }
 
     /// Frame generation rate (`FgRate`): the fixed patterns (third, half) or the content-clock planner (two thirds, uncapped).
@@ -638,15 +632,33 @@ impl Pipeline {
         Plan::Fg { mode: 1, t, age, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Synth }
     }
 
-    /// the newest tracking sample newer than the last sent frame: the stamp (and the rotation target) of a generated frame
+    /// The tracking sample an output is stamped with (and rotated to): a sample newer than the last sent frame, and when two or more are
+    /// waiting, the older of the two newest, so that one stays in hand for the next boundary. The Vision Pro sends one sample per display
+    /// period and Wi-Fi delivers them bunched (a quarter of the gaps over 15 ms, no game running, 2026-10-16): a boundary that takes the
+    /// newest sample the moment it lands leaves nothing for the next boundary, which then waits for a sample that is late by more than the
+    /// wait on 7-14 % of the boundaries (the skipped boundaries of that night, each a frozen frame on the headset). One sample in hand
+    /// tolerates a full period of lateness and stamps every output with a sample of the same age (an age that alternates is what the
+    /// headset shows as tremble). A tracker faster than the display (Quest, 270 Hz) has several unused samples per boundary spaced well
+    /// under a period: there the newest is used, as before. `fg_in_hand` counts the stamps that left a sample behind.
     fn fg_pick_sample_now(&self) -> Option<(Duration, [f32; 4])> {
         let last = *self.last_sent_ts.lock();
         let ring = self.shared.recent_samples.lock();
-        ring.back().filter(|(t, _)| *t > last).copied()
+        let n = ring.len();
+        let first_unused = ring.iter().position(|(t, _)| *t > last)?;
+        if n - first_unused >= 2 {
+            let (t1, _) = ring[n - 1];
+            let (t2, q2) = ring[n - 2];
+            // two samples at the display cadence (at least half a period apart): a bunch; the newest is kept for the next boundary
+            if t1.saturating_sub(t2) >= self.period() / 2 {
+                self.fg_in_hand.fetch_add(1, Ordering::Relaxed);
+                return Some((t2, q2));
+            }
+        }
+        ring.back().copied()
     }
 
-    /// Like `fg_pick_sample_now`, waiting up to VISIONALVR_FG_SAMPLE_WAIT_MS (3) for one to arrive: the headset's samples arrive once per
-    /// period with Wi-Fi jitter, and a boundary that finds none would otherwise send nothing (a repeat on the headset).
+    /// Like `fg_pick_sample_now`, waiting up to VISIONALVR_FG_SAMPLE_WAIT_MS (3) for one to arrive: with one sample in hand the wait is
+    /// rare (a sample later than a whole period); a boundary that finds none sends nothing (a repeat on the headset).
     fn fg_pick_sample(&self) -> Option<(Duration, [f32; 4])> {
         if let Some(s) = self.fg_pick_sample_now() {
             return Some(s);
@@ -670,70 +682,7 @@ impl Pipeline {
             }
         }
         self.fg_sample_wait_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
-        self.fg_predict_sample()
-    }
-
-    /// No sample newer than the last sent frame arrived in time (the headset's samples land at a phase of our boundaries that the wait does
-    /// not cover: 1-2 % of boundaries on the headset, up to 13 % in the lab): the pose one display period past the last sent timestamp,
-    /// extrapolated from the two newest samples (the rotation between them scaled to the gap), with that timestamp. The headset resolves a
-    /// pose for any timestamp on the Vision Pro (device anchor query), and a predicted pose is consistent with its timestamp, unlike a
-    /// stale pose relabelled (the 2026-10-13 tremble). Opt-in with VISIONALVR_FG_PREDICT_SAMPLE=1: the lab's viewer matches poses by exact
-    /// timestamp (it reported one period of head motion as error under a turn), and the Quest client's lookup is unverified.
-    fn fg_predict_sample(&self) -> Option<(Duration, [f32; 4])> {
-        if !self.fg_predict.load(Ordering::Relaxed) {
-            return None;
-        }
-        let ring = self.shared.recent_samples.lock();
-        let n = ring.len();
-        if n < 2 {
-            return None;
-        }
-        let (t2, q2) = ring[n - 1];
-        // the angular velocity over a baseline of about four periods, not the two adjacent samples: with adjacent samples the extrapolation
-        // scales the samples' noise by one to four and the head path trembled in the lab (hf 0.015 -> 0.09 deg turning, 0.05 still)
-        let period = self.period();
-        let mut j = n - 2;
-        while j > 0 && t2.saturating_sub(ring[j].0) < period * 4 {
-            j -= 1;
-        }
-        let (t1, q1) = ring[j];
-        let last = *self.last_sent_ts.lock();
-        if t2 <= t1 || t2 > last || last.saturating_sub(t2) > period * 2 || t2 - t1 > period * 12 || t2 - t1 < period / 2 {
-            return None;
-        }
-        let ts = last + period;
-        let k = (ts - t2).as_secs_f64() / (t2 - t1).as_secs_f64();
-        if !(k > 0.0 && k <= 2.0) {
-            return None;
-        }
-        // delta = q2 * conj(q1): the rotation from sample 1 to sample 2; scaled by k and applied to q2
-        let conj = |q: [f32; 4]| [-q[0], -q[1], -q[2], q[3]];
-        let mul = |a: [f32; 4], b: [f32; 4]| [
-            a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
-            a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
-            a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
-            a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
-        ];
-        let mut d = mul(q2, conj(q1));
-        if d[3] < 0.0 {
-            for v in d.iter_mut() { *v = -*v; }
-        }
-        let sin_half = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-        let scaled = if sin_half < 1e-6 {
-            [0.0, 0.0, 0.0, 1.0]
-        } else {
-            // the extrapolated rotation, at most 2 degrees (about 170 deg/s over a period: beyond that the samples are not a turn)
-            let half = ((sin_half.min(1.0) as f64).atan2(d[3].max(-1.0).min(1.0) as f64) as f32 * k as f32).min(1.0f32.to_radians());
-            let s = half.sin() / sin_half;
-            [d[0] * s, d[1] * s, d[2] * s, half.cos()]
-        };
-        let mut q = mul(scaled, q2);
-        let norm = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
-        if norm > 0.0 {
-            for v in q.iter_mut() { *v /= norm; }
-        }
-        self.fg_predicted.fetch_add(1, Ordering::Relaxed);
-        Some((ts, q))
+        None
     }
 
     /// A rendered frame arrived (frame generation on): what this boundary encodes. Releases the slot.
@@ -830,13 +779,10 @@ impl Pipeline {
                 }
             }
             None => {
-                // no fresh tracking sample: the synthetic output of this boundary is dropped, not delayed (see `fg_plan_hold`)
-                if r == 1 {
-                    pattern.pop_front();
-                    st.due = pattern;
-                } else {
-                    st.due = VecDeque::from(vec![1.0]);
-                }
+                // no fresh tracking sample: nothing can be stamped, the whole pattern stays owed and starts at the next boundary (the
+                // headset repeats once). It was dropped instead on 2026-10-16 (lab, 1/3) and every miss on the headset became a frozen
+                // frame followed by a double step; the headset's good night (2026-10-15/16) ran this rule.
+                st.due = if r == 1 { pattern } else { VecDeque::from(vec![1.0]) };
                 self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
                 Plan::Skip
             }
@@ -894,13 +840,8 @@ impl Pipeline {
             return self.fg_plan_uncapped(&mut *st);
         }
         let Some((sts, q)) = self.fg_pick_sample() else {
+            // no fresh sample: the output stays owed (the pattern slides one boundary; with one sample in hand this is rare)
             self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
-            // A synthetic output with no fresh sample is dropped rather than delayed: delaying it pushed the whole pattern back a boundary,
-            // the rendered frame went out late and the next arrival queued behind it until a newer one superseded it (lab, 1/3 rate,
-            // 2026-10-16: 7 % of the game's frames lost, content jumps). The rendered frame itself stays due.
-            if st.due.front().map_or(false, |&t| t < 1.0) {
-                st.due.pop_front();
-            }
             return Plan::Skip;
         };
         let (counter, submit_s, arrival) = (st.last_counter, st.last_submit_s, st.last_arrival);
@@ -1487,7 +1428,7 @@ impl Pipeline {
             "gpu_scheduling": self.gpu_sched.lock().map(|(c, st)| json!({ "class": c, "status": st })),
             "frame_gen": {
                 "on": self.fg_on.load(Ordering::Relaxed), "synths": self.fg_synths.load(Ordering::Relaxed), "reals": self.fg_reals.load(Ordering::Relaxed),
-                "repeats": self.fg_repeats.load(Ordering::Relaxed), "holds": self.fg_holds.load(Ordering::Relaxed), "no_sample": self.fg_no_sample.load(Ordering::Relaxed), "predicted_samples": self.fg_predicted.load(Ordering::Relaxed),
+                "repeats": self.fg_repeats.load(Ordering::Relaxed), "holds": self.fg_holds.load(Ordering::Relaxed), "no_sample": self.fg_no_sample.load(Ordering::Relaxed), "in_hand": self.fg_in_hand.load(Ordering::Relaxed),
                 "dropped": self.fg_dropped.load(Ordering::Relaxed), "pairs_skipped": self.fg_pairs_skipped.load(Ordering::Relaxed), "errors": self.fg_errors.load(Ordering::Relaxed),
                 "passthrough": self.fg.try_lock().map(|s| s.passthrough).unwrap_or(0),
                 "uncapped": self.fg_uncapped.load(Ordering::Relaxed),
