@@ -130,8 +130,18 @@ random per run). Bandwidth is not the lever, serialization and queue depth are.
    rule (main) stays the default behaviour. The alternative, sliding the host grid to the sample phase, conflicts with the existing phase
    lock to the headset's display ticks and was not built.
 
-Lab A/Bs: `stutter_unc_queue` against `stutter_unc` (frames in flight: inconclusive, the probe's GPU load blocks its render thread so the
-shim sees it as CPU time and never holds; item 1 is headset-verified only), `third_mv_nopredict` against `third_mv`; the full scenario suite
-is the regression gate (2026-10-16: every verdict equal or better than before with items 1-3 in, flow skipped on 100 % of vector outputs). Headset check: the shim pacing line's holds and `app cpu` / `gpu` numbers, the
+Lab A/Bs. Item 1 needs a GPU-bound app: the `fps:lo:hi` scenarios are a CPU busy-wait (a CPU-bound game, where the rule correctly holds
+nothing), so `gpu_unc` / `gpu_unc_queue` / `gpu` / `gpu_queue` drive the probe with 2 ms of CPU and 50 x 128 MB GPU copies per frame
+(3080 Ti: 13 ms of GPU, 72-78 fps, GPU 91-96 %). Measured per frame from the shim's own release and publish times:
+
+| pacing | release -> GPU done (p50 / p95) | frames in flight at the host (p50) | content lag | app fps | holds |
+|---|---|---|---|---|---|
+| queue throttle | 28.0 / 34.3 ms = 2.0 game periods | 34.1 ms | 58.5 ms | 72 | none |
+| just in time | 16.2 / 21.4 ms = 1.2 game periods | 22.6 ms | 45.8 ms | 71 | 4497 of 4673 releases, 12 ms each |
+
+Same frame rate, one game period less in the queue, 12-13 ms less content lag at 13 ms frames (it scales with the frame time: Carma's
+25 ms frames would give back about 25 ms). Generation off, the same app: 25.0 ms (queue) against the just-in-time figure in the run log.
+`third_mv_nopredict` against `third_mv` for item 4. The full scenario suite is the regression gate (2026-10-16: every verdict equal or
+better than before with items 1-3 in, flow skipped on 100 % of vector outputs). Headset check: the shim pacing line's holds and `app cpu` / `gpu` numbers, the
 `frame generation perf` line's in-flight proxy, and the feel against the 2026-10-15/16 recordings.
 
