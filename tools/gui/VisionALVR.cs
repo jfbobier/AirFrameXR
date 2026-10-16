@@ -44,6 +44,8 @@ namespace VisionALVR
         readonly CheckBox fgMv = new CheckBox { Text = "DLSS motion vectors", AutoSize = true, Margin = new Padding(14, 3, 0, 0) };
         readonly CheckBox fgPredict = new CheckBox { Text = "Predicted sample", AutoSize = true, Margin = new Padding(10, 3, 0, 0) };
         readonly CheckBox gamePacing = new CheckBox { Text = "Just-in-time pacing", AutoSize = true, Margin = new Padding(10, 3, 0, 0) };
+        readonly CheckBox fgAuto = new CheckBox { Text = "Auto", AutoSize = true, Margin = new Padding(8, 3, 0, 0) };
+        bool fgRateFromHost;   // the slider follows the host's rate in auto mode: no command back
         readonly Label footer = Ui.Line("", new Font("Segoe UI", 8.5f));
         string pairedName = "", pairedIp = "";
         bool closing;
@@ -126,6 +128,7 @@ namespace VisionALVR
             fgOpts.Controls.Add(new Label { Text = "1/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(0, 6, 2, 0) });
             fgOpts.Controls.Add(fgRate);
             fgOpts.Controls.Add(new Label { Text = "2/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(2, 6, 0, 0) });
+            fgOpts.Controls.Add(fgAuto);
             fgOpts.Controls.Add(fgMv);
             fgOpts.Controls.Add(fgPredict);
             fgOpts.Controls.Add(gamePacing);
@@ -136,6 +139,7 @@ namespace VisionALVR
             lt.Controls.Add(fgRateText);
             lt.SetColumnSpan(fgRateText, 6);
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
+            tips.SetToolTip(fgAuto, "The streamer picks the rate from the game's measured frame cost and repeats (down fast, up slowly), remembers it per game; the slider follows.");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the VisionALVR-OptiScaler DLL is in the game folder (else optical flow).");
             tips.SetToolTip(fgPredict, "A frame boundary with no fresh tracking sample is stamped with a predicted pose instead of being skipped (test: off by default).");
             tips.SetToolTip(gamePacing, "The game's next frame starts when its frame on the GPU is about to finish (one frame in flight); off = the queue throttle (two).");
@@ -165,7 +169,7 @@ namespace VisionALVR
                 settings.Save();
             };
             frameGen.Checked = settings.FrameGen;
-            Action fgEnable = () => { fgRate.Enabled = fgMv.Enabled = fgPredict.Enabled = frameGen.Checked; };
+            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !fgAuto.Checked; fgAuto.Enabled = fgMv.Enabled = fgPredict.Enabled = frameGen.Checked; };
             frameGen.CheckedChanged += (s, e) =>
             {
                 host.Send("frame_gen " + (frameGen.Checked ? "on" : "off"));   // the running streamer switches at the next boundary; the setting is read at start too
@@ -179,6 +183,7 @@ namespace VisionALVR
             fgRate.Value = savedRate >= 0 ? savedRate : (settings.FrameGenRate == "uncapped" ? 2 : 1);
             fgRateText.Text = settings.FrameGenRate == "uncapped" ? "uncapped (config): the game runs free, every frame sent is interpolated" : FgRateText[fgRate.Value];
             fgMv.Checked = settings.GameMotionVectors;
+            fgAuto.Checked = settings.FrameGenAuto;
             fgPredict.Checked = settings.FrameGenPredictSample;
             gamePacing.Checked = settings.GamePacingJit;
             fgEnable();
@@ -186,7 +191,7 @@ namespace VisionALVR
             {
                 var rate = FgRates[fgRate.Value];
                 fgRateText.Text = FgRateText[fgRate.Value];
-                if (rate == settings.FrameGenRate) return;
+                if (fgRateFromHost || rate == settings.FrameGenRate) return;
                 host.Send("frame_gen_rate " + rate);
                 settings.FrameGenRate = rate;
                 settings.Save();
@@ -198,6 +203,14 @@ namespace VisionALVR
                 settings.GameMotionVectors = fgMv.Checked;
                 settings.Save();
                 Log.Write("INFO", "game motion vectors " + (fgMv.Checked ? "on" : "off"));
+            };
+            fgAuto.CheckedChanged += (s, e) =>
+            {
+                host.Send("frame_gen_auto " + (fgAuto.Checked ? "on" : "off"));
+                settings.FrameGenAuto = fgAuto.Checked;
+                settings.Save();
+                fgEnable();
+                Log.Write("INFO", "frame generation auto rate " + (fgAuto.Checked ? "on" : "off"));
             };
             fgPredict.CheckedChanged += (s, e) =>
             {
@@ -404,6 +417,24 @@ namespace VisionALVR
                     break;
                 case "status":
                     var c = d != null && d.TryGetValue("client", out var cc) ? cc as Dictionary<string, object> : null;
+                    if (d != null && d.ContainsKey("fg_rate") && S(d, "fg_on") == "True")
+                    {
+                        // the rate in force (the host moves it in auto mode) and the headroom readout: frame cost against the rate's budget
+                        var rateName = S(d, "fg_rate");
+                        var pos = Array.IndexOf(FgRates, rateName);
+                        if (pos >= 0 && fgRate.Value != pos) { fgRateFromHost = true; fgRate.Value = pos; fgRateFromHost = false; }
+                        double cost = D(d, "frame_cost_p95_ms"), budget = D(d, "budget_ms");
+                        if (cost > 0 && budget > 0)
+                        {
+                            string[] names = { "1/3", "1/2", "2/3" };
+                            var label = pos >= 0 ? names[pos] : rateName;
+                            var fit = "";
+                            if (pos == 0 && cost < 0.8 * budget * 2 / 3) fit = "; 1/2 would fit";
+                            else if (pos == 1 && cost < 0.75 * budget * 0.75) fit = "; 2/3 would fit";
+                            else if (cost > budget) fit = "; over budget (repeats)";
+                            fgRateText.Text = $"{(S(d, "fg_auto") == "True" ? "Auto: " : "")}{label} in force; game frame {cost:0.0} ms (p95) of a {budget:0.0} ms budget, headroom {budget - cost:0.0} ms{fit}";
+                        }
+                    }
                     stats.Text =
                         $"Game fps {F(D(d, "app_fps"), "0.0"),6}    streamed fps {F(D(d, "stream_fps"), "0.0"),6}    headset shows {F(double.IsNaN(D(c, "displayed_fps")) ? D(c, "client_fps") : D(c, "displayed_fps"), "0.0"),6} fps\n" +
                         $"Bitrate  {F(D(d, "mbps"), "0"),5} Mbps   frames not streamed {S(d, "frames_not_streamed"),4}   packets lost {S(d, "packets_lost"),4}\n" +

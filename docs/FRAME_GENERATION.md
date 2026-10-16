@@ -72,6 +72,27 @@ render queue (2 to 3 frames when GPU-bound) sets the content lag, and that the u
 stays available from the config and the command line, with `video.frame_gen_cap_fps` and `video.frame_gen_lag_ms`, for experiments.
 Choosing: the 10-second `frame generation perf` line reports the game's `app fps`; pick the largest fraction the game sustains with margin.
 
+### Auto (branch fg-performance, 2026-10-16): the rate from the game's measured frame cost
+
+The "Auto" tick (`video.frame_gen_auto`, live `frame_gen_auto on|off`, off by default) lets the host pick the rate. It decides from what the
+shim measures, never by trying rates: the game's **frame cost** (release -> GPU done per frame, p95 over the last ~250 frames, published by
+the shim as `frameCostP95Ms`; with the just-in-time release this is the game's true CPU + GPU time whatever the budget) against each rate's
+budget (1/3 = three display periods, 1/2 = two, 2/3 = one and a half), and the **repeat share** over the last 5 s. Rules, one step at a time:
+
+| condition | action |
+|---|---|
+| repeats above 5 % of outputs for 5 s | step down (2/3 -> 1/2 -> 1/3); at 1/3 a line says there is nothing slower |
+| p95 cost under 80 % of the next faster budget (75 % for 2/3) for 20 s, repeats under 2 % | step up |
+| cost above 90 % of the budget with no repeats for 60 s | logged once as a resolution-scaling game: the budget is spent on pixels, a faster rate cannot be judged from the cost |
+
+Never two switches within 20 s. Every decision is a log line `frame generation auto: 1/2 -> 1/3 (repeats 7.2 % over 5 s, frame cost p95 24.1 ms
+of a 20.0 ms budget)` and an `fg_auto` event, and a `frame generation config (auto)` line. **Per-game memory** `config/games.json`: the rate that
+held, the frame cost and whether vectors were found, keyed by the executable; written at every rate change (auto or by hand) and at game end;
+a known game starts at its remembered rate (`auto_start`). The launcher's slider follows the host and the line under it reads the **headroom**:
+`Auto: 1/3 in force; game frame 18.2 ms (p95) of a 30.0 ms budget, headroom 11.8 ms; 1/2 would fit` (also without Auto: the readout is for the
+human's judgement). The 10-second `frame generation headroom` log line carries the same with cpu / gpu split. Lab scenario `auto_ramp`: GPU
+cost ramping 12 -> 24 -> 12 ms over 40 s under Auto from 1/2.
+
 Lab for the rates (3080 Ti simrig, 2026-10-16, 40 s each, marker on the wall clock; `third`, `third_slow`, `third_mv`, `stutter_third`,
 `two_thirds`, `jitter_two_thirds`, `stutter_fg` as the half-rate regression):
 - 1/2 unchanged: stutter_fg SMOOTH, frozen 1.3 %, step cv 0.18-0.20.

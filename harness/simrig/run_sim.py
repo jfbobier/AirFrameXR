@@ -96,6 +96,10 @@ SCENARIOS = {
                     "note": "the GPU-bound app with generation off, just-in-time release: the reference for the pacing's effect on latency without generation"},
     "gpu_queue":   {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "50", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_GAME_PACING": "queue", "note": "generation off, queue throttle"},
+    # the automatic rate: a GPU-bound app whose cost ramps 1x -> 2x -> 1x over 40 s (XR_PROBE_LOAD ramp:40, copies 30 -> 60 = 8 -> 16 ms GPU on the
+    # 3080 Ti) under Auto starting at 1/2: expect a step down at the peak and a step up after it, logged as "frame generation auto:" lines
+    "auto_ramp":   {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "ramp:40", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "45", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "half", "ENV:VISIONALVR_FG_AUTO": "1", "note": "GPU cost ramping 12 -> 24 -> 12 ms over 40 s, automatic rate from 1/2 (run 90 s or more)"},
     "third_slow":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.12", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "the 1/3 rate with the marker at half speed: the planner's test; at full speed the 5 px marker moves 14 px per 30 ms game step, past the flow's 8 px blocks (the thin-mover limit, not the planner)"},
     "third_mv":    {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",

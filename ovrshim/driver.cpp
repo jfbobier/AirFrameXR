@@ -37,6 +37,7 @@
 #include "ngxtap.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <deque>
 #include <mmdeviceapi.h>
@@ -1615,6 +1616,18 @@ namespace {
                 est = std::min(std::max(est, 0.001), 0.1);
                 m_appTimeS = est;
                 s.appFrameMs = (float)(est * 1000.0);
+                // the frame cost distribution (release -> GPU done) for the headroom readout and the automatic rate (ipc frameCostP50Ms/P95Ms)
+                m_costRing[m_costN++ % m_costRing.size()] = (float)(sample * 1000.0);
+                if (m_costN % 32 == 0) {
+                    const size_t n = std::min<size_t>(m_costN, m_costRing.size());
+                    std::vector<float> v(m_costRing.begin(), m_costRing.begin() + n);
+                    std::nth_element(v.begin(), v.begin() + n / 2, v.end());
+                    s.frameCostP50Ms = v[n / 2];
+                    std::nth_element(v.begin(), v.begin() + (n * 95) / 100, v.end());
+                    s.frameCostP95Ms = v[(n * 95) / 100];
+                    s.appCpuMs = (float)(m_cpuTimeS.load() * 1000.0);
+                    s.appGpuMs = (float)(m_gpuDurS.load() * 1000.0);
+                }
             }
             m_lastPublishedSlot = slot;
             s.slotBusyWaits = (uint32_t)m_slotBusyWaits.load();
@@ -2594,6 +2607,8 @@ namespace {
         std::atomic<double> m_cpuTimeS{0.0}, m_gpuDurS{0.0}, m_lastGpuDoneS{0.0};
         uint64_t m_jitHolds{0};
         double m_jitHoldSumS{0.0};
+        std::array<float, 256> m_costRing{};   // release -> GPU done per frame (ms), the last 256 frames
+        uint64_t m_costN{0};
         uint64_t m_capHolds{0};                    // releases the fps cap (ipc appMinPeriodUs) pushed past their boundary
         std::atomic<double> m_appTimeS{0.004};     // envelope of release -> frame GPU-complete (published), seconds
         long long m_lastTargetBoundary{0};         // boundary (tick index) the last release aimed at: one release per boundary

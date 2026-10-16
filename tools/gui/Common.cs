@@ -184,6 +184,7 @@ namespace VisionALVR
         public bool GameMotionVectors { get => Json.Bool(Root, "video.game_motion_vectors", true); set => Json.Set(Root, "video.game_motion_vectors", value); }
         // branch fg-performance (docs/PERFORMANCE_FINDINGS.md): a predicted tracking sample on a miss (off by default), the game's just-in-time release pacing (on)
         public bool FrameGenPredictSample { get => Json.Bool(Root, "video.frame_gen_predict_sample", false); set => Json.Set(Root, "video.frame_gen_predict_sample", value); }
+        public bool FrameGenAuto { get => Json.Bool(Root, "video.frame_gen_auto", false); set => Json.Set(Root, "video.frame_gen_auto", value); }
         public bool GamePacingJit { get => Json.Str(Root, "video.game_pacing", "jit") != "queue"; set => Json.Set(Root, "video.game_pacing", value ? "jit" : "queue"); }
         public bool Debug { get => Json.Bool(Root, "debug", true); set => Json.Set(Root, "debug", value); }
         /// display (live in VisionALVR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral

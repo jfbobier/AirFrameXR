@@ -106,6 +106,7 @@ void nvh_ipc_set_game_mv(void* ipc, uint32_t on);
 // Uncapped frame generation: the minimum spacing of the game's releases (us, 0 = none): an fps cap that leaves the host GPU headroom.
 void nvh_ipc_set_app_min_period(void* ipc, uint32_t min_period_us);
 void nvh_ipc_set_app_pacing(void* ipc, uint32_t jit);   // 1 = just-in-time release (ipc.h appPacingJit), 0 = the queue throttle
+void nvh_ipc_frame_cost(void* ipc, float* p50_ms, float* p95_ms, float* cpu_ms, float* gpu_ms);   // the game's frame cost (ipc.h frameCost*)
 // The generator synthesises from the game's vectors when present (1) or from the flow alone (0): the GUI tick, live.
 void nvh_fg_use_mv(void* nvh, int on);
 // The tap's state as the shim reports it: tap 0 none / 1 attached / 2 ABI mismatch / 3 refused, DLSS streams seen lately, evaluates seen.

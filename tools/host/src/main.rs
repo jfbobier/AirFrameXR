@@ -81,6 +81,10 @@ struct Args {
     /// frame generation: a boundary without a fresh tracking sample is stamped with a predicted one instead of being skipped (default off).
     /// Settings `video.frame_gen_predict_sample`, `--frame-gen-predict on|off`, env VISIONALVR_FG_PREDICT_SAMPLE=1.
     fg_predict: bool,
+    /// automatic frame-generation rate (docs/FRAME_GENERATION.md "Auto"): steps 1/3 <-> 1/2 <-> 2/3 from the game's measured frame cost
+    /// (shim ipc frameCostP95Ms) and the repeat share; starts a known game at its remembered rate (config/games.json). Settings
+    /// `video.frame_gen_auto`, `--frame-gen-auto on|off`, env VISIONALVR_FG_AUTO=1. Off by default.
+    fg_auto: bool,
     /// frame generation (docs/FRAME_GENERATION.md): the game is paced at half the display rate and the host interpolates the frame in
     /// between from the optical flow of the last two rendered frames. None = settings file (`video.frame_gen`, default off); env
     /// VISIONALVR_FRAME_GEN=1/0 and `--frame-gen on|off` win over it.
@@ -182,6 +186,7 @@ fn parse_args() -> Result<Args, String> {
         gpu_sched_class: 5,
         game_pacing_jit: true,
         fg_predict: false,
+        fg_auto: false,
         frame_gen: None,
         game_motion_vectors: true,
         fg_rate: None,
@@ -321,6 +326,7 @@ fn parse_args() -> Result<Args, String> {
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
             "--game-pacing" => a.game_pacing_jit = match v()?.to_ascii_lowercase().as_str() { "jit" => true, "queue" => false, _ => return Err("--game-pacing jit|queue".into()) },
             "--frame-gen-predict" => a.fg_predict = parse_on_off("--frame-gen-predict", &v()?)?,
+            "--frame-gen-auto" => a.fg_auto = parse_on_off("--frame-gen-auto", &v()?)?,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
             "--frame-gen-lag-ms" => a.fg_lag_ms = Some(v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.0, 100.0)),
@@ -397,6 +403,9 @@ fn parse_args() -> Result<Args, String> {
     }
     if let Ok(v) = std::env::var("VISIONALVR_FG_PREDICT_SAMPLE") {
         a.fg_predict = v == "1";
+    }
+    if let Ok(v) = std::env::var("VISIONALVR_FG_AUTO") {
+        a.fg_auto = v == "1";
     }
     if a.fg_lag_ms.is_none() {
         a.fg_lag_ms = std::env::var("VISIONALVR_FG_LAG_MS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 100.0));
@@ -516,6 +525,11 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if std::env::var("VISIONALVR_FG_PREDICT_SAMPLE").is_err() {
         if let Some(v) = st.frame_gen_predict_sample {
             a.fg_predict = v;
+        }
+    }
+    if std::env::var("VISIONALVR_FG_AUTO").is_err() {
+        if let Some(v) = st.frame_gen_auto {
+            a.fg_auto = v;
         }
     }
     if a.fg_lag_ms.is_none() {
@@ -886,6 +900,7 @@ mod nvh {
         pub fn nvh_ipc_set_game_mv(ipc: *mut c_void, on: u32);
         pub fn nvh_ipc_set_app_min_period(ipc: *mut c_void, min_period_us: u32);
         pub fn nvh_ipc_set_app_pacing(ipc: *mut c_void, jit: u32);
+        pub fn nvh_ipc_frame_cost(ipc: *mut c_void, p50_ms: *mut f32, p95_ms: *mut f32, cpu_ms: *mut f32, gpu_ms: *mut f32);
         pub fn nvh_fg_use_mv(nvh: *mut c_void, on: i32);
         pub fn nvh_ipc_motion_tap(ipc: *mut c_void, tap: *mut u32, streams: *mut u32, publications: *mut u64);
         pub fn nvh_qpc_seconds() -> f64;
@@ -1379,12 +1394,128 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
     let rate = args.fg_rate.unwrap_or(FgRate::Half).name();
     let cap = args.fg_cap_fps.unwrap_or(0.0);
     let lag = args.fg_lag_ms.unwrap_or(0.0);
-    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms, predicted sample {}, game pacing {}",
+    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms, predicted sample {}, game pacing {}, auto rate {}",
         if fg_active { "ON" } else { "off" }, if args.game_motion_vectors { "on" } else { "off" }, if cap > 0.0 { format!("{cap:.0}") } else { "none".into() },
-        if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }, if args.fg_predict { "on" } else { "off" }, if args.game_pacing_jit { "jit" } else { "queue" }));
+        if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }, if args.fg_predict { "on" } else { "off" }, if args.game_pacing_jit { "jit" } else { "queue" },
+        if args.fg_auto { "on" } else { "off" }));
     event(origin, "frame_gen_config", json!({ "why": why, "on": fg_active, "rate": rate, "game_motion_vectors": args.game_motion_vectors,
         "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf, "predict_sample": args.fg_predict,
-        "game_pacing": if args.game_pacing_jit { "jit" } else { "queue" } }));
+        "game_pacing": if args.game_pacing_jit { "jit" } else { "queue" }, "auto_rate": args.fg_auto }));
+}
+
+/// The automatic frame-generation rate (docs/FRAME_GENERATION.md "Auto"). Decides from what the shim measures, not from trying rates: the game's
+/// frame cost (release -> GPU done, p95 over the last ~250 frames; with the just-in-time release the game's true CPU + GPU time) against each
+/// rate's budget (1/3: three display periods, 1/2: two, 2/3: one and a half), and the share of repeated outputs over the last 5 s.
+/// Fast down, slow up, one step at a time: repeats above 5 % for 5 s -> the next slower rate; the p95 cost under 80 % of the next faster
+/// budget (75 % for 2/3) for 20 s -> the next faster rate; never two switches within 20 s. A cost that tracks the budget with no repeats for
+/// 60 s is logged as a resolution-scaling game (the budget is spent on pixels; a faster rate cannot be judged from the cost).
+struct AutoRate {
+    last_switch: Instant,
+    up_since: Option<Instant>,
+    tracking_since: Option<Instant>,
+    tracking_logged: bool,
+    /// (time, synths + reals, repeats) samples of the last 5 s
+    window: std::collections::VecDeque<(Instant, u64, u64)>,
+    last_eval: Instant,
+}
+
+impl AutoRate {
+    fn new() -> Self {
+        let now = Instant::now();
+        AutoRate { last_switch: now, up_since: None, tracking_since: None, tracking_logged: false, window: Default::default(), last_eval: now }
+    }
+    fn reset(&mut self) {
+        *self = AutoRate::new();
+    }
+    /// One evaluation per second while a game runs: Some(new rate) when a switch is due. `outputs` = synths + reals so far, `repeats` so far.
+    fn evaluate(&mut self, rate: FgRate, period_s: f64, cost_p95_ms: f32, outputs: u64, repeats: u64, origin: Instant) -> Option<FgRate> {
+        let now = Instant::now();
+        if now.duration_since(self.last_eval) < Duration::from_secs(1) {
+            return None;
+        }
+        self.last_eval = now;
+        self.window.push_back((now, outputs, repeats));
+        while self.window.len() > 6 {
+            self.window.pop_front();
+        }
+        if rate == FgRate::Uncapped || cost_p95_ms <= 0.0 || self.window.len() < 6 {
+            return None;
+        }
+        let (o0, r0) = (self.window.front().unwrap().1, self.window.front().unwrap().2);
+        let d_out = outputs.saturating_sub(o0);
+        let d_rep = repeats.saturating_sub(r0);
+        let repeat_share = if d_out + d_rep > 0 { d_rep as f64 / (d_out + d_rep) as f64 } else { 0.0 };
+        let budget_ms = |r: FgRate| period_s * 1000.0 * match r { FgRate::Third => 3.0, FgRate::Half => 2.0, FgRate::TwoThirds => 1.5, FgRate::Uncapped => 1.0 };
+        let since_switch = now.duration_since(self.last_switch);
+        let slower = match rate { FgRate::TwoThirds => Some(FgRate::Half), FgRate::Half => Some(FgRate::Third), _ => None };
+        let faster = match rate { FgRate::Third => Some(FgRate::Half), FgRate::Half => Some(FgRate::TwoThirds), _ => None };
+        if repeat_share > 0.05 && since_switch >= Duration::from_secs(5) {
+            self.up_since = None;
+            if let Some(next) = slower {
+                logs::general("INFO", &format!("frame generation auto: {} -> {} (repeats {:.1} % over 5 s, frame cost p95 {cost_p95_ms:.1} ms of a {:.1} ms budget)",
+                    rate.name(), next.name(), repeat_share * 100.0, budget_ms(rate)));
+                event(origin, "fg_auto", json!({ "from": rate.name(), "to": next.name(), "why": "repeats", "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(rate) }));
+                self.last_switch = now;
+                return Some(next);
+            }
+            if !self.tracking_logged {
+                self.tracking_logged = true;
+                logs::general("INFO", &format!("frame generation auto: at {} with repeats {:.1} %: the game does not hold a third of the display rate (cost p95 {cost_p95_ms:.1} ms); nothing slower to offer, consider uncapped",
+                    rate.name(), repeat_share * 100.0));
+            }
+            return None;
+        }
+        if let Some(next) = faster {
+            let factor = if next == FgRate::TwoThirds { 0.75 } else { 0.8 };
+            if (cost_p95_ms as f64) < factor * budget_ms(next) && repeat_share < 0.02 {
+                let since = *self.up_since.get_or_insert(now);
+                if now.duration_since(since) >= Duration::from_secs(20) && since_switch >= Duration::from_secs(20) {
+                    logs::general("INFO", &format!("frame generation auto: {} -> {} (frame cost p95 {cost_p95_ms:.1} ms under {:.0} % of the {:.1} ms budget for 20 s, repeats {:.1} %)",
+                        rate.name(), next.name(), factor * 100.0, budget_ms(next), repeat_share * 100.0));
+                    event(origin, "fg_auto", json!({ "from": rate.name(), "to": next.name(), "why": "headroom", "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(next) }));
+                    self.last_switch = now;
+                    self.up_since = None;
+                    self.tracking_since = None;
+                    return Some(next);
+                }
+            } else {
+                self.up_since = None;
+            }
+        }
+        // the resolution-scaling signature: the cost fills the budget, no repeats, for a minute
+        if (cost_p95_ms as f64) > 0.9 * budget_ms(rate) && repeat_share < 0.02 {
+            let since = *self.tracking_since.get_or_insert(now);
+            if !self.tracking_logged && now.duration_since(since) >= Duration::from_secs(60) {
+                self.tracking_logged = true;
+                logs::general("INFO", &format!("frame generation auto: at {} the frame cost p95 ({cost_p95_ms:.1} ms) tracks the {:.1} ms budget with no repeats for 60 s: a resolution-scaling game spends the budget on pixels; a faster rate cannot be judged from the cost (try it by hand)",
+                    rate.name(), budget_ms(rate)));
+                event(origin, "fg_auto", json!({ "from": rate.name(), "to": rate.name(), "why": "scaling", "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(rate) }));
+            }
+        } else {
+            self.tracking_since = None;
+        }
+        None
+    }
+}
+
+/// What VisionALVR remembers per game (config/games.json, keyed by the executable's file name): the rate that held last, the frame cost
+/// seen, whether DLSS vectors were found. Read at game start (the automatic rate starts there), written at every rate change and game end.
+fn games_memory_path(args: &Args) -> PathBuf {
+    args.config_dir.join("games.json")
+}
+
+fn games_memory_load(args: &Args) -> serde_json::Value {
+    std::fs::read_to_string(games_memory_path(args)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}))
+}
+
+fn games_memory_update(args: &Args, exe: &str, rate: FgRate, cost_p95_ms: f32, vectors: bool, why: &str) {
+    let mut all = games_memory_load(args);
+    let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    all[exe] = json!({ "rate": rate.name(), "cost_p95_ms": cost_p95_ms, "vectors": vectors, "updated": unix, "why": why });
+    if let Ok(t) = serde_json::to_string_pretty(&all) {
+        let _ = std::fs::create_dir_all(args.config_dir.as_path());
+        let _ = std::fs::write(games_memory_path(args), t);
+    }
 }
 
 /// Creates the generator on the encoder (after nvh_create, the stream's frame size being known): true when it runs; false (logged) when the
@@ -2125,6 +2256,8 @@ fn main() {
         submitted0: u32,
     }
     let mut game: Option<GameRun> = None;
+    let mut auto_rate = AutoRate::new();
+    let mut game_cost_p95 = 0f32;   // the newest frame cost p95 seen for the running game (games.json at game end)
     // scripted input (--auto-input): index of the next event to fire and the release instant of a pressed one
     let mut auto_next = 0usize;
     let mut auto_release: Option<(Instant, usize)> = None;
@@ -2214,6 +2347,20 @@ fn main() {
                 }
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_rate");
+                auto_rate.reset();
+                if let Some(g) = &game {
+                    if fg_active && !ipc.is_null() {
+                        let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
+                        unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
+                        games_memory_update(&args, &g.exe, r, game_cost_p95, tap == 1 && pubs > 0, "user");
+                    }
+                }
+            }
+            let au = vision::FG_AUTO_REQ.swap(-1, Ordering::SeqCst);
+            if au >= 0 {
+                args.fg_auto = au == 1;
+                auto_rate.reset();
+                log_fg_config(origin, &args, fg_active, "frame_gen_auto");
             }
             let pr = vision::FG_PREDICT_REQ.swap(-1, Ordering::SeqCst);
             if pr >= 0 {
@@ -2262,6 +2409,23 @@ fn main() {
                 let exe = if exe.is_empty() { "(unknown app)".to_string() } else { exe };
                 logs::general("INFO", &format!("game started: {exe}"));
                 event(origin, "game_started", json!({ "exe": exe }));
+                auto_rate.reset();
+                game_cost_p95 = 0.0;
+                if args.fg_auto && fg_active {
+                    // a known game starts at the rate that held last time (games.json), the controller takes it from there
+                    let mem = games_memory_load(&args);
+                    if let Some(r) = mem[&exe]["rate"].as_str().and_then(FgRate::parse) {
+                        if Some(r) != args.fg_rate && r != FgRate::Uncapped {
+                            logs::general("INFO", &format!("frame generation auto: {exe} starts at {} (remembered from {})", r.name(), mem[&exe]["why"].as_str().unwrap_or("?")));
+                            args.fg_rate = Some(r);
+                            if let Some(p) = pipeline.as_ref() {
+                                p.set_frame_gen_rate(r, args.fg_lag_ms.unwrap_or(0.0));
+                            }
+                            apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
+                            log_fg_config(origin, &args, fg_active, "auto_start");
+                        }
+                    }
+                }
                 game = Some(GameRun { exe, start: Instant::now(), frames0: shared.frames_sent.load(Ordering::Relaxed), submitted0: shim_submitted(ipc) });
             } else if !alive && game.is_some() {
                 let g = game.take().unwrap();
@@ -2272,8 +2436,36 @@ fn main() {
                     "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps)",
                     g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3)));
                 event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames }));
+                if fg_active && secs > 20.0 {
+                    let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
+                    unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
+                    games_memory_update(&args, &g.exe, args.fg_rate.unwrap_or(FgRate::Half), game_cost_p95, tap == 1 && pubs > 0, "game end");
+                }
             }
             if let Some(g) = &game {
+                if fg_active && !ipc.is_null() {
+                    let (mut c50, mut c95, mut cc, mut cg) = (0f32, 0f32, 0f32, 0f32);
+                    unsafe { nvh::nvh_ipc_frame_cost(ipc, &mut c50, &mut c95, &mut cc, &mut cg) };
+                    if c95 > 0.0 {
+                        game_cost_p95 = c95;
+                    }
+                    if args.fg_auto {
+                        if let Some(p) = pipeline.as_ref() {
+                            let rate = args.fg_rate.unwrap_or(FgRate::Half);
+                            let outputs = p.fg_synths.load(Ordering::Relaxed) + p.fg_reals.load(Ordering::Relaxed);
+                            let repeats = p.fg_repeats.load(Ordering::Relaxed);
+                            if let Some(next) = auto_rate.evaluate(rate, p.period().as_secs_f64(), c95, outputs, repeats, origin) {
+                                args.fg_rate = Some(next);
+                                p.set_frame_gen_rate(next, args.fg_lag_ms.unwrap_or(0.0));
+                                apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
+                                log_fg_config(origin, &args, fg_active, "auto");
+                                let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
+                                unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
+                                games_memory_update(&args, &g.exe, next, c95, tap == 1 && pubs > 0, "auto");
+                            }
+                        }
+                    }
+                }
                 if let Some((until, side)) = auto_release {
                     if Instant::now() >= until {
                         unsafe { nvh::nvh_ipc_publish_input(ipc, side as i32, 0, 0, 0.0, 0.0, 0.0, 0.0) };
@@ -2306,6 +2498,10 @@ fn main() {
                 "packets_lost": lost.saturating_sub(st_lost),
                 "client": logs::client_stats::take(1),
                 "gamma": user_gamma, "debug": debug_on,
+                "fg_on": fg_active, "fg_rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "fg_auto": args.fg_auto,
+                "frame_cost_p95_ms": game_cost_p95,
+                "budget_ms": pipeline.as_ref().map(|p| p.period().as_secs_f64() * 1000.0 * (fg_pacing(&args, fg_active, p.period().as_secs_f64()).0.max(1) as f64)
+                    * if fg_active && args.fg_rate.unwrap_or(FgRate::Half) == FgRate::TwoThirds { 1.5 } else { 1.0 }).unwrap_or(0.0),
             }));
             (st_frames, st_bytes, st_submitted, st_lost) = (frames, bytes, submitted, lost);
             status_at = Instant::now();
@@ -2323,12 +2519,19 @@ fn main() {
                     let gen = p.fg_stats_json();
                     let (d_rel, d_late) = (rel.wrapping_sub(perf_rel), late.wrapping_sub(perf_late));
                     (perf_rel, perf_late) = (rel, late);
+                    let (mut c50, mut c95, mut cc, mut cg) = (0f32, 0f32, 0f32, 0f32);
+                    unsafe { nvh::nvh_ipc_frame_cost(ipc, &mut c50, &mut c95, &mut cc, &mut cg) };
+                    let per = p.period().as_secs_f64() * 1000.0;
+                    let budget = per * match args.fg_rate.unwrap_or(FgRate::Half) { FgRate::Third => 3.0, FgRate::Half => 2.0, FgRate::TwoThirds => 1.5, FgRate::Uncapped => 1.0 };
+                    logs::general("INFO", &format!("frame generation headroom: game frame cost p50 {c50:.1} p95 {c95:.1} ms (cpu {cc:.1}, gpu {cg:.1}), budget {budget:.1} ms at {}, headroom {:.1} ms{}",
+                        args.fg_rate.unwrap_or(FgRate::Half).name(), budget - c95 as f64, if args.fg_auto { " (auto)" } else { "" }));
                     logs::general("INFO", &format!("frame generation perf: app {:.1} fps (envelope {app_ms:.1} ms, {d_late}/{d_rel} releases late), stream {:.1} fps, game period {:.1} ms (p50 {:.1} p95 {:.1} max {:.1}), lag {:.1} ms (slack p5 {:.1} p50 {:.1}), mean t {:.2} mean age {:.2}, behind {} ahead {}, gpu [{gpu}]",
                         rendered as f64 / secs, streamed as f64 / secs, u.game_period_ms, u.interval_p50, u.interval_p95, u.interval_max, u.lag_ms, u.slack_p5, u.slack_p50, u.mean_t, u.mean_age, u.behind, u.ahead));
                     event(origin, "fg_perf", json!({ "app_fps": rendered as f64 / secs, "stream_fps": streamed as f64 / secs, "app_envelope_ms": app_ms,
                         "releases": d_rel, "releases_late": d_late, "slot_waits": waits, "game_period_ms": u.game_period_ms, "lag_ms": u.lag_ms, "mean_t": u.mean_t,
                         "unc_synths": u.synths, "mean_age": u.mean_age, "behind": u.behind, "ahead": u.ahead, "arrivals": u.arrivals, "slack_ms_p5": u.slack_p5, "slack_ms_p50": u.slack_p50,
                         "interval_ms_p50": u.interval_p50, "interval_ms_p95": u.interval_p95, "interval_ms_max": u.interval_max, "gpu_csv": gpu,
+                        "frame_cost_p50_ms": c50, "frame_cost_p95_ms": c95, "app_cpu_ms": cc, "app_gpu_ms": cg, "budget_ms": budget, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "auto": args.fg_auto,
                         "gen": serde_json::from_str::<serde_json::Value>(&gen).unwrap_or(serde_json::Value::Null) }));
                 }
             }
