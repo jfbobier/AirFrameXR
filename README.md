@@ -68,16 +68,15 @@ OpenXR game
   them (shown fps a little under the host fps). A fix exists (branch `exp/restamp-2026-10-13`) but needs a change on the visionOS
   client side, so it is not in the release.
 - **New in 0.4: frame generation** (toggle in the streamer window and in Settings, `video.frame_gen`, off by default): for games that cannot
-  hold the display rate. **Half rate** paces the game at half the display rate and the streamer fills the frame in between; **Uncapped** lets
-  the game run free (an optional **fps cap** holds it a little under its sustained rate, which keeps its render queue short) and synthesises
-  every output at the right fraction between the two newest rendered frames. In-scene motion comes from the game's own **DLSS motion vectors**
-  when the [VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler) DLL sits next to the game's executable (download it from
-  that repository's Releases page, rename it `dxgi.dll`, tick *DLSS motion vectors*), else from the GPU's optical-flow engine (NVIDIA Optical
-  Flow, Turing or later). Every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz with an RTX 5090: missed
-  display periods 38 % -> 1 % at half rate; uncapped keeps a 70 fps game at 70. Costs latency by construction (interpolation: one display
-  period at half rate, about two game periods uncapped); small fast HUD elements may ghost without vectors. See
-  [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md) and
-  [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md). Not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
+  hold the display rate. A slider sets the game's rate as a fraction of the display rate, **1/3, 1/2 (default) or 2/3**, and the streamer
+  generates the frames in between: at 1/2 and 1/3 the game is locked to the display cadence (one or two generated frames per rendered one),
+  at 2/3 it is held to two thirds of the rate and every frame sent is interpolated. In-scene motion comes from the game's own **DLSS motion
+  vectors** when the [VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler) DLL sits next to the game's executable
+  (download it from that repository's Releases page, rename it `dxgi.dll`, tick *DLSS motion vectors*), else from the GPU's optical-flow
+  engine (NVIDIA Optical Flow, Turing or later). Every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz
+  with an RTX 5090: missed display periods 38 % -> 1 % at half rate. Costs latency by construction (interpolation: one game period); small
+  fast objects may ghost without vectors. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md)
+  and [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md). Not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
