@@ -216,6 +216,7 @@ impl log::Log for AlvrLogger {
         if let Some(inner) = msg.strip_prefix("{\"va_client_caps\":").and_then(|s| s.strip_suffix('}')) {
             if let (Ok(v), Some(o)) = (serde_json::from_str::<Value>(inner), crate::phase::origin()) {
                 write_alvr("CAPS", inner);
+                *CLIENT_REFRESH_RATES.lock().unwrap() = v["supported_refresh_rates"].as_array().map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default();
                 crate::event(o, "client_capabilities", v);
             }
             return;
@@ -290,6 +291,14 @@ fn write_alvr(kind: &str, msg: &str) {
 }
 
 /// ALVR's client statistics, aggregated per window (status lines every 10 s, encoder_stats every 2 s, benchmark steps).
+/// The refresh rates the headset declared at the handshake (ALVR's client capabilities): the display rates it can actually run.
+static CLIENT_REFRESH_RATES: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
+
+/// the headset's declared refresh rates (Hz), empty until the handshake has been seen
+pub fn client_refresh_rates() -> Vec<f64> {
+    CLIENT_REFRESH_RATES.lock().unwrap().clone()
+}
+
 pub mod client_stats {
     use super::*;
 

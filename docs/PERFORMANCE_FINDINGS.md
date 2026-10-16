@@ -303,9 +303,10 @@ headset (Valor Mortis 1/3: 30 030 streamed in 3m35s), Auto's budgets read 8.3 ms
 of the display rate", the headset repeated 7-16 % of its periods and received two or three frames per period: the artifacts. With
 generation off the host streams the game's own frames and the clock does not matter, hence the clean Dead Space.
 
-Fix: a cadence is only followed when it is a display refresh rate (within 3 % of 60 / 72 / 80 / 90 / 96 / 100 / 120 / 144 Hz); otherwise one
-line, `client tracking cadence 270.0 Hz is not a display rate (several samples per frame): host clock stays on the nominal 90.0 Hz`, and the
-nominal grid stays. The estimator's floor is 2 ms so the Quest's true cadence is what gets judged. Not a headset exception: a sanity check
+Fix: a cadence is only followed when it is within 3 % of one of the refresh rates the headset declared at the handshake (ALVR's client
+capabilities, `supported_refresh_rates`: Vision Pro 100 / 96 / 90, Quest 3 72 / 80 / 90 / 120; a generic list of display rates is the
+fallback before the handshake has been seen); otherwise one line, `client tracking cadence 270.0 Hz is none of the headset's refresh rates
+(72 / 80 / 90 / 120): several samples per frame, host clock stays on the nominal 90.0 Hz`, and the nominal grid stays. The estimator's floor is 2 ms so the Quest's true cadence is what gets judged. Not a headset exception: a sanity check
 on an inference. The Quest findings of that night are void; the headset needs a new session on this build before anything is said about
 its artifacts. Separately, the eye-height override (made for the Vision Pro's unreliable floor estimate) displaced the user in Valor Mortis
 on the Quest, which reports its floor correctly: the launcher now greys the knob out and hands the host 0 (the headset's floor) for any

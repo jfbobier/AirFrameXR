@@ -2102,14 +2102,17 @@ fn main() {
                         *shared.latest_sample_ts.lock() = Some(sample_timestamp);
                         if args.follow_rate {
                             if let Some(period) = rate_est.push(sample_timestamp.as_nanos() as u64) {
-                                // only a cadence that is a display refresh rate is the display's: a headset that tracks faster than it
-                                // displays (Quest 3: 270 Hz for a 90 Hz panel) says nothing about its display period this way
+                                // only a cadence that is one of the refresh rates the headset declared at the handshake is its display's
+                                // (Vision Pro: 100 / 96 / 90, Quest 3: 72 / 80 / 90 / 120); a headset that tracks faster than it displays
+                                // (Quest 3: 270 Hz for a 90 Hz panel) says nothing about its display period this way
                                 let hz = 1e9 / period as f64;
-                                let display_rate = [60.0, 72.0, 80.0, 90.0, 96.0, 100.0, 120.0, 144.0].iter().any(|r| (hz - r).abs() / r < 0.03);
-                                if !display_rate {
+                                let declared = logs::client_refresh_rates();
+                                let known: &[f64] = if declared.is_empty() { &[60.0, 72.0, 80.0, 90.0, 96.0, 100.0, 120.0, 144.0] } else { &declared };
+                                if !known.iter().any(|r| (hz - r).abs() / r < 0.03) {
                                     if !RATE_IGNORED.swap(true, Ordering::Relaxed) {
-                                        logs::general("INFO", &format!("client tracking cadence {hz:.1} Hz is not a display rate (several samples per frame): host clock stays on the nominal {:.1} Hz", 1e9 / nominal_period_ns as f64));
-                                        event(origin, "display_rate", json!({ "client_period_ms": period as f64 / 1e6, "client_hz": hz, "host_period_ms": nominal_period_ns as f64 / 1e6, "following": false, "ignored": true }));
+                                        logs::general("INFO", &format!("client tracking cadence {hz:.1} Hz is none of the headset's refresh rates ({}): several samples per frame, host clock stays on the nominal {:.1} Hz",
+                                            known.iter().map(|r| format!("{r:.0}")).collect::<Vec<_>>().join(" / "), 1e9 / nominal_period_ns as f64));
+                                        event(origin, "display_rate", json!({ "client_period_ms": period as f64 / 1e6, "client_hz": hz, "host_period_ms": nominal_period_ns as f64 / 1e6, "following": false, "ignored": true, "declared_hz": known }));
                                     }
                                     continue;
                                 }
