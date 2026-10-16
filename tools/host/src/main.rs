@@ -74,10 +74,6 @@ struct Args {
     boundary_offset_ms: f64,
     /// D3DKMT process scheduling class asked for (5 realtime .. 2; 0 = leave)
     gpu_sched_class: i32,
-    /// the shim's release pacing of the game: true = just in time (release held until the newest frame on the GPU is predicted to finish
-    /// minus the app's CPU time: one frame in flight, the Reflex idea), false = the queue throttle alone. Settings `video.game_pacing`
-    /// "jit" | "queue", `--game-pacing`, env VISIONALVR_GAME_PACING.
-    game_pacing_jit: bool,
     /// automatic frame-generation rate (docs/FRAME_GENERATION.md "Auto"): steps 1/3 <-> 1/2 <-> 2/3 from the game's measured frame cost
     /// (shim ipc frameCostP95Ms) and the repeat share; starts a known game at its remembered rate (config/games.json). Settings
     /// `video.frame_gen_auto`, `--frame-gen-auto on|off`, env VISIONALVR_FG_AUTO=1. Off by default.
@@ -181,7 +177,6 @@ fn parse_args() -> Result<Args, String> {
         follow_rate: true,
         boundary_offset_ms: 0.0,
         gpu_sched_class: 5,
-        game_pacing_jit: true,
         fg_auto: false,
         frame_gen: None,
         game_motion_vectors: true,
@@ -320,7 +315,6 @@ fn parse_args() -> Result<Args, String> {
             "--predict-missing-head" => a.predict_missing_head = true,
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
-            "--game-pacing" => a.game_pacing_jit = match v()?.to_ascii_lowercase().as_str() { "jit" => true, "queue" => false, _ => return Err("--game-pacing jit|queue".into()) },
             "--frame-gen-auto" => a.fg_auto = parse_on_off("--frame-gen-auto", &v()?)?,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
@@ -392,9 +386,6 @@ fn parse_args() -> Result<Args, String> {
         if let Ok(v) = std::env::var("VISIONALVR_FG_RATE") {
             a.fg_rate = FgRate::parse(&v);
         }
-    }
-    if let Ok(v) = std::env::var("VISIONALVR_GAME_PACING") {
-        a.game_pacing_jit = !v.eq_ignore_ascii_case("queue");
     }
     if let Ok(v) = std::env::var("VISIONALVR_FG_AUTO") {
         a.fg_auto = v == "1";
@@ -508,11 +499,6 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if a.fg_rate.is_none() {
         a.fg_rate = st.frame_gen_rate.as_deref().and_then(FgRate::parse);
-    }
-    if std::env::var("VISIONALVR_GAME_PACING").is_err() {
-        if let Some(v) = st.game_pacing.as_deref() {
-            a.game_pacing_jit = !v.eq_ignore_ascii_case("queue");
-        }
     }
     if std::env::var("VISIONALVR_FG_AUTO").is_err() {
         if let Some(v) = st.frame_gen_auto {
@@ -641,6 +627,8 @@ static HOLD_MS: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
 /// spacing of the headset's tracking packets arriving at the host
 static TRACKING_GAP_MS: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
 /// the last statistics window's tracking spacing (p95 ms, max ms, gaps over 15 ms, gaps) for the frame generation perf line
+/// the client's tracking cadence was judged not to be a display rate (logged once per connection)
+static RATE_IGNORED: AtomicBool = AtomicBool::new(false);
 static TRACKING_GAP_LAST: Mutex<(f64, f64, u64, u64)> = Mutex::new((0.0, 0.0, 0, 0));
 static LAST_TRACKING_NS: AtomicU64 = AtomicU64::new(0);
 
@@ -891,7 +879,6 @@ mod nvh {
         pub fn nvh_ipc_set_app_period_mul(ipc: *mut c_void, mul: u32);
         pub fn nvh_ipc_set_game_mv(ipc: *mut c_void, on: u32);
         pub fn nvh_ipc_set_app_min_period(ipc: *mut c_void, min_period_us: u32);
-        pub fn nvh_ipc_set_app_pacing(ipc: *mut c_void, jit: u32);
         pub fn nvh_ipc_frame_cost(ipc: *mut c_void, p50_ms: *mut f32, p95_ms: *mut f32, cpu_ms: *mut f32, gpu_ms: *mut f32);
         pub fn nvh_fg_use_mv(nvh: *mut c_void, on: i32);
         pub fn nvh_ipc_motion_tap(ipc: *mut c_void, tap: *mut u32, streams: *mut u32, publications: *mut u64);
@@ -1386,13 +1373,11 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
     let rate = args.fg_rate.unwrap_or(FgRate::Half).name();
     let cap = args.fg_cap_fps.unwrap_or(0.0);
     let lag = args.fg_lag_ms.unwrap_or(0.0);
-    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms, game pacing {}, auto rate {}",
+    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms, auto rate {}",
         if fg_active { "ON" } else { "off" }, if args.game_motion_vectors { "on" } else { "off" }, if cap > 0.0 { format!("{cap:.0}") } else { "none".into() },
-        if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }, if args.game_pacing_jit { "jit" } else { "queue" },
-        if args.fg_auto { "on" } else { "off" }));
+        if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }, if args.fg_auto { "on" } else { "off" }));
     event(origin, "frame_gen_config", json!({ "why": why, "on": fg_active, "rate": rate, "game_motion_vectors": args.game_motion_vectors,
-        "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf,
-        "game_pacing": if args.game_pacing_jit { "jit" } else { "queue" }, "auto_rate": args.fg_auto }));
+        "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf, "auto_rate": args.fg_auto }));
 }
 
 /// The automatic frame-generation level (docs/FRAME_GENERATION.md "Auto"): generation off, or one of the rates.
@@ -2027,14 +2012,11 @@ fn main() {
         p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half), args.fg_lag_ms.unwrap_or(0.0));
         apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
         unsafe { nvh::nvh_ipc_set_game_mv(ipc, if args.game_motion_vectors { 1 } else { 0 }) };
-        unsafe { nvh::nvh_ipc_set_app_pacing(ipc, args.game_pacing_jit as u32) };
-        logs::general("INFO", &format!("game pacing: {}", if args.game_pacing_jit { "just-in-time release (the game's next frame starts when its frame on the GPU is about to finish: one frame in flight)" } else { "queue throttle (up to two frames in flight)" }));
         log_fg_config(origin, &args, fg_active, "start");
         p.start();
         event(origin, "pacing_config", json!({ "send_pacing": args.send_pacing.name(), "running_start_ms": args.running_start_ms,
             "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6,
-            "frame_gen": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "app_period_mul": fg_pacing(&args, fg_active, 1.0 / args.fps).0,
-            "game_pacing": if args.game_pacing_jit { "jit" } else { "queue" } }));
+            "frame_gen": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "app_period_mul": fg_pacing(&args, fg_active, 1.0 / args.fps).0 }));
         #[cfg(feature = "simrig")]
         if let Some(dir) = &args.simrig {
             simrig::set_ipc(ipc_addr);
@@ -2089,6 +2071,7 @@ fn main() {
                         height_anchored = false;
                         samples_since_connect = 0;
                         rate_est.reset();
+                        RATE_IGNORED.store(false, Ordering::Relaxed);
                         shared.connect_pending.store(true, Ordering::SeqCst);
                         shared.client_connected.store(true, Ordering::SeqCst);
                         shared.restart_from_idr.store(true, Ordering::SeqCst);
@@ -2119,6 +2102,17 @@ fn main() {
                         *shared.latest_sample_ts.lock() = Some(sample_timestamp);
                         if args.follow_rate {
                             if let Some(period) = rate_est.push(sample_timestamp.as_nanos() as u64) {
+                                // only a cadence that is a display refresh rate is the display's: a headset that tracks faster than it
+                                // displays (Quest 3: 270 Hz for a 90 Hz panel) says nothing about its display period this way
+                                let hz = 1e9 / period as f64;
+                                let display_rate = [60.0, 72.0, 80.0, 90.0, 96.0, 100.0, 120.0, 144.0].iter().any(|r| (hz - r).abs() / r < 0.03);
+                                if !display_rate {
+                                    if !RATE_IGNORED.swap(true, Ordering::Relaxed) {
+                                        logs::general("INFO", &format!("client tracking cadence {hz:.1} Hz is not a display rate (several samples per frame): host clock stays on the nominal {:.1} Hz", 1e9 / nominal_period_ns as f64));
+                                        event(origin, "display_rate", json!({ "client_period_ms": period as f64 / 1e6, "client_hz": hz, "host_period_ms": nominal_period_ns as f64 / 1e6, "following": false, "ignored": true }));
+                                    }
+                                    continue;
+                                }
                                 let cur = vsync_period_ns.load(Ordering::Relaxed);
                                 let off_nominal = (period as f64 - nominal_period_ns as f64).abs() / nominal_period_ns as f64 > 0.025;
                                 let target = if off_nominal { period } else { nominal_period_ns };
@@ -2496,12 +2490,6 @@ fn main() {
                 } else {
                     log_fg_config(origin, &args, fg_active, "frame_gen_auto");
                 }
-            }
-            let gp = vision::GAME_PACING_REQ.swap(-1, Ordering::SeqCst);
-            if gp >= 0 {
-                args.game_pacing_jit = gp == 1;
-                unsafe { nvh::nvh_ipc_set_app_pacing(ipc, args.game_pacing_jit as u32) };
-                log_fg_config(origin, &args, fg_active, "game_pacing");
             }
             let mv = vision::GAME_MV_REQ.swap(-1, Ordering::SeqCst);
             if mv >= 0 {

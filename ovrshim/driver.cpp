@@ -921,38 +921,6 @@ namespace {
                     if (!m_publishCv.wait_for(plock, 50ms, [&] { return m_publishQueue.size() <= 1; })) {
                         m_gpuThrottleTimeouts++;
                     }
-                    if (m_ipc.state && *(volatile uint32_t*)&m_ipc.state->host.appPacingJit) {
-                        // Just in time (ipc appPacingJit): with a frame still on the GPU, hold the release until that frame is predicted to
-                        // finish minus the app's CPU time (and a 1 ms lead), so the frame the app starts now reaches the GPU as it frees up:
-                        // no idle GPU, at most one frame in flight. A GPU-bound game otherwise keeps 2-3 frames queued (20-56 ms of
-                        // latency measured on the 5090); with the GPU idle (CPU-bound game) nothing is held.
-                        const double lead = 0.001;
-                        bool held = false;
-                        double holdStart = 0;
-                        for (;;) {
-                            const size_t pend = m_publishQueue.size();
-                            const double gpuDur = m_gpuDurS.load();
-                            if (pend == 0 || gpuDur <= 0) {
-                                break;
-                            }
-                            const double predictedDone = std::max(m_lastGpuDoneS.load(), m_publishQueue.back().composeStart) + (double)pend * gpuDur;
-                            const double releaseAt = predictedDone - m_cpuTimeS.load() - lead;
-                            const double nowS = QpcSeconds();
-                            if (releaseAt <= nowS) {
-                                break;
-                            }
-                            if (!held) {
-                                held = true;
-                                holdStart = nowS;
-                                m_jitHolds++;
-                            }
-                            m_publishCv.wait_for(plock, std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                                            std::chrono::duration<double>(std::min(releaseAt - nowS, 0.002))));
-                        }
-                        if (held) {
-                            m_jitHoldSumS += QpcSeconds() - holdStart;
-                        }
-                    }
                 }
                 lock.lock();
                 m_lastReleaseS = QpcSeconds();
@@ -1480,15 +1448,14 @@ namespace {
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
                             "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x, "
-                            "period mul %u, fps cap %.1f (holds %llu), pacing %s (holds %llu, mean %.1f ms), app cpu %.1f ms, gpu %.1f ms/frame",
+                            "period mul %u, fps cap %.1f (holds %llu), app cpu %.1f ms, gpu %.1f ms/frame",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
                             (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
                             m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds,
-                            m_ipc.state->host.appPacingJit ? "just-in-time" : "queue", (unsigned long long)m_jitHolds,
-                            m_jitHolds ? m_jitHoldSumS / (double)m_jitHolds * 1000.0 : 0.0, m_cpuTimeS.load() * 1000.0, m_gpuDurS.load() * 1000.0);
+                            m_cpuTimeS.load() * 1000.0, m_gpuDurS.load() * 1000.0);
                     if (m_ngx.Attached()) {
                         ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, %llu sources not copied, tap %s", m_ngx.ActiveStreams(),
                                 (unsigned long long)m_ngx.Publications(), (unsigned long long)m_ngx.CopyFailures(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)");
@@ -2625,11 +2592,10 @@ namespace {
             m_releaseQueue.pop_front();
             return r;
         }
-        // just-in-time release (ipc appPacingJit): envelope of the app's CPU time (release -> submit), EMA of its GPU time per frame (from the
-        // GPU-done events, saturated GPU), the last GPU completion, and the holds applied
+        // the app's CPU time envelope (release -> submit), the EMA of its GPU time per frame (from the GPU-done events, saturated GPU) and
+        // the last GPU completion: the frame cost readout (ipc appCpuMs / appGpuMs). The just-in-time release that used them to hold the
+        // app was removed 2026-10-17: virtualdesktop-openxr calls WaitToBeginFrame right before the submit, so it never had anything to hold.
         std::atomic<double> m_cpuTimeS{0.0}, m_gpuDurS{0.0}, m_lastGpuDoneS{0.0};
-        uint64_t m_jitHolds{0};
-        double m_jitHoldSumS{0.0};
         std::array<float, 256> m_costRing{};   // release -> GPU done per frame (ms), the last 256 frames
         uint64_t m_costN{0};
         uint64_t m_capHolds{0};                    // releases the fps cap (ipc appMinPeriodUs) pushed past their boundary

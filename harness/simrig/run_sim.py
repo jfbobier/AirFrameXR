@@ -81,19 +81,12 @@ SCENARIOS = {
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "a 40-50 fps app at the 1/3 rate (33 fps budget it always meets): expect SMOOTH, few repeats"},
     "stutter_third": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:30:45", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "a 30-45 fps app at the 1/3 rate: the budget is missed at times (repeats), compare with stutter_fg"},
-    # performance branch A/B: the just-in-time release (default) against the queue throttle
-    "stutter_unc_queue": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "ENV:VISIONALVR_GAME_PACING": "queue", "note": "stutter_unc with the old queue throttle: compare frames in flight (fg_uncapped.csv now - newest) with stutter_unc (just-in-time release)"},
-    # GPU-bound app (the shape of a UE game: 2 ms of CPU, the GPU the bottleneck through XR_PROBE_GPU_COPIES = 128 MB copies per frame): the
-    # just-in-time release's test. In flight = t_publish - t_release per frame in the shim CSV (and now - newest in fg_uncapped.csv).
+    # GPU-bound app (the shape of a UE game: 2 ms of CPU, the GPU the bottleneck through XR_PROBE_GPU_COPIES = 128 MB copies per frame).
+    # In flight = t_publish - t_release per frame in the shim CSV (and now - newest in fg_uncapped.csv).
     "gpu_unc":     {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "50", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "note": "GPU-bound ~50 fps app, uncapped generation, just-in-time release (default)"},
-    "gpu_unc_queue": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "50", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "ENV:VISIONALVR_GAME_PACING": "queue", "note": "the same with the queue throttle: frames in flight should be 2-3 against ~1"},
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "note": "GPU-bound ~50 fps app, uncapped generation"},
     "gpu":         {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "50", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "note": "the GPU-bound app with generation off, just-in-time release: the reference for the pacing's effect on latency without generation"},
-    "gpu_queue":   {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "50", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_GAME_PACING": "queue", "note": "generation off, queue throttle"},
+                    "note": "the GPU-bound app with generation off: the latency reference without generation"},
     # the automatic rate: a GPU-bound app whose cost ramps 1x -> 2x -> 1x over 40 s (XR_PROBE_LOAD ramp:40, copies 30 -> 60 = 8 -> 16 ms GPU on the
     # 3080 Ti) under Auto starting at 1/2: expect a step down at the peak and a step up after it, logged as "frame generation auto:" lines
     "auto_ramp":   {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "ramp:40", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "45", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",

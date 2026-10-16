@@ -108,7 +108,7 @@ Measured basis (RTX 5090, Vision Pro 100 Hz, nights of 2026-10-15/16): a GPU-bou
 about 3 ms, a copy about 50 us at 45 MB); the headset's tracking samples miss 1-2 % of boundaries (up to 13 % in the lab, where the phase is
 random per run). Bandwidth is not the lever, serialization and queue depth are.
 
-1. **Just-in-time release** (`ipc.h appPacingJit`, settings `video.game_pacing` jit | queue, default jit; `--game-pacing`, `VISIONALVR_GAME_PACING`).
+1. **REMOVED 2026-10-17 (never engaged on any headset: virtualdesktop-openxr calls WaitToBeginFrame right before the submit, so there was nothing to hold; the setting, tick, IPC field and lab A/B scenarios are gone, IPC v30).** Just-in-time release (`ipc.h appPacingJit`, settings `video.game_pacing` jit | queue, default jit; `--game-pacing`, `VISIONALVR_GAME_PACING`).
    The shim's queue throttle let the game start a frame while one was still on the GPU, so a GPU-bound game ran 2-3 frames ahead. Now the
    release is also held until the newest submitted frame is predicted to finish on the GPU (last GPU completion + frames pending x the EMA of
    the GPU time per frame, measured from the per-slot GPU-done events) minus the app's CPU time envelope (release -> submit) and a 1 ms lead:
@@ -288,3 +288,25 @@ through Cemu + BetterVR (Vulkan). Phase table (client_frames.csv):
   stream alternated menu quad, stale world, menu quad (`passthrough 100` and `repeats 100` per 2 s window, `same_ts 52`). Without
   generation the quad frames simply stream. Auto then read the repeats as the rate failing (2/3 -> 1/2 -> 1/3, "99.4 % repeats").
   Fix: a passthrough frame drops the held frame (nothing to repeat until the next projection frame).
+
+## Quest 3 session 2026-10-16/17: the host paced at 241 Hz
+
+First Quest 3 session on the frame-generation build (logs/debug/20261016-234945). User: "frame generation creates a lot of artifacts, and
+even pacing issues", not solved by DLSS vectors off or the pacing setting; Dead Space without generation was perfect.
+
+The cause was the host's, not the headset's. The display-rate estimator (`vision::RateEstimator`, `--no-follow-rate` to disable) infers the
+client's display period from the spacing of its tracking samples, built for the Vision Pro, which sends one sample per displayed frame (it
+is how the host follows the AVP's 90 / 100 Hz switch). The Quest 3 tracks at 270 Hz (gap p50 3.67 ms) whatever its display rate. The
+estimator dropped gaps under 4 ms and took the median of the rest: 4.1 ms, "client display rate 241.2 Hz: host clock follows it", three
+minutes into the session. From there every boundary, budget and pattern ran at 241 Hz: 139-242 frames per second streamed to a 90 Hz
+headset (Valor Mortis 1/3: 30 030 streamed in 3m35s), Auto's budgets read 8.3 ms at 1/2 and 6.1 ms at 2/3, "the game does not hold a third
+of the display rate", the headset repeated 7-16 % of its periods and received two or three frames per period: the artifacts. With
+generation off the host streams the game's own frames and the clock does not matter, hence the clean Dead Space.
+
+Fix: a cadence is only followed when it is a display refresh rate (within 3 % of 60 / 72 / 80 / 90 / 96 / 100 / 120 / 144 Hz); otherwise one
+line, `client tracking cadence 270.0 Hz is not a display rate (several samples per frame): host clock stays on the nominal 90.0 Hz`, and the
+nominal grid stays. The estimator's floor is 2 ms so the Quest's true cadence is what gets judged. Not a headset exception: a sanity check
+on an inference. The Quest findings of that night are void; the headset needs a new session on this build before anything is said about
+its artifacts. Separately, the eye-height override (made for the Vision Pro's unreliable floor estimate) displaced the user in Valor Mortis
+on the Quest, which reports its floor correctly: the launcher now greys the knob out and hands the host 0 (the headset's floor) for any
+headset that is not an Apple one; the saved value stays for the Vision Pro.

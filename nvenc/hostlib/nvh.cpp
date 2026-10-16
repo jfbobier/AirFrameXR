@@ -686,7 +686,6 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
 
 void nvh_ipc_set_game_mv(void* i, uint32_t on) { ((Ipc*)i)->state->host.gameMotionVectors = on ? 1u : 0u; }
 void nvh_ipc_set_app_min_period(void* i, uint32_t us) { ((Ipc*)i)->state->host.appMinPeriodUs = us; }
-void nvh_ipc_set_app_pacing(void* i, uint32_t jit) { ((Ipc*)i)->state->host.appPacingJit = jit; }
 void nvh_ipc_frame_cost(void* i, float* p50, float* p95, float* cpu, float* gpu) {
     const auto& s = ((Ipc*)i)->state->shim;
     *p50 = s.frameCostP50Ms; *p95 = s.frameCostP95Ms; *cpu = s.appCpuMs; *gpu = s.appGpuMs;

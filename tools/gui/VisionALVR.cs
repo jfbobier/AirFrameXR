@@ -42,7 +42,6 @@ namespace VisionALVR
         readonly TrackBar fgRate = new TrackBar { Minimum = 0, Maximum = 2, TickFrequency = 1, SmallChange = 1, LargeChange = 1, Width = 110, AutoSize = false, Height = 30, Margin = new Padding(0, 0, 0, 0) };
         readonly Label fgRateText = Ui.Line("");
         readonly CheckBox fgMv = new CheckBox { Text = "DLSS motion vectors", AutoSize = true, Margin = new Padding(14, 3, 0, 0) };
-        readonly CheckBox gamePacing = new CheckBox { Text = "Just-in-time pacing", AutoSize = true, Margin = new Padding(10, 3, 0, 0) };
         readonly CheckBox fgAuto = new CheckBox { Text = "Auto", AutoSize = true, Margin = new Padding(8, 3, 0, 0) };
         bool fgRateFromHost;   // the slider follows the host's rate in auto mode: no command back
         readonly Label footer = Ui.Line("", new Font("Segoe UI", 8.5f));
@@ -99,6 +98,7 @@ namespace VisionALVR
             if (!settings.HasDisplay) { settings.Gamma = AppSettings.DefaultGamma; settings.Save(); } // the streamer reads it at start
             AddKnob(lt, "Eye height, m", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v,
                     "Your eye height above the floor, as games see it: about 1.30 m seated, 1.6-1.7 m standing; 0 = the headset's own floor estimate. Games that place you from the floor use it; moving it re-anchors at your current head position.");
+            heightKnob = knobs[knobs.Count - 1];
             AddKnob(lt, "Gamma (>1 brighter)", 50, 200, AppSettings.DefaultGamma, () => settings.Gamma, v => settings.Gamma = v);
             AddKnob(lt, "Brightness", -30, 30, 0, () => settings.Brightness, v => settings.Brightness = v);
             AddKnob(lt, "Contrast", -30, 30, 0, () => settings.Contrast, v => settings.Contrast = v);
@@ -129,7 +129,6 @@ namespace VisionALVR
             fgOpts.Controls.Add(new Label { Text = "2/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(2, 6, 0, 0) });
             fgOpts.Controls.Add(fgAuto);
             fgOpts.Controls.Add(fgMv);
-            fgOpts.Controls.Add(gamePacing);
             lt.Controls.Add(fgOpts);
             lt.SetColumnSpan(fgOpts, 6);
             fgRateText.Margin = new Padding(44, 0, 0, 4);
@@ -139,7 +138,6 @@ namespace VisionALVR
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
             tips.SetToolTip(fgAuto, "The streamer picks the level (1/3, 1/2, 2/3 or generation off): down when the stream repeats frames, up by trying the next level after a quiet spell; three failed trials settle the game. Remembered per game; the slider follows.");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the VisionALVR-OptiScaler DLL is in the game folder (else optical flow).");
-            tips.SetToolTip(gamePacing, "The game's next frame starts when its frame on the GPU is about to finish (one frame in flight); off = the queue throttle (two).");
             live.Controls.Add(lt);
             body.Controls.Add(live);
 
@@ -181,7 +179,6 @@ namespace VisionALVR
             fgRateText.Text = settings.FrameGenRate == "uncapped" ? "uncapped (config): the game runs free, every frame sent is interpolated" : FgRateText[fgRate.Value];
             fgMv.Checked = settings.GameMotionVectors;
             fgAuto.Checked = settings.FrameGenAuto;
-            gamePacing.Checked = settings.GamePacingJit;
             fgEnable();
             fgRate.ValueChanged += (s, e) =>
             {
@@ -207,13 +204,6 @@ namespace VisionALVR
                 settings.Save();
                 fgEnable();
                 Log.Write("INFO", "frame generation auto rate " + (fgAuto.Checked ? "on" : "off"));
-            };
-            gamePacing.CheckedChanged += (s, e) =>
-            {
-                host.Send("game_pacing " + (gamePacing.Checked ? "jit" : "queue"));
-                settings.GamePacingJit = gamePacing.Checked;
-                settings.Save();
-                Log.Write("INFO", "game pacing " + (gamePacing.Checked ? "just-in-time" : "queue"));
             };
 
 
@@ -274,11 +264,27 @@ namespace VisionALVR
             knobs.Add(k);
         }
 
+        // The eye-height override exists for the Vision Pro, whose floor estimate is unreliable. A Quest (or any other headset) reports its
+        // floor height correctly, and the override only displaced the user (Valor Mortis, 2026-10-17): for those the knob is greyed out and
+        // the host is handed 0 = the headset's own floor; the saved value stays for the next Vision Pro session.
+        Knob heightKnob;
+        bool heightFromHeadset;
+        void HeightSource(string headsetName)
+        {
+            if (string.IsNullOrEmpty(headsetName)) return;
+            var fromHeadset = !headsetName.Contains("Apple");
+            if (fromHeadset == heightFromHeadset) return;
+            heightFromHeadset = fromHeadset;
+            heightKnob.Bar.Enabled = !fromHeadset;
+            tips.SetToolTip(heightKnob.Bar, fromHeadset ? $"{headsetName} reports its own floor height: the override is off for it." : "Your eye height above the floor, as games see it: about 1.30 m seated, 1.6-1.7 m standing; 0 = the headset's own floor estimate.");
+            SendDisplay();
+        }
+
         void SendDisplay()
         {
             string f(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
             host.Send("gamma " + f(settings.Gamma));
-            host.Send("height " + f(settings.Height));
+            host.Send("height " + f(heightFromHeadset ? 0 : settings.Height));
             host.Send($"color {f(settings.Brightness)} {f(settings.Contrast)} {f(settings.Saturation)} {f(settings.Sharpening)}");
         }
 
@@ -404,8 +410,12 @@ namespace VisionALVR
                     gameRunning = false;
                     game.Text = $"Game: none (last: {S(d, "exe")}, {F(D(d, "seconds") / 60, "0.0")} min)";
                     break;
+                case "client_connected":
+                    HeightSource(S(d, "name"));
+                    break;
                 case "status":
                     var c = d != null && d.TryGetValue("client", out var cc) ? cc as Dictionary<string, object> : null;
+                    if (d != null && d.TryGetValue("headset", out var ho) && ho is Dictionary<string, object> hd) HeightSource(S(hd, "name"));
                     if (d != null && d.ContainsKey("fg_rate") && S(d, "fg_on") == "True")
                     {
                         // the rate in force (the host moves it in auto mode) and the headroom readout: frame cost against the rate's budget
