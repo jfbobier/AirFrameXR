@@ -83,16 +83,19 @@ generation off (a game that holds the display rate is better without it: End of 
 
 Judged second by second over the last 5 s; a second in which the game delivers less than a quarter of the rendered frames the level expects
 (the shim's releases: a loading screen, a hitch) counts neither way, and a game start gets 15 s of grace: the headset night of 2026-10-16
-had three games stepped down by their own 2-4 s stalls and by their loading at game start, not by the rate.
+had three games stepped down by their own 2-4 s stalls and by their loading at game start, not by the rate; a 0.4 s hitch of Callisto at 1/2
+spread over 3 seconds, hence 4 of 5. With generation off the host's own sent count sees nothing wrong with a game at 91 fps (every frame
+streamed) while the headset repeats 14 % of its periods (End of Abyss, 399 s), so that level is judged on the headset's statistics.
 
 | condition | action |
 |---|---|
-| 3 of the last 5 s with repeats above 5 % of the outputs while the game delivers (at 2/3 also a frame cost 15 % over the budget: the content clock there turns a slow game into lag, not repeats) | step down (off -> 2/3 -> 1/2 -> 1/3); at 1/3 a line says there is nothing slower |
-| generation off and 3 of the last 4 s with more than 8 % of the display periods without a frame while frames flow | back to 2/3 |
-| every second quiet (repeats under 2 %, the game delivering) for the dwell (20 s at first) | **trial** of the next level (1/3 -> 1/2 -> 2/3 -> off); the verdict above brings it back if it does not hold |
+| 4 of the last 5 s with repeats above 5 % of the outputs while the game delivers (at 2/3 also a frame cost 15 % over the budget: the content clock there turns a slow game into lag, not repeats) | step down (off -> 2/3 -> 1/2 -> 1/3); at 1/3 a line says there is nothing slower |
+| generation off and 4 of the last 5 s with the headset repeating more than 8 % of its display periods (its own per-frame statistics; the host's sent count is the fallback) | back to 2/3 |
+| every second quiet (repeats under 2 %, the game delivering) for the dwell (20 s at first) | **trial** of the next level (1/3 -> 1/2 -> 2/3 -> off); while the trial is young (15 s) the verdict above is taken on 3 s, all failing, so a wrong level costs 3-4 s of repeats, not 6 |
 
 A failed trial doubles the dwell (40, 80 ... 320 s); the third failure **settles** the game at the level that held: no more trials, steps down
-only. Dwell and settled are remembered per game in `config/games.json` with the level ("off" included), the frame cost and whether vectors
+only. The failures are carried across sessions by the remembered dwell (headset 2026-10-16: Valor Mortis, Carma and The Darken each paid one
+failed 1/2 trial per session, 6 s of 12-23 % repeats, without ever settling; now the third one settles). Dwell and settled are remembered per game in `config/games.json` with the level ("off" included), the frame cost and whether vectors
 were found, keyed by the executable; written at every change and at game end; a known game starts at its remembered level (`auto_start`).
 Ticking Auto off and on re-arms the trials, and a rate chosen by hand brings generation back. While Auto has generation off the launcher's
 tick stays as the user set it and the line under the slider says so; generation comes back at game end so the next game starts as set.

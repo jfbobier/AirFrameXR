@@ -322,6 +322,15 @@ pub mod client_stats {
     /// Windows: 0 = encoder_stats (2 s), 1 = status (10 s), 2 = benchmark step.
     static WINDOWS: std::sync::Mutex<[Agg; 3]> = std::sync::Mutex::new([ZERO, ZERO, ZERO]);
     static PACKETS_LOST_TOTAL: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+    /// the headset's own count: frames it displayed, and display periods it had to repeat (a gap between displayed frames of more than
+    /// 1.5 periods = that many periods without a new frame); cumulative, for the automatic level's verdict on "generation off"
+    static CLIENT_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static CLIENT_MISSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    /// (frames the headset displayed, display periods it repeated) so far
+    pub fn client_frames_missed() -> (u64, u64) {
+        (CLIENT_FRAMES.load(std::sync::atomic::Ordering::Relaxed), CLIENT_MISSED.load(std::sync::atomic::Ordering::Relaxed))
+    }
     static LAST_SUMMARY: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
 
     pub fn graph(g: &alvr_events::GraphStatistics) {
@@ -351,6 +360,14 @@ pub mod client_stats {
             a.server_fps += g.server_fps as f64;
             a.throughput_bps += g.throughput_bps as f64;
             a.bitrate_bps += g.bitrate_bps as f64;
+        }
+        if g.client_fps > 1.0 && g.client_fps < 500.0 {
+            let gap_s = 1.0 / g.client_fps as f64;
+            let period_s = crate::phase::period_ns() as f64 / 1e9;
+            CLIENT_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if gap_s > 1.5 * period_s {
+                CLIENT_MISSED.fetch_add(((gap_s / period_s).round() as u64).saturating_sub(1), std::sync::atomic::Ordering::Relaxed);
+            }
         }
     }
 

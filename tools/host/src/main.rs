@@ -1433,15 +1433,15 @@ impl AutoLevel {
 /// The automatic frame-generation level (docs/FRAME_GENERATION.md "Auto"): 1/3 <-> 1/2 <-> 2/3 <-> generation off, one step at a time.
 /// Down from what the stream shows, second by second: at a rate a second fails when repeats exceed 5 % of its outputs while the game
 /// delivers (at least a quarter of the rendered frames the rate expects: a game that stalls, loading or hitching, is not a rate that does
-/// not hold; headset night 2026-10-16: three games were stepped down by 2-4 s stalls and by their loading at game start); 3 failing
-/// seconds of the last 5 step down. At 2/3 a frame cost 15 % over the budget steps down too (the content clock there turns a slow game
-/// into lag rather than repeats). With generation off a second fails when more than 8 % of the display periods got no frame while frames
-/// did flow; 3 of the last 4 step back to 2/3. Up by trial: 5 quiet seconds (repeats under 2 %, the game delivering) for the dwell (20 s
-/// at first) get the next level tried, and the same verdict brings it back if it does not hold. The shim's frame cost cannot judge a
+/// not hold; headset night 2026-10-16: three games were stepped down by 2-4 s stalls and by their loading at game start). At 2/3 a frame cost 15 % over the budget steps down too (the content clock there turns a slow game
+/// into lag rather than repeats); 4 failing seconds of the last 5 step down (a 0.4 s hitch of the game spreads over 2-3 s and is not a
+/// rate that does not hold). With generation off a second fails when the headset repeated more than 8 % of its display periods (its own
+/// per-frame statistics: a game at 91 fps streams every frame and the headset still repeats 14 %); 4 of the last 5 step back to 2/3. Up by trial: 5 quiet seconds (repeats under 2 %, the game delivering) for the dwell (20 s
+/// at first) get the next level tried, and the same verdict, on 3 s with 2 failing while the trial is young, brings it back if it does not hold. The shim's frame cost cannot judge a
 /// faster rate (at 1/3 every game read 5-10 ms, the GPU tail of a frame submitted right after its release; the cost rule stepped up games
 /// that need 1/3), so the trial is the measurement. A failed trial doubles the dwell (40, 80 ... 320 s); the third failure settles the
-/// game at the level that held: no more trials, steps down only, remembered per game (games.json up_dwell_s, settled; ticking Auto off and
-/// on re-arms it). A game start gets 15 s of grace before any step down (its loading repeats are not the rate's).
+/// game at the level that held: no more trials, steps down only, remembered per game (games.json up_dwell_s carries the failures across
+/// sessions, settled; ticking Auto off and on re-arms it). A game start gets 15 s of grace before any step down (its loading repeats are not the rate's).
 struct AutoRate {
     last_switch: Instant,
     /// the quiet time a step down needs after the last switch or game start (5 s after a switch, 15 s after a game start)
@@ -1452,8 +1452,8 @@ struct AutoRate {
     reverts: u32,
     settled: bool,
     nothing_slower_logged: bool,
-    /// (time, synths + reals, repeats, frames sent, shim releases) samples, one per second, the last 6
-    window: std::collections::VecDeque<(Instant, u64, u64, u64, u64)>,
+    /// (time, synths + reals, repeats, frames sent, shim releases, headset frames displayed, headset periods repeated) samples, one per second, the last 6
+    window: std::collections::VecDeque<(Instant, u64, u64, u64, u64, u64, u64)>,
     last_eval: Instant,
 }
 
@@ -1465,21 +1465,29 @@ impl AutoRate {
     fn reset(&mut self, up_dwell_s: f64, settled: bool) {
         *self = AutoRate::new();
         self.up_dwell_s = up_dwell_s.clamp(20.0, 320.0);
+        // the failed trials so far are in the remembered dwell (doubled per failure): the third one settles the game, sessions included
+        self.reverts = (self.up_dwell_s / 20.0).log2().round() as u32;
         self.settled = settled;
     }
     /// One evaluation per second while a game runs: Some(next level) when a switch is due. Cumulative counts: `outputs` = synths + reals,
-    /// `repeats`, `sent` = frames sent to the headset (the one count that runs with generation off), `reals` = the shim's releases (one per rendered frame).
-    fn evaluate(&mut self, level: AutoLevel, period_s: f64, cost_p95_ms: f32, outputs: u64, repeats: u64, sent: u64, reals: u64, origin: Instant) -> Option<AutoLevel> {
+    /// `repeats`, `sent` = frames sent to the headset, `reals` = the shim's releases (one per rendered frame), `client` = (frames the headset
+    /// displayed, display periods it repeated): with generation off the headset's own count is the verdict (End of Abyss at 91 fps without
+    /// generation streamed every frame yet the headset repeated 14 % of its periods, the host's sent count saw nothing); the sent count is
+    /// the fallback for a client that reports no per-frame statistics.
+    fn evaluate(&mut self, level: AutoLevel, period_s: f64, cost_p95_ms: f32, outputs: u64, repeats: u64, sent: u64, reals: u64, client: (u64, u64), origin: Instant) -> Option<AutoLevel> {
         let now = Instant::now();
         if now.duration_since(self.last_eval) < Duration::from_secs(1) {
             return None;
         }
         self.last_eval = now;
-        self.window.push_back((now, outputs, repeats, sent, reals));
+        self.window.push_back((now, outputs, repeats, sent, reals, client.0, client.1));
         while self.window.len() > 6 {
             self.window.pop_front();
         }
-        let need = if level == AutoLevel::Off { 5 } else { 6 };
+        // a trial under way (the 15 s after a step up) is judged on 3 s, all failing: a wrong level costs the stream 3-4 s, not 6; otherwise
+        // 4 of the last 5 s (a game's 0.4 s hitch spreads over 2-3 s and must not read as a rate that does not hold: Callisto at 1/2)
+        let trial = self.last_up.map_or(false, |t| now.duration_since(t) < Duration::from_secs(15));
+        let need = if trial { 4 } else { 6 };
         if level == AutoLevel::Rate(FgRate::Uncapped) || self.window.len() < need {
             return None;
         }
@@ -1489,14 +1497,16 @@ impl AutoRate {
         // second by second: failing, quiet (fit for a trial), or stalled (the game not delivering: counts neither way)
         let (mut failing, mut quiet, mut stalled, mut share_sum, mut miss_sum) = (0u32, 0u32, 0u32, 0.0f64, 0.0f64);
         for w in self.window.iter().collect::<Vec<_>>().windows(2) {
-            let (t0, o0, r0, s0, f0) = *w[0];
-            let (t1, o1, r1, s1, f1) = *w[1];
+            let (t0, o0, r0, s0, f0, c0, m0) = *w[0];
+            let (t1, o1, r1, s1, f1, c1, m1) = *w[1];
             let dt = t1.duration_since(t0).as_secs_f64().max(0.5);
             let (d_out, d_rep, d_sent, d_real) = (o1.saturating_sub(o0), r1.saturating_sub(r0), s1.saturating_sub(s0), f1.saturating_sub(f0));
+            let (d_cf, d_cm) = (c1.saturating_sub(c0), m1.saturating_sub(m0));
             if level == AutoLevel::Off {
-                let missing = 1.0 - (d_sent as f64 / (dt / period_s)).min(1.0);
+                let periods = dt / period_s;
+                let (shown, missing) = if d_cf + d_cm > 0 { (d_cf + d_cm, d_cm as f64 / (d_cf + d_cm) as f64) } else { (d_sent, 1.0 - (d_sent as f64 / periods).min(1.0)) };
                 miss_sum += missing;
-                if (d_sent as f64) < 0.1 * dt / period_s { stalled += 1; } else if missing > 0.08 { failing += 1; } else { quiet += 1; }
+                if (shown as f64) < 0.1 * periods { stalled += 1; } else if missing > 0.08 { failing += 1; } else { quiet += 1; }
             } else {
                 let share = if d_out + d_rep > 0 { d_rep as f64 / (d_out + d_rep) as f64 } else { 0.0 };
                 share_sum += share;
@@ -1507,7 +1517,7 @@ impl AutoRate {
         let n = (self.window.len() - 1) as f64;
         let (repeat_share, missing_share) = (share_sum / n, miss_sum / n);
         let over_budget = level == AutoLevel::Rate(FgRate::TwoThirds) && cost_p95_ms > 0.0 && (cost_p95_ms as f64) > 1.15 * budget && stalled == 0;
-        let fails = if level == AutoLevel::Off { failing >= 3 } else { failing >= 3 || over_budget };
+        let fails = (failing >= if trial { 3 } else { 4 }) || (level != AutoLevel::Off && over_budget);
         if fails && since_switch >= self.hold_s {
             self.up_since = None;
             if let Some(next) = level.slower() {
@@ -1520,7 +1530,7 @@ impl AutoRate {
                         self.settled = true;
                     }
                 }
-                let why = if level == AutoLevel::Off { format!("{failing} of the last {n:.0} s with over 8 % of the display periods without a frame (mean {:.1} %)", missing_share * 100.0) }
+                let why = if level == AutoLevel::Off { format!("{failing} of the last {n:.0} s with the headset repeating over 8 % of its display periods (mean {:.1} %)", missing_share * 100.0) }
                     else if over_budget && failing < 3 { format!("over budget: frame cost p95 {cost_p95_ms:.1} ms of a {budget:.1} ms budget, repeats {:.1} %", repeat_share * 100.0) }
                     else { format!("{failing} of the last {n:.0} s with repeats over 5 % (mean {:.1} %), frame cost p95 {cost_p95_ms:.1} ms of a {budget:.1} ms budget", repeat_share * 100.0) };
                 let tail = if reverted && self.settled { format!("; the trial did not hold, settled at {} for this game: no more trials, steps down only", next.name()) }
@@ -1549,7 +1559,7 @@ impl AutoRate {
                         level.name(), next.name(), self.up_dwell_s, if next == AutoLevel::Off { "without generation, the game may hold the display rate" } else { "the next rate" }));
                     event(origin, "fg_auto", json!({ "from": level.name(), "to": next.name(), "why": "trial", "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": next.budget_ms(period_ms), "up_dwell_s": self.up_dwell_s, "reverts": self.reverts }));
                     self.last_switch = now;
-                    self.hold_s = 5.0;
+                    self.hold_s = 3.0;
                     self.last_up = Some(now);
                     self.up_since = None;
                     self.window.clear();
@@ -2576,7 +2586,7 @@ fn main() {
                             // the game's delivery = the shim's releases (one per rendered frame at every level; the 2/3 planner counts no "reals")
                             let (mut w, mut am, mut rel, mut lt, mut gh, mut gs) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
                             unsafe { nvh::nvh_ipc_shim_pacing(ipc, &mut w, &mut am, &mut rel, &mut lt, &mut gh, &mut gs) };
-                            if let Some(next) = auto_rate.evaluate(level, p.period().as_secs_f64(), c95, outputs, repeats, sent, rel, origin) {
+                            if let Some(next) = auto_rate.evaluate(level, p.period().as_secs_f64(), c95, outputs, repeats, sent, rel, logs::client_stats::client_frames_missed(), origin) {
                                 apply_auto_level(origin, p.as_ref(), &mut args, next, &mut fg_active, &mut auto_off, ipc, "auto");
                                 let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
                                 unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };

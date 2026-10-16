@@ -220,3 +220,32 @@ whole run, level loads included):
 - **Pose match by display time fails almost everywhere**: the shim's "no pose for display time" counter reads 850-900 of 900 frames at 1/3
   for every game and at 1/2 for all but Valor Mortis (131 and 0 of 900). Not 1/3-specific as first thought; the fallback (the newest of the
   tied poses) is in force nearly always. Open: what VDXR stamps as SensorSampleTime against what the shim records per pose.
+
+### Second Auto session the same night (21:54-22:25): manual 1/3 "felt smoother", End of Abyss at generation off
+
+User: manual 1/3 felt smoother than Auto on The Darken and Valor Mortis; End of Abyss "generates close to 90 fps", what did Auto decide.
+The phase table (client_frames.csv, split at every level change):
+
+| game, phase | duration | headset missed periods | client latency p50 ms |
+|---|---|---|---|
+| Valor Mortis 1/3 (Auto, after the trial) | 49 s | 2.0 % | 66.9 |
+| Valor Mortis 1/2 trial | 6 s | 1.7 % (host repeats 12.5 %) | 66.9 |
+| Valor Mortis 1/3 by hand | 127 s | 1.7 % | 66.9 |
+| The Darken 1/3 (Auto) | 46 + 68 s | 1.9 / 1.8 % | 67.0 |
+| The Darken 1/2 trials (two) | 6 s each | host repeats 18-23 % | 67.1 |
+| The Darken 1/3 by hand | 117 s | 1.9 % | 67.1 |
+| Callisto 1/2 trial | 27 s | 2.0 % | 57.1 |
+| End of Abyss 2/3 | 26 s | 3.7 % | 67.0 |
+| End of Abyss generation off (second trial, held) | 399 s | 14.0 % | 86.9 |
+
+- **Manual 1/3 and Auto at 1/3 are the same stream** (missed periods 1.7-2.0 %, same latency). What the user felt is the trials: each
+  one is 6 s of 12-23 % repeats, and Valor Mortis, Carma and The Darken each paid one or two per session without ever settling, because
+  the failed-trial count lived in the session while the doubled dwell was remembered. Now the dwell carries the count (the third failure
+  settles the game for good) and a young trial is judged on 3 s, so a wrong level costs 3-4 s.
+- **Callisto held 1/2 for 24 s** (frame interval p50 20.0 ms, repeats 0) and was stepped down by a 0.4 s hitch (frame interval max 407 ms)
+  that spread 63 repeats over 3 seconds: 3 of 5 failing. Hence 4 of 5 now.
+- **End of Abyss: Auto chose generation off and the headset says that was wrong.** The host streamed every rendered frame (91.3 fps) and
+  its own count saw no periods missing, but the headset repeated 14.0 % of its display periods for 399 s, with 87 ms of latency (a
+  free-running game queues at the client), against 3.7 % and 67 ms at 2/3. The off level is now judged on the headset's per-frame
+  statistics (frames displayed, periods repeated), which would have sent it back to 2/3 within 5 s. Whether 2/3 also *feels* better than
+  off there is the user's call; the numbers say so.

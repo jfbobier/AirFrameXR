@@ -59,6 +59,11 @@ pub fn configure(on: bool) {
     ENABLED.store(on && std::env::var("VISIONALVR_PHASE_LOCK").map(|v| v != "0").unwrap_or(true), Ordering::Relaxed);
 }
 
+/// the host's display period (ns) as the clock thread last set it
+pub fn period_ns() -> u64 {
+    PERIOD_NS.load(Ordering::Relaxed)
+}
+
 /// the host's display period (the clock thread, every tick)
 pub fn set_period_ns(ns: u64) {
     PERIOD_NS.store(ns.max(1_000_000), Ordering::Relaxed);
