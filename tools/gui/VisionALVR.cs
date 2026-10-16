@@ -28,6 +28,9 @@ namespace VisionALVR
         readonly Label game = Ui.Line("Game: none", Ui.Bold);
         readonly Label runtime = Ui.Line("");
         readonly Label stats = Ui.Line("Waiting for the first statistics (every 10 s)...");
+        // the Streaming box shows live numbers while a game runs and, once it has ended, the run's record and what will be proposed next time
+        readonly GroupBox statsBox = new GroupBox { Text = "Streaming (updated every 10 s)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
+        bool lastSession;
         // display controls: (label, min, max, default, settings getter/setter), values x100 on the track bars
         class Knob { public string Name; public TrackBar Bar; public Label Value; public double Def; public Func<double> Get; public Action<double> Set; }
         readonly List<Knob> knobs = new List<Knob>();
@@ -90,7 +93,7 @@ namespace VisionALVR
             body.Controls.Add(game);
             body.Controls.Add(runtime);
 
-            var box = new GroupBox { Text = "Streaming (updated every 10 s)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
+            var box = statsBox;
             stats.Font = new Font("Consolas", 9.5f);
             box.Controls.Add(stats);
             stats.Location = new Point(10, 22);
@@ -144,7 +147,7 @@ namespace VisionALVR
             lt.SetColumnSpan(fgRateText, 6);
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
             tips.SetToolTip(fgRecommend, "The slider is set from this game's recorded runs on this headset (config\\games.json): the fastest rate whose typical 10-second window repeated under 5 % of the headset's periods; a rate that filled its cap suggests the next one once. Untick to choose yourself.");
-            tips.SetToolTip(recenter, "Turn the tracking space so your current forward is forward and your position the origin (sent on its own at game start for headsets other than the Vision Pro, whose client does it itself).");
+            tips.SetToolTip(recenter, "Turn the tracking space so your current forward is forward and your position the origin (sent on its own at every game start).");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the VisionALVR-OptiScaler DLL is in the game folder (else optical flow).");
             live.Controls.Add(lt);
             body.Controls.Add(live);
@@ -302,7 +305,8 @@ namespace VisionALVR
                 if (best < 0) return null;
                 string[] names = { "1/3", "1/2", "2/3" };
                 var fps = D(bestRun, "rendered_fps"); var hz = D(bestRun, "display_hz");
-                var text = $"{names[best]}: last run {fps:0} fps, headset repeated {bestTyp * 100:0.0} % typical, {D(bestRun, "headset_repeated_p90") * 100:0.0} % in its heavy parts";
+                var low = D(bestRun, "rendered_fps_low");
+                var text = $"{names[best]}: last run {fps:0} fps{(low > 0 ? $", {low:0} in its slowest tenth" : "")}, headset repeated {bestTyp * 100:0.0} % typical, {D(bestRun, "headset_repeated_p90") * 100:0.0} % in its heavy parts";
                 if (bestTyp < 0.05 && best < 2 && hz > 0 && fps >= 0.95 * hz * LevelCap[best] && !runs.ContainsKey(Levels[best + 1]))
                     return (Levels[best + 1], $"{names[best + 1]} to try: {names[best]} was clean and filled its cap ({fps:0} fps)");
                 return (Levels[best], text);
@@ -472,16 +476,31 @@ namespace VisionALVR
                     game.Text = "Game: " + S(d, "exe");
                     gameRunning = true;
                     currentExe = S(d, "exe");
+                    lastSession = false;
+                    statsBox.Text = "Streaming (updated every 10 s)";
                     ApplyRecommendation(fgRecommend.Checked);
-                    if (headsetName.Length > 0 && !headsetName.Contains("Apple")) { host.Send("recenter"); Log.Write("INFO", "recenter at game start (" + headsetName + ")"); }
+                    host.Send("recenter");   // the player's forward at game start is forward, on every headset (the Vision Pro's own centring agrees)
+                    Log.Write("INFO", "recenter at game start");
                     break;
                 case "game_ended":
                     gameRunning = false;
                     game.Text = $"Game: none (last: {S(d, "exe")}, {F(D(d, "seconds") / 60, "0.0")} min)";
                     break;
                 case "game_run":
-                    // the streamer recorded the run: show what it will propose next time (the slider is not moved after the game)
-                    fgRateText.Text = $"Recorded: {S(d, "exe")} on {S(d, "headset")} at {S(d, "level")}, {D(d, "rendered_fps"):0} fps rendered, headset repeated {D(d, "headset_repeated_typ") * 100:0.0} % typical, {D(d, "headset_repeated_p90") * 100:0.0} % in its heavy parts";
+                    // the streamer recorded the run: the Streaming box turns into the run's record and what will be proposed next time
+                    // (no pop-up; the live numbers come back with the next game)
+                    {
+                        lastSession = true;
+                        statsBox.Text = "Streaming (last session stats)";
+                        string[] names = { "1/3", "1/2", "2/3" };
+                        var lvl = S(d, "level"); var li = Array.IndexOf(FgRates, lvl);
+                        var rec = Recommend(S(d, "exe"), S(d, "headset"));
+                        var ri = rec == null ? -1 : Array.IndexOf(FgRates, rec.Value.level);
+                        stats.Text =
+                            $"Game fps {F(D(d, "rendered_fps"), "0.0"),6} average, {F(D(d, "rendered_fps_low"), "0.0")} in its slowest tenth    streamed fps {F(D(d, "streamed_fps"), "0.0"),6}    {F(D(d, "seconds") / 60, "0.0")} min at {(li >= 0 ? names[li] : lvl)}\n" +
+                            $"Headset repeated periods {F(D(d, "headset_repeated_typ") * 100, "0.0")} % typical, {F(D(d, "headset_repeated_p90") * 100, "0.0")} % in its heavy parts   host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} %   skipped {F(D(d, "skipped") * 100, "0.0")} %\n" +
+                            $"Frame generation recommendation: {(rec == null ? "none yet" : (ri >= 0 ? names[ri] : rec.Value.level) + " next time (" + rec.Value.why + ")")}";
+                    }
                     break;
                 case "status":
                     var c = d != null && d.TryGetValue("client", out var cc) ? cc as Dictionary<string, object> : null;
@@ -492,7 +511,7 @@ namespace VisionALVR
                         var pos = Array.IndexOf(FgRates, S(d, "fg_rate"));
                         if (pos >= 0 && fgRate.Value != pos) { fgRateFromHost = true; fgRate.Value = pos; fgRateFromHost = false; }
                     }
-                    stats.Text =
+                    if (!lastSession) stats.Text =
                         $"Game fps {F(D(d, "app_fps"), "0.0"),6}    streamed fps {F(D(d, "stream_fps"), "0.0"),6}    headset shows {F(double.IsNaN(D(c, "displayed_fps")) ? D(c, "client_fps") : D(c, "displayed_fps"), "0.0"),6} fps\n" +
                         $"Bitrate  {F(D(d, "mbps"), "0"),5} Mbps   frames not streamed {S(d, "frames_not_streamed"),4}   packets lost {S(d, "packets_lost"),4}\n" +
                         $"Latency  total {F(D(c, "total_latency_ms"), "0.0"),5} ms = encode {F(D(c, "encode_ms"), "0.0")} + network {F(D(c, "network_ms"), "0.0")} + decode {F(D(c, "decode_ms"), "0.0")} + other";

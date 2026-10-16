@@ -87,19 +87,23 @@ concerned; the launcher owns the judgement.
 - **The host records.** At every game end (runs of 20 s or more) one entry in `config/games.json`, keyed by executable, then the headset's
   name, then the level (`third` | `half` | `two_thirds` | `off`): duration, display Hz, rendered and streamed fps, the headset's repeated
   display periods as the **median 10-second window** of the run (`headset_repeated_typ`, what the game is like most of the time) and its
-  90th percentile (`headset_repeated_p90`, the heavy parts), the host's repeat share, the skipped-boundary share, the run count. A level
+  90th percentile (`headset_repeated_p90`, the heavy parts), the rendered fps of the slowest tenth of the windows (`rendered_fps_low`), the
+  host's repeat share, the skipped-boundary share, the run count. A level
   changed during the run restarts the record from that moment, so a record belongs to one level. Log line `game run recorded:` and event
   `game_run`. The host decides nothing.
-- **The launcher proposes.** The "Recommended" tick (`video.frame_gen_recommended`, on by default) reads games.json when a game starts on
-  the connected headset: the fastest level whose last run was clean (typical window under 5 % repeated, run of 30 s or more) is set on the
+- **The launcher proposes.** A game is only known once it streams, so the proposal is applied at game start (the first second runs at the
+  slider's level, the record restarts at the switch); the slider is the default for a game without a record, and the user's choice with the
+  tick off. The "Recommended" tick (`video.frame_gen_recommended`, on by default) reads games.json when a game starts on the connected headset: the fastest level whose last run was clean (typical window under 5 % repeated, run of 30 s or more) is set on the
   slider, which is greyed while the tick is on; if that run filled its cap (rendered at least 95 % of the level's fps) and the next level
   has no run yet, the next level is proposed once, and its run then speaks for itself. No clean level: the one with the fewest repeats.
   No run at all for the game on this headset: nothing is proposed and the slider stays live (1/2 on a fresh install). Unticked, the slider
   is yours at its current value. The proposal is made on the typical window, not the worst: hiccups are a fact of life in VR and a heavy
-  corridor must not cost the rest of the game a level (user, 2026-10-17).
+  corridor must not cost the rest of the game a level (user, 2026-10-17). No pop-up: when the game ends the launcher's "Streaming" box turns
+  into "Streaming (last session stats)" (average and slowest-tenth fps, repeated periods typical and heavy parts, host repeats, skipped) with
+  the line "Frame generation recommendation: ... next time"; the live numbers come back with the next game.
 - **Recenter.** A generic host command `recenter` turns the published tracking space so the head's forward at that moment is forward and
-  its position the origin (height as before). The launcher sends it at game start for a headset whose name is not Apple's (the Vision Pro
-  client sets its own forward at connection; the Quest passes the room's), and has a "Recenter" button for any headset.
+  its position the origin (height as before). The launcher sends it at every game start (verified on the Quest 3 with Valor Mortis and
+  Carma, 2026-10-17; the Vision Pro's own centring at connection agrees with it) and has a "Recenter" button.
 
 Lab for the rates (3080 Ti simrig, 2026-10-16, 40 s each, marker on the wall clock; `third`, `third_slow`, `third_mv`, `stutter_third`,
 `two_thirds`, `jitter_two_thirds`, `stutter_fg` as the half-rate regression):

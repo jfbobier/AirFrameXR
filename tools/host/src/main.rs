@@ -1370,7 +1370,7 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
 /// launcher reads the file and proposes. A run shorter than 20 s is not recorded. The headset's repeated-period share is given as the median
 /// 10-second window of the run (what the game is like most of the time) and its 90th percentile (its heavy parts): the proposal is made on the
 /// typical window, hiccups being a fact of life in VR (user, 2026-10-17).
-fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64)], skipped: f64) {
+fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64, f64)], skipped: f64) {
     let pct = |v: &mut Vec<f64>, q: f64| -> f64 {
         if v.is_empty() { return 0.0; }
         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1378,8 +1378,10 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
     };
     let mut c: Vec<f64> = windows.iter().map(|w| w.0).collect();
     let mut h: Vec<f64> = windows.iter().map(|w| w.1).collect();
+    let mut f: Vec<f64> = windows.iter().map(|w| w.2).collect();
     let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let mut rec = json!({ "seconds": secs, "display_hz": hz, "rendered_fps": rendered_fps, "streamed_fps": streamed_fps,
+    // rendered_fps_low: the slowest tenth of the run's 10-second windows (its heavy parts), next to the run's average
+    let mut rec = json!({ "seconds": secs, "display_hz": hz, "rendered_fps": rendered_fps, "rendered_fps_low": if f.is_empty() { rendered_fps } else { pct(&mut f, 0.1) }, "streamed_fps": streamed_fps,
         "headset_repeated_typ": pct(&mut c, 0.5), "headset_repeated_p90": pct(&mut c, 0.9), "host_repeats_typ": pct(&mut h, 0.5),
         "skipped": skipped, "windows": windows.len(), "updated": unix });
     let path = args.config_dir.join("games.json");
@@ -1391,8 +1393,8 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
         let _ = std::fs::create_dir_all(args.config_dir.as_path());
         let _ = std::fs::write(&path, t);
     }
-    logs::general("INFO", &format!("game run recorded: {exe} on {headset} at {level}, {secs:.0} s, {rendered_fps:.1} fps rendered, {streamed_fps:.1} streamed, headset repeated {:.1} % typical / {:.1} % worst (run {runs})",
-        rec["headset_repeated_typ"].as_f64().unwrap_or(0.0) * 100.0, rec["headset_repeated_p90"].as_f64().unwrap_or(0.0) * 100.0));
+    logs::general("INFO", &format!("game run recorded: {exe} on {headset} at {level}, {secs:.0} s, {rendered_fps:.1} fps rendered (slowest tenth {:.1}), {streamed_fps:.1} streamed, headset repeated {:.1} % typical / {:.1} % worst (run {runs})",
+        rec["rendered_fps_low"].as_f64().unwrap_or(0.0), rec["headset_repeated_typ"].as_f64().unwrap_or(0.0) * 100.0, rec["headset_repeated_p90"].as_f64().unwrap_or(0.0) * 100.0));
     rec["exe"] = json!(exe);
     rec["headset"] = json!(headset);
     rec["level"] = json!(level);
@@ -2223,7 +2225,7 @@ fn main() {
     };
     let mut game: Option<GameRun> = None;
     // the run record (games.json): one (headset repeated share, host repeat share) sample per status tick (10 s) while a game runs
-    let mut run_windows: Vec<(f64, f64)> = Vec::new();
+    let mut run_windows: Vec<(f64, f64, f64)> = Vec::new();
     let mut run_client0 = (0u64, 0u64);
     let mut run_rep0 = (0u64, 0u64);
     // scripted input (--auto-input): index of the next event to fire and the release instant of a pressed one
@@ -2237,7 +2239,7 @@ fn main() {
         a.wrapping_add(b)
     };
     // the level changed during a run (the launcher, or the user): the record restarts here, a record belongs to one level
-    let restart_segment = |game: &mut Option<GameRun>, pipeline: &Option<std::sync::Arc<pipeline::Pipeline>>, ipc: *mut std::ffi::c_void, windows: &mut Vec<(f64, f64)>, client0: &mut (u64, u64), rep0: &mut (u64, u64)| {
+    let restart_segment = |game: &mut Option<GameRun>, pipeline: &Option<std::sync::Arc<pipeline::Pipeline>>, ipc: *mut std::ffi::c_void, windows: &mut Vec<(f64, f64, f64)>, client0: &mut (u64, u64), rep0: &mut (u64, u64)| {
         if let Some(g) = game.as_mut() {
             let (s, o) = fg_counts(pipeline);
             g.seg_start = Instant::now();
@@ -2423,7 +2425,7 @@ fn main() {
                 let (d_r, d_o) = (rep.saturating_sub(run_rep0.0), out.saturating_sub(run_rep0.1));
                 run_rep0 = (rep, out);
                 if d_f + d_m > 0 {
-                    run_windows.push((d_m as f64 / (d_f + d_m) as f64, if d_o + d_r > 0 { d_r as f64 / (d_o + d_r) as f64 } else { 0.0 }));
+                    run_windows.push((d_m as f64 / (d_f + d_m) as f64, if d_o + d_r > 0 { d_r as f64 / (d_o + d_r) as f64 } else { 0.0 }, rendered as f64 / secs));
                 }
             }
             if fg_active {
