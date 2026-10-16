@@ -140,7 +140,7 @@ nothing), so `gpu_unc` / `gpu_unc_queue` / `gpu` / `gpu_queue` drive the probe w
 | just in time | 16.2 / 21.4 ms = 1.2 game periods | 22.6 ms | 45.8 ms | 71 | 4497 of 4673 releases, 12 ms each |
 
 Same frame rate, one game period less in the queue, 12-13 ms less content lag at 13 ms frames (it scales with the frame time: Carma's
-25 ms frames would give back about 25 ms). Generation off, the same app: 25.0 ms (queue) against the just-in-time figure in the run log.
+25 ms frames would give back about 25 ms). Generation off, the same app: 25.0 ms (queue) against 15.0 ms (just in time), 80 fps either way.
 `third_mv_nopredict` against `third_mv` for item 4. The full scenario suite is the regression gate (2026-10-16: every verdict equal or
 better than before with items 1-3 in, flow skipped on 100 % of vector outputs). Headset check: the shim pacing line's holds and `app cpu` / `gpu` numbers, the
 `frame generation perf` line's in-flight proxy, and the feel against the 2026-10-15/16 recordings.
