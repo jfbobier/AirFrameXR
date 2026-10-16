@@ -381,7 +381,7 @@ pub struct Pipeline {
     pub fg_no_sample: AtomicU64,
     /// boundaries stamped with a tracking sample predicted one period past the newest one (no fresh sample arrived in time; see `fg_pick_sample`)
     pub fg_predicted: AtomicU64,
-    fg_predict: bool,
+    fg_predict: AtomicBool,
     /// rendered frames never shown: still due when the next one was encoded (an encoder overrun; `on_boundary` otherwise keeps the arrival
     /// waiting): the boundary gets the synthetic frame between the two newest instead, so the motion never stalls
     pub fg_dropped: AtomicU64,
@@ -487,9 +487,7 @@ impl Pipeline {
             fg_holds: AtomicU64::new(0),
             fg_no_sample: AtomicU64::new(0),
             fg_predicted: AtomicU64::new(0),
-            // opt-in (VISIONALVR_FG_PREDICT_SAMPLE=1): the lab's viewer matches poses by exact timestamp and cannot judge a predicted one, and the
-            // Quest client's lookup for an unsent timestamp is unverified; the Vision Pro resolves any timestamp. Default: the drop rule.
-            fg_predict: std::env::var("VISIONALVR_FG_PREDICT_SAMPLE").map(|v| v == "1").unwrap_or(false),
+            fg_predict: AtomicBool::new(false),   // set_fg_predict (settings video.frame_gen_predict_sample, live command frame_gen_predict)
             fg_dropped: AtomicU64::new(0),
             fg_pairs_skipped: AtomicU64::new(0),
             fg_real_due: AtomicBool::new(false),
@@ -521,6 +519,11 @@ impl Pipeline {
         if !on {
             self.fg_have_frame.store(false, Ordering::Relaxed);
         }
+    }
+
+    /// Predicted tracking sample on a miss (see `fg_predict_sample`): off = the drop rule. Live.
+    pub fn set_fg_predict(&self, on: bool) {
+        self.fg_predict.store(on, Ordering::Relaxed);
     }
 
     /// Frame generation rate (`FgRate`): the fixed patterns (third, half) or the content-clock planner (two thirds, uncapped).
@@ -677,7 +680,7 @@ impl Pipeline {
     /// stale pose relabelled (the 2026-10-13 tremble). Opt-in with VISIONALVR_FG_PREDICT_SAMPLE=1: the lab's viewer matches poses by exact
     /// timestamp (it reported one period of head motion as error under a turn), and the Quest client's lookup is unverified.
     fn fg_predict_sample(&self) -> Option<(Duration, [f32; 4])> {
-        if !self.fg_predict {
+        if !self.fg_predict.load(Ordering::Relaxed) {
             return None;
         }
         let ring = self.shared.recent_samples.lock();

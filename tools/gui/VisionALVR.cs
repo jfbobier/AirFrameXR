@@ -42,6 +42,8 @@ namespace VisionALVR
         readonly TrackBar fgRate = new TrackBar { Minimum = 0, Maximum = 2, TickFrequency = 1, SmallChange = 1, LargeChange = 1, Width = 110, AutoSize = false, Height = 30, Margin = new Padding(0, 0, 0, 0) };
         readonly Label fgRateText = Ui.Line("");
         readonly CheckBox fgMv = new CheckBox { Text = "DLSS motion vectors", AutoSize = true, Margin = new Padding(14, 3, 0, 0) };
+        readonly CheckBox fgPredict = new CheckBox { Text = "Predicted sample", AutoSize = true, Margin = new Padding(10, 3, 0, 0) };
+        readonly CheckBox gamePacing = new CheckBox { Text = "Just-in-time pacing", AutoSize = true, Margin = new Padding(10, 3, 0, 0) };
         readonly Label footer = Ui.Line("", new Font("Segoe UI", 8.5f));
         string pairedName = "", pairedIp = "";
         bool closing;
@@ -125,6 +127,8 @@ namespace VisionALVR
             fgOpts.Controls.Add(fgRate);
             fgOpts.Controls.Add(new Label { Text = "2/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(2, 6, 0, 0) });
             fgOpts.Controls.Add(fgMv);
+            fgOpts.Controls.Add(fgPredict);
+            fgOpts.Controls.Add(gamePacing);
             lt.Controls.Add(fgOpts);
             lt.SetColumnSpan(fgOpts, 6);
             fgRateText.Margin = new Padding(44, 0, 0, 4);
@@ -133,6 +137,8 @@ namespace VisionALVR
             lt.SetColumnSpan(fgRateText, 6);
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the VisionALVR-OptiScaler DLL is in the game folder (else optical flow).");
+            tips.SetToolTip(fgPredict, "A frame boundary with no fresh tracking sample is stamped with a predicted pose instead of being skipped (test: off by default).");
+            tips.SetToolTip(gamePacing, "The game's next frame starts when its frame on the GPU is about to finish (one frame in flight); off = the queue throttle (two).");
             live.Controls.Add(lt);
             body.Controls.Add(live);
 
@@ -159,7 +165,7 @@ namespace VisionALVR
                 settings.Save();
             };
             frameGen.Checked = settings.FrameGen;
-            Action fgEnable = () => { fgRate.Enabled = fgMv.Enabled = frameGen.Checked; };
+            Action fgEnable = () => { fgRate.Enabled = fgMv.Enabled = fgPredict.Enabled = frameGen.Checked; };
             frameGen.CheckedChanged += (s, e) =>
             {
                 host.Send("frame_gen " + (frameGen.Checked ? "on" : "off"));   // the running streamer switches at the next boundary; the setting is read at start too
@@ -173,6 +179,8 @@ namespace VisionALVR
             fgRate.Value = savedRate >= 0 ? savedRate : (settings.FrameGenRate == "uncapped" ? 2 : 1);
             fgRateText.Text = settings.FrameGenRate == "uncapped" ? "uncapped (config): the game runs free, every frame sent is interpolated" : FgRateText[fgRate.Value];
             fgMv.Checked = settings.GameMotionVectors;
+            fgPredict.Checked = settings.FrameGenPredictSample;
+            gamePacing.Checked = settings.GamePacingJit;
             fgEnable();
             fgRate.ValueChanged += (s, e) =>
             {
@@ -190,6 +198,20 @@ namespace VisionALVR
                 settings.GameMotionVectors = fgMv.Checked;
                 settings.Save();
                 Log.Write("INFO", "game motion vectors " + (fgMv.Checked ? "on" : "off"));
+            };
+            fgPredict.CheckedChanged += (s, e) =>
+            {
+                host.Send("frame_gen_predict " + (fgPredict.Checked ? "on" : "off"));
+                settings.FrameGenPredictSample = fgPredict.Checked;
+                settings.Save();
+                Log.Write("INFO", "frame generation predicted sample " + (fgPredict.Checked ? "on" : "off"));
+            };
+            gamePacing.CheckedChanged += (s, e) =>
+            {
+                host.Send("game_pacing " + (gamePacing.Checked ? "jit" : "queue"));
+                settings.GamePacingJit = gamePacing.Checked;
+                settings.Save();
+                Log.Write("INFO", "game pacing " + (gamePacing.Checked ? "just-in-time" : "queue"));
             };
 
 

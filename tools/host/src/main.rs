@@ -78,6 +78,9 @@ struct Args {
     /// minus the app's CPU time: one frame in flight, the Reflex idea), false = the queue throttle alone. Settings `video.game_pacing`
     /// "jit" | "queue", `--game-pacing`, env VISIONALVR_GAME_PACING.
     game_pacing_jit: bool,
+    /// frame generation: a boundary without a fresh tracking sample is stamped with a predicted one instead of being skipped (default off).
+    /// Settings `video.frame_gen_predict_sample`, `--frame-gen-predict on|off`, env VISIONALVR_FG_PREDICT_SAMPLE=1.
+    fg_predict: bool,
     /// frame generation (docs/FRAME_GENERATION.md): the game is paced at half the display rate and the host interpolates the frame in
     /// between from the optical flow of the last two rendered frames. None = settings file (`video.frame_gen`, default off); env
     /// VISIONALVR_FRAME_GEN=1/0 and `--frame-gen on|off` win over it.
@@ -178,6 +181,7 @@ fn parse_args() -> Result<Args, String> {
         boundary_offset_ms: 0.0,
         gpu_sched_class: 5,
         game_pacing_jit: true,
+        fg_predict: false,
         frame_gen: None,
         game_motion_vectors: true,
         fg_rate: None,
@@ -316,6 +320,7 @@ fn parse_args() -> Result<Args, String> {
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
             "--game-pacing" => a.game_pacing_jit = match v()?.to_ascii_lowercase().as_str() { "jit" => true, "queue" => false, _ => return Err("--game-pacing jit|queue".into()) },
+            "--frame-gen-predict" => a.fg_predict = parse_on_off("--frame-gen-predict", &v()?)?,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
             "--frame-gen-lag-ms" => a.fg_lag_ms = Some(v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.0, 100.0)),
@@ -389,6 +394,9 @@ fn parse_args() -> Result<Args, String> {
     }
     if let Ok(v) = std::env::var("VISIONALVR_GAME_PACING") {
         a.game_pacing_jit = !v.eq_ignore_ascii_case("queue");
+    }
+    if let Ok(v) = std::env::var("VISIONALVR_FG_PREDICT_SAMPLE") {
+        a.fg_predict = v == "1";
     }
     if a.fg_lag_ms.is_none() {
         a.fg_lag_ms = std::env::var("VISIONALVR_FG_LAG_MS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 100.0));
@@ -503,6 +511,11 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if std::env::var("VISIONALVR_GAME_PACING").is_err() {
         if let Some(v) = st.game_pacing.as_deref() {
             a.game_pacing_jit = !v.eq_ignore_ascii_case("queue");
+        }
+    }
+    if std::env::var("VISIONALVR_FG_PREDICT_SAMPLE").is_err() {
+        if let Some(v) = st.frame_gen_predict_sample {
+            a.fg_predict = v;
         }
     }
     if a.fg_lag_ms.is_none() {
@@ -1366,11 +1379,12 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
     let rate = args.fg_rate.unwrap_or(FgRate::Half).name();
     let cap = args.fg_cap_fps.unwrap_or(0.0);
     let lag = args.fg_lag_ms.unwrap_or(0.0);
-    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms",
+    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms, predicted sample {}, game pacing {}",
         if fg_active { "ON" } else { "off" }, if args.game_motion_vectors { "on" } else { "off" }, if cap > 0.0 { format!("{cap:.0}") } else { "none".into() },
-        if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }));
+        if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }, if args.fg_predict { "on" } else { "off" }, if args.game_pacing_jit { "jit" } else { "queue" }));
     event(origin, "frame_gen_config", json!({ "why": why, "on": fg_active, "rate": rate, "game_motion_vectors": args.game_motion_vectors,
-        "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf }));
+        "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf, "predict_sample": args.fg_predict,
+        "game_pacing": if args.game_pacing_jit { "jit" } else { "queue" } }));
 }
 
 /// Creates the generator on the encoder (after nvh_create, the stream's frame size being known): true when it runs; false (logged) when the
@@ -1751,6 +1765,7 @@ fn main() {
             p.set_frame_gen(fg_active);
         }
         p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half), args.fg_lag_ms.unwrap_or(0.0));
+        p.set_fg_predict(args.fg_predict);
         apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
         unsafe { nvh::nvh_ipc_set_game_mv(ipc, if args.game_motion_vectors { 1 } else { 0 }) };
         unsafe { nvh::nvh_ipc_set_app_pacing(ipc, args.game_pacing_jit as u32) };
@@ -2199,6 +2214,20 @@ fn main() {
                 }
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_rate");
+            }
+            let pr = vision::FG_PREDICT_REQ.swap(-1, Ordering::SeqCst);
+            if pr >= 0 {
+                args.fg_predict = pr == 1;
+                if let Some(p) = pipeline.as_ref() {
+                    p.set_fg_predict(args.fg_predict);
+                }
+                log_fg_config(origin, &args, fg_active, "frame_gen_predict");
+            }
+            let gp = vision::GAME_PACING_REQ.swap(-1, Ordering::SeqCst);
+            if gp >= 0 {
+                args.game_pacing_jit = gp == 1;
+                unsafe { nvh::nvh_ipc_set_app_pacing(ipc, args.game_pacing_jit as u32) };
+                log_fg_config(origin, &args, fg_active, "game_pacing");
             }
             let mv = vision::GAME_MV_REQ.swap(-1, Ordering::SeqCst);
             if mv >= 0 {
