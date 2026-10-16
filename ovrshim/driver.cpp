@@ -1448,14 +1448,13 @@ namespace {
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
                             "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x, "
-                            "period mul %u, fps cap %.1f (holds %llu), app cpu %.1f ms, gpu %.1f ms/frame",
+                            "period mul %u, fps cap %.1f (holds %llu)",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
                             (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
-                            m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds,
-                            m_cpuTimeS.load() * 1000.0, m_gpuDurS.load() * 1000.0);
+                            m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds);
                     if (m_ngx.Attached()) {
                         ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, %llu sources not copied, tap %s", m_ngx.ActiveStreams(),
                                 (unsigned long long)m_ngx.Publications(), (unsigned long long)m_ngx.CopyFailures(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)");
@@ -1503,14 +1502,6 @@ namespace {
                     pf.motion = motion;
                     pf.displayS = displayS;
                     pf.tapSeq = m_ngx.HarvestSeq();
-                    {
-                        // the app's CPU time for this frame (release -> submit), envelope with a fast attack and a slow decay (0.1 ms per frame)
-                        const double cpu = composeStart - releaseS;
-                        if (cpu > 0 && cpu < 0.1) {
-                            const double est = std::max(cpu, m_cpuTimeS.load() - 0.0001);
-                            m_cpuTimeS = std::min(std::max(est, 0.0005), 0.05);
-                        }
-                    }
                     m_publishQueue.push_back(pf);
                     lock.unlock();
                     m_publishCv.notify_all();
@@ -1593,18 +1584,6 @@ namespace {
                 est = std::min(std::max(est, 0.001), 0.1);
                 m_appTimeS = est;
                 s.appFrameMs = (float)(est * 1000.0);
-                // the frame cost distribution (release -> GPU done) for the headroom readout and the automatic rate (ipc frameCostP50Ms/P95Ms)
-                m_costRing[m_costN++ % m_costRing.size()] = (float)(sample * 1000.0);
-                if (m_costN % 32 == 0) {
-                    const size_t n = std::min<size_t>(m_costN, m_costRing.size());
-                    std::vector<float> v(m_costRing.begin(), m_costRing.begin() + n);
-                    std::nth_element(v.begin(), v.begin() + n / 2, v.end());
-                    s.frameCostP50Ms = v[n / 2];
-                    std::nth_element(v.begin(), v.begin() + (n * 95) / 100, v.end());
-                    s.frameCostP95Ms = v[(n * 95) / 100];
-                    s.appCpuMs = (float)(m_cpuTimeS.load() * 1000.0);
-                    s.appGpuMs = (float)(m_gpuDurS.load() * 1000.0);
-                }
             }
             m_lastPublishedSlot = slot;
             s.slotBusyWaits = (uint32_t)m_slotBusyWaits.load();
@@ -1700,19 +1679,7 @@ namespace {
                         }
                         // same 50 ms cap as the spin wait: a hung GPU must not stall the stream forever
                         WaitForSingleObject(m_gpuDone[f.slot], 50);
-                        {
-                            // the GPU finished this frame: its time per frame when the GPU was busy since the previous one (what the just-in-time
-                            // release predicts with), and the tap may free copies retired before this frame's harvest
-                            const double doneS = QpcSeconds();
-                            const double prev = m_lastGpuDoneS.load();
-                            const double dur = doneS - std::max(prev, f.composeStart);
-                            if (prev > 0 && dur > 0 && dur < 0.2) {
-                                const double old = m_gpuDurS.load();
-                                m_gpuDurS = old > 0 ? old * 0.8 + dur * 0.2 : dur;
-                            }
-                            m_lastGpuDoneS = doneS;
-                            m_ngx.GpuDone(f.tapSeq);
-                        }
+                        m_ngx.GpuDone(f.tapSeq);   // the GPU finished this frame: the tap may free copies retired before its harvest
                         PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr, f.renderQ, f.hasProjection, f.motion, f.displayS);
                         {
                             std::unique_lock lock(m_publishMutex);
@@ -2592,12 +2559,6 @@ namespace {
             m_releaseQueue.pop_front();
             return r;
         }
-        // the app's CPU time envelope (release -> submit), the EMA of its GPU time per frame (from the GPU-done events, saturated GPU) and
-        // the last GPU completion: the frame cost readout (ipc appCpuMs / appGpuMs). The just-in-time release that used them to hold the
-        // app was removed 2026-10-17: virtualdesktop-openxr calls WaitToBeginFrame right before the submit, so it never had anything to hold.
-        std::atomic<double> m_cpuTimeS{0.0}, m_gpuDurS{0.0}, m_lastGpuDoneS{0.0};
-        std::array<float, 256> m_costRing{};   // release -> GPU done per frame (ms), the last 256 frames
-        uint64_t m_costN{0};
         uint64_t m_capHolds{0};                    // releases the fps cap (ipc appMinPeriodUs) pushed past their boundary
         std::atomic<double> m_appTimeS{0.004};     // envelope of release -> frame GPU-complete (published), seconds
         long long m_lastTargetBoundary{0};         // boundary (tick index) the last release aimed at: one release per boundary

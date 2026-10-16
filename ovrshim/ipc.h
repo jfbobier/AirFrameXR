@@ -14,7 +14,7 @@
 namespace visionalvr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 30;
+constexpr uint32_t kVersion = 31;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -172,10 +172,6 @@ struct ShimToHost {
     uint64_t releasesLate;         // releases whose computed time was already past (app slower than a display period: free-running)
     uint64_t gateHolds;            // releases the intake gate skipped for a standing host queue (see HostToShim::intakeGate)
     uint64_t gateSuppressed;       // standing queue seen while the gate was quiet after a skip (its effect still in flight)
-    // The game's frame cost (release -> GPU done, ms) over the last ~250 frames, and the pacing's CPU / GPU estimates: the headroom readout
-    // and the automatic rate (host main.rs auto_rate) read these; with the just-in-time release they are the game's true cost per frame.
-    float frameCostP50Ms, frameCostP95Ms;
-    float appCpuMs, appGpuMs;
     // Game motion vectors (HostToShim::gameMotionVectors): tap state and the per-slot publications (written with the frame fields).
     uint32_t motionTap;            // 0 no provider in the game, 1 attached, 2 provider found with another ABI version, 3 attach failed
     uint32_t motionStreams;        // DLSS streams seen in the last two seconds

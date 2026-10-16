@@ -182,8 +182,8 @@ namespace VisionALVR
         public string FrameGenRate { get => Json.Str(Root, "video.frame_gen_rate", "half"); set => Json.Set(Root, "video.frame_gen_rate", value); }
         // the game's DLSS motion vectors drive the synthesis when the VisionALVR-OptiScaler provider is loaded in the game (docs/MOTION_VECTORS.md)
         public bool GameMotionVectors { get => Json.Bool(Root, "video.game_motion_vectors", true); set => Json.Set(Root, "video.game_motion_vectors", value); }
-        // docs/FRAME_GENERATION.md "Auto": the automatic level (off by default)
-        public bool FrameGenAuto { get => Json.Bool(Root, "video.frame_gen_auto", false); set => Json.Set(Root, "video.frame_gen_auto", value); }
+        // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
+        public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", true); set => Json.Set(Root, "video.frame_gen_recommended", value); }
         public bool Debug { get => Json.Bool(Root, "debug", true); set => Json.Set(Root, "debug", value); }
         /// display (live in VisionALVR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral
         public const double DefaultGamma = 1.2;

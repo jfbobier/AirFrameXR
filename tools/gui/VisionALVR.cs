@@ -42,8 +42,14 @@ namespace VisionALVR
         readonly TrackBar fgRate = new TrackBar { Minimum = 0, Maximum = 2, TickFrequency = 1, SmallChange = 1, LargeChange = 1, Width = 110, AutoSize = false, Height = 30, Margin = new Padding(0, 0, 0, 0) };
         readonly Label fgRateText = Ui.Line("");
         readonly CheckBox fgMv = new CheckBox { Text = "DLSS motion vectors", AutoSize = true, Margin = new Padding(14, 3, 0, 0) };
-        readonly CheckBox fgAuto = new CheckBox { Text = "Auto", AutoSize = true, Margin = new Padding(8, 3, 0, 0) };
-        bool fgRateFromHost;   // the slider follows the host's rate in auto mode: no command back
+        readonly CheckBox fgRecommend = new CheckBox { Text = "Recommended", AutoSize = true, Margin = new Padding(8, 3, 0, 0) };
+        readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(14, 0, 0, 0) };
+        bool fgRateFromHost;   // the slider follows the host's rate: no command back
+        // Game profiles (config\games.json, written by the streamer at every game end: per game, headset and level the last run's numbers). The
+        // launcher proposes a level from them when "Recommended" is ticked: the slider is set and greyed; unticked, the slider is yours again.
+        // No run recorded for the game on this headset: nothing proposed, the slider stays live. The streamer itself decides nothing.
+        string currentExe = "", headsetName = "";
+        bool recommendationApplied;
         readonly Label footer = Ui.Line("", new Font("Segoe UI", 8.5f));
         string pairedName = "", pairedIp = "";
         bool closing;
@@ -127,8 +133,9 @@ namespace VisionALVR
             fgOpts.Controls.Add(new Label { Text = "1/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(0, 6, 2, 0) });
             fgOpts.Controls.Add(fgRate);
             fgOpts.Controls.Add(new Label { Text = "2/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(2, 6, 0, 0) });
-            fgOpts.Controls.Add(fgAuto);
+            fgOpts.Controls.Add(fgRecommend);
             fgOpts.Controls.Add(fgMv);
+            fgOpts.Controls.Add(recenter);
             lt.Controls.Add(fgOpts);
             lt.SetColumnSpan(fgOpts, 6);
             fgRateText.Margin = new Padding(44, 0, 0, 4);
@@ -136,7 +143,8 @@ namespace VisionALVR
             lt.Controls.Add(fgRateText);
             lt.SetColumnSpan(fgRateText, 6);
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
-            tips.SetToolTip(fgAuto, "The streamer picks the level (1/3, 1/2, 2/3 or generation off): down when the stream repeats frames, up by trying the next level after a quiet spell; three failed trials settle the game. Remembered per game; the slider follows.");
+            tips.SetToolTip(fgRecommend, "The slider is set from this game's recorded runs on this headset (config\\games.json): the fastest rate whose typical 10-second window repeated under 5 % of the headset's periods; a rate that filled its cap suggests the next one once. Untick to choose yourself.");
+            tips.SetToolTip(recenter, "Turn the tracking space so your current forward is forward and your position the origin (sent on its own at game start for headsets other than the Vision Pro, whose client does it itself).");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the VisionALVR-OptiScaler DLL is in the game folder (else optical flow).");
             live.Controls.Add(lt);
             body.Controls.Add(live);
@@ -164,7 +172,8 @@ namespace VisionALVR
                 settings.Save();
             };
             frameGen.Checked = settings.FrameGen;
-            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !fgAuto.Checked; fgAuto.Enabled = fgMv.Enabled = frameGen.Checked; };
+            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = fgMv.Enabled = frameGen.Checked; };
+            fgEnableAll = fgEnable;
             frameGen.CheckedChanged += (s, e) =>
             {
                 host.Send("frame_gen " + (frameGen.Checked ? "on" : "off"));   // the running streamer switches at the next boundary; the setting is read at start too
@@ -178,7 +187,7 @@ namespace VisionALVR
             fgRate.Value = savedRate >= 0 ? savedRate : (settings.FrameGenRate == "uncapped" ? 2 : 1);
             fgRateText.Text = settings.FrameGenRate == "uncapped" ? "uncapped (config): the game runs free, every frame sent is interpolated" : FgRateText[fgRate.Value];
             fgMv.Checked = settings.GameMotionVectors;
-            fgAuto.Checked = settings.FrameGenAuto;
+            fgRecommend.Checked = settings.FrameGenRecommended;
             fgEnable();
             fgRate.ValueChanged += (s, e) =>
             {
@@ -197,14 +206,14 @@ namespace VisionALVR
                 settings.Save();
                 Log.Write("INFO", "game motion vectors " + (fgMv.Checked ? "on" : "off"));
             };
-            fgAuto.CheckedChanged += (s, e) =>
+            fgRecommend.CheckedChanged += (s, e) =>
             {
-                host.Send("frame_gen_auto " + (fgAuto.Checked ? "on" : "off"));
-                settings.FrameGenAuto = fgAuto.Checked;
+                settings.FrameGenRecommended = fgRecommend.Checked;
                 settings.Save();
-                fgEnable();
-                Log.Write("INFO", "frame generation auto rate " + (fgAuto.Checked ? "on" : "off"));
+                Log.Write("INFO", "recommended rate " + (fgRecommend.Checked ? "on" : "off"));
+                ApplyRecommendation(fgRecommend.Checked);
             };
+            recenter.Click += (s, e) => { host.Send("recenter"); Log.Write("INFO", "recenter"); };
 
 
             host.OnEvent += (name, data) => BeginInvoke((Action)(() => HostEvent(name, data)));
@@ -269,9 +278,65 @@ namespace VisionALVR
         // the host is handed 0 = the headset's own floor; the saved value stays for the next Vision Pro session.
         Knob heightKnob;
         bool heightFromHeadset;
+        Action fgEnableAll;
+
+        // The proposal from config\games.json for the running game on the connected headset (null = no run recorded). Levels in order; a level
+        // counts when its last run lasted 30 s or more; "clean" = the typical 10-second window repeated under 5 % of the headset's periods.
+        // The fastest clean level is proposed; if that run rendered at least 95 % of the level's fps cap (the game was held back) and the next
+        // level has no run yet, the next level is proposed once. No clean level: the one with the fewest repeats.
+        static readonly string[] Levels = { "third", "half", "two_thirds" };
+        static readonly double[] LevelCap = { 1.0 / 3, 0.5, 2.0 / 3 };
+        (string level, string why)? Recommend(string exe, string hs)
+        {
+            try
+            {
+                var all = Json.Load(Path.Combine(Paths.Config, "games.json"));
+                if (!(all.TryGetValue(exe, out var g) && g is Dictionary<string, object> gd && gd.TryGetValue(hs, out var h) && h is Dictionary<string, object> runs)) return null;
+                int best = -1; double bestTyp = 1.0; Dictionary<string, object> bestRun = null;
+                for (int i = 0; i < Levels.Length; i++)
+                {
+                    if (!(runs.TryGetValue(Levels[i], out var ro) && ro is Dictionary<string, object> run) || D(run, "seconds") < 30) continue;
+                    var typ = D(run, "headset_repeated_typ");
+                    if (typ < 0.05 || best < 0 || typ < bestTyp) { if (typ < 0.05 || best < 0 || bestTyp >= 0.05) { best = i; bestTyp = typ; bestRun = run; } }
+                }
+                if (best < 0) return null;
+                string[] names = { "1/3", "1/2", "2/3" };
+                var fps = D(bestRun, "rendered_fps"); var hz = D(bestRun, "display_hz");
+                var text = $"{names[best]}: last run {fps:0} fps, headset repeated {bestTyp * 100:0.0} % typical, {D(bestRun, "headset_repeated_p90") * 100:0.0} % in its heavy parts";
+                if (bestTyp < 0.05 && best < 2 && hz > 0 && fps >= 0.95 * hz * LevelCap[best] && !runs.ContainsKey(Levels[best + 1]))
+                    return (Levels[best + 1], $"{names[best + 1]} to try: {names[best]} was clean and filled its cap ({fps:0} fps)");
+                return (Levels[best], text);
+            }
+            catch { return null; }
+        }
+
+        void ApplyRecommendation(bool apply)
+        {
+            recommendationApplied = false;
+            if (currentExe.Length == 0 || headsetName.Length == 0) { fgEnableAll?.Invoke(); return; }
+            var rec = Recommend(currentExe, headsetName);
+            if (rec == null)
+            {
+                fgRateText.Text = $"No run recorded yet for {currentExe} on {headsetName}: the slider is yours; the run is recorded when the game ends.";
+            }
+            else if (apply)
+            {
+                var pos = Array.IndexOf(FgRates, rec.Value.level);
+                if (pos >= 0 && fgRate.Value != pos) fgRate.Value = pos;   // sends frame_gen_rate and saves, like a hand move
+                recommendationApplied = true;
+                fgRateText.Text = $"Recommended for {currentExe} on {headsetName}: {rec.Value.why}";
+            }
+            else
+            {
+                fgRateText.Text = $"Recorded for {currentExe} on {headsetName}: {rec.Value.why} (untick Recommended keeps the slider yours)";
+            }
+            fgEnableAll?.Invoke();
+        }
+
         void HeightSource(string headsetName)
         {
             if (string.IsNullOrEmpty(headsetName)) return;
+            this.headsetName = headsetName;
             var fromHeadset = !headsetName.Contains("Apple");
             if (fromHeadset == heightFromHeadset) return;
             heightFromHeadset = fromHeadset;
@@ -406,33 +471,26 @@ namespace VisionALVR
                 case "game_started":
                     game.Text = "Game: " + S(d, "exe");
                     gameRunning = true;
+                    currentExe = S(d, "exe");
+                    ApplyRecommendation(fgRecommend.Checked);
+                    if (headsetName.Length > 0 && !headsetName.Contains("Apple")) { host.Send("recenter"); Log.Write("INFO", "recenter at game start (" + headsetName + ")"); }
                     break;
                 case "game_ended":
                     gameRunning = false;
                     game.Text = $"Game: none (last: {S(d, "exe")}, {F(D(d, "seconds") / 60, "0.0")} min)";
+                    break;
+                case "game_run":
+                    // the streamer recorded the run: show what it will propose next time (the slider is not moved after the game)
+                    fgRateText.Text = $"Recorded: {S(d, "exe")} on {S(d, "headset")} at {S(d, "level")}, {D(d, "rendered_fps"):0} fps rendered, headset repeated {D(d, "headset_repeated_typ") * 100:0.0} % typical, {D(d, "headset_repeated_p90") * 100:0.0} % in its heavy parts";
                     break;
                 case "status":
                     var c = d != null && d.TryGetValue("client", out var cc) ? cc as Dictionary<string, object> : null;
                     if (d != null && d.TryGetValue("headset", out var ho) && ho is Dictionary<string, object> hd) HeightSource(S(hd, "name"));
                     if (d != null && d.ContainsKey("fg_rate") && S(d, "fg_on") == "True")
                     {
-                        // the rate in force (the host moves it in auto mode) and the headroom readout: frame cost against the rate's budget
-                        var rateName = S(d, "fg_rate");
-                        var pos = Array.IndexOf(FgRates, rateName);
+                        // the rate in force (the slider follows the streamer, e.g. a rate set in the config file)
+                        var pos = Array.IndexOf(FgRates, S(d, "fg_rate"));
                         if (pos >= 0 && fgRate.Value != pos) { fgRateFromHost = true; fgRate.Value = pos; fgRateFromHost = false; }
-                        double cost = D(d, "frame_cost_p95_ms"), budget = D(d, "budget_ms");
-                        if (cost > 0 && budget > 0)
-                        {
-                            string[] names = { "1/3", "1/2", "2/3" };
-                            var label = pos >= 0 ? names[pos] : rateName;
-                            // no "would fit" hint: the cost cannot judge a faster rate (at 1/3 it reads the GPU tail only); Auto tries instead
-                            var fit = cost > budget ? "; over budget (repeats)" : "";
-                            fgRateText.Text = $"{(S(d, "fg_auto") == "True" ? "Auto: " : "")}{label} in force; game frame {cost:0.0} ms (p95) of a {budget:0.0} ms budget, headroom {budget - cost:0.0} ms{fit}";
-                        }
-                    }
-                    else if (d != null && S(d, "fg_auto_off") == "True")
-                    {
-                        fgRateText.Text = "Auto: generation off in force (the game holds the display rate); back to 2/3 if frames go missing";
                     }
                     stats.Text =
                         $"Game fps {F(D(d, "app_fps"), "0.0"),6}    streamed fps {F(D(d, "stream_fps"), "0.0"),6}    headset shows {F(double.IsNaN(D(c, "displayed_fps")) ? D(c, "client_fps") : D(c, "displayed_fps"), "0.0"),6} fps\n" +

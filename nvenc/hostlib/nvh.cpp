@@ -686,10 +686,6 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
 
 void nvh_ipc_set_game_mv(void* i, uint32_t on) { ((Ipc*)i)->state->host.gameMotionVectors = on ? 1u : 0u; }
 void nvh_ipc_set_app_min_period(void* i, uint32_t us) { ((Ipc*)i)->state->host.appMinPeriodUs = us; }
-void nvh_ipc_frame_cost(void* i, float* p50, float* p95, float* cpu, float* gpu) {
-    const auto& s = ((Ipc*)i)->state->shim;
-    *p50 = s.frameCostP50Ms; *p95 = s.frameCostP95Ms; *cpu = s.appCpuMs; *gpu = s.appGpuMs;
-}
 void nvh_fg_use_mv(void* hh, int on) { auto* n = (Nvh*)hh; if (n && n->fg) n->fg->SetUseVectors(on != 0); }
 
 void nvh_ipc_motion_tap(void* i, uint32_t* tap, uint32_t* streams, uint64_t* publications) {

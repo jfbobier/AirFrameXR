@@ -76,43 +76,30 @@ render queue (2 to 3 frames when GPU-bound) sets the content lag, and that the u
 stays available from the config and the command line, with `video.frame_gen_cap_fps` and `video.frame_gen_lag_ms`, for experiments.
 Choosing: the 10-second `frame generation perf` line reports the game's `app fps`; pick the largest fraction the game sustains with margin.
 
-### Auto (branch fg-performance, 2026-10-16): the level by trial, judged by what the stream shows
+### Game profiles (2026-10-17): the engine records, the launcher proposes
 
-The "Auto" tick (`video.frame_gen_auto`, live `frame_gen_auto on|off`, off by default) lets the host pick the **level**: 1/3, 1/2, 2/3 or
-generation off (a game that holds the display rate is better without it: End of Abyss on the 5090). One step at a time:
+The in-engine controller ("Auto": a level ladder with trials, a settle rule, an off level, a per-game memory) was removed on 2026-10-17 after
+two headset nights. It worked where the stream's verdict was clean, but every trial was a visible hiccup, its memory was keyed by executable
+only (the Vision Pro's verdicts polluted the Quest's, half the pixels), and the "off" level it was built to reach lost to 2/3 on both
+headsets (the plain path repeats 9-14 % of the display periods at display rate). The level is now **fixed per run** as far as the engine is
+concerned; the launcher owns the judgement.
 
-Judged second by second over the last 5 s; a second in which the game delivers less than a quarter of the rendered frames the level expects
-(the shim's releases: a loading screen, a hitch) counts neither way, and a game start gets 15 s of grace: the headset night of 2026-10-16
-had three games stepped down by their own 2-4 s stalls and by their loading at game start, not by the rate; a 0.4 s hitch of Callisto at 1/2
-spread over 3 seconds, hence 4 of 5. With generation off the host's own sent count sees nothing wrong with a game at 91 fps (every frame
-streamed) while the headset repeats 14 % of its periods (End of Abyss, 399 s), so that level is judged on the headset's statistics.
-
-| condition | action |
-|---|---|
-| 4 of the last 5 s with repeats above 5 % of the outputs while the game delivers (at 2/3 also a frame cost 15 % over the budget: the content clock there turns a slow game into lag, not repeats) | step down (off -> 2/3 -> 1/2 -> 1/3); at 1/3 a line says there is nothing slower |
-| generation off and 4 of the last 5 s with the headset repeating more than 8 % of its display periods (its own per-frame statistics; the host's sent count is the fallback) | back to 2/3 |
-| every second quiet (repeats under 2 %, the game delivering) for the dwell (20 s at first); for off, the game also filling the 2/3 cap (93 % of 66.7 fps) every second | **trial** of the next level (1/3 -> 1/2 -> 2/3 -> off); while the trial is young (15 s) the verdict above is taken on 3 s, all failing, so a wrong level costs 3-4 s of repeats, not 6 |
-
-A failed trial doubles the dwell (40, 80 ... 320 s); the third failure **settles** the game at the level that held: no more trials, steps down
-only. The failures are carried across sessions by the remembered dwell (headset 2026-10-16: Valor Mortis, Carma and The Darken each paid one
-failed 1/2 trial per session, 6 s of 12-23 % repeats, without ever settling; now the third one settles). Dwell and settled are remembered per game in `config/games.json` with the level ("off" included), the frame cost and whether vectors
-were found, keyed by the executable; written at every change and at game end; a known game starts at its remembered level (`auto_start`).
-Ticking Auto off and on re-arms the trials, and a rate chosen by hand brings generation back. While Auto has generation off the launcher's
-tick stays as the user set it and the line under the slider says so; generation comes back at game end so the next game starts as set.
-Every decision is a log line (`frame generation auto: third -> half (no repeats for 20 s, frame cost p95 8.1 ms: trying the next rate; back
-if it does not hold)`, `... half -> third (3 of the last 5 s with repeats over 5 % (mean 10.7 %) ...; the trial did not hold, next one after
-40 s without repeats)`), an `fg_auto` event (with `failing_s` and `stalled_s`) and a `frame generation config (auto)` line.
-
-Why trials and not the frame cost (the first design, 2026-10-16 afternoon: "decide from what the shim measures, never by trying"): the headset
-night of 2026-10-16 showed the cost cannot judge a faster rate. At 1/3 every UEVR game read a p95 cost of 5-10 ms with "cpu 0.5 ms" (the frame
-is submitted right after its release, so release -> GPU done is the tail of GPU work already queued), and the cost rule stepped Valor Mortis
-and Carma up to 1/2, which they do not hold (repeats 10.7 % within 5 s, back to 1/3). At 1/2 the same games read 41-47 ms (two frame intervals:
-the queue), with generation off 14-22 ms of CPU. The cost stays as a readout (the line under the slider, the 10-second `frame generation
-headroom` log line) and as the 2/3 step-down signal; the launcher no longer prints "1/2 would fit" from it.
-
-Lab: `auto_light` (2 ms CPU, 4 GPU copies, from 1/3): trials to 1/2, 2/3 and off over the first 60 s, then held. `auto_burst` (cost 24 / 2 ms
-alternating every 30 s, from 1/2) and `auto_ramp` (cost 12 -> 24 -> 12 ms over 40 s) as before: the step down is unchanged, the step up is the
-trial after the dwell.
+- **The host records.** At every game end (runs of 20 s or more) one entry in `config/games.json`, keyed by executable, then the headset's
+  name, then the level (`third` | `half` | `two_thirds` | `off`): duration, display Hz, rendered and streamed fps, the headset's repeated
+  display periods as the **median 10-second window** of the run (`headset_repeated_typ`, what the game is like most of the time) and its
+  90th percentile (`headset_repeated_p90`, the heavy parts), the host's repeat share, the skipped-boundary share, the run count. A level
+  changed during the run restarts the record from that moment, so a record belongs to one level. Log line `game run recorded:` and event
+  `game_run`. The host decides nothing.
+- **The launcher proposes.** The "Recommended" tick (`video.frame_gen_recommended`, on by default) reads games.json when a game starts on
+  the connected headset: the fastest level whose last run was clean (typical window under 5 % repeated, run of 30 s or more) is set on the
+  slider, which is greyed while the tick is on; if that run filled its cap (rendered at least 95 % of the level's fps) and the next level
+  has no run yet, the next level is proposed once, and its run then speaks for itself. No clean level: the one with the fewest repeats.
+  No run at all for the game on this headset: nothing is proposed and the slider stays live (1/2 on a fresh install). Unticked, the slider
+  is yours at its current value. The proposal is made on the typical window, not the worst: hiccups are a fact of life in VR and a heavy
+  corridor must not cost the rest of the game a level (user, 2026-10-17).
+- **Recenter.** A generic host command `recenter` turns the published tracking space so the head's forward at that moment is forward and
+  its position the origin (height as before). The launcher sends it at game start for a headset whose name is not Apple's (the Vision Pro
+  client sets its own forward at connection; the Quest passes the room's), and has a "Recenter" button for any headset.
 
 Lab for the rates (3080 Ti simrig, 2026-10-16, 40 s each, marker on the wall clock; `third`, `third_slow`, `third_mv`, `stutter_third`,
 `two_thirds`, `jitter_two_thirds`, `stutter_fg` as the half-rate regression):

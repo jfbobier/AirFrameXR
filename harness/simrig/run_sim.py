@@ -87,18 +87,6 @@ SCENARIOS = {
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "note": "GPU-bound ~50 fps app, uncapped generation"},
     "gpu":         {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "50", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "note": "the GPU-bound app with generation off: the latency reference without generation"},
-    # the automatic rate: a GPU-bound app whose cost ramps 1x -> 2x -> 1x over 40 s (XR_PROBE_LOAD ramp:40, copies 30 -> 60 = 8 -> 16 ms GPU on the
-    # 3080 Ti) under Auto starting at 1/2: expect a step down at the peak and a step up after it, logged as "frame generation auto:" lines
-    "auto_ramp":   {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "ramp:40", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "45", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "half", "ENV:VISIONALVR_FG_AUTO": "1", "note": "GPU cost ramping 12 -> 24 -> 12 ms over 40 s, automatic rate from 1/2 (run 90 s or more)"},
-    # the whole ladder: a light app (2 ms CPU, little GPU) under Auto from 1/3: trials to 1/2 (20 s), 2/3 (40 s), then generation off (60 s) and
-    # held there (the probe holds the display rate); expect three "frame generation auto:" trial lines and none back (run 100 s)
-    "auto_light":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "4", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "ENV:VISIONALVR_FG_AUTO": "1", "note": "light app, automatic level from 1/3: trials up to generation off, which holds (run 100 s)"},
-    # the back-off: a GPU cost alternating 24 ms / 2 ms every 30 s (burst:30:30, 90 copies) under Auto: down at +5 s, up at +50 s (20 s dwell), down again at
-    # +65 s doubles the dwell to 40 s, which the 30 s quiet half no longer meets: the controller settles at 1/3 instead of switching every half minute
-    "auto_burst":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "burst:30:30", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "90", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "half", "ENV:VISIONALVR_FG_AUTO": "1", "note": "GPU cost 24 ms / 2 ms alternating every 30 s, automatic rate from 1/2: the back-off should stop the switching (run 180 s)"},
     "third_slow":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.12", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "the 1/3 rate with the marker at half speed: the planner's test; at full speed the 5 px marker moves 14 px per 30 ms game step, past the flow's 8 px blocks (the thin-mover limit, not the planner)"},
     "third_mv":    {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",

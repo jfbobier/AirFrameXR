@@ -311,3 +311,15 @@ on an inference. The Quest findings of that night are void; the headset needs a 
 its artifacts. Separately, the eye-height override (made for the Vision Pro's unreliable floor estimate) displaced the user in Valor Mortis
 on the Quest, which reports its floor correctly: the launcher now greys the knob out and hands the host 0 (the headset's floor) for any
 headset that is not an Apple one; the saved value stays for the Vision Pro.
+
+## 2026-10-17: the Auto controller removed, game profiles in the launcher, the frame cost gone
+
+Quest 3 session on the corrected build (logs/debug/20261017-003318): the display-rate guard held (`client tracking cadence 270.1 Hz is
+none of the headset's refresh rates`), the stream stayed at 86-89 fps. Auto still lost to the user's hand: Valor Mortis started "at third,
+settled" from the Vision Pro's memory and never tried 1/2, which it holds on the Quest (39 fps by hand); Carma's inherited 80 s dwell outlived
+the run; Dead Space reached "off" and the Quest repeated 10 % of its periods there, as the Vision Pro had on End of Abyss. Decision (user):
+the engine does not change the level during a run, ever; it records one honest line per run (games.json: headset, level, fps, the headset's
+repeated share as the median and 90th-percentile 10-second window) and the launcher proposes from the records ("Recommended" tick, greyed
+slider, nothing proposed without a record). The shim's frame-cost readout (release to GPU done, CPU / GPU envelopes, IPC fields, headroom
+line, launcher text) is gone with it (IPC v31): it never measured a capability. Recenter: a generic host command, sent by the launcher at
+game start for non-Apple headsets (Valor Mortis started facing the room's forward on the Quest).
