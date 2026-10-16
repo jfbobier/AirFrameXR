@@ -169,3 +169,54 @@ frame N+1's release) is the wrong release; the cost read 2 ms at 1/3 and Auto st
 the frames in order. For a pipelined engine the cost (release to GPU done) is then about two of its frame intervals, which is its real
 latency; Auto's step up compares it with the next budget and will not fire for such engines (conservative), the step down on repeats is
 unaffected.
+
+## Headset night 2026-10-16, later: the fix verified, the just-in-time A/B, the frame cost at 1/3, Auto by trial
+
+Session 20:38-21:11 on the 5090 + Vision Pro after the user changed the Wi-Fi channel (the 17:43 session had also suffered an exceptional
+neighbour's interference, confirmed with stock ALVR; the analysis above stands, its mechanism was in the counters). User verdict on f2ec33a:
+"yesterday's performance was restored or enhanced"; Valor Mortis and Carma need 1/3 to be smooth; just-in-time pacing a modest plus.
+Per run (`logs/debug/20261016-203858`, `-205821`; client_frames.csv, first 8 s skipped; latency = the client's total; repeats over the
+whole run, level loads included):
+
+| run | game / stream fps | missed display periods | repeats per 100 outputs | client latency p50 / p95 ms |
+|---|---|---|---|---|
+| Valor Mortis 1/2, just-in-time | 43.1 / 98.1 | 2.7 % | 15 | 57.1 / 67.1 |
+| Valor Mortis 1/2, queue | 42.6 / 97.7 | 2.7 % | 17 | 66.6 / 67.2 |
+| Valor Mortis 1/3, just-in-time | 32.8 / 99.4 | 1.2 % | 7 | 67.0 / 77.1 |
+| Valor Mortis 1/3, queue | 33.3 / 99.1 | 2.2 % | 5 | 67.0 / 67.2 |
+| Carma 1/3, just-in-time (Auto) | 31.8 / 98.7 | 2.1 % | 9 | 67.0 / 77.0 |
+| Dead Space, Auto 1/3 -> 1/2 -> 2/3 | 49.4 / 99.4 | 1.2 % | 0 | 67.0 / 67.2 |
+| Lies of P, Auto 1/3 -> 1/2 -> 2/3 -> 1/2 | 53.2 / 98.9 | 1.4 % | 4 | 67.0 / 77.1 |
+| Callisto Protocol, generation off | 69.2 / 69.2 | 31 % | - | 86.9 / 97.0 |
+| Valor Mortis, generation off | 39.1 / 39.1 | 52 % | - | 87.1 / 97.1 |
+
+- **The tracking-sample rule works.** Boundaries skipped for want of a sample: 0.6-2.4 % per game (80 of 3 400 at Valor Mortis 1/2)
+  against 7-14 % in the 17:43 session, with the same bunched tracking (p95 14-18 ms, 7-25 of 200 gaps over 15 ms). The stream runs
+  above the display rate (94-99 fps of 90) because a delayed output and the next boundary's own go out together: the client shows one.
+- **Just-in-time pacing**: at 1/2 the client latency is one display period lower (p50 57 against 67 ms) at the same fps and the same
+  missed periods; at 1/3 no gain (both 67, the p95 one period higher with it). The shim's line reports holds 0 in both UE runs, so the
+  gain at 1/2 is not from the hold itself (open; the release lands differently relative to the submit, see the cost readings below).
+- **The frame cost cannot judge a faster rate.** At 1/3 every game read p95 5-10 ms with "app cpu 0.5 ms" (the envelope's floor: the
+  frame is composed within 0.5 ms of the release it is matched with, so release -> GPU done is the tail of GPU work already queued, 4-9
+  ms), at 1/2 with queue pacing 41-47 ms (cpu 22-27, gpu 17-19: two frame intervals, the standing queue), with generation off 14-22 ms
+  of CPU. Which release a UEVR game's frame belongs to depends on the rate and the pacing mode (xrWaitFrame right before xrEndFrame is
+  the likely order; unverified, a per-frame trace would tell). Consequence tonight: Auto stepped Valor Mortis and Carma 1/3 -> 1/2 on
+  "cost 7 ms under 80 % of 20 ms" and back 5 s later on repeats 10.7 %; Mortal Shell 2 and Lies of P reached 2/3 and came back to 1/2;
+  Dead Space held 2/3 (49 fps). End of Abyss reached 1/2 in 27 s before the user quit; it renders near 90 fps without generation, where
+  generation off is the right level: not a level Auto had.
+- **Three step downs were the game's stalls, not the rate's** (user: "for some games like Callisto Protocol the gain is hard to see").
+  Callisto held 1/2 (frame interval p50 20.0 ms, p95 21.5 against the 22 ms cap, repeats 0-1 per 2 s for 24 s) and was sent back to 1/3
+  by a 4 s stall in which the shim released 6 then 0 frames per 2 s (184 and 75 repeats): a hitch of the game, read as 5.8 % repeats
+  over 5 s. Lies of P at 2/3 the same (releases 38, 0, 0 per 2 s; 136, 200, 54 repeats). And every game that started at a remembered
+  1/2 (End of Abyss, Lies of P, Callisto) was stepped down within 5 s by its loading burst (58-111 repeats while the shim's release
+  counter had just reset). Valor Mortis and Carma at 1/2 were genuine: 16-43 repeats in every 2 s window with the game delivering 82-87
+  frames, frame interval p50 23-26 ms against the 22 ms cap. So Callisto sat at 1/3, rendering 30 fps where it can render 69: little to
+  gain over no generation. Fix in the controller: a step down needs 3 of the last 5 seconds with repeats over 5 % while the game
+  delivers at least a quarter of the frames the level expects (shim releases); seconds in which it does not count neither way; 15 s of
+  grace after a game start. Each false step down had also counted as a failed trial, doubling the dwell.
+- **Auto redesigned (this commit): the trial is the measurement.** Levels 1/3, 1/2, 2/3, off; down on what the stream shows (repeats;
+  with generation off, display periods without a frame); up by trying the next level after a dwell with no repeats, back within 5 s if
+  it does not hold; a failed trial doubles the dwell, the third settles the game (remembered). docs/FRAME_GENERATION.md "Auto".
+- **Pose match by display time fails almost everywhere**: the shim's "no pose for display time" counter reads 850-900 of 900 frames at 1/3
+  for every game and at 1/2 for all but Valor Mortis (131 and 0 of 900). Not 1/3-specific as first thought; the fallback (the newest of the
+  tied poses) is in force nearly always. Open: what VDXR stamps as SensorSampleTime against what the shim records per pose.

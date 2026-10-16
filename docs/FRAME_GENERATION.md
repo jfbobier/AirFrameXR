@@ -76,34 +76,40 @@ render queue (2 to 3 frames when GPU-bound) sets the content lag, and that the u
 stays available from the config and the command line, with `video.frame_gen_cap_fps` and `video.frame_gen_lag_ms`, for experiments.
 Choosing: the 10-second `frame generation perf` line reports the game's `app fps`; pick the largest fraction the game sustains with margin.
 
-### Auto (branch fg-performance, 2026-10-16): the rate from the game's measured frame cost
+### Auto (branch fg-performance, 2026-10-16): the level by trial, judged by what the stream shows
 
-The "Auto" tick (`video.frame_gen_auto`, live `frame_gen_auto on|off`, off by default) lets the host pick the rate. It decides from what the
-shim measures, never by trying rates: the game's **frame cost** (release -> GPU done per frame, p95 over the last ~250 frames, published by
-the shim as `frameCostP95Ms`; with the just-in-time release this is the game's true CPU + GPU time whatever the budget) against each rate's
-budget (1/3 = three display periods, 1/2 = two, 2/3 = one and a half), and the **repeat share** over the last 5 s. Rules, one step at a time:
+The "Auto" tick (`video.frame_gen_auto`, live `frame_gen_auto on|off`, off by default) lets the host pick the **level**: 1/3, 1/2, 2/3 or
+generation off (a game that holds the display rate is better without it: End of Abyss on the 5090). One step at a time:
+
+Judged second by second over the last 5 s; a second in which the game delivers less than a quarter of the rendered frames the level expects
+(the shim's releases: a loading screen, a hitch) counts neither way, and a game start gets 15 s of grace: the headset night of 2026-10-16
+had three games stepped down by their own 2-4 s stalls and by their loading at game start, not by the rate.
 
 | condition | action |
 |---|---|
-| repeats above 5 % of outputs for 5 s | step down (2/3 -> 1/2 -> 1/3); at 1/3 a line says there is nothing slower |
-| p95 cost under 80 % of the next faster budget (75 % for 2/3) for 20 s, repeats under 2 % | step up |
-| cost above 90 % of the budget with no repeats for 60 s | logged once as a resolution-scaling game: the budget is spent on pixels, a faster rate cannot be judged from the cost |
+| 3 of the last 5 s with repeats above 5 % of the outputs while the game delivers (at 2/3 also a frame cost 15 % over the budget: the content clock there turns a slow game into lag, not repeats) | step down (off -> 2/3 -> 1/2 -> 1/3); at 1/3 a line says there is nothing slower |
+| generation off and 3 of the last 4 s with more than 8 % of the display periods without a frame while frames flow | back to 2/3 |
+| every second quiet (repeats under 2 %, the game delivering) for the dwell (20 s at first) | **trial** of the next level (1/3 -> 1/2 -> 2/3 -> off); the verdict above brings it back if it does not hold |
 
-Never two switches within 20 s, and a **back-off**: a step up that has to be reverted within a minute doubles the dwell the next step up
-needs (20 -> 40 -> 80 s, 320 at most), per game and remembered, so a game whose cost swings around a budget settles at the slower rate
-instead of adjusting every half minute (the user's pacing concern; lab scenario `auto_burst`, cost 24 / 2 ms alternating every 30 s).
-At 2/3 the content-clock planner turns a slow game into lag rather than repeats, so the step down there triggers on the cost itself (15 %
-over the budget). With resolution scaling off in the game, as the user runs them, the frame cost is a true measure and the rules above are
-the whole story. Lab `auto_burst` (cost 24 / 2 ms alternating every 30 s, from 1/2): down at 13 s, up at 41 s, up to 2/3 at 63 s, back down
-at 68 s (over budget, dwell doubled to 40 s) and 73 s (repeats, dwell 80 s), then no switch for the remaining 140 s: settled at 1/3, the
-80 s dwell no longer met by the 30 s quiet half. `auto_ramp` (cost 12 -> 24 -> 12 ms over 40 s): one step down near the peak, one up after it, per cycle.
-Every decision is a log line `frame generation auto: 1/2 -> 1/3 (repeats 7.2 % over 5 s, frame cost p95 24.1 ms
-of a 20.0 ms budget)` and an `fg_auto` event, and a `frame generation config (auto)` line. **Per-game memory** `config/games.json`: the rate that
-held, the frame cost and whether vectors were found, keyed by the executable; written at every rate change (auto or by hand) and at game end;
-a known game starts at its remembered rate (`auto_start`). The launcher's slider follows the host and the line under it reads the **headroom**:
-`Auto: 1/3 in force; game frame 18.2 ms (p95) of a 30.0 ms budget, headroom 11.8 ms; 1/2 would fit` (also without Auto: the readout is for the
-human's judgement). The 10-second `frame generation headroom` log line carries the same with cpu / gpu split. Lab scenario `auto_ramp`: GPU
-cost ramping 12 -> 24 -> 12 ms over 40 s under Auto from 1/2.
+A failed trial doubles the dwell (40, 80 ... 320 s); the third failure **settles** the game at the level that held: no more trials, steps down
+only. Dwell and settled are remembered per game in `config/games.json` with the level ("off" included), the frame cost and whether vectors
+were found, keyed by the executable; written at every change and at game end; a known game starts at its remembered level (`auto_start`).
+Ticking Auto off and on re-arms the trials, and a rate chosen by hand brings generation back. While Auto has generation off the launcher's
+tick stays as the user set it and the line under the slider says so; generation comes back at game end so the next game starts as set.
+Every decision is a log line (`frame generation auto: third -> half (no repeats for 20 s, frame cost p95 8.1 ms: trying the next rate; back
+if it does not hold)`, `... half -> third (3 of the last 5 s with repeats over 5 % (mean 10.7 %) ...; the trial did not hold, next one after
+40 s without repeats)`), an `fg_auto` event (with `failing_s` and `stalled_s`) and a `frame generation config (auto)` line.
+
+Why trials and not the frame cost (the first design, 2026-10-16 afternoon: "decide from what the shim measures, never by trying"): the headset
+night of 2026-10-16 showed the cost cannot judge a faster rate. At 1/3 every UEVR game read a p95 cost of 5-10 ms with "cpu 0.5 ms" (the frame
+is submitted right after its release, so release -> GPU done is the tail of GPU work already queued), and the cost rule stepped Valor Mortis
+and Carma up to 1/2, which they do not hold (repeats 10.7 % within 5 s, back to 1/3). At 1/2 the same games read 41-47 ms (two frame intervals:
+the queue), with generation off 14-22 ms of CPU. The cost stays as a readout (the line under the slider, the 10-second `frame generation
+headroom` log line) and as the 2/3 step-down signal; the launcher no longer prints "1/2 would fit" from it.
+
+Lab: `auto_light` (2 ms CPU, 4 GPU copies, from 1/3): trials to 1/2, 2/3 and off over the first 60 s, then held. `auto_burst` (cost 24 / 2 ms
+alternating every 30 s, from 1/2) and `auto_ramp` (cost 12 -> 24 -> 12 ms over 40 s) as before: the step down is unchanged, the step up is the
+trial after the dwell.
 
 Lab for the rates (3080 Ti simrig, 2026-10-16, 40 s each, marker on the wall clock; `third`, `third_slow`, `third_mv`, `stutter_third`,
 `two_thirds`, `jitter_two_thirds`, `stutter_fg` as the half-rate regression):
@@ -164,8 +170,8 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
   on the 5090 at the foveated size: flow 2.3 ms, synthesis 0.13 ms.
 - Interpolation only (t = 0.5): `--frame-gen-t` exists for experiments; extrapolation (t > 1) would remove the added period at the cost of
   disocclusion artefacts.
-- Always half rate when on, by design: no automatic engagement (the user's call: a game holding a steady 70-75 fps is often better left at full
-  rate; the checkbox in the streamer window switches live).
+- Rates 1/3, 1/2, 2/3 and an Auto level that includes generation off (2026-10-16): a game holding a steady 70-75 fps is often better left at
+  full rate; the checkbox and the Auto tick in the streamer window switch live.
 - Quad/cylinder layers are composed into the frame by the shim before the generator sees them, so HUD quads are interpolated like the
   scene (OFXR-Bridge copies them verbatim instead).
 - The flow runs on gamma-encoded colour at 50 %; `frame_gen_flow_scale` and `frame_gen_perf` (fast | medium | slow) are the two knobs.

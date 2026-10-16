@@ -98,6 +98,10 @@ SCENARIOS = {
     # 3080 Ti) under Auto starting at 1/2: expect a step down at the peak and a step up after it, logged as "frame generation auto:" lines
     "auto_ramp":   {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "ramp:40", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "45", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "half", "ENV:VISIONALVR_FG_AUTO": "1", "note": "GPU cost ramping 12 -> 24 -> 12 ms over 40 s, automatic rate from 1/2 (run 90 s or more)"},
+    # the whole ladder: a light app (2 ms CPU, little GPU) under Auto from 1/3: trials to 1/2 (20 s), 2/3 (40 s), then generation off (60 s) and
+    # held there (the probe holds the display rate); expect three "frame generation auto:" trial lines and none back (run 100 s)
+    "auto_light":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "4", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "ENV:VISIONALVR_FG_AUTO": "1", "note": "light app, automatic level from 1/3: trials up to generation off, which holds (run 100 s)"},
     # the back-off: a GPU cost alternating 24 ms / 2 ms every 30 s (burst:30:30, 90 copies) under Auto: down at +5 s, up at +50 s (20 s dwell), down again at
     # +65 s doubles the dwell to 40 s, which the 30 s quiet half no longer meets: the controller settles at 1/3 instead of switching every half minute
     "auto_burst":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "burst:30:30", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "90", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",

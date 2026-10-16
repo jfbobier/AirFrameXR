@@ -137,7 +137,7 @@ namespace VisionALVR
             lt.Controls.Add(fgRateText);
             lt.SetColumnSpan(fgRateText, 6);
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
-            tips.SetToolTip(fgAuto, "The streamer picks the rate from the game's measured frame cost and repeats (down fast, up slowly), remembers it per game; the slider follows.");
+            tips.SetToolTip(fgAuto, "The streamer picks the level (1/3, 1/2, 2/3 or generation off): down when the stream repeats frames, up by trying the next level after a quiet spell; three failed trials settle the game. Remembered per game; the slider follows.");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the VisionALVR-OptiScaler DLL is in the game folder (else optical flow).");
             tips.SetToolTip(gamePacing, "The game's next frame starts when its frame on the GPU is about to finish (one frame in flight); off = the queue throttle (two).");
             live.Controls.Add(lt);
@@ -417,12 +417,14 @@ namespace VisionALVR
                         {
                             string[] names = { "1/3", "1/2", "2/3" };
                             var label = pos >= 0 ? names[pos] : rateName;
-                            var fit = "";
-                            if (pos == 0 && cost < 0.8 * budget * 2 / 3) fit = "; 1/2 would fit";
-                            else if (pos == 1 && cost < 0.75 * budget * 0.75) fit = "; 2/3 would fit";
-                            else if (cost > budget) fit = "; over budget (repeats)";
+                            // no "would fit" hint: the cost cannot judge a faster rate (at 1/3 it reads the GPU tail only); Auto tries instead
+                            var fit = cost > budget ? "; over budget (repeats)" : "";
                             fgRateText.Text = $"{(S(d, "fg_auto") == "True" ? "Auto: " : "")}{label} in force; game frame {cost:0.0} ms (p95) of a {budget:0.0} ms budget, headroom {budget - cost:0.0} ms{fit}";
                         }
+                    }
+                    else if (d != null && S(d, "fg_auto_off") == "True")
+                    {
+                        fgRateText.Text = "Auto: generation off in force (the game holds the display rate); back to 2/3 if frames go missing";
                     }
                     stats.Text =
                         $"Game fps {F(D(d, "app_fps"), "0.0"),6}    streamed fps {F(D(d, "stream_fps"), "0.0"),6}    headset shows {F(double.IsNaN(D(c, "displayed_fps")) ? D(c, "client_fps") : D(c, "displayed_fps"), "0.0"),6} fps\n" +

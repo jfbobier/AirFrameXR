@@ -1394,118 +1394,178 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
         "game_pacing": if args.game_pacing_jit { "jit" } else { "queue" }, "auto_rate": args.fg_auto }));
 }
 
-/// The automatic frame-generation rate (docs/FRAME_GENERATION.md "Auto"). Decides from what the shim measures, not from trying rates: the game's
-/// frame cost (release -> GPU done, p95 over the last ~250 frames; with the just-in-time release the game's true CPU + GPU time) against each
-/// rate's budget (1/3: three display periods, 1/2: two, 2/3: one and a half), and the share of repeated outputs over the last 5 s.
-/// Fast down, slow up, one step at a time: repeats above 5 % for 5 s -> the next slower rate; the p95 cost under 80 % of the next faster
-/// budget (75 % for 2/3) for 20 s -> the next faster rate; never two switches within 20 s. A cost that tracks the budget with no repeats for
-/// 60 s is logged as a resolution-scaling game (the budget is spent on pixels; a faster rate cannot be judged from the cost).
+/// The automatic frame-generation level (docs/FRAME_GENERATION.md "Auto"): generation off, or one of the rates.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum AutoLevel {
+    Off,
+    Rate(FgRate),
+}
+
+impl AutoLevel {
+    fn name(self) -> &'static str {
+        match self { AutoLevel::Off => "off", AutoLevel::Rate(r) => r.name() }
+    }
+    fn parse(v: &str) -> Option<AutoLevel> {
+        if v.trim().eq_ignore_ascii_case("off") { Some(AutoLevel::Off) } else { FgRate::parse(v).map(AutoLevel::Rate) }
+    }
+    /// the game's frame budget at this level (ms): the display period times the release step (1/3: three, 1/2: two, 2/3: one and a half, off: one)
+    fn budget_ms(self, period_ms: f64) -> f64 {
+        period_ms * match self { AutoLevel::Off | AutoLevel::Rate(FgRate::Uncapped) => 1.0, AutoLevel::Rate(FgRate::Third) => 3.0, AutoLevel::Rate(FgRate::Half) => 2.0, AutoLevel::Rate(FgRate::TwoThirds) => 1.5 }
+    }
+    fn slower(self) -> Option<AutoLevel> {
+        match self {
+            AutoLevel::Off => Some(AutoLevel::Rate(FgRate::TwoThirds)),
+            AutoLevel::Rate(FgRate::TwoThirds) => Some(AutoLevel::Rate(FgRate::Half)),
+            AutoLevel::Rate(FgRate::Half) => Some(AutoLevel::Rate(FgRate::Third)),
+            _ => None,
+        }
+    }
+    fn faster(self) -> Option<AutoLevel> {
+        match self {
+            AutoLevel::Rate(FgRate::Third) => Some(AutoLevel::Rate(FgRate::Half)),
+            AutoLevel::Rate(FgRate::Half) => Some(AutoLevel::Rate(FgRate::TwoThirds)),
+            AutoLevel::Rate(FgRate::TwoThirds) => Some(AutoLevel::Off),
+            _ => None,
+        }
+    }
+}
+
+/// The automatic frame-generation level (docs/FRAME_GENERATION.md "Auto"): 1/3 <-> 1/2 <-> 2/3 <-> generation off, one step at a time.
+/// Down from what the stream shows, second by second: at a rate a second fails when repeats exceed 5 % of its outputs while the game
+/// delivers (at least a quarter of the rendered frames the rate expects: a game that stalls, loading or hitching, is not a rate that does
+/// not hold; headset night 2026-10-16: three games were stepped down by 2-4 s stalls and by their loading at game start); 3 failing
+/// seconds of the last 5 step down. At 2/3 a frame cost 15 % over the budget steps down too (the content clock there turns a slow game
+/// into lag rather than repeats). With generation off a second fails when more than 8 % of the display periods got no frame while frames
+/// did flow; 3 of the last 4 step back to 2/3. Up by trial: 5 quiet seconds (repeats under 2 %, the game delivering) for the dwell (20 s
+/// at first) get the next level tried, and the same verdict brings it back if it does not hold. The shim's frame cost cannot judge a
+/// faster rate (at 1/3 every game read 5-10 ms, the GPU tail of a frame submitted right after its release; the cost rule stepped up games
+/// that need 1/3), so the trial is the measurement. A failed trial doubles the dwell (40, 80 ... 320 s); the third failure settles the
+/// game at the level that held: no more trials, steps down only, remembered per game (games.json up_dwell_s, settled; ticking Auto off and
+/// on re-arms it). A game start gets 15 s of grace before any step down (its loading repeats are not the rate's).
 struct AutoRate {
     last_switch: Instant,
-    /// the dwell a step up needs (s): 20 at first; doubled (to 320 at most) every time a step up is reverted within 60 s, so a game whose cost
-    /// swings around a budget settles at the slower rate instead of adjusting every half minute; remembered per game (games.json up_dwell_s)
+    /// the quiet time a step down needs after the last switch or game start (5 s after a switch, 15 s after a game start)
+    hold_s: f64,
     up_dwell_s: f64,
     last_up: Option<Instant>,
     up_since: Option<Instant>,
-    tracking_since: Option<Instant>,
-    tracking_logged: bool,
-    /// (time, synths + reals, repeats) samples of the last 5 s
-    window: std::collections::VecDeque<(Instant, u64, u64)>,
+    reverts: u32,
+    settled: bool,
+    nothing_slower_logged: bool,
+    /// (time, synths + reals, repeats, frames sent, shim releases) samples, one per second, the last 6
+    window: std::collections::VecDeque<(Instant, u64, u64, u64, u64)>,
     last_eval: Instant,
 }
 
 impl AutoRate {
     fn new() -> Self {
         let now = Instant::now();
-        AutoRate { last_switch: now, up_dwell_s: 20.0, last_up: None, up_since: None, tracking_since: None, tracking_logged: false, window: Default::default(), last_eval: now }
+        AutoRate { last_switch: now, hold_s: 15.0, up_dwell_s: 20.0, last_up: None, up_since: None, reverts: 0, settled: false, nothing_slower_logged: false, window: Default::default(), last_eval: now }
     }
-    fn reset(&mut self, up_dwell_s: f64) {
+    fn reset(&mut self, up_dwell_s: f64, settled: bool) {
         *self = AutoRate::new();
         self.up_dwell_s = up_dwell_s.clamp(20.0, 320.0);
+        self.settled = settled;
     }
-    /// One evaluation per second while a game runs: Some(new rate) when a switch is due. `outputs` = synths + reals so far, `repeats` so far.
-    fn evaluate(&mut self, rate: FgRate, period_s: f64, cost_p95_ms: f32, outputs: u64, repeats: u64, origin: Instant) -> Option<FgRate> {
+    /// One evaluation per second while a game runs: Some(next level) when a switch is due. Cumulative counts: `outputs` = synths + reals,
+    /// `repeats`, `sent` = frames sent to the headset (the one count that runs with generation off), `reals` = the shim's releases (one per rendered frame).
+    fn evaluate(&mut self, level: AutoLevel, period_s: f64, cost_p95_ms: f32, outputs: u64, repeats: u64, sent: u64, reals: u64, origin: Instant) -> Option<AutoLevel> {
         let now = Instant::now();
         if now.duration_since(self.last_eval) < Duration::from_secs(1) {
             return None;
         }
         self.last_eval = now;
-        self.window.push_back((now, outputs, repeats));
+        self.window.push_back((now, outputs, repeats, sent, reals));
         while self.window.len() > 6 {
             self.window.pop_front();
         }
-        if rate == FgRate::Uncapped || cost_p95_ms <= 0.0 || self.window.len() < 6 {
+        let need = if level == AutoLevel::Off { 5 } else { 6 };
+        if level == AutoLevel::Rate(FgRate::Uncapped) || self.window.len() < need {
             return None;
         }
-        let (o0, r0) = (self.window.front().unwrap().1, self.window.front().unwrap().2);
-        let d_out = outputs.saturating_sub(o0);
-        let d_rep = repeats.saturating_sub(r0);
-        let repeat_share = if d_out + d_rep > 0 { d_rep as f64 / (d_out + d_rep) as f64 } else { 0.0 };
-        let budget_ms = |r: FgRate| period_s * 1000.0 * match r { FgRate::Third => 3.0, FgRate::Half => 2.0, FgRate::TwoThirds => 1.5, FgRate::Uncapped => 1.0 };
-        let since_switch = now.duration_since(self.last_switch);
-        let slower = match rate { FgRate::TwoThirds => Some(FgRate::Half), FgRate::Half => Some(FgRate::Third), _ => None };
-        let faster = match rate { FgRate::Third => Some(FgRate::Half), FgRate::Half => Some(FgRate::TwoThirds), _ => None };
-        // over budget: repeats at the fixed patterns; at 2/3 the content-clock planner turns a slow game into lag rather than repeats, so the
-        // cost itself decides there (15 % over the budget)
-        let over_budget = rate == FgRate::TwoThirds && (cost_p95_ms as f64) > 1.15 * budget_ms(rate);
-        if (repeat_share > 0.05 || over_budget) && since_switch >= Duration::from_secs(5) {
+        let period_ms = period_s * 1000.0;
+        let budget = level.budget_ms(period_ms);
+        let since_switch = now.duration_since(self.last_switch).as_secs_f64();
+        // second by second: failing, quiet (fit for a trial), or stalled (the game not delivering: counts neither way)
+        let (mut failing, mut quiet, mut stalled, mut share_sum, mut miss_sum) = (0u32, 0u32, 0u32, 0.0f64, 0.0f64);
+        for w in self.window.iter().collect::<Vec<_>>().windows(2) {
+            let (t0, o0, r0, s0, f0) = *w[0];
+            let (t1, o1, r1, s1, f1) = *w[1];
+            let dt = t1.duration_since(t0).as_secs_f64().max(0.5);
+            let (d_out, d_rep, d_sent, d_real) = (o1.saturating_sub(o0), r1.saturating_sub(r0), s1.saturating_sub(s0), f1.saturating_sub(f0));
+            if level == AutoLevel::Off {
+                let missing = 1.0 - (d_sent as f64 / (dt / period_s)).min(1.0);
+                miss_sum += missing;
+                if (d_sent as f64) < 0.1 * dt / period_s { stalled += 1; } else if missing > 0.08 { failing += 1; } else { quiet += 1; }
+            } else {
+                let share = if d_out + d_rep > 0 { d_rep as f64 / (d_out + d_rep) as f64 } else { 0.0 };
+                share_sum += share;
+                let expected_reals = dt / (budget / 1000.0);
+                if (d_real as f64) < 0.25 * expected_reals { stalled += 1; } else if share > 0.05 { failing += 1; } else if share < 0.02 { quiet += 1; }
+            }
+        }
+        let n = (self.window.len() - 1) as f64;
+        let (repeat_share, missing_share) = (share_sum / n, miss_sum / n);
+        let over_budget = level == AutoLevel::Rate(FgRate::TwoThirds) && cost_p95_ms > 0.0 && (cost_p95_ms as f64) > 1.15 * budget && stalled == 0;
+        let fails = if level == AutoLevel::Off { failing >= 3 } else { failing >= 3 || over_budget };
+        if fails && since_switch >= self.hold_s {
             self.up_since = None;
-            if let Some(next) = slower {
-                // a step up reverted within a minute: the game's cost swings around this budget; wait longer before the next attempt
+            if let Some(next) = level.slower() {
+                // a trial that failed within a minute: wait longer before the next one; the third failure settles the game at the level that held
                 let reverted = self.last_up.map_or(false, |t| now.duration_since(t) < Duration::from_secs(60));
                 if reverted {
                     self.up_dwell_s = (self.up_dwell_s * 2.0).min(320.0);
+                    self.reverts += 1;
+                    if self.reverts >= 3 {
+                        self.settled = true;
+                    }
                 }
-                logs::general("INFO", &format!("frame generation auto: {} -> {} ({}repeats {:.1} % over 5 s, frame cost p95 {cost_p95_ms:.1} ms of a {:.1} ms budget{})",
-                    rate.name(), next.name(), if over_budget { "over budget: " } else { "" }, repeat_share * 100.0, budget_ms(rate),
-                    if reverted { format!("; the step up did not hold, next attempt after {:.0} s of headroom", self.up_dwell_s) } else { String::new() }));
-                event(origin, "fg_auto", json!({ "from": rate.name(), "to": next.name(), "why": if over_budget { "over_budget" } else { "repeats" }, "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(rate), "up_dwell_s": self.up_dwell_s }));
+                let why = if level == AutoLevel::Off { format!("{failing} of the last {n:.0} s with over 8 % of the display periods without a frame (mean {:.1} %)", missing_share * 100.0) }
+                    else if over_budget && failing < 3 { format!("over budget: frame cost p95 {cost_p95_ms:.1} ms of a {budget:.1} ms budget, repeats {:.1} %", repeat_share * 100.0) }
+                    else { format!("{failing} of the last {n:.0} s with repeats over 5 % (mean {:.1} %), frame cost p95 {cost_p95_ms:.1} ms of a {budget:.1} ms budget", repeat_share * 100.0) };
+                let tail = if reverted && self.settled { format!("; the trial did not hold, settled at {} for this game: no more trials, steps down only", next.name()) }
+                    else if reverted { format!("; the trial did not hold, next one after {:.0} s without repeats", self.up_dwell_s) } else { String::new() };
+                logs::general("INFO", &format!("frame generation auto: {} -> {} ({why}{tail})", level.name(), next.name()));
+                event(origin, "fg_auto", json!({ "from": level.name(), "to": next.name(), "why": if level == AutoLevel::Off { "missing" } else if over_budget && failing < 3 { "over_budget" } else { "repeats" },
+                    "failing_s": failing, "stalled_s": stalled, "repeat_share": repeat_share, "missing_share": missing_share, "cost_p95_ms": cost_p95_ms, "budget_ms": budget, "up_dwell_s": self.up_dwell_s, "reverts": self.reverts, "settled": self.settled }));
                 self.last_switch = now;
+                self.hold_s = 5.0;
+                self.window.clear();   // judge the new level on its own samples
                 return Some(next);
             }
-            if !self.tracking_logged {
-                self.tracking_logged = true;
+            if !self.nothing_slower_logged {
+                self.nothing_slower_logged = true;
                 logs::general("INFO", &format!("frame generation auto: at {} with repeats {:.1} %: the game does not hold a third of the display rate (cost p95 {cost_p95_ms:.1} ms); nothing slower to offer, consider uncapped",
-                    rate.name(), repeat_share * 100.0));
+                    level.name(), repeat_share * 100.0));
             }
             return None;
         }
-        if let Some(next) = faster {
-            let factor = if next == FgRate::TwoThirds { 0.75 } else { 0.8 };
-            if (cost_p95_ms as f64) < factor * budget_ms(next) && repeat_share < 0.02 {
+        // the trial: every second of the window quiet (no repeats, the game delivering) for the dwell, then the next level
+        if let Some(next) = level.faster() {
+            if !self.settled && quiet as f64 >= n {
                 let since = *self.up_since.get_or_insert(now);
-                if now.duration_since(since).as_secs_f64() >= self.up_dwell_s && since_switch >= Duration::from_secs(20) {
-                    logs::general("INFO", &format!("frame generation auto: {} -> {} (frame cost p95 {cost_p95_ms:.1} ms under {:.0} % of the {:.1} ms budget for {:.0} s, repeats {:.1} %)",
-                        rate.name(), next.name(), factor * 100.0, budget_ms(next), self.up_dwell_s, repeat_share * 100.0));
-                    event(origin, "fg_auto", json!({ "from": rate.name(), "to": next.name(), "why": "headroom", "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(next), "up_dwell_s": self.up_dwell_s }));
+                if now.duration_since(since).as_secs_f64() >= self.up_dwell_s && since_switch >= 20.0 {
+                    logs::general("INFO", &format!("frame generation auto: {} -> {} (no repeats for {:.0} s, frame cost p95 {cost_p95_ms:.1} ms: trying {}; back if it does not hold)",
+                        level.name(), next.name(), self.up_dwell_s, if next == AutoLevel::Off { "without generation, the game may hold the display rate" } else { "the next rate" }));
+                    event(origin, "fg_auto", json!({ "from": level.name(), "to": next.name(), "why": "trial", "repeat_share": repeat_share, "cost_p95_ms": cost_p95_ms, "budget_ms": next.budget_ms(period_ms), "up_dwell_s": self.up_dwell_s, "reverts": self.reverts }));
                     self.last_switch = now;
+                    self.hold_s = 5.0;
                     self.last_up = Some(now);
                     self.up_since = None;
-                    self.tracking_since = None;
+                    self.window.clear();
                     return Some(next);
                 }
             } else {
                 self.up_since = None;
             }
         }
-        // the resolution-scaling signature: the cost fills the budget, no repeats, for a minute
-        if (cost_p95_ms as f64) > 0.9 * budget_ms(rate) && repeat_share < 0.02 {
-            let since = *self.tracking_since.get_or_insert(now);
-            if !self.tracking_logged && now.duration_since(since) >= Duration::from_secs(60) {
-                self.tracking_logged = true;
-                logs::general("INFO", &format!("frame generation auto: at {} the frame cost p95 ({cost_p95_ms:.1} ms) tracks the {:.1} ms budget with no repeats for 60 s: a resolution-scaling game spends the budget on pixels; a faster rate cannot be judged from the cost (try it by hand)",
-                    rate.name(), budget_ms(rate)));
-                event(origin, "fg_auto", json!({ "from": rate.name(), "to": rate.name(), "why": "scaling", "cost_p95_ms": cost_p95_ms, "budget_ms": budget_ms(rate) }));
-            }
-        } else {
-            self.tracking_since = None;
-        }
         None
     }
 }
 
-/// What VisionALVR remembers per game (config/games.json, keyed by the executable's file name): the rate that held last, the frame cost
-/// seen, whether DLSS vectors were found. Read at game start (the automatic rate starts there), written at every rate change and game end.
+/// What VisionALVR remembers per game (config/games.json, keyed by the executable's file name): the level that held last ("off" = generation
+/// off), the frame cost seen, whether DLSS vectors were found, the trial dwell and whether Auto has settled the game. Read at game start (the
+/// automatic level starts there), written at every level change and game end.
 fn games_memory_path(args: &Args) -> PathBuf {
     args.config_dir.join("games.json")
 }
@@ -1514,13 +1574,60 @@ fn games_memory_load(args: &Args) -> serde_json::Value {
     std::fs::read_to_string(games_memory_path(args)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}))
 }
 
-fn games_memory_update(args: &Args, exe: &str, rate: FgRate, cost_p95_ms: f32, vectors: bool, why: &str, up_dwell_s: f64) {
+fn games_memory_update(args: &Args, exe: &str, level: AutoLevel, cost_p95_ms: f32, vectors: bool, why: &str, up_dwell_s: f64, settled: bool) {
     let mut all = games_memory_load(args);
     let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    all[exe] = json!({ "rate": rate.name(), "cost_p95_ms": cost_p95_ms, "vectors": vectors, "updated": unix, "why": why, "up_dwell_s": up_dwell_s });
+    all[exe] = json!({ "rate": level.name(), "cost_p95_ms": cost_p95_ms, "vectors": vectors, "updated": unix, "why": why, "up_dwell_s": up_dwell_s, "settled": settled });
     if let Ok(t) = serde_json::to_string_pretty(&all) {
         let _ = std::fs::create_dir_all(args.config_dir.as_path());
         let _ = std::fs::write(games_memory_path(args), t);
+    }
+}
+
+/// Generation on or off on the running stream (the launcher's tick, or Auto): the generator is created or dropped on the running encoder (under
+/// the encoder lock, so never while a frame is being encoded) and the shim's pacing follows at the next boundary.
+fn set_frame_gen_live(origin: Instant, p: &pipeline::Pipeline, args: &Args, want: bool, fg_active: &mut bool, ipc: *mut std::ffi::c_void, why: &str) {
+    if want == *fg_active {
+        return;
+    }
+    if !want {
+        p.set_frame_gen(false);   // the encoder thread plans plain frames from here on
+    }
+    let g = p.enc.lock();
+    if want {
+        *fg_active = enable_frame_gen(origin, g.handle, args);
+    } else {
+        let mut err = [0 as std::ffi::c_char; 256];
+        unsafe { nvh::nvh_fg_enable(g.handle, 0, args.fg_flow_scale, args.fg_perf, args.fg_grid, err.as_mut_ptr(), 256) };
+        *fg_active = false;
+        logs::general("INFO", &format!("frame generation OFF ({why}): full-rate pacing"));
+        event(origin, "frame_gen", json!({ "requested": false, "on": false, "why": why }));
+    }
+    drop(g);
+    p.set_frame_gen(*fg_active);
+    apply_fg_pacing(ipc, Some(p), args, *fg_active);
+    log_fg_config(origin, args, *fg_active, why);
+}
+
+/// Puts an Auto level in force on the running stream: a rate (generation back on when Auto had it off), or generation off. `auto_off` says
+/// that Auto, not the user, has generation off; the user's setting (args.frame_gen) is untouched.
+fn apply_auto_level(origin: Instant, p: &pipeline::Pipeline, args: &mut Args, level: AutoLevel, fg_active: &mut bool, auto_off: &mut bool, ipc: *mut std::ffi::c_void, why: &str) {
+    match level {
+        AutoLevel::Off => {
+            *auto_off = true;
+            set_frame_gen_live(origin, p, args, false, fg_active, ipc, why);
+        }
+        AutoLevel::Rate(r) => {
+            args.fg_rate = Some(r);
+            p.set_frame_gen_rate(r, args.fg_lag_ms.unwrap_or(0.0));
+            if *auto_off {
+                *auto_off = false;
+                set_frame_gen_live(origin, p, args, true, fg_active, ipc, why);
+            } else {
+                apply_fg_pacing(ipc, Some(p), args, *fg_active);
+                log_fg_config(origin, args, *fg_active, why);
+            }
+        }
     }
 }
 
@@ -2272,6 +2379,7 @@ fn main() {
     };
     let mut game: Option<GameRun> = None;
     let mut auto_rate = AutoRate::new();
+    let mut auto_off = false;   // Auto has generation off for the running game (the user's setting stays on; restored at game end)
     let mut game_cost_p95 = 0f32;   // the newest frame cost p95 seen for the running game (games.json at game end)
     // scripted input (--auto-input): index of the next event to fire and the release instant of a pressed one
     let mut auto_next = 0usize;
@@ -2332,26 +2440,9 @@ fn main() {
             if fgr >= 0 {
                 let want = fgr == 1;
                 args.frame_gen = Some(want);
+                auto_off = false;   // the user's choice
                 if let Some(p) = pipeline.as_ref() {
-                    if want != fg_active {
-                        if !want {
-                            p.set_frame_gen(false);   // the encoder thread plans plain frames from here on
-                        }
-                        let g = p.enc.lock();
-                        if want {
-                            fg_active = enable_frame_gen(origin, g.handle, &args);
-                        } else {
-                            let mut err = [0 as std::ffi::c_char; 256];
-                            unsafe { nvh::nvh_fg_enable(g.handle, 0, args.fg_flow_scale, args.fg_perf, args.fg_grid, err.as_mut_ptr(), 256) };
-                            fg_active = false;
-                            logs::general("INFO", "frame generation OFF (live setting): full-rate pacing");
-                            event(origin, "frame_gen", json!({ "requested": false, "on": false }));
-                        }
-                        drop(g);
-                        p.set_frame_gen(fg_active);
-                        apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
-                        log_fg_config(origin, &args, fg_active, "frame_gen");
-                    }
+                    set_frame_gen_live(origin, p.as_ref(), &args, want, &mut fg_active, ipc, "frame_gen");
                 }
             }
             // frame generation rate, the game's motion vectors, the fps cap and the content lag from VisionALVR.exe (live; the settings are read at start too)
@@ -2361,23 +2452,34 @@ fn main() {
                 args.fg_rate = Some(r);
                 if let Some(p) = pipeline.as_ref() {
                     p.set_frame_gen_rate(r, args.fg_lag_ms.unwrap_or(0.0));
+                    if auto_off {
+                        auto_off = false;   // the user's choice of a rate brings generation back
+                        set_frame_gen_live(origin, p.as_ref(), &args, true, &mut fg_active, ipc, "frame_gen_rate");
+                    }
                 }
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_rate");
-                auto_rate.reset(auto_rate.up_dwell_s);
+                auto_rate.reset(auto_rate.up_dwell_s, auto_rate.settled);
                 if let Some(g) = &game {
                     if fg_active && !ipc.is_null() {
                         let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
                         unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
-                        games_memory_update(&args, &g.exe, r, game_cost_p95, tap == 1 && pubs > 0, "user", auto_rate.up_dwell_s);
+                        games_memory_update(&args, &g.exe, AutoLevel::Rate(r), game_cost_p95, tap == 1 && pubs > 0, "user", auto_rate.up_dwell_s, auto_rate.settled);
                     }
                 }
             }
             let au = vision::FG_AUTO_REQ.swap(-1, Ordering::SeqCst);
             if au >= 0 {
                 args.fg_auto = au == 1;
-                auto_rate.reset(auto_rate.up_dwell_s);
-                log_fg_config(origin, &args, fg_active, "frame_gen_auto");
+                auto_rate.reset(auto_rate.up_dwell_s, false);   // ticking Auto off and on re-arms the trials of a settled game
+                if !args.fg_auto && auto_off {
+                    if let Some(p) = pipeline.as_ref() {
+                        let r = args.fg_rate.unwrap_or(FgRate::Half);
+                        apply_auto_level(origin, p.as_ref(), &mut args, AutoLevel::Rate(r), &mut fg_active, &mut auto_off, ipc, "frame_gen_auto");
+                    }
+                } else {
+                    log_fg_config(origin, &args, fg_active, "frame_gen_auto");
+                }
             }
             let gp = vision::GAME_PACING_REQ.swap(-1, Ordering::SeqCst);
             if gp >= 0 {
@@ -2420,18 +2522,16 @@ fn main() {
                 event(origin, "game_started", json!({ "exe": exe }));
                 game_cost_p95 = 0.0;
                 let mem = games_memory_load(&args);
-                auto_rate.reset(mem[&exe]["up_dwell_s"].as_f64().unwrap_or(20.0));
+                let settled = mem[&exe]["settled"].as_bool().unwrap_or(false);
+                auto_rate.reset(mem[&exe]["up_dwell_s"].as_f64().unwrap_or(20.0), settled);
                 if args.fg_auto && fg_active {
-                    // a known game starts at the rate that held last time (games.json), the controller takes it from there
-                    if let Some(r) = mem[&exe]["rate"].as_str().and_then(FgRate::parse) {
-                        if Some(r) != args.fg_rate && r != FgRate::Uncapped {
-                            logs::general("INFO", &format!("frame generation auto: {exe} starts at {} (remembered from {})", r.name(), mem[&exe]["why"].as_str().unwrap_or("?")));
-                            args.fg_rate = Some(r);
+                    // a known game starts at the level that held last time (games.json, "off" = without generation), the controller takes it from there
+                    if let Some(l) = mem[&exe]["rate"].as_str().and_then(AutoLevel::parse) {
+                        if l != AutoLevel::Rate(args.fg_rate.unwrap_or(FgRate::Half)) && l != AutoLevel::Rate(FgRate::Uncapped) {
+                            logs::general("INFO", &format!("frame generation auto: {exe} starts at {} (remembered from {}{})", l.name(), mem[&exe]["why"].as_str().unwrap_or("?"), if settled { ", settled" } else { "" }));
                             if let Some(p) = pipeline.as_ref() {
-                                p.set_frame_gen_rate(r, args.fg_lag_ms.unwrap_or(0.0));
+                                apply_auto_level(origin, p.as_ref(), &mut args, l, &mut fg_active, &mut auto_off, ipc, "auto_start");
                             }
-                            apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
-                            log_fg_config(origin, &args, fg_active, "auto_start");
                         }
                     }
                 }
@@ -2446,14 +2546,22 @@ fn main() {
                     "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps){}",
                     g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline)));
                 event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames }));
-                if fg_active && secs > 20.0 {
+                if (fg_active || auto_off) && secs > 20.0 {
                     let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
                     unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
-                    games_memory_update(&args, &g.exe, args.fg_rate.unwrap_or(FgRate::Half), game_cost_p95, tap == 1 && pubs > 0, "game end", auto_rate.up_dwell_s);
+                    let level = if auto_off { AutoLevel::Off } else { AutoLevel::Rate(args.fg_rate.unwrap_or(FgRate::Half)) };
+                    games_memory_update(&args, &g.exe, level, game_cost_p95, tap == 1 && pubs > 0, "game end", auto_rate.up_dwell_s, auto_rate.settled);
+                }
+                if auto_off {
+                    // the next game starts with generation on, as the user set it (this one is remembered as "off")
+                    if let Some(p) = pipeline.as_ref() {
+                        let r = args.fg_rate.unwrap_or(FgRate::Half);
+                        apply_auto_level(origin, p.as_ref(), &mut args, AutoLevel::Rate(r), &mut fg_active, &mut auto_off, ipc, "auto_end");
+                    }
                 }
             }
             if let Some(g) = &game {
-                if fg_active && !ipc.is_null() {
+                if (fg_active || auto_off) && !ipc.is_null() {
                     let (mut c50, mut c95, mut cc, mut cg) = (0f32, 0f32, 0f32, 0f32);
                     unsafe { nvh::nvh_ipc_frame_cost(ipc, &mut c50, &mut c95, &mut cc, &mut cg) };
                     if c95 > 0.0 {
@@ -2461,17 +2569,18 @@ fn main() {
                     }
                     if args.fg_auto {
                         if let Some(p) = pipeline.as_ref() {
-                            let rate = args.fg_rate.unwrap_or(FgRate::Half);
+                            let level = if auto_off { AutoLevel::Off } else { AutoLevel::Rate(args.fg_rate.unwrap_or(FgRate::Half)) };
                             let outputs = p.fg_synths.load(Ordering::Relaxed) + p.fg_reals.load(Ordering::Relaxed);
                             let repeats = p.fg_repeats.load(Ordering::Relaxed);
-                            if let Some(next) = auto_rate.evaluate(rate, p.period().as_secs_f64(), c95, outputs, repeats, origin) {
-                                args.fg_rate = Some(next);
-                                p.set_frame_gen_rate(next, args.fg_lag_ms.unwrap_or(0.0));
-                                apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
-                                log_fg_config(origin, &args, fg_active, "auto");
+                            let sent = shared.frames_sent.load(Ordering::Relaxed) as u64;
+                            // the game's delivery = the shim's releases (one per rendered frame at every level; the 2/3 planner counts no "reals")
+                            let (mut w, mut am, mut rel, mut lt, mut gh, mut gs) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
+                            unsafe { nvh::nvh_ipc_shim_pacing(ipc, &mut w, &mut am, &mut rel, &mut lt, &mut gh, &mut gs) };
+                            if let Some(next) = auto_rate.evaluate(level, p.period().as_secs_f64(), c95, outputs, repeats, sent, rel, origin) {
+                                apply_auto_level(origin, p.as_ref(), &mut args, next, &mut fg_active, &mut auto_off, ipc, "auto");
                                 let (mut tap, mut streams, mut pubs) = (0u32, 0u32, 0u64);
                                 unsafe { nvh::nvh_ipc_motion_tap(ipc, &mut tap, &mut streams, &mut pubs) };
-                                games_memory_update(&args, &g.exe, next, c95, tap == 1 && pubs > 0, "auto", auto_rate.up_dwell_s);
+                                games_memory_update(&args, &g.exe, next, c95, tap == 1 && pubs > 0, "auto", auto_rate.up_dwell_s, auto_rate.settled);
                             }
                         }
                     }
@@ -2508,7 +2617,7 @@ fn main() {
                 "packets_lost": lost.saturating_sub(st_lost),
                 "client": logs::client_stats::take(1),
                 "gamma": user_gamma, "debug": debug_on,
-                "fg_on": fg_active, "fg_rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "fg_auto": args.fg_auto,
+                "fg_on": fg_active, "fg_rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "fg_auto": args.fg_auto, "fg_auto_off": auto_off,
                 "frame_cost_p95_ms": game_cost_p95,
                 "budget_ms": pipeline.as_ref().map(|p| p.period().as_secs_f64() * 1000.0 * (fg_pacing(&args, fg_active, p.period().as_secs_f64()).0.max(1) as f64)
                     * if fg_active && args.fg_rate.unwrap_or(FgRate::Half) == FgRate::TwoThirds { 1.5 } else { 1.0 }).unwrap_or(0.0),
@@ -2557,6 +2666,11 @@ fn main() {
                         "interval_ms_p50": u.interval_p50, "interval_ms_p95": u.interval_p95, "interval_ms_max": u.interval_max, "gpu_csv": gpu,
                         "frame_cost_p50_ms": c50, "frame_cost_p95_ms": c95, "app_cpu_ms": cc, "app_gpu_ms": cg, "budget_ms": budget, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "auto": args.fg_auto,
                         "gen": serde_json::from_str::<serde_json::Value>(&gen).unwrap_or(serde_json::Value::Null) }));
+                }
+            } else if auto_off {
+                if let Some(p) = pipeline.as_ref() {
+                    logs::general("INFO", &format!("frame generation headroom: generation off (auto), the game holds the display rate: stream {:.1} fps of {:.1}",
+                        streamed as f64 / secs, 1.0 / p.period().as_secs_f64()));
                 }
             }
             if !ipc.is_null() {
