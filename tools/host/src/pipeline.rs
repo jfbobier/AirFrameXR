@@ -688,10 +688,17 @@ impl Pipeline {
     /// A rendered frame arrived (frame generation on): what this boundary encodes. Releases the slot.
     fn fg_plan_app(&self, handle: *mut std::ffi::c_void, ipc: *mut std::ffi::c_void, a: Arrived) -> Plan {
         if !a.has_projection {
-            // no projection layer (a loading screen made of quads): the slot goes out as is, nothing to interpolate
+            // no projection layer (a loading screen, or a menu made of quads: Zelda BotW's BetterVR inventory and scope): the slot goes out as
+            // is, nothing to interpolate, and the held world frame is dropped: a boundary without a new arrival would otherwise re-send it
+            // between the quad frames (menu / world / menu on the headset, 2026-10-16); the next projection frame starts the history again
             let mut st = self.fg.lock();
             st.passthrough += 1;
             st.due.clear();
+            st.hist.clear();
+            st.real_sent = false;
+            self.fg_have_frame.store(false, Ordering::Relaxed);
+            self.fg_real_due.store(false, Ordering::Relaxed);
+            unsafe { nvh::nvh_fg_reset(handle) };   // the generator's pair history too: no interpolation across the menu
             return Plan::Slot(a);
         }
         let mut st = self.fg.lock();

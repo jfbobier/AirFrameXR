@@ -249,3 +249,42 @@ The phase table (client_frames.csv, split at every level change):
   free-running game queues at the client), against 3.7 % and 67 ms at 2/3. The off level is now judged on the headset's per-frame
   statistics (frames displayed, periods repeated), which would have sent it back to 2/3 within 5 s. Whether 2/3 also *feels* better than
   off there is the user's call; the numbers say so.
+
+### Third session the same night (22:43-23:19): Unity games, DLSS vectors, the 2/3 level at length, Zelda's menu
+
+User followed the blind-spot list: Dead Space and Callisto at 2/3 by hand (just-in-time ticked), End of Abyss at 2/3 for 10 min, Unity
+titles (Mouse: P.I. For Hire with the OptiScaler fork, Gunman Contracts native with DLSS, End of Abyss), Silas, and Zelda Breath of the Wild
+through Cemu + BetterVR (Vulkan). Phase table (client_frames.csv):
+
+| game, level | duration | headset missed periods | client latency p50 |
+|---|---|---|---|
+| Dead Space 2/3 | 121 s | 2.4 % | 67.0 ms |
+| Callisto 2/3 | 67 s | 2.6 % | 67.0 ms |
+| End of Abyss 2/3 | 608 s | 1.6 % | 67.0 ms (off the night before: 14 %, 87 ms) |
+| Mouse 2/3 (Auto, two off trials inside) | 172 s | 4.3 % | 66.1 ms |
+| Silas 2/3 -> 1/2 (Auto) | 152 s | 2.8 % | 66.2 ms |
+| Gunman Contracts 1/2 -> 2/3 (Auto) | 185 s | 3.0 % | 66.3 ms |
+| Zelda (Cemu) 2/3 -> 1/2 -> 1/3 (Auto) | 78 s | 7.0 % | 66.4 ms |
+| Zelda (Cemu), generation off | 36 s | 28.2 % | 76.1 ms |
+
+- **2/3 holds for 10 minutes** on End of Abyss with 1.6 % missed periods; the per-game memory now says "two_thirds" for it.
+- **Just-in-time never engages, in any engine.** Dead Space (Frostbite), End of Abyss (Unity), Callisto (UE): holds 0, 0 and 2 in 8 000+
+  releases, and the shim's "app cpu" sits on its 0.5 ms floor for all of them, UE and Unity alike. So the "frame submitted right after its
+  release" pattern is not UEVR's: it is where virtualdesktop-openxr calls ovr_WaitToBeginFrame for every OpenXR app, right before the
+  frame's submit. The shim never sees an app's frame start and the just-in-time rule has nothing to hold. The setting is inert; the gain
+  measured at 1/2 the night before came from elsewhere. A real frame-start hold would have to live in the OpenXR layer (xrWaitFrame).
+- **DLSS vectors**: Mouse (OptiScaler fork `dxgi.dll`, one DLAA stream 2560x1440, dx11): 3 274 evaluates, 0 copy failures, vectors used on
+  three eyes in four (`used_eyes` 6 965 for 4 527 frames), the flow engine still ran for the eye without them (`flow_skipped` 0). No A/B
+  without vectors in the logs, so no claim of improvement. Gunman Contracts: the fork attached but saw **0 DLSS streams and 0 evaluates**
+  in 3 min: the game's DLSS does not pass through it (Unity's NGX plugin loads its own path, or DLSS was off in the game). Vectors did
+  not work there.
+- **Auto tried generation off on Mouse, Silas and Gunman** (55-64 fps at the 2/3 cap) and the headset sent it back each time within
+  4-7 s (9-28 % periods repeated): the client-side verdict works, but each try is a visible 4-7 s hiccup for a game that obviously
+  cannot hold 90. Gate added: the off trial needs the game to fill the 2/3 cap (at least 93 % of 66.7 releases per second) for the
+  whole dwell.
+- **Zelda's menu / world oscillation** (BetterVR, Vulkan): the mod renders the inventory and the scope as a single quad layer with no
+  projection layer. Such frames go through the pipeline as **passthrough** (sent as they are, 60 per 2 s in the menu), but the generator
+  kept the last world frame as its held frame, and every boundary without a new arrival re-sent it rotated to the head ("repeat"): the
+  stream alternated menu quad, stale world, menu quad (`passthrough 100` and `repeats 100` per 2 s window, `same_ts 52`). Without
+  generation the quad frames simply stream. Auto then read the repeats as the rate failing (2/3 -> 1/2 -> 1/3, "99.4 % repeats").
+  Fix: a passthrough frame drops the held frame (nothing to repeat until the next projection frame).

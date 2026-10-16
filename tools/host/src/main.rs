@@ -885,6 +885,7 @@ mod nvh {
         pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64, render_q8: *mut f32, has_projection: *mut i32, display_s: *mut f64, release_s: *mut f64) -> i32;
         pub fn nvh_fg_enable(nvh: *mut c_void, on: i32, flow_scale: f64, perf_level: i32, grid: i32, err: *mut c_char, errlen: i32) -> i32;
         pub fn nvh_fg_ingest(nvh: *mut c_void, ipc: *mut c_void, slot: u32, q_render8: *const f32, err: *mut c_char, errlen: i32) -> i32;
+        pub fn nvh_fg_reset(nvh: *mut c_void);
         pub fn nvh_fg_encode(nvh: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, age: i32, q_out4: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_fg_stats(nvh: *mut c_void, buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_ipc_set_app_period_mul(ipc: *mut c_void, mul: u32);
@@ -1437,7 +1438,8 @@ impl AutoLevel {
 /// into lag rather than repeats); 4 failing seconds of the last 5 step down (a 0.4 s hitch of the game spreads over 2-3 s and is not a
 /// rate that does not hold). With generation off a second fails when the headset repeated more than 8 % of its display periods (its own
 /// per-frame statistics: a game at 91 fps streams every frame and the headset still repeats 14 %); 4 of the last 5 step back to 2/3. Up by trial: 5 quiet seconds (repeats under 2 %, the game delivering) for the dwell (20 s
-/// at first) get the next level tried, and the same verdict, on 3 s with 2 failing while the trial is young, brings it back if it does not hold. The shim's frame cost cannot judge a
+/// at first) get the next level tried (generation off only when the game fills the 2/3 cap every second), and the same verdict, on 3 s
+/// all failing while the trial is young, brings it back if it does not hold. The shim's frame cost cannot judge a
 /// faster rate (at 1/3 every game read 5-10 ms, the GPU tail of a frame submitted right after its release; the cost rule stepped up games
 /// that need 1/3), so the trial is the measurement. A failed trial doubles the dwell (40, 80 ... 320 s); the third failure settles the
 /// game at the level that held: no more trials, steps down only, remembered per game (games.json up_dwell_s carries the failures across
@@ -1495,7 +1497,7 @@ impl AutoRate {
         let budget = level.budget_ms(period_ms);
         let since_switch = now.duration_since(self.last_switch).as_secs_f64();
         // second by second: failing, quiet (fit for a trial), or stalled (the game not delivering: counts neither way)
-        let (mut failing, mut quiet, mut stalled, mut share_sum, mut miss_sum) = (0u32, 0u32, 0u32, 0.0f64, 0.0f64);
+        let (mut failing, mut quiet, mut stalled, mut full, mut share_sum, mut miss_sum) = (0u32, 0u32, 0u32, 0u32, 0.0f64, 0.0f64);
         for w in self.window.iter().collect::<Vec<_>>().windows(2) {
             let (t0, o0, r0, s0, f0, c0, m0) = *w[0];
             let (t1, o1, r1, s1, f1, c1, m1) = *w[1];
@@ -1511,6 +1513,7 @@ impl AutoRate {
                 let share = if d_out + d_rep > 0 { d_rep as f64 / (d_out + d_rep) as f64 } else { 0.0 };
                 share_sum += share;
                 let expected_reals = dt / (budget / 1000.0);
+                if (d_real as f64) >= 0.93 * expected_reals { full += 1; }   // the game fills this level's cap
                 if (d_real as f64) < 0.25 * expected_reals { stalled += 1; } else if share > 0.05 { failing += 1; } else if share < 0.02 { quiet += 1; }
             }
         }
@@ -1552,7 +1555,10 @@ impl AutoRate {
         }
         // the trial: every second of the window quiet (no repeats, the game delivering) for the dwell, then the next level
         if let Some(next) = level.faster() {
-            if !self.settled && quiet as f64 >= n {
+            // generation off is only worth trying when the game fills the 2/3 cap (66.7 fps) every second: a game at 55-64 fps there cannot
+            // hold 90 (Mouse, Silas, Gunman Contracts: every off trial failed within 4-7 s, 9-28 % of the headset's periods repeated)
+            let fills_cap = next != AutoLevel::Off || full as f64 >= n;
+            if !self.settled && quiet as f64 >= n && fills_cap {
                 let since = *self.up_since.get_or_insert(now);
                 if now.duration_since(since).as_secs_f64() >= self.up_dwell_s && since_switch >= 20.0 {
                     logs::general("INFO", &format!("frame generation auto: {} -> {} (no repeats for {:.0} s, frame cost p95 {cost_p95_ms:.1} ms: trying {}; back if it does not hold)",

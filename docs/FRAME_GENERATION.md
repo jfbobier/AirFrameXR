@@ -91,7 +91,7 @@ streamed) while the headset repeats 14 % of its periods (End of Abyss, 399 s), s
 |---|---|
 | 4 of the last 5 s with repeats above 5 % of the outputs while the game delivers (at 2/3 also a frame cost 15 % over the budget: the content clock there turns a slow game into lag, not repeats) | step down (off -> 2/3 -> 1/2 -> 1/3); at 1/3 a line says there is nothing slower |
 | generation off and 4 of the last 5 s with the headset repeating more than 8 % of its display periods (its own per-frame statistics; the host's sent count is the fallback) | back to 2/3 |
-| every second quiet (repeats under 2 %, the game delivering) for the dwell (20 s at first) | **trial** of the next level (1/3 -> 1/2 -> 2/3 -> off); while the trial is young (15 s) the verdict above is taken on 3 s, all failing, so a wrong level costs 3-4 s of repeats, not 6 |
+| every second quiet (repeats under 2 %, the game delivering) for the dwell (20 s at first); for off, the game also filling the 2/3 cap (93 % of 66.7 fps) every second | **trial** of the next level (1/3 -> 1/2 -> 2/3 -> off); while the trial is young (15 s) the verdict above is taken on 3 s, all failing, so a wrong level costs 3-4 s of repeats, not 6 |
 
 A failed trial doubles the dwell (40, 80 ... 320 s); the third failure **settles** the game at the level that held: no more trials, steps down
 only. The failures are carried across sessions by the remembered dwell (headset 2026-10-16: Valor Mortis, Carma and The Darken each paid one
@@ -176,7 +176,9 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
 - Rates 1/3, 1/2, 2/3 and an Auto level that includes generation off (2026-10-16): a game holding a steady 70-75 fps is often better left at
   full rate; the checkbox and the Auto tick in the streamer window switch live.
 - Quad/cylinder layers are composed into the frame by the shim before the generator sees them, so HUD quads are interpolated like the
-  scene (OFXR-Bridge copies them verbatim instead).
+  scene (OFXR-Bridge copies them verbatim instead). A frame with no projection layer at all (a loading screen or a menu made of quads:
+  Zelda BotW through BetterVR) is passed through as it is and drops the generator's held frame, so nothing stale is repeated between such
+  frames (2026-10-16: the inventory alternated with the last world frame before this).
 - The flow runs on gamma-encoded colour at 50 %; `frame_gen_flow_scale` and `frame_gen_perf` (fast | medium | slow) are the two knobs.
 - **Small fast high-contrast objects ghost.** The confidence saturate(1 - 6 max|dRGB|) is zero at any misaligned hard edge, so such an object
   falls back to the crossfade (two half-bright copies). The rig's marker (a white rectangle on black, ~9 px per app frame at 1024 px per eye)
