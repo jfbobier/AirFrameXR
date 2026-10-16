@@ -379,6 +379,7 @@ namespace VisionALVR
                     setupError = S(d, "message");
                     break;
                 case "client_connected":
+                    HeightSource(S(d, "name"));
                     var n = S(d, "name");
                     var ip = S(d, "ip");
                     headset.Text = $"Headset: connected - {(n.Length > 0 ? n : pairedName)} ({(ip.Length > 0 ? ip : pairedIp)})";
@@ -409,9 +410,6 @@ namespace VisionALVR
                 case "game_ended":
                     gameRunning = false;
                     game.Text = $"Game: none (last: {S(d, "exe")}, {F(D(d, "seconds") / 60, "0.0")} min)";
-                    break;
-                case "client_connected":
-                    HeightSource(S(d, "name"));
                     break;
                 case "status":
                     var c = d != null && d.TryGetValue("client", out var cc) ? cc as Dictionary<string, object> : null;
