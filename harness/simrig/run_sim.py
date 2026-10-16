@@ -75,6 +75,20 @@ SCENARIOS = {
                     "ENV:VISIONALVR_FRAME_GEN": "1", "note": "stutter_fg with the marker on the wall clock (an engine's delta-time animation): the half-rate reference for the _unc scenarios"},
     "jitter":      {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:30", "PROBE:XR_PROBE_CPU_MS": "13.3", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "note": "the same jittery app, generation off: the reference (expect frozen periods and uneven steps)"},
+    # the 1/3 rate (game paced at a third of the display rate, two generated frames at t = 1/3 and 2/3 per rendered frame) and the 2/3 rate (the
+    # game held to two thirds of the display rate by the shim's minimum release spacing, the content-clock planner interpolates every output)
+    "third":       {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "a 40-50 fps app at the 1/3 rate (33 fps budget it always meets): expect SMOOTH, few repeats"},
+    "stutter_third": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:30:45", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "a 30-45 fps app at the 1/3 rate: the budget is missed at times (repeats), compare with stutter_fg"},
+    "third_slow":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.12", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "the 1/3 rate with the marker at half speed: the planner's test; at full speed the 5 px marker moves 14 px per 30 ms game step, past the flow's 8 px blocks (the thin-mover limit, not the planner)"},
+    "third_mv":    {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "PROBE:XR_PROBE_MV": "truth", "note": "the 1/3 rate from the probe's exact vectors"},
+    "two_thirds":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:80:100", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "two_thirds", "note": "an 80-100 fps app held to 2/3 of the display rate (67 fps at 100 Hz), every output interpolated"},
+    "jitter_two_thirds": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:30", "PROBE:XR_PROBE_CPU_MS": "13.3", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
+                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "two_thirds", "note": "the ~75 fps jittery app at the 2/3 rate: compare with jitter_unc"},
 }
 
 

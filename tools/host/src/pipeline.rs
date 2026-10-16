@@ -21,7 +21,7 @@ use serde_json::json;
 use std::{
     collections::VecDeque,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         Arc,
     },
     thread,
@@ -148,19 +148,64 @@ enum Job {
     FgHold,
 }
 
-/// Frame generation (docs/FRAME_GENERATION.md): what the encoder thread owes the stream. The game is paced at half the display rate
-/// (ipc appPeriodMul 2). Rendered frame B arrives: if a previous frame A exists, the boundary gets the interpolated frame S(A, B) and B
-/// itself is due at the next boundary (`real_due`); C arriving while B is still due waits in the intake (`on_boundary` does not pick it): B
-/// goes out, then S(B, C), then C, so the schedule never shifts. A boundary with nothing due first waits briefly for the expected rendered
-/// frame (`fg_wait_arrival`) and otherwise re-sends B
+/// The frame-generation rate (docs/FRAME_GENERATION.md, docs/FRAME_GENERATION_UNCAPPED.md): the game runs at a fraction of the display rate.
+/// Third and Half lock the game to the display cadence (ipc appPeriodMul 3 / 2) and the host fills the boundaries in between with a fixed
+/// pattern (t = k/m); TwoThirds and Uncapped let the game run free (appPeriodMul 1), TwoThirds held to two thirds of the display rate by
+/// the shim's minimum release spacing, and every output is interpolated at the fraction the content clock falls at.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FgRate {
+    Third,
+    Half,
+    TwoThirds,
+    Uncapped,
+}
+
+impl FgRate {
+    pub fn parse(v: &str) -> Option<FgRate> {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "third" | "1/3" => Some(FgRate::Third),
+            "half" | "1/2" => Some(FgRate::Half),
+            "two_thirds" | "two-thirds" | "2/3" => Some(FgRate::TwoThirds),
+            "uncapped" => Some(FgRate::Uncapped),
+            _ => None,
+        }
+    }
+    pub fn from_index(i: i32) -> FgRate {
+        match i { 0 => FgRate::Third, 2 => FgRate::TwoThirds, 3 => FgRate::Uncapped, _ => FgRate::Half }
+    }
+    pub fn index(self) -> i32 {
+        match self { FgRate::Third => 0, FgRate::Half => 1, FgRate::TwoThirds => 2, FgRate::Uncapped => 3 }
+    }
+    pub fn name(self) -> &'static str {
+        match self { FgRate::Third => "third", FgRate::Half => "half", FgRate::TwoThirds => "two_thirds", FgRate::Uncapped => "uncapped" }
+    }
+    /// the shim's release step in display periods (1 = free-running)
+    pub fn period_mul(self) -> u32 {
+        match self { FgRate::Third => 3, FgRate::Half => 2, FgRate::TwoThirds | FgRate::Uncapped => 1 }
+    }
+    /// the content-clock planner (`fg_plan_uncapped`) rather than the fixed pattern
+    pub fn is_uncapped(self) -> bool {
+        matches!(self, FgRate::TwoThirds | FgRate::Uncapped)
+    }
+    /// the shim's minimum release spacing (us) for this rate at this display period; 0 = none (Uncapped: the user's cap applies instead)
+    pub fn min_period_us(self, display_period_s: f64) -> u32 {
+        match self { FgRate::TwoThirds => (display_period_s * 1.5e6).round() as u32, _ => 0 }
+    }
+}
+
+/// Frame generation (docs/FRAME_GENERATION.md): what the encoder thread owes the stream. Fixed-pattern rates: the game is paced at 1/m of
+/// the display rate (ipc appPeriodMul m). Rendered frame B arrives: if a previous frame A exists, the boundary gets the interpolated frame
+/// S(A, B) at t = 1/m and the rest of the pattern is `due`: the further fractions (2/m, ...) then B itself (t = 1). C arriving while
+/// anything is due waits in the intake (`on_boundary` does not pick it): B goes out, then S(B, C, 1/m)..., then C, so the schedule never
+/// shifts. A boundary with nothing due first waits briefly for the expected rendered frame (`fg_wait_arrival`) and otherwise re-sends B
 /// rotated to the new head sample (the headset would repeat it anyway; the rotation keeps head turns smooth). Every output is stamped with
 /// the newest tracking sample newer than the last sent frame and rotated to it; with no such sample the boundary is skipped (`fg_no_sample`).
 struct FgState {
     on: bool,
-    /// the synthetic frame's position between the two rendered frames (0.5 = midpoint)
-    t: f64,
-    synth_due: bool,
-    real_due: bool,
+    rate: FgRate,
+    /// fixed-pattern rates: the outputs still owed for the current game period, as fractions between the two newest rendered frames
+    /// (1.0 = the newest rendered frame itself)
+    due: VecDeque<f64>,
     /// the newest rendered frame's identity for the statistics rows
     last_counter: u64,
     last_submit_s: f64,
@@ -339,8 +384,10 @@ pub struct Pipeline {
     pub fg_dropped: AtomicU64,
     /// (unused since the drop policy; kept for the statistics layout)
     pub fg_pairs_skipped: AtomicU64,
-    /// mirror of `FgState::real_due` for the clock thread: while a rendered frame is due, a new arrival waits in the intake (see `on_boundary`)
+    /// mirror of `!FgState::due.is_empty()` for the clock thread: while an output is due, a new arrival waits in the intake (see `on_boundary`)
     fg_real_due: AtomicBool,
+    /// the shim's minimum release spacing the pipeline last applied for the two-thirds rate (us); 0 = none applied
+    fg_cap_us: AtomicU32,
     /// boundaries at which an arrived frame was left waiting because the previous rendered frame was still due
     pub fg_queued: AtomicU64,
     /// how long a boundary with nothing due waits for the expected rendered frame (VISIONALVR_FG_ARRIVAL_WAIT_MS, default 4)
@@ -426,7 +473,7 @@ impl Pipeline {
             green_active: AtomicBool::new(false),
             last_green_boundary: AtomicU64::new(0),
             gpu_sched: Mutex::new(None),
-            fg: Mutex::new(FgState { on: false, t: 0.5, synth_due: false, real_due: false, last_counter: 0, last_submit_s: 0.0, last_arrival: None, passthrough: 0,
+            fg: Mutex::new(FgState { on: false, rate: FgRate::Half, due: VecDeque::new(), last_counter: 0, last_submit_s: 0.0, last_arrival: None, passthrough: 0,
                 uncapped: false, hist: Vec::new(), lag_auto_s: 0.0, unc_age_sum: 0, real_sent: false, game_period_s: 0.0, lag_override_s: 0.0, last_lag_s: 0.0, last_t: 0.0, unc_behind: 0, unc_ahead: 0, unc_t_sum: 0.0, unc_synths: 0, unc_slack_ms: Vec::new(), unc_interval_ms: Vec::new() }),
             fg_uncapped: AtomicBool::new(false),
             fg_on: AtomicBool::new(false),
@@ -439,6 +486,7 @@ impl Pipeline {
             fg_dropped: AtomicU64::new(0),
             fg_pairs_skipped: AtomicU64::new(0),
             fg_real_due: AtomicBool::new(false),
+            fg_cap_us: AtomicU32::new(0),
             fg_queued: AtomicU64::new(0),
             fg_arrival_wait: Duration::from_secs_f64(
                 std::env::var("VISIONALVR_FG_ARRIVAL_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(4.0).clamp(0.0, 10.0) / 1000.0),
@@ -454,15 +502,13 @@ impl Pipeline {
         })
     }
 
-    /// Frame generation on/off (before `start`, or whenever the encoder is rebuilt); `t` = the synthetic frame's position between the rendered frames.
-    pub fn set_frame_gen(&self, on: bool, t: f64) {
+    /// Frame generation on/off (before `start`, or whenever the encoder is rebuilt).
+    pub fn set_frame_gen(&self, on: bool) {
         self.fg_real_due.store(false, Ordering::Relaxed);
         let mut st = self.fg.lock();
         st.on = on;
         self.fg_on.store(on, Ordering::Relaxed);
-        st.t = t.clamp(0.05, 0.95);
-        st.synth_due = false;
-        st.real_due = false;
+        st.due.clear();
         st.hist.clear();
         st.real_sent = false;
         if !on {
@@ -470,14 +516,16 @@ impl Pipeline {
         }
     }
 
-    /// Frame generation rate: uncapped (every output synthesised between the two newest rendered frames, the game paced at the display rate)
-    /// or half (today's strict alternation, the game paced at half rate). `lag_ms` = 0: the lag follows the game's measured frame period.
-    pub fn set_frame_gen_rate(&self, uncapped: bool, lag_ms: f64) {
+    /// Frame generation rate (`FgRate`): the fixed patterns (third, half) or the content-clock planner (two thirds, uncapped).
+    /// `lag_ms` = 0: the lag of the content-clock planner follows the arrivals.
+    pub fn set_frame_gen_rate(&self, rate: FgRate, lag_ms: f64) {
         let mut st = self.fg.lock();
+        let uncapped = rate.is_uncapped();
+        st.rate = rate;
         st.uncapped = uncapped;
         st.lag_override_s = (lag_ms.max(0.0)) / 1000.0;
-        st.synth_due = false;
-        st.real_due = false;
+        st.due.clear();
+        self.fg_cap_us.store(0, Ordering::Relaxed);
         st.hist.clear();
         st.real_sent = false;
         st.game_period_s = 0.0;
@@ -621,18 +669,16 @@ impl Pipeline {
             // no projection layer (a loading screen made of quads): the slot goes out as is, nothing to interpolate
             let mut st = self.fg.lock();
             st.passthrough += 1;
-            st.real_due = false;
-            st.synth_due = false;
+            st.due.clear();
             return Plan::Slot(a);
         }
         let mut st = self.fg.lock();
-        if st.real_due && !st.uncapped && self.fg_have_frame.load(Ordering::Relaxed) {
+        if !st.due.is_empty() && !st.uncapped && self.fg_have_frame.load(Ordering::Relaxed) {
             // The previous rendered frame B is still due and the new frame C is here. `on_boundary` leaves C waiting while B is due, so this
             // is the encoder-overrun fallback (a boundary was replaced before it was encoded): B is dropped and this boundary gets S(B, C),
             // C next, which keeps the motion continuous (0.5 -> 1.5 -> 2) where sending B and then C twice froze a tick and jumped.
             self.fg_dropped.fetch_add(1, Ordering::Relaxed);
-            st.real_due = false;
-            st.synth_due = false;
+            st.due.clear();
         }
         let mut err = [0 as std::ffi::c_char; 256];
         let r = unsafe { nvh::nvh_fg_ingest(handle, ipc, a.slot, a.render_q.as_ptr(), err.as_mut_ptr(), 256) };
@@ -692,22 +738,32 @@ impl Pipeline {
                 st.hist.remove(0);
             }
             st.real_sent = false;
-            st.real_due = false;
+            st.due.clear();
             return self.fg_plan_uncapped(&mut *st);
         }
+        // the fixed pattern of one game period: m - 1 synthetic frames at k/m between the two newest rendered frames, then the newest itself
+        let m = st.rate.period_mul().max(2) as usize;
+        let mut pattern: VecDeque<f64> = (1..m).map(|k| k as f64 / m as f64).collect();
+        pattern.push_back(1.0);
         match self.fg_pick_sample() {
             Some((sts, q)) => {
                 if r == 1 {
-                    st.real_due = true;
-                    Plan::Fg { mode: 1, t: st.t, age: 0, q, ts: sts, counter: a.counter, submit_s: a.submit_s, arrival: Some(a.arrival), kind: FgKind::Synth }
+                    let t = pattern.pop_front().unwrap_or(1.0);
+                    st.due = pattern;
+                    Plan::Fg { mode: 1, t, age: 0, q, ts: sts, counter: a.counter, submit_s: a.submit_s, arrival: Some(a.arrival), kind: FgKind::Synth }
                 } else {
-                    st.real_due = false;
+                    st.due.clear();
                     Plan::Fg { mode: 0, t: 0.0, age: 0, q, ts: sts, counter: a.counter, submit_s: a.submit_s, arrival: Some(a.arrival), kind: FgKind::Real }
                 }
             }
             None => {
-                st.synth_due = r == 1;
-                st.real_due = true;
+                // no fresh tracking sample: the synthetic output of this boundary is dropped, not delayed (see `fg_plan_hold`)
+                if r == 1 {
+                    pattern.pop_front();
+                    st.due = pattern;
+                } else {
+                    st.due = VecDeque::from(vec![1.0]);
+                }
                 self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
                 Plan::Skip
             }
@@ -722,7 +778,7 @@ impl Pipeline {
     fn fg_wait_arrival(&self, boundary: Instant) -> Option<Arrived> {
         {
             let st = self.fg.lock();
-            if st.real_due || st.synth_due {
+            if !st.due.is_empty() {
                 return None;
             }
             if st.uncapped {
@@ -766,17 +822,19 @@ impl Pipeline {
         }
         let Some((sts, q)) = self.fg_pick_sample() else {
             self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
+            // A synthetic output with no fresh sample is dropped rather than delayed: delaying it pushed the whole pattern back a boundary,
+            // the rendered frame went out late and the next arrival queued behind it until a newer one superseded it (lab, 1/3 rate,
+            // 2026-10-16: 7 % of the game's frames lost, content jumps). The rendered frame itself stays due.
+            if st.due.front().map_or(false, |&t| t < 1.0) {
+                st.due.pop_front();
+            }
             return Plan::Skip;
         };
         let (counter, submit_s, arrival) = (st.last_counter, st.last_submit_s, st.last_arrival);
-        if st.synth_due {
-            st.synth_due = false;
-            Plan::Fg { mode: 1, t: st.t, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Synth }
-        } else if st.real_due {
-            st.real_due = false;
-            Plan::Fg { mode: 0, t: 0.0, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Real }
-        } else {
-            Plan::Fg { mode: 0, t: 0.0, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Repeat }
+        match st.due.pop_front() {
+            Some(t) if t < 1.0 => Plan::Fg { mode: 1, t, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Synth },
+            Some(_) => Plan::Fg { mode: 0, t: 0.0, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Real },
+            None => Plan::Fg { mode: 0, t: 0.0, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Repeat },
         }
     }
 
@@ -792,7 +850,7 @@ impl Pipeline {
         }
     }
 
-    fn period(&self) -> Duration {
+    pub fn period(&self) -> Duration {
         Duration::from_nanos(self.cfg.period_ns.load(Ordering::Relaxed).max(1_000_000))
     }
 
@@ -906,6 +964,13 @@ impl Pipeline {
         // frame generation: while a rendered frame is still due, a frame that has already arrived waits one boundary (the stream shows
         // B, S(B, C), C in order rather than dropping or doubling one; see `FgState`)
         let fg_unc = self.fg_on.load(Ordering::Relaxed) && self.fg_uncapped.load(Ordering::Relaxed);
+        if fg_unc {
+            // two-thirds rate: the shim's minimum release spacing follows the display period (the host clock follows the client's rate)
+            let want = self.fg.lock().rate.min_period_us(self.period().as_secs_f64());
+            if want != 0 && self.fg_cap_us.swap(want, Ordering::Relaxed) != want && self.ipc != 0 {
+                unsafe { nvh::nvh_ipc_set_app_min_period(self.ipc(), want) };
+            }
+        }
         let fg_queue = self.fg_on.load(Ordering::Relaxed) && !fg_unc && self.fg_have_frame.load(Ordering::Relaxed) && self.fg_real_due.load(Ordering::Relaxed)
             && !self.intake.lock().is_empty();
         let newest = if fg_queue {
@@ -1075,7 +1140,7 @@ impl Pipeline {
                 (Job::FgHold, false) => Plan::Skip,
             };
             if fg_on {
-                self.fg_real_due.store(self.fg.lock().real_due, Ordering::Relaxed);
+                self.fg_real_due.store(!self.fg.lock().due.is_empty(), Ordering::Relaxed);
             }
             if matches!(plan, Plan::Skip) {
                 continue;
@@ -1128,9 +1193,7 @@ impl Pipeline {
                 if !self.green_active.swap(true, Ordering::Relaxed) {
                     unsafe { nvh::nvh_release_shared(handle) }; // the app's ring is gone: free its VRAM (and the generator's frame history)
                     self.fg_have_frame.store(false, Ordering::Relaxed);
-                    let mut st = self.fg.lock();
-                    st.real_due = false;
-                    st.synth_due = false;
+                    self.fg.lock().due.clear();
                     self.fg_real_due.store(false, Ordering::Relaxed);
                 }
             } else {

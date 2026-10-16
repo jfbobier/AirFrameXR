@@ -203,7 +203,7 @@ pub static GAMMA_REQ: AtomicU32 = AtomicU32::new(0);
 pub static DEBUG_REQ: AtomicI32 = AtomicI32::new(-1);
 /// frame generation on/off from VisionALVR.exe (-1 none, 0 off, 1 on); applied by the main loop to the running encoder and the shim's pacing
 pub static FRAME_GEN_REQ: AtomicI32 = AtomicI32::new(-1);
-/// frame generation rate from VisionALVR.exe (-1 none, 0 half, 1 uncapped)
+/// frame generation rate from VisionALVR.exe (-1 none, else `pipeline::FgRate::index`: 0 third, 1 half, 2 two_thirds, 3 uncapped)
 pub static FG_RATE_REQ: AtomicI32 = AtomicI32::new(-1);
 /// the game's DLSS motion vectors on/off (-1 none)
 pub static GAME_MV_REQ: AtomicI32 = AtomicI32::new(-1);
@@ -215,7 +215,7 @@ pub static FG_LAG_REQ: AtomicI32 = AtomicI32::new(-1);
 pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 
-/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate half|uncapped`, `game_mv on|off`,
+/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`, `game_mv on|off`,
 /// `frame_gen_cap <fps>` (0 = none), `frame_gen_lag <ms>` (0 = automatic), `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
@@ -234,7 +234,11 @@ pub fn spawn_stdin_control() {
                 }
                 (Some("debug"), Some(v)) => DEBUG_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("frame_gen"), Some(v)) => FRAME_GEN_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
-                (Some("frame_gen_rate"), Some(v)) => FG_RATE_REQ.store((v == "uncapped") as i32, Ordering::SeqCst),
+                (Some("frame_gen_rate"), Some(v)) => {
+                    if let Some(r) = crate::pipeline::FgRate::parse(v) {
+                        FG_RATE_REQ.store(r.index(), Ordering::SeqCst);
+                    }
+                }
                 (Some("game_mv"), Some(v)) => GAME_MV_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("frame_gen_cap"), Some(v)) => {
                     if let Ok(f) = v.parse::<f64>() {

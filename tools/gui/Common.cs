@@ -177,13 +177,11 @@ namespace VisionALVR
         public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", "00ff00"); set => Json.Set(Root, "video.idle_rgb", value); }
         /// frame generation (docs/FRAME_GENERATION.md): the game renders every other frame, the streamer interpolates the one in between (off by default)
         public bool FrameGen { get => Json.Bool(Root, "video.frame_gen", false); set => Json.Set(Root, "video.frame_gen", value); }
-        // frame generation rate: "half" (the game at half the display rate, strict alternation) or "uncapped" (every output interpolated, docs/FRAME_GENERATION_UNCAPPED.md)
+        // frame generation rate: "third" | "half" (default) | "two_thirds" (the game's rate as a fraction of the display rate, the streamer generates the
+        // frames in between; docs/FRAME_GENERATION.md), "uncapped" from the config only (docs/FRAME_GENERATION_UNCAPPED.md)
         public string FrameGenRate { get => Json.Str(Root, "video.frame_gen_rate", "half"); set => Json.Set(Root, "video.frame_gen_rate", value); }
         // the game's DLSS motion vectors drive the synthesis when the VisionALVR-OptiScaler provider is loaded in the game (docs/MOTION_VECTORS.md)
         public bool GameMotionVectors { get => Json.Bool(Root, "video.game_motion_vectors", true); set => Json.Set(Root, "video.game_motion_vectors", value); }
-        // uncapped mode: fps cap on the game's releases (0 = none) and content lag in ms (0 = automatic)
-        public int FrameGenCapFps { get => (int)Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }
-        public int FrameGenLagMs { get => (int)Json.Num(Root, "video.frame_gen_lag_ms", 0); set => Json.Set(Root, "video.frame_gen_lag_ms", value); }
         public bool Debug { get => Json.Bool(Root, "debug", true); set => Json.Set(Root, "debug", value); }
         /// display (live in VisionALVR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral
         public const double DefaultGamma = 1.2;

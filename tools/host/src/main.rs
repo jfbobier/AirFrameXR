@@ -18,6 +18,7 @@ mod logs;
 mod nvidia_profile;
 mod phase;
 mod pipeline;
+use pipeline::FgRate;
 #[cfg(feature = "simrig")]
 mod simrig;
 mod telemetry;
@@ -79,9 +80,9 @@ struct Args {
     frame_gen: Option<bool>,
     /// the game's DLSS motion vectors (docs/MOTION_VECTORS.md): the shim copies them with every frame when the provider is loaded; settings `video.game_motion_vectors`
     game_motion_vectors: bool,
-    /// frame generation rate (docs/FRAME_GENERATION_UNCAPPED.md): Some(true) = uncapped (every output interpolated, the game paced at the display
-    /// rate), Some(false) = half rate; None = settings `video.frame_gen_rate` ("half" default). `--frame-gen-rate`, env VISIONALVR_FG_RATE.
-    fg_uncapped: Option<bool>,
+    /// frame generation rate (pipeline::FgRate: third | half | two_thirds | uncapped; docs/FRAME_GENERATION.md, docs/FRAME_GENERATION_UNCAPPED.md);
+    /// None = settings `video.frame_gen_rate` ("half" default). `--frame-gen-rate`, env VISIONALVR_FG_RATE.
+    fg_rate: Option<FgRate>,
     /// uncapped mode: content lag behind the newest tracking sample, ms; 0 = automatic (the game's frame period + half a display period)
     fg_lag_ms: Option<f64>,
     /// uncapped mode: fps cap on the game's releases (0 = none), headroom for the host's own GPU work
@@ -89,8 +90,6 @@ struct Args {
     fg_flow_scale: f64,
     fg_perf: i32,
     fg_grid: i32,
-    /// the synthetic frame's position between the two rendered frames (0.5 = midpoint)
-    fg_t: f64,
     /// scripted controller input for unattended runs (harness): (seconds after game start, hand, click mask, trigger)
     auto_input: Vec<(f64, usize, u32, f32)>,
     qp_map: Option<bool>,
@@ -176,13 +175,12 @@ fn parse_args() -> Result<Args, String> {
         gpu_sched_class: 5,
         frame_gen: None,
         game_motion_vectors: true,
-        fg_uncapped: None,
+        fg_rate: None,
         fg_lag_ms: None,
         fg_cap_fps: None,
         fg_flow_scale: 0.5,
         fg_perf: 20,
         fg_grid: 4,
-        fg_t: 0.5,
         auto_input: vec![],
         send_pacing_explicit: false,
         qp_map: None,
@@ -313,14 +311,13 @@ fn parse_args() -> Result<Args, String> {
             "--boundary-offset-ms" => a.boundary_offset_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--gpu-sched-class" => a.gpu_sched_class = v()?.parse().map_err(|e| format!("{e}"))?,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
-            "--frame-gen-rate" => a.fg_uncapped = Some(v()?.eq_ignore_ascii_case("uncapped")),
+            "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
             "--frame-gen-lag-ms" => a.fg_lag_ms = Some(v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.0, 100.0)),
             "--frame-gen-cap" => a.fg_cap_fps = Some(v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.0, 240.0)),
             "--game-motion-vectors" => a.game_motion_vectors = parse_on_off("--game-motion-vectors", &v()?)?,
             "--frame-gen-flow-scale" => a.fg_flow_scale = v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.1, 1.0),
             "--frame-gen-perf" => a.fg_perf = parse_fg_perf(&v()?)?,
             "--frame-gen-grid" => a.fg_grid = v()?.parse::<i32>().map_err(|e| format!("{e}"))?,
-            "--frame-gen-t" => a.fg_t = v()?.parse::<f64>().map_err(|e| format!("{e}"))?,
             "--auto-input" => {
                 // "20:rA,26:rA,40:lT": at 20 s and 26 s after the game starts press A on the right controller, at 40 s the left
                 // trigger. Buttons: A/X primary, B/Y secondary, S thumbstick, M menu, H system, T trigger.
@@ -379,9 +376,9 @@ fn parse_args() -> Result<Args, String> {
             a.frame_gen = Some(v != "0" && !v.eq_ignore_ascii_case("off") && !v.eq_ignore_ascii_case("false"));
         }
     }
-    if a.fg_uncapped.is_none() {
+    if a.fg_rate.is_none() {
         if let Ok(v) = std::env::var("VISIONALVR_FG_RATE") {
-            a.fg_uncapped = Some(v.eq_ignore_ascii_case("uncapped"));
+            a.fg_rate = FgRate::parse(&v);
         }
     }
     if a.fg_lag_ms.is_none() {
@@ -389,9 +386,6 @@ fn parse_args() -> Result<Args, String> {
     }
     if a.fg_cap_fps.is_none() {
         a.fg_cap_fps = std::env::var("VISIONALVR_FG_CAP_FPS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 240.0));
-    }
-    if let Some(v) = std::env::var("VISIONALVR_FG_T").ok().and_then(|v| v.parse::<f64>().ok()) {
-        a.fg_t = v;
     }
     if let Some(v) = std::env::var("VISIONALVR_FG_FLOW_SCALE").ok().and_then(|v| v.parse::<f64>().ok()) {
         a.fg_flow_scale = v.clamp(0.1, 1.0);
@@ -494,8 +488,8 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if let Some(v) = st.game_motion_vectors {
         a.game_motion_vectors = v;
     }
-    if a.fg_uncapped.is_none() {
-        a.fg_uncapped = st.frame_gen_rate.as_deref().map(|v| v.eq_ignore_ascii_case("uncapped"));
+    if a.fg_rate.is_none() {
+        a.fg_rate = st.frame_gen_rate.as_deref().and_then(FgRate::parse);
     }
     if a.fg_lag_ms.is_none() {
         a.fg_lag_ms = st.frame_gen_lag_ms.map(|v| v.clamp(0.0, 100.0));
@@ -1327,24 +1321,41 @@ pub(crate) fn push_recent_sample(shared: &Shared, ts: Duration, q: [f32; 4]) {
     }
 }
 
-/// The shim's minimum release spacing (us) for the fps cap of the uncapped mode; 0 = none (cap off, half rate, or generation off).
-fn fg_cap_us(uncapped_active: bool, cap_fps: Option<f64>) -> u32 {
-    match cap_fps {
-        Some(f) if uncapped_active && f > 0.0 => (1_000_000.0 / f).round() as u32,
-        _ => 0,
+/// The shim's pacing for the frame-generation rate in force: (release step in display periods, minimum release spacing in us; 0 = none).
+/// Generation off: every boundary, no cap. Third / half: every 3rd / 2nd boundary. Two thirds: free-running held to two thirds of the
+/// display rate (the pipeline refreshes it when the display period changes). Uncapped: free-running, the user's fps cap if any.
+fn fg_pacing(args: &Args, fg_active: bool, display_period_s: f64) -> (u32, u32) {
+    if !fg_active {
+        return (1, 0);
+    }
+    let rate = args.fg_rate.unwrap_or(FgRate::Half);
+    let cap = match rate {
+        FgRate::Uncapped => match args.fg_cap_fps { Some(f) if f > 0.0 => (1_000_000.0 / f).round() as u32, _ => 0 },
+        r => r.min_period_us(display_period_s),
+    };
+    (rate.period_mul(), cap)
+}
+
+/// Applies `fg_pacing` to the shim (ipc appPeriodMul and appMinPeriodUs).
+fn apply_fg_pacing(ipc: *mut std::ffi::c_void, p: Option<&pipeline::Pipeline>, args: &Args, fg_active: bool) {
+    let period_s = p.map(|p| p.period().as_secs_f64()).unwrap_or(1.0 / args.fps);
+    let (mul, cap) = fg_pacing(args, fg_active, period_s);
+    unsafe {
+        nvh::nvh_ipc_set_app_period_mul(ipc, mul);
+        nvh::nvh_ipc_set_app_min_period(ipc, cap);
     }
 }
 
 /// Every frame-generation choice, logged whenever one changes (the night's tests are read back from these lines).
 fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
-    let rate = if args.fg_uncapped.unwrap_or(false) { "uncapped" } else { "half" };
+    let rate = args.fg_rate.unwrap_or(FgRate::Half).name();
     let cap = args.fg_cap_fps.unwrap_or(0.0);
     let lag = args.fg_lag_ms.unwrap_or(0.0);
     logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game motion vectors {}, fps cap {}, content lag {} ms",
         if fg_active { "ON" } else { "off" }, if args.game_motion_vectors { "on" } else { "off" }, if cap > 0.0 { format!("{cap:.0}") } else { "none".into() },
         if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }));
     event(origin, "frame_gen_config", json!({ "why": why, "on": fg_active, "rate": rate, "game_motion_vectors": args.game_motion_vectors,
-        "cap_fps": cap, "lag_ms": lag, "t": args.fg_t, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf }));
+        "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf }));
 }
 
 /// Creates the generator on the encoder (after nvh_create, the stream's frame size being known): true when it runs; false (logged) when the
@@ -1357,13 +1368,13 @@ fn enable_frame_gen(origin: Instant, handle: *mut std::ffi::c_void, args: &Args)
     unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 768) };
     let stats = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
     if ok {
-        logs::general("INFO", &format!("frame generation ON: half-rate pacing, flow scale {:.2}, perf {}, grid {}, t {:.2}; {}", args.fg_flow_scale, args.fg_perf, args.fg_grid, args.fg_t,
+        logs::general("INFO", &format!("frame generation ON: rate {}, flow scale {:.2}, perf {}, grid {}; {}", args.fg_rate.unwrap_or(FgRate::Half).name(), args.fg_flow_scale, args.fg_perf, args.fg_grid,
             serde_json::from_str::<serde_json::Value>(&stats).ok().and_then(|v| v["info"].as_str().map(str::to_string)).unwrap_or_default()));
     } else {
         let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();
         logs::general("WARN", &format!("frame generation requested but unavailable, streaming without it: {msg}"));
     }
-    event(origin, "frame_gen", json!({ "requested": true, "on": ok, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf, "grid": args.fg_grid, "t": args.fg_t,
+    event(origin, "frame_gen", json!({ "requested": true, "on": ok, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf, "grid": args.fg_grid, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(),
         "error": if ok { None } else { Some(unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string()) },
         "gen": serde_json::from_str::<serde_json::Value>(&stats).unwrap_or(serde_json::Value::Null) }));
     ok
@@ -1722,17 +1733,16 @@ fn main() {
         // frame generation: the generator lives on the encoder; the shim paces the game at half rate only while it runs
         if args.frame_gen.unwrap_or(false) {
             fg_active = enable_frame_gen(origin, p.enc.lock().handle, &args);
-            p.set_frame_gen(fg_active, args.fg_t);
+            p.set_frame_gen(fg_active);
         }
-        p.set_frame_gen_rate(args.fg_uncapped.unwrap_or(false), args.fg_lag_ms.unwrap_or(0.0));
-        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active && !args.fg_uncapped.unwrap_or(false) { 2 } else { 1 }) };
+        p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half), args.fg_lag_ms.unwrap_or(0.0));
+        apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
         unsafe { nvh::nvh_ipc_set_game_mv(ipc, if args.game_motion_vectors { 1 } else { 0 }) };
-        unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && args.fg_uncapped.unwrap_or(false), args.fg_cap_fps)) };
         log_fg_config(origin, &args, fg_active, "start");
         p.start();
         event(origin, "pacing_config", json!({ "send_pacing": args.send_pacing.name(), "running_start_ms": args.running_start_ms,
             "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "boundary_offset_ms": args.boundary_offset_ms, "gpu_sched_class": args.gpu_sched_class, "ring_slots": 6,
-            "frame_gen": fg_active, "app_period_mul": if fg_active { 2 } else { 1 } }));
+            "frame_gen": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "app_period_mul": fg_pacing(&args, fg_active, 1.0 / args.fps).0 }));
         #[cfg(feature = "simrig")]
         if let Some(dir) = &args.simrig {
             simrig::set_ipc(ipc_addr);
@@ -2142,7 +2152,7 @@ fn main() {
                 if let Some(p) = pipeline.as_ref() {
                     if want != fg_active {
                         if !want {
-                            p.set_frame_gen(false, args.fg_t);   // the encoder thread plans plain frames from here on
+                            p.set_frame_gen(false);   // the encoder thread plans plain frames from here on
                         }
                         let g = p.enc.lock();
                         if want {
@@ -2155,9 +2165,8 @@ fn main() {
                             event(origin, "frame_gen", json!({ "requested": false, "on": false }));
                         }
                         drop(g);
-                        p.set_frame_gen(fg_active, args.fg_t);
-                        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active && !args.fg_uncapped.unwrap_or(false) { 2 } else { 1 }) };
-                        unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && args.fg_uncapped.unwrap_or(false), args.fg_cap_fps)) };
+                        p.set_frame_gen(fg_active);
+                        apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
                         log_fg_config(origin, &args, fg_active, "frame_gen");
                     }
                 }
@@ -2165,13 +2174,12 @@ fn main() {
             // frame generation rate, the game's motion vectors, the fps cap and the content lag from VisionALVR.exe (live; the settings are read at start too)
             let rate = vision::FG_RATE_REQ.swap(-1, Ordering::SeqCst);
             if rate >= 0 {
-                let unc = rate == 1;
-                args.fg_uncapped = Some(unc);
+                let r = FgRate::from_index(rate);
+                args.fg_rate = Some(r);
                 if let Some(p) = pipeline.as_ref() {
-                    p.set_frame_gen_rate(unc, args.fg_lag_ms.unwrap_or(0.0));
-                    unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active && !unc { 2 } else { 1 }) };
-                    unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && unc, args.fg_cap_fps)) };
+                    p.set_frame_gen_rate(r, args.fg_lag_ms.unwrap_or(0.0));
                 }
+                apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_rate");
             }
             let mv = vision::GAME_MV_REQ.swap(-1, Ordering::SeqCst);
@@ -2187,14 +2195,14 @@ fn main() {
             let cap = vision::FG_CAP_REQ.swap(-1, Ordering::SeqCst);
             if cap >= 0 {
                 args.fg_cap_fps = Some(cap as f64);
-                unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && args.fg_uncapped.unwrap_or(false), args.fg_cap_fps)) };
+                apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_cap");
             }
             let lag = vision::FG_LAG_REQ.swap(-1, Ordering::SeqCst);
             if lag >= 0 {
                 args.fg_lag_ms = Some(lag as f64 / 10.0);
                 if let Some(p) = pipeline.as_ref() {
-                    p.set_frame_gen_rate(args.fg_uncapped.unwrap_or(false), args.fg_lag_ms.unwrap_or(0.0));
+                    p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half), args.fg_lag_ms.unwrap_or(0.0));
                 }
                 log_fg_config(origin, &args, fg_active, "frame_gen_lag");
             }
@@ -2334,9 +2342,8 @@ fn main() {
                         // a new encoder: the generator is created again for the new frame size
                         fg_active = enable_frame_gen(origin, g.handle, &args);
                         let p = pipeline.as_ref().expect("pipeline");
-                        p.set_frame_gen(fg_active, args.fg_t);
-                        unsafe { nvh::nvh_ipc_set_app_period_mul(ipc, if fg_active && !args.fg_uncapped.unwrap_or(false) { 2 } else { 1 }) };
-                        unsafe { nvh::nvh_ipc_set_app_min_period(ipc, fg_cap_us(fg_active && args.fg_uncapped.unwrap_or(false), args.fg_cap_fps)) };
+                        p.set_frame_gen(fg_active);
+                        apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
                     }
                     nvenc_cfg = describe_encoder(origin, g.handle, &args.dump_qpmap);
                     logs::general("INFO", &format!("encoder rebuilt for the negotiated stream: {ew}x{eh} (was {}x{})", enc_size.0, enc_size.1));

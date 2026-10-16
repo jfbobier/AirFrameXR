@@ -48,13 +48,15 @@ t = 0 repeats, frozen 12 %, verdict JUDDER on the stutter scenario against 2 % f
 | Setting (`config/visionalvr.json`) | GUI | Live command | Meaning |
 |---|---|---|---|
 | `video.frame_gen` | toggle "Frame generation" | `frame_gen on\|off` | the generator on the encoder, as before |
-| `video.frame_gen_rate` = `half` (default) \| `uncapped` | "Game rate: Half / Uncapped" | `frame_gen_rate half\|uncapped` | this note's mode vs today's alternation; the shim's pacing follows (`appPeriodMul` 2 or 1) |
+| `video.frame_gen_rate` = `third` \| `half` (default) \| `two_thirds` \| `uncapped` | slider "Game rate 1/3 - 1/2 - 2/3" (2026-10-16; `uncapped` from the config only) | `frame_gen_rate third\|half\|two_thirds\|uncapped` | `third`/`half`: fixed patterns, the shim paces at `appPeriodMul` 3 / 2; `two_thirds`: this note's planner with the game held to 2/3 of the display rate (the host sets `appMinPeriodUs` from the display period and follows rate changes); `uncapped`: this note's planner, free-running |
 | `video.game_motion_vectors` (default on) | tick "DLSS motion vectors" | `game_mv on\|off` | the shim taps the game's vectors when the VisionALVR-OptiScaler DLL is in the game folder and the generator synthesises from them; off = optical flow only (the tap is idle) |
-| `video.frame_gen_cap_fps` (0 = none) | "fps cap" | `frame_gen_cap <fps>` | uncapped mode: the shim never releases the game sooner than 1/cap after the previous release (IPC v27 `appMinPeriodUs`); the headroom knob below |
-| `video.frame_gen_lag_ms` (0 = auto) | "lag ms" | `frame_gen_lag <ms>` | uncapped mode: the content lag; 0 = automatic as above |
+| `video.frame_gen_cap_fps` (0 = none) | config only (2026-10-16) | `frame_gen_cap <fps>` | uncapped mode: the shim never releases the game sooner than 1/cap after the previous release (IPC v27 `appMinPeriodUs`); the headroom knob below |
+| `video.frame_gen_lag_ms` (0 = auto) | config only | `frame_gen_lag <ms>` | two-thirds and uncapped modes: the content lag; 0 = automatic as above |
 
 CLI `--frame-gen-rate`, `--frame-gen-cap`, `--frame-gen-lag-ms`, `--game-motion-vectors`; env `VISIONALVR_FG_RATE`, `VISIONALVR_FG_CAP_FPS`,
-`VISIONALVR_FG_LAG_MS`. The cap and the lag only act in uncapped mode (greyed out otherwise). Nothing engages by itself.
+`VISIONALVR_FG_LAG_MS`. The cap acts in uncapped mode only, the lag in the two free-running modes. Nothing engages by itself. After the
+two headset nights (below) the launcher shows three locked rates, 1/3, 1/2, 2/3 (`docs/FRAME_GENERATION.md`, "Rates"); 2/3 is this
+planner with the cap implied by the display rate, uncapped itself is a config-only experiment.
 
 ## What is logged (how to read the night)
 

@@ -8,9 +8,10 @@ Games that cannot hold the display rate (50-70 fps on a 90/100 Hz headset) look 
 ticks, and in-scene motion (and everything the headset's own rotation reprojection cannot fix: translation, moving objects,
 animation) stutters. With frame generation on:
 
-1. The shim paces the game at **half the display rate** (IPC `appPeriodMul` 2: `WaitForVsync` releases the app every other compositor
-   boundary; the predicted display time moves one period later, see below). A 60 fps game becomes a steady 50 fps (100 Hz) or 45 fps
-   (90 Hz) game with a 20 ms budget per frame.
+1. The shim paces the game at **a fraction of the display rate** (IPC `appPeriodMul` m: `WaitForVsync` releases the app every m-th
+   compositor boundary; the predicted display time moves accordingly, see below). At the default **1/2** a 60 fps game becomes a steady
+   50 fps (100 Hz) or 45 fps (90 Hz) game with a 20 ms budget per frame; at **1/3** a 40 fps game becomes a steady 33 fps game with a 30 ms
+   budget and two generated frames per rendered one (see "Rates" below).
 2. For every rendered frame B the host keeps a copy, computes the **optical flow** between the previous rendered frame A, rotated into
    B's camera first, and B (NVIDIA Optical Flow API: the flow engine of Turing-and-later GPUs, through the driver's `nvofapi64.dll`,
    on the frame downscaled to 50 %, 4x4 vector grid, cost output), and sends the **interpolated frame S(A, B)**: each pixel samples A
@@ -42,7 +43,8 @@ generation itself (3080 Ti at 2048x1024: flow 3.3 ms, synthesis 0.2 ms; the RTX 
 | Settings | `config/visionalvr.json` `video.frame_gen` (+ `frame_gen_flow_scale`, `frame_gen_perf`), `--frame-gen on|off`, `VISIONALVR_FRAME_GEN=1/0`; live: GUI command `frame_gen on|off` | CLI > env > settings; checkbox "Frame generation" in the streamer window (applies at once: generator created or dropped under the encoder lock, shim pacing follows) and in Settings |
 | Headers | `third_party/nvof/` | `nvOpticalFlowCommon.h`, `nvOpticalFlowD3D11.h` (MIT notice; nothing of NVIDIA's is redistributed) |
 
-Rules of the per-boundary decision (`FgState`): the output schedule is a strict alternation, synthetic then rendered. A rendered frame
+Rules of the per-boundary decision (`FgState`): the output schedule is a fixed pattern per game period, the m - 1 synthetic frames at
+t = 1/m ... (m-1)/m then the rendered frame (`due`); at 1/2 that is the strict alternation synthetic, rendered. A rendered frame
 that arrives while the previous one is still due waits in the intake for one boundary (`fg_queued`); a boundary with nothing due waits up to
 `VISIONALVR_FG_ARRIVAL_WAIT_MS` (4) past the boundary for the frame the app is about to publish (`fg_arrival_waits` / `fg_arrival_hits`) and
 only then repeats the rendered frame. Both rules exist because an app released at a boundary publishes its frame near a boundary: without
@@ -52,6 +54,40 @@ projection layer (quad-only loading screens) goes out as is; a frame still due w
 between the two newest (`fg_dropped`). With the generator on the newest waiting frame always wins a pick (older ones superseded): the shim's
 half-rate pacing runs open loop and the generator consumes one frame per two boundaries, so a standing queue would never drain otherwise.
 When the GPU/driver has no flow engine the host logs a WARN, streams as without the feature and keeps the game at full rate.
+
+## Rates (2026-10-16): 1/3, 1/2, 2/3
+
+The launcher offers the game's rate as a fraction of the display rate, one slider with three positions (`video.frame_gen_rate`):
+
+| rate | setting | the game | the host | for games that render at |
+|---|---|---|---|---|
+| 1/3 | `third` | released every 3rd boundary (33 fps at 100 Hz, 30 at 90) | S(A, B, 1/3), S(A, B, 2/3), B | 34-49 fps |
+| 1/2 | `half` (default) | every 2nd boundary (50 / 45 fps) | S(A, B, 1/2), B | 50-66 fps, and the safe choice |
+| 2/3 | `two_thirds` | free-running, held to two thirds of the display rate by the shim's minimum release spacing (67 / 60 fps) | the content-clock planner of `docs/FRAME_GENERATION_UNCAPPED.md`: every output interpolated at the fraction its time falls at | 67 fps and above |
+
+Why these three and not a free ratio: on the boundary grid only 1/m patterns are regular (a 2/3 pattern with boundary-locked releases
+alternates 10 and 20 ms frame times, which engines with frame-time smoothing turn into judder), so 2/3 is the free-running planner with a
+cap rather than a pattern. Why not "uncapped" in the launcher: the two headset nights of 2026-10-15/16 showed that the free-running game's
+render queue (2 to 3 frames when GPU-bound) sets the content lag, and that the user preferred the locked cadences on latency; `uncapped`
+stays available from the config and the command line, with `video.frame_gen_cap_fps` and `video.frame_gen_lag_ms`, for experiments.
+Choosing: the 10-second `frame generation perf` line reports the game's `app fps`; pick the largest fraction the game sustains with margin.
+
+Lab for the rates (3080 Ti simrig, 2026-10-16, 40 s each, marker on the wall clock; `third`, `third_slow`, `third_mv`, `stutter_third`,
+`two_thirds`, `jitter_two_thirds`, `stutter_fg` as the half-rate regression):
+- 1/2 unchanged: stutter_fg SMOOTH, frozen 1.3 %, step cv 0.18-0.20.
+- 2/3: an 80-100 fps app held to 67 fps, SMOOTH, frozen 2.4 %, step cv 0.34; the ~75 fps jittery app SMOOTH, frozen 3.7 %, step cv 0.36-0.38.
+- 1/3: the pattern runs as designed (two synthetic outputs then the rendered frame, superseded frames 8-10 per 2200 once the sample-miss
+  rule below was in), but the lab's 5 px marker is a hard case at 30 ms game steps: it moves 14 px per pair, past what the optical flow's
+  8 px blocks resolve, so the synthetic frames under-move it and the rendered frame catches up (steps small, small, big). With the probe's
+  exact vectors the steps are uniform (4.0 / 4.0 / 4.0 px) except where a boundary had no fresh tracking sample. The 1/3 rate is where the
+  per-frame motion is largest, which is the case the vectors exist for; a 1/3 verdict with flow is a thin-object verdict, not a planner one.
+- Two rules came out of it. (a) A synthetic output whose boundary finds no fresh tracking sample is dropped, not delayed: delaying it pushed
+  the whole pattern back, the rendered frame went out late, the next arrival queued and a newer one superseded it (7 % of the game's
+  frames lost at 1/3 before the rule; also half rate, where it delayed the rendered frame a period). The rendered frame stays owed.
+  (b) The lab's sample misses depend on the random phase between the host's boundary grid and the simulated headset's sample delivery
+  (2 ms + a mostly constant uplink), from 1 % to 13 % of boundaries between runs, and the judge counts each as a frozen tick: verdicts on
+  the fixed-pattern rates need the counters (`no_sample`, `superseded`) read next to them until the lab aligns or jitters the sample
+  phase, or the host locks its grid to the samples. Headset sessions show 1-2 % misses.
 
 ## Telemetry
 
