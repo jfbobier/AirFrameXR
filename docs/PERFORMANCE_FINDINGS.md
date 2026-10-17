@@ -334,3 +334,13 @@ displays at its next tick either way). The phase lock had been aiming the earlie
 spread of 8 ms, so a share of the frames landed after the tick and were shown a tick late: that is the "lower performance" of the evening.
 `VISIONALVR_PHASE_MARGIN_MS=7` with debug off reproduced the cure by hand ("visual frame generation aspect was MUCH BETTER"); the default is
 now 7 ms. Open: why debug mode costs 5 ms per frame (the CSV writers are buffered; the NVML sampler or the event writer are the suspects).
+
+Same margin with generation off (checked right after): the phase lock's arrival spread is 7.9-9.0 ms without generation (End of Abyss 372
+evaluations, Cemu, Gunman Contracts) and 8.2-9.5 ms at every level with it, so the spread is the host-to-headset path (encode variance and
+Wi-Fi), not the interpolation, and one default serves both. **Deep dive to do (counter-intuitive, the user's words):** the arrivals cover
+8-9 ms of a 10 ms period, nearly all of it, so a margin can only move the cluster, never shrink it; a frame will be late whatever the margin
+unless the spread itself comes down. What makes it: the encode's own variance (p95 4.3 ms, max 6-7), the send's position in the period, the
+network's jitter (the tracking samples show the Wi-Fi bunching: p95 11-18 ms for a 10 ms cadence), the headset's decode. Measure each leg
+on one night (debug on costs 5 ms per frame, so that bug comes first), then decide whether a send-side change (a fixed send phase, a
+smaller encode variance) can narrow the cluster so the margin can come back down. The 3 -> 7 ms change buys smoothness with the headset's
+own latency quantum; the deep dive is about buying it for nothing.
