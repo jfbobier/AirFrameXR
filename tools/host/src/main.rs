@@ -2238,10 +2238,21 @@ fn main() {
         }
         a.wrapping_add(b)
     };
-    // the level changed during a run (the launcher, or the user): the record restarts here, a record belongs to one level
-    let restart_segment = |game: &mut Option<GameRun>, pipeline: &Option<std::sync::Arc<pipeline::Pipeline>>, ipc: *mut std::ffi::c_void, windows: &mut Vec<(f64, f64, f64)>, client0: &mut (u64, u64), rep0: &mut (u64, u64)| {
+    // the level changed during a run (the launcher, or the user): the segment played so far is recorded under the level it ran at (20 s or
+    // more; the 2/3 segment of a Gears of War run was lost without this, 2026-10-17) and the record restarts here: a record belongs to one level
+    let restart_segment = |game: &mut Option<GameRun>, pipeline: &Option<std::sync::Arc<pipeline::Pipeline>>, ipc: *mut std::ffi::c_void, windows: &mut Vec<(f64, f64, f64)>, client0: &mut (u64, u64), rep0: &mut (u64, u64), old_level: &str, args: &Args| {
         if let Some(g) = game.as_mut() {
             let (s, o) = fg_counts(pipeline);
+            let seg_secs = g.seg_start.elapsed().as_secs_f64();
+            if seg_secs > 20.0 {
+                let (ds, d_o) = (s.wrapping_sub(g.seg_skips0), o.wrapping_sub(g.seg_outputs0));
+                let skipped = if ds + d_o > 0 { ds as f64 / (ds + d_o) as f64 } else { 0.0 };
+                let seg_frames = shared.frames_sent.load(Ordering::Relaxed) - g.seg_frames0;
+                let seg_submitted = shim_submitted(ipc).wrapping_sub(g.seg_submitted0);
+                let headset = shared.headset.lock().clone().map(|(_, n, _)| n).unwrap_or_default();
+                let hz = pipeline.as_ref().map(|p| 1.0 / p.period().as_secs_f64()).unwrap_or(args.fps);
+                games_record_run(args, origin, &g.exe, &headset, hz, old_level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, windows, skipped);
+            }
             g.seg_start = Instant::now();
             g.seg_frames0 = shared.frames_sent.load(Ordering::Relaxed);
             g.seg_submitted0 = shim_submitted(ipc);
@@ -2300,23 +2311,25 @@ fn main() {
             let fgr = vision::FRAME_GEN_REQ.swap(-1, Ordering::SeqCst);
             if fgr >= 0 {
                 let want = fgr == 1;
+                let old_level = if fg_active { args.fg_rate.unwrap_or(FgRate::Half).name() } else { "off" };
                 args.frame_gen = Some(want);
                 if let Some(p) = pipeline.as_ref() {
                     set_frame_gen_live(origin, p.as_ref(), &args, want, &mut fg_active, ipc, "frame_gen");
                 }
-                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0);
+                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args);
             }
             // frame generation rate, the game's motion vectors, the fps cap and the content lag from VisionALVR.exe (live; the settings are read at start too)
             let rate = vision::FG_RATE_REQ.swap(-1, Ordering::SeqCst);
             if rate >= 0 {
                 let r = FgRate::from_index(rate);
+                let old_level = if fg_active { args.fg_rate.unwrap_or(FgRate::Half).name() } else { "off" };
                 args.fg_rate = Some(r);
                 if let Some(p) = pipeline.as_ref() {
                     p.set_frame_gen_rate(r, args.fg_lag_ms.unwrap_or(0.0));
                 }
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_rate");
-                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0);
+                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args);
             }
             let mv = vision::GAME_MV_REQ.swap(-1, Ordering::SeqCst);
             if mv >= 0 {
