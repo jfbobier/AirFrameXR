@@ -51,6 +51,7 @@ namespace VisionALVR
             this.check = check;
             Text = "VisionALVR - configure";
             Icon = Ui.AppIcon();
+            StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body;
             BackColor = Color.White;

@@ -68,6 +68,7 @@ namespace VisionALVR
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body;
             FormBorderStyle = FormBorderStyle.FixedSingle;
+            StartPosition = FormStartPosition.CenterScreen;   // like ALVR's dashboard, not the top-left corner (user, 2026-10-17)
             MaximizeBox = false;
             AutoSize = true;
             AutoSizeMode = AutoSizeMode.GrowAndShrink;
