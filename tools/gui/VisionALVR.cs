@@ -301,11 +301,11 @@ namespace VisionALVR
                 for (int i = 0; i < Levels.Length; i++)
                 {
                     if (!(runs.TryGetValue(Levels[i], out var ro) && ro is Dictionary<string, object> run) || D(run, "seconds") < 30) continue;
-                    double hs = D(run, "headset_repeated_typ"), ho = D(run, "host_repeats_typ");
-                    if (double.IsNaN(ho)) ho = 0;
-                    bool clean = hs < 0.05 && ho < 0.05;
+                    double headsetRep = D(run, "headset_repeated_typ"), hostRep = D(run, "host_repeats_typ");
+                    if (double.IsNaN(hostRep)) hostRep = 0;
+                    bool clean = headsetRep < 0.05 && hostRep < 0.05;
                     // a clean level beats any dirty one and a faster clean level beats a slower one; among dirty ones the fewest repeats
-                    if (clean || (!bestClean && (best < 0 || hs + ho < bestScore))) { best = i; bestClean = clean; bestScore = hs + ho; bestRun = run; }
+                    if (clean || (!bestClean && (best < 0 || headsetRep + hostRep < bestScore))) { best = i; bestClean = clean; bestScore = headsetRep + hostRep; bestRun = run; }
                 }
                 if (best < 0) return null;
                 string[] names = { "1/3", "1/2", "2/3" };
