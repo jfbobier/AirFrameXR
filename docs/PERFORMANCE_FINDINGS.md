@@ -323,3 +323,14 @@ repeated share as the median and 90th-percentile 10-second window) and the launc
 slider, nothing proposed without a record). The shim's frame-cost readout (release to GPU done, CPU / GPU envelopes, IPC fields, headroom
 line, launcher text) is gone with it (IPC v31): it never measured a capability. Recenter: a generic host command, sent by the launcher at
 game start for non-Apple headsets (Valor Mortis started facing the room's forward on the Quest).
+
+## 2026-10-17, 02:30: the phase margin (3 -> 7 ms), found through the debug tick
+
+The user felt Valor Mortis at 1/3 smoother with debug logging on than off, and said so. The counters agreed with neither feeling until the
+client data was compared: with debug on every frame left the host 4.6 ms later in its display period (encode p95 9.0 ms against 4.3, send
+after tick 8.6 ms against 3.9), arrived later at the headset, waited 3 ms longer in its decoder queue (p50 10.8 against 7.3-8.5) and almost
+never missed its tick (0.5 % repeated periods against 1.2-2.3 % in the earlier runs), at the same measured latency (67 ms p50: the headset
+displays at its next tick either way). The phase lock had been aiming the earliest arrivals 3 ms before the render tick with an arrival
+spread of 8 ms, so a share of the frames landed after the tick and were shown a tick late: that is the "lower performance" of the evening.
+`VISIONALVR_PHASE_MARGIN_MS=7` with debug off reproduced the cure by hand ("visual frame generation aspect was MUCH BETTER"); the default is
+now 7 ms. Open: why debug mode costs 5 ms per frame (the CSV writers are buffered; the NVML sampler or the event writer are the suspects).
