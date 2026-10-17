@@ -11,8 +11,8 @@ Stream PC OpenXR games to **Apple Vision Pro** with the stock **ALVR** visionOS 
 
 > [!WARNING]
 > **ALPHA SOFTWARE (0.4): TEST AT YOUR OWN RISK.**
-> On real headsets it has been tested by one person, on one PC (RTX 5090) with one Vision Pro and one Quest 3 (plus automated tests on a
-> laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
+> On real headsets it has been tested by one person, on one PC (RTX 5090) with one Vision Pro and one Quest 3, frame generation included
+> (plus automated tests on a laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
 > (both undone by `unregister_openxr_runtime.bat`). Keep comfort in mind: a frozen or juddering image in a headset can cause
 > discomfort; take the headset off if anything looks wrong. Provided "as is", without warranty of any kind (see [LICENSE](LICENSE)).
 
@@ -22,9 +22,13 @@ Apple Vision Pro**. That is what is built, tuned and tested here.
 This is a **personal project**. It targets NVIDIA because that is what I run, and the Vision Pro because that is my headset.
 It is not affiliated with or supported by NVIDIA, Apple or the ALVR project.
 - **Other headsets**: the ALVR protocol is device agnostic, so **other headsets with an ALVR client (Quest, Pico, ...) are expected to
-  work**, but they are **not actively supported**: they are not tested here, and the encoder settings, defaults and the idle chroma-key
-  frame are tuned for the Vision Pro. Reports and small fixes for them are welcome, with no promise of an answer or a fix; nothing
-  that makes the Vision Pro path worse will be merged.
+  work**. The Quest 3 has been tested here with the Meta-store ALVR client, frame generation included; others are not, and the encoder
+  settings, defaults and the idle chroma-key frame are tuned for the Vision Pro. Reports and small fixes for them are welcome, with no
+  promise of an answer or a fix; nothing that makes the Vision Pro path worse will be merged.
+- **A plain green screen when the headset connects is normal and intended**: it is the streamer's idle frame while no game runs. On the
+  Vision Pro set the ALVR app's **chroma-key colour to pure green (#00FF00)** and the green becomes transparent: you see your room between
+  games and the game appears when it starts. If the headset stays green, the chroma key is not set. VisionALVR does not mirror the Windows
+  desktop into the headset between sessions (Virtual Desktop's way) by design: see-through is the cleaner idle state.
 - **AMD / Intel GPUs**: not supported and not planned. The encode path is NVENC only; you are welcome to fork and adapt it.
   [ALVR](https://github.com/alvr-org/ALVR) itself supports them.
 
@@ -74,9 +78,13 @@ OpenXR game
   vectors** when the [VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler) DLL sits next to the game's executable
   (download it from that repository's Releases page, rename it `dxgi.dll`, tick *DLSS motion vectors*), else from the GPU's optical-flow
   engine (NVIDIA Optical Flow, Turing or later). Every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz
-  with an RTX 5090: missed display periods 38 % -> 1 % at half rate. Costs latency by construction (interpolation: one game period); small
-  fast objects may ghost without vectors. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md)
-  and [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md). Not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
+  with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3. Costs latency by construction (interpolation:
+  one game period); small fast objects may ghost without vectors. The rate is fixed for a run; a **Recommended** tick sets it from the
+  game's recorded runs on the connected headset (`config/games.json`, written by the streamer at every game end: fps, the headset's repeated
+  periods, the streamer's repeats), and the streamer window shows the last run's record when a game ends. A **Recenter** button (also sent
+  at every game start) turns the tracking space to your current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md),
+  [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md) and [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md). Not automatic
+  by design: a game that holds a steady 70-75 fps is often better left alone.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
