@@ -284,9 +284,11 @@ namespace VisionALVR
         Action fgEnableAll;
 
         // The proposal from config\games.json for the running game on the connected headset (null = no run recorded). Levels in order; a level
-        // counts when its last run lasted 30 s or more; "clean" = the typical 10-second window repeated under 5 % of the headset's periods.
-        // The fastest clean level is proposed; if that run rendered at least 95 % of the level's fps cap (the game was held back) and the next
-        // level has no run yet, the next level is proposed once. No clean level: the one with the fewest repeats.
+        // counts when its last run lasted 30 s or more; "clean" = in the typical 10-second window the headset repeated under 5 % of its periods
+        // AND the host repeated under 5 % of its outputs (a game under the level's cap makes the host re-send its last frame: the headset shows a
+        // frame every period, frozen content; Valor Mortis at 1/2 on the Vision Pro read 0.4 % headset / 14 % host, 2026-10-17). The fastest
+        // clean level is proposed; if that run rendered at least 95 % of the level's fps cap (the game was held back) and the next level has no
+        // run yet, the next level is proposed once. No clean level: the one with the fewest repeats (headset and host added).
         static readonly string[] Levels = { "third", "half", "two_thirds" };
         static readonly double[] LevelCap = { 1.0 / 3, 0.5, 2.0 / 3 };
         (string level, string why)? Recommend(string exe, string hs)
@@ -295,19 +297,22 @@ namespace VisionALVR
             {
                 var all = Json.Load(Path.Combine(Paths.Config, "games.json"));
                 if (!(all.TryGetValue(exe, out var g) && g is Dictionary<string, object> gd && gd.TryGetValue(hs, out var h) && h is Dictionary<string, object> runs)) return null;
-                int best = -1; double bestTyp = 1.0; Dictionary<string, object> bestRun = null;
+                int best = -1; bool bestClean = false; double bestScore = 9.0; Dictionary<string, object> bestRun = null;
                 for (int i = 0; i < Levels.Length; i++)
                 {
                     if (!(runs.TryGetValue(Levels[i], out var ro) && ro is Dictionary<string, object> run) || D(run, "seconds") < 30) continue;
-                    var typ = D(run, "headset_repeated_typ");
-                    if (typ < 0.05 || best < 0 || typ < bestTyp) { if (typ < 0.05 || best < 0 || bestTyp >= 0.05) { best = i; bestTyp = typ; bestRun = run; } }
+                    double hs = D(run, "headset_repeated_typ"), ho = D(run, "host_repeats_typ");
+                    if (double.IsNaN(ho)) ho = 0;
+                    bool clean = hs < 0.05 && ho < 0.05;
+                    // a clean level beats any dirty one and a faster clean level beats a slower one; among dirty ones the fewest repeats
+                    if (clean || (!bestClean && (best < 0 || hs + ho < bestScore))) { best = i; bestClean = clean; bestScore = hs + ho; bestRun = run; }
                 }
                 if (best < 0) return null;
                 string[] names = { "1/3", "1/2", "2/3" };
                 var fps = D(bestRun, "rendered_fps"); var hz = D(bestRun, "display_hz");
                 var low = D(bestRun, "rendered_fps_low");
-                var text = $"{names[best]}: last run {fps:0} fps{(low > 0 ? $", {low:0} in its slowest tenth" : "")}, headset repeated {bestTyp * 100:0.0} % typical, {D(bestRun, "headset_repeated_p90") * 100:0.0} % in its heavy parts";
-                if (bestTyp < 0.05 && best < 2 && hz > 0 && fps >= 0.95 * hz * LevelCap[best] && !runs.ContainsKey(Levels[best + 1]))
+                var text = $"{names[best]}: last run {fps:0} fps{(low > 0 ? $", {low:0} in its slowest tenth" : "")}, headset repeated {D(bestRun, "headset_repeated_typ") * 100:0.0} % typical ({D(bestRun, "headset_repeated_p90") * 100:0.0} % in its heavy parts), host repeats {D(bestRun, "host_repeats_typ") * 100:0.0} %";
+                if (bestClean && best < 2 && hz > 0 && fps >= 0.95 * hz * LevelCap[best] && !runs.ContainsKey(Levels[best + 1]))
                     return (Levels[best + 1], $"{names[best + 1]} to try: {names[best]} was clean and filled its cap ({fps:0} fps)");
                 return (Levels[best], text);
             }
@@ -498,7 +503,7 @@ namespace VisionALVR
                         var ri = rec == null ? -1 : Array.IndexOf(FgRates, rec.Value.level);
                         stats.Text =
                             $"Game fps {F(D(d, "rendered_fps"), "0.0"),6} average, {F(D(d, "rendered_fps_low"), "0.0")} in its slowest tenth    streamed fps {F(D(d, "streamed_fps"), "0.0"),6}    {F(D(d, "seconds") / 60, "0.0")} min at {(li >= 0 ? names[li] : lvl)}\n" +
-                            $"Headset repeated periods {F(D(d, "headset_repeated_typ") * 100, "0.0")} % typical, {F(D(d, "headset_repeated_p90") * 100, "0.0")} % in its heavy parts   host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} %   skipped {F(D(d, "skipped") * 100, "0.0")} %\n" +
+                            $"Headset repeated periods {F(D(d, "headset_repeated_typ") * 100, "0.0")} % typical, {F(D(d, "headset_repeated_p90") * 100, "0.0")} % in its heavy parts   host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} % (game under the cap)   skipped {F(D(d, "skipped") * 100, "0.0")} %\n" +
                             $"Frame generation recommendation: {(rec == null ? "none yet" : (ri >= 0 ? names[ri] : rec.Value.level) + " next time (" + rec.Value.why + ")")}";
                     }
                     break;

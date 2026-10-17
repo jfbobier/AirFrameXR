@@ -93,7 +93,8 @@ concerned; the launcher owns the judgement.
   `game_run`. The host decides nothing.
 - **The launcher proposes.** A game is only known once it streams, so the proposal is applied at game start (the first second runs at the
   slider's level, the record restarts at the switch); the slider is the default for a game without a record, and the user's choice with the
-  tick off. The "Recommended" tick (`video.frame_gen_recommended`, on by default) reads games.json when a game starts on the connected headset: the fastest level whose last run was clean (typical window under 5 % repeated, run of 30 s or more) is set on the
+  tick off. The "Recommended" tick (`video.frame_gen_recommended`, on by default) reads games.json when a game starts on the connected headset: the fastest level whose last run was clean (typical window: the headset repeated under 5 % of its periods AND the
+  host repeated under 5 % of its outputs, run of 30 s or more) is set on the
   slider, which is greyed while the tick is on; if that run filled its cap (rendered at least 95 % of the level's fps) and the next level
   has no run yet, the next level is proposed once, and its run then speaks for itself. No clean level: the one with the fewest repeats.
   No run at all for the game on this headset: nothing is proposed and the slider stays live (1/2 on a fresh install). Unticked, the slider
@@ -182,3 +183,8 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
   take their own stamp.
 - **Game motion vectors** (DLSS inputs) would replace the flow where they exist, allow extrapolation (no added period) and depth-aware
   reprojection: design note docs/MOTION_VECTORS.md (in-process NGX tap at session creation, not an OptiScaler fork).
+
+Why both repeat counts (2026-10-17, Valor Mortis on the Vision Pro at 100 Hz): at 1/2 the game rendered 39 fps against a 50 fps cap, the host
+re-sent its last frame on 14 % of the outputs (`host_repeats_typ`) while the headset itself repeated only 0.4 % of its periods (it was shown
+a frame every period, with frozen content). A proposal made on the headset's count alone said 1/2; the user's eyes and the host's count said
+1/3 (0.2 % host repeats, 0.5 % headset). Both are in the record and both must be under 5 % for a level to count as clean.
