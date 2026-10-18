@@ -246,7 +246,7 @@ picture rather than the counters, apply to any project that optimises the OpenXR
 frame-generation layer. Take it.
 
 ## Credits
-VisionALVR stands on two projects that did the hard work:
+VisionALVR stands on the shoulders of giants: the projects below made it possible and gave it solid foundations to build on.
 - **[ALVR](https://github.com/alvr-org/ALVR)** (MIT) by polygraphene and the alvr-org contributors: the foundational
   infrastructure this is built on, its streaming protocol, server core, networking, audio, foveated encoding and NVENC
   encoder code, and the [ALVR visionOS client](https://github.com/alvr-org/alvr-visionos) that runs on the headset.
