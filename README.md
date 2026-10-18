@@ -101,8 +101,17 @@ OpenXR game
   UEVR games, Luke Ross mods (Dead Space Remake), native VR games, controllers (ALVR's Quest/Touch emulation), haptics, game audio,
   discovery/pairing with the stock app.
 - **Known issues**: some games still have controller and/or crash issues (for example one Unity game crashes, one UEVR game shows
-  no image, one Unity game shows its menu very small). Use SteamVR + ALVR for those. Games running elevated (e.g. Cemu) cannot
-  reach the streamer.
+  no image, one Unity game shows its menu very small). Use SteamVR + ALVR for those. Zelda: Breath of the Wild through Cemu + BetterVR,
+  once a problem case (elevated process, inventory flicker, controllers), now works fully (2026-10-18).
+- **Perceived quality varies a lot from one setup to another, especially with frame generation on.** The same build felt "restored" one
+  evening and "lower" the next on the same PC and headset, and every time the cause was a condition of the setup, not a game: the Wi-Fi
+  channel (a neighbour's network produced micro-stutters that stock ALVR showed too; channel 149 cured them), the panel running 100 Hz
+  instead of 90 under 50 Hz lighting (every generation cap 11 % tighter), the margin frames need before the headset's tick (3 ms was too
+  thin for an 8-9 ms arrival spread, 7 ms is the default now), the generation rate per game (a game under its cap re-sends frozen frames
+  that the headset counts as shown), the Quest tracking at 270 Hz being read as a 241 Hz display. All of these are measured now and most
+  are handled, but a new PC, router or headset will find the next one. If something feels off, the logs usually say why; see
+  [docs/PERFORMANCE_KNOBS.md](docs/PERFORMANCE_KNOBS.md) for every knob, what it does and what should drive it, and
+  [docs/PERFORMANCE_FINDINGS.md](docs/PERFORMANCE_FINDINGS.md) for the nights that taught us.
 - **New in 0.3**: a **setup wizard** (`configure.exe`) that reads what the headset supports, offers a community profile, a pre-filled
   manual configuration or your existing ALVR settings, then tests the result (system and NVENC, encoder speed, network at the configured
   bitrate, a real scene streamed through the pipeline with the headset's own head pose, audio); **Find headset...** in the streamer window;
