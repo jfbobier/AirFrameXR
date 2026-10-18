@@ -65,13 +65,35 @@ VisionALVR replaces the SteamVR + ALVR server pair on the PC with one lean strea
 unchanged, so the ALVR app on the headset sees an ordinary ALVR server. In between, it does less work:
 no SteamVR compositor, no extra frame copies between processes, and an encode path written for NVENC only.
 
+```mermaid
+flowchart LR
+    subgraph PC["Windows PC, one process chain, NVIDIA GPU"]
+        direction LR
+        G["OpenXR game<br/>(UEVR, native VR)"]
+        D["DLSS in the game<br/>+ VisionALVR-OptiScaler DLL<br/>(motion vectors, depth)"]
+        V["VirtualDesktop-OpenXR<br/>OpenXR runtime, small patches"]
+        S["OVRShim (LibOVRRT64_1.dll)<br/>composes layers, paces the game<br/>to 1/3, 1/2, 2/3 of the display rate,<br/>10-bit frame ring in shared GPU memory"]
+        H["alvr_host.exe<br/>frame generation (NVIDIA Optical Flow<br/>or the game's vectors), head-pose stamping,<br/>foveated encoding, NVENC HEVC 10-bit split encode,<br/>ALVR 20.14 server core"]
+        L["VisionALVR.exe launcher<br/>settings, game records,<br/>proposals, recenter"]
+        G --> V --> S --> H
+        G -.-> D -.->|same process,<br/>no copy| S
+        L <-.->|commands, events| H
+    end
+    W(("Wi-Fi<br/>ALVR protocol"))
+    C["ALVR client<br/>Vision Pro (stock app), Quest 3, others"]
+    H --> W --> C
+    C -.->|tracking 90-270 Hz,<br/>per-frame statistics| H
+```
+
+In words:
+
 ```
 OpenXR game
   -> VirtualDesktop-OpenXR (VDXR, OpenXR runtime, small patches)
-  -> OVRShim (LibOVRRT64_1.dll: composes layers into a shared 10-bit side-by-side frame ring)
-  -> alvr_host.exe (ALVR v20.14.1 server_core + ALVR's own foveated encoding + NVENC HEVC 10-bit)
+  -> OVRShim (LibOVRRT64_1.dll: composes layers, paces the game, shared 10-bit side-by-side frame ring)
+  -> alvr_host.exe (frame generation, ALVR v20.14.1 server_core, ALVR's foveated encoding, NVENC HEVC 10-bit split encode)
   -> ALVR protocol over Wi-Fi
-  -> ALVR app on Vision Pro (stock, from the App Store)
+  -> ALVR client on the headset (stock Vision Pro app, Quest client, ...)
 ```
 
 ## Status
