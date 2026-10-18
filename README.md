@@ -17,7 +17,7 @@ Wi-Fi packet, every stage is tuned against the next one instead of stacked mods 
 - **No SteamVR.** The game talks OpenXR to a small runtime; no SteamVR compositor, no extra frame copies between processes, no dashboard.
 - **NVIDIA all the way.** NVENC HEVC 10-bit with split-frame encoding across the GPU's encoders, ALVR's foveated encoding when you want it,
   NVIDIA Optical Flow for the generated frames, and the game's own **DLSS motion vectors** when the
-  [VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler) DLL sits in the game folder. Shared GPU memory between the
+  [OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor) DLL sits in the game folder. Shared GPU memory between the
   game, the shim and the encoder; nothing crosses the CPU.
 - **Frame generation that is part of the pipeline, not a mod on top of a mod.** The game is paced to 1/3, 1/2 or 2/3 of the display rate and
   the streamer interpolates the rest, every output rotated to the newest head pose. On an RTX 5090 and a Vision Pro: a 40 fps Unreal game
@@ -70,7 +70,7 @@ flowchart LR
     subgraph PC["Windows PC, one process chain, NVIDIA GPU"]
         direction LR
         G["OpenXR game<br/>(UEVR, native VR)"]
-        D["DLSS in the game<br/>+ VisionALVR-OptiScaler DLL<br/>(motion vectors, depth)"]
+        D["DLSS in the game<br/>+ OptiScaler-DLSSMotionVectorExtractor DLL<br/>(motion vectors, depth)"]
         V["VirtualDesktop-OpenXR<br/>OpenXR runtime, small patches"]
         S["OVRShim (LibOVRRT64_1.dll)<br/>composes layers, paces the game<br/>to 1/3, 1/2, 2/3 of the display rate,<br/>10-bit frame ring in shared GPU memory"]
         H["alvr_host.exe<br/>frame generation (NVIDIA Optical Flow<br/>or the game's vectors), head-pose stamping,<br/>foveated encoding, NVENC HEVC 10-bit split encode,<br/>ALVR 20.14 server core"]
@@ -125,7 +125,7 @@ OpenXR game
   hold the display rate. A slider sets the game's rate as a fraction of the display rate, **1/3, 1/2 (default) or 2/3**, and the streamer
   generates the frames in between: at 1/2 and 1/3 the game is locked to the display cadence (one or two generated frames per rendered one),
   at 2/3 it is held to two thirds of the rate and every frame sent is interpolated. In-scene motion comes from the game's own **DLSS motion
-  vectors** when the [VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler) DLL sits next to the game's executable
+  vectors** when the [OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor) DLL sits next to the game's executable
   (download it from that repository's Releases page, rename it `dxgi.dll`, tick *DLSS motion vectors*), else from the GPU's optical-flow
   engine (NVIDIA Optical Flow, Turing or later). Every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz
   with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3. Costs latency by construction (interpolation:
@@ -258,7 +258,7 @@ VisionALVR stands on the shoulders of giants: the projects below made it possibl
   (rotation-compensated residual flow, midpoint sampling, confidence and crossfade fallback) and its never-block safety rules were
   studied from its code and re-implemented here; its DLSS provider interface is the model for ours.
 - **[OptiScaler](https://github.com/optiscaler/OptiScaler)** (GPL-3.0) and its contributors: the DLSS motion-vector tap for frame
-  generation is a separate fork, [VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler), kept under GPL-3.0 and
+  generation is a separate fork, [OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor), kept under GPL-3.0 and
   shipped as its own DLL; VisionALVR talks to it only through shared textures and a small documented interface. Years of
   game-compatibility work live in that project.
 - NVIDIA Video Codec SDK and Optical Flow SDK headers (MIT). cgltf (MIT), stb_image (public domain / MIT), Draco (Apache-2.0, offline converter only).

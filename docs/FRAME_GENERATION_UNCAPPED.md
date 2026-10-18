@@ -49,7 +49,7 @@ t = 0 repeats, frozen 12 %, verdict JUDDER on the stutter scenario against 2 % f
 |---|---|---|---|
 | `video.frame_gen` | toggle "Frame generation" | `frame_gen on\|off` | the generator on the encoder, as before |
 | `video.frame_gen_rate` = `third` \| `half` (default) \| `two_thirds` \| `uncapped` | slider "Game rate 1/3 - 1/2 - 2/3" (2026-10-16; `uncapped` from the config only) | `frame_gen_rate third\|half\|two_thirds\|uncapped` | `third`/`half`: fixed patterns, the shim paces at `appPeriodMul` 3 / 2; `two_thirds`: this note's planner with the game held to 2/3 of the display rate (the host sets `appMinPeriodUs` from the display period and follows rate changes); `uncapped`: this note's planner, free-running |
-| `video.game_motion_vectors` (default on) | tick "DLSS motion vectors" | `game_mv on\|off` | the shim taps the game's vectors when the VisionALVR-OptiScaler DLL is in the game folder and the generator synthesises from them; off = optical flow only (the tap is idle) |
+| `video.game_motion_vectors` (default on) | tick "DLSS motion vectors" | `game_mv on\|off` | the shim taps the game's vectors when the OptiScaler-DLSSMotionVectorExtractor DLL is in the game folder and the generator synthesises from them; off = optical flow only (the tap is idle) |
 | `video.frame_gen_cap_fps` (0 = none) | config only (2026-10-16) | `frame_gen_cap <fps>` | uncapped mode: the shim never releases the game sooner than 1/cap after the previous release (IPC v27 `appMinPeriodUs`); the headroom knob below |
 | `video.frame_gen_lag_ms` (0 = auto) | config only | `frame_gen_lag <ms>` | two-thirds and uncapped modes: the content lag; 0 = automatic as above |
 

@@ -131,7 +131,7 @@ Effort: several days to step 1 on one title; the pacing, stamping, synthesis pas
 ## Recon (2026-10-15 night, RTX 5090)
 
 Decision taken with the user: no own NGX tap; a **fork of OptiScaler** (GPL-3.0 kept, separate repository
-[VisionALVR-OptiScaler](https://github.com/jfbobier/VisionALVR-OptiScaler), branch `visionalvr`) publishes the DLSS inputs to the shim
+[OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor), branch `visionalvr`) publishes the DLSS inputs to the shim
 in-process, the way OFXR-Bridge's fork does. OFXR's own fork is not public (GitHub code search finds the provider export only in OFXR-Bridge),
 so the provider is ours, modelled on OFXR's ABI.
 
@@ -153,7 +153,7 @@ Facts established:
   overlay off, DXGI spoofing off) so no ini is needed, `VISIONALVR.md`. No stripping yet: make it work, then make it lean.
 - **Smoke test of the fork** (efe4f5f, built on the 5090, log-only ini): the sample app in D3D12 and D3D11 runs DLSS through the DLSS backend with the
   compiled defaults, and the provider reports at every evaluate `stream 1000000 (dx12|dx11) render 1280x710 output 2560x1421 mv true depth true
-  flags 0x3` (IsHDR, MVLowRes), ~1000 evaluates/s, zero errors, no consumer registered yet. Built DLL kept at private/dist/VisionALVR-OptiScaler-efe4f5f.dll.
+  flags 0x3` (IsHDR, MVLowRes), ~1000 evaluates/s, zero errors, no consumer registered yet. Built DLL kept at private/dist/OptiScaler-DLSSMotionVectorExtractor-efe4f5f.dll.
 - **Harness target**: the DLSS sample app is a deterministic DLSS application for the lab (D3D11 and D3D12 by flag); the probe's own DLSS mode
   (direct NGX SDK, `NVIDIA/DLSS` clone, D3D11) remains the ground-truth path.
 

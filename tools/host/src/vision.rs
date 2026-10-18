@@ -59,7 +59,7 @@ pub struct Settings {
     pub frame_gen_flow_scale: Option<f64>,
     /// "fast" (default) | "medium" | "slow": the optical-flow engine's preset
     pub frame_gen_perf: Option<String>,
-    /// tap the game's DLSS motion vectors when the VisionALVR-OptiScaler provider is loaded (docs/MOTION_VECTORS.md); default on
+    /// tap the game's DLSS motion vectors when the OptiScaler-DLSSMotionVectorExtractor provider is loaded (docs/MOTION_VECTORS.md); default on
     pub game_motion_vectors: Option<bool>,
     /// "half" (default) | "uncapped": the game paced at half the display rate with strict alternation, or at the display rate with every
     /// output interpolated (docs/FRAME_GENERATION_UNCAPPED.md)

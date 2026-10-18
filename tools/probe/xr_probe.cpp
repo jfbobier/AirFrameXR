@@ -59,7 +59,7 @@ static const char* stateName(XrSessionState s) {
 }
 
 // XR_PROBE_MV=synthetic|truth: the probe stands in for the game's DLSS proxy (docs/MOTION_VECTORS.md). It exports the provider ABI of
-// VisionALVR-OptiScaler (VaProvider.h v1, mirrored in ovrshim/ngxtap.h) so the shim finds and registers with it, and once per eye and frame
+// OptiScaler-DLSSMotionVectorExtractor (VaProvider.h v1, mirrored in ovrshim/ngxtap.h) so the shim finds and registers with it, and once per eye and frame
 // publishes a motion-vector texture (R16G16_FLOAT at half the eye size: the DLSS render size) and a depth texture (D32_FLOAT, a depth-stencil
 // target like a game's) on the app's immediate context.
 // `synthetic` (plumbing check): vx = 8 sin(2 pi y / h), vy = 4 cos(2 pi x / w), the right eye negated, the 16 x 16 block at the origin holds

@@ -107,7 +107,7 @@ struct HostToShim {
     // other compositor boundary; the host interpolates the frame in between from the optical flow of the last two rendered frames) and its
     // predicted display time moves one display period later (an interpolated frame is shown before each rendered one). 0 or 1 = every boundary.
     uint32_t appPeriodMul;
-    // Game motion vectors (docs/MOTION_VECTORS.md, ovrshim/ngxtap.h): 1 = when the VisionALVR-OptiScaler provider is loaded in the game, copy
+    // Game motion vectors (docs/MOTION_VECTORS.md, ovrshim/ngxtap.h): 1 = when the OptiScaler-DLSSMotionVectorExtractor provider is loaded in the game, copy
     // the motion vectors and depth of every DLSS evaluate and publish them with the frame (ShimToHost::motion). 0 = leave the tap idle.
     uint32_t gameMotionVectors;
     // Uncapped frame generation (docs/FRAME_GENERATION_UNCAPPED.md): the app is paced at every boundary (appPeriodMul 1) and may be held to a

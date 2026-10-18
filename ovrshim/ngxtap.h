@@ -1,4 +1,4 @@
-// Consumer of the game's DLSS inputs (docs/MOTION_VECTORS.md). The VisionALVR-OptiScaler fork (github.com/jfbobier/VisionALVR-OptiScaler,
+// Consumer of the game's DLSS inputs (docs/MOTION_VECTORS.md). The OptiScaler-DLSSMotionVectorExtractor fork (github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor,
 // a separate GPL-3.0 project loaded by the game as its DLSS proxy) exports a small C ABI; this file is its MIT-side counterpart, declaring the
 // same ABI and consuming the publications: at every DLSS evaluate, inside the call and on the game's own command list / context, the shim copies
 // the motion vectors and depth into shared textures of its own; at SubmitFrame the newest copy of each eye is copied once more into the frame's
@@ -32,7 +32,7 @@ namespace ngxtap {
 
 using Microsoft::WRL::ComPtr;
 
-// ---- the provider ABI (VisionALVR-OptiScaler OptiScaler/visionalvr/VaProvider.h, version 1) -------------------------------------------
+// ---- the provider ABI (OptiScaler-DLSSMotionVectorExtractor OptiScaler/visionalvr/VaProvider.h, version 1) -------------------------------------------
 constexpr uint32_t kProviderVersion = 1;
 struct PublicationV1 {
     uint32_t struct_size;

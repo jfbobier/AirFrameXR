@@ -180,7 +180,7 @@ namespace VisionALVR
         // frame generation rate: "third" | "half" (default) | "two_thirds" (the game's rate as a fraction of the display rate, the streamer generates the
         // frames in between; docs/FRAME_GENERATION.md), "uncapped" from the config only (docs/FRAME_GENERATION_UNCAPPED.md)
         public string FrameGenRate { get => Json.Str(Root, "video.frame_gen_rate", "half"); set => Json.Set(Root, "video.frame_gen_rate", value); }
-        // the game's DLSS motion vectors drive the synthesis when the VisionALVR-OptiScaler provider is loaded in the game (docs/MOTION_VECTORS.md)
+        // the game's DLSS motion vectors drive the synthesis when the OptiScaler-DLSSMotionVectorExtractor provider is loaded in the game (docs/MOTION_VECTORS.md)
         public bool GameMotionVectors { get => Json.Bool(Root, "video.game_motion_vectors", true); set => Json.Set(Root, "video.game_motion_vectors", value); }
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
         public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", true); set => Json.Set(Root, "video.frame_gen_recommended", value); }
