@@ -324,7 +324,14 @@ namespace VisionALVR
             hsDetails = new FlowLayoutPanel { AutoSize = true, Visible = false, WrapContents = false, FlowDirection = FlowDirection.TopDown };
             p.Controls.Add(hsDetails);
             hsGo = new Button { Text = "Yes, this is my headset: continue >", AutoSize = true, Font = Ui.Big, Padding = new Padding(10), Visible = false, Margin = new Padding(0, 12, 0, 0) };
-            hsGo.Click += (s, e) => GoTo(3);
+            hsGo.Click += (s, e) =>
+            {
+                // Vision Pro: the passthrough tick lives in the ALVR app on the headset (asked once, the answer is remembered)
+                if (hs.IsVisionPro && !settings.AvpChromaConfirmed && !demo && !auto)
+                    using (var dlg = new ChromaStepForm())
+                        if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Confirmed) { settings.AvpChromaConfirmed = true; settings.Save(); Log.Write("INFO", "wizard: Vision Pro chroma passthrough confirmed by the user"); }
+                GoTo(3);
+            };
             p.Controls.Add(hsGo);
             if (demo) { hsReal = true; ShowHandshakeResult(true); } else if (hsDone) ShowHandshakeResult(hsReal); else BeginHandshake();
             return p;

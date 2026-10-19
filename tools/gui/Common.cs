@@ -322,6 +322,8 @@ namespace VisionALVR
         /// NVENC split-frame encoding ("3" = one strip per engine, up to 3; "off"): on by default, the reason the project exists on a multi-engine GPU
         /// the Logs window deletes the records of games whose exe no longer exists (on by default)
         public bool AutoDeleteGameLogs { get => Json.Bool(Root, "logs.auto_delete_uninstalled", true); set => Json.Set(Root, "logs.auto_delete_uninstalled", value); }
+        /// the Vision Pro's chroma-key tick is set in the ALVR app on the headset (no way to read it from here): the wizard asks once and remembers the answer
+        public bool AvpChromaConfirmed { get => Json.Bool(Root, "avp.chroma_confirmed", false); set => Json.Set(Root, "avp.chroma_confirmed", value); }
         public bool SplitEncode { get => Json.Str(Root, "video.split_encode", "3") != "off"; set => Json.Set(Root, "video.split_encode", value ? "3" : "off"); }
         public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", "00ff00"); set => Json.Set(Root, "video.idle_rgb", value); }
         /// frame generation (docs/FRAME_GENERATION.md): the game renders every other frame, the streamer interpolates the one in between (off by default)
@@ -655,6 +657,39 @@ namespace VisionALVR
             col.Controls.Add(row);
             Controls.Add(col);
             AcceptButton = yes; CancelButton = no;
+        }
+    }
+
+    /// Vision Pro only: the chroma-key passthrough is a setting of the ALVR app on the headset that the streamer can neither set nor read, so
+    /// the wizard shows where it is and asks the user to confirm.
+    public class ChromaStepForm : Form
+    {
+        public bool Confirmed => done.Checked;
+        readonly CheckBox done = new CheckBox { Text = "I have set it in the ALVR app on the Vision Pro", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
+        public ChromaStepForm()
+        {
+            Text = "VisionALVR - one setting on the Vision Pro";
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            Font = Ui.Body; Icon = Ui.AppIcon();
+            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
+            AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; BackColor = Color.White;
+            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
+            col.Controls.Add(new Label { Text = "Turn on passthrough in the ALVR app", AutoSize = true, Font = Ui.Big });
+            col.Controls.Add(new Label { Text = "Between games VisionALVR shows a pure green screen, which the Vision Pro turns into your room when chroma-key passthrough is on; the game appears when it starts. " +
+                "This is a setting of the ALVR app on the headset: VisionALVR cannot change or read it. In the ALVR app, tick \"Enable Chroma Keyed Passthrough\" and set the colour to pure green (#00FF00), as in the picture.",
+                AutoSize = true, MaximumSize = new Size(560, 0), Margin = new Padding(3, 6, 3, 6) });
+            var img = Ui.Resource("chroma_passthrough.png");
+            if (img != null) col.Controls.Add(new PictureBox { Image = img, SizeMode = PictureBoxSizeMode.Zoom, Width = 440, Height = (int)(440.0 * img.Height / img.Width), Margin = new Padding(3) });
+            col.Controls.Add(done);
+            var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            var go = new Button { Text = "Continue", AutoSize = true, DialogResult = DialogResult.OK, Font = Ui.Bold, MinimumSize = new Size(100, 30), Enabled = false };
+            var skip = new Button { Text = "Skip", AutoSize = true, DialogResult = DialogResult.Cancel, MinimumSize = new Size(100, 30) };
+            done.CheckedChanged += (s, e) => go.Enabled = done.Checked;
+            row.Controls.Add(go); row.Controls.Add(skip);
+            col.Controls.Add(row);
+            Controls.Add(col);
+            CancelButton = skip;
         }
     }
 

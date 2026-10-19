@@ -119,7 +119,7 @@ def build(what):
             lib.b_run("if not exist _tmp\\gui\\res mkdir _tmp\\gui\\res")
             for src in sorted((lib.ROOT / "tools/gui").glob("*.cs")) + [lib.ROOT / "tools/gui/app.manifest"]:
                 lib.b_put(src, f"_tmp/gui/{src.name}")
-            for f in ("visionalvr.ico", "logo_640.png"):
+            for f in ("visionalvr.ico", "logo_640.png", "chroma_passthrough.png"):
                 lib.b_put(lib.ROOT / "tools/gui/res" / f, f"_tmp/gui/res/{f}")
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage16_gui.ps1"], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")

@@ -13,6 +13,6 @@ for t in "VisionALVR.exe:VisionALVR.cs FindHeadset.cs" "configure.exe:Configure.
   exe=${t%%:*}; src=${t##*:}; echo "== $exe"
   FILES=("$SRC\\Common.cs"); for f in $src; do FILES+=("$SRC\\$f"); done
   out=$(cd "$T" && "$CSC" /nologo /noconfig /target:winexe /platform:x64 /langversion:latest /nowarn:1701,1702 "${REFS[@]}" \
-     "/win32manifest:$SRC\\app.manifest" "/resource:$SRC\\res\\logo_640.png,logo_640.png" "/out:$OUT\\$exe" "${FILES[@]}" 2>&1 | tr -d '\r'); echo "$out"; echo "$out" | grep -q 'error CS' && rc=1
+     "/win32manifest:$SRC\\app.manifest" "/resource:$SRC\\res\\logo_640.png,logo_640.png" "/resource:$SRC\\res\\chroma_passthrough.png,chroma_passthrough.png" "/out:$OUT\\$exe" "${FILES[@]}" 2>&1 | tr -d '\r'); echo "$out"; echo "$out" | grep -q 'error CS' && rc=1
 done
 echo "check_gui: $([ $rc = 0 ] && echo OK || echo FAILED)"; exit $rc

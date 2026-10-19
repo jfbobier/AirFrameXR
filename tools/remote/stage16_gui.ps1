@@ -10,7 +10,7 @@ New-Item -ItemType Directory -Force $out | Out-Null
 Set-Content -Path "$out\build.log" -Value '' -Encoding UTF8
 $refs = 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Web.Extensions.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll' | ForEach-Object { "/r:$fw\$_" }
 $common = @('/nologo', '/noconfig', '/target:winexe', '/platform:x64', '/optimize+', '/langversion:latest', '/nowarn:1701,1702',
-            "/win32icon:$src\res\visionalvr.ico", "/win32manifest:$src\app.manifest", "/resource:$src\res\logo_640.png,logo_640.png") + $refs
+            "/win32icon:$src\res\visionalvr.ico", "/win32manifest:$src\app.manifest", "/resource:$src\res\logo_640.png,logo_640.png", "/resource:$src\res\chroma_passthrough.png,chroma_passthrough.png") + $refs
 $ok = $true
 foreach ($t in @(@{ exe = 'VisionALVR.exe'; files = @("$src\Common.cs", "$src\VisionALVR.cs", "$src\FindHeadset.cs") }, @{ exe = 'configure.exe'; files = @("$src\Common.cs", "$src\Configure.cs", "$src\SettingsPanel.cs", "$src\Reference.cs", "$src\TestRunner.cs", "$src\Wizard.cs", "$src\Profiles.cs", "$src\Verdict.cs") }, @{ exe = 'launcher.exe'; files = @("$src\Common.cs", "$src\Launcher.cs") }, @{ exe = 'performance.exe'; files = @("$src\Common.cs", "$src\Performance.cs") })) {
     $o = & $csc @common "/out:$out\$($t.exe)" @($t.files) 2>&1
