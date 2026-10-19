@@ -182,6 +182,16 @@ def build(what):
                 lib.b_put(pf, f"_tmp/install/profiles/{pf.name}")
             lib.b_put(out_dir / "version.txt", "_tmp/install/version.txt")   # the zip is named after the host's VERSION (vision.rs)
             # licences shipped with the binaries: the notices, the project licence (once chosen) and the upstream texts
+            # the DLSS motion-vector extractor (OptiScaler fork, GPL-3.0), shipped as DLSSMotionVectors\dxgi.dll: private/dist/dlssvec/dxgi.dll,
+            # fetched from the fork's build (tools/remote build_fork.ps1 on the builder, or the 5090's recon clone); without it the zip ships none
+            dll = Path(os.environ.get("VISIONALVR_DLSSVEC_DLL", str(lib.ROOT / "private/dist/dlssvec/dxgi.dll")))
+            if dll.exists():
+                lib.b_run("if not exist _tmp\\install\\DLSSMotionVectors mkdir _tmp\\install\\DLSSMotionVectors")
+                lib.b_put(dll, "_tmp/install/DLSSMotionVectors/dxgi.dll")
+                print(f"package: DLSSMotionVectors\\dxgi.dll from {dll} ({dll.stat().st_size // 1024} KB)")
+            else:
+                lib.b_run("if exist _tmp\\install\\DLSSMotionVectors rmdir /s /q _tmp\\install\\DLSSMotionVectors")
+                print(f"package: no extractor DLL at {dll}: the zip ships without DLSSMotionVectors\\dxgi.dll")
             lib.b_run("if not exist _tmp\\install\\licenses mkdir _tmp\\install\\licenses")
             lib.b_put(lib.ROOT / "THIRD_PARTY_NOTICES.md", "_tmp/install/THIRD_PARTY_NOTICES.md")
             if (lib.ROOT / "LICENSE").exists():

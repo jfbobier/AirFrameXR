@@ -147,8 +147,8 @@ Facts established:
 - **Tap point**: `DLSSFeatureDx12::EvaluateInternal` and `DLSSFeatureDx11::EvaluateInternal`, right before the native evaluate: the game's
   parameter object with colour, motion vectors, depth, output, exposure, jitter, MV scale, reset, subrects, plus the feature's flags and sizes,
   and the game's command list / device context.
-- **Fork changes** (two commits): `OptiScaler/visionalvr/VaProvider.{h,cpp}` (C ABI `VisionALVR_ProviderVersion`, `VisionALVR_SetConsumerV1`;
-  the consumer is called synchronously at every evaluate with a `VisionALVR_PublicationV1`; no allocation, no copy, no blocking; a structured
+- **Fork changes** (two commits): `OptiScaler/visionalvr/VaProvider.{h,cpp}` (C ABI `DLSSVEC_ProviderVersion`, `DLSSVEC_SetConsumerV1`;
+  the consumer is called synchronously at every evaluate with a `DLSSVEC_PublicationV1`; no allocation, no copy, no blocking; a structured
   exception in the consumer removes it instead of taking the game down), two hook lines, compiled defaults (DLSS backend on D3D11/D3D12/Vulkan,
   overlay off, DXGI spoofing off) so no ini is needed, `VISIONALVR.md`. No stripping yet: make it work, then make it lean.
 - **Smoke test of the fork** (efe4f5f, built on the 5090, log-only ini): the sample app in D3D12 and D3D11 runs DLSS through the DLSS backend with the
@@ -161,7 +161,7 @@ Facts established:
 
 Implemented (IPC version 26):
 - **Shim consumer** `ovrshim/ngxtap.h` (MIT, header-only): finds the provider among the loaded modules by its export
-  (`VisionALVR_SetConsumerV1`), checks the ABI version, registers. At every DLSS evaluate, inside the call: a copy of the motion vectors and the
+  (`DLSSVEC_SetConsumerV1`), checks the ABI version, registers. At every DLSS evaluate, inside the call: a copy of the motion vectors and the
   depth recorded on the game's own command list (D3D12: committed resources with `D3D12_HEAP_FLAG_SHARED` and simultaneous access, opened on
   the shim's D3D11 submission device through the NT handle; a transition barrier around the copy with the state DLSS requires of its inputs,
   `OVRSHIM_MV_STATE=<int>` overrides it like OptiScaler's `MVResourceBarrier`) or context (D3D11: shared textures on the game's device). Three

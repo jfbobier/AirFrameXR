@@ -17,7 +17,8 @@ Wi-Fi packet, every stage is tuned against the next one instead of stacked mods 
 - **No SteamVR.** The game talks OpenXR to a small runtime; no SteamVR compositor, no extra frame copies between processes, no dashboard.
 - **NVIDIA all the way.** NVENC HEVC 10-bit with split-frame encoding across the GPU's encoders, ALVR's foveated encoding when you want it,
   NVIDIA Optical Flow for the generated frames, and the game's own **DLSS motion vectors** when the
-  [OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor) DLL sits in the game folder. Shared GPU memory between the
+  [OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor) DLL sits in the game folder
+  (shipped in the zip as `DLSSMotionVectors\dxgi.dll`). Shared GPU memory between the
   game, the shim and the encoder; nothing crosses the CPU.
 - **Frame generation that is part of the pipeline, not a mod on top of a mod.** The game is paced to 1/3, 1/2 or 2/3 of the display rate and
   the streamer interpolates the rest, every output rotated to the newest head pose. On an RTX 5090 and a Vision Pro: a 40 fps Unreal game
@@ -126,7 +127,7 @@ OpenXR game
   generates the frames in between: at 1/2 and 1/3 the game is locked to the display cadence (one or two generated frames per rendered one),
   at 2/3 it is held to two thirds of the rate and every frame sent is interpolated. In-scene motion comes from the game's own **DLSS motion
   vectors** when the [OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor) DLL sits next to the game's executable
-  (download it from that repository's Releases page, rename it `dxgi.dll`, tick *DLSS motion vectors*), else from the GPU's optical-flow
+  (copy `DLSSMotionVectors\dxgi.dll` from the zip next to the game's real executable, tick *DLSS motion vectors*), else from the GPU's optical-flow
   engine (NVIDIA Optical Flow, Turing or later). Every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz
   with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3. Costs latency by construction (interpolation:
   one game period); small fast objects may ghost without vectors. The rate is fixed for a run; a **Recommended** tick sets it from the

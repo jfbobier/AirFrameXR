@@ -68,16 +68,16 @@ static const char* stateName(XrSessionState s) {
 // motion of the world-fixed background (where each pixel's direction projected in the previous frame's view, minus its position) and, inside
 // the moving marker, the marker's own displacement; both in render-size pixels, previous minus current.
 extern "C" {
-struct VisionALVR_PublicationV1 {
+struct DLSSVEC_PublicationV1 {
     uint32_t struct_size, version, api, stream; uint64_t frame;
     void* cmd; void* color; void* motion_vectors; void* depth; void* output; void* exposure;
     uint32_t render_w, render_h, output_w, output_h, color_x, color_y, mv_x, mv_y, depth_x, depth_y;
     float jitter_x, jitter_y, mv_scale_x, mv_scale_y; int32_t reset; uint32_t flags; void* params;
 };
-typedef void (*VisionALVR_ConsumerV1)(const VisionALVR_PublicationV1*, void*);
-static VisionALVR_ConsumerV1 g_mvConsumer = nullptr; static void* g_mvConsumerUser = nullptr;
-__declspec(dllexport) uint32_t VisionALVR_ProviderVersion() { return 1; }
-__declspec(dllexport) int VisionALVR_SetConsumerV1(VisionALVR_ConsumerV1 c, void* u) { g_mvConsumer = c; g_mvConsumerUser = u; return 1; }
+typedef void (*DLSSVEC_ConsumerV1)(const DLSSVEC_PublicationV1*, void*);
+static DLSSVEC_ConsumerV1 g_mvConsumer = nullptr; static void* g_mvConsumerUser = nullptr;
+__declspec(dllexport) uint32_t DLSSVEC_ProviderVersion() { return 1; }
+__declspec(dllexport) int DLSSVEC_SetConsumerV1(DLSSVEC_ConsumerV1 c, void* u) { g_mvConsumer = c; g_mvConsumerUser = u; return 1; }
 }
 struct SyntheticMv {
     ID3D11Texture2D* mv[2] = {}; ID3D11Texture2D* depth[2] = {}; ID3D11DepthStencilView* dsv[2] = {}; ID3D11RenderTargetView* rtv[2] = {};
@@ -149,7 +149,7 @@ float2 PS(VSOut i) : SV_Target {
         ctx->Draw(3, 0);
         ID3D11RenderTargetView* nullRtv = nullptr; ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
         ctx->ClearDepthStencilView(dsv[eye], D3D11_CLEAR_DEPTH, 0.5f, 0);
-        VisionALVR_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye; p.frame = frame; p.cmd = ctx;
+        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye; p.frame = frame; p.cmd = ctx;
         p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = w; p.render_h = h; p.output_w = outW; p.output_h = outH;
         p.mv_scale_x = p.mv_scale_y = 1.f; p.reset = prevValid[eye] ? 0 : 1; p.flags = 0x2 | 0x8;
         g_mvConsumer(&p, g_mvConsumerUser);
@@ -188,7 +188,7 @@ float2 PS(VSOut i) : SV_Target {
         D3D11_BOX box{ 0, 0, 0, 16, 16, 1 };
         ctx->UpdateSubresource(mv[eye], 0, &box, block, 16 * 4, 0);
         ctx->ClearDepthStencilView(dsv[eye], D3D11_CLEAR_DEPTH, frame % 2 ? 0.75f : 0.25f, 0);
-        VisionALVR_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye; p.frame = frame; p.cmd = ctx;
+        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye; p.frame = frame; p.cmd = ctx;
         p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = w; p.render_h = h; p.output_w = outW; p.output_h = outH;
         p.mv_scale_x = p.mv_scale_y = 1.f; p.reset = frame == 0 ? 1 : 0; p.flags = 0x2 | 0x8;   // MVLowRes, DepthInverted
         g_mvConsumer(&p, g_mvConsumerUser);

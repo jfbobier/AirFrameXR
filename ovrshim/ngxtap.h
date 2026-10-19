@@ -115,13 +115,13 @@ public:
         }
         const size_t n = std::min<size_t>(needed / sizeof(HMODULE), 1024);
         for (size_t i = 0; i < n; i++) {
-            auto set = (SetConsumerV1Fn)GetProcAddress(mods[i], "VisionALVR_SetConsumerV1");
+            auto set = (SetConsumerV1Fn)GetProcAddress(mods[i], "DLSSVEC_SetConsumerV1");
             if (!set) {
                 continue;
             }
             char path[MAX_PATH] = "";
             GetModuleFileNameA(mods[i], path, MAX_PATH);
-            auto ver = (ProviderVersionFn)GetProcAddress(mods[i], "VisionALVR_ProviderVersion");
+            auto ver = (ProviderVersionFn)GetProcAddress(mods[i], "DLSSVEC_ProviderVersion");
             const uint32_t v = ver ? ver() : 0;
             if (v != kProviderVersion) {
                 m_state = 2;
