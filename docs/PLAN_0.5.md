@@ -115,13 +115,11 @@ signal; it would hide the real cause and change nothing on the headset. What the
   vectors are missing; that is the engine's failsafe (`vecSource` falls back to flow per eye, nothing to switch). Text: what was expected,
   what the shim saw (`motion_tap` streams and evaluates, "sources not copied"), and the one action: the DLL version and the game's DLSS
   setting. Data: `game_run.mv` / the game record's `mv`, the `status.mv` window counters, `motion_tap` events.
-- [ ] **Red flag after a run: "the game never sent a stereo picture".** Condition: the game rendered for more than ~10 s (shim frames
-  counted) while every frame reached the host without a projection layer (the pipeline's `passthrough` count equals its frame count; the
-  shim composed a disabled layer). That is the VR injector's set-up failing (UEVR: "Failed to get back buffer (D3D12)" means its render
-  target is null), not the stream and not the vectors. Text: "the game rendered but UEVR never set up stereo: attach UEVR after the game's
-  menu, or use a build known to work (the 2026-10-17 fork build did; 18.10 and 19.10 did not)". Data: a new host event at game end
-  (`frames_rendered`, `frames_without_projection`), to be added to the host.
-- [ ] Both flags belong to the per-game page (Performance / inventory) as a line under the tiles, with the same wording in the Logs window.
+- [ ] No flag for a black screen: the user sees it. What the night cost was the *why*, so the diagnosis goes where one looks for it: one
+  line in the general log at game end when the game rendered for more than ~10 s and no frame carried a projection layer ("the game
+  rendered N frames but never sent a stereo picture: the VR injector did not set up, VisionALVR received no image to stream"), and the
+  same sentence in the Logs window's last-run summary and the exported zip. Not a tile, not a colour.
+- [ ] The orange flag belongs to the per-game page (Performance / inventory) as a line under the tiles, with the same wording in the Logs window.
 
 ## Order
 0 → 1 → 2 → 3 → 4 → 5. Phase 2 before the DLL popup (shared install code). Phase 5 last.
