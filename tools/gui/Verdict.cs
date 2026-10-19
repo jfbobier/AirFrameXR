@@ -94,6 +94,14 @@ namespace VisionALVR
                 p.Controls.Add(Ui.Line($"\u2022 Your link carries {r.CleanMbps:0} Mbps, far more than this stream needs ({tg.GoodMbps:0} Mbps): there is room for a higher resolution or less foveation if your GPU's encoder allows it."));
             foreach (var a in bad.Distinct()) p.Controls.Add(Ui.Line("\u2022 " + a));
             p.Controls.Add(Ui.Line($"\u2022 Network advice for {prof.Label}: {prof.WifiAdvice}."));
+            // suggestions from docs/PERFORMANCE_KNOBS.md: this run's measurements, and the logs when there are any
+            try
+            {
+                var settings = new AppSettings();
+                var facts = LogFacts.Read(Paths.Logs, Games.Dir);
+                p.Controls.Add(Advice.Panel(Advice.From(r, hs, ctxFps, settings.Debug, facts, () => { settings.Debug = false; settings.Save(); })));
+            }
+            catch (Exception e) { Log.Write("WARN", "suggestions: " + e.Message); }
             var note = Ui.Line("Targets are rules of thumb from ALVR's documentation and forum guidance (about 0.13 bits per encoded pixel as the minimum, 0.18 comfortable; encoder 5-10 ms; network about 10 ms), scaled to your stream. They tell you whether this setup is likely fine, not whether it is perfect.");
             note.ForeColor = Color.DimGray;
             p.Controls.Add(note);

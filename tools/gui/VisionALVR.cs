@@ -565,9 +565,19 @@ namespace VisionALVR
         }
 
         /// uitest.exe: the fullest the window gets (long lines, the firewall warning, every tile filled), to audit the layout at any size and scale.
-        public void ApplyDemoState()
+        public void ApplyDemoState(bool worstCase = true)
         {
-            headset.Text = "Headset: connected - Apple Vision Pro of Jean-Francois (192.168.100.123)"; headset.ForeColor = Color.SeaGreen;
+            headset.Text = worstCase ? "Headset: connected - Apple Vision Pro of a person with a long name (192.168.100.123)" : "Headset: connected - Apple Vision Pro (192.168.1.50)"; headset.ForeColor = Color.SeaGreen;
+            runtime.Text = "GPU: NVIDIA GeForce RTX 5090 (Blackwell, driver 617.42)   \u00B7   OpenXR runtime: VisionALVR (this folder)";
+            if (!worstCase)
+            {
+                findHint.Visible = false;
+                game.Text = "Game: Cyberpunk2077.exe";
+                tGame.Set("44.8 fps", "average, slowest tenth 38.2"); tStreamed.Set("89.7 fps", "25.0 min at 1/2"); tShown.Set("89.1 fps", "repeated periods 1.0 %");
+                tBitrate.Set("120 Mbps", "average"); tLatency.Set("57 ms", "enc 6 + net 9 + dec 14"); tLoss.Set("0", "packets lost");
+                stats.Text = "Updated every 10 s."; frameGen.SetCheckedInstant(true);
+                return;
+            }
             findHint.Visible = true;
             fwWarn.Text = "Windows Firewall blocks alvr_host.exe: the headset will not be found by discovery and the stream may not connect."; fwWarn.Visible = fwFix.Visible = true;
             game.Text = "Game: Cyberpunk2077.exe (Cyberpunk 2077) after 123 min";

@@ -1,0 +1,16 @@
+{"event": "encoder_stats", "data": {"fps": 88.0, "encode_ms_p95": 9.2, "tracking_gap_ms": {"p95": 21.0, "over_15ms": 35, "n": 500}}}
+{"event": "phase_lock", "data": {"spread_ms": 11.0, "period_ms": 11.1, "est_ms": 3.0}}
+{"event": "encoder_stats", "data": {"fps": 88.0, "encode_ms_p95": 9.2, "tracking_gap_ms": {"p95": 21.0, "over_15ms": 35, "n": 500}}}
+{"event": "phase_lock", "data": {"spread_ms": 11.0, "period_ms": 11.1, "est_ms": 3.0}}
+{"event": "encoder_stats", "data": {"fps": 88.0, "encode_ms_p95": 9.2, "tracking_gap_ms": {"p95": 21.0, "over_15ms": 35, "n": 500}}}
+{"event": "phase_lock", "data": {"spread_ms": 11.0, "period_ms": 11.1, "est_ms": 3.0}}
+{"event": "encoder_stats", "data": {"fps": 88.0, "encode_ms_p95": 9.2, "tracking_gap_ms": {"p95": 21.0, "over_15ms": 35, "n": 500}}}
+{"event": "phase_lock", "data": {"spread_ms": 11.0, "period_ms": 11.1, "est_ms": 3.0}}
+{"event": "encoder_stats", "data": {"fps": 88.0, "encode_ms_p95": 9.2, "tracking_gap_ms": {"p95": 21.0, "over_15ms": 35, "n": 500}}}
+{"event": "phase_lock", "data": {"spread_ms": 11.0, "period_ms": 11.1, "est_ms": 3.0}}
+{"event": "encoder_stats", "data": {"fps": 88.0, "encode_ms_p95": 9.2, "tracking_gap_ms": {"p95": 21.0, "over_15ms": 35, "n": 500}}}
+{"event": "phase_lock", "data": {"spread_ms": 11.0, "period_ms": 11.1, "est_ms": 3.0}}
+{"event": "encoder_stats", "data": {"fps": 88.0, "encode_ms_p95": 9.2, "tracking_gap_ms": {"p95": 21.0, "over_15ms": 35, "n": 500}}}
+{"event": "phase_lock", "data": {"spread_ms": 11.0, "period_ms": 11.1, "est_ms": 3.0}}
+{"event": "encoder_stats", "data": {"fps": 88.0, "encode_ms_p95": 9.2, "tracking_gap_ms": {"p95": 21.0, "over_15ms": 35, "n": 500}}}
+{"event": "phase_lock", "data": {"spread_ms": 11.0, "period_ms": 11.1, "est_ms": 3.0}}

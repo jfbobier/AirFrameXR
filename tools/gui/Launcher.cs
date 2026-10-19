@@ -52,20 +52,21 @@ namespace VisionALVR
 
         // The OpenXR runtime games use: shows the current one and switches to the other (ours <-> the one that was active before), reversed after each
         // click. Going back also puts back the OpenXR layers VisionALVR switched off.
-        readonly Label runtimeLabel = new Label { AutoSize = true, Font = Ui.Body, MaximumSize = new Size(520, 0), Margin = new Padding(0, 6, 12, 0) };
+        readonly Label runtimeLabel = new Label { AutoSize = true, Font = Ui.Body, MaximumSize = new Size(640, 0), Margin = new Padding(0, 0, 0, 0) };
         readonly Button runtimeBtn = new Button { AutoSize = true, MinimumSize = new Size(150, 30) };
         readonly Button layersBtn = new Button { Text = "OpenXR layers...", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(3, 0, 0, 0) };
         readonly Button firewallBtn = new Button { Text = "Firewall rules...", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(3, 0, 0, 0) };
 
         Control RuntimeRow()
         {
-            var row = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
-            var text = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
-            text.Controls.Add(new Label { Text = "OpenXR runtime", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
-            text.Controls.Add(runtimeLabel);
-            var btns = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right };
+            // text on top, the buttons under it: three buttons beside the text made the whole window wide
+            var row = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
+            row.Controls.Add(new Label { Text = "OpenXR runtime and Windows", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
+            row.Controls.Add(runtimeLabel);
+            var btns = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 6, 0, 0), MaximumSize = new Size(640, 0) };
+            runtimeBtn.Margin = new Padding(0, 0, 6, 0); layersBtn.Margin = new Padding(0, 0, 6, 0); firewallBtn.Margin = new Padding(0);
             btns.Controls.Add(runtimeBtn); btns.Controls.Add(layersBtn); btns.Controls.Add(firewallBtn);
-            row.Controls.Add(text); row.Controls.Add(btns);
+            row.Controls.Add(btns);
             runtimeBtn.Click += (s, e) => ToggleRuntime();
             layersBtn.Click += (s, e) => { using (var f = new LayersForm()) f.ShowDialog(this); };
             firewallBtn.Click += (s, e) => { using (var f = new FirewallForm()) f.ShowDialog(this); };

@@ -97,6 +97,40 @@ OpenXR game
   -> ALVR client on the headset (stock Vision Pro app, Quest client, ...)
 ```
 
+## What it looks like
+
+The windows of 0.5, at 1080p and 125 % scale, rendered by the project's own UI harness with demo data (a made-up game history and headset, no real person's data).
+Regenerate them with `python3 harness/readme_screens.py`.
+
+**One front door.** Double-click `VisionALVR.exe`: a card per tool, the OpenXR runtime switch (it switches back, too), and reviews of the OpenXR layers and the firewall rules.
+
+<p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, Logs and performance, Diagnose, Setup wizard, and the OpenXR runtime row"></p>
+
+**The streamer.** Live numbers as tiles (the game's fps, what is streamed, what the headset shows, bitrate, latency split, loss), display settings, frame generation with its rate and DLSS motion vectors, Recenter, and the optional desktop mirror.
+
+<p align="center"><img src="docs/images/ui_streamer.png" width="640" alt="The streamer window with live statistics tiles and the frame generation controls"></p>
+
+**What happened in each game.** One record per game: the last sessions with fps, latency, network, GPU and whether the game's motion vectors reached the streamer; install or remove the motion-vector DLL per game; export a log zip.
+
+<p align="center"><img src="docs/images/ui_performance.png" width="720" alt="Logs and performance: the games played, a session's statistics as tiles, the session history and the DLSS motion-vector DLL manager"></p>
+
+**Diagnose, with suggestions.** The wizard's checks on your settings as they are, and a list of suggestions taken from [docs/PERFORMANCE_KNOBS.md](docs/PERFORMANCE_KNOBS.md): each says what it measured (this run's tests, or your logs and game records) and which knob it is about. Nothing changes unless you press a button.
+
+<p align="center"><img src="docs/images/ui_suggestions.png" width="480" alt="Suggestions: encoder headroom, bursty tracking, GPU power state, with the measured numbers and what to do"></p>
+
+**Setup, once.** The wizard reads what the headset supports, offers a community profile, a pre-filled manual setup or your existing ALVR settings, then tests the result.
+
+<p align="center"><img src="docs/images/ui_wizard.png" width="640" alt="The setup wizard: choose a setup"></p>
+
+<table>
+<tr>
+<td width="50%" valign="top"><b>Firewall rules.</b> Finds the rule for this folder's exact <code>alvr_host.exe</code>, offers one only if none is in place, and lists the leftovers Windows keeps (stale, duplicate, blocking) with one click to remove them.<br><br><img src="docs/images/ui_firewall.png" width="100%" alt="The firewall review"></td>
+<td width="50%" valign="top"><b>Vision Pro passthrough.</b> The one setting that lives in the ALVR app on the headset (the streamer cannot set or read it): the wizard shows where it is, once.<br><br><img src="docs/images/ui_visionpro_passthrough.png" width="100%" alt="The wizard's passthrough step for the Vision Pro"></td>
+</tr>
+</table>
+
+The desktop mirror (the Windows desktop floating in front of you between games, your right hand as the mouse) is only visible in a headset; its picture is tested on the GPU for 7 desktop shapes in SDR and HDR (see the harness below).
+
 ## Status
 - **Works on the real headset** (tested on RTX 5090 + Vision Pro, and on a Quest 3 with the Meta-store ALVR client): the vast majority of
   UEVR games, Luke Ross mods (Dead Space Remake), native VR games, controllers (ALVR's Quest/Touch emulation), haptics, game audio,

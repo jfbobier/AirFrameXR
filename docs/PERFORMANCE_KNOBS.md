@@ -56,3 +56,24 @@ against the tick, with the margin proposal; encode p95 and the generator's GPU t
 in one number: p95 and gaps over 15 ms); the GPU p-state while streaming; and, per game, the record table the "Recommended" tick already
 reads. Each proposal with the measured reason next to it, applied by the user, remembered per rig. The engine stays as it is: it measures and
 records; the launcher proposes.
+
+## Implemented in 0.5: the suggestions in Diagnose
+
+`tools/gui/Advice.cs` is that page, in the Diagnose window and the wizard's results page. It reads the wizard's measurements of the run (encode p95, tracking gaps and rate,
+repeated head samples) and, when there are any, the logs: the newest debug session with a game streaming (`encoder_stats` windows at the display rate: encode p95, tracking gap
+p95 and the share over 15 ms; `phase_lock` events: the arrival spread; `gpu.csv`: power state, video clock, load) and the latest session of each recorded game
+(`config/games/<exe>.json`: fps against the panel, the headset's and the host's repeats, whether the motion vectors flowed). Rules, each with its measured reason shown:
+
+| suggestion | measurement | rule |
+|---|---|---|
+| encoder leaves little room for generation | encode p95 (wizard, else logs) against the period | hint at 50 % of the period, warning at 70 % |
+| tracking arrives in bursts (Wi-Fi) | tracking gap p95 over 15 ms, over 15 ms in more than 5 % of gaps, or under 0.8 x the display rate of samples | warning; the Wi-Fi advice from the nights (channel without neighbours, Ethernet) |
+| repeated head samples | the scene test's share of same-timestamp frames >= 5 % | hint; the known Vision Pro client issue |
+| **arrival margin** | the phase lock's spread (median, p90) | proposes `round(0.85 x spread)` clamped 4-10 ms; says "the default 7 fits" within 2 ms of it. Environment variable `VISIONALVR_PHASE_MARGIN_MS`, not a launcher setting yet |
+| GPU low power state | `gpu.csv`: median video clock under 900 MHz with the GPU under 30 % busy | warning; `--gpu-keepalive 90` |
+| debug logging on | the setting | hint with a button that turns it off (4.6 ms of send delay per frame on the reference PC) |
+| per game | last session: fps under 0.9 x the panel with the headset repeating over 5 % and generation off; host repeats >= 5 % under generation; headset repeats >= 5 % with the game keeping up; vectors on but none arrived; vectors flowing | frame generation as a taste; the next lower rate; the link and the margin; the DLL; good news |
+| display rate | the headset's supported rates | information: 90 <-> 100 Hz moves the caps |
+
+Not suggested, on purpose (the table above says why): the generation on/off choice beyond the measurable part, uncapped mode, the flow settings, the intake and sample-wait knobs.
+`python3 harness/advice_check.py` tests every rule against synthetic metrics and fixture logs, including a clean setup that must stay quiet.

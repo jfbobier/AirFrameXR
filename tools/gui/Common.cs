@@ -992,6 +992,8 @@ namespace VisionALVR
                 Invalidate();
             };
         }
+        /// Sets the state without the slide (a screenshot, the initial state).
+        public void SetCheckedInstant(bool v) { on = v; pos = v ? 1f : 0f; Invalidate(); }
         protected override void OnClick(EventArgs e) { Checked = !Checked; base.OnClick(e); }
         protected override void OnKeyDown(KeyEventArgs e) { if (e.KeyCode == Keys.Space) Checked = !Checked; base.OnKeyDown(e); }
         protected override void OnPaint(PaintEventArgs e)
@@ -1153,12 +1155,14 @@ namespace VisionALVR
         /// than the work area allows (1080p at 150 %, a long message) the window stops at the work area and the body scrolls instead of being cut.
         public static void AutoFitWindow(Form f, Control header, Control body)
         {
+            if (body is Panel bp) bp.AutoSizeMode = AutoSizeMode.GrowAndShrink;   // the default GrowOnly keeps the size the framework scaled it to: empty space below the content
             Action fit = () =>
             {
                 var wa = WorkArea(f);
                 var chrome = new Size(f.Width - f.ClientSize.Width, f.Height - f.ClientSize.Height);
                 var bs = body.PreferredSize;
-                int cw = Math.Max(bs.Width, body.Width) + 4, ch = (header != null ? header.Height : 0) + Math.Max(bs.Height, body.Height) + 2;
+                body.PerformLayout();
+                int cw = Math.Max(bs.Width, body.Width) + 4, ch = (header != null ? header.Height : 0) + body.Height + 2;   // the body is AutoSize: its real height after a layout is the content
                 int maxW = wa.Width - chrome.Width, maxH = wa.Height - chrome.Height;
                 if (ch > maxH) { ch = maxH; cw += SystemInformation.VerticalScrollBarWidth; }
                 if (cw > maxW) { cw = maxW; ch = Math.Min(maxH, ch + SystemInformation.HorizontalScrollBarHeight); }

@@ -20,6 +20,23 @@ using System.Windows.Forms;
 
 namespace VisionALVR
 {
+    /// The suggestions panel on its own, fed with fixture metrics and the fixture logs (what the results page shows below the verdict).
+    class AdviceHost : DpiForm
+    {
+        public AdviceHost()
+        {
+            Text = "VisionALVR - suggestions"; Font = Ui.Body; BackColor = Color.White; Icon = Ui.AppIcon();
+            var res = new Results { EncodeP95 = 9.0, SceneRan = true, HeadSamplesPerS = 60, HeadGapP95Ms = 22, SameTsPct = 9 };
+            var panel = Advice.Panel(Advice.From(res, new Handshake { Rates = new List<double> { 90, 100 } }, 90, true, LogFacts.Read(Paths.Logs, Games.Dir), null));
+            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
+            col.Controls.Add(panel);
+            col.Dock = DockStyle.None; col.Location = Point.Empty;
+            var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
+            scroller.Controls.Add(col); Controls.Add(scroller);
+            Ui.AutoFitWindow(this, null, col);
+        }
+    }
+
     static class UiTest
     {
         class Case { public string Name; public Func<Form> Make; public Action<Form> Prepare; }
@@ -29,6 +46,7 @@ namespace VisionALVR
         {
             yield return new Case { Name = "launcher", Make = () => new LauncherForm() };
             yield return new Case { Name = "streamer", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState() };
+            yield return new Case { Name = "streamer-clean", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };
             yield return new Case { Name = "streamer-empty", Make = () => new RuntimeForm(null) };
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             for (int p = 0; p <= 6; p++)
@@ -41,7 +59,90 @@ namespace VisionALVR
             yield return new Case { Name = "dll-offer", Make = () => new DllOfferForm("Cyberpunk 2077 (C) 2020 by CD Projekt RED - Phantom Liberty Edition") };
             yield return new Case { Name = "chroma-step", Make = () => new ChromaStepForm() };
             yield return new Case { Name = "openxr-layers", Make = () => new LayersForm() };
+            yield return new Case { Name = "suggestions", Make = () => new AdviceHost() };
             yield return new Case { Name = "firewall-rules", Make = () => new FirewallForm(DemoFirewall()) };
+        }
+
+        // harness/advice_check.py: every suggestion rule against synthetic wizard metrics and fixture logs; a clean setup must stay quiet
+        static int AdviceSelfTest(string outDir)
+        {
+            var o = new StringBuilder(); int fails = 0;
+            void check(string name, bool ok, string detail = "") { if (!ok) fails++; o.AppendLine($"CHECK {(ok ? "PASS" : "FAIL")} {name}" + (ok ? "" : ": " + detail)); }
+            string Titles(List<Suggestion> l) => string.Join(" | ", l.Select(x => x.Sev + ": " + x.Title));
+            var hs = new Handshake { Rates = new List<double> { 90, 100 } };
+            // fixture logs: a noisy link, a laptop GPU in P8, a long arrival spread, four games
+            var root = Path.Combine(Path.GetTempPath(), "advice_" + Guid.NewGuid().ToString("N"));
+            string MakeLogs(string name, double encP95, double gap95, int over15, double spread, string pstate, double videoMhz, double gpuPct)
+            {
+                var d = Path.Combine(root, name, "logs", "debug", "20261019-120000"); Directory.CreateDirectory(d);
+                var ev = new List<string>();
+                for (int i = 0; i < 6; i++)
+                {
+                    ev.Add("{\"data\":{\"fps\":88.0,\"encode_ms_p95\":" + encP95.ToString(CultureInfo.InvariantCulture) + ",\"tracking_gap_ms\":{\"p95\":" + gap95.ToString(CultureInfo.InvariantCulture) + ",\"over_15ms\":" + over15 + ",\"n\":500}},\"event\":\"encoder_stats\"}");
+                    ev.Add("{\"data\":{\"spread_ms\":" + spread.ToString(CultureInfo.InvariantCulture) + ",\"period_ms\":11.1,\"est_ms\":3.0},\"event\":\"phase_lock\"}");
+                }
+                ev.Add("{\"data\":{\"fps\":30.0,\"encode_ms_p95\":2.0},\"event\":\"encoder_stats\"}");   // a menu window: ignored
+                File.WriteAllLines(Path.Combine(d, "host_events.jsonl"), ev);
+                var gpu = new List<string> { "time,gpu_pct,mem_pct,enc_pct,dec_pct,graphics_mhz,memory_mhz,video_mhz,power_w,temp_c,pstate,vram_used_mb,clock_event_reasons" };
+                for (int i = 0; i < 8; i++) gpu.Add($"12:00:0{i}.000,{gpuPct.ToString(CultureInfo.InvariantCulture)},10,5,0,300,810,{videoMhz.ToString(CultureInfo.InvariantCulture)},20,40,{pstate},900,0x1");
+                File.WriteAllLines(Path.Combine(d, "gpu.csv"), gpu);
+                return Path.Combine(root, name, "logs");
+            }
+            string MakeGames(string name, params string[] games)
+            {
+                var d = Path.Combine(root, name, "config", "games"); Directory.CreateDirectory(d);
+                for (int i = 0; i < games.Length; i++) File.WriteAllText(Path.Combine(d, "g" + i + ".json"), games[i]);
+                return d;
+            }
+            string Game(string exe, string name, string level, double fps, double rep, double hostRep, bool mv, double mvFrames, double mvUsed, long start) =>
+                "{\"exe\":\"" + exe + "\",\"name\":\"" + name + "\",\"sessions\":[{\"start\":" + start + ",\"headset\":\"Apple Vision Pro\",\"level\":\"" + level + "\",\"display_hz\":90,\"rendered_fps\":" + fps.ToString(CultureInfo.InvariantCulture) +
+                ",\"headset_repeated_typ\":" + (rep / 100).ToString(CultureInfo.InvariantCulture) + ",\"headset_repeated_p90\":" + (rep / 50).ToString(CultureInfo.InvariantCulture) + ",\"host_repeats_typ\":" + (hostRep / 100).ToString(CultureInfo.InvariantCulture) +
+                ",\"net\":{\"latency_ms\":60},\"mv\":{\"enabled\":" + (mv ? "true" : "false") + ",\"frames\":" + mvFrames + ",\"used_eyes\":" + mvUsed + "}}]}";
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+            var clean = Advice.From(new Results { EncodeP95 = 4, SceneRan = true, HeadSamplesPerS = 270, HeadGapP95Ms = 5, SameTsPct = 0.5 }, hs, 90, false, new LogFacts());
+            check("a clean setup raises nothing above Info", clean.All(x => x.Sev == Sev.Info), Titles(clean));
+            var none = Advice.From(null, null, 90, false, null);
+            check("no measurement at all: an empty list, no crash", none.Count == 0, Titles(none));
+
+            var slow = Advice.From(new Results { EncodeP95 = 9.0 }, hs, 90, false, new LogFacts());
+            check("a slow encoder is flagged with its numbers", slow.Any(x => x.Sev == Sev.Warn && x.Title.Contains("encoder") && x.Measured.Contains("9") && x.Source.Contains("wizard")), Titles(slow));
+            var wifi = Advice.From(new Results { EncodeP95 = 4, SceneRan = true, HeadSamplesPerS = 60, HeadGapP95Ms = 22 }, hs, 90, false, new LogFacts());
+            check("bursty tracking from the scene test points at the Wi-Fi", wifi.Any(x => x.Sev == Sev.Warn && x.Title.Contains("bursts") && x.Source.Contains("scene test")), Titles(wifi));
+            var same = Advice.From(new Results { EncodeP95 = 4, SceneRan = true, HeadSamplesPerS = 270, HeadGapP95Ms = 5, SameTsPct = 9 }, hs, 90, false, new LogFacts());
+            check("repeated head samples are explained (known Vision Pro issue)", same.Any(x => x.Title.Contains("same head sample")), Titles(same));
+
+            // logs: noisy link, long spread, laptop GPU, debug on, games
+            var logs = MakeLogs("noisy", 9.5, 21, 40, 11.0, "P8", 555, 10);
+            var games = MakeGames("noisy",
+                Game("a.exe", "Game A", "off", 55, 12, 0, true, 0, 0, now - 400),
+                Game("b.exe", "Game B", "half", 44, 0.4, 20, true, 100, 100, now - 300),
+                Game("c.exe", "Game C", "half", 44, 0.5, 0.2, true, 0, 0, now - 200),
+                Game("d.exe", "Game D", "third", 30, 7, 0.2, true, 500, 900, now - 100));
+            var f = LogFacts.Read(logs, games);
+            check("the newest debug session with a game streaming is read", f.Windows == 6 && Math.Abs(f.EncodeP95 - 9.5) < 0.01 && Math.Abs(f.SpreadMed - 11.0) < 0.01 && f.GpuSamples == 8, $"windows {f.Windows} enc {f.EncodeP95} spread {f.SpreadMed} gpu samples {f.GpuSamples}");
+            check("the four newest games are read, newest first", f.Games.Count == 4 && f.Games[0].Name == "Game D", string.Join(",", f.Games.Select(g => g.Name)));
+            bool off = false;
+            var all = Advice.From(null, hs, 90, true, f, () => off = true);
+            check("logs: the encoder headroom", all.Any(x => x.Title.Contains("encoder") && x.Source.Contains("logs")), Titles(all));
+            check("logs: bursty tracking", all.Any(x => x.Title.Contains("bursts") && x.Source.Contains("logs")), Titles(all));
+            check("logs: arrival margin 9 proposed for an 11 ms spread", all.Any(x => x.Title.Contains("try 9") && x.Do.Contains("VISIONALVR_PHASE_MARGIN_MS=9")), Titles(all));
+            check("logs: the GPU in P8 gets the keepalive", all.Any(x => x.Title.Contains("low power state") && x.Do.Contains("--gpu-keepalive")), Titles(all));
+            var dbg = all.FirstOrDefault(x => x.Apply != null); dbg?.Apply();
+            check("debug logging: a button that turns it off", dbg != null && off, Titles(all));
+            check("game A (55 fps raw, headset repeats 12 %): frame generation suggested", all.Any(x => x.Title.Contains("Game A") && x.Title.Contains("frame generation")), Titles(all));
+            check("game B (host repeats 20 % at 1/2): a lower rate", all.Any(x => x.Title.Contains("Game B") && x.Do.Contains("lower rate")), Titles(all));
+            check("game C (vectors on, none came): the DLL", all.Any(x => x.Title.Contains("Game C") && x.Title.Contains("motion vectors")), Titles(all));
+            check("game D (vectors flowing): good news", all.Any(x => x.Title.Contains("Game D") && x.Sev == Sev.Info), Titles(all));
+            check("every suggestion says what it measured and where from", all.All(x => x.Measured.Length > 0 && x.Source.Length > 0 && x.Title.Length > 0), "");
+            check("warnings come first", all.Count > 1 && (int)all[0].Sev >= (int)all[all.Count - 1].Sev, Titles(all).Substring(0, Math.Min(120, Titles(all).Length)));
+
+            var fine = LogFacts.Read(MakeLogs("fine", 4.0, 6, 3, 8.0, "P0", 1500, 55), MakeGames("fine"));
+            var good = Advice.From(null, hs, 90, false, fine);
+            check("a healthy session: margin default fits, nothing above Info", good.Any(x => x.Title.Contains("default 7 ms fits")) && good.All(x => x.Sev == Sev.Info), Titles(good));
+
+            File.WriteAllText(Path.Combine(outDir, "advice.txt"), o.ToString());
+            return fails == 0 ? 0 : 1;
         }
 
         static FwReport DemoFirewall()
@@ -63,6 +164,7 @@ namespace VisionALVR
             var outDir = Arg("--out") ?? Path.Combine(Paths.Dir, "uitest");
             Directory.CreateDirectory(outDir);
             var only = Arg("--only");
+            if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);
             var fwExe = Arg("--firewall");   // harness/firewall_check.py: print the firewall analysis of this exe and stop
             if (fwExe != null)
             {

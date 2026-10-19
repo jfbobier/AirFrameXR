@@ -51,6 +51,7 @@ namespace VisionALVR
             games.SelectedIndexChanged += (s, e) => Render();
             if (settings.AutoDeleteGameLogs) Scan();
             Fill(select);
+            Load += (s, e) => { ActiveControl = games; right.AutoScrollPosition = Point.Empty; };   // focus on the list of games: a control lower in the right pane would scroll it
             Ui.ScreenshotWhenShown(this, 1500);
         }
 
@@ -135,6 +136,7 @@ namespace VisionALVR
             right.Controls.Add(tools);
             foreach (Control c in right.Controls) Ui.LateScale(c, this);   // rebuilt after the window loaded; widths above are design units
             right.ResumeLayout();
+            right.AutoScrollPosition = Point.Empty;   // a rebuilt pane starts at its top, whatever the last one was scrolled to
         }
 
         static string Mode(string level) => level == "off" ? "generation off" : level == "third" ? "generation 1/3" : level == "half" ? "generation 1/2" : level == "two_thirds" ? "generation 2/3" : level;
