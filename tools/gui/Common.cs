@@ -983,7 +983,11 @@ namespace VisionALVR
         }
         static float systemScale;
         /// the system dpi / 96, never the test override (the harness scales everything else itself)
-        public static float SystemScale { get { if (systemScale <= 0) using (var g = Graphics.FromHwnd(IntPtr.Zero)) systemScale = g.DpiX / 96f; return systemScale; } }
+        public static float SystemScale { get {
+#if NATIVE_DPI
+            return 1f;   // experiment: WinForms' own per-monitor scaling does it
+#endif
+            if (systemScale <= 0) using (var g = Graphics.FromHwnd(IntPtr.Zero)) systemScale = g.DpiX / 96f; return systemScale; } }
         public static int DpiOf(Control c) => DpiOverride > 0 ? DpiOverride : (c != null ? c.DeviceDpi : 96);
         /// A size designed at 96 dpi, in pixels at the display's dpi (for what the framework does not scale itself: list columns).
         public static int Px(Control c, int designPx) => (int)Math.Round(designPx * DpiOf(c) / 96.0);
@@ -993,6 +997,9 @@ namespace VisionALVR
         /// The scale the framework applied to the window at load (the system dpi / 96): what controls created later must be given by hand.
         public static float LoadScale(Control c)
         {
+#if NATIVE_DPI
+            return 1f;
+#endif
             var f = c.FindForm() ?? c as Form;
             return f != null && f.CurrentAutoScaleDimensions.Width > 0 ? f.CurrentAutoScaleDimensions.Width / 96f : 1f;
         }
