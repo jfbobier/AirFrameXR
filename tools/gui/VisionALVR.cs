@@ -276,6 +276,8 @@ namespace VisionALVR
 
         // The desktop mirror is an OpenXR app of its own (bin\mirrordesktop.exe): it runs while the toggle is on, a headset is connected and no game runs. A game
         // starting takes the headset (the app leaves by itself when the shim signals it; this only makes sure it is gone), and the mirror returns when it ends.
+        static bool IsMirrorApp(string exe) => string.Equals(exe, "mirrordesktop.exe", StringComparison.OrdinalIgnoreCase);
+        bool mirrorInHost;
         Process mirrorProc; bool headsetConnected; int mirrorFails; DateTime mirrorStarted;
         readonly Timer mirrorTimer = new Timer { Interval = 1500 };
         void MirrorSync()
@@ -572,6 +574,15 @@ namespace VisionALVR
                     }
                     break;
                 case "game_started":
+                    if (IsMirrorApp(S(d, "exe")))
+                    {
+                        // the desktop mirror is an OpenXR app like a game (the engine records it as one), but it is not played: no generation (it would only add latency to a
+                        // static screen), and it must not count as a game for the mirror's own start/stop logic
+                        mirrorInHost = true;
+                        game.Text = "Game: none (the desktop mirror is on)";
+                        if (frameGen.Checked) host.Send("frame_gen off");
+                        break;
+                    }
                     game.Text = "Game: " + S(d, "exe");
                     gameRunning = true; MirrorSync();
                     currentExe = S(d, "exe");
@@ -580,10 +591,17 @@ namespace VisionALVR
                     ApplyRecommendation(fgRecommend.Checked);
                     break;
                 case "game_ended":
+                    if (IsMirrorApp(S(d, "exe")))
+                    {
+                        mirrorInHost = false;
+                        if (settings.FrameGen) host.Send("frame_gen on");   // the user's choice comes back for the next game
+                        break;
+                    }
                     gameRunning = false; MirrorSync();
                     game.Text = $"Game: none (last: {S(d, "exe")}, {F(D(d, "seconds") / 60, "0.0")} min)";
                     break;
                 case "game_run":
+                    if (IsMirrorApp(S(d, "exe"))) break;   // the mirror's record is kept by the engine like any game's; the Streaming box keeps the last game's numbers
                     // the streamer recorded the run: the Streaming box turns into the run's record and what will be proposed next time
                     // (no pop-up; the live numbers come back with the next game)
                     {

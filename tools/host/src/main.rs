@@ -2292,7 +2292,6 @@ fn main() {
         if s + o > 0 { format!(", {s} boundaries skipped for want of a tracking sample ({:.1} %)", 100.0 * s as f64 / (s + o) as f64) } else { String::new() }
     };
     let mut game: Option<GameRun> = None;
-    let mut mirror_app = false;   // the desktop mirror (mirrordesktop.exe) is the app connected: not a game
     // the run record (games.json): one (headset repeated share, host repeat share) sample per status tick (10 s) while a game runs
     let mut run_windows: Vec<(f64, f64, f64)> = Vec::new();
     let mut run_stats = RunStats::default();
@@ -2430,17 +2429,11 @@ fn main() {
             }
             // game start / end, for the general log and the GUI
             let alive = app_alive();
-            if !alive { mirror_app = false; }
-            if alive && game.is_none() && !mirror_app {
+            if alive && game.is_none() {
                 let mut b = [0 as std::ffi::c_char; 256];
                 unsafe { nvh::nvh_ipc_app_exe(ipc, b.as_mut_ptr(), b.len() as i32) };
                 let exe = unsafe { std::ffi::CStr::from_ptr(b.as_ptr()) }.to_string_lossy().to_string();
                 let exe = if exe.is_empty() { "(unknown app)".to_string() } else { exe };
-                if exe.eq_ignore_ascii_case("mirrordesktop.exe") {
-                    // the desktop mirror is an OpenXR app like any other, but not a game: no record, no recenter, no statistics
-                    logs::general("INFO", "the desktop mirror connected");
-                    mirror_app = true;
-                } else {
                 logs::general("INFO", &format!("game started: {exe}"));
                 event(origin, "game_started", json!({ "exe": exe }));
                 vision::RECENTER_REQ.store(true, Ordering::SeqCst);   // the player's forward and position at game start are the game's forward and origin, on every headset, with or without the launcher
@@ -2452,7 +2445,6 @@ fn main() {
                 let (skips0, outputs0) = fg_counts(&pipeline);
                 let (frames0, submitted0, now) = (shared.frames_sent.load(Ordering::Relaxed), shim_submitted(ipc), Instant::now());
                 game = Some(GameRun { exe, start: now, frames0, submitted0, skips0, outputs0, seg_start: now, seg_frames0: frames0, seg_submitted0: submitted0, seg_skips0: skips0, seg_outputs0: outputs0 });
-                }
             } else if !alive && game.is_some() {
                 let g = game.take().unwrap();
                 let secs = g.start.elapsed().as_secs_f64();

@@ -1238,7 +1238,7 @@ def evaluate(sc, a):
             chk("mirror_beam", M_.get("beam_frames", 0) >= mk.get("min_frames", 20) and bf >= mk.get("min_ok_frac", 0.9), {"frames": M_.get("beam_frames"), "ok_frac": round(bf, 2), "median_pixels": M_.get("beam_pixels_median")},
                 "the controller's orange beam is in the left eye (>= 6 beam-coloured pixels at 160x144) in >= 90 % of the frames")
             chk("mirror_controller_seen", M_.get("tracked_logged") and M_.get("pointer_logged"), {"tracked": M_.get("tracked_logged"), "pointer_on_screen": M_.get("pointer_logged")}, "the app tracked the controller through OpenXR and its ray met the screen")
-        chk("mirror_not_a_game", not M_["recorded_as_game"], M_["recorded_as_game"], "the host did not record mirrordesktop.exe as a game")
+        chk("mirror_is_a_game_to_the_engine", M_["recorded_as_game"], M_["recorded_as_game"], "the engine saw mirrordesktop.exe as an app like any game (game_started in its events): nothing special in the engine")
     if "qpmap" in ck:
         qk, qa = ck["qpmap"], a.get("qpmap") or {}
         chk("qpmap_enabled_in_nvenc", qa.get("nvenc_qp_map_mode") == (2 if qk.get("on", True) else 0), qa.get("nvenc_qp_map_mode"), "NVENC reports qpMapMode 2 (delta) when the map is on, 0 when off")
