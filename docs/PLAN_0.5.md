@@ -90,5 +90,8 @@ Minimal code:
 ## Package layout (2026-10-19, built and tested)
 The root holds one file, `VisionALVR.exe` (the launcher). `bin\` has every exe and DLL the launcher starts or loads (including the OpenXR runtime), plus `register_openxr_runtime.ps1`. Other folders: `DLSSMotionVectors\`, `bench\`, `profiles\`, `config\`, `docs\`, `logs\` (on use), `extras\` (personal builds only). No `.bat` files. `python3 harness/run.py build package` moves an older-layout `out\dist\VisionALVR` aside (renamed `.old-<time>`, never deleted); `test-install` and `test-zip` check the root and the absence of `.bat`.
 
+## Desktop and DPI coverage (2026-10-19)
+`harness/ui_matrix.py` (every window and wizard page at 1080p/1440p/4K x 100-200 % scale), `harness/launcher_flow.py` (the launcher hides while a tool is open, returns when all are closed), `harness/mirror_check.py` (7 desktop shapes x SDR/HDR). They found and fixed: sizes set in code were raw pixels (windows and docked panels did not scale), late-built wizard pages were not scaled, fixed list-column widths broke with fonts (columns are now sized from their content), windows could be taller than a 1080p work area (now capped, the body scrolls), tall desktops made a screen taller than the view (capped at 40 degrees), and the cursor dot was tiny on a 4K desktop (now scales with the desktop's height).
+
 ## Order
 0 → 1 → 2 → 3 → 4 → 5. Phase 2 before the DLL popup (shared install code). Phase 5 last.
