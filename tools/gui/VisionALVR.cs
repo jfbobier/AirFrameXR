@@ -45,10 +45,11 @@ namespace VisionALVR
             "1/3: the game at a third of the display rate, two generated frames per rendered one (games at 34-49 fps)",
             "1/2: the game at half the display rate, one generated frame per rendered one (the default)",
             "2/3: the game held to two thirds of the display rate, every frame sent is interpolated (games above 67 fps)" };
-        readonly TrackBar fgRate = new TrackBar { Minimum = 0, Maximum = 2, TickFrequency = 1, SmallChange = 1, LargeChange = 1, Width = 110, AutoSize = false, Height = 30, Margin = new Padding(0, 0, 0, 0) };
+        readonly Segmented fgRate = new Segmented("1/3", "1/2", "2/3") { AccessibleName = "Game rate" };
         readonly Label fgRateText = Ui.Line("");
-        readonly CheckBox fgMv = new CheckBox { Text = "DLSS motion vectors", AutoSize = true, Margin = new Padding(14, 3, 0, 0) };
-        readonly CheckBox fgRecommend = new CheckBox { Text = "Recommended", AutoSize = true, Margin = new Padding(8, 3, 0, 0) };
+        readonly CheckBox fgMv = new CheckBox { Text = "Use the game's DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0), Visible = false };   // shown only where the extractor DLL is installed for the running game
+        readonly ToggleButton fgRecommend = new ToggleButton { Text = "Auto", Margin = new Padding(0, 0, 8, 0), AccessibleName = "Choose the game rate automatically from this game's recorded runs" };
+        readonly FlowLayoutPanel debugNotice = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Visible = false, Margin = new Padding(0, 8, 0, 0) };
         readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(8, 3, 3, 3) };
         bool fgRateFromHost;   // the slider follows the host's rate: no command back
         // Game profiles (config\games\<exe>.json, written by the streamer at every game end: per game, headset and level the last run's numbers). The
@@ -113,23 +114,28 @@ namespace VisionALVR
             // (above the floor) when you enter VR and keeps your own vertical movement on top of it. Everything is applied live.
             var live = new GroupBox { Text = "Position and picture (applied live)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
             var lt = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Dock = DockStyle.Fill, Font = Ui.Body };
+            var pic = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Font = Ui.Body };   // the look of the picture: behind the "Picture" expander
             if (!settings.HasDisplay) { settings.Gamma = AppSettings.DefaultGamma; settings.Save(); } // the streamer reads it at start
             AddKnob(lt, "Eye height, m", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v,
                     "Your eye height above the floor, as games see it: about 1.30 m seated, 1.6-1.7 m standing; 0 = the headset's own floor estimate. Games that place you from the floor use it; moving it re-anchors at your current head position.");
             heightKnob = knobs[knobs.Count - 1];
-            AddKnob(lt, "Gamma (>1 brighter)", 50, 200, AppSettings.DefaultGamma, () => settings.Gamma, v => settings.Gamma = v);
-            AddKnob(lt, "Brightness", -30, 30, 0, () => settings.Brightness, v => settings.Brightness = v);
-            AddKnob(lt, "Contrast", -30, 30, 0, () => settings.Contrast, v => settings.Contrast = v);
-            AddKnob(lt, "Saturation", -50, 50, 0, () => settings.Saturation, v => settings.Saturation = v, "Below 0: less vivid.");
-            AddKnob(lt, "Sharpening", 0, 100, 0, () => settings.Sharpening, v => settings.Sharpening = v);
+            AddKnob(pic, "Gamma (>1 brighter)", 50, 200, AppSettings.DefaultGamma, () => settings.Gamma, v => settings.Gamma = v);
+            AddKnob(pic, "Brightness", -30, 30, 0, () => settings.Brightness, v => settings.Brightness = v);
+            AddKnob(pic, "Contrast", -30, 30, 0, () => settings.Contrast, v => settings.Contrast = v);
+            AddKnob(pic, "Saturation", -50, 50, 0, () => settings.Saturation, v => settings.Saturation = v, "Below 0: less vivid.");
+            AddKnob(pic, "Sharpening", 0, 100, 0, () => settings.Sharpening, v => settings.Sharpening = v);
             var reset = new Button { Text = "Defaults", AutoSize = true };
             reset.Click += (s, e) => { foreach (var k in knobs) k.Bar.Value = (int)Math.Round(k.Def * 100); };
             tips.SetToolTip(reset, "Eye height 1.30 m, gamma 1.2, the rest neutral.");
+            pic.Controls.Add(reset);
+            pic.SetColumnSpan(reset, 6);
             var util = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
-            util.Controls.Add(reset);
             util.Controls.Add(recenter);
             lt.Controls.Add(util);
             lt.SetColumnSpan(util, 6);
+            var picture = Ui.Expander("Picture", pic);
+            lt.Controls.Add(picture);
+            lt.SetColumnSpan(picture, 6);
             var fgRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
             fgRow.Controls.Add(frameGen);
             var fgText = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
@@ -143,13 +149,13 @@ namespace VisionALVR
             // the content lag stay available in config\visionalvr.json and on the host's command line for experiments.
             var fgOpts = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(44, 2, 0, 0) };
             fgOpts.Controls.Add(new Label { Text = "Game rate", AutoSize = true, Font = Ui.Body, Margin = new Padding(0, 6, 6, 0) });
-            fgOpts.Controls.Add(new Label { Text = "1/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(0, 6, 2, 0) });
-            fgOpts.Controls.Add(fgRate);
-            fgOpts.Controls.Add(new Label { Text = "2/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(2, 6, 0, 0) });
             fgOpts.Controls.Add(fgRecommend);
-            fgOpts.Controls.Add(fgMv);
+            fgOpts.Controls.Add(fgRate);
             lt.Controls.Add(fgOpts);
             lt.SetColumnSpan(fgOpts, 6);
+            fgMv.Margin = new Padding(44, 0, 0, 0);
+            lt.Controls.Add(fgMv);
+            lt.SetColumnSpan(fgMv, 6);
             fgRateText.Margin = new Padding(44, 0, 0, 4);
             fgRateText.ForeColor = Color.DimGray;
             lt.Controls.Add(fgRateText);
@@ -163,17 +169,23 @@ namespace VisionALVR
             mirrorText.Controls.Add(new Label { Text = "Mirror Windows desktop between sessions", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 4, 0, 0) });
             mirrorText.Controls.Add(new Label { Text = "Shows the desktop in the headset when no game runs, and your right hand is the mouse (pinch = click). For games you start from the headset; replaces the passthrough screen while on.", AutoSize = true, Font = Ui.Body, ForeColor = Color.DimGray, MaximumSize = new Size(560, 0), Margin = new Padding(0) });
             mirrorRow.Controls.Add(mirrorText);
-            lt.Controls.Add(mirrorRow);
-            lt.SetColumnSpan(mirrorRow, 6);
+            var between = new GroupBox { Text = "Between games", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
+            mirrorRow.Font = Ui.Body; mirrorRow.Dock = DockStyle.Fill;
+            between.Controls.Add(mirrorRow);
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
             tips.SetToolTip(fgRecommend, "The slider is set from this game's recorded runs on this headset (config\\games\\<game>.json): the fastest rate whose typical 10-second window repeated under 5 % of the headset's periods; a rate that filled its cap suggests the next one once. Untick to choose yourself.");
             tips.SetToolTip(recenter, "Turn the tracking space so your current forward is forward and your position the origin (done by the streamer on its own at every game start; the recenter key (End by default, set in the wizard) does the same while playing).");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the OptiScaler-DLSSMotionVectorExtractor DLL is in the game folder (else optical flow).");
             live.Controls.Add(lt);
             body.Controls.Add(live);
+            body.Controls.Add(between);
 
-            debug.Margin = new Padding(3, 8, 3, 3);   // a diagnostic aid, off unless asked for: it lives at the bottom
-            body.Controls.Add(debug);
+            // debug logging is a diagnostic aid, off unless asked for: it is switched on in the Game history window; here only a notice while it is on
+            debugNotice.Controls.Add(new Label { Text = "Debug logging is on (files in logs\\debug\\).", AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(3, 7, 6, 0) });
+            var debugOff = new Button { Text = "Turn off", AutoSize = true };
+            debugOff.Click += (s, e) => debug.Checked = false;
+            debugNotice.Controls.Add(debugOff);
+            body.Controls.Add(debugNotice);
             footer.ForeColor = Color.DimGray;
             body.Controls.Add(footer);
 
@@ -186,8 +198,10 @@ namespace VisionALVR
 
 
             debug.Checked = settings.Debug;
+            debugNotice.Visible = debug.Checked;
             debug.CheckedChanged += (s, e) =>
             {
+                debugNotice.Visible = debug.Checked;
                 host.Send("debug " + (debug.Checked ? "on" : "off"));
                 settings.Debug = debug.Checked;
                 settings.Save();
@@ -201,7 +215,7 @@ namespace VisionALVR
                 settings.Save();
                 Log.Write("INFO", "desktop mirror " + (mirror.Checked ? "on" : "off"));
             };
-            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = fgMv.Enabled = frameGen.Checked; };
+            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = fgMv.Enabled = frameGen.Checked; ShowMvTick(); };
             fgEnableAll = fgEnable;
             frameGen.CheckedChanged += (s, e) =>
             {
@@ -258,6 +272,8 @@ namespace VisionALVR
         }
 
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 400 };
+
+        void NeedFind(bool on) { findHint.Visible = find.Visible = on; }
 
         void CheckFirewall()
         {
@@ -345,6 +361,15 @@ namespace VisionALVR
             catch { return null; }
         }
 
+        // the DLSS motion-vector tick means something only where the extractor DLL sits in the running game's folder
+        void ShowMvTick()
+        {
+            bool installed = false;
+            try { if (currentExe.Length > 0) installed = MvDll.Check(MvDll.GameDir(Games.Load(currentExe)), Games.Stem(currentExe), out _) == MvDll.State.Installed; } catch { }
+            fgMv.Visible = frameGen.Checked && (installed || demoMv);
+        }
+        bool demoMv;
+
         void ApplyRecommendation(bool apply)
         {
             recommendationApplied = false;
@@ -395,7 +420,7 @@ namespace VisionALVR
             pairedIp = hs?.Item3 ?? "";
             headset.Text = hs == null ? "Headset: none paired - click Find headset" : $"Headset: searching for {pairedName} ({pairedIp}) ...";
             headset.ForeColor = Color.DarkOrange;
-            findHint.Visible = true;
+            NeedFind(true);
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
             var err = host.Start(args);
             if (err != null)
@@ -484,11 +509,11 @@ namespace VisionALVR
                     var ip = S(d, "ip");
                     headset.Text = $"Headset: connected - {(n.Length > 0 ? n : pairedName)} ({(ip.Length > 0 ? ip : pairedIp)})";
                     headset.ForeColor = Color.SeaGreen;
-                    findHint.Visible = false;
+                    NeedFind(false);
                     if (ip.Length > 0 && ip != settings.HeadsetIp) { settings.HeadsetIp = ip; settings.Save(); }
                     break;
                 case "client_disconnected":
-                    findHint.Visible = true;
+                    NeedFind(true);
                     headset.Text = $"Headset: searching for {pairedName} ({pairedIp}) ...";
                     headset.ForeColor = Color.DarkOrange;
                     break;
@@ -533,6 +558,7 @@ namespace VisionALVR
                         tBitrate.Set(F(D(net, "bitrate_mbps"), "0") + " Mbps", "average");
                         tLatency.Set(F(D(net, "latency_ms"), "0") + " ms", $"p95 {F(D(net, "latency_p95_ms"), "0")}");
                         tLoss.Set(F(D(net, "packets_lost"), "0"), "packets lost", D(net, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
+                        stats.Visible = true;
                         stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} % (game under the cap), skipped {F(D(d, "skipped") * 100, "0.0")} %. " +
                                      $"Frame generation recommendation: {(rec == null ? "none yet" : (ri >= 0 ? names[ri] : rec.Value.level) + " next time (" + rec.Value.why + ")")}";
                         OfferDll(d);
@@ -555,7 +581,7 @@ namespace VisionALVR
                         tBitrate.Set(F(D(d, "mbps"), "0") + " Mbps", "");
                         tLatency.Set(F(D(c, "total_latency_ms"), "0") + " ms", $"enc {F(D(c, "encode_ms"), "0")} + net {F(D(c, "network_ms"), "0")} + dec {F(D(c, "decode_ms"), "0")}");
                         tLoss.Set(S(d, "packets_lost"), "packets lost", D(d, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
-                        stats.Text = "Updated every 10 s.";
+                        stats.Text = ""; stats.Visible = false;
                     }
                     break;
                 case "encode_error":
@@ -568,22 +594,23 @@ namespace VisionALVR
         public void ApplyDemoState(bool worstCase = true)
         {
             headset.Text = worstCase ? "Headset: connected - Apple Vision Pro of a person with a long name (192.168.100.123)" : "Headset: connected - Apple Vision Pro (192.168.1.50)"; headset.ForeColor = Color.SeaGreen;
+            demoMv = true; ShowMvTick();
             runtime.Text = "GPU: NVIDIA GeForce RTX 5090 (Blackwell, driver 617.42)   \u00B7   OpenXR runtime: VisionALVR (this folder)";
             if (!worstCase)
             {
-                findHint.Visible = false;
+                NeedFind(false);
                 game.Text = "Game: Cyberpunk2077.exe";
                 tGame.Set("44.8 fps", "average, slowest tenth 38.2"); tStreamed.Set("89.7 fps", "25.0 min at 1/2"); tShown.Set("89.1 fps", "repeated periods 1.0 %");
                 tBitrate.Set("120 Mbps", "average"); tLatency.Set("57 ms", "enc 6 + net 9 + dec 14"); tLoss.Set("0", "packets lost");
-                stats.Text = "Updated every 10 s."; frameGen.SetCheckedInstant(true);
+                stats.Text = ""; stats.Visible = false; frameGen.SetCheckedInstant(true);
                 return;
             }
-            findHint.Visible = true;
+            NeedFind(true);
             fwWarn.Text = "Windows Firewall blocks alvr_host.exe: the headset will not be found by discovery and the stream may not connect."; fwWarn.Visible = fwFix.Visible = true;
             game.Text = "Game: Cyberpunk2077.exe (Cyberpunk 2077) after 123 min";
             tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at 1/2"); tShown.Set("144.4 fps", "repeated periods 12.3 %", Color.Firebrick);
             tBitrate.Set("1000 Mbps", "average"); tLatency.Set("123 ms", "enc 12 + net 12 + dec 12"); tLoss.Set("1234", "packets lost", Color.Firebrick);
-            stats.Text = "Host repeats 12.3 % (game under the cap), skipped 12.3 %. Frame generation recommendation: 1/2 next time (1/2: last run 44 fps, 38 in its slowest tenth, headset repeated 1.2 % typical (5.6 % in its heavy parts), host repeats 0.0 %)";
+            stats.Visible = true; stats.Text = "Host repeats 12.3 % (game under the cap), skipped 12.3 %. Frame generation recommendation: 1/2 next time (1/2: last run 44 fps, 38 in its slowest tenth, headset repeated 1.2 % typical (5.6 % in its heavy parts), host repeats 0.0 %)";
             fgRateText.Text = FgRateText[2];
             footer.Text = "config\\session.json is missing and there is no config\\session.default.json to create it from: this VisionALVR folder is incomplete. Unzip the release again (you can keep your config\\ folder).";
             footer.ForeColor = Color.Firebrick;
@@ -602,12 +629,14 @@ namespace VisionALVR
                 var dir = MvDll.GameDir(Games.Load(exe));
                 var st = MvDll.Check(dir, stem, out _);
                 if (st == MvDll.State.NoMaster || st == MvDll.State.NoFolder || st == MvDll.State.Installed) return;
-                using (var dlg = new DllOfferForm(S(Games.Load(exe), "name").Length > 0 ? S(Games.Load(exe), "name") : exe))
+                var dlg = new DllOfferForm(S(Games.Load(exe), "name").Length > 0 ? S(Games.Load(exe), "name") : exe);
+                dlg.FormClosed += (s, e) =>
                 {
-                    var r = dlg.ShowDialog(this);
                     if (dlg.DontAsk) MvDll.Dismiss(stem);
-                    if (r == DialogResult.Yes) MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR");
-                }
+                    if (dlg.DialogResult == DialogResult.Yes) MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR");
+                    dlg.Dispose();
+                };
+                dlg.Show(this);   // not modal: the streamer window keeps working while the offer waits
             }
             catch (Exception e) { Log.Write("WARN", "DLL offer failed: " + e.Message); }
         }

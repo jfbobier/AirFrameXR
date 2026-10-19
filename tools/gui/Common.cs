@@ -362,6 +362,43 @@ namespace VisionALVR
     }
 
     /// The session (ALVR settings, paired headset). Created from session.default.json on first use.
+    /// A button that stays pressed: Checked / CheckedChanged like a check box, the look of one Segmented segment.
+    public class ToggleButton : Button
+    {
+        bool on;
+        public event EventHandler CheckedChanged;
+        public ToggleButton() { AutoSize = true; FlatStyle = FlatStyle.Flat; Padding = new Padding(6, 2, 6, 2); UseVisualStyleBackColor = false; BackColor = Color.White; }
+        public bool Checked
+        {
+            get { return on; }
+            set { if (on == value) return; on = value; BackColor = on ? Color.FromArgb(0xCF, 0xDD, 0xF7) : Color.White; CheckedChanged?.Invoke(this, EventArgs.Empty); }
+        }
+        protected override void OnClick(EventArgs e) { base.OnClick(e); Checked = !Checked; }
+    }
+
+    /// A segmented choice: a row of toggle buttons, one selected (Value = its index). Enabled greys the whole row.
+    public class Segmented : FlowLayoutPanel
+    {
+        readonly List<RadioButton> items = new List<RadioButton>();
+        public event EventHandler ValueChanged;
+        public Segmented(params string[] texts)
+        {
+            AutoSize = true; WrapContents = false; Margin = new Padding(0);
+            for (int i = 0; i < texts.Length; i++)
+            {
+                var r = new RadioButton { Text = texts[i], Appearance = Appearance.Button, FlatStyle = FlatStyle.Flat, AutoSize = true, Margin = new Padding(0, 0, 2, 0), Padding = new Padding(6, 2, 6, 2), TextAlign = ContentAlignment.MiddleCenter, AccessibleName = texts[i], Tag = i };
+                r.FlatAppearance.CheckedBackColor = Color.FromArgb(0xCF, 0xDD, 0xF7);
+                r.CheckedChanged += (s, e) => { if (((RadioButton)s).Checked) ValueChanged?.Invoke(this, EventArgs.Empty); };
+                items.Add(r); Controls.Add(r);
+            }
+        }
+        public int Value
+        {
+            get { for (int i = 0; i < items.Count; i++) if (items[i].Checked) return i; return -1; }
+            set { if (value >= 0 && value < items.Count) items[value].Checked = true; }
+        }
+    }
+
     /// Brings a working ALVR session.json into config\: the user points at their ALVR folder (or the file), we look for session.json around it, check it is an ALVR session,
     /// keep a backup of the current one and copy it over.
     public static class AlvrImport
