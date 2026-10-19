@@ -10,12 +10,14 @@ namespace VisionALVR
 {
     public class LauncherForm : Form
     {
-        class Tool { public string Title, What, Exe; public bool StopsStreamer; }
+        class Tool { public string Title, What, Exe, Args = ""; public bool StopsStreamer; }
         static readonly Tool[] Tools = {
             new Tool { Title = "Streamer", Exe = "VisionALVR.exe",
                 What = "Starts streaming to your headset and shows the live state: headset, game, frame rate and latency. Brightness, eye height and frame generation are set here, applied live." },
             new Tool { Title = "Logs and performance", Exe = "performance.exe",
                 What = "The games you played: frame rates, latency, network and frame-generation results of each session, the DLSS motion-vector DLL of each game (install / uninstall), and a one-click export of the logs." },
+            new Tool { Title = "Diagnose", Exe = "configure.exe", Args = "--diagnose", StopsStreamer = true,
+                What = "Checks your setup as it is, without changing anything: the encoder, the network, the latency and the head tracking, then tells you what is below target and why. Run it when something feels wrong. The streamer must be closed." },
             new Tool { Title = "Setup wizard", Exe = "configure.exe", StopsStreamer = true,
                 What = "Pairs your headset, tests the connection and proposes the settings that suit your PC and headset. Run it once, and again when the setup changes. The streamer must be closed." },
         };
@@ -64,7 +66,7 @@ namespace VisionALVR
                 MessageBox.Show(this, t.Title + " needs the network port the streamer uses. Close the streamer window first.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            try { Process.Start(exe); Log.Write("INFO", "launcher: started " + t.Exe); }
+            try { Process.Start(exe, t.Args); Log.Write("INFO", "launcher: started " + t.Exe); }
             catch (Exception ex) { MessageBox.Show(this, "Could not start " + t.Exe + ": " + ex.Message, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
 
