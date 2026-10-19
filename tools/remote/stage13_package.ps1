@@ -22,7 +22,9 @@ if (Test-Path "$root\bench\littlest_tokyo.vab") { Copy-Item "$root\bench\littles
 # the OpenXR scene app of the wizard's scene test (renders that scene through the real shim path with the headset's head pose)
 if (Test-Path "$root\build\probe\xr_probe.exe") { Copy-Item "$root\build\probe\xr_probe.exe" "$pkg\bench\xr_probe.exe" -Force }
 # the DLSS motion-vector extractor (OptiScaler fork, GPL-3.0; source and licence named in THIRD_PARTY_NOTICES.md): a user copies it next to a game's exe
-if (Test-Path "$root\_tmp\install\DLSSMotionVectors\dxgi.dll") { New-Item -ItemType Directory -Force "$pkg\DLSSMotionVectors" | Out-Null; Copy-Item "$root\_tmp\install\DLSSMotionVectors\dxgi.dll" "$pkg\DLSSMotionVectors\dxgi.dll" -Force } elseif (Test-Path "$pkg\DLSSMotionVectors") { Remove-Item -Recurse -Force "$pkg\DLSSMotionVectors" }
+$dlssvecMarker = "$root\_tmp\install\DLSSMotionVectors\present.txt"
+$shipDlssvec = (Test-Path $dlssvecMarker) -and ((Get-Content $dlssvecMarker -Raw).Trim() -eq '1') -and (Test-Path "$root\_tmp\install\DLSSMotionVectors\dxgi.dll")
+if ($shipDlssvec) { New-Item -ItemType Directory -Force "$pkg\DLSSMotionVectors" | Out-Null; Copy-Item "$root\_tmp\install\DLSSMotionVectors\dxgi.dll" "$pkg\DLSSMotionVectors\dxgi.dll" -Force }
 # the wizard's community headset profiles
 New-Item -ItemType Directory -Force "$pkg\profiles" | Out-Null
 if (Test-Path "$root\_tmp\install\profiles") { Copy-Item "$root\_tmp\install\profiles\*.json" "$pkg\profiles" -Force }
@@ -46,7 +48,7 @@ $ship = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'LibOVRRT64_1.dll'
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'THIRD_PARTY_NOTICES.md', 'LICENSE.txt')
 $ship += $persShip
 $ship += $persFiles
-if (Test-Path "$pkg\DLSSMotionVectors\dxgi.dll") { $ship += 'DLSSMotionVectors\dxgi.dll' }
+if ($shipDlssvec) { $ship += 'DLSSMotionVectors\dxgi.dll' }
 $ship += Get-ChildItem "$pkg\profiles" -File -Filter *.json | ForEach-Object { "profiles\$($_.Name)" }
 $ship += Get-ChildItem "$pkg\licenses" -File | ForEach-Object { "licenses\$($_.Name)" }
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
