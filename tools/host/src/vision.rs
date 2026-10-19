@@ -50,6 +50,10 @@ pub struct Settings {
     pub intake_gate: Option<bool>,
     /// slide the host's display grid so frames arrive just before the headset's tick (phase.rs); default on
     pub phase_lock: Option<bool>,
+    /// arrival margin of the phase lock, ms (default 7; the environment variable VISIONALVR_PHASE_MARGIN_MS wins)
+    pub phase_margin_ms: Option<f64>,
+    /// GPU keepalive duty in percent (a laptop GPU that drops to a low power state while streaming; --gpu-keepalive wins)
+    pub gpu_keepalive: Option<i64>,
     /// follow the client's display rate (detected from its sample timestamps) instead of the 90 Hz grid (default on)
     pub follow_client_rate: Option<bool>,
     /// compositor boundary offset after the display tick, ms
@@ -114,6 +118,8 @@ pub fn load_settings(path: &Path) -> Settings {
         client_queue_drain: video["client_queue_drain"].as_bool(),
         intake_gate: video["intake_gate"].as_bool(),
         phase_lock: video["phase_lock"].as_bool(),
+        phase_margin_ms: video["phase_margin_ms"].as_f64(),
+        gpu_keepalive: video["gpu_keepalive"].as_i64(),
         follow_client_rate: video["follow_client_rate"].as_bool(),
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),
         frame_gen: video["frame_gen"].as_bool(),

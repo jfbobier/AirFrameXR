@@ -485,6 +485,14 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
             std::env::set_var("VISIONALVR_INTAKE_GATE", if v { "1" } else { "0" });
         }
     }
+    if let Some(v) = st.phase_margin_ms {
+        if std::env::var_os("VISIONALVR_PHASE_MARGIN_MS").is_none() {
+            std::env::set_var("VISIONALVR_PHASE_MARGIN_MS", v.to_string());
+        }
+    }
+    if a.gpu_keepalive.is_none() {
+        a.gpu_keepalive = st.gpu_keepalive.map(|d| d as i32);
+    }
     phase::configure(st.phase_lock.unwrap_or(true));
     if let Some(v) = st.boundary_offset_ms {
         a.boundary_offset_ms = v;

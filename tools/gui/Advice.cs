@@ -160,8 +160,9 @@ namespace VisionALVR
                 s.Add(new Suggestion { Sev = differs ? Sev.Hint : Sev.Info, Knob = "VISIONALVR_PHASE_MARGIN_MS", Source = logSrc,
                     Title = differs ? $"Arrival margin: try {proposal} ms instead of the default 7" : "Arrival margin: the default 7 ms fits your link",
                     Measured = $"frames arrive over a spread of {F(facts.SpreadMed)} ms (p90 {F(facts.SpreadP90)}) of a {F(facts.PeriodMs > 0 ? facts.PeriodMs : period)} ms period",
-                    Do = differs ? $"the margin steers the earliest arrivals that far before the headset's tick; it should cover the spread so the p90 arrival lands before it. Set the environment variable VISIONALVR_PHASE_MARGIN_MS={proposal} before starting the streamer (not a launcher setting yet); it costs at most one period of latency, invisible until it crosses a tick"
-                                    : "frames land before the headset's tick; nothing to change" });
+                    Do = differs ? $"the margin steers the earliest arrivals that far before the headset's tick; it should cover the spread so the p90 arrival lands before it. The button sets it for the next streamer start (video.phase_margin_ms); it costs at most one period of latency, invisible until it crosses a tick"
+                                    : "frames land before the headset's tick; nothing to change",
+                    Apply = differs ? (Action)(() => { var st = new AppSettings(); st.PhaseMarginMs = proposal; st.Save(); }) : null, ApplyText = $"Use {proposal} ms (next start)" });
             }
 
             // GPU power state: a laptop GPU that idles while it streams makes the encode slow
@@ -169,7 +170,8 @@ namespace VisionALVR
                 s.Add(new Suggestion { Sev = Sev.Warn, Knob = "--gpu-keepalive", Source = logSrc,
                     Title = "The GPU sits in a low power state while streaming",
                     Measured = $"power state {facts.Pstate}, video clock {F(facts.VideoMhz, "0")} MHz, GPU {F(facts.GpuPct, "0")} % busy (a laptop at P8 took 30 ms to encode what P0 does in 9)",
-                    Do = "start the streamer's host with --gpu-keepalive 90 (a small load that keeps the GPU out of idle), or set the Windows power mode and the NVIDIA power management to maximum performance" });
+                    Do = "a small load (90 % duty) that keeps the GPU out of idle: the button sets it for the next streamer start (video.gpu_keepalive); or set the Windows power mode and the NVIDIA power management to maximum performance",
+                    Apply = () => { var st = new AppSettings(); st.GpuKeepalive = 90; st.Save(); }, ApplyText = "Keep the GPU awake (next start)" });
 
             // the display rate in force
             if (hs != null && hs.Rates != null && hs.Rates.Count > 1)

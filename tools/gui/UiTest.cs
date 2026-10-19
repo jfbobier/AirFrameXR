@@ -127,8 +127,8 @@ namespace VisionALVR
             var all = Advice.From(null, hs, 90, true, f, () => off = true);
             check("logs: the encoder headroom", all.Any(x => x.Title.Contains("encoder") && x.Source.Contains("logs")), Titles(all));
             check("logs: bursty tracking", all.Any(x => x.Title.Contains("bursts") && x.Source.Contains("logs")), Titles(all));
-            check("logs: arrival margin 9 proposed for an 11 ms spread", all.Any(x => x.Title.Contains("try 9") && x.Do.Contains("VISIONALVR_PHASE_MARGIN_MS=9")), Titles(all));
-            check("logs: the GPU in P8 gets the keepalive", all.Any(x => x.Title.Contains("low power state") && x.Do.Contains("--gpu-keepalive")), Titles(all));
+            check("logs: arrival margin 9 proposed for an 11 ms spread", all.Any(x => x.Title.Contains("try 9") && x.Apply != null && x.ApplyText.Contains("9 ms")), Titles(all));
+            check("logs: the GPU in P8 gets the keepalive", all.Any(x => x.Title.Contains("low power state") && x.Apply != null), Titles(all));
             var dbg = all.FirstOrDefault(x => x.Apply != null); dbg?.Apply();
             check("debug logging: a button that turns it off", dbg != null && off, Titles(all));
             check("game A (55 fps raw, headset repeats 12 %): frame generation suggested", all.Any(x => x.Title.Contains("Game A") && x.Title.Contains("frame generation")), Titles(all));
