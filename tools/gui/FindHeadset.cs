@@ -34,6 +34,7 @@ namespace VisionALVR
             this.autoPick = autoPick;
             Text = "VisionALVR - find the headset";
             Icon = Ui.AppIcon();
+            AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body;
             BackColor = Color.White;

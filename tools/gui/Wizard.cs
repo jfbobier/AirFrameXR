@@ -63,6 +63,7 @@ namespace VisionALVR
             Text = "VisionALVR - setup";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
+            AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body;
             BackColor = Color.White;
