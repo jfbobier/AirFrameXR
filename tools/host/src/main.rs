@@ -1442,6 +1442,8 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
     let runs = games::record(args.config_dir.as_path(), exe, headset, level, rec.clone(), session, run.meta.as_ref());
     logs::general("INFO", &format!("game run recorded: {exe} on {headset} at {level}, {secs:.0} s, {rendered_fps:.1} fps rendered (slowest tenth {:.1}), {streamed_fps:.1} streamed, headset repeated {:.1} % typical / {:.1} % worst (run {runs})",
         rec["rendered_fps_low"].as_f64().unwrap_or(0.0), rec["headset_repeated_typ"].as_f64().unwrap_or(0.0) * 100.0, rec["headset_repeated_p90"].as_f64().unwrap_or(0.0) * 100.0));
+    rec["net"] = run.net_summary();
+    rec["mv"] = json!({ "enabled": args.game_motion_vectors, "frames": run.mv_now.0.saturating_sub(run.mv0.0) });
     rec["exe"] = json!(exe);
     rec["headset"] = json!(headset);
     rec["level"] = json!(level);

@@ -27,6 +27,8 @@ namespace VisionALVR
         bool finding, gameRunning;
         readonly Label game = Ui.Line("Game: none", Ui.Bold);
         readonly Label runtime = Ui.Line("");
+        // the Streaming box: tiles (live numbers during a game, the last session's after it) and one line of text under them
+        readonly Tile tGame = Ui.MakeTile("Game"), tStreamed = Ui.MakeTile("Streamed"), tShown = Ui.MakeTile("Headset shows"), tBitrate = Ui.MakeTile("Bitrate"), tLatency = Ui.MakeTile("Latency"), tLoss = Ui.MakeTile("Loss");
         readonly Label stats = Ui.Line("Waiting for the first statistics (every 10 s)...");
         // the Streaming box shows live numbers while a game runs and, once it has ended, the run's record and what will be proposed next time
         readonly GroupBox statsBox = new GroupBox { Text = "Streaming (updated every 10 s)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
@@ -96,9 +98,14 @@ namespace VisionALVR
             body.Controls.Add(runtime);
 
             var box = statsBox;
-            stats.Font = new Font("Consolas", 9.5f);
-            stats.Dock = DockStyle.Fill;   // the box sizes from its text (no absolute position: it would not follow the display scale)
-            box.Controls.Add(stats);
+            stats.Font = new Font("Segoe UI", 9f);
+            stats.ForeColor = Color.DimGray;
+            var tiles = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Font = Ui.Body };
+            foreach (var t in new[] { tGame, tStreamed, tShown, tBitrate, tLatency, tLoss }) tiles.Controls.Add(t);
+            var statsCol = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill, Font = Ui.Body };
+            statsCol.Controls.Add(tiles);
+            statsCol.Controls.Add(stats);
+            box.Controls.Add(statsCol);
             body.Controls.Add(box);
 
             // Position and picture, two knobs per row so the window fits a laptop screen. Games with the action on the floor by default (Moss,
@@ -497,10 +504,17 @@ namespace VisionALVR
                         var lvl = S(d, "level"); var li = Array.IndexOf(FgRates, lvl);
                         var rec = Recommend(S(d, "exe"), S(d, "headset"));
                         var ri = rec == null ? -1 : Array.IndexOf(FgRates, rec.Value.level);
-                        stats.Text =
-                            $"Game fps {F(D(d, "rendered_fps"), "0.0"),6} average, {F(D(d, "rendered_fps_low"), "0.0")} in its slowest tenth    streamed fps {F(D(d, "streamed_fps"), "0.0"),6}    {F(D(d, "seconds") / 60, "0.0")} min at {(li >= 0 ? names[li] : lvl)}\n" +
-                            $"Headset repeated periods {F(D(d, "headset_repeated_typ") * 100, "0.0")} % typical, {F(D(d, "headset_repeated_p90") * 100, "0.0")} % in its heavy parts   host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} % (game under the cap)   skipped {F(D(d, "skipped") * 100, "0.0")} %\n" +
-                            $"Frame generation recommendation: {(rec == null ? "none yet" : (ri >= 0 ? names[ri] : rec.Value.level) + " next time (" + rec.Value.why + ")")}";
+                        var net = d != null && d.TryGetValue("net", out var no) ? no as Dictionary<string, object> : null;
+                        var rep = D(d, "headset_repeated_typ") * 100;
+                        tGame.Set(F(D(d, "rendered_fps"), "0.0") + " fps", $"average, slowest tenth {F(D(d, "rendered_fps_low"), "0.0")}");
+                        tStreamed.Set(F(D(d, "streamed_fps"), "0.0") + " fps", $"{F(D(d, "seconds") / 60, "0.0")} min at {(li >= 0 ? names[li] : lvl)}");
+                        tShown.Set(F(D(net, "displayed_fps"), "0.0") + " fps", $"repeated periods {F(rep, "0.0")} %", rep >= 5 ? Color.Firebrick : (Color?)null);
+                        tBitrate.Set(F(D(net, "bitrate_mbps"), "0") + " Mbps", "average");
+                        tLatency.Set(F(D(net, "latency_ms"), "0") + " ms", $"p95 {F(D(net, "latency_p95_ms"), "0")}");
+                        tLoss.Set(F(D(net, "packets_lost"), "0"), "packets lost", D(net, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
+                        stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} % (game under the cap), skipped {F(D(d, "skipped") * 100, "0.0")} %. " +
+                                     $"Frame generation recommendation: {(rec == null ? "none yet" : (ri >= 0 ? names[ri] : rec.Value.level) + " next time (" + rec.Value.why + ")")}";
+                        OfferDll(d);
                     }
                     break;
                 case "status":
@@ -512,15 +526,44 @@ namespace VisionALVR
                         var pos = Array.IndexOf(FgRates, S(d, "fg_rate"));
                         if (pos >= 0 && fgRate.Value != pos) { fgRateFromHost = true; fgRate.Value = pos; fgRateFromHost = false; }
                     }
-                    if (!lastSession) stats.Text =
-                        $"Game fps {F(D(d, "app_fps"), "0.0"),6}    streamed fps {F(D(d, "stream_fps"), "0.0"),6}    headset shows {F(double.IsNaN(D(c, "displayed_fps")) ? D(c, "client_fps") : D(c, "displayed_fps"), "0.0"),6} fps\n" +
-                        $"Bitrate  {F(D(d, "mbps"), "0"),5} Mbps   frames not streamed {S(d, "frames_not_streamed"),4}   packets lost {S(d, "packets_lost"),4}\n" +
-                        $"Latency  total {F(D(c, "total_latency_ms"), "0.0"),5} ms = encode {F(D(c, "encode_ms"), "0.0")} + network {F(D(c, "network_ms"), "0.0")} + decode {F(D(c, "decode_ms"), "0.0")} + other";
+                    if (!lastSession)
+                    {
+                        tGame.Set(F(D(d, "app_fps"), "0.0") + " fps", "");
+                        tStreamed.Set(F(D(d, "stream_fps"), "0.0") + " fps", "not streamed " + S(d, "frames_not_streamed"));
+                        tShown.Set(F(double.IsNaN(D(c, "displayed_fps")) ? D(c, "client_fps") : D(c, "displayed_fps"), "0.0") + " fps", "");
+                        tBitrate.Set(F(D(d, "mbps"), "0") + " Mbps", "");
+                        tLatency.Set(F(D(c, "total_latency_ms"), "0") + " ms", $"enc {F(D(c, "encode_ms"), "0")} + net {F(D(c, "network_ms"), "0")} + dec {F(D(c, "decode_ms"), "0")}");
+                        tLoss.Set(S(d, "packets_lost"), "packets lost", D(d, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
+                        stats.Text = "Updated every 10 s.";
+                    }
                     break;
                 case "encode_error":
                     footer.Text = "Encode error: " + S(d, "message");
                     break;
             }
+        }
+
+        // After a game with generation on and the DLSS-vectors tick on, if the game gave no vectors and the extractor DLL is not in its folder:
+        // offer to install it (once per game unless asked again). Installed copies are managed in the Logs window.
+        void OfferDll(Dictionary<string, object> d)
+        {
+            try
+            {
+                var exe = S(d, "exe"); var stem = Games.Stem(exe);
+                var mv = d != null && d.TryGetValue("mv", out var mo) ? mo as Dictionary<string, object> : null;
+                if (S(d, "level") == "off" || mv == null || !(mv.TryGetValue("enabled", out var eo) && eo is bool en && en) || D(mv, "frames") > 0) return;
+                if (MvDll.Dismissed(stem)) return;
+                var dir = MvDll.GameDir(Games.Load(exe));
+                var st = MvDll.Check(dir, stem, out _);
+                if (st == MvDll.State.NoMaster || st == MvDll.State.NoFolder || st == MvDll.State.Installed) return;
+                using (var dlg = new DllOfferForm(S(Games.Load(exe), "name").Length > 0 ? S(Games.Load(exe), "name") : exe))
+                {
+                    var r = dlg.ShowDialog(this);
+                    if (dlg.DontAsk) MvDll.Dismiss(stem);
+                    if (r == DialogResult.Yes) MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR");
+                }
+            }
+            catch (Exception e) { Log.Write("WARN", "DLL offer failed: " + e.Message); }
         }
 
         [STAThread]

@@ -630,6 +630,48 @@ namespace VisionALVR
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
     }
 
+    /// "Install the DLSS motion-vector DLL?" after a game that gave no vectors.
+    public class DllOfferForm : Form
+    {
+        public bool DontAsk => dont.Checked;
+        readonly CheckBox dont = new CheckBox { Text = "Don't ask again for this game", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
+        public DllOfferForm(string game)
+        {
+            Text = "VisionALVR - DLSS motion vectors";
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            Font = Ui.Body; Icon = Ui.AppIcon();
+            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
+            AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; BackColor = Color.White;
+            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
+            col.Controls.Add(new Label { Text = game + ": no DLSS motion vectors were available this session.", AutoSize = true, Font = Ui.Bold, MaximumSize = new Size(480, 0) });
+            col.Controls.Add(new Label { Text = "Frame generation is better when the game's own motion vectors are used. A small DLL placed next to the game's exe provides them (games that use DLSS). " +
+                "It can be removed again from the Logs window, which lists what was installed. Install it for this game?", AutoSize = true, MaximumSize = new Size(480, 0), Margin = new Padding(3, 8, 3, 3) });
+            col.Controls.Add(dont);
+            var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            var yes = new Button { Text = "Install", AutoSize = true, DialogResult = DialogResult.Yes, Font = Ui.Bold, MinimumSize = new Size(100, 30) };
+            var no = new Button { Text = "Not now", AutoSize = true, DialogResult = DialogResult.No, MinimumSize = new Size(100, 30) };
+            row.Controls.Add(yes); row.Controls.Add(no);
+            col.Controls.Add(row);
+            Controls.Add(col);
+            AcceptButton = yes; CancelButton = no;
+        }
+    }
+
+    public class Tile : TableLayoutPanel
+    {
+        readonly Label value, note;
+        public Tile(string title, string v, string n)
+        {
+            AutoSize = true; ColumnCount = 1; BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9); Padding = new Padding(10, 6, 10, 6); Margin = new Padding(0, 0, 8, 8); MinimumSize = new Size(110, 0);
+            Controls.Add(new Label { Text = title, AutoSize = true, ForeColor = Color.DimGray, Font = Ui.Body, Margin = new Padding(0) });
+            value = new Label { Text = v, AutoSize = true, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Margin = new Padding(0) };
+            note = new Label { Text = n, AutoSize = true, ForeColor = Color.Gray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0) };
+            Controls.Add(value); Controls.Add(note);
+        }
+        public void Set(string v, string n, Color? color = null) { value.Text = v; note.Text = n; value.ForeColor = color ?? Color.Black; }
+    }
+
     public static class Ui
     {
         public static readonly Font Body = new Font("Segoe UI", 9.5f);
@@ -700,14 +742,7 @@ namespace VisionALVR
         }
 
         /// A statistics tile: small title, a big value, a one-line note. Sizes from its text (no fixed width), so it follows the display scale.
-        public static Control Tile(string title, string value, string note, Color? valueColor = null)
-        {
-            var t = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), Padding = new Padding(10, 6, 10, 6), Margin = new Padding(0, 0, 8, 8), MinimumSize = new Size(110, 0) };
-            t.Controls.Add(new Label { Text = title, AutoSize = true, ForeColor = Color.DimGray, Font = Body, Margin = new Padding(0) });
-            t.Controls.Add(new Label { Text = value, AutoSize = true, Font = new Font("Segoe UI", 15f, FontStyle.Bold), ForeColor = valueColor ?? Color.Black, Margin = new Padding(0) });
-            t.Controls.Add(new Label { Text = note, AutoSize = true, ForeColor = Color.Gray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0) });
-            return t;
-        }
+        public static Tile MakeTile(string title, string value = "-", string note = "", Color? color = null) { var t = new Tile(title, value, note); if (color != null) t.Set(value, note, color); return t; }
 
         public static Label Line(string text, Font f = null) =>
             new Label { Text = text, AutoSize = true, Font = f ?? Body, Margin = new Padding(3, 3, 3, 3), MaximumSize = new Size(820, 0) }; // long lines wrap

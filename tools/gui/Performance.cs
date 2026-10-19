@@ -148,23 +148,23 @@ namespace VisionALVR
             var net = O(s, "net"); var mv = O(s, "mv");
             var f = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(Math.Max(400, right.ClientSize.Width - 40), 0), Margin = new Padding(0) };
             var rep = D(s, "headset_repeated_typ") * 100; var hostRep = D(s, "host_repeats_typ") * 100;
-            f.Controls.Add(Ui.Tile("Game", N(D(s, "rendered_fps")) + " fps", "slowest tenth " + N(D(s, "rendered_fps_low"))));
-            f.Controls.Add(Ui.Tile("Streamed", N(D(s, "streamed_fps")) + " fps", "display " + N(D(s, "display_hz"), "0") + " Hz"));
-            if (net != null) f.Controls.Add(Ui.Tile("Headset shows", N(D(net, "displayed_fps")) + " fps", "repeated periods " + N(rep) + " %", rep >= 5 ? Color.Firebrick : (Color?)null));
-            f.Controls.Add(Ui.Tile("Host repeats", N(hostRep) + " %", "of its outputs"));
+            f.Controls.Add(Ui.MakeTile("Game", N(D(s, "rendered_fps")) + " fps", "slowest tenth " + N(D(s, "rendered_fps_low"))));
+            f.Controls.Add(Ui.MakeTile("Streamed", N(D(s, "streamed_fps")) + " fps", "display " + N(D(s, "display_hz"), "0") + " Hz"));
+            if (net != null) f.Controls.Add(Ui.MakeTile("Headset shows", N(D(net, "displayed_fps")) + " fps", "repeated periods " + N(rep) + " %", rep >= 5 ? Color.Firebrick : (Color?)null));
+            f.Controls.Add(Ui.MakeTile("Host repeats", N(hostRep) + " %", "of its outputs"));
             if (net != null)
             {
-                f.Controls.Add(Ui.Tile("Latency", N(D(net, "latency_ms"), "0") + " ms", $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}"));
-                f.Controls.Add(Ui.Tile("Bitrate", N(D(net, "bitrate_mbps"), "0") + " Mbps", "sent " + N(D(net, "throughput_mbps"), "0")));
+                f.Controls.Add(Ui.MakeTile("Latency", N(D(net, "latency_ms"), "0") + " ms", $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}"));
+                f.Controls.Add(Ui.MakeTile("Bitrate", N(D(net, "bitrate_mbps"), "0") + " Mbps", "sent " + N(D(net, "throughput_mbps"), "0")));
                 var lost = D(net, "packets_lost");
-                f.Controls.Add(Ui.Tile("Packets lost", N(lost, "0"), "during the session", lost > 0 ? Color.Firebrick : (Color?)null));
+                f.Controls.Add(Ui.MakeTile("Packets lost", N(lost, "0"), "during the session", lost > 0 ? Color.Firebrick : (Color?)null));
             }
             if (mv != null)
             {
                 var frames = D(mv, "frames");
                 var on = mv.TryGetValue("enabled", out var eo) && eo is bool b && b;
                 var gen = S(s, "level") != "off";
-                f.Controls.Add(Ui.Tile("DLSS vectors", !gen ? "not used" : frames > 0 ? "working" : (on ? "not seen" : "off"), !gen ? "generation was off" : frames > 0 ? N(frames, "0") + " frames" : (on ? "no vectors from the game" : "ticked off")));
+                f.Controls.Add(Ui.MakeTile("DLSS vectors", !gen ? "not used" : frames > 0 ? "working" : (on ? "not seen" : "off"), !gen ? "generation was off" : frames > 0 ? N(frames, "0") + " frames" : (on ? "no vectors from the game" : "ticked off")));
             }
             return f;
         }
