@@ -97,15 +97,15 @@ namespace VisionALVR
 
             var box = statsBox;
             stats.Font = new Font("Consolas", 9.5f);
+            stats.Dock = DockStyle.Fill;   // the box sizes from its text (no absolute position: it would not follow the display scale)
             box.Controls.Add(stats);
-            stats.Location = new Point(10, 22);
             body.Controls.Add(box);
 
             // Position and picture, two knobs per row so the window fits a laptop screen. Games with the action on the floor by default (Moss,
             // Titan Isles) assume a standing user; the headset's floor estimate is unreliable, so the streamer hands games the eye height set here
             // (above the floor) when you enter VR and keeps your own vertical movement on top of it. Everything is applied live.
             var live = new GroupBox { Text = "Position and picture (applied live)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
-            var lt = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Location = new Point(8, 20), Font = Ui.Body };
+            var lt = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Dock = DockStyle.Fill, Font = Ui.Body };
             if (!settings.HasDisplay) { settings.Gamma = AppSettings.DefaultGamma; settings.Save(); } // the streamer reads it at start
             AddKnob(lt, "Eye height, m", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v,
                     "Your eye height above the floor, as games see it: about 1.30 m seated, 1.6-1.7 m standing; 0 = the headset's own floor estimate. Games that place you from the floor use it; moving it re-anchors at your current head position.");

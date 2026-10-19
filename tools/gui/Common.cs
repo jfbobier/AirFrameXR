@@ -512,7 +512,7 @@ namespace VisionALVR
         /// A short header (small logo, version, the alpha warning on one line) for windows that must fit a laptop screen.
         public static Control CompactHeader(string subtitle)
         {
-            var p = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 84, BackColor = Color.White, Padding = new Padding(12, 6, 12, 2), WrapContents = false };
+            var p = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, BackColor = Color.White, Padding = new Padding(12, 6, 12, 2), WrapContents = false };
             var logo = Resource("logo_640.png");
             if (logo != null) p.Controls.Add(new PictureBox { Image = logo, SizeMode = PictureBoxSizeMode.Zoom, Width = 180, Height = 76, Margin = new Padding(0) });
             var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(16, 10, 0, 0) };
