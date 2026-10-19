@@ -533,10 +533,10 @@ int nvh_desk_start(void* hh, int* w, int* h, int* hdr, char* err, int errlen) {
 
 void nvh_desk_stop(void* hh) { auto* n = (Nvh*)hh; if (n) { n->deskFfr.reset(); n->desk.reset(); } }
 
-double nvh_encode_desktop(void* hh, const float* ndc16, const float* cursor2, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
+double nvh_encode_desktop(void* hh, const float* ndc16, const float* cursor10, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
     auto* n = (Nvh*)hh;
     if (!n || !n->desk) { seterr(err, errlen, "desktop mirror off"); return -1; }
-    ID3D11Texture2D* tex = n->desk->Render(ndc16, cursor2, g_idleRgb, err, errlen);
+    ID3D11Texture2D* tex = n->desk->Render(ndc16, cursor10, g_idleRgb, err, errlen);
     if (!tex) return -1;
     if (!n->deskFfr) {
         try { n->deskFfr = std::make_unique<FFR>(n->render->GetDevice()); n->deskFfr->Initialize(tex); }

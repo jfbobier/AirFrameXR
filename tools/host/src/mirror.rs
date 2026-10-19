@@ -28,6 +28,9 @@ struct State {
     desk: (i32, i32),
     started: bool,
     cursor: Option<(f32, f32)>,
+    hand: Option<(Q, V3)>,
+    seen_hand: bool,
+    seen_hit: bool,
     mouse: Mouse,
 }
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -74,11 +77,14 @@ pub fn on_head(ts: Duration, q: Q, p: V3) {
 pub fn on_right_hand(pose: Option<(Q, V3)>) {
     if !idle() { return; }
     let hit = with(|s| {
+        s.hand = pose;
+        if pose.is_some() && !s.seen_hand { s.seen_hand = true; crate::logs::general("INFO", "desktop mirror: the right controller / hand is tracked, its beam is drawn"); }
         let h = match (pose, s.screen) {
             (Some((q, p)), Some(sc)) => { let (o, d) = desktop::hand_ray(q, p); desktop::ray_hit(&sc, o, d) }
             _ => None,
         };
         s.cursor = h;
+        if h.is_some() && !s.seen_hit { s.seen_hit = true; crate::logs::general("INFO", "desktop mirror: the pointer is on the screen"); }
         h
     });
     #[cfg(windows)]
@@ -99,7 +105,7 @@ pub fn on_buttons(trigger: f32, squeeze: f32) {
 }
 
 /// What the idle frame draws: the screen's corners in both eyes' NDC, the cursor, and the head sample's timestamp the frame has to carry.
-pub fn frame_params() -> Option<([f32; 16], [f32; 2], Duration)> {
+pub fn frame_params() -> Option<([f32; 16], [f32; 10], Duration)> {
     if !idle() { return None; }
     with(|s| {
         let (ts, q, p) = s.head?;
@@ -115,7 +121,20 @@ pub fn frame_params() -> Option<([f32; 16], [f32; 2], Duration)> {
             }
         }
         let cur = s.cursor.map(|(u, v)| [u, v]).unwrap_or([-1.0, -1.0]);
-        if any { Some((ndc, cur, ts)) } else { None }
+        // the beam: from the controller along its aim to where it meets the screen (or 3 m out), in each eye
+        let mut extra = [cur[0], cur[1], f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN];
+        if let Some((hq, hp)) = s.hand {
+            let (o, d) = desktop::hand_ray(hq, hp);
+            let end = match s.cursor {
+                Some((u, v)) => desktop::screen_point(&sc, u, v),
+                None => desktop::along(o, d, 3.0),
+            };
+            for e in 0..2 {
+                let tan = [fov[e * 4], fov[e * 4 + 1], fov[e * 4 + 2], fov[e * 4 + 3]];
+                if let Some(l) = desktop::project_segment(q, p, [off[e * 3], off[e * 3 + 1], off[e * 3 + 2]], tan, o, end) { extra[2 + e * 4..6 + e * 4].copy_from_slice(&l); }
+            }
+        }
+        if any { Some((ndc, extra, ts)) } else { None }
     })
 }
 

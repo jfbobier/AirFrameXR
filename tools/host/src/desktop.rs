@@ -91,6 +91,21 @@ pub fn eye_corners(s: &Screen, head_q: Q, head_p: V3, eye_off: V3, tan: [f32; 4]
     Some(out)
 }
 
+/// The segment of a ray from `a` to `b` (world points) as the NDC of both ends in one eye, clipped at a hand's width in front of the eye (the beam starts
+/// at the controller, which is below and often beside the view). None when the whole segment is behind the eye.
+pub fn project_segment(head_q: Q, head_p: V3, eye_off: V3, tan: [f32; 4], a: V3, b: V3) -> Option<[f32; 4]> {
+    let eye = add(head_p, rotate(head_q, eye_off));
+    let inv = conj(head_q);
+    let (mut va, mut vb) = (rotate(inv, sub(a, eye)), rotate(inv, sub(b, eye)));
+    const NEAR: f32 = -0.05;   // eye space looks down -Z
+    if va[2] > NEAR && vb[2] > NEAR { return None; }
+    if va[2] > NEAR { let t = (NEAR - va[2]) / (vb[2] - va[2]); va = add(va, mul(sub(vb, va), t)); }
+    if vb[2] > NEAR { let t = (NEAR - vb[2]) / (va[2] - vb[2]); vb = add(vb, mul(sub(va, vb), t)); }
+    let ndc = |v: V3| -> [f32; 2] { let (tx, ty) = (v[0] / -v[2], v[1] / -v[2]); [(tx + tan[0]) / (tan[0] + tan[1]) * 2.0 - 1.0, (ty + tan[3]) / (tan[2] + tan[3]) * 2.0 - 1.0] };
+    let (p, q) = (ndc(va), ndc(vb));
+    Some([p[0], p[1], q[0], q[1]])
+}
+
 /// Where a ray (origin, unit direction) meets the screen, as (u, v) over the screen with (0, 0) at its top-left; None when it misses or points away.
 pub fn ray_hit(s: &Screen, origin: V3, dir: V3) -> Option<(f32, f32)> {
     let denom = dot(dir, s.normal);
@@ -101,6 +116,11 @@ pub fn ray_hit(s: &Screen, origin: V3, dir: V3) -> Option<(f32, f32)> {
     let (u, v) = (dot(h, s.right) / s.width + 0.5, 0.5 - dot(h, s.up) / s.height);
     if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) { Some((u, v)) } else { None }
 }
+
+/// The world point of a screen position (u, v), (0, 0) at the top-left.
+pub fn screen_point(s: &Screen, u: f32, v: f32) -> V3 { add(add(s.center, mul(s.right, (u - 0.5) * s.width)), mul(s.up, (0.5 - v) * s.height)) }
+/// The point `t` metres along a ray.
+pub fn along(o: V3, d: V3, t: f32) -> V3 { add(o, mul(d, t)) }
 
 /// The pointing ray of a hand pose: from the hand, along its -Z axis (the aim of the emulated controller).
 pub fn hand_ray(q: Q, p: V3) -> (V3, V3) { (p, norm(rotate(q, [0.0, 0.0, -1.0]))) }
@@ -173,6 +193,13 @@ mod tests {
         assert!(near(dot(s.normal, t.normal), 1.0) || dot(s.normal, t.normal) > 0.9995, "{:?}", s.normal);
         assert!(!moving);
         assert!(near(s.width, t.width));
+    }
+
+    #[test]
+    fn beam_is_clipped_in_front_of_the_eye() {
+        let seg = project_segment(ID, [0.0, 1.5, 0.0], [0.0; 3], TAN, [0.2, 1.2, 0.1], [0.0, 1.5, -2.0]).unwrap();
+        assert!(seg.iter().all(|v| v.is_finite()));
+        assert!(project_segment(ID, [0.0, 1.5, 0.0], [0.0; 3], TAN, [0.0, 1.5, 0.5], [0.0, 1.5, 1.5]).is_none());
     }
 
     #[test]

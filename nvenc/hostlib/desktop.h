@@ -21,7 +21,7 @@ public:
     // Takes the newest desktop image (the previous one when nothing changed), clears the target to `clearRgb` (0xRRGGBB) and draws the screen quad
     // into each eye's half: ndc = left eye TL TR BL BR then right eye (x, y pairs; NaN x = that eye does not see the screen);
     // cursor = (u, v) over the desktop, or negative for none. Returns the target texture (owned here), nullptr on failure.
-    ID3D11Texture2D* Render(const float ndc[16], const float cursor[2], uint32_t clearRgb, char* err, int errlen);
+    ID3D11Texture2D* Render(const float ndc[16], const float cursor[10], uint32_t clearRgb, char* err, int errlen);
 private:
     struct Impl;
     std::unique_ptr<Impl> I;

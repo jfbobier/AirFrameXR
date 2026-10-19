@@ -94,10 +94,12 @@ for dn, w, h in DESKTOPS:
         body += f"_tmp\\mirror\\desktop_probe.exe synthetic {kind} runs\\{rid}\\{dn}_{mn}.json {w} {h} {xl:.5f} {xr:.5f} {yt:.5f} {yb:.5f} > runs\\{rid}\\{dn}_{mn}.txt 2>&1\r\n"
 for dn, w, h in DESKTOPS:   # the cursor dot at 1 desktop pixel = 1 eye pixel (SDR: the dot does not depend on the colour path)
     body += f"_tmp\\mirror\\desktop_probe.exe synthetic sdr 1.0 runs\\{rid}\\{dn}_zoom.json {w} {h} 0 0 0 0 zoom > runs\\{rid}\\{dn}_zoom.txt 2>&1\r\n"
+body += f"_tmp\\mirror\\desktop_probe.exe synthetic sdr 1.0 runs\\{rid}\\persp.json 1920 1080 0 0 0 0 persp > runs\\{rid}\\persp.txt 2>&1\r\n"   # a screen seen at an angle: not warped
+body += f"_tmp\\mirror\\desktop_probe.exe synthetic sdr 1.0 runs\\{rid}\\beam.json 1920 1080 -0.5 0.5 0.4 -0.4 beam > runs\\{rid}\\beam.txt 2>&1\r\n"   # the pointing beam
 body += f"_tmp\\mirror\\desktop_probe.exe capture runs\\{rid}\\capture.json > runs\\{rid}\\capture.txt 2>&1\r\n"
 proc = lib.start_limited(rid, "va_mirror", "mirror_run.bat", body, "rc.txt")
 try:
-    proc.wait(600)
+    proc.wait(1500)
 except subprocess.TimeoutExpired:
     check("probe ran", False, "timeout")
 loc = Path(tempfile.mkdtemp(prefix="mirror_"))
@@ -154,6 +156,27 @@ for dn, w, h in DESKTOPS:
     print(f"{dn:10}" + "".join(table.get((dn, m), "-").rjust(9) for m, _ in MODES) + f"   {w}x{h}")
 n_ok = sum(1 for v in table.values() if v == "ok")
 check(f"picture: {len(DESKTOPS)} desktop shapes x {len(MODES)} display modes", n_ok == len(table) and len(table) == len(DESKTOPS) * len(MODES), f"{n_ok}/{len(DESKTOPS) * len(MODES)} cases pass")
+
+# ---- 2b. no warping, and the pointing beam ------------------------------------------------------------------------------------
+pj = res_dir / "persp.json"
+if pj.exists():
+    r = json.loads(pj.read_text())
+    bad = [f"patch {i}: {r['patches'][i]} expected {[i * 36] * 3}" for i in range(8) if i != 5 and not near(r["patches"][i], [i * 36] * 3, 3)]
+    check("a screen turned 40 degrees is not warped (patches found where a pinhole projection puts them)", not bad, "; ".join(bad) or "8 patches in place")
+else:
+    check("a screen turned 40 degrees is not warped", False, (res_dir / "persp.txt").read_text(errors="replace")[-160:] if (res_dir / "persp.txt").exists() else "no output")
+bj = res_dir / "beam.json"
+if bj.exists():
+    r = json.loads(bj.read_text())
+    clear = [0x11, 0x22, 0x33]
+    bad = []
+    if not near(r["beam_mid"], [255, 89, 26], 6): bad.append(f"beam over the clear colour {r['beam_mid']}")
+    if not near(r["beam_beside"], clear, 1): bad.append(f"beside the beam {r['beam_beside']} (not the clear colour)")
+    if not near(r["beam_end"], [255, 89, 26], 6): bad.append(f"beam over the screen {r['beam_end']}")
+    if not near(r["beam_right_eye"], clear, 1): bad.append(f"the other eye {r['beam_right_eye']} (no beam there)")
+    check("the pointing beam is drawn in the eye, over the clear colour and over the screen, and not in the eye without it", not bad, "; ".join(bad) or "ok")
+else:
+    check("the pointing beam", False, (res_dir / "beam.txt").read_text(errors="replace")[-160:] if (res_dir / "beam.txt").exists() else "no output")
 
 # ---- 3. the real desktop --------------------------------------------------------------------------------------------------------
 cap = res_dir / "capture.json"

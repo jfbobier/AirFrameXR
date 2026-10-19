@@ -66,7 +66,7 @@ double nvh_encode_green(void* nvh, uint32_t frame_no, uint64_t ts_ns, int force_
 // and encodes the frame like a game's. Returns the encode ms (<0 on error).
 int nvh_desk_start(void* nvh, int* w, int* h, int* hdr, char* err, int errlen);
 void nvh_desk_stop(void* nvh);
-double nvh_encode_desktop(void* nvh, const float* ndc16, const float* cursor2, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
+double nvh_encode_desktop(void* nvh, const float* ndc16, const float* cursor10, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
 // Encodes the shim's shared SBS slot (same adapter) with the unmodified ALVR encoder. Returns encode ms (<0 on error).
 double nvh_encode_shared(void* nvh, void* ipc, uint32_t slot, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
 // Drops the opened shim slots (and their foveation passes): an app that exited leaves ~4 full frames of VRAM otherwise.

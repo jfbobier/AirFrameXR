@@ -891,7 +891,7 @@ mod nvh {
         pub fn nvh_qpc_seconds() -> f64;
         pub fn nvh_desk_start(nvh: *mut c_void, w: *mut i32, h: *mut i32, hdr: *mut i32, err: *mut c_char, errlen: i32) -> i32;
         pub fn nvh_desk_stop(nvh: *mut c_void);
-        pub fn nvh_encode_desktop(nvh: *mut c_void, ndc16: *const f32, cursor2: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
+        pub fn nvh_encode_desktop(nvh: *mut c_void, ndc16: *const f32, cursor10: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_encode_green(nvh: *mut c_void, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_ipc_shim_alive(ipc: *mut c_void) -> i32;
         pub fn nvh_encode_shared(nvh: *mut c_void, ipc: *mut c_void, slot: u32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
