@@ -72,14 +72,20 @@ struct DesktopMirror::Impl {
 
     bool OpenDuplication(char* err, int errlen) {
         dup.Reset();
+        HRESULT hr1 = E_FAIL, hr2 = E_FAIL;
+        // the thread has to be on the input desktop (the one the user is looking at); E_ACCESSDENIED otherwise
+        if (HDESK d = OpenInputDesktop(0, FALSE, GENERIC_ALL)) { SetThreadDesktop(d); CloseDesktop(d); }
         ComPtr<IDXGIOutput5> o5;
         if (SUCCEEDED(output.As(&o5))) {
             const DXGI_FORMAT fmts[2] = { DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_B8G8R8A8_UNORM };
-            if (SUCCEEDED(o5->DuplicateOutput1(capDev.Get(), 0, 2, fmts, &dup))) return true;
+            hr1 = o5->DuplicateOutput1(capDev.Get(), 0, 2, fmts, &dup);
+            if (SUCCEEDED(hr1)) return true;
         }
         ComPtr<IDXGIOutput1> o1;
-        if (SUCCEEDED(output.As(&o1)) && SUCCEEDED(o1->DuplicateOutput(capDev.Get(), &dup))) return true;
-        seterr(err, errlen, "desktop duplication is not available (a protected or remote session, or the display is on a GPU that cannot be duplicated)");
+        if (SUCCEEDED(output.As(&o1))) { hr2 = o1->DuplicateOutput(capDev.Get(), &dup); if (SUCCEEDED(hr2)) return true; }
+        char b[200];
+        snprintf(b, sizeof b, "desktop duplication is not available (0x%08x / 0x%08x: a locked or remote session, a protected screen, or a display on a GPU that cannot be duplicated)", (unsigned)hr1, (unsigned)hr2);
+        seterr(err, errlen, b);
         return false;
     }
 
@@ -106,6 +112,12 @@ struct DesktopMirror::Impl {
         D3D11_TEXTURE2D_DESC td{}; td.Width = dw; td.Height = dh; td.MipLevels = 1; td.ArraySize = 1; td.Format = dfmt; td.SampleDesc.Count = 1;
         td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         if (FAILED(capDev->CreateTexture2D(&td, nullptr, &staging))) { seterr(err, errlen, "staging texture"); return false; }
+        return InitGpu(err, errlen);
+    }
+
+    bool testMode = false;
+    bool InitGpu(char* err, int errlen) {
+        D3D11_TEXTURE2D_DESC td{}; td.Width = dw; td.Height = dh; td.MipLevels = 1; td.ArraySize = 1; td.Format = dfmt; td.SampleDesc.Count = 1;
         td.Usage = D3D11_USAGE_DEFAULT; td.CPUAccessFlags = 0; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         if (FAILED(dev->CreateTexture2D(&td, nullptr, &src)) || FAILED(dev->CreateShaderResourceView(src.Get(), nullptr, &srcSrv))) { seterr(err, errlen, "desktop texture"); return false; }
         D3D11_TEXTURE2D_DESC tt{}; tt.Width = tw; tt.Height = th; tt.MipLevels = 1; tt.ArraySize = 1; tt.Format = tfmt; tt.SampleDesc.Count = 1;
@@ -129,6 +141,7 @@ struct DesktopMirror::Impl {
 
     // the newest desktop image into `src` (nothing to do when the screen did not change)
     void Capture() {
+        if (testMode) return;
         if (!dup) { char e[8]; if (!OpenDuplication(e, 8)) return; }
         DXGI_OUTDUPL_FRAME_INFO info; ComPtr<IDXGIResource> res;
         HRESULT hr = dup->AcquireNextFrame(0, &info, &res);
@@ -138,6 +151,13 @@ struct DesktopMirror::Impl {
         if (info.LastPresentTime.QuadPart != 0) {
             ComPtr<ID3D11Texture2D> tex;
             if (SUCCEEDED(res.As(&tex))) {
+                D3D11_TEXTURE2D_DESC d; tex->GetDesc(&d);
+                if (d.Format != dfmt || (int)d.Width != dw || (int)d.Height != dh) {   // the surface is not what the duplication description said (HDR switched on, a mode change)
+                    dfmt = d.Format; dw = (int)d.Width; dh = (int)d.Height; hdr = dfmt == DXGI_FORMAT_R16G16B16A16_FLOAT; white = hdr ? SdrWhite() : 1.f; have = false;
+                    D3D11_TEXTURE2D_DESC sd{}; sd.Width = dw; sd.Height = dh; sd.MipLevels = 1; sd.ArraySize = 1; sd.Format = dfmt; sd.SampleDesc.Count = 1; sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                    staging.Reset(); char e[8];
+                    if (FAILED(capDev->CreateTexture2D(&sd, nullptr, &staging)) || !InitGpu(e, 8)) { dup->ReleaseFrame(); dup.Reset(); return; }
+                }
                 capCtx->CopyResource(staging.Get(), tex.Get());
                 D3D11_MAPPED_SUBRESOURCE m;
                 if (SUCCEEDED(capCtx->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &m))) {
@@ -183,6 +203,15 @@ struct DesktopMirror::Impl {
 DesktopMirror::DesktopMirror(ID3D11Device* dev, ID3D11DeviceContext* ctx, int w, int h, DXGI_FORMAT fmt) : I(new Impl) { I->dev = dev; I->ctx = ctx; I->tw = w; I->th = h; I->tfmt = fmt; }
 DesktopMirror::~DesktopMirror() = default;
 bool DesktopMirror::Init(char* err, int errlen) { return I->Init(err, errlen); }
+bool DesktopMirror::InitForTest(int w, int h, bool hdr, float sdrWhite, char* err, int errlen) {
+    I->testMode = true; I->dw = w; I->dh = h; I->hdr = hdr; I->white = sdrWhite;
+    I->dfmt = hdr ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM;
+    return I->InitGpu(err, errlen);
+}
+void DesktopMirror::SetTestImage(const void* pixels) {
+    I->ctx->UpdateSubresource(I->src.Get(), 0, nullptr, pixels, I->dw * (I->hdr ? 8 : 4), 0);
+    I->have = true;
+}
 int DesktopMirror::DesktopW() const { return I->dw; }
 int DesktopMirror::DesktopH() const { return I->dh; }
 bool DesktopMirror::Hdr() const { return I->hdr; }

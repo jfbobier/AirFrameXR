@@ -58,7 +58,8 @@ the launcher's "Recommended" reads the new files). The streamer's own log, `logs
 - [x] (code read; lab test still to do) Head pose at session start: forward + horizontal position (X, Z) are re-anchored by `recenter` at game start, height by Eye height;
   verify with a test that X/Z really are zero at start (lab: simrig with an off-centre start pose) instead of assuming.
 
-## Phase 5: desktop mirror between sessions (last, optional, experimental)
+## Phase 5: desktop mirror between sessions (last, optional, experimental) — BUILT, not yet tried on a headset
+Status: host + C++ built on the builder; `harness/mirror_check.py` passes the maths and the picture (SDR, HDR->SDR, cursor); the live desktop capture is blocked on the 3080 Ti laptop by the OS (access denied: corporate capture protection) and untested elsewhere; hands, pinch and the screen's stability are only testable with a headset (checklist in the harness).
 Goal: for people who start games from a distance (garage): see the Windows desktop in the headset between sessions and use the hand as a mouse.
 Minimal code:
 - **Capture**: Windows Graphics Capture (or DXGI desktop duplication) of the primary monitor, only while no game session runs and the toggle is on.

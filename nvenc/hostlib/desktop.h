@@ -14,6 +14,9 @@ public:
     DesktopMirror(ID3D11Device* dev, ID3D11DeviceContext* ctx, int targetW, int targetH, DXGI_FORMAT targetFmt);
     ~DesktopMirror();
     bool Init(char* err, int errlen);
+    // Test hook (tools/probe/desktop_probe.cpp): no capture; the desktop image is whatever SetTestImage was given (BGRA8 or FP16 scRGB, tightly packed).
+    bool InitForTest(int w, int h, bool hdr, float sdrWhite, char* err, int errlen);
+    void SetTestImage(const void* pixels);
     int DesktopW() const; int DesktopH() const; bool Hdr() const;
     // Takes the newest desktop image (the previous one when nothing changed), clears the target to `clearRgb` (0xRRGGBB) and draws the screen quad
     // into each eye's half: ndc = left eye TL TR BL BR then right eye (x, y pairs; NaN x = that eye does not see the screen);
