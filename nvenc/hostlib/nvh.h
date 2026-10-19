@@ -61,6 +61,12 @@ float nvh_last_ffr_wait_ms(void* nvh);   // foveation pass queued -> done on the
 int nvh_ipc_shim_alive(void* ipc);
 // Encodes a solid pure-green SBS frame (what the headset chroma-keys when no OpenXR app is running).
 double nvh_encode_green(void* nvh, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
+// Desktop mirror (desktop.h): start captures the primary desktop (its size and whether it is HDR come back); encode draws it as a screen quad into
+// each eye (ndc16 = left TL TR BL BR, right TL TR BL BR as x y; NaN x = that eye does not see it; cursor2 = u v over the desktop, negative = none)
+// and encodes the frame like a game's. Returns the encode ms (<0 on error).
+int nvh_desk_start(void* nvh, int* w, int* h, int* hdr, char* err, int errlen);
+void nvh_desk_stop(void* nvh);
+double nvh_encode_desktop(void* nvh, const float* ndc16, const float* cursor2, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
 // Encodes the shim's shared SBS slot (same adapter) with the unmodified ALVR encoder. Returns encode ms (<0 on error).
 double nvh_encode_shared(void* nvh, void* ipc, uint32_t slot, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
 // Drops the opened shim slots (and their foveation passes): an app that exited leaves ~4 full frames of VRAM otherwise.

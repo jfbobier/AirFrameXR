@@ -13,9 +13,11 @@ use alvr_packets::{ButtonValue, Haptics};
 use alvr_server_core::{ServerCoreContext, ServerCoreEvent};
 use alvr_session::CodecType;
 mod bench_quality;
+mod desktop;
 mod discovery;
 mod games;
 mod logs;
+mod mirror;
 mod nvidia_profile;
 mod phase;
 mod pipeline;
@@ -113,6 +115,7 @@ struct Args {
     /// the launcher sets a plausible seated height (1.3 m) and the headset's own vertical movement is kept on top of it.
     height_m: f32,
     recenter_key: String,
+    mirror_desktop: bool,
     /// hand pose convention fix (shim, Oculus-emulation path): local rotation in degrees (XYZ Euler, left hand; right hand mirrors
     /// y and z like ALVR's controller offsets) and local position offset in metres (in the LibOVR frame, after the rotation).
     /// Default (derived 2026-10-13, see docs/progress.md): ALVR's hand motion is the OpenXR grip pose turned by its Quest 2 offset (-15 deg
@@ -201,6 +204,7 @@ fn parse_args() -> Result<Args, String> {
         gamma: None,
         height_m: 1.3,
         recenter_key: "End".to_string(),
+        mirror_desktop: false,
         hand_rotation_deg: [-45.0, 0.0, 0.0],
         hand_position_m: [0.0, -0.048, 0.038],
         bench_network: None,
@@ -534,6 +538,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if a.gamma.is_none() {
         a.gamma = st.gamma;
+    }
+    if let Some(m) = st.mirror_desktop {
+        a.mirror_desktop = m;
     }
     if let Some(k) = st.recenter_key.clone() {
         a.recenter_key = k;
@@ -874,6 +881,9 @@ mod nvh {
         pub fn nvh_fg_use_mv(nvh: *mut c_void, on: i32);
         pub fn nvh_ipc_motion_tap(ipc: *mut c_void, tap: *mut u32, streams: *mut u32, publications: *mut u64);
         pub fn nvh_qpc_seconds() -> f64;
+        pub fn nvh_desk_start(nvh: *mut c_void, w: *mut i32, h: *mut i32, hdr: *mut i32, err: *mut c_char, errlen: i32) -> i32;
+        pub fn nvh_desk_stop(nvh: *mut c_void);
+        pub fn nvh_encode_desktop(nvh: *mut c_void, ndc16: *const f32, cursor2: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_encode_green(nvh: *mut c_void, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_ipc_shim_alive(ipc: *mut c_void) -> i32;
         pub fn nvh_encode_shared(nvh: *mut c_void, ipc: *mut c_void, slot: u32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
@@ -1565,6 +1575,7 @@ fn main() {
     if args.gui {
         vision::spawn_stdin_control();
     }
+    mirror::set_enabled(args.mirror_desktop);
     if args.discover.is_none() && !args.recenter_key.eq_ignore_ascii_case("off") {
         vision::spawn_recenter_hotkey(&args.recenter_key);
     }
@@ -1999,6 +2010,7 @@ fn main() {
                             }
                             if vision::RECENTER_REQ.swap(false, Ordering::SeqCst) {
                                 recenter_pending = true;
+                                mirror::replace();   // the desktop mirror's screen is put in front of the user again
                             }
                             if let Some(m) = ctx.get_device_motion(*HEAD_ID, sample_timestamp) {
                                 if recenter_pending && samples_since_connect >= 45 {
@@ -2036,6 +2048,7 @@ fn main() {
                                 }
                                 p[1] += height_offset;
                                 push_recent_sample(&shared, sample_timestamp, q);
+                                mirror::on_head(sample_timestamp, m.pose.orientation.to_array(), m.pose.position.to_array());   // the raw pose (the mirror has its own origin)
                                 let (lv, av) = ([0f32; 3], [0f32; 3]);
                                 unsafe { nvh::nvh_ipc_publish_head(ipc, sample_timestamp.as_nanos() as u64, q.as_ptr(), p.as_ptr(), lv.as_ptr(), av.as_ptr()) };
                                 telemetry::head_sample(sample_timestamp.as_nanos() as u64, q, p);
@@ -2043,6 +2056,7 @@ fn main() {
                             for (side, id) in [(0, *HAND_LEFT_ID), (1, *HAND_RIGHT_ID)] {
                                 match ctx.get_device_motion(id, sample_timestamp) {
                                     Some(m) => {
+                                        if side == 1 { mirror::on_right_hand(Some((m.pose.orientation.to_array(), m.pose.position.to_array()))); }
                                         let (mut q, mut p) = (m.pose.orientation.to_array(), m.pose.position.to_array());
                                         let (mut lv, mut av) = (m.linear_velocity.to_array(), world_av(&m));
                                         if let Some((r, anchor)) = recenter {
@@ -2054,6 +2068,7 @@ fn main() {
                                         p[1] += height_offset; // hands move with the head's frame
                                         unsafe { nvh::nvh_ipc_publish_hand(ipc, side, 1, q.as_ptr(), p.as_ptr(), lv.as_ptr(), av.as_ptr()) };
                                     }
+                                    None if side == 1 && { mirror::on_right_hand(None); false } => {}
                                     None => unsafe { nvh::nvh_ipc_publish_hand(ipc, side, 0, std::ptr::null(), std::ptr::null(), std::ptr::null(), std::ptr::null()) },
                                 }
                             }
@@ -2077,6 +2092,7 @@ fn main() {
                                 }
                             }
                         }
+                        mirror::on_buttons(hands[1].trigger, hands[1].squeeze);
                         buttons_seen += entries.len();
                         if !ipc.is_null() {
                             for side in 0..2 {
@@ -2111,6 +2127,7 @@ fn main() {
                         let off6 = [a[0], a[1], a[2], b[0], b[1], b[2]];
                         // the main loop applies it: it may have to rebuild the encoder for the negotiated stream parameters first
                         *shared.pending_views.lock() = Some((fov8, off6));
+                        mirror::on_views(fov8, off6);
                         event(origin, "views_config", json!({ "fov_tan": fov8, "eye_offsets": off6 }));
                     }
                     ServerCoreEvent::ViewsConfig(cfg) => event(origin, "views_config", json!({
@@ -2368,6 +2385,10 @@ fn main() {
             }
             // frame generation on/off from VisionALVR.exe: the generator is created or dropped on the running encoder (under the encoder lock, so
             // never while a frame is being encoded) and the shim's pacing follows at the next boundary; the setting is also what the next start reads
+            let mr = mirror::MIRROR_REQ.swap(-1, Ordering::SeqCst);
+            if mr >= 0 {
+                mirror::set_enabled(mr == 1);   // from the launcher's toggle; the setting is read at start too
+            }
             let fgr = vision::FRAME_GEN_REQ.swap(-1, Ordering::SeqCst);
             if fgr >= 0 {
                 let want = fgr == 1;
@@ -2424,6 +2445,7 @@ fn main() {
                 let exe = if exe.is_empty() { "(unknown app)".to_string() } else { exe };
                 logs::general("INFO", &format!("game started: {exe}"));
                 event(origin, "game_started", json!({ "exe": exe }));
+                mirror::set_game(true);
                 vision::RECENTER_REQ.store(true, Ordering::SeqCst);   // the player's forward and position at game start are the game's forward and origin, on every headset, with or without the launcher
                 run_windows.clear();
                 run_stats = RunStats::default();
@@ -2441,6 +2463,7 @@ fn main() {
                 logs::general("INFO", &format!(
                     "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps){}",
                     g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline)));
+                mirror::set_game(false);
                 event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames }));
                 let seg_secs = g.seg_start.elapsed().as_secs_f64();
                 if seg_secs > 20.0 {

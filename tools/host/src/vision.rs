@@ -76,6 +76,8 @@ pub struct Settings {
     pub height_m: Option<f32>,
     /// key combination that recentres while playing (`controls.recenter_key`, e.g. "Ctrl+Alt+R", "F9", "Insert"; "off" disables)
     pub recenter_key: Option<String>,
+    /// the Windows desktop on a virtual screen between games, the right hand as the mouse (`display.mirror_desktop`, off by default)
+    pub mirror_desktop: Option<bool>,
     /// hand pose convention fix for the Oculus-emulation path: rotation (deg, XYZ Euler, left hand; the right mirrors y/z) and
     /// position offset (m) applied in the hand's local frame by the shim; default [0, 180, 0] (palm/back and aim were inverted)
     pub hand_rotation_deg: Option<[f32; 3]>,
@@ -126,6 +128,7 @@ pub fn load_settings(path: &Path) -> Settings {
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
         height_m: v["headset"]["height_m"].as_f64().map(|g| g as f32),
         recenter_key: v["controls"]["recenter_key"].as_str().map(str::to_string),
+        mirror_desktop: v["display"]["mirror_desktop"].as_bool(),
         hand_rotation_deg: arr3(&v["controllers"]["hand_rotation_deg"]),
         hand_position_m: arr3(&v["controllers"]["hand_position_m"]),
         color: ["brightness", "contrast", "saturation", "sharpening"].map(|k| v["display"][k].as_f64().unwrap_or(0.0) as f32),
@@ -300,6 +303,7 @@ pub fn spawn_stdin_control() {
                 }
                 (Some("game_mv"), Some(v)) => GAME_MV_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("recenter"), _) => RECENTER_REQ.store(true, Ordering::SeqCst),
+                (Some("mirror"), Some(v)) => crate::mirror::MIRROR_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("frame_gen_cap"), Some(v)) => {
                     if let Ok(f) = v.parse::<f64>() {
                         FG_CAP_REQ.store(f.clamp(0.0, 240.0).round() as i32, Ordering::SeqCst);

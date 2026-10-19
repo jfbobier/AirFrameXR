@@ -1237,7 +1237,21 @@ impl Pipeline {
                 Plan::Fg { mode, t, age, q, .. } => unsafe {
                     nvh::nvh_fg_encode(handle, ipc, *mode, *t, *age, q.as_ptr(), counter as u32, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256)
                 },
-                Plan::Green | Plan::Skip => unsafe { nvh::nvh_encode_green(handle, 0, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256) },
+                Plan::Green | Plan::Skip => {
+                    // desktop mirror (mirror.rs): between games the frame is the Windows desktop on a virtual screen, stamped with the head sample it was drawn for
+                    let mirrored = if crate::mirror::enabled() && crate::mirror::ensure_started(handle) {
+                        crate::mirror::frame_params().map(|(ndc, cur, head_ts)| unsafe {
+                            nvh::nvh_encode_desktop(handle, ndc.as_ptr(), cur.as_ptr(), 0, head_ts.max(*self.last_sent_ts.lock()).as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256)
+                        })
+                    } else {
+                        if !crate::mirror::enabled() { crate::mirror::stop(handle); }
+                        None
+                    };
+                    match mirrored {
+                        Some(ms) => ms,
+                        None => unsafe { nvh::nvh_encode_green(handle, 0, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256) },
+                    }
+                }
             };
             if let Some(s) = slot {
                 // the foveation pass consumed the slot (Transmit returns after the packet is out): the shim may reuse it

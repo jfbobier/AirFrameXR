@@ -38,6 +38,7 @@ namespace VisionALVR
         readonly List<Knob> knobs = new List<Knob>();
         readonly CheckBox debug = new CheckBox { Text = "Debug logging (files in logs\\debug\\)", AutoSize = true, Font = Ui.Body };
         readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3) };
+        readonly ToggleSwitch mirror = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3) };
         // the game's rate as a fraction of the display rate: 1/3, 1/2 (default), 2/3 (settings video.frame_gen_rate third | half | two_thirds)
         static readonly string[] FgRates = { "third", "half", "two_thirds" };
         static readonly string[] FgRateText = {
@@ -154,6 +155,17 @@ namespace VisionALVR
             fgRateText.ForeColor = Color.Gray;
             lt.Controls.Add(fgRateText);
             lt.SetColumnSpan(fgRateText, 6);
+            // the desktop mirror: between games the headset shows the Windows desktop on a virtual screen and the right hand (pinch = click, grip = right
+            // click) is the mouse. For games started from the headset (VR controller games); off by default: the green passthrough screen is for games
+            // started from the desktop (UEVR). While on, the passthrough key colour is not shown between games.
+            var mirrorRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
+            mirrorRow.Controls.Add(mirror);
+            var mirrorText = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
+            mirrorText.Controls.Add(new Label { Text = "Mirror Windows desktop between sessions", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 4, 0, 0) });
+            mirrorText.Controls.Add(new Label { Text = "Shows the desktop in the headset when no game runs, and your right hand is the mouse (pinch = click). For games you start from the headset; replaces the passthrough screen while on.", AutoSize = true, Font = Ui.Body, ForeColor = Color.DimGray, MaximumSize = new Size(560, 0), Margin = new Padding(0) });
+            mirrorRow.Controls.Add(mirrorText);
+            lt.Controls.Add(mirrorRow);
+            lt.SetColumnSpan(mirrorRow, 6);
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
             tips.SetToolTip(fgRecommend, "The slider is set from this game's recorded runs on this headset (config\\games\\<game>.json): the fastest rate whose typical 10-second window repeated under 5 % of the headset's periods; a rate that filled its cap suggests the next one once. Untick to choose yourself.");
             tips.SetToolTip(recenter, "Turn the tracking space so your current forward is forward and your position the origin (done by the streamer on its own at every game start; the recenter key (End by default, set in the wizard) does the same while playing).");
@@ -178,6 +190,14 @@ namespace VisionALVR
                 settings.Save();
             };
             frameGen.Checked = settings.FrameGen;
+            mirror.Checked = settings.MirrorDesktop;
+            mirror.CheckedChanged += (s, e) =>
+            {
+                host.Send("mirror " + (mirror.Checked ? "on" : "off"));
+                settings.MirrorDesktop = mirror.Checked;
+                settings.Save();
+                Log.Write("INFO", "desktop mirror " + (mirror.Checked ? "on" : "off"));
+            };
             Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = fgMv.Enabled = frameGen.Checked; };
             fgEnableAll = fgEnable;
             frameGen.CheckedChanged += (s, e) =>

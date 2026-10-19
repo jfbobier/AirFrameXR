@@ -326,6 +326,8 @@ namespace VisionALVR
         public bool AvpChromaConfirmed { get => Json.Bool(Root, "avp.chroma_confirmed", false); set => Json.Set(Root, "avp.chroma_confirmed", value); }
         /// the key that recentres while playing (the streamer polls it): End by default; "off" disables
         public string RecenterKey { get => Json.Str(Root, "controls.recenter_key", "End"); set => Json.Set(Root, "controls.recenter_key", value); }
+        /// the Windows desktop on a virtual screen between games, the right hand (pinch = click) as the mouse; off by default
+        public bool MirrorDesktop { get => Json.Bool(Root, "display.mirror_desktop", false); set => Json.Set(Root, "display.mirror_desktop", value); }
         public bool SplitEncode { get => Json.Str(Root, "video.split_encode", "3") != "off"; set => Json.Set(Root, "video.split_encode", value ? "3" : "off"); }
         public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", "00ff00"); set => Json.Set(Root, "video.idle_rgb", value); }
         /// frame generation (docs/FRAME_GENERATION.md): the game renders every other frame, the streamer interpolates the one in between (off by default)
