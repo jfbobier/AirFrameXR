@@ -35,8 +35,10 @@ float4 PS(VSOut i) : SV_Target {
         c = srgb(c);
     }
     if (cursor.x >= 0) {
+        // the dot is the same size to the eye whatever the desktop's resolution: 4 px core and 3 px ring on a 1080-line desktop, more on a bigger one
+        float sc = max(1.0, cursor.w / 1080.0);
         float r = length((i.uv - cursor.xy) * cursor.zw);
-        if (r < 4.0) c = float3(1, 1, 1); else if (r < 7.0) c = float3(0, 0, 0);
+        if (r < 4.0 * sc) c = float3(1, 1, 1); else if (r < 7.0 * sc) c = float3(0, 0, 0);
     }
     return float4(c, 1);
 }

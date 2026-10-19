@@ -33,7 +33,7 @@ Wi-Fi packet, every stage is tuned against the next one instead of stacked mods 
 > **ALPHA SOFTWARE (0.4): TEST AT YOUR OWN RISK.**
 > On real headsets it has been tested by one person, on one PC (RTX 5090) with one Vision Pro and one Quest 3, frame generation included
 > (plus automated tests on a laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
-> (both undone by `unregister_openxr_runtime.bat`). Keep comfort in mind: a frozen or juddering image in a headset can cause
+> (both undone by the launcher's OpenXR runtime button, "Switch back"). Keep comfort in mind: a frozen or juddering image in a headset can cause
 > discomfort; take the headset off if anything looks wrong. Provided "as is", without warranty of any kind (see [LICENSE](LICENSE)).
 
 **Main focus:** the **Windows** streamer on an **NVIDIA** GPU (RTX 40 series or newer recommended; any NVENC 12.2 driver runs), with the **ALVR app (20.14.x) on
@@ -131,11 +131,27 @@ OpenXR game
   engine (NVIDIA Optical Flow, Turing or later). Every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz
   with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3. Costs latency by construction (interpolation:
   one game period); small fast objects may ghost without vectors. The rate is fixed for a run; a **Recommended** tick sets it from the
-  game's recorded runs on the connected headset (`config/games.json`, written by the streamer at every game end: fps, the headset's repeated
+  game's recorded runs on the connected headset (`config/games/<exe>.json`, written by the streamer at every game end: fps, the headset's repeated
   periods, the streamer's repeats), and the streamer window shows the last run's record when a game ends. A **Recenter** button (also sent
   at every game start) turns the tracking space to your current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md),
   [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md) and [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md). Not automatic
   by design: a game that holds a steady 70-75 fps is often better left alone.
+- **New in 0.5: the windows.** Double-click **`VisionALVR.exe`** (the only file in the folder's root; a stub that opens the launcher) and pick a tool;
+  the launcher steps aside while a tool is open and comes back when you close it. Everything else sits in `bin\`.
+  - **Launcher** (`bin\launcher.exe`): a card per tool, plus three switches that people kept asking for: the **OpenXR runtime** (shows the active one,
+    switches to VisionALVR, and the same button switches back to the previous runtime), the **OpenXR layers** review (some layers capture the
+    controllers before any runtime sees them; listed, switched off and on again reversibly) and the **firewall rules** review (finds the rule for
+    this folder's exact `alvr_host.exe`, offers one only if none is in place, and lists leftovers from moved or deleted copies to clean up).
+  - **Streamer** (`bin\streamer.exe`): live numbers as tiles (game, streamed and shown fps, bitrate, latency split, loss), display settings,
+    frame generation, **Recenter** (and a recenter key, **End** by default, set in the wizard), and an optional **Mirror Windows desktop between
+    sessions** toggle: the desktop floats in front of you (SDR or HDR, converted to SDR), your right hand is the mouse (pinch = click, grip = right click);
+    for games you start from the headset, off by default. After a game, if the DLSS motion vectors were missing it offers to install the DLL.
+  - **Logs and performance** (`bin\performance.exe`): the games you played, one file per game (`config/games/<exe>.json`) with the last sessions (fps,
+    latency, network, GPU, whether the motion vectors worked); install or remove the motion-vector DLL for a game (checked against the packaged copy,
+    the master copy is never touched); export a log zip; records of uninstalled games are cleaned.
+  - **Diagnose** (`bin\configure.exe --diagnose`): the wizard's checks and verdict on your settings as they are, now also covering the OpenXR layers
+    and the firewall. The **Setup wizard** asks Vision Pro users once to turn on passthrough in the ALVR app (the streamer cannot set it).
+  - The windows follow the display: 1080p laptops to 4K, 100-200 % scale (WinForms' own per-monitor DPI mode), checked by the UI harness below.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
@@ -160,8 +176,9 @@ The stream is 100+ Mbit/s of low-latency video: the network matters more than th
 - Nothing else heavy on that access point while you play (downloads, other headsets).
 
 ## Install (users)
-Download the release zip, unzip it anywhere, run `register_openxr_runtime.bat` once, then `configure.exe` (pair the headset,
-benchmark, settings) and `VisionALVR.exe` (keep it open while you play). Details, settings and logs: [docs/INSTALL.md](docs/INSTALL.md).
+Download the release zip, unzip it anywhere and double-click `VisionALVR.exe` (the launcher, the only file in the folder's root): switch the
+OpenXR runtime to VisionALVR once (one administrator prompt; the same button switches back), run the **Setup wizard** (pair the headset,
+tests, settings), then **Streamer** (keep it open while you play). Details, settings and logs: [docs/INSTALL.md](docs/INSTALL.md).
 The headset's address does not have to be fixed: VisionALVR dials the saved address, finds a paired headset again by name on its own,
 and the **Find headset...** button in its window searches the network, pairs a new headset or takes an address you type.
 `configure.exe` offers a shared **community profile** for your headset (JSON files, import/export, see [docs/HMD_PROFILES.md](docs/HMD_PROFILES.md); the
@@ -188,13 +205,14 @@ See also [CONTRIBUTING.md](CONTRIBUTING.md).
 | `nvenc/hostlib/` | C++ library of the host: NVENC wrapper around ALVR's encoder, IPC, QP map, benchmark renderer + quality metric |
 | `nvenc/upstream/` | ALVR's encoder sources, vendored **unmodified** (checksums in `nvenc/upstream.sha256`; patched at build time by `tools/host/build.rs`) |
 | `ovrshim/` | OVRShim: the LibOVR-side driver loaded by VDXR (fork of VDXR's OVRNull): layer composition, frame ring, IPC |
-| `tools/gui/` | `VisionALVR.exe` (runtime window) and `configure.exe` (pairing, benchmarks, settings), C# WinForms |
+| `tools/gui/` | the C# WinForms tools: `Stub.cs` (root `VisionALVR.exe`), `Launcher.cs`, `VisionALVR.cs` (streamer), `Wizard.cs` / `Configure.cs` (`configure.exe`), `Performance.cs`, `Verdict.cs`, shared `Common.cs`; `UiTest.cs` is the UI harness's test program (not shipped) |
 | `tools/install/` | portable-folder scripts (OpenXR runtime registration), shipped default session |
 | `tools/mock_client/` | headless ALVR client (Rust, ALVR's client_core) used by the harness |
 | `tools/probe/` | `xr_probe`: OpenXR test app (layers, input, pacing) |
 | `tools/bench_scene/` | offline converter of the benchmark scene (glTF + Draco -> `.vab`) |
 | `tools/patches/`, `tools/remote/` | the one ALVR patch (test-only loopback binding), PowerShell build/test stages run on the builder |
-| `harness/` | test harness (Python, stdlib only): scenarios, checks, builder orchestration |
+| `tools/check_firewall_rules.bat` | prompt-driven firewall check and clean-up for `alvr_host.exe` rules (not shipped in the zip) |
+| `harness/` | test harness (Python, stdlib only): scenarios, checks, builder orchestration, and the GUI / desktop harnesses |
 | `third_party/` | vendored headers (cgltf, stb_image) and licence texts |
 | `docs/` | install guide, benchmark design, progress log |
 
@@ -230,6 +248,10 @@ the headset and the network, each by something whose behaviour is known exactly,
 | **Live harness** | the same loop on the real headset, unattended: build on the PC from the working tree, deploy, start the host and a game or the synthetic source, stream N seconds, fetch the debug session, score it; A/B variant files; a baseline run against stock SteamVR + ALVR on the same rig | `harness/live.py`, `live_variants.json`, `baseline.py`, `stock.py` |
 | **Session logs** | with the launcher's debug tick: every host event (`host_events.jsonl`, 2-second encoder windows with the pipeline's counters), the headset's per-frame statistics (`client_frames.csv`), the shim's per-frame trace, the GPU's clocks and power state (`gpu.csv`); the analyses in `docs/PERFORMANCE_FINDINGS.md` are joins over these | `logs\debug\<session>` |
 | **Benchmarks and probes** | the headless encoder quality sweep and the network bench behind the setup wizard, the wizard's own end-to-end test, the NVENC split-frame probe, the D3D11/D3D12 interop test that pinned the shared-texture flag bug, the motion-vector plumbing check | `harness/run.py`, `wizard_e2e.py`, `tools/nvenc_split_probe`, `tools/interop_test`, `harness/simrig/check_mv.py` |
+| **GUI matrix** | every window and wizard page at 1080p / 1440p / 4K x 100-200 % Windows scale, audited for fit, clipping, overlap and cut-off text, with a screenshot per case | `harness/ui_matrix.py`, `tools/gui/UiTest.cs` |
+| **Launcher round trip** | the launcher hides while a tool is open and returns when all are closed; the root stub starts it | `harness/launcher_flow.py` |
+| **Desktop mirror** | 7 desktop shapes x SDR / HDR (3 SDR-white levels) rendered on the GPU: colours, placement, cursor size; the input maths as unit tests | `harness/mirror_check.py`, `tools/probe/desktop_probe.cpp`, `tools/host/src/desktop.rs` |
+| **Firewall review** | the rule analysis against real throwaway rules, and the `.bat` | `harness/firewall_check.py` |
 | **Compile checks from WSL** | host, shim and C++ checked without the Windows builder | `tools/wsl/check_host.sh`, `check_cpp.sh`, `check_gui.sh` |
 
 How it is used: `python3 harness/simrig/run_sim.py build` once, then `run <scenario> --seconds 40`; results land in `harness/results/<UTC>_simrig_<name>/`
@@ -239,7 +261,7 @@ profiles (`VISIONALVR_PROFILE`) that point the harness at your PC.
 **Pull requests.** A change to anything on the frame path (shim, pipeline, generator, encoder, pacing) is accepted only with the lab's proof
 in the description: the scenarios relevant to the change, their verdicts before and after, and the compile checks. "It looks fine in my
 headset" is where this project started, and the harness exists because it was not enough. A PR that adds a scenario for the condition it
-fixes is the normal case.
+fixes is the normal case. A change to the GUI needs `harness/ui_matrix.py` to stay at 0 FAIL (see [harness/README.md](harness/README.md): the rules it enforces).
 
 **Transferable.** Nothing in the harness is specific to VisionALVR except the IPC it hooks. A fake game with controllable cost and exact
 vectors, a fake headset replaying recorded tracking imperfections, a viewer that reprojects like a client, and a judge that measures the
