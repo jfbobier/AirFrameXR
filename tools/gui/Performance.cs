@@ -22,7 +22,7 @@ namespace VisionALVR
 
         public PerformanceForm(string select)
         {
-            Text = "VisionALVR - logs and performance";
+            Text = "VisionALVR \u2013 Game history";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -33,13 +33,17 @@ namespace VisionALVR
             MinimumSize = new Size(760, 520);
             Ui.FitToWorkArea(this);
 
-            var autoDel = new CheckBox { Text = "Delete the records of games that are no longer installed", AutoSize = true, Checked = settings.AutoDeleteGameLogs, Margin = new Padding(3, 6, 3, 6) };
+            // troubleshooting and the one preference, folded away: most people never open them
+            var debug = new CheckBox { Text = "Record debug logs at every start (costs about 4.6 ms per frame: turn it off when you are done)", AutoSize = true, Checked = settings.Debug, Margin = new Padding(3, 4, 3, 2) };
+            debug.CheckedChanged += (s, e) => { settings.Debug = debug.Checked; settings.Save(); Log.Write("INFO", "debug logging " + (debug.Checked ? "on" : "off") + " (from the logs window)"); };
+            var autoDel = new CheckBox { Text = "Delete the records of games that are no longer installed", AutoSize = true, Checked = settings.AutoDeleteGameLogs, Margin = new Padding(3, 2, 3, 2) };
             autoDel.CheckedChanged += (s, e) => { settings.AutoDeleteGameLogs = autoDel.Checked; settings.Save(); if (autoDel.Checked) { Scan(); Fill(null); } };
-            var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(10, 0, 10, 4), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
-            var open = new Button { Text = "Open logs folder", AutoSize = true };
+            var open = new Button { Text = "Open the logs folder", AutoSize = true, Margin = new Padding(3, 4, 3, 4) };
             open.Click += (s, e) => { Directory.CreateDirectory(Paths.Logs); Process.Start("explorer.exe", Paths.Logs); };
-            bottom.Controls.Add(autoDel);
-            bottom.Controls.Add(open);
+            var trouble = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+            trouble.Controls.Add(debug); trouble.Controls.Add(autoDel); trouble.Controls.Add(open);
+            var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(10, 2, 10, 4), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
+            bottom.Controls.Add(Ui.Expander("Troubleshooting and settings", trouble));
 
             var left = new Panel { Dock = DockStyle.Left, Width = 300, Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
             left.Controls.Add(games);
@@ -47,7 +51,6 @@ namespace VisionALVR
             Controls.Add(right);
             Controls.Add(left);
             Controls.Add(bottom);
-            Controls.Add(Ui.CompactHeader("Logs and performance"));
             games.SelectedIndexChanged += (s, e) => Render();
             if (settings.AutoDeleteGameLogs) Scan();
             Fill(select);
@@ -149,33 +152,38 @@ namespace VisionALVR
         Control Tiles(Dictionary<string, object> s)
         {
             var net = O(s, "net"); var mv = O(s, "mv");
-            var f = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0), Margin = new Padding(0) };
+            int maxW = Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40));
+            var main = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(maxW, 0), Margin = new Padding(0) };
+            var more = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(maxW, 0), Margin = new Padding(0) };
             var rep = D(s, "headset_repeated_typ") * 100; var hostRep = D(s, "host_repeats_typ") * 100;
-            f.Controls.Add(Ui.MakeTile("Game", N(D(s, "rendered_fps")) + " fps", "slowest tenth " + N(D(s, "rendered_fps_low"))));
-            f.Controls.Add(Ui.MakeTile("Streamed", N(D(s, "streamed_fps")) + " fps", "display " + N(D(s, "display_hz"), "0") + " Hz"));
-            if (net != null) f.Controls.Add(Ui.MakeTile("Headset shows", N(D(net, "displayed_fps")) + " fps", "repeated periods " + N(rep) + " %", rep >= 5 ? Color.Firebrick : (Color?)null));
-            f.Controls.Add(Ui.MakeTile("Host repeats", N(hostRep) + " %", "of its outputs"));
-            if (net != null)
-            {
-                f.Controls.Add(Ui.MakeTile("Latency", N(D(net, "latency_ms"), "0") + " ms", $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}"));
-                f.Controls.Add(Ui.MakeTile("Bitrate", N(D(net, "bitrate_mbps"), "0") + " Mbps", "sent " + N(D(net, "throughput_mbps"), "0")));
-                var lost = D(net, "packets_lost");
-                f.Controls.Add(Ui.MakeTile("Packets lost", N(lost, "0"), "during the session", lost > 0 ? Color.Firebrick : (Color?)null));
-            }
+            // the four numbers that answer "how did it go"; the rest is one click away
+            main.Controls.Add(Ui.MakeTile("Game", N(D(s, "rendered_fps")) + " fps", "slowest tenth " + N(D(s, "rendered_fps_low"))));
+            if (net != null) main.Controls.Add(Ui.MakeTile("Headset shows", N(D(net, "displayed_fps")) + " fps", "repeated periods " + N(rep) + " %", rep >= 5 ? Color.Firebrick : (Color?)null));
+            if (net != null) main.Controls.Add(Ui.MakeTile("Latency", N(D(net, "latency_ms"), "0") + " ms", $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}"));
             if (mv != null)
             {
                 var frames = D(mv, "frames");
                 var on = mv.TryGetValue("enabled", out var eo) && eo is bool b && b;
                 var gen = S(s, "level") != "off";
-                f.Controls.Add(Ui.MakeTile("DLSS vectors", !gen ? "not used" : frames > 0 ? "working" : (on ? "not seen" : "off"), !gen ? "generation was off" : frames > 0 ? N(frames, "0") + " frames" : (on ? "no vectors from the game" : "ticked off")));
+                main.Controls.Add(Ui.MakeTile("DLSS vectors", !gen ? "not used" : frames > 0 ? "working" : (on ? "not seen" : "off"), !gen ? "generation was off" : frames > 0 ? N(frames, "0") + " frames" : (on ? "no vectors from the game" : "ticked off")));
             }
-            return f;
+            more.Controls.Add(Ui.MakeTile("Streamed", N(D(s, "streamed_fps")) + " fps", "display " + N(D(s, "display_hz"), "0") + " Hz"));
+            more.Controls.Add(Ui.MakeTile("Host repeats", N(hostRep) + " %", "of its outputs"));
+            if (net != null)
+            {
+                more.Controls.Add(Ui.MakeTile("Bitrate", N(D(net, "bitrate_mbps"), "0") + " Mbps", "sent " + N(D(net, "throughput_mbps"), "0")));
+                var lost = D(net, "packets_lost");
+                more.Controls.Add(Ui.MakeTile("Packets lost", N(lost, "0"), "during the session", lost > 0 ? Color.Firebrick : (Color?)null));
+            }
+            var all = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+            all.Controls.Add(main); all.Controls.Add(Ui.Expander("More numbers", more));
+            return all;
         }
 
         Control SessionList(List<Dictionary<string, object>> sessions)
         {
             var lv = new ListView { View = View.Details, FullRowSelect = true, GridLines = false, Height = 150, Width = Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3) };
-            string[] cols = { "Date", "Headset", "Gen.", "Min", "Game", "Shown", "Repeat %", "Lat. ms", "Vectors" };
+            string[] cols = { "Date", "Headset", "Generation", "Minutes", "Game fps", "Shown fps", "Repeated %", "Latency ms", "Vectors" };
             int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 70 };
             for (int i = 0; i < cols.Length; i++) Ui.Col(lv, cols[i], w[i]);
             right.Resize += (s, e) => lv.Width = Math.Max(400, right.ClientSize.Width - 40);
@@ -190,30 +198,26 @@ namespace VisionALVR
             return lv;
         }
 
+        // one line and at most one button: the state of the motion-vector DLL for this game and the action that fits it
         Control DllBox(string stem, Dictionary<string, object> g)
         {
-            var box = new GroupBox { Text = "DLSS motion vectors", AutoSize = true, Font = Ui.Bold, Padding = new Padding(8), Margin = new Padding(3, 8, 3, 0) };
-            var flow = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill, Font = Ui.Body };
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(3, 10, 3, 0), MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0) };
             var dir = MvDll.GameDir(g);
             var st = MvDll.Check(dir, stem, out var file);
-            string text = st == MvDll.State.NoMaster ? "This release does not include the DLL (DLSSMotionVectors\\dxgi.dll)."
-                : st == MvDll.State.NoFolder ? "The game's folder is not known (or the game is gone): run the game once with the streamer."
-                : st == MvDll.State.Installed ? "Installed: " + file + " (identical to this release's copy)."
-                : st == MvDll.State.OlderCopy ? "Installed by VisionALVR but different from this release's copy (an older version): reinstall to update."
-                : st == MvDll.State.OtherDll ? "A dxgi.dll that is not ours is in the game folder; install will use version.dll."
-                : "Not installed in " + dir + ".";
-            flow.Controls.Add(new Label { Text = text, AutoSize = true, MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 80)), 0), Margin = new Padding(0, 2, 0, 4) });
-            var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
-            bool can = st != MvDll.State.NoMaster && st != MvDll.State.NoFolder;
-            var install = new Button { Text = st == MvDll.State.Installed ? "Reinstall" : "Install", AutoSize = true, Enabled = can };
-            install.Click += (s, e) => { MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR"); Render(); };
-            var remove = new Button { Text = "Uninstall", AutoSize = true, Enabled = can && MvDll.Installed(stem) != null };
-            remove.Click += (s, e) => { MessageBox.Show(this, MvDll.Uninstall(dir, stem), "VisionALVR"); Render(); };
-            row.Controls.Add(install);
-            row.Controls.Add(remove);
-            flow.Controls.Add(row);
-            box.Controls.Add(flow);
-            return box;
+            string text; string action = null; Action act = null;
+            switch (st)
+            {
+                case MvDll.State.NoMaster: text = "not available in this release"; break;
+                case MvDll.State.NoFolder: text = "the game's folder is not known yet: run the game once with the streamer"; break;
+                case MvDll.State.Installed: text = "installed"; action = "Remove"; act = () => MessageBox.Show(this, MvDll.Uninstall(dir, stem), "VisionALVR"); break;
+                case MvDll.State.OlderCopy: text = "installed, but an older copy than this release's"; action = "Update"; act = () => MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR"); break;
+                case MvDll.State.OtherDll: text = "another dxgi.dll is in the game folder (it is left alone)"; action = "Install as version.dll"; act = () => MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR"); break;
+                default: text = "not installed"; action = "Install"; act = () => MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR"); break;
+            }
+            row.Controls.Add(new Label { Text = "DLSS motion vectors:", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 6, 4, 0) });
+            row.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 6, 12, 0) });
+            if (action != null) { var b = new Button { Text = action, AutoSize = true, Margin = new Padding(0) }; b.Click += (s, e) => { act(); Render(); }; row.Controls.Add(b); }
+            return row;
         }
 
         // one zip with what a bug report needs: this game's record, the general log, the newest debug run, the DLL install record

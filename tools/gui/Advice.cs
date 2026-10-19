@@ -231,7 +231,7 @@ namespace VisionALVR
                 box.Controls.Add(t);
                 var m = Ui.Line("Measured: " + x.Measured); m.ForeColor = Color.DimGray; box.Controls.Add(m);
                 box.Controls.Add(Ui.Line("What to do: " + x.Do));
-                var src = Ui.Line(x.Source + (x.Knob.Length > 0 ? "   ·   knob: " + x.Knob : ""), new Font("Segoe UI", 8.5f)); src.ForeColor = Color.Gray; box.Controls.Add(src);
+                var src = Ui.Line(x.Source + (x.Knob.Length > 0 ? "   ·   knob: " + x.Knob : ""), new Font("Segoe UI", 8.5f)); src.ForeColor = Color.DimGray; box.Controls.Add(src);
                 if (x.Apply != null)
                 {
                     var b = new Button { Text = x.ApplyText ?? "Apply", AutoSize = true, Margin = new Padding(3, 2, 3, 2) };

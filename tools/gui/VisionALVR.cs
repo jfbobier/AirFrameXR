@@ -37,8 +37,8 @@ namespace VisionALVR
         class Knob { public string Name; public TrackBar Bar; public Label Value; public double Def; public Func<double> Get; public Action<double> Set; }
         readonly List<Knob> knobs = new List<Knob>();
         readonly CheckBox debug = new CheckBox { Text = "Debug logging (files in logs\\debug\\)", AutoSize = true, Font = Ui.Body };
-        readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3) };
-        readonly ToggleSwitch mirror = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3) };
+        readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Frame generation" };
+        readonly ToggleSwitch mirror = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Mirror the Windows desktop between sessions" };
         // the game's rate as a fraction of the display rate: 1/3, 1/2 (default), 2/3 (settings video.frame_gen_rate third | half | two_thirds)
         static readonly string[] FgRates = { "third", "half", "two_thirds" };
         static readonly string[] FgRateText = {
@@ -66,7 +66,7 @@ namespace VisionALVR
         {
             this.check = check;
             this.autoFind = autoFind;
-            Text = "VisionALVR";
+            Text = "VisionALVR \u2013 Streamer";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -151,7 +151,7 @@ namespace VisionALVR
             lt.Controls.Add(fgOpts);
             lt.SetColumnSpan(fgOpts, 6);
             fgRateText.Margin = new Padding(44, 0, 0, 4);
-            fgRateText.ForeColor = Color.Gray;
+            fgRateText.ForeColor = Color.DimGray;
             lt.Controls.Add(fgRateText);
             lt.SetColumnSpan(fgRateText, 6);
             // the desktop mirror: between games the headset shows the Windows desktop on a virtual screen and the right hand (pinch = click, grip = right
@@ -174,7 +174,7 @@ namespace VisionALVR
 
             debug.Margin = new Padding(3, 8, 3, 3);   // a diagnostic aid, off unless asked for: it lives at the bottom
             body.Controls.Add(debug);
-            footer.ForeColor = Color.Gray;
+            footer.ForeColor = Color.DimGray;
             body.Controls.Add(footer);
 
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
@@ -283,7 +283,7 @@ namespace VisionALVR
         void AddKnob(TableLayoutPanel t, string name, int min, int max, double def, Func<double> get, Action<double> set, string tip = null)
         {
             var k = new Knob { Name = name, Def = def, Get = get, Set = set, Value = Ui.Line("0.00"),
-                               Bar = new TrackBar { Minimum = min, Maximum = max, TickFrequency = (max - min) / 6, SmallChange = 5, LargeChange = 10, Width = 170, AutoSize = false, Height = 32 } };
+                               Bar = new TrackBar { Minimum = min, Maximum = max, TickFrequency = (max - min) / 6, SmallChange = 5, LargeChange = 10, Width = 170, AutoSize = false, Height = 32, AccessibleName = name } };
             k.Bar.Value = (int)Math.Max(min, Math.Min(max, Math.Round(get() * 100)));
             k.Value.Text = (k.Bar.Value / 100.0).ToString("0.00", CultureInfo.InvariantCulture);
             k.Bar.ValueChanged += (s, e) =>

@@ -27,6 +27,7 @@ namespace VisionALVR
         readonly Button next = new Button { Text = "Next >", AutoSize = true, MinimumSize = new Size(110, 30), Font = Ui.Bold };
         readonly Button advanced = new Button { Text = "Advanced (old tabs)", AutoSize = true };
         readonly Label[] stepLabels = new Label[7];
+        Control wizHeader;
         static readonly string[] StepNames = { "0  Your PC", "1  Headset", "2  Your headset says", "3  Choose a setup", "4  Tests", "5  How you perform", "6  Configuration" };
         int step;
         // state
@@ -62,7 +63,7 @@ namespace VisionALVR
         {
             this.check = check;
             this.demo = demo;
-            Text = cmd.Contains("--diagnose") ? "VisionALVR - diagnose" : "VisionALVR - setup";
+            Text = cmd.Contains("--diagnose") ? "VisionALVR \u2013 Diagnose" : "VisionALVR \u2013 Setup";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
@@ -93,7 +94,8 @@ namespace VisionALVR
             Controls.Add(content);
             Controls.Add(stepsPanel);
             Controls.Add(bottom);
-            Controls.Add(Ui.CompactHeader(cmd.Contains("--diagnose") ? "Diagnose" : "Setup"));
+            wizHeader = Ui.CompactHeader(cmd.Contains("--diagnose") ? "Diagnose" : "Setup");   // the logo greets on the first page only
+            Controls.Add(wizHeader);
             FormClosing += (s, e) => { discovery?.Dispose(); handshakeHost?.Stop(1000); testCts?.Cancel(); };
             Shown += (s, e) => Start();
             var shot = Ui.ScreenshotPath();
@@ -124,6 +126,7 @@ namespace VisionALVR
         void GoTo(int s)
         {
             step = s;
+            if (wizHeader != null) wizHeader.Visible = s <= 1;
             discovery?.Dispose(); discovery = null;
             content.Controls.Clear();
             for (int i = 0; i < 7; i++)

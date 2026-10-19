@@ -25,7 +25,7 @@ namespace VisionALVR
 
         public LauncherForm()
         {
-            Text = "VisionALVR - launcher";
+            Text = "VisionALVR \u2013 Launcher";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;

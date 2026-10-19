@@ -630,7 +630,7 @@ namespace VisionALVR
         readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(820, 0), Margin = new Padding(3, 6, 3, 6) };
         public LayersForm()
         {
-            Text = "VisionALVR - OpenXR layers";
+            Text = "VisionALVR \u2013 OpenXR layers";
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body; Icon = Ui.AppIcon();
@@ -913,7 +913,7 @@ namespace VisionALVR
         public FirewallForm(FwReport demo = null)
         {
             exe = Paths.Host;
-            Text = "VisionALVR - firewall rules";
+            Text = "VisionALVR \u2013 Firewall rules";
             Font = Ui.Body; Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
@@ -1030,7 +1030,7 @@ namespace VisionALVR
         readonly CheckBox dont = new CheckBox { Text = "Don't ask again for this game", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
         public DllOfferForm(string game)
         {
-            Text = "VisionALVR - DLSS motion vectors";
+            Text = "VisionALVR \u2013 DLSS motion vectors";
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body; Icon = Ui.AppIcon();
@@ -1063,7 +1063,7 @@ namespace VisionALVR
         readonly CheckBox done = new CheckBox { Text = "I have set it in the ALVR app on the Vision Pro", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
         public ChromaStepForm()
         {
-            Text = "VisionALVR - one setting on the Vision Pro";
+            Text = "VisionALVR \u2013 Vision Pro passthrough";
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body; Icon = Ui.AppIcon();
@@ -1101,7 +1101,7 @@ namespace VisionALVR
             AutoSize = true; ColumnCount = 1; BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9); Padding = new Padding(10, 6, 10, 6); Margin = new Padding(0, 0, 8, 8); MinimumSize = new Size(110, 0);
             Controls.Add(new Label { Text = title, AutoSize = true, ForeColor = Color.DimGray, Font = Ui.Body, Margin = new Padding(0) });
             value = new Label { Text = v, AutoSize = true, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Margin = new Padding(0) };
-            note = new Label { Text = n, AutoSize = true, ForeColor = Color.Gray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0) };
+            note = new Label { Text = n, AutoSize = true, ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0) };
             Controls.Add(value); Controls.Add(note);
         }
         public void Set(string v, string n, Color? color = null) { value.Text = v; note.Text = n; value.ForeColor = color ?? Color.Black; }
@@ -1217,9 +1217,11 @@ namespace VisionALVR
             for (int i = 0; i < n; i++) if (lv.Columns[i].Width != want[i]) lv.Columns[i].Width = want[i];
             lv.EndUpdate();
         }
-        public static readonly Font Body = new Font("Segoe UI", 9.5f);
-        public static readonly Font Bold = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-        public static readonly Font Big = new Font("Segoe UI", 11f, FontStyle.Bold);
+        // the system message font (Segoe UI on Windows 10/11, whatever the user chose), a little larger than a dialog's: one family across the OS
+        static readonly FontFamily Family = SystemFonts.MessageBoxFont.FontFamily;
+        public static readonly Font Body = new Font(Family, 9.5f);
+        public static readonly Font Bold = new Font(Family, 9.5f, FontStyle.Bold);
+        public static readonly Font Big = new Font(Family, 11f, FontStyle.Bold);
         public static readonly Color Accent = Color.FromArgb(0x1E, 0x6B, 0xF0);
 
         public static Image Resource(string name)
@@ -1276,6 +1278,19 @@ namespace VisionALVR
                 f.Close();
             };
             f.Shown += (s, e) => t.Start();
+        }
+
+        /// A collapsed section: a flat "> title" button that shows or hides its content. For what most people never need (progressive disclosure).
+        public static Control Expander(string title, Control content, bool open = false)
+        {
+            var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
+            var b = new Button { FlatStyle = FlatStyle.Flat, AutoSize = true, TextAlign = ContentAlignment.MiddleLeft, Font = Bold, Cursor = Cursors.Hand, Margin = new Padding(0), BackColor = Color.Transparent, TabStop = true, AccessibleName = title };
+            b.FlatAppearance.BorderSize = 0; b.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xE6, 0xEA, 0xF2);
+            Action paint = () => { b.Text = (content.Visible ? "\u25BE  " : "\u25B8  ") + title; };
+            content.Visible = open; paint();
+            b.Click += (s, e) => { content.Visible = !content.Visible; paint(); };
+            p.Controls.Add(b); p.Controls.Add(content);
+            return p;
         }
 
         /// A statistics tile: small title, a big value, a one-line note. Sizes from its text (no fixed width), so it follows the display scale.

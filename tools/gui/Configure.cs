@@ -49,7 +49,7 @@ namespace VisionALVR
         public ConfigureForm(Dictionary<string, object> check)
         {
             this.check = check;
-            Text = "VisionALVR - configure";
+            Text = "VisionALVR \u2013 Advanced settings";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
@@ -72,7 +72,6 @@ namespace VisionALVR
             bottom.Controls.Add(save);
             Controls.Add(tabs);
             Controls.Add(bottom);
-            Controls.Add(Ui.Header("Configuration"));
             LoadSettings();
             Shown += (s, e) => StartDiscovery();
             var shot = Ui.ScreenshotPath();
