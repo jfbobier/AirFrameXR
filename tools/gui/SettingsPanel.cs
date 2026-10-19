@@ -28,7 +28,8 @@ namespace VisionALVR
         public readonly ComboBox Proto = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         public readonly NumericUpDown Packet = Num(500, 4000, 100);
         public readonly NumericUpDown Haptics = Dec(0m, 5m);
-        public readonly CheckBox DebugDefault = new CheckBox { Text = "Debug logging on by default (recommended during the alpha)", AutoSize = true };
+        public readonly CheckBox DebugDefault = new CheckBox { Text = "Debug logging on at every start (off by default: it costs a few ms per frame)", AutoSize = true };
+        public readonly ComboBox RecenterKey = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 130 };
         const string V = "session_settings.video.";
 
         static NumericUpDown Num(int min, int max, int inc) => new NumericUpDown { Minimum = min, Maximum = max, Increment = inc, Width = 80 };
@@ -92,6 +93,11 @@ namespace VisionALVR
             row("Stream protocol", flow(Proto, Ui.Line("UDP is what the headset normally uses")), Proto);
             row("Packet size (bytes)", Packet);
             row("Haptics strength", Haptics);
+            RecenterKey.Items.AddRange(new object[] { "End", "Home", "Pause", "F9", "Ctrl+Alt+R", "off" });
+            row("Recenter key (while playing)", RecenterKey);
+            var keyNote = Ui.Line("Turns the tracking space so you face forward at your current spot, in any game. End is used by no mod we know of (UEVR uses Insert, Luke Pause, Mutar F11). Type another key (F1-F24, a letter, Ctrl+Alt+R) or off.");
+            keyNote.ForeColor = Color.DimGray;
+            note(keyNote);
 
             section("Logging");
             note(DebugDefault);
@@ -140,6 +146,7 @@ namespace VisionALVR
             Packet.Value = Clamp(Packet, Json.Num(s, "session_settings.connection.packet_size", 1400));
             Haptics.Value = Clamp(Haptics, Json.Num(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", 1));
             DebugDefault.Checked = settings.Debug;
+            RecenterKey.Text = settings.RecenterKey;
         }
 
         /// Puts a proposal into the controls (nothing is written to disk until Save).
@@ -201,6 +208,7 @@ namespace VisionALVR
             settings.FrameGen = FrameGen.Checked;
             settings.IdleRgb = $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}";
             settings.Debug = DebugDefault.Checked;
+            settings.RecenterKey = RecenterKey.Text.Trim().Length > 0 ? RecenterKey.Text.Trim() : "End";
             settings.Save();
             Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {rate} Hz, {Bitrate.Value} Mbps, {settings.EncodeProfile}, split {settings.SplitEncode}, frame generation {settings.FrameGen}, idle #{settings.IdleRgb}, audio {Audio.Checked}, {Proto.SelectedItem}, debug {settings.Debug}");
             return true;

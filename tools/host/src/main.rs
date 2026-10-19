@@ -200,7 +200,7 @@ fn parse_args() -> Result<Args, String> {
         discover: None,
         gamma: None,
         height_m: 1.3,
-        recenter_key: "Ctrl+Alt+R".to_string(),
+        recenter_key: "End".to_string(),
         hand_rotation_deg: [-45.0, 0.0, 0.0],
         hand_position_m: [0.0, -0.048, 0.038],
         bench_network: None,
