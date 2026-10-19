@@ -87,5 +87,8 @@ Minimal code:
 - [x] **OpenXR API layers** (registry lists of the Khronos loader, HKLM/HKCU, 64/32-bit, implicit/explicit): the verdict (Diagnose and the wizard) flags enabled implicit layers, rated Poor when one may capture input (hand/controller/input tools); a dialog lists them and disables/enables the ticked ones (reversible: a registry DWORD, recorded in config\layers_disabled.json). Reference: FredEmmott/openxr-api-layers-gui (MIT), same lists; no code taken.
 - [x] Per-game records verified end to end on the builder (a 26 s run wrote config/games/<exe>.json with the session, network, GPU and vectors); idle/green scenarios still pass with the mirror off.
 
+## Package layout (2026-10-19, built and tested)
+The root holds one file, `VisionALVR.exe` (the launcher). `bin\` has every exe and DLL the launcher starts or loads (including the OpenXR runtime), plus `register_openxr_runtime.ps1`. Other folders: `DLSSMotionVectors\`, `bench\`, `profiles\`, `config\`, `docs\`, `logs\` (on use), `extras\` (personal builds only). No `.bat` files. `python3 harness/run.py build package` moves an older-layout `out\dist\VisionALVR` aside (renamed `.old-<time>`, never deleted); `test-install` and `test-zip` check the root and the absence of `.bat`.
+
 ## Order
 0 → 1 → 2 → 3 → 4 → 5. Phase 2 before the DLL popup (shared install code). Phase 5 last.

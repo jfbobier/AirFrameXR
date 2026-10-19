@@ -279,13 +279,13 @@ def run_scenario(sc, outdir: Path, log=print):
         # the portable folder exactly as a user unzips it (no registry: the app gets XR_RUNTIME_JSON); the host runs from it
         # with --install-dir, so config\ and logs\ are the folder's own
         inst = f"{rd}\\VisionALVR"
-        rc, out = b_run(f"xcopy /E /I /Q /Y out\\dist\\VisionALVR {inst} && if exist {inst}\\alvr_host.exe echo COPIED")
+        rc, out = b_run(f"xcopy /E /I /Q /Y out\\dist\\VisionALVR {inst} && if exist {inst}\\bin\\alvr_host.exe echo COPIED")
         if "COPIED" not in out:
             raise Blocked("portable package missing (build it first: python3 harness/run.py build gui package): " + out[-300:])
-        host_exe = f"{inst}\\alvr_host.exe"
+        host_exe = f"{inst}\\bin\\alvr_host.exe"
         h = sc["host"] = {**sc["host"], "install_dir": f"%USERPROFILE%\\{ROOTNAME}\\{inst}"}
         if sc.get("app"):
-            sc["app"] = {**sc["app"], "runtime": inst}
+            sc["app"] = {**sc["app"], "runtime": inst + "\\bin"}
         steps["installed_from"] = "out\\dist\\VisionALVR (portable folder)"
     host_p = host_log = None
     if h is not None:

@@ -33,7 +33,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1 host gui     # only some part
   (`tools/remote/setup_builder.ps1`). Measured on an RTX 3080 Ti laptop: 10 minutes with Rust crates already cached, longer
   on a first-ever Rust build or a slow connection; about 6 GB on disk. Later builds take minutes.
 - Output: `out\dist\VisionALVR\` (the portable folder) and `out\dist\VisionALVR-<version>.zip`. Logs: `logs\build_<step>.txt`.
-- Nothing outside the checkout is changed: no registry, no OpenXR runtime registration (that is `register_openxr_runtime.bat`,
+- Nothing outside the checkout is changed: no registry, no OpenXR runtime registration (that is the launcher's runtime switch (`register_openxr_runtime.ps1`),
   run by hand from the built folder).
 - The benchmark scene (`bench\littlest_tokyo.vab`) is generated, not committed. `build.ps1` takes it from the published release
   (SHA-256 checked); to regenerate it, `tools/bench_scene/build.sh <work dir> build/bench/littlest_tokyo.vab` (a Linux shell

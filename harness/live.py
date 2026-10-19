@@ -103,7 +103,7 @@ def check():
 'host elevated?'; ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators')
 'streamer running?'; [bool](Get-Process alvr_host,VisionALVR -ErrorAction SilentlyContinue)
 'steam running?'; [bool](Get-Process steam -ErrorAction SilentlyContinue)
-'install:'; Get-Item '{INSTALL}\\alvr_host.exe','{INSTALL}\\LibOVRRT64_1.dll','{INSTALL}\\virtualdesktop-openxr.dll' | Select-Object Name, LastWriteTime | Format-Table -AutoSize | Out-String
+'install:'; Get-Item '{INSTALL}\\bin\\alvr_host.exe','{INSTALL}\\bin\\LibOVRRT64_1.dll','{INSTALL}\\bin\\virtualdesktop-openxr.dll' | Select-Object Name, LastWriteTime | Format-Table -AutoSize | Out-String
 'runtime registered:'; (Get-ItemProperty 'HKLM:\\SOFTWARE\\Khronos\\OpenXR\\1' -ErrorAction SilentlyContinue).ActiveRuntime
 'paired headset:'; Select-String -Path '{INSTALL}\\logs\\VisionALVR.log' -Pattern 'paired headset' | Select-Object -Last 1 | ForEach-Object {{ $_.Line }}
 """))
@@ -157,12 +157,12 @@ $inst = '{INSTALL}'; $src = '{CLONE}\\src'
 $stamp = Get-Date -Format 'HHmm'
 $bak = "$inst\\..\\VisionALVR_backup_$(Get-Date -Format yyyyMMdd)"
 New-Item -ItemType Directory -Force $bak | Out-Null
-Copy-Item "$inst\\alvr_host.exe" "$bak\\alvr_host_$stamp.exe" -Force
-Copy-Item "$inst\\LibOVRRT64_1.dll" "$bak\\LibOVRRT64_1_$stamp.dll" -Force
-Copy-Item "$src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe" "$inst\\alvr_host.exe" -Force
-Copy-Item "$src\\VDXR\\bin-shim\\x64\\Release\\LibOVRRT64_1.dll" "$inst\\LibOVRRT64_1.dll" -Force
-Copy-Item "$src\\VDXR\\bin\\x64\\Release\\virtualdesktop-openxr.dll" "$inst\\virtualdesktop-openxr.dll" -Force
-Get-Item "$inst\\alvr_host.exe", "$inst\\LibOVRRT64_1.dll", "$inst\\virtualdesktop-openxr.dll" | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize | Out-String
+Copy-Item "$inst\\bin\\alvr_host.exe" "$bak\\alvr_host_$stamp.exe" -Force
+Copy-Item "$inst\\bin\\LibOVRRT64_1.dll" "$bak\\LibOVRRT64_1_$stamp.dll" -Force
+Copy-Item "$src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe" "$inst\\bin\\alvr_host.exe" -Force
+Copy-Item "$src\\VDXR\\bin-shim\\x64\\Release\\LibOVRRT64_1.dll" "$inst\\bin\\LibOVRRT64_1.dll" -Force
+Copy-Item "$src\\VDXR\\bin\\x64\\Release\\virtualdesktop-openxr.dll" "$inst\\bin\\virtualdesktop-openxr.dll" -Force
+Get-Item "$inst\\bin\\alvr_host.exe", "$inst\\bin\\LibOVRRT64_1.dll", "$inst\\bin\\virtualdesktop-openxr.dll" | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize | Out-String
 """)
     print(out)
 
@@ -205,7 +205,7 @@ def start_host(auto_input="", synthetic=False, seconds=120):
     the headset + network side; the run ends by itself after `seconds`."""
     extra = f" --auto-input {auto_input}" if auto_input else ""
     mode = f"--live --seconds {seconds}" if synthetic else "--shim --daemon"
-    cmd = f'{INSTALL}\\alvr_host.exe --install-dir "{INSTALL}" {mode} --debug{extra}'
+    cmd = f'{INSTALL}\\bin\\alvr_host.exe --install-dir "{INSTALL}" {mode} --debug{extra}'
     ps(f"""
 schtasks /delete /tn visionalvr_live_host /f 2>$null | Out-Null
 schtasks /create /tn visionalvr_live_host /tr '{cmd}' /sc once /st 00:00 /rl HIGHEST /it /f | Out-Null
@@ -227,7 +227,7 @@ def start_game(game):
     if g.get("probe"):
         # xr_probe on the PC (build\probe, run.py build probe) through the installed runtime: the Tokyo room as an OpenXR app
         ps("""
-$cmd = "@echo off`r`nset XR_RUNTIME_JSON=""" + INSTALL + """\\virtualdesktop-openxr.json`r`nset XR_PROBE_SCENE=bench\\littlest_tokyo.vab`r`nset XR_PROBE_CPU_MS=""" + str(PROBE_CPU_MS) + """`r`nset XR_PROBE_LOAD=""" + PROBE_LOAD + """`r`ncd /d C:\\Users\\""" + PC_USER + """\\openxr`r`nbuild\\probe\\xr_probe.exe logs\\probe_live.log 200000 900 - -`r`n"
+$cmd = "@echo off`r`nset XR_RUNTIME_JSON=""" + INSTALL + """\\bin\\virtualdesktop-openxr.json`r`nset XR_PROBE_SCENE=bench\\littlest_tokyo.vab`r`nset XR_PROBE_CPU_MS=""" + str(PROBE_CPU_MS) + """`r`nset XR_PROBE_LOAD=""" + PROBE_LOAD + """`r`ncd /d C:\\Users\\""" + PC_USER + """\\openxr`r`nbuild\\probe\\xr_probe.exe logs\\probe_live.log 200000 900 - -`r`n"
 [IO.File]::WriteAllText('""" + INSTALL + """\\run_probe.cmd', $cmd)
 """)
         launch = f'"{INSTALL}\\run_probe.cmd"'

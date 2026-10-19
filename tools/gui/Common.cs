@@ -25,17 +25,21 @@ namespace VisionALVR
     /// The portable folder: everything next to the exe, config/ and logs/ inside it.
     public static class Paths
     {
-        public static readonly string Dir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
+        /// The package root. Everything but the launcher lives in bin\ (VisionALVR.exe, the launcher, is the only file in the root): their folder's parent is the root.
+        public static readonly string Dir = RootOf(AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\'));
+        static string RootOf(string d) => string.Equals(Path.GetFileName(d), "bin", StringComparison.OrdinalIgnoreCase) ? (Path.GetDirectoryName(d) ?? d) : d;
+        public static string Bin => Path.Combine(Dir, "bin");
         public static string Config => Path.Combine(Dir, "config");
         public static string Logs => Path.Combine(Dir, "logs");
+        public static string Docs => Path.Combine(Dir, "docs");
         public static string Session => Path.Combine(Config, "session.json");
         public static string SessionDefault => Path.Combine(Config, "session.default.json");
         public static string Settings => Path.Combine(Config, "visionalvr.json");
-        public static string Host => Path.Combine(Dir, "alvr_host.exe");
-        public static string Manifest => Path.Combine(Dir, "virtualdesktop-openxr.json");
-        public static string RegisterScript => Path.Combine(Dir, "register_openxr_runtime.ps1");
-        public static string Configure => Path.Combine(Dir, "configure.exe");
-        public static string Runtime => Path.Combine(Dir, "VisionALVR.exe");
+        public static string Host => Path.Combine(Bin, "alvr_host.exe");
+        public static string Manifest => Path.Combine(Bin, "virtualdesktop-openxr.json");
+        public static string RegisterScript => Path.Combine(Bin, "register_openxr_runtime.ps1");
+        public static string Configure => Path.Combine(Bin, "configure.exe");
+        public static string Runtime => Path.Combine(Bin, "streamer.exe");
     }
 
     /// config\games\<exe name without .exe>.json, one file per game, written by the streamer (tools/host/src/games.rs documents the layout).

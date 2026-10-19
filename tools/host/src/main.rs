@@ -1149,7 +1149,9 @@ fn run_quality_bench(origin: Instant, args: &Args, layout: &alvr_filesystem::Lay
         ipd,
         engines: 0,
     };
-    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    // the package root: the host sits in <root>\bin\
+    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .map(|d| if d.file_name().map(|n| n.eq_ignore_ascii_case("bin")).unwrap_or(false) { d.parent().map(|p| p.to_path_buf()).unwrap_or(d) } else { d });
     let scene = args.bench_scene.clone().unwrap_or_else(|| {
         install.map(|i| i.dir.clone()).or(exe_dir).unwrap_or_default().join("bench").join("littlest_tokyo.vab")
     });

@@ -101,7 +101,7 @@ SCENARIOS = {
 def host_cmd(rd, env, seconds):
     lines = ["@echo off"] + [f"set VISIONALVR_SIM_{k}={v}" for k, v in env.items() if not (k.startswith("ENV:") or k.startswith("PROBE:"))] \
         + [f"set {k[4:]}={str(v).replace('{rd}', rd)}" for k, v in env.items() if k.startswith("ENV:")] + [
-        f'"{live.INSTALL}\\{SIMEXE}" --install-dir "{live.INSTALL}" --shim --simrig {rd}\\out --seconds {seconds + 90} --debug --connect-timeout 30 --report {rd}\\host_report.json > {rd}\\host_stdout.txt 2>&1']
+        f'"{live.INSTALL}\\bin\\{SIMEXE}" --install-dir "{live.INSTALL}" --shim --simrig {rd}\\out --seconds {seconds + 90} --debug --connect-timeout 30 --report {rd}\\host_report.json > {rd}\\host_stdout.txt 2>&1']
     return lines
 
 
@@ -162,12 +162,12 @@ if ($newest.LastWriteTime -gt $exe.LastWriteTime) {{ 'STALE BUILD: host binary (
     live.build("probe")
     out = live.ps(f"""
 $src = '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe'
-$dst = '{live.INSTALL}\\{copy_as or SIMEXE}'
+$dst = '{live.INSTALL}\\bin\\{copy_as or SIMEXE}'
 # the fresh exe can still be locked for a moment after cargo wrote it (antivirus scan): retry before giving up
 $copied = $false
 for ($i = 0; $i -lt 10 -and -not $copied; $i++) {{ try {{ Copy-Item $src $dst -Force -ErrorAction Stop; $copied = $true }} catch {{ Start-Sleep -Seconds 1 }} }}
 if (-not $copied) {{ 'COPY FAILED: ' + $dst + ' could not be overwritten (locked?)' }}
-try {{ Copy-Item '{live.CLONE}\\src\\VDXR\\bin-shim\\x64\\Release\\LibOVRRT64_1.dll' '{live.INSTALL}\\LibOVRRT64_1.dll' -Force -ErrorAction Stop }} catch {{ 'COPY FAILED: ' + $_.Exception.Message }}
+try {{ Copy-Item '{live.CLONE}\\src\\VDXR\\bin-shim\\x64\\Release\\LibOVRRT64_1.dll' '{live.INSTALL}\\bin\\LibOVRRT64_1.dll' -Force -ErrorAction Stop }} catch {{ 'COPY FAILED: ' + $_.Exception.Message }}
 # the installed exe must be the one just built: a locked or skipped copy left the lab running an old binary for two hours (2026-10-16)
 if ((Get-Item $src).LastWriteTime -ne (Get-Item $dst).LastWriteTime) {{ 'COPY FAILED: ' + $dst + ' is not the build just made' }}
 Get-Item $dst | Select-Object Name, Length, LastWriteTime | Out-String
@@ -202,7 +202,7 @@ def run_one(name, seconds, extra):
         time.sleep(8)
         probe_env = {"XR_PROBE_SCENE": "dots", "XR_PROBE_CPU_MS": "0", "XR_PROBE_LOAD": "steady", "XR_PROBE_MARKERS_CSV": f"{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{rd}\\app_timing.csv"}
         probe_env.update({k[6:]: v for k, v in env.items() if k.startswith("PROBE:")})   # scenario keys "PROBE:XR_PROBE_...": the app's load and scene
-        probe = ["@echo off", f'set XR_RUNTIME_JSON={live.INSTALL}\\virtualdesktop-openxr.json'] + [f"set {k}={v}" for k, v in probe_env.items()] + [
+        probe = ["@echo off", f'set XR_RUNTIME_JSON={live.INSTALL}\\bin\\virtualdesktop-openxr.json'] + [f"set {k}={v}" for k, v in probe_env.items()] + [
                  f"cd /d {live.INSTALL}", f'"{live.CLONE}\\build\\probe\\xr_probe.exe" {rd}\\probe.log 200000 {seconds + 60} - - > {rd}\\probe_stdout.txt 2>&1']
         task("simrig_probe", probe, rd)
         t0 = time.time()

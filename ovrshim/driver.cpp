@@ -48,7 +48,7 @@ static bool EnvSet(const char* n) { char* v = nullptr; size_t len = 0; const boo
 
 using namespace visionalvr_ipc;
 
-// Logging. General log: <folder of this DLL>\logs\VisionALVR.log, appended by every VisionALVR component (one WriteFile per
+// Logging. General log: <package root>\logs\VisionALVR.log (the DLL sits in <root>\bin), appended by every VisionALVR component (one WriteFile per
 // line, so the host and several games can share it): game start/exit and errors only. Debug log (verbose): OVRSHIM_LOG = path
 // (harness), else shim_<exe>_<pid>.log in the host's debug session folder, which the shim learns through the IPC block; lines
 // logged before that are kept in memory and written once the folder is known.
@@ -114,7 +114,10 @@ namespace shimlog {
         const std::string msg = Format(fmt, a);
         va_end(a);
         static const std::wstring path = [] {
-            const std::wstring logs = DllDir() + L"\\logs";
+            // the DLL sits in <package>\bin\: the logs are in the package root
+            std::wstring root = DllDir();
+            if (root.size() >= 4 && _wcsicmp(root.c_str() + root.size() - 4, L"\\bin") == 0) root.resize(root.size() - 4);
+            const std::wstring logs = root + L"\\logs";
             CreateDirectoryW(logs.c_str(), nullptr);
             return logs + L"\\VisionALVR.log";
         }();

@@ -1,21 +1,24 @@
-# VisionALVR: install, use, logs (0.1 alpha)
+# VisionALVR: install, use, logs (0.5 alpha)
 
 VisionALVR is **portable**, like ALVR and UEVR: one folder you unzip wherever you want. Nothing goes to Program Files; the only
-system changes are the OpenXR runtime registration and one firewall rule, both undone by `unregister_openxr_runtime.bat`.
+system changes are the OpenXR runtime registration and one firewall rule, both undone by the launcher's OpenXR runtime button ("Switch back").
 Requirements: Windows 10/11, an NVIDIA GPU with a current driver (RTX 40 series or newer recommended), the ALVR app (20.14.x) on the Vision Pro, same LAN.
 
 ## The folder
 
-| File | What it is |
+| Path | What it is |
 |---|---|
-| `VisionALVR.exe` | the runtime window: keep it open while you play (starts the streamer, shows status, gamma / debug switches) |
-| `configure.exe` | one-time setup: pair the headset, settings, optional benchmarks |
-| `alvr_host.exe` | the streamer (ALVR server_core + NVENC); started by VisionALVR.exe, no window |
-| `virtualdesktop-openxr.dll`, `.json`, `LibOVRRT64_1.dll` | the OpenXR runtime games load (VDXR + VisionALVR's OVR shim) |
-| `register_openxr_runtime.bat` / `unregister_openxr_runtime.bat` (+ `.ps1`) | make this folder the Windows OpenXR runtime / put the previous one back |
-| `bench\littlest_tokyo.vab` | the benchmark scene ("Littlest Tokyo" by Glen Fox, CC-BY-4.0) |
-| `THIRD_PARTY_NOTICES.md`, `licenses\` | third-party licences (ALVR, VirtualDesktop-OpenXR, the Rust crates in `alvr_host.exe`, the scene) |
-| `config\session.default.json` | shipped ALVR settings; `config\session.json` (yours) and `config\visionalvr.json` are created on first use |
+| `VisionALVR.exe` | **the launcher, the only file in the root**: a card per tool, the OpenXR runtime switch (and the OpenXR layers check), Help |
+| `bin\streamer.exe` | the streamer window: keep it open while you play (starts the streamer, shows status, display / frame generation / mirror switches) |
+| `bin\configure.exe` | the setup wizard (pair the headset, tests, settings); `--diagnose` runs the same checks on your settings as they are |
+| `bin\performance.exe` | the games you played: per-session numbers, the DLSS motion-vector DLL of each game, export of the logs |
+| `bin\alvr_host.exe` | the streamer proper (ALVR server_core + NVENC); started by streamer.exe, no window |
+| `bin\virtualdesktop-openxr.dll`, `.json`, `LibOVRRT64_1.dll` | the OpenXR runtime games load (VDXR + VisionALVR's OVR shim; VDXR loads the shim from its own folder) |
+| `bin\register_openxr_runtime.ps1` | what the launcher's runtime switch runs (UAC prompt): make this folder the Windows OpenXR runtime / put the previous one back |
+| `DLSSMotionVectors\dxgi.dll` | the DLSS motion-vector extractor (GPL-3.0); copied next to a game's exe from the Logs window, never loaded from here |
+| `bench\`, `profiles\` | the benchmark scene ("Littlest Tokyo" by Glen Fox, CC-BY-4.0) and the scene app; community headset profiles |
+| `docs\` | `README.txt`, `THIRD_PARTY_NOTICES.md`, `licenses\` (ALVR, VirtualDesktop-OpenXR, the Rust crates, the scene) |
+| `config\session.default.json` | shipped ALVR settings; `config\session.json` (yours), `config\visionalvr.json` and `config\games\<exe>.json` are created on first use |
 | `logs\` | created on first use (see below) |
 
 Build it with `python3 harness/run.py build gui package` (on the builder: `out\dist\VisionALVR` and `out\dist\VisionALVR-0.1-alpha.zip`;
@@ -30,9 +33,9 @@ configure.exe is a setup wizard: it checks the PC (NVIDIA GPU with a driver that
 
 **Quest:** the Meta store version of the ALVR app is 20.14.0; the protocol id only depends on the major version (20), and ALVR's own diff from 20.14.0 to 20.14.1 touches only audio-device handling and the dashboard (no client/server packet or stream change), so it connects to this streamer (not yet tried on a real Quest 3 at the time of writing). It appears in the list as untrusted until you pick it once.
 
-1. Unzip. 2. `register_openxr_runtime.bat` (asks for administrator rights; moved the folder? run it again). 3. `configure.exe`:
+1. Unzip. 2. Double-click `VisionALVR.exe`, click **Switch to VisionALVR** in the OpenXR runtime row (administrator prompt; moved the folder? click it again from the new place; the same button switches back). 3. **Setup wizard**:
 open the ALVR app on the Vision Pro, select it, **Pair**; check the settings; set the ALVR app's chroma key to the "colour when no
-game runs" (default #00FF00). 4. `VisionALVR.exe`, then start an OpenXR game. Close SteamVR and ALVR's own launcher first (same ports).
+game runs" (default #00FF00). 4. **Streamer**, then start an OpenXR game. Close SteamVR and ALVR's own launcher first (same ports).
 
 **Passthrough:** `video.passthrough` is enabled by default with an RGB chroma key on pure green (#00FF00, threshold 50, feathering 0.2), in the default session and in every shipped profile. The Vision Pro app has its own chroma-key setting and ignores it; the Quest app (and other ALVR clients with passthrough) use it, so the idle green frame is transparent there without touching the ALVR dashboard.
 

@@ -10,7 +10,7 @@ $reg = "$testRoot\Khronos\OpenXR\1"
 $state = "$testRoot\State"
 $legacyState = "$testRoot\LegacyState"
 $inst = "$tmp\VisionALVR"                # "unzipped" here
-$manifest = "$inst\virtualdesktop-openxr.json"
+$manifest = "$inst\bin\virtualdesktop-openxr.json"
 $fail = 0
 function Check($name, $ok, $detail = '') { if ($ok) { Write-Host "CHECK $name PASS $detail" } else { Write-Host "CHECK $name FAIL $detail"; $script:fail++ } }
 function Active { (Get-ItemProperty -Path $reg -Name ActiveRuntime -ErrorAction SilentlyContinue).ActiveRuntime }
@@ -28,10 +28,12 @@ New-ItemProperty -Path "$reg\AvailableRuntimes" -Name 'C:\fake\sibling_runtime.j
 $oldPf = @("$tmp\pf_ClearXR", "$tmp\pf_VisionALVR")
 $oldCfg = @("$tmp\lad_VisionALVR_host", "$tmp\lad_ClearXR_host")
 $common = @{ RegistryRoot = $reg; StateKey = $state; LegacyStateKey = $legacyState; NoFirewall = $true; Quiet = $true; OldInstallDirs = $oldPf; OldConfigDirs = $oldCfg }
-$ps = "$inst\register_openxr_runtime.ps1"
+$ps = "$inst\bin\register_openxr_runtime.ps1"
 
-Check 'package_is_flat' ((Test-Path "$inst\alvr_host.exe") -and (Test-Path "$inst\LibOVRRT64_1.dll") -and (Test-Path "$inst\virtualdesktop-openxr.dll") -and
-    (Test-Path $manifest) -and (Test-Path "$inst\register_openxr_runtime.bat") -and (Test-Path "$inst\config\session.default.json"))
+Check 'package_layout' ((Test-Path "$inst\VisionALVR.exe") -and (Test-Path "$inst\bin\alvr_host.exe") -and (Test-Path "$inst\bin\LibOVRRT64_1.dll") -and (Test-Path "$inst\bin\virtualdesktop-openxr.dll") -and
+    (Test-Path $manifest) -and (Test-Path "$inst\bin\register_openxr_runtime.ps1") -and (Test-Path "$inst\config\session.default.json"))
+$rootFiles = @(Get-ChildItem $inst -File | ForEach-Object { $_.Name })
+Check 'root_has_only_the_launcher' ($rootFiles.Count -eq 1 -and $rootFiles[0] -eq 'VisionALVR.exe') ($rootFiles -join ', ')
 & $ps @common | Out-Null
 Check 'active_runtime_is_this_folder' ((Active) -eq $manifest) (Active)
 Check 'available_runtimes_entry' ($null -ne (Get-ItemProperty "$reg\AvailableRuntimes" -Name $manifest -ErrorAction SilentlyContinue))
@@ -47,7 +49,7 @@ Check 'whatif_changes_nothing' ((Active) -eq $manifest)
 & $ps @common -Unregister | Out-Null
 Check 'unregister_restores_previous' ((Active) -eq 'C:\fake\previous_runtime.json') (Active)
 Check 'unregister_drops_available_entry' ($null -eq (Get-ItemProperty "$reg\AvailableRuntimes" -Name $manifest -ErrorAction SilentlyContinue))
-Check 'unregister_keeps_folder' (Test-Path "$inst\alvr_host.exe")
+Check 'unregister_keeps_folder' (Test-Path "$inst\bin\alvr_host.exe")
 
 Remove-ItemProperty -Path $reg -Name ActiveRuntime
 & $ps @common | Out-Null
@@ -65,11 +67,11 @@ Set-ItemProperty -Path $reg -Name ActiveRuntime -Value 'C:\fake\previous_runtime
 $moved = "$tmp\moved\VisionALVR"
 New-Item -ItemType Directory -Force (Split-Path $moved) | Out-Null
 Copy-Item $inst $moved -Recurse
-& "$moved\register_openxr_runtime.ps1" @common | Out-Null
-Check 'moved_folder_is_active' ((Active) -eq "$moved\virtualdesktop-openxr.json") (Active)
+& "$moved\bin\register_openxr_runtime.ps1" @common | Out-Null
+Check 'moved_folder_is_active' ((Active) -eq "$moved\bin\virtualdesktop-openxr.json") (Active)
 Check 'moved_folder_keeps_previous' ((Saved) -eq 'C:\fake\previous_runtime.json') (Saved)
 Check 'moved_folder_old_entry_removed' ($null -eq (Get-ItemProperty "$reg\AvailableRuntimes" -Name $manifest -ErrorAction SilentlyContinue))
-& "$moved\register_openxr_runtime.ps1" @common -Unregister | Out-Null
+& "$moved\bin\register_openxr_runtime.ps1" @common -Unregister | Out-Null
 
 # earlier install: ClearXR in "Program Files" with its marker, its state key, its config with a paired headset
 $cx = $oldPf[0]

@@ -52,8 +52,8 @@ Put "$repo\tools\mock_client\src\main.rs" "$repo\_tmp\mock_client\src\main.rs"
 Get-ChildItem "$repo\ovrshim" -File | ForEach-Object { Put $_.FullName "$repo\_tmp\ovrshim\$($_.Name)" }
 Get-ChildItem "$repo\tools\gui\*.cs", "$repo\tools\gui\app.manifest" | ForEach-Object { Put $_.FullName "$repo\_tmp\gui\$($_.Name)" }
 Get-ChildItem "$repo\profiles\*.json" | ForEach-Object { Put $_.FullName "$repo\_tmp\install\profiles\$($_.Name)" }
-foreach ($f in 'visionalvr.ico', 'logo_640.png') { Put "$repo\tools\gui\res\$f" "$repo\_tmp\gui\res\$f" }
-foreach ($f in 'register_openxr_runtime.ps1', 'register_openxr_runtime.bat', 'unregister_openxr_runtime.bat', 'session.default.json', 'README.txt') {
+foreach ($f in 'visionalvr.ico', 'logo_640.png', 'chroma_passthrough.png') { Put "$repo\tools\gui\res\$f" "$repo\_tmp\gui\res\$f" }
+foreach ($f in 'register_openxr_runtime.ps1', 'session.default.json', 'README.txt') {
     Put "$repo\tools\install\$f" "$repo\_tmp\install\$f"
 }
 Put "$repo\THIRD_PARTY_NOTICES.md" "$repo\_tmp\install\THIRD_PARTY_NOTICES.md"

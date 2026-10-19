@@ -1,4 +1,4 @@
-// launcher.exe: the front door. One card per tool (what it does, a Launch button); every tool is its own exe so experts can run only what they
+// VisionALVR.exe (the launcher): the only file in the package root, the front door. One card per tool (what it does, a Launch button); every tool is its own exe so experts can run only what they
 // need. Experts can skip this window and start the exes directly.
 using System;
 using System.Diagnostics;
@@ -13,13 +13,13 @@ namespace VisionALVR
     {
         class Tool { public string Title, What, Exe, Args = ""; public bool StopsStreamer; }
         static readonly Tool[] Tools = {
-            new Tool { Title = "Streamer", Exe = "VisionALVR.exe",
+            new Tool { Title = "Streamer", Exe = @"bin\streamer.exe",
                 What = "Starts streaming to your headset and shows the live state: headset, game, frame rate and latency. Brightness, eye height and frame generation are set here, applied live." },
-            new Tool { Title = "Logs and performance", Exe = "performance.exe",
+            new Tool { Title = "Logs and performance", Exe = @"bin\performance.exe",
                 What = "The games you played: frame rates, latency, network and frame-generation results of each session, the DLSS motion-vector DLL of each game (install / uninstall), and a one-click export of the logs." },
-            new Tool { Title = "Diagnose", Exe = "configure.exe", Args = "--diagnose", StopsStreamer = true,
+            new Tool { Title = "Diagnose", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true,
                 What = "Checks your setup as it is, without changing anything: the encoder, the network, the latency and the head tracking, then tells you what is below target and why. Run it when something feels wrong. The streamer must be closed." },
-            new Tool { Title = "Setup wizard", Exe = "configure.exe", StopsStreamer = true,
+            new Tool { Title = "Setup wizard", Exe = @"bin\configure.exe", StopsStreamer = true,
                 What = "Pairs your headset, tests the connection and proposes the settings that suit your PC and headset. Run it once, and again when the setup changes. The streamer must be closed." },
         };
 
@@ -40,6 +40,9 @@ namespace VisionALVR
             var body = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
             foreach (var t in Tools) body.Controls.Add(Card(t));
             body.Controls.Add(RuntimeRow());
+            var help = new Button { Text = "Help (README)", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
+            help.Click += (s2, e2) => { var f = Path.Combine(Paths.Docs, "README.txt"); if (File.Exists(f)) Process.Start(f); else MessageBox.Show(this, "docs\\README.txt is missing from this folder.", "VisionALVR"); };
+            body.Controls.Add(help);
             Controls.Add(body);
             Controls.Add(Ui.CompactHeader("Launcher"));
             Ui.ScreenshotWhenShown(this, 800);
@@ -121,13 +124,13 @@ namespace VisionALVR
 
         void Launch(Tool t, string exe)
         {
-            if (t.StopsStreamer && Process.GetProcessesByName("VisionALVR").Length > 0)
+            if (t.StopsStreamer && Process.GetProcessesByName("streamer").Length > 0)
             {
                 MessageBox.Show(this, t.Title + " needs the network port the streamer uses. Close the streamer window first.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
             try { Process.Start(exe, t.Args); Log.Write("INFO", "launcher: started " + t.Exe); }
-            catch (Exception ex) { MessageBox.Show(this, "Could not start " + t.Exe + ": " + ex.Message, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            catch (Exception ex) { MessageBox.Show(this, "Could not start " + Path.GetFileName(t.Exe) + ": " + ex.Message, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
 
         [STAThread]

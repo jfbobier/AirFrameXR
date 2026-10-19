@@ -130,7 +130,7 @@ def build(what):
             continue
         if w == "package":   # out\\VisionALVR: the portable folder a user unzips (+ out\\VisionALVR-<version>.zip)
             lib.b_run("if not exist _tmp\\install mkdir _tmp\\install")
-            for f in ("register_openxr_runtime.ps1", "register_openxr_runtime.bat", "unregister_openxr_runtime.bat", "session.default.json", "README.txt"):
+            for f in ("register_openxr_runtime.ps1", "session.default.json", "README.txt"):
                 lib.b_put(lib.ROOT / "tools/install" / f, f"_tmp/install/{f}")
             # personal build (VISIONALVR_PERSONAL=1, values from private/personal_config.json, never published): other session defaults, a ready
             # config\visionalvr.json and a zip suffix. A generic build overwrites these with empty ones so a stale personal file cannot leak.

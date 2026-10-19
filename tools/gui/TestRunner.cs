@@ -243,8 +243,8 @@ namespace VisionALVR
                     if (!ctx.HeadsetAvailable) throw new TestSkipped("needs the headset connected");
                     var probe = System.IO.Path.Combine(Paths.Dir, "bench", "xr_probe.exe");
                     var scene = System.IO.Path.Combine(Paths.Dir, "bench", "littlest_tokyo.vab");
-                    var runtime = System.IO.Path.Combine(Paths.Dir, "virtualdesktop-openxr.json");
-                    if (!System.IO.File.Exists(probe) || !System.IO.File.Exists(scene) || !System.IO.File.Exists(runtime)) throw new TestSkipped("bench\\xr_probe.exe, bench\\littlest_tokyo.vab or the runtime is missing from this folder");
+                    var runtime = Paths.Manifest;
+                    if (!System.IO.File.Exists(probe) || !System.IO.File.Exists(scene) || !System.IO.File.Exists(runtime)) throw new TestSkipped("bench\\xr_probe.exe, bench\\littlest_tokyo.vab or bin\\virtualdesktop-openxr.json is missing from this folder");
                     var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "visionalvr_scene_test");
                     System.IO.Directory.CreateDirectory(tmp);
                     var poseCsv = System.IO.Path.Combine(tmp, "pose.csv");

@@ -251,7 +251,7 @@ namespace VisionALVR
                 if (autoFind) { var t = new Timer { Interval = 3000 }; t.Tick += (a, b) => { t.Stop(); FindHeadset(true); }; t.Start(); }
             };
             Ui.ScreenshotWhenShown(this, 12000);
-            FormClosing += (s, e) => { closing = true; footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); Log.Write("INFO", "VisionALVR.exe closed"); };
+            FormClosing += (s, e) => { closing = true; footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); Log.Write("INFO", "streamer.exe closed"); };
         }
 
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 400 };
@@ -593,10 +593,10 @@ namespace VisionALVR
             using (new System.Threading.Mutex(true, "VisionALVR_Runtime_Window", out bool first))
             {
                 if (!first) { MessageBox.Show("VisionALVR is already running.", "VisionALVR"); return; }
-                Log.Write("INFO", $"VisionALVR.exe {Version.Text} start ({Paths.Dir})");
+                Log.Write("INFO", $"streamer.exe {Version.Text} start ({Paths.Dir})");
                 if (!File.Exists(Paths.Host))
                 {
-                    MessageBox.Show("alvr_host.exe was not found next to VisionALVR.exe. Unzip the whole VisionALVR folder.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("bin\\alvr_host.exe was not found. Unzip the whole VisionALVR folder and start VisionALVR.exe from it.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
                 var check = SystemCheck.Run();
@@ -612,10 +612,10 @@ namespace VisionALVR
                 {
                     var cur = OpenXr.ActiveRuntime();
                     var q = MessageBox.Show($"VisionALVR is not the Windows OpenXR runtime (currently: {(cur.Length > 0 ? cur : "none")}).\n\n" +
-                                            "Register this folder now? (asks for administrator rights; unregister_openxr_runtime.bat puts the previous one back)",
+                                            "Register this folder now? (asks for administrator rights; the OpenXR runtime button of the launcher puts the previous one back)",
                                             "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                     if (q == DialogResult.Yes && !OpenXr.Register(null))
-                        MessageBox.Show("Registration did not take effect. Run register_openxr_runtime.bat from this folder.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        MessageBox.Show("Registration did not take effect. Use the OpenXR runtime button of the launcher (VisionALVR.exe).", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 if (Session.Headset(Session.Load()) == null && !testing)
                 {

@@ -8,18 +8,19 @@ sys.path.insert(0, str(Path(__file__).parent))
 import live
 
 import os
-exe = os.environ.get("GUI_EXE", "configure.exe")   # VisionALVR.exe for the runtime window (no --demo/--page there)
+exe = os.environ.get("GUI_EXE", "configure.exe")   # streamer.exe for the runtime window (no --demo/--page there)
 page, out = sys.argv[1], Path(sys.argv[2])
 extra = " ".join(sys.argv[3:])
 wt = rf"C:\Users\{live.PC_USER}\wizard_test"
 live.ps(f"""
-if (-not (Test-Path '{wt}\\alvr_host.exe')) {{ Copy-Item '{live.INSTALL if False else rf"C:\\Users\\{live.PC_USER}\\VisionALVR_0.3test"}\\*' '{wt}' -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force '{wt}' | Out-Null }}
-Stop-Process -Name VisionALVR,configure,alvr_host -Force -ErrorAction SilentlyContinue
-Copy-Item '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wt}\\alvr_host.exe' -Force
-Copy-Item '{live.CLONE}\\out\\gui\\{exe}' '{wt}\\{exe}' -Force
+New-Item -ItemType Directory -Force '{wt}\\bin' | Out-Null
+Stop-Process -Name VisionALVR,streamer,configure,alvr_host -Force -ErrorAction SilentlyContinue
+if (-not (Test-Path '{wt}\\bin\\alvr_host.exe')) {{ Copy-Item '{live.CLONE}\\out\\dist\\VisionALVR\\*' '{wt}' -Recurse -Force -ErrorAction SilentlyContinue }}
+Copy-Item '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wt}\\bin\\alvr_host.exe' -Force
+Copy-Item '{live.CLONE}\\out\\gui\\{exe}' '{wt}\\bin\\{exe}' -Force
 Remove-Item '{wt}\\shot_{page}.png' -ErrorAction SilentlyContinue
 """)
-cmd = f'"{wt}\\{exe}" ' + ('--demo --page ' + page + ' ' if exe == 'configure.exe' else '') + f'--screenshot {wt}\\shot_{page}.png {extra}'
+cmd = f'"{wt}\\bin\\{exe}" ' + ('--demo --page ' + page + ' ' if exe == 'configure.exe' else '') + f'--screenshot {wt}\\shot_{page}.png {extra}'
 live.SCRATCH.mkdir(parents=True, exist_ok=True)
 f = live.SCRATCH / "shot.cmd"
 f.write_bytes(("@echo off\r\n" + cmd + "\r\n").encode())

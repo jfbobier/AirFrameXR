@@ -27,9 +27,10 @@ if (Test-Path '{wd}') {{ Remove-Item '{wd}' -Recurse -Force }}
 New-Item -ItemType Directory -Force '{wd}' | Out-Null
 robocopy '{tmpl}' '{wd}' /E /NFL /NDL /NJH /NJS | Out-Null
 Remove-Item '{wd}\\config\\session.json','{wd}\\config\\visionalvr.json','{wd}\\logs' -Recurse -Force -ErrorAction SilentlyContinue
-Copy-Item '{root}\\out\\gui\\configure.exe' '{wd}\\configure.exe' -Force
-Copy-Item '{root}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wd}\\alvr_host.exe' -Force
-Copy-Item '{root}\\out\\vdxr-shim\\*' '{wd}' -Force
+New-Item -ItemType Directory -Force '{wd}\\bin' | Out-Null
+Copy-Item '{root}\\out\\gui\\configure.exe' '{wd}\\bin\\configure.exe' -Force
+Copy-Item '{root}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wd}\\bin\\alvr_host.exe' -Force
+Copy-Item '{root}\\out\\vdxr-shim\\*' '{wd}\\bin' -Force
 New-Item -ItemType Directory -Force '{wd}\\bench' | Out-Null
 Copy-Item '{root}\\build\\probe\\xr_probe.exe' '{wd}\\bench\\xr_probe.exe' -Force
 if (-not (Test-Path '{wd}\\bench\\littlest_tokyo.vab')) {{ Copy-Item '{root}\\bench\\littlest_tokyo.vab' '{wd}\\bench\\littlest_tokyo.vab' -Force }}
@@ -42,7 +43,7 @@ client = rf"{root}\{lib.CLIENT_EXE}"
 loop = ["@echo off", "set ALVR_BIND_IP=127.0.0.2", ":loop",
         f'"{client}" --report {wd}\\mock_report.json --connect-timeout 900 --seconds 1200 --refresh 100 --real-views --poll-ms 5 --queue-max 2 --display-sim --display-hz 100 > {wd}\\mock_stdout.txt 2>&1',
         "goto loop"]
-wiz = ["@echo off", f'"{wd}\\configure.exe" --auto --headset-ip 127.0.0.2 --headset-host {host} --auto-mode {mode} --report {wd}\\report.json']
+wiz = ["@echo off", f'"{wd}\\bin\\configure.exe" --auto --headset-ip 127.0.0.2 --headset-host {host} --auto-mode {mode} --report {wd}\\report.json']
 for name, lines in (("va_mock", loop), ("va_wiz", wiz)):
     f = live.SCRATCH / f"{name}.cmd"
     live.SCRATCH.mkdir(parents=True, exist_ok=True)

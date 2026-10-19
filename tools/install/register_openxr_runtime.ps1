@@ -3,9 +3,9 @@
   Registers (or with -Unregister, unregisters) the VisionALVR folder this script sits in as the Windows OpenXR runtime.
 
 .DESCRIPTION
-  VisionALVR is portable: unzip it anywhere, run register_openxr_runtime.bat once (it asks for administrator rights). This sets
-  HKLM\SOFTWARE\Khronos\OpenXR\1\ActiveRuntime to <this folder>\virtualdesktop-openxr.json (the previous runtime is saved and put
-  back by -Unregister), lists it under AvailableRuntimes, and adds an inbound firewall rule for <this folder>\alvr_host.exe
+  VisionALVR is portable: unzip it anywhere; the launcher (VisionALVR.exe) runs this script, with a UAC prompt, from its OpenXR runtime button. This sets
+  HKLM\SOFTWARE\Khronos\OpenXR\1\ActiveRuntime to <package>\bin\virtualdesktop-openxr.json (the previous runtime is saved and put
+  back by -Unregister), lists it under AvailableRuntimes, and adds an inbound firewall rule for <package>\bin\alvr_host.exe
   (skip with -NoFirewall). Nothing is copied anywhere. Moving the folder: run it again from the new place.
   Earlier installs of this project (ClearXR, or VisionALVR in Program Files) are taken over: their saved previous runtime,
   their host config (paired headset) and their registry/firewall entries; their files are deleted only if their install marker
@@ -25,14 +25,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if (-not $InstallDir) { $InstallDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path } }
+# the script lives in <package>\bin\: the package root is its parent (an explicit -InstallDir is taken as the root)
+if (-not $InstallDir) { $InstallDir = Split-Path -Parent $(if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }) }
 $InstallDir = (Resolve-Path $InstallDir).Path.TrimEnd('\')
 $pf = if ($env:ProgramFiles) { $env:ProgramFiles } else { 'C:\Program Files' }
 $lad = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE 'AppData\Local' }
 if (-not $OldInstallDirs) { $OldInstallDirs = @((Join-Path $pf 'ClearXR'), (Join-Path $pf 'VisionALVR')) }
 if (-not $OldConfigDirs) { $OldConfigDirs = @((Join-Path $lad 'VisionALVR\host'), (Join-Path $lad 'ClearXR\host')) }
-$Manifest = Join-Path $InstallDir 'virtualdesktop-openxr.json'
-$HostExe = Join-Path $InstallDir 'alvr_host.exe'
+$Manifest = Join-Path $InstallDir 'bin\virtualdesktop-openxr.json'
+$HostExe = Join-Path $InstallDir 'bin\alvr_host.exe'
 $FirewallName = 'VisionALVR (alvr_host)'
 $OldFirewallNames = @('VisionALVR streamer (alvr_host)', 'ClearXR streamer (alvr_host)')
 
@@ -44,7 +45,7 @@ function Test-Ours([string]$path) {
     if ($path -ieq $Manifest) { return $true }
     $dir = Split-Path -Parent $path
     if (-not $dir) { return $false }
-    if ((Test-Path (Join-Path $dir 'alvr_host.exe')) -or (Test-Path (Join-Path (Split-Path -Parent $dir) 'host\alvr_host.exe'))) { return $true }
+    if ((Test-Path (Join-Path $dir 'alvr_host.exe')) -or (Test-Path (Join-Path (Split-Path -Parent $dir) 'host\alvr_host.exe')) -or (Test-Path (Join-Path (Split-Path -Parent $dir) 'bin\alvr_host.exe'))) { return $true }
     foreach ($d in $OldInstallDirs) { if ($path -like "$d\*") { return $true } }
     return $false
 }
@@ -52,7 +53,7 @@ function Test-Ours([string]$path) {
 function Get-Active { if (Test-Path $RegistryRoot) { (Get-ItemProperty -Path $RegistryRoot -Name ActiveRuntime -ErrorAction SilentlyContinue).ActiveRuntime } }
 
 try {
-    if (-not (Test-Path $Manifest)) { throw "virtualdesktop-openxr.json not found next to this script ($InstallDir)" }
+    if (-not (Test-Path $Manifest)) { throw "bin\virtualdesktop-openxr.json not found in ($InstallDir)" }
 
     if (-not $Unregister) {
         # ---- the runtime to put back on -Unregister
@@ -76,7 +77,7 @@ try {
             New-ItemProperty -Path "$RegistryRoot\AvailableRuntimes" -Name $Manifest -Value 0 -PropertyType DWord -Force | Out-Null
             if (Test-Path $LegacyStateKey) { Remove-Item -Path $LegacyStateKey -Recurse -Force }
             Write-Host "OpenXR runtime: $Manifest"
-            Write-Host "previous runtime (restored by unregister_openxr_runtime.bat): '$prev'"
+            Write-Host "previous runtime (restored by the launcher's switch back): '$prev'"
         }
 
         # ---- host config of an earlier install: keep the paired headset
