@@ -1235,23 +1235,17 @@ namespace VisionALVR
             var logo = Resource("logo_640.png");
             if (logo != null) p.Controls.Add(new PictureBox { Image = logo, SizeMode = PictureBoxSizeMode.Zoom, Width = 360, Height = 172, Margin = new Padding(0) });
             p.Controls.Add(new Label { Text = $"{subtitle}   ·   version {Version.Text}", AutoSize = true, Font = Body, ForeColor = Color.DimGray });
-            p.Controls.Add(new Label
-            {
-                Text = "ALPHA SOFTWARE - use at your own risk. For testing only.", AutoSize = true, Font = Bold, ForeColor = Color.White,
-                BackColor = Color.FromArgb(0xC6, 0x28, 0x28), Padding = new Padding(6, 3, 6, 3), Margin = new Padding(0, 6, 0, 4),
-            });
             return p;
         }
 
-        /// A short header (small logo, version, the alpha warning on one line) for windows that must fit a laptop screen.
+        /// A short header (small logo and the window's name with the version) for windows that must fit a laptop screen.
         public static Control CompactHeader(string subtitle)
         {
             var p = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, BackColor = Color.White, Padding = new Padding(12, 6, 12, 2), WrapContents = false };
             var logo = Resource("logo_640.png");
             if (logo != null) p.Controls.Add(new PictureBox { Image = logo, SizeMode = PictureBoxSizeMode.Zoom, Width = 180, Height = 76, Margin = new Padding(0) });
-            var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(16, 10, 0, 0) };
+            var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(16, 26, 0, 0) };   // centred against the logo
             col.Controls.Add(new Label { Text = $"{subtitle}   \u00B7   version {Version.Text}", AutoSize = true, Font = Body, ForeColor = Color.DimGray });
-            col.Controls.Add(new Label { Text = "ALPHA SOFTWARE - use at your own risk. For testing only.", AutoSize = true, Font = Bold, ForeColor = Color.White, BackColor = Color.FromArgb(0xC6, 0x28, 0x28), Padding = new Padding(6, 3, 6, 3), Margin = new Padding(0, 6, 0, 0) });
             p.Controls.Add(col);
             return p;
         }
