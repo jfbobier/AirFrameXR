@@ -247,7 +247,7 @@ namespace VisionALVR
                 ["notes"] = new List<object>(),
                 ["verified"] = verified,
                 ["exported_by"] = new Dictionary<string, object> {
-                    ["visionalvr"] = Version.Text, ["date"] = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    ["visionalvr"] = Version.Number, ["date"] = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     ["alvr_declared"] = new Dictionary<string, object> {
                         ["display_name"] = hs.DisplayName, ["hostname"] = hs.Hostname, ["panel"] = new List<object> { hs.PanelW, hs.PanelH }, ["refresh_rates"] = rates,
                         ["foveated_encoding"] = hs.Foveation, ["encoder_10_bits"] = hs.Enc10, ["encoder_high_profile"] = hs.EncHigh, ["encoder_av1"] = hs.EncAv1,

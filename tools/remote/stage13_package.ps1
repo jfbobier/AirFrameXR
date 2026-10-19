@@ -43,6 +43,10 @@ $versionFile = "$root\_tmp\install\version.txt"
 if ((Test-Path $versionFile) -and ((Get-Content $versionFile -Raw).Trim().Length -gt 0)) { $version = (Get-Content $versionFile -Raw).Trim() }
 $suffixFile = "$root\_tmp\install\version_suffix.txt"
 if (Test-Path $suffixFile) { $version += (Get-Content $suffixFile -Raw).Trim() }
+# the flavour of this build (harness/run.py writes _tmp\flavour.txt: debug = per-frame telemetry, release = none): bin\flavour.txt tells the windows, and a debug zip says so in its name
+$flavour = if (Test-Path "$root\_tmp\flavour.txt") { (Get-Content "$root\_tmp\flavour.txt" -Raw).Trim() } else { 'debug' }
+Set-Content -Path "$pkg\bin\flavour.txt" -Value $flavour -NoNewline
+if ($flavour -ne 'release') { $version += '-debug' }
 $persFile = "$root\_tmp\install\visionalvr.personal.json"
 $persShip = @()
 if ((Test-Path $persFile) -and ((Get-Content $persFile -Raw).Trim().Length -gt 2)) { Copy-Item $persFile "$pkg\config\visionalvr.json" -Force; $persShip = @('config\visionalvr.json') }
@@ -53,7 +57,7 @@ if (Test-Path $pfList) { foreach ($line in (Get-Content $pfList)) { $f = $line.T
 $zip = "$root\out\dist\VisionALVR-$version.zip"
 # the zip holds only what ships (never logs\, config\session.json or results a test run may have left in the folder);
 # everything sits under VisionALVR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
-$ship = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1',
+$ship = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
           'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json',
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
 $ship += $persShip

@@ -292,6 +292,16 @@ How it is used: `python3 harness/simrig/run_sim.py build` once, then `run <scena
 with the verdict JSON, the viewer's CSVs and the host's debug session. `docs/DEVELOPMENT.md` has the full recipe, the builder setup and the
 profiles (`VISIONALVR_PROFILE`) that point the harness at your PC.
 
+**Debug and release builds (the telemetry flavour).** The per-frame traces the lab needs cost CPU on every frame, so they are a compile-time
+flag. A **debug build** (the default of `python3 harness/run.py build ...`) keeps them: the shim's per-frame trace (`shim_frames.csv`: pose
+read, head-sample arrival, release, submit, publish), the host's frame fates and sent-frame CSVs, the audio-capture trace and a scheduler
+probe, written into a debug session folder when debug logging is on. The frame-by-frame analysis (`harness/frames.py`), the pacing and
+judder scenarios and the simrig need them. A **release build** (`--release`: cargo `--no-default-features`, the shim compiled with
+`VISIONALVR_RELEASE`) compiles them out; the periodic statistics behind Game history, Diagnose and its suggestions stay in both. Build one
+with `python3 harness/run.py build host shim gui package` (debug) or `... package --release` (release; what a public release uses);
+`build.ps1` is the other way round (release by default, `debug` as a target). A debug package says so: its zip name ends in `-debug` and
+the windows show "version 0.5 alpha (debug build)". New per-frame telemetry must sit behind the flag (`docs/DEVELOPMENT.md`).
+
 **Pull requests.** A change to anything on the frame path (shim, pipeline, generator, encoder, pacing) is accepted only with the lab's proof
 in the description: the scenarios relevant to the change, their verdicts before and after, and the compile checks. "It looks fine in my
 headset" is where this project started, and the harness exists because it was not enough. A PR that adds a scenario for the condition it
