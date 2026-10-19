@@ -195,11 +195,14 @@ namespace VisionALVR
                 if (!gen && g.Hz > 0 && g.Fps > 0 && g.Fps < 0.9 * g.Hz && g.RepTyp > 5)
                     s.Add(new Suggestion { Sev = Sev.Hint, Knob = "Frame generation", Source = src, Title = $"{g.Name}: frame generation would probably help",
                         Measured = $"it ran at {F(g.Fps, "0")} fps on a {F(g.Hz, "0")} Hz panel and the headset repeated {F(g.RepTyp)} % of its refreshes",
-                        Do = "tick Frame generation in the streamer window and leave Recommended on; some games look better raw (a 56 fps game was preferred to 2/3), so it is a taste, not a rule" });
+                        Do = "switch Frame generation on in the streamer window and leave it on Auto; some games look better raw (a 56 fps game was preferred to 2/3), so it is a taste, not a rule",
+                        Apply = () => { var st = new AppSettings(); st.FrameGen = true; st.FrameGenRecommended = true; st.Save(); }, ApplyText = "Turn frame generation on (Auto)" });
                 if (gen && g.HostRep >= 5)
                     s.Add(new Suggestion { Sev = Sev.Hint, Knob = "Frame generation rate", Source = src, Title = $"{g.Name}: the game could not keep up with its rate ({lvl})",
                         Measured = $"the streamer re-sent {F(g.HostRep)} % of its outputs because the game had not delivered (frozen content the headset counts as shown); the headset itself repeated {F(g.RepTyp)} %",
-                        Do = "choose the next lower rate (1/3 under 1/2): the Recommended tick does it after one more run" });
+                        Do = "choose the next lower rate (1/3 under 1/2): Auto does it after one more run",
+                        Apply = g.Level == "half" || g.Level == "two_thirds" ? (Action)(() => { var st = new AppSettings(); st.FrameGen = true; st.FrameGenRate = g.Level == "half" ? "third" : "half"; st.FrameGenRecommended = false; st.Save(); }) : null,
+                        ApplyText = g.Level == "half" ? "Use 1/3" : "Use 1/2" });
                 else if (gen && g.RepTyp >= 5)
                     s.Add(new Suggestion { Sev = Sev.Hint, Knob = "Arrival / Wi-Fi", Source = src, Title = $"{g.Name}: the headset still repeated {F(g.RepTyp)} % of its refreshes at {lvl}",
                         Measured = $"typical window {F(g.RepTyp)} %, heavy parts {F(g.RepP90)} %, host repeats {F(g.HostRep)} %",
@@ -216,15 +219,19 @@ namespace VisionALVR
         }
 
         /// The suggestions as controls for the results page.
-        public static Control Panel(List<Suggestion> list)
+        public static Control Panel(List<Suggestion> list, int top = 0)
         {
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
             var head = Ui.Line("Suggestions", Ui.Big); head.ForeColor = Ui.Accent; p.Controls.Add(head);
             var note = Ui.Line("From docs\\PERFORMANCE_KNOBS.md, with this PC's measurements: the wizard's tests of this run and, when there are any, your logs and game records. Each says what it measured; nothing is changed unless you press a button.");
             note.ForeColor = Color.DimGray; p.Controls.Add(note);
             if (list.Count == 0) { p.Controls.Add(Ui.Line("Nothing to suggest: no measurement points to a knob worth changing.")); return p; }
+            // `top` > 0: the first few (the list is ordered, warnings first) and the rest behind "More suggestions"
+            var more = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            int n = 0;
             foreach (var x in list)
             {
+                var into = top > 0 && n++ >= top ? more : p;
                 var box = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 6, 0, 2), Padding = new Padding(8, 4, 8, 4), MinimumSize = new Size(780, 0), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
                 var t = Ui.Line((x.Sev == Sev.Warn ? "⚠  " : x.Sev == Sev.Info ? "✓  " : "•  ") + x.Title, Ui.Bold);
                 t.ForeColor = x.Sev == Sev.Warn ? Color.Firebrick : x.Sev == Sev.Info ? Color.SeaGreen : Color.Black;
@@ -239,8 +246,9 @@ namespace VisionALVR
                     b.Click += (s, e) => { ap(); b.Enabled = false; b.Text = "Done"; };
                     box.Controls.Add(b);
                 }
-                p.Controls.Add(box);
+                into.Controls.Add(box);
             }
+            if (more.Controls.Count > 0) p.Controls.Add(Ui.Expander("More suggestions (" + more.Controls.Count + ")", more));
             return p;
         }
     }

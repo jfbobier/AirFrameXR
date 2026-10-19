@@ -221,14 +221,15 @@ namespace VisionALVR
             Log.Component = "launcher";
             bool first;
             var one = new System.Threading.Mutex(true, "VisionALVR_Launcher", out first);
-            if (!first) return;   // a second double-click: the launcher (or the tool it stepped aside for) is already there
+            if (!first) { Log.Write("INFO", "launcher: already running, this start ends"); return; }   // a second double-click: the launcher (or the tool it stepped aside for) is already there
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             var args = Environment.GetCommandLineArgs();
             var f = new LauncherForm();
             var i = Array.IndexOf(args, "--test-flow");
             if (i >= 0 && i + 1 < args.Length) f.Shown += (s, e) => f.StartTestFlowPublic(args[i + 1]);
-            Application.Run(f);
+            try { Application.Run(f); }
+            catch (Exception e) { Log.Write("ERROR", "launcher failed: " + e); throw; }
         }
     }
 }

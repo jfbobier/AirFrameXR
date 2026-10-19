@@ -18,9 +18,9 @@ namespace VisionALVR
         public readonly NumericUpDown EyeW = Num(256, 8192, 32), EyeH = Num(256, 8192, 32), Bitrate = Num(10, 1000, 10);
         public readonly ComboBox Fps = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         public readonly RadioButton ProfFov = new RadioButton { Text = "Foveated (ALVR foveated encoding; recommended)", AutoSize = true };
-        public readonly RadioButton ProfFull = new RadioButton { Text = "Full frame + split encode (experimental, needs a strong link)", AutoSize = true };
+        public readonly RadioButton ProfFull = new RadioButton { Text = "Full frame + split encode (needs a strong link)", AutoSize = true };
         public readonly CheckBox Split = new CheckBox { Text = "Split encoding: one strip per NVENC engine (needs 2 or more)", AutoSize = true };
-        public readonly CheckBox FrameGen = new CheckBox { Text = "Frame generation (experimental; also in the streamer window)", AutoSize = true };
+        public readonly CheckBox FrameGen = new CheckBox { Text = "Frame generation (also in the streamer window)", AutoSize = true };
         public readonly NumericUpDown Fcx = Dec(0.1m, 1m), Fcy = Dec(0.1m, 1m), Fsx = Dec(-1m, 1m), Fsy = Dec(-1m, 1m), Frx = Dec(1m, 10m), Fry = Dec(1m, 10m);
         readonly Button idle = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
         public readonly CheckBox Audio = new CheckBox { Text = "Stream game audio (Windows default output)", AutoSize = true };
@@ -65,10 +65,10 @@ namespace VisionALVR
             row("Bitrate (Mbps)", Bitrate);
             var prof = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, Margin = new Padding(0) };
             prof.Controls.Add(ProfFov);
-            prof.Controls.Add(ProfFull);
+            prof.Controls.Add(flow(ProfFull, Ui.Badge("Experimental")));
             row("Encoding", prof, ProfFov);
             row("Split encoding", Split, Split);
-            row("Frame generation", FrameGen, FrameGen);
+            row("Frame generation", flow(FrameGen, Ui.Badge("Experimental")), FrameGen);
             row("Foveation center size", flow(Fcx, Fcy), Fcx);
             row("Foveation center shift", flow(Fsx, Fsy), Fsx);
             row("Foveation edge ratio", flow(Frx, Fry, Ui.Line("(higher = fewer pixels at the edges)")), Frx);

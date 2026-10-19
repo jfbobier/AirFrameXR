@@ -25,10 +25,11 @@ namespace VisionALVR
         readonly Panel stepsPanel = new Panel { Dock = DockStyle.Left, Width = 230, BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), Padding = new Padding(12) };
         readonly Button back = new Button { Text = "< Back", AutoSize = true, MinimumSize = new Size(90, 30) };
         readonly Button next = new Button { Text = "Next >", AutoSize = true, MinimumSize = new Size(110, 30), Font = Ui.Bold };
-        readonly Button advanced = new Button { Text = "Advanced (old tabs)", AutoSize = true };
-        readonly Label[] stepLabels = new Label[7];
+                readonly Label[] stepLabels = new Label[4];
         Control wizHeader;
-        static readonly string[] StepNames = { "0  Your PC", "1  Headset", "2  Your headset says", "3  Choose a setup", "4  Tests", "5  How you perform", "6  Configuration" };
+        // four steps the user sees; the pages behind them: PC check + headset + handshake / choice of setup / tests / verdict + configuration
+        static readonly string[] StepNames = { "1  Headset", "2  Setup", "3  Test", "4  Result" };
+        static int Group(int page) => page <= 2 ? 0 : page == 3 ? 1 : page == 4 ? 2 : 3;
         int step;
         // state
         Handshake hs = new Handshake();
@@ -73,24 +74,21 @@ namespace VisionALVR
             Width = 1080; Height = 900;   // design values at 96 dpi: scaled at load, then kept inside the work area
             MinimumSize = new Size(980, 760);
             Ui.FitToWorkArea(this);
-            for (int i = 0; i < 7; i++)
+            for (int i = 0; i < 4; i++)
             {
                 stepLabels[i] = new Label { Text = StepNames[i], AutoSize = false, Height = 30, Dock = DockStyle.Top, Font = Ui.Body, ForeColor = Color.DimGray, TextAlign = ContentAlignment.MiddleLeft };
             }
-            for (int i = 6; i >= 0; i--) stepsPanel.Controls.Add(stepLabels[i]);
+            for (int i = 3; i >= 0; i--) stepsPanel.Controls.Add(stepLabels[i]);
             var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 4, Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            bottom.Controls.Add(advanced, 0, 0);
             bottom.Controls.Add(new Label(), 1, 0);
             bottom.Controls.Add(back, 2, 0);
             bottom.Controls.Add(next, 3, 0);
-            advanced.Visible = !cmd.Contains("--diagnose");
             back.Click += (s, e) => GoBack();
             next.Click += (s, e) => GoNext();
-            advanced.Click += (s, e) => { Hide(); new ConfigureForm(check).ShowDialog(); Close(); };
             Controls.Add(content);
             Controls.Add(stepsPanel);
             Controls.Add(bottom);
@@ -129,12 +127,15 @@ namespace VisionALVR
             if (wizHeader != null) wizHeader.Visible = s <= 1;
             discovery?.Dispose(); discovery = null;
             content.Controls.Clear();
-            for (int i = 0; i < 7; i++)
+            int g = Group(s), shown = 0;
+            for (int i = 0; i < 4; i++)
             {
-                stepLabels[i].Font = i == s ? Ui.Bold : Ui.Body;
-                stepLabels[i].ForeColor = i == s ? Ui.Accent : (i < s ? Color.SeaGreen : Color.DimGray);
-                stepLabels[i].Text = (i < s ? "✓  " : "") + StepNames[i];
-                stepLabels[i].Visible = !(diagnose && (i == 3 || i == 6));
+                stepLabels[i].Visible = !(diagnose && i == 1);   // diagnosing keeps the setup as it is: no Setup step
+                if (!stepLabels[i].Visible) continue;
+                shown++;
+                stepLabels[i].Font = i == g ? Ui.Bold : Ui.Body;
+                stepLabels[i].ForeColor = i == g ? Ui.Accent : (i < g ? Color.SeaGreen : Color.DimGray);
+                stepLabels[i].Text = (i < g ? "\u2713  " : "") + (diagnose && i > 1 ? StepNames[i].Replace((i + 1).ToString(), i.ToString()) : StepNames[i]);
             }
             back.Enabled = s > 1; back.Visible = true; next.Visible = true; next.Text = "Next >"; next.Enabled = true;
             Control page;
@@ -427,20 +428,35 @@ namespace VisionALVR
             // the three ways to a configuration; the tests (next page) then check it on this PC
             p.Controls.Add(Ui.Line("How do you want to configure the stream?", Ui.Big));
             var modes = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(820, 0) };
-            modeProfile = new RadioButton { Appearance = Appearance.Button, Text = "Community profile (recommended)", AutoSize = true, Checked = true, Font = Ui.Bold, Padding = new Padding(8) };
+            modeProfile = new RadioButton { Appearance = Appearance.Button, Text = "Community profile", AutoSize = true, Font = Ui.Body, Padding = new Padding(8) };
             modeManual = new RadioButton { Appearance = Appearance.Button, Text = "Manual configuration (pre-filled)", AutoSize = true, Font = Ui.Body, Padding = new Padding(8) };
             modeExisting = new RadioButton { Appearance = Appearance.Button, Text = "I have an existing ALVR configuration", AutoSize = true, Font = Ui.Body, Padding = new Padding(8) };
-            modeProfile.CheckedChanged += (s, e) => { modeProfile.Font = modeProfile.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
-            modeManual.CheckedChanged += (s, e) => { modeManual.Font = modeManual.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
-            modeExisting.CheckedChanged += (s, e) => { modeExisting.Font = modeExisting.Checked ? Ui.Bold : Ui.Body; RenderMode(real); };
-            modes.Controls.Add(modeProfile); modes.Controls.Add(modeManual); modes.Controls.Add(modeExisting);
+            // the recommended way is the one choice shown: the matching community profile, else the pre-filled values; the others sit under "Other ways to set up".
+            // The buttons live in two containers, so they are made exclusive by hand.
+            var rec = matchedProfile != null ? modeProfile : modeManual;
+            rec.Text = "Recommended: " + (matchedProfile != null ? "community profile for your headset" : "manual configuration, pre-filled from your headset");
+            var radios = new[] { modeProfile, modeManual, modeExisting };
+            foreach (var r0 in radios)
+            {
+                var r = r0;
+                r.CheckedChanged += (s, e) =>
+                {
+                    r.Font = r.Checked ? Ui.Bold : Ui.Body;
+                    if (r.Checked) foreach (var o in radios) if (o != r && o.Checked) o.Checked = false;
+                    if (radios.Any(o => o.Checked)) RenderMode(real);
+                };
+            }
+            modes.Controls.Add(rec);
             p.Controls.Add(modes);
+            var others = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(820, 0) };
+            foreach (var r in radios) if (r != rec) others.Controls.Add(r);
+            p.Controls.Add(Ui.Expander("Other ways to set up", others));
             modePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
             p.Controls.Add(modePanel);
             hsGo = new Button { Text = "Run the tests >", AutoSize = true, Font = Ui.Big, Padding = new Padding(10), Margin = new Padding(0, 12, 0, 0) };
             hsGo.Click += (s, e) => ContinueToTests();
             p.Controls.Add(hsGo);
-            RenderMode(real);
+            rec.Checked = true;   // renders the option (the buttons' handlers need modePanel and hsGo)
             return p;
         }
 

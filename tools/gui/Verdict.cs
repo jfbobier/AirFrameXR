@@ -73,38 +73,42 @@ namespace VisionALVR
                 fwClean ? Rating.Good : fw.State == FirewallState.Allowed ? Rating.Ok : fw.State == FirewallState.Unknown ? Rating.Unknown : Rating.Poor,
                 fw.Headline + " Review the rules with the button below.");
             add("GPU", string.IsNullOrEmpty(r.GpuName) ? "-" : r.GpuName, $"{r.Engines} hardware encoder engine(s), {r.VramMb / 1024.0:0} GB", Rating.Unknown);
-            p.Controls.Add(list);
+            var details = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+            details.Controls.Add(list);
             Ui.FitColumns(list);
             if (!fwClean && fw.State != FirewallState.Unknown)
             {
                 var fwReview = new Button { Text = "Review firewall rules...", AutoSize = true, Margin = new Padding(3, 6, 3, 6) };
                 fwReview.Click += (s2, e2) => { using (var f = new FirewallForm()) f.ShowDialog(fwReview.FindForm()); };
-                p.Controls.Add(fwReview);
+                details.Controls.Add(fwReview);
             }
             if (layersOn.Count > 0)
             {
                 var review = new Button { Text = "Review OpenXR layers...", AutoSize = true, Margin = new Padding(3, 6, 3, 6) };
                 review.Click += (s2, e2) => { using (var f = new LayersForm()) f.ShowDialog(review.FindForm()); };
-                p.Controls.Add(review);
+                details.Controls.Add(review);
             }
             var count = new Func<string, int>(v => list.Items.Cast<ListViewItem>().Count(x => x.SubItems[3].Text == v));
             var verdict = count("Poor") > 0 ? "Limited: some parts are below the target (see below)" : (count("Ok") > 0 ? "Good: the setup works, a few values are only acceptable" : (count("Good") > 0 ? "Excellent: everything measured meets the target" : "Not enough measurements to judge"));
-            p.Controls.Add(Ui.Line(verdict, Ui.Big));
+            var vl = Ui.Line(verdict, Ui.Big);
+            vl.ForeColor = count("Poor") > 0 ? Color.Firebrick : count("Ok") > 0 ? Color.DarkOrange : Color.SeaGreen;
+            p.Controls.Add(vl);
             if (profile == null && r.CleanMbps >= 2 * tg.GoodMbps && r.CleanMbps > 0)
                 p.Controls.Add(Ui.Line($"\u2022 Your link carries {r.CleanMbps:0} Mbps, far more than this stream needs ({tg.GoodMbps:0} Mbps): there is room for a higher resolution or less foveation if your GPU's encoder allows it."));
             foreach (var a in bad.Distinct()) p.Controls.Add(Ui.Line("\u2022 " + a));
-            p.Controls.Add(Ui.Line($"\u2022 Network advice for {prof.Label}: {prof.WifiAdvice}."));
+            details.Controls.Add(Ui.Line($"\u2022 Network advice for {prof.Label}: {prof.WifiAdvice}."));
             // suggestions from docs/PERFORMANCE_KNOBS.md: this run's measurements, and the logs when there are any
             try
             {
                 var settings = new AppSettings();
                 var facts = LogFacts.Read(Paths.Logs, Games.Dir);
-                p.Controls.Add(Advice.Panel(Advice.From(r, hs, ctxFps, settings.Debug, facts, () => { settings.Debug = false; settings.Save(); })));
+                p.Controls.Add(Advice.Panel(Advice.From(r, hs, ctxFps, settings.Debug, facts, () => { settings.Debug = false; settings.Save(); }), 3));
             }
             catch (Exception e) { Log.Write("WARN", "suggestions: " + e.Message); }
             var note = Ui.Line("Targets are rules of thumb from ALVR's documentation and forum guidance (about 0.13 bits per encoded pixel as the minimum, 0.18 comfortable; encoder 5-10 ms; network about 10 ms), scaled to your stream. They tell you whether this setup is likely fine, not whether it is perfect.");
             note.ForeColor = Color.DimGray;
-            p.Controls.Add(note);
+            details.Controls.Add(note);
+            p.Controls.Add(Ui.Expander("Details: every measurement", details));
             return p;
         }
     }

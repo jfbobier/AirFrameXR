@@ -25,7 +25,7 @@ namespace VisionALVR
         readonly NumericUpDown eyeW = Num(1024, 4096, 32), eyeH = Num(1024, 4096, 32), bitrate = Num(10, 1000, 10);
         readonly ComboBox fps = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         readonly RadioButton profFov = new RadioButton { Text = "Foveated (ALVR foveated encoding; recommended)", AutoSize = true };
-        readonly RadioButton profFull = new RadioButton { Text = "Full frame + split encode (experimental: 3x the pixels, needs a strong Wi-Fi link)", AutoSize = true };
+        readonly RadioButton profFull = new RadioButton { Text = "Full frame + split encode (3x the pixels, needs a strong Wi-Fi link)", AutoSize = true };
         readonly NumericUpDown fcx = Dec(0.1m, 1m), fcy = Dec(0.1m, 1m), fsx = Dec(-1m, 1m), fsy = Dec(-1m, 1m), frx = Dec(1m, 10m), fry = Dec(1m, 10m);
         readonly Button idle = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
         readonly CheckBox audio = new CheckBox { Text = "Stream game audio (Windows default output)", AutoSize = true };
@@ -166,7 +166,7 @@ namespace VisionALVR
             row("Bitrate (Mbps)", flow(bitrate, Ui.Line("constant; the Benchmark tab can find yours")));
             var prof = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, Margin = new Padding(0) };
             prof.Controls.Add(profFov);
-            prof.Controls.Add(profFull);
+            prof.Controls.Add(flow(profFull, Ui.Badge("Experimental")));
             row("Encoding", prof);
             row("Foveation center size", flow(fcx, fcy));
             row("Foveation center shift", flow(fsx, fsy));

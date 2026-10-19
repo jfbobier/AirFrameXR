@@ -1033,8 +1033,8 @@ namespace VisionALVR
     {
         readonly ListView list = new ListView { View = View.Details, CheckBoxes = true, FullRowSelect = true, Height = 240, Width = 880, HeaderStyle = ColumnHeaderStyle.Nonclickable };
         readonly Label headline = new Label { AutoSize = true, MaximumSize = new Size(880, 0), Font = Ui.Bold, Margin = new Padding(3, 6, 3, 6) };
-        readonly Button allow = new Button { Text = "Allow this folder", AutoSize = true, Font = Ui.Bold, MinimumSize = new Size(130, 30) };
-        readonly Button remove = new Button { Text = "Remove ticked", AutoSize = true, MinimumSize = new Size(130, 30) };
+        readonly Button allow = new Button { Text = "Clean up", AutoSize = true, Font = Ui.Bold, MinimumSize = new Size(130, 30) };
+        readonly Button remove = new Button { Text = "Remove only the ticked rules", AutoSize = true, MinimumSize = new Size(130, 30) };
         FwReport report;
         readonly string exe;
         public FirewallForm(FwReport demo = null)
@@ -1050,15 +1050,26 @@ namespace VisionALVR
                 "Ticked rules are leftovers: files that are gone, duplicates, rules that block. Rules of other copies that still exist are left alone.", AutoSize = true, MaximumSize = new Size(880, 0), Margin = new Padding(3, 4, 3, 4) });
             col.Controls.Add(headline);
             foreach (var c in new[] { ("Rule", 190), ("Action", 70), ("Protocol", 80), ("Network", 100), ("On", 40), ("What it is", 400) }) Ui.Col(list, c.Item1, c.Item2);
-            col.Controls.Add(list);
             var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
             var refresh = new Button { Text = "Refresh", AutoSize = true, MinimumSize = new Size(100, 30) };
             var close = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.OK, MinimumSize = new Size(100, 30) };
-            allow.Click += (s, e) => { Firewall.Allow(exe); Load(null); };
+            // one action: the rule that is missing is added, the leftovers are removed (the rules themselves are in the details below)
+            allow.Click += (s, e) =>
+            {
+                if (report != null && (report.State == FirewallState.Missing || report.State == FirewallState.Blocked)) Firewall.Allow(exe);
+                Firewall.Remove(list.Items.Cast<ListViewItem>().Where(i => i.Checked).Select(i => (FwRule)i.Tag));
+                Load(null);
+            };
             remove.Click += (s, e) => { Firewall.Remove(list.CheckedItems.Cast<ListViewItem>().Select(i => (FwRule)i.Tag)); Load(null); };
             refresh.Click += (s, e) => Load(null);
-            row.Controls.Add(allow); row.Controls.Add(remove); row.Controls.Add(refresh); row.Controls.Add(close);
+            var det = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+            var detRow = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
+            detRow.Controls.Add(remove); detRow.Controls.Add(refresh);
+            det.Controls.Add(list); det.Controls.Add(detRow);
+            row.Controls.Add(allow); row.Controls.Add(close);
             col.Controls.Add(row);
+            col.Controls.Add(Ui.Expander("Details: the rules", det, demo != null));
+            AcceptButton = allow;
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             col.Dock = DockStyle.None; col.Location = Point.Empty;
             scroller.Controls.Add(col);
@@ -1088,7 +1099,7 @@ namespace VisionALVR
                 list.Items.Add(it);
             }
             Ui.FitColumns(list);
-            allow.Enabled = r.State == FirewallState.Missing || r.State == FirewallState.Blocked;
+            allow.Enabled = r.State == FirewallState.Missing || r.State == FirewallState.Blocked || r.Rules.Any(x => x.Propose);
             remove.Enabled = r.Rules.Count > 0;
         }
     }
@@ -1422,6 +1433,9 @@ namespace VisionALVR
 
         /// A statistics tile: small title, a big value, a one-line note. Sizes from its text (no fixed width), so it follows the display scale.
         public static Tile MakeTile(string title, string value = "-", string note = "", Color? color = null) { var t = new Tile(title, value, note); if (color != null) t.Set(value, note, color); return t; }
+
+        /// A small coloured tag next to a label (instead of a suffix in its text).
+        public static Label Badge(string text) => new Label { Text = text, AutoSize = true, ForeColor = Color.DarkOrange, Font = new Font(Body.FontFamily, 8.5f, FontStyle.Bold), Margin = new Padding(0, 6, 3, 0) };
 
         public static Label Line(string text, Font f = null) =>
             new Label { Text = text, AutoSize = true, Font = f ?? Body, Margin = new Padding(3, 3, 3, 3), MaximumSize = new Size(760, 0) }; // long lines wrap (narrower than the page: it may also have a scroll bar)
