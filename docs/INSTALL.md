@@ -8,7 +8,9 @@ Requirements: Windows 10/11, an NVIDIA GPU with a current driver (RTX 40 series 
 
 | Path | What it is |
 |---|---|
-| `VisionALVR.exe` | **the launcher, the only file in the root**: a card per tool, the OpenXR runtime switch (and the OpenXR layers check), Help |
+| `VisionALVR.exe` | **the only file in the root**: a tiny stub (no window of its own) that starts `bin\launcher.exe` |
+| `bin\launcher.exe` | the launcher: a card per tool, the OpenXR runtime switch, the OpenXR layers and firewall reviews, Help; steps aside while a tool is open |
+| `bin\*.exe.config` | one per GUI exe: WinForms' own per-monitor DPI mode (a window follows its monitor's scale) |
 | `bin\streamer.exe` | the streamer window: keep it open while you play (starts the streamer, shows status, display / frame generation / mirror switches) |
 | `bin\configure.exe` | the setup wizard (pair the headset, tests, settings); `--diagnose` runs the same checks on your settings as they are |
 | `bin\performance.exe` | the games you played: per-session numbers, the DLSS motion-vector DLL of each game, export of the logs |

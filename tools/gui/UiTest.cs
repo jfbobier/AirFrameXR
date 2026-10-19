@@ -41,6 +41,17 @@ namespace VisionALVR
             yield return new Case { Name = "dll-offer", Make = () => new DllOfferForm("Cyberpunk 2077 (C) 2020 by CD Projekt RED - Phantom Liberty Edition") };
             yield return new Case { Name = "chroma-step", Make = () => new ChromaStepForm() };
             yield return new Case { Name = "openxr-layers", Make = () => new LayersForm() };
+            yield return new Case { Name = "firewall-rules", Make = () => new FirewallForm(DemoFirewall()) };
+        }
+
+        static FwReport DemoFirewall()
+        {
+            var r = new FwReport { State = FirewallState.Allowed, Headline = "Windows Firewall lets this folder's alvr_host.exe in. 3 leftover rule(s) can be removed." };
+            r.Rules.Add(new FwRule { Name = "{1}", DisplayName = "VisionALVR (alvr_host)", Direction = "Inbound", Action = "Allow", Profile = "Any", Protocol = "Any", Enabled = true, InPlace = true, Status = "in place: lets this folder in", Program = @"C:\Users\Someone With A Long Name\Downloads\VisionALVR-0.5-alpha\VisionALVR\bin\alvr_host.exe" });
+            r.Rules.Add(new FwRule { Name = "{2}", DisplayName = "alvr_host.exe", Direction = "Inbound", Action = "Allow", Profile = "Public", Protocol = "TCP", Enabled = true, Propose = true, Status = "redundant: the rule above already covers all protocols", Program = @"C:\x\alvr_host.exe" });
+            r.Rules.Add(new FwRule { Name = "{3}", DisplayName = "alvr_host.exe", Direction = "Inbound", Action = "Allow", Profile = "Public", Protocol = "UDP", Enabled = true, Propose = true, Status = "stale: the file is gone (C:\\Old\\VisionALVR\\bin\\alvr_host.exe)", Program = @"C:\Old\alvr_host.exe" });
+            r.Rules.Add(new FwRule { Name = "{4}", DisplayName = "ALVR Streamer (other copy)", Direction = "Inbound", Action = "Allow", Profile = "Private, Public", Protocol = "Any", Enabled = true, Status = "another copy of alvr_host.exe (left alone)", Program = @"D:\ALVR\alvr_host.exe" });
+            return r;
         }
 
         [STAThread]
@@ -52,6 +63,13 @@ namespace VisionALVR
             var outDir = Arg("--out") ?? Path.Combine(Paths.Dir, "uitest");
             Directory.CreateDirectory(outDir);
             var only = Arg("--only");
+            var fwExe = Arg("--firewall");   // harness/firewall_check.py: print the firewall analysis of this exe and stop
+            if (fwExe != null)
+            {
+                var rep = Firewall.Analyze(fwExe);
+                File.WriteAllText(Path.Combine(outDir, "firewall.txt"), "state=" + rep.State + "\r\nclutter=" + rep.Clutter + "\r\n" + string.Join("\r\n", rep.Rules.Select(r => $"{r.Name}|{r.Direction}|{r.Action}|{r.Protocol}|{r.Profile}|{r.Enabled}|{(r.InPlace ? "INPLACE" : "")}|{(r.Propose ? "PROPOSE" : "")}|{r.Status}")));
+                return 0;
+            }
             var matrix = (Arg("--matrix") ?? "1920x1080@100,1920x1080@125,1920x1080@150,2560x1440@100,2560x1440@125,2560x1440@150,3840x2160@100,3840x2160@150,3840x2160@200").Split(',');
             int fails = 0, warns = 0, n = 0;
             foreach (var m in matrix)

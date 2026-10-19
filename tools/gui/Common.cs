@@ -759,43 +759,115 @@ namespace VisionALVR
         }
     }
 
-    /// Window chrome shared by both tools: logo, version, the red alpha warning.
-    /// Windows Firewall state of alvr_host.exe (the rules are per executable path: every folder the package is unzipped to needs its own). Without an
-    /// allow rule the headset is not found by mDNS and the stream may not connect; a dismissed Windows prompt leaves a BLOCK rule that beats any allow.
     public enum FirewallState { Allowed, Blocked, Missing, Unknown }
 
+    /// One inbound/outbound rule of Windows Firewall that names an alvr_host.exe, with what the review makes of it.
+    public class FwRule
+    {
+        public string Name = "", DisplayName = "", Direction = "", Action = "", Profile = "", Protocol = "", Program = "";
+        public bool Enabled = true, ProgramExists = true;
+        public string Status = "";      // plain words for the list
+        public bool Propose;            // ticked by default in the review: it can go
+        public bool InPlace;            // the rule that lets this folder's alvr_host.exe in
+    }
+
+    public class FwReport
+    {
+        public FirewallState State = FirewallState.Unknown;
+        public List<FwRule> Rules = new List<FwRule>();
+        public string Headline = "";
+        public int Clutter => Rules.Count(r => r.Propose);
+    }
+
+    /// Windows Firewall rules of alvr_host.exe. The rule belongs to the exact exe path: a moved folder needs its own rule, and Windows leaves the old ones
+    /// behind (and adds a TCP and a UDP rule at every "Allow" prompt). Read through PowerShell's NetSecurity cmdlets, whose values are English whatever
+    /// the Windows language is (netsh's are not), without administrator rights; changing anything asks for them.
     public static class Firewall
     {
-        public static FirewallState Check(string program)
+        const string ReadScript = "$ErrorActionPreference='SilentlyContinue'; " +
+            "$rules = @(Get-NetFirewallApplicationFilter | Where-Object { $_.Program -match 'alvr_host\\.exe$' } | ForEach-Object { $r = $_ | Get-NetFirewallRule; $p = $r | Get-NetFirewallPortFilter; " +
+            "[pscustomobject]@{ Name=$r.Name; DisplayName=$r.DisplayName; Enabled=[string]$r.Enabled; Direction=[string]$r.Direction; Action=[string]$r.Action; Profile=[string]$r.Profile; Protocol=[string]$p.Protocol; Program=$_.Program } }); " +
+            "$profiles = @(Get-NetConnectionProfile | ForEach-Object { [string]$_.NetworkCategory }); " +
+            "ConvertTo-Json -Depth 4 -Compress -InputObject ([pscustomobject]@{ profiles = $profiles; rules = $rules })";
+
+        static string Ps(string script, int ms = 40000)
         {
+            var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"" + script.Replace("\"", "\\\"") + "\"")
+            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8 };
+            using (var p = System.Diagnostics.Process.Start(psi)) { var t = p.StandardOutput.ReadToEnd(); p.WaitForExit(ms); return t; }
+        }
+
+        static IEnumerable<Dictionary<string, object>> Items(object o)
+        {
+            if (o is object[] a) return a.OfType<Dictionary<string, object>>();
+            if (o is Dictionary<string, object> d) return new[] { d };
+            return new Dictionary<string, object>[0];
+        }
+
+        static bool ProfileApplies(string rule, string[] active)
+        {
+            if (string.IsNullOrEmpty(rule) || rule.Equals("Any", StringComparison.OrdinalIgnoreCase) || rule.Equals("All", StringComparison.OrdinalIgnoreCase) || active.Length == 0) return true;
+            return active.Any(c => rule.IndexOf(c.StartsWith("Domain") ? "Domain" : c, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        /// Every rule that names an alvr_host.exe, judged against this folder's exe: the one that lets it in, the ones that block it, and what is just clutter.
+        public static FwReport Analyze(string exe)
+        {
+            var rep = new FwReport();
             try
             {
-                var psi = new System.Diagnostics.ProcessStartInfo("netsh.exe", "advfirewall firewall show rule name=all dir=in verbose")
-                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage) };
-                string text;
-                using (var p = System.Diagnostics.Process.Start(psi)) { text = p.StandardOutput.ReadToEnd(); p.WaitForExit(20000); }
-                bool allow = false, block = false, understood = false;
-                foreach (var blk in text.Replace("\r", "").Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries))
+                var j = Json.Parse(Ps(ReadScript).Trim());
+                if (j.Count == 0) { rep.Headline = "The firewall could not be read."; return rep; }
+                string[] active = j.TryGetValue("profiles", out var po0) ? (po0 is object[] pa ? pa.Select(x => Convert.ToString(x)).ToArray() : po0 is string one ? new[] { one } : new string[0]) : new string[0];
+                foreach (var d in Items(j.TryGetValue("rules", out var ro) ? ro : null))
                 {
-                    string prog = null, action = null; bool enabled = true;
-                    foreach (var raw in blk.Split('\n'))
-                    {
-                        var i = raw.IndexOf(':');
-                        if (i < 0) continue;
-                        var k = raw.Substring(0, i).Trim(); var v = raw.Substring(i + 1).Trim();
-                        if (k.StartsWith("Program", StringComparison.OrdinalIgnoreCase)) prog = v;
-                        else if (k.StartsWith("Action", StringComparison.OrdinalIgnoreCase)) action = v;
-                        else if (k.StartsWith("Enabled", StringComparison.OrdinalIgnoreCase) || k.StartsWith("Activ", StringComparison.OrdinalIgnoreCase)) enabled = !(v.Equals("No", StringComparison.OrdinalIgnoreCase) || v.Equals("Non", StringComparison.OrdinalIgnoreCase));
-                    }
-                    if (action != null && (action.Equals("Allow", StringComparison.OrdinalIgnoreCase) || action.Equals("Autoriser", StringComparison.OrdinalIgnoreCase) || action.Equals("Block", StringComparison.OrdinalIgnoreCase) || action.Equals("Bloquer", StringComparison.OrdinalIgnoreCase))) understood = true;
-                    if (prog == null || action == null || !enabled || !string.Equals(prog, program, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (action.Equals("Allow", StringComparison.OrdinalIgnoreCase) || action.Equals("Autoriser", StringComparison.OrdinalIgnoreCase)) allow = true;
-                    else if (action.Equals("Block", StringComparison.OrdinalIgnoreCase) || action.Equals("Bloquer", StringComparison.OrdinalIgnoreCase)) block = true;
+                    string S(string k) => d.TryGetValue(k, out var v) && v != null ? Convert.ToString(v) : "";
+                    var r = new FwRule { Name = S("Name"), DisplayName = S("DisplayName"), Direction = S("Direction"), Action = S("Action"), Profile = S("Profile"), Protocol = S("Protocol"), Program = S("Program"), Enabled = S("Enabled").Equals("True", StringComparison.OrdinalIgnoreCase) };
+                    // a program on a drive that is not there (a removed USB disk) is not proven gone
+                    r.ProgramExists = r.Program.Length == 0 || File.Exists(r.Program) || !Directory.Exists(Path.GetPathRoot(r.Program));
+                    rep.Rules.Add(r);
                 }
-                if (!understood) return FirewallState.Unknown;   // another Windows language: do not claim anything
-                return block ? FirewallState.Blocked : (allow ? FirewallState.Allowed : FirewallState.Missing);
+                Func<FwRule, bool> effective = r => r.Enabled && ProfileApplies(r.Profile, active);
+                bool Mine(FwRule r) => r.Direction.Equals("Inbound", StringComparison.OrdinalIgnoreCase) && string.Equals(r.Program, exe, StringComparison.OrdinalIgnoreCase);
+                var mine = rep.Rules.Where(Mine).ToList();
+                bool block = mine.Any(r => r.Action.Equals("Block", StringComparison.OrdinalIgnoreCase) && effective(r));
+                var allows = mine.Where(r => r.Action.Equals("Allow", StringComparison.OrdinalIgnoreCase) && effective(r)).ToList();
+                rep.State = block ? FirewallState.Blocked : (allows.Count > 0 ? FirewallState.Allowed : FirewallState.Missing);
+                // the rule that counts: an any-protocol one if there is one, else the first
+                var keeper = allows.FirstOrDefault(r => r.Protocol.Equals("Any", StringComparison.OrdinalIgnoreCase)) ?? allows.FirstOrDefault();
+                foreach (var r in rep.Rules)
+                {
+                    if (Mine(r))
+                    {
+                        if (r.Action.Equals("Block", StringComparison.OrdinalIgnoreCase)) { r.Status = "BLOCKS this folder"; r.Propose = r.Enabled; }
+                        else if (!r.Enabled) { r.Status = "this folder, switched off"; }
+                        else if (!ProfileApplies(r.Profile, active)) { r.Status = "this folder, but not for the current network (" + string.Join("/", active) + ")"; }
+                        else if (r == keeper) { r.Status = "in place: lets this folder in"; r.InPlace = true; }
+                        else if (keeper != null && keeper.Protocol.Equals("Any", StringComparison.OrdinalIgnoreCase)) { r.Status = "redundant: the rule above already covers all protocols"; r.Propose = true; }
+                        else if (allows.Any(o => o != r && o.Protocol.Equals(r.Protocol, StringComparison.OrdinalIgnoreCase) && allows.IndexOf(o) < allows.IndexOf(r))) { r.Status = "duplicate of an earlier " + r.Protocol + " rule"; r.Propose = true; }
+                        else r.Status = "this folder (" + r.Protocol + ")";
+                    }
+                    else if (!r.ProgramExists) { r.Status = "stale: the file is gone (" + r.Program + ")"; r.Propose = true; }
+                    else r.Status = "another copy of alvr_host.exe (left alone)";
+                }
+                int clutter = rep.Clutter;
+                rep.Headline = rep.State == FirewallState.Allowed
+                    ? (clutter == 0 ? "Windows Firewall lets this folder's alvr_host.exe in. Nothing to clean up." : $"Windows Firewall lets this folder's alvr_host.exe in. {clutter} leftover rule(s) can be removed.")
+                    : rep.State == FirewallState.Blocked ? "Windows Firewall BLOCKS this folder's alvr_host.exe: the headset will not be found and cannot connect."
+                    : "Windows Firewall has no rule for this folder's alvr_host.exe (a rule belongs to the exact folder): discovery will find nothing until it is allowed.";
             }
-            catch (Exception e) { Log.Write("WARN", "firewall check: " + e.Message); return FirewallState.Unknown; }
+            catch (Exception e) { Log.Write("WARN", "firewall check: " + e.Message); rep.State = FirewallState.Unknown; rep.Headline = "The firewall could not be read."; }
+            return rep;
+        }
+
+        public static FirewallState Check(string program) => Analyze(program).State;
+
+        static FwReport cached; static string cachedFor; static DateTime cachedAt;
+        /// The same analysis, reused for a minute (a window that shows the verdict many times, the test harness): PowerShell takes a few seconds.
+        public static FwReport AnalyzeCached(string exe)
+        {
+            if (cached == null || cachedFor != exe || (DateTime.Now - cachedAt).TotalSeconds > 60) { cached = Analyze(exe); cachedFor = exe; cachedAt = DateTime.Now; }
+            return cached;
         }
 
         /// Removes every rule of this program (a block rule beats an allow rule) and adds one inbound allow rule, through a UAC prompt. False: declined or failed.
@@ -810,6 +882,87 @@ namespace VisionALVR
                 return true;
             }
             catch (Exception e) { Log.Write("WARN", "firewall rule not added: " + e.Message); return false; }
+        }
+
+        /// Deletes these rules (by their internal name) through one UAC prompt.
+        public static bool Remove(IEnumerable<FwRule> rules)
+        {
+            var names = rules.Select(r => "'" + r.Name.Replace("'", "''") + "'").ToList();
+            if (names.Count == 0) return true;
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \"Remove-NetFirewallRule -Name " + string.Join(",", names).Replace("\"", "\\\"") + "\"")
+                { UseShellExecute = true, Verb = "runas", WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden };
+                using (var p = System.Diagnostics.Process.Start(psi)) { p.WaitForExit(60000); }
+                Log.Write("INFO", "firewall: removed " + names.Count + " leftover rule(s) of alvr_host.exe");
+                return true;
+            }
+            catch (Exception e) { Log.Write("WARN", "firewall rules not removed: " + e.Message); return false; }
+        }
+    }
+
+    /// The firewall review: every rule that names an alvr_host.exe, what each is, the clutter ticked, one click to remove it or to allow this folder.
+    public class FirewallForm : DpiForm
+    {
+        readonly ListView list = new ListView { View = View.Details, CheckBoxes = true, FullRowSelect = true, Height = 240, Width = 880, HeaderStyle = ColumnHeaderStyle.Nonclickable };
+        readonly Label headline = new Label { AutoSize = true, MaximumSize = new Size(880, 0), Font = Ui.Bold, Margin = new Padding(3, 6, 3, 6) };
+        readonly Button allow = new Button { Text = "Allow this folder", AutoSize = true, Font = Ui.Bold, MinimumSize = new Size(130, 30) };
+        readonly Button remove = new Button { Text = "Remove ticked", AutoSize = true, MinimumSize = new Size(130, 30) };
+        FwReport report;
+        readonly string exe;
+        public FirewallForm(FwReport demo = null)
+        {
+            exe = Paths.Host;
+            Text = "VisionALVR - firewall rules";
+            Font = Ui.Body; Icon = Ui.AppIcon();
+            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
+            BackColor = Color.White;
+            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
+            col.Controls.Add(new Label { Text = "Windows Firewall and alvr_host.exe", AutoSize = true, Font = Ui.Big });
+            col.Controls.Add(new Label { Text = "A rule lets one exact alvr_host.exe in. Moving the folder needs a new rule, and Windows keeps the old ones (it also adds a TCP and a UDP rule at every Allow prompt). " +
+                "Ticked rules are leftovers: files that are gone, duplicates, rules that block. Rules of other copies that still exist are left alone.", AutoSize = true, MaximumSize = new Size(880, 0), Margin = new Padding(3, 4, 3, 4) });
+            col.Controls.Add(headline);
+            foreach (var c in new[] { ("Rule", 190), ("Action", 70), ("Protocol", 80), ("Network", 100), ("On", 40), ("What it is", 400) }) Ui.Col(list, c.Item1, c.Item2);
+            col.Controls.Add(list);
+            var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            var refresh = new Button { Text = "Refresh", AutoSize = true, MinimumSize = new Size(100, 30) };
+            var close = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.OK, MinimumSize = new Size(100, 30) };
+            allow.Click += (s, e) => { Firewall.Allow(exe); Load(null); };
+            remove.Click += (s, e) => { Firewall.Remove(list.CheckedItems.Cast<ListViewItem>().Select(i => (FwRule)i.Tag)); Load(null); };
+            refresh.Click += (s, e) => Load(null);
+            row.Controls.Add(allow); row.Controls.Add(remove); row.Controls.Add(refresh); row.Controls.Add(close);
+            col.Controls.Add(row);
+            var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
+            col.Dock = DockStyle.None; col.Location = Point.Empty;
+            scroller.Controls.Add(col);
+            Controls.Add(scroller);
+            Ui.AutoFitWindow(this, null, col);
+            CancelButton = close;
+            if (demo != null) Fill(demo); else Shown += (s, e) => Load(null);
+        }
+
+        void Load(object _)
+        {
+            headline.Text = "Reading the firewall..."; headline.ForeColor = Color.DimGray;
+            allow.Enabled = remove.Enabled = false;
+            System.Threading.Tasks.Task.Run(() => Firewall.Analyze(exe)).ContinueWith(t => { try { BeginInvoke((Action)(() => Fill(t.Result))); } catch { } });
+        }
+
+        void Fill(FwReport r)
+        {
+            report = r;
+            headline.Text = r.Headline;
+            headline.ForeColor = r.State == FirewallState.Allowed ? Color.SeaGreen : r.State == FirewallState.Unknown ? Color.DimGray : Color.Firebrick;
+            list.Items.Clear();
+            foreach (var x in r.Rules.OrderByDescending(x => x.InPlace).ThenBy(x => x.Propose).ThenBy(x => x.Program))
+            {
+                var it = new ListViewItem(new[] { x.DisplayName.Length > 0 ? x.DisplayName : x.Name, x.Action, x.Protocol, x.Profile, x.Enabled ? "yes" : "no", x.Status }) { Tag = x, Checked = x.Propose, ToolTipText = x.Program };
+                if (x.Propose) it.ForeColor = Color.Firebrick; else if (x.InPlace) it.ForeColor = Color.SeaGreen;
+                list.Items.Add(it);
+            }
+            Ui.FitColumns(list);
+            allow.Enabled = r.State == FirewallState.Missing || r.State == FirewallState.Blocked;
+            remove.Enabled = r.Rules.Count > 0;
         }
     }
 
@@ -1131,6 +1284,6 @@ namespace VisionALVR
         public static Tile MakeTile(string title, string value = "-", string note = "", Color? color = null) { var t = new Tile(title, value, note); if (color != null) t.Set(value, note, color); return t; }
 
         public static Label Line(string text, Font f = null) =>
-            new Label { Text = text, AutoSize = true, Font = f ?? Body, Margin = new Padding(3, 3, 3, 3), MaximumSize = new Size(820, 0) }; // long lines wrap
+            new Label { Text = text, AutoSize = true, Font = f ?? Body, Margin = new Padding(3, 3, 3, 3), MaximumSize = new Size(760, 0) }; // long lines wrap (narrower than the page: it may also have a scroll bar)
     }
 }

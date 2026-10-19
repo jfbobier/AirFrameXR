@@ -55,6 +55,7 @@ namespace VisionALVR
         readonly Label runtimeLabel = new Label { AutoSize = true, Font = Ui.Body, MaximumSize = new Size(520, 0), Margin = new Padding(0, 6, 12, 0) };
         readonly Button runtimeBtn = new Button { AutoSize = true, MinimumSize = new Size(150, 30) };
         readonly Button layersBtn = new Button { Text = "OpenXR layers...", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(3, 0, 0, 0) };
+        readonly Button firewallBtn = new Button { Text = "Firewall rules...", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(3, 0, 0, 0) };
 
         Control RuntimeRow()
         {
@@ -63,10 +64,11 @@ namespace VisionALVR
             text.Controls.Add(new Label { Text = "OpenXR runtime", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
             text.Controls.Add(runtimeLabel);
             var btns = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right };
-            btns.Controls.Add(runtimeBtn); btns.Controls.Add(layersBtn);
+            btns.Controls.Add(runtimeBtn); btns.Controls.Add(layersBtn); btns.Controls.Add(firewallBtn);
             row.Controls.Add(text); row.Controls.Add(btns);
             runtimeBtn.Click += (s, e) => ToggleRuntime();
             layersBtn.Click += (s, e) => { using (var f = new LayersForm()) f.ShowDialog(this); };
+            firewallBtn.Click += (s, e) => { using (var f = new FirewallForm()) f.ShowDialog(this); };
             RefreshRuntime();
             return row;
         }
