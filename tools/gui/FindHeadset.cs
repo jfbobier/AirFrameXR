@@ -51,9 +51,9 @@ namespace VisionALVR
             p.Controls.Add(title);
             p.Controls.Add(Ui.Line("Open the ALVR app on the headset (same network as this PC). It appears below within a few seconds; a headset paired before is listed at once. " +
                                    "VisionALVR normally dials the saved address and finds a paired headset again by name by itself: use this when that did not work."));
-            list.Columns.Add("Name (hostname)", 290);
-            list.Columns.Add("IP address", 120);
-            list.Columns.Add("Status", 270);
+            Ui.Col(list, "Name (hostname)", 290);
+            Ui.Col(list, "IP address", 120);
+            Ui.Col(list, "Status", 270);
             list.SelectedIndexChanged += (s, e) => use.Enabled = list.SelectedItems.Count > 0 && ((Row)list.SelectedItems[0].Tag).Usable;
             list.DoubleClick += (s, e) => { if (use.Enabled) Accept(); };
             p.Controls.Add(list);
@@ -130,6 +130,7 @@ namespace VisionALVR
             {
                 item = new ListViewItem(new[] { host.Length > 0 ? $"{name} ({host})" : name, ip, text }) { Tag = row };
                 list.Items.Add(item);
+                Ui.FitColumns(list);
                 rows[host + "|" + ip] = item;
             }
             else

@@ -29,9 +29,10 @@ namespace VisionALVR
             Font = Ui.Body;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Color.White;
-            Width = 1180;
-            Height = 780;
-            MinimumSize = new Size(760, 520);
+            var k = Ui.SystemScale;
+            Width = (int)(1180 * k); Height = (int)(780 * k);
+            MinimumSize = new Size((int)(760 * k), (int)(520 * k));
+            Ui.FitToWorkArea(this);
 
             var autoDel = new CheckBox { Text = "Delete the records of games that are no longer installed", AutoSize = true, Checked = settings.AutoDeleteGameLogs, Margin = new Padding(3, 6, 3, 6) };
             autoDel.CheckedChanged += (s, e) => { settings.AutoDeleteGameLogs = autoDel.Checked; settings.Save(); if (autoDel.Checked) { Scan(); Fill(null); } };
@@ -41,7 +42,7 @@ namespace VisionALVR
             bottom.Controls.Add(autoDel);
             bottom.Controls.Add(open);
 
-            var left = new Panel { Dock = DockStyle.Left, Width = 300, Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
+            var left = new Panel { Dock = DockStyle.Left, Width = (int)(300 * Ui.SystemScale), Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
             left.Controls.Add(games);
             games.BackColor = left.BackColor;
             Controls.Add(right);
@@ -171,10 +172,10 @@ namespace VisionALVR
 
         Control SessionList(List<Dictionary<string, object>> sessions)
         {
-            var lv = new ListView { View = View.Details, FullRowSelect = true, GridLines = false, Height = 150, Width = Math.Max(400, right.ClientSize.Width - 40), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3) };
+            var lv = new ListView { View = View.Details, FullRowSelect = true, GridLines = false, Height = (int)(150 * Ui.LoadScale(right)), Width = Math.Max(400, right.ClientSize.Width - 40), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3) };
             string[] cols = { "Date", "Headset", "Gen.", "Min", "Game", "Shown", "Repeat %", "Lat. ms", "Vectors" };
             int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 70 };
-            for (int i = 0; i < cols.Length; i++) lv.Columns.Add(cols[i], (int)(w[i] * DeviceDpi / 96.0));   // column widths are raw pixels: scale them
+            for (int i = 0; i < cols.Length; i++) Ui.Col(lv, cols[i], w[i]);
             right.Resize += (s, e) => lv.Width = Math.Max(400, right.ClientSize.Width - 40);
             foreach (var s in Enumerable.Reverse(sessions))
             {
@@ -183,6 +184,7 @@ namespace VisionALVR
                     N(D(s, "headset_repeated_typ") * 100), net != null ? N(D(net, "latency_ms"), "0") : "-",
                     mv != null ? (D(mv, "frames") > 0 ? "working" : "-") : "-" }));
             }
+            Ui.FitColumns(lv);
             return lv;
         }
 

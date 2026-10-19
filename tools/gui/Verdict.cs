@@ -22,7 +22,7 @@ namespace VisionALVR
             var eh = r.EncH > 0 ? r.EncH : (int)(hs.PanelH * ctxScale * (hs.Foveation ? 0.52 : 1.0));
             var tg = Targets.For(ew, eh, ctxFps);
             var list = new ListView { View = View.Details, FullRowSelect = true, Width = 790, Height = 350, ShowItemToolTips = true };
-            list.Columns.Add("Measurement", 220); list.Columns.Add("Your value", 190); list.Columns.Add("Target for your setup", 280); list.Columns.Add("Verdict", 90);
+            Ui.Col(list, "Measurement", 220); Ui.Col(list, "Your value", 190); Ui.Col(list, "Target for your setup", 280); Ui.Col(list, "Verdict", 90);
             var bad = new List<string>();
             void add(string name, string val, string target, Rating rt, string advice = null)
             {
@@ -67,6 +67,7 @@ namespace VisionALVR
                 "OpenXR layers that may capture the controllers are enabled (" + string.Join(", ", risky.Select(l => l.Name)) + "): hands and controllers may do nothing in games. Review them with the button below; switching one off is reversible.");
             add("GPU", string.IsNullOrEmpty(r.GpuName) ? "-" : r.GpuName, $"{r.Engines} hardware encoder engine(s), {r.VramMb / 1024.0:0} GB", Rating.Unknown);
             p.Controls.Add(list);
+            Ui.FitColumns(list);
             if (layersOn.Count > 0)
             {
                 var review = new Button { Text = "Review OpenXR layers...", AutoSize = true, Margin = new Padding(3, 6, 3, 6) };

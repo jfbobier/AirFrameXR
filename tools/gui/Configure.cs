@@ -56,8 +56,8 @@ namespace VisionALVR
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body;
             BackColor = Color.White;
-            Width = 920;
-            Height = 860;
+            Width = (int)(920 * Ui.SystemScale); Height = (int)(860 * Ui.SystemScale);
+            Ui.FitToWorkArea(this);
             var tabs = new TabControl { Dock = DockStyle.Fill };
             // workflow: pair, then the benchmark (it fills the settings), then review the settings
             tabs.TabPages.Add(HeadsetTab());
@@ -88,9 +88,9 @@ namespace VisionALVR
             var t = new TabPage("1. Headset") { BackColor = Color.White, Padding = new Padding(10) };
             var p = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoScroll = true };
             p.Controls.Add(Ui.Line("Open the ALVR app on the Vision Pro (same network as this PC). It appears below within a few seconds."));
-            found.Columns.Add("Name (hostname)", 260);
-            found.Columns.Add("IP address", 140);
-            found.Columns.Add("ALVR version", 170);
+            Ui.Col(found, "Name (hostname)", 260);
+            Ui.Col(found, "IP address", 140);
+            Ui.Col(found, "ALVR version", 170);
             p.Controls.Add(found);
             var pair = new Button { Text = "Pair the selected headset", AutoSize = true, Font = Ui.Bold };
             pair.Click += (s, e) => PairSelected();
@@ -131,6 +131,7 @@ namespace VisionALVR
             var item = new ListViewItem(new[] { f.Hostname, f.Ip, f.Compatible ? $"compatible (ALVR {version})" : $"INCOMPATIBLE ({f.Protocol}, streamer {f.ServerProtocol})" }) { Tag = f };
             if (!f.Compatible) item.ForeColor = Color.Firebrick;
             found.Items.Add(item);
+            Ui.FitColumns(found);
             if (found.Items.Count == 1) item.Selected = true;
         }
 
@@ -293,8 +294,9 @@ namespace VisionALVR
             p.Controls.Add(net);
             benchList.Width = 840;
             foreach (var c in new[] { ("Test", 200), ("Mbps", 60), ("fps", 50), ("lost/s", 60), ("total ms", 70), ("encode ms", 75), ("network ms", 80), ("decode ms", 75), ("result", 160) })
-                benchList.Columns.Add(c.Item1, c.Item2);
+                Ui.Col(benchList, c.Item1, c.Item2);
             p.Controls.Add(benchList);
+            Ui.FitColumns(benchList);
             p.Controls.Add(benchStatus);
             applyBitrate.Click += (s, e) =>
             {

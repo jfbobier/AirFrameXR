@@ -18,9 +18,9 @@ namespace VisionALVR
         public readonly NumericUpDown EyeW = Num(256, 8192, 32), EyeH = Num(256, 8192, 32), Bitrate = Num(10, 1000, 10);
         public readonly ComboBox Fps = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         public readonly RadioButton ProfFov = new RadioButton { Text = "Foveated (ALVR foveated encoding; recommended)", AutoSize = true };
-        public readonly RadioButton ProfFull = new RadioButton { Text = "Full frame + split encode (experimental: 3x the pixels, needs a strong Wi-Fi link)", AutoSize = true };
-        public readonly CheckBox Split = new CheckBox { Text = "Split encoding: one strip per NVENC engine (recommended; needs a GPU with 2 or more engines)", AutoSize = true };
-        public readonly CheckBox FrameGen = new CheckBox { Text = "Frame generation (experimental): the game renders every other frame, the streamer fills the one in between from the optical flow (for games stuck at 50-70 fps)", AutoSize = true, MaximumSize = new Size(560, 0) };
+        public readonly RadioButton ProfFull = new RadioButton { Text = "Full frame + split encode (experimental, needs a strong link)", AutoSize = true };
+        public readonly CheckBox Split = new CheckBox { Text = "Split encoding: one strip per NVENC engine (needs 2 or more)", AutoSize = true };
+        public readonly CheckBox FrameGen = new CheckBox { Text = "Frame generation (experimental; also in the streamer window)", AutoSize = true };
         public readonly NumericUpDown Fcx = Dec(0.1m, 1m), Fcy = Dec(0.1m, 1m), Fsx = Dec(-1m, 1m), Fsy = Dec(-1m, 1m), Frx = Dec(1m, 10m), Fry = Dec(1m, 10m);
         readonly Button idle = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
         public readonly CheckBox Audio = new CheckBox { Text = "Stream game audio (Windows default output)", AutoSize = true };
@@ -28,7 +28,7 @@ namespace VisionALVR
         public readonly ComboBox Proto = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         public readonly NumericUpDown Packet = Num(500, 4000, 100);
         public readonly NumericUpDown Haptics = Dec(0m, 5m);
-        public readonly CheckBox DebugDefault = new CheckBox { Text = "Debug logging on at every start (off by default: it costs a few ms per frame)", AutoSize = true };
+        public readonly CheckBox DebugDefault = new CheckBox { Text = "Debug logging at every start (costs a few ms per frame)", AutoSize = true };
         public readonly ComboBox RecenterKey = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 130 };
         const string V = "session_settings.video.";
 
@@ -42,7 +42,7 @@ namespace VisionALVR
             AutoScroll = true;
             BackColor = Color.White;
             Font = Ui.Body;
-            var g = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Top };
+            var g = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.None, Location = Point.Empty };   // its natural width: the panel scrolls rather than clipping
             void row(string label, Control c, Control reasonFor = null)
             {
                 g.Controls.Add(Ui.Line(label));
@@ -55,7 +55,7 @@ namespace VisionALVR
             }
             void section(string title) { var l = Ui.Line(title, Ui.Big); l.ForeColor = Ui.Accent; l.Margin = new Padding(3, 12, 3, 3); g.Controls.Add(l); g.SetColumnSpan(l, 2); }
             Control flow(params Control[] cs) { var f = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) }; f.Controls.AddRange(cs); return f; }
-            void note(Control c) { g.Controls.Add(new Label()); g.Controls.Add(c); }
+            void note(Control c) { if (c is Label nl) nl.MaximumSize = new Size(560, 0); g.Controls.Add(new Label()); g.Controls.Add(c); }   // wraps inside the column, not at the page's width
 
             section("Video");
             var res = flow(EyeW, Ui.Line("x"), EyeH);

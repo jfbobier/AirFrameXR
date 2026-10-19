@@ -33,18 +33,20 @@ namespace VisionALVR
             FormBorderStyle = FormBorderStyle.FixedSingle;
             StartPosition = FormStartPosition.CenterScreen;
             MaximizeBox = false;
-            AutoSize = true;
-            AutoSizeMode = AutoSizeMode.GrowAndShrink;
             BackColor = Color.White;
 
-            var body = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
+            var body = new TableLayoutPanel { Dock = DockStyle.None, Location = Point.Empty, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
             foreach (var t in Tools) body.Controls.Add(Card(t));
             body.Controls.Add(RuntimeRow());
             var help = new Button { Text = "Help (README)", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
             help.Click += (s2, e2) => { var f = Path.Combine(Paths.Docs, "README.txt"); if (File.Exists(f)) Process.Start(f); else MessageBox.Show(this, "docs\\README.txt is missing from this folder.", "VisionALVR"); };
             body.Controls.Add(help);
-            Controls.Add(body);
-            Controls.Add(Ui.CompactHeader("Launcher"));
+            var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
+            scroller.Controls.Add(body);
+            Controls.Add(scroller);
+            var hdr = Ui.CompactHeader("Launcher");
+            Controls.Add(hdr);
+            Ui.AutoFitWindow(this, hdr, body);
             Ui.ScreenshotWhenShown(this, 800);
         }
 

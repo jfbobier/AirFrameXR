@@ -22,7 +22,7 @@ namespace VisionALVR
         HostProcess handshakeHost;
         CancellationTokenSource testCts;
         readonly Panel content = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(14) };
-        readonly Panel stepsPanel = new Panel { Dock = DockStyle.Left, Width = 230, BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), Padding = new Padding(12) };
+        readonly Panel stepsPanel = new Panel { Dock = DockStyle.Left, Width = (int)(230 * Ui.SystemScale), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), Padding = new Padding(12) };
         readonly Button back = new Button { Text = "< Back", AutoSize = true, MinimumSize = new Size(90, 30) };
         readonly Button next = new Button { Text = "Next >", AutoSize = true, MinimumSize = new Size(110, 30), Font = Ui.Bold };
         readonly Button advanced = new Button { Text = "Advanced (old tabs)", AutoSize = true };
@@ -69,12 +69,13 @@ namespace VisionALVR
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body;
             BackColor = Color.White;
-            Width = 1080;
-            Height = 900;
-            MinimumSize = new Size(980, 760);
+            var k = Ui.SystemScale;   // sizes set in code are raw pixels: scaled by hand, then kept inside the work area
+            Width = (int)(1080 * k); Height = (int)(900 * k);
+            MinimumSize = new Size((int)(980 * k), (int)(760 * k));
+            Ui.FitToWorkArea(this);
             for (int i = 0; i < 7; i++)
             {
-                stepLabels[i] = new Label { Text = StepNames[i], AutoSize = false, Width = 200, Height = 30, Dock = DockStyle.Top, Font = Ui.Body, ForeColor = Color.DimGray, TextAlign = ContentAlignment.MiddleLeft };
+                stepLabels[i] = new Label { Text = StepNames[i], AutoSize = false, Height = (int)(30 * Ui.SystemScale), Dock = DockStyle.Top, Font = Ui.Body, ForeColor = Color.DimGray, TextAlign = ContentAlignment.MiddleLeft };
             }
             for (int i = 6; i >= 0; i--) stepsPanel.Controls.Add(stepLabels[i]);
             var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 4, Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
@@ -99,6 +100,9 @@ namespace VisionALVR
             var shot = Ui.ScreenshotPath();
             if (shot != null) Ui.ScreenshotWhenShown(this, 3500);
         }
+
+        /// uitest.exe: one page of the demo wizard, without the discovery and the tests.
+        public void ForTest(int page) { if (demo) LoadDemo(); GoTo(page); }
 
         // ------------------------------------------------------------------------------------------------------------- navigation
         void Start()
@@ -145,6 +149,7 @@ namespace VisionALVR
                 case 5: page = PageResults(); break;
                 default: page = PageConfig(); next.Text = "Save and start VisionALVR"; break;
             }
+            Ui.LateScale(page, this);   // built after the window loaded: scaled by hand
             page.Dock = DockStyle.Fill;
             content.Controls.Add(page);
             if (diagnose && s == 5) next.Text = "Close";
@@ -203,9 +208,9 @@ namespace VisionALVR
             p.Controls.Add(H("Your headset"));
             p.Controls.Add(Ui.Line("Open the ALVR app on the headset (same network as this PC). It appears below within a few seconds. A headset you paired before is listed at once."));
             found.Columns.Clear(); found.Items.Clear(); rows.Clear();
-            found.Columns.Add("Name (hostname)", 300);
-            found.Columns.Add("IP address", 140);
-            found.Columns.Add("Status", 320);
+            Ui.Col(found, "Name (hostname)", 300);
+            Ui.Col(found, "IP address", 140);
+            Ui.Col(found, "Status", 320);
             found.SelectedIndexChanged += (s, e) =>
             {
                 if (found.SelectedItems.Count == 0) { chosenHost = chosenIp = chosenName = ""; return; }
@@ -263,6 +268,7 @@ namespace VisionALVR
             {
                 item = new ListViewItem(new[] { host.Length > 0 ? $"{name} ({host})" : name, ip, status }) { Tag = new[] { host, ip, name } };
                 found.Items.Add(item);
+                Ui.FitColumns(found);
                 rows[host + "|" + ip] = item;
             }
             else
@@ -402,6 +408,7 @@ namespace VisionALVR
             row("Video codec", $"HEVC{(hs.EncHigh ? " (high profile)" : "")}{(hs.Enc10 ? ", 10-bit" : ", 8-bit")}{(hs.EncAv1 ? "; the headset also decodes AV1 (VisionALVR encodes HEVC)" : "")}");
             row("Colour", $"{(hs.PreferFull ? "full range" : "limited range")}, encoding gamma {hs.Gamma:0.00}{(hs.PreferHdr ? ", HDR preferred" : "")}");
             row("Microphone", hs.MicRate > 0 ? $"{hs.MicRate} Hz" : "none advertised");
+            Ui.LateScale(g, this);
             hsDetails.Controls.Add(g);
             hsDetails.Visible = true;
             hsGo.Visible = true;
@@ -437,6 +444,12 @@ namespace VisionALVR
 
         /// The lower part of the handshake page for the chosen option: the profile (matched or imported) with the network it is for, or the pre-filled values.
         void RenderMode(bool real)
+        {
+            RenderModeInner(real);
+            foreach (Control c in modePanel.Controls) Ui.LateScale(c, this);   // rebuilt after the window loaded
+        }
+
+        void RenderModeInner(bool real)
         {
             modePanel.Controls.Clear();
             variantBox = null; rateBox = null; scaleBox = null; foveationBox = null;
@@ -559,7 +572,7 @@ namespace VisionALVR
             p.Controls.Add(H("Testing your setup"));
             p.Controls.Add(Ui.Line("Each test is ticked off when it is done. This takes a few minutes; the headset ones need the ALVR app open on it."));
             testList = new ListView { View = View.Details, FullRowSelect = true, Width = 790, Height = 300, HeaderStyle = ColumnHeaderStyle.None, ShowItemToolTips = true };
-            testList.Columns.Add("Test", 330); testList.Columns.Add("Result", 440);
+            Ui.Col(testList, "Test", 330); Ui.Col(testList, "Result", 440);
             p.Controls.Add(testList);
             testStatus = Ui.Line("");
             p.Controls.Add(testStatus);
@@ -617,6 +630,7 @@ namespace VisionALVR
             }
             steps = demo ? DemoSteps() : Tests.Build(ctx);
             foreach (var st in steps) testList.Items.Add(new ListViewItem(new[] { Glyph(st.State) + "  " + st.Name, "" }));
+            Ui.FitColumns(testList);
             if (demo) { FinishTests(); return; }
             testCts = new CancellationTokenSource();
             ctx.Ct = testCts.Token;
@@ -650,6 +664,7 @@ namespace VisionALVR
             it.ToolTipText = st.Name + "\n" + st.Note;
             it.ForeColor = st.State == TestState.Failed ? Color.Firebrick : st.State == TestState.Warning ? Color.DarkOrange : st.State == TestState.Passed ? Color.SeaGreen : st.State == TestState.Skipped ? Color.Gray : Color.Black;
             if (st.State == TestState.Running) testList.EnsureVisible(i);
+            Ui.FitColumns(testList);
         }
 
         void FinishTests()
@@ -694,7 +709,7 @@ namespace VisionALVR
             p.RowCount = 4;
             p.RowStyles.Clear();
             p.RowStyles.Add(new RowStyle(SizeType.AutoSize)); p.RowStyles.Add(new RowStyle(SizeType.AutoSize)); p.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); p.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            var exp = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            var exp = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0), MaximumSize = new Size(640, 0) };   // wraps inside the page
             var authorBox = new TextBox { Width = 130, Text = "" };
             var netBox = new TextBox { Width = 230, Text = "" };
             var export = new Button { Text = "Export profile...", AutoSize = true };

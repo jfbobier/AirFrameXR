@@ -1,0 +1,16 @@
+{
+  "exe": "Cyberpunk2077.exe",
+  "name": "Cyberpunk 2077 (C) 2020 by CD Projekt RED - Phantom Liberty Edition",
+  "paths": ["C:\\Windows\\notepad.exe"],
+  "levels": { "Apple Vision Pro": { "half": { "seconds": 600, "rendered_fps": 44.1, "runs": 2 } } },
+  "sessions": [
+    { "start": 1760800000, "headset": "Apple Vision Pro", "level": "half", "seconds": 1500, "display_hz": 90, "rendered_fps": 44.8, "rendered_fps_low": 38.2, "streamed_fps": 89.7,
+      "headset_repeated_typ": 0.01, "host_repeats_typ": 0.0, "updated": 1760801500,
+      "net": { "windows": 150, "bitrate_mbps": 120, "throughput_mbps": 118, "displayed_fps": 89.1, "latency_ms": 57, "latency_p95_ms": 74, "encode_ms": 6, "network_ms": 9, "decode_ms": 14, "packets_lost": 3 },
+      "mv": { "enabled": true, "frames": 53000, "used_eyes": 100000 }, "gpu": { "name": "RTX 5090", "driver": "617.42" } },
+    { "start": 1760900000, "headset": "Apple Vision Pro", "level": "third", "seconds": 900, "display_hz": 90, "rendered_fps": 31.0, "rendered_fps_low": 27, "streamed_fps": 89.5,
+      "headset_repeated_typ": 0.08, "host_repeats_typ": 0.02, "updated": 1760900900,
+      "net": { "windows": 90, "bitrate_mbps": 110, "throughput_mbps": 108, "displayed_fps": 84.0, "latency_ms": 66, "latency_p95_ms": 99, "encode_ms": 6, "network_ms": 12, "decode_ms": 15, "packets_lost": 0 },
+      "mv": { "enabled": true, "frames": 0, "used_eyes": 0 }, "gpu": { "name": "RTX 5090", "driver": "617.42" } }
+  ]
+}

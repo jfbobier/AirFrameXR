@@ -638,7 +638,7 @@ namespace VisionALVR
             col.Controls.Add(new Label { Text = "A layer that is enabled and implicit is loaded into every OpenXR game. Some capture or remap the controllers before the runtime (ours included) ever sees them: " +
                 "hands and controllers then do nothing in the game. Tick the ones to switch off; this only flips a switch in the registry, nothing is deleted, and Enable puts it back.", AutoSize = true, MaximumSize = new Size(820, 0), Margin = new Padding(3, 4, 3, 6) });
             string[] cols = { "Layer", "Loads", "Where", "Note" }; int[] w = { 290, 95, 170, 230 };
-            for (int i = 0; i < cols.Length; i++) list.Columns.Add(cols[i], (int)(w[i] * DeviceDpi / 96.0));
+            for (int i = 0; i < cols.Length; i++) Ui.Col(list, cols[i], w[i]);
             col.Controls.Add(list);
             col.Controls.Add(status);
             var row = new FlowLayoutPanel { AutoSize = true };
@@ -667,6 +667,7 @@ namespace VisionALVR
                 list.Items.Add(it);
             }
             var n = layers.Count(l => l.Enabled && l.Section == "Implicit");
+            Ui.FitColumns(list);
             status.Text = layers.Count == 0 ? "No OpenXR API layer is registered." : $"{n} implicit layer(s) enabled. {layers.Count(l => l.Enabled && l.Section == "Implicit" && l.MayCaptureInput)} of them may capture input.";
         }
 
@@ -926,7 +927,8 @@ namespace VisionALVR
         readonly Label value, note;
         public Tile(string title, string v, string n)
         {
-            AutoSize = true; ColumnCount = 1; BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9); Padding = new Padding(10, 6, 10, 6); Margin = new Padding(0, 0, 8, 8); MinimumSize = new Size(110, 0);
+            var k = Ui.SystemScale;   // built after the window loaded: its pixel sizes are scaled by hand
+            AutoSize = true; ColumnCount = 1; BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9); Padding = new Padding((int)(10 * k), (int)(6 * k), (int)(10 * k), (int)(6 * k)); Margin = new Padding(0, 0, (int)(8 * k), (int)(8 * k)); MinimumSize = new Size((int)(110 * k), 0);
             Controls.Add(new Label { Text = title, AutoSize = true, ForeColor = Color.DimGray, Font = Ui.Body, Margin = new Padding(0) });
             value = new Label { Text = v, AutoSize = true, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Margin = new Padding(0) };
             note = new Label { Text = n, AutoSize = true, ForeColor = Color.Gray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0) };
@@ -937,6 +939,100 @@ namespace VisionALVR
 
     public static class Ui
     {
+        /// Test harness only (uitest.exe): pretend the display is this many dpi. 0 = the real one.
+        public static int DpiOverride;
+        /// Test harness only: the pretend work area (device pixels) the window-fitting code uses instead of the real screen's.
+        public static Rectangle? WorkAreaOverride;
+        public static Rectangle WorkArea(Control c) => WorkAreaOverride ?? Screen.FromControl(c).WorkingArea;
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Form, Action> refits = new System.Runtime.CompilerServices.ConditionalWeakTable<Form, Action>();
+        /// Test harness: runs a window's own fitting code again (after the pretend scale and work area changed).
+        public static void Refit(Form f) { if (refits.TryGetValue(f, out var a)) a(); }
+
+        /// A window with a fixed design size (a wizard, a list window): never bigger than the work area, its minimum size too. Sizes set in code are
+        /// raw pixels the framework does not scale: multiply them by SystemScale first.
+        public static void FitToWorkArea(Form f)
+        {
+            Action fit = () =>
+            {
+                var wa = WorkArea(f);
+                f.MinimumSize = new Size(Math.Min(f.MinimumSize.Width, wa.Width), Math.Min(f.MinimumSize.Height, wa.Height));
+                f.Size = new Size(Math.Min(f.Width, wa.Width), Math.Min(f.Height, wa.Height));
+            };
+            f.Load += (s, e) => fit();
+            refits.Remove(f); refits.Add(f, fit);
+        }
+
+        /// A window exactly as big as its content: the header (docked at the top) plus the body, which sits in a scrolling host. When that is more
+        /// than the work area allows (1080p at 150 %, a long message) the window stops at the work area and the body scrolls instead of being cut.
+        public static void AutoFitWindow(Form f, Control header, Control body)
+        {
+            Action fit = () =>
+            {
+                var wa = WorkArea(f);
+                var chrome = new Size(f.Width - f.ClientSize.Width, f.Height - f.ClientSize.Height);
+                var bs = body.PreferredSize;
+                int cw = Math.Max(bs.Width, body.Width) + 4, ch = (header != null ? header.Height : 0) + Math.Max(bs.Height, body.Height) + 2;
+                int maxW = wa.Width - chrome.Width, maxH = wa.Height - chrome.Height;
+                if (ch > maxH) { ch = maxH; cw += SystemInformation.VerticalScrollBarWidth; }
+                if (cw > maxW) { cw = maxW; ch = Math.Min(maxH, ch + SystemInformation.HorizontalScrollBarHeight); }
+                f.ClientSize = new Size(cw, ch);
+            };
+            f.Load += (s, e) => fit();
+            body.SizeChanged += (s, e) => { if (f.IsHandleCreated) fit(); };
+            refits.Remove(f); refits.Add(f, fit);
+        }
+        static float systemScale;
+        /// the system dpi / 96, never the test override (the harness scales everything else itself)
+        public static float SystemScale { get { if (systemScale <= 0) using (var g = Graphics.FromHwnd(IntPtr.Zero)) systemScale = g.DpiX / 96f; return systemScale; } }
+        public static int DpiOf(Control c) => DpiOverride > 0 ? DpiOverride : (c != null ? c.DeviceDpi : 96);
+        /// A size designed at 96 dpi, in pixels at the display's dpi (for what the framework does not scale itself: list columns).
+        public static int Px(Control c, int designPx) => (int)Math.Round(designPx * DpiOf(c) / 96.0);
+        /// A details-view column whose width is a 96-dpi design value (a starting width: FitColumns sizes the columns from their content).
+        public static void Col(ListView lv, string header, int designPx) => lv.Columns.Add(header, Px(lv, designPx));
+
+        /// The scale the framework applied to the window at load (the system dpi / 96): what controls created later must be given by hand.
+        public static float LoadScale(Control c)
+        {
+            var f = c.FindForm() ?? c as Form;
+            return f != null && f.CurrentAutoScaleDimensions.Width > 0 ? f.CurrentAutoScaleDimensions.Width / 96f : 1f;
+        }
+        /// Controls built after the window loaded (a wizard page, a rebuilt pane) are not scaled by the framework: give them the window's scale.
+        public static T LateScale<T>(T sub, Control owner) where T : Control
+        {
+            var k = LoadScale(owner);
+            if (Math.Abs(k - 1f) > 0.01f) sub.Scale(new SizeF(k, k));
+            return sub;
+        }
+
+        /// Column widths from what they hold (header and cells), then the widest shrunk so the list never needs sideways scrolling. Fonts and dpi
+        /// change what fits, which fixed pixel widths cannot follow. Re-run when the items change; hooked to the list's resize once.
+        public static void FitColumns(ListView lv)
+        {
+            if (lv.View != View.Details || lv.Columns.Count == 0) return;
+            if (!lv.Tag?.Equals("fit-hooked") ?? true) { lv.Tag = "fit-hooked"; lv.SizeChanged += (s, e) => FitColumns(lv); lv.FontChanged += (s, e) => FitColumns(lv); lv.ParentChanged += (s, e) => FitColumns(lv); }   // the font it inherits is only known once it has a parent
+            int pad = Px(lv, 16);                                  // the list's own padding around a header or a cell
+            int n = lv.Columns.Count;
+            var want = new int[n]; var floor = new int[n];
+            for (int i = 0; i < n; i++)
+            {
+                floor[i] = want[i] = TextRenderer.MeasureText(lv.Columns[i].Text, lv.Font).Width + pad;
+                foreach (ListViewItem it in lv.Items)
+                    if (i < it.SubItems.Count) want[i] = Math.Max(want[i], TextRenderer.MeasureText(it.SubItems[i].Text, lv.Font).Width + pad + (i == 0 ? Px(lv, 6) : 0));
+            }
+            int avail = lv.ClientSize.Width - 2;
+            if (avail > 0)
+                while (want.Sum() > avail)
+                {
+                    int widest = 0;
+                    for (int i = 1; i < n; i++) if (want[i] - floor[i] > want[widest] - floor[widest]) widest = i;
+                    int cut = Math.Min(want.Sum() - avail, want[widest] - floor[widest]);
+                    if (cut <= 0) break;                           // only headers left: sideways scrolling is all that remains
+                    want[widest] -= cut;
+                }
+            lv.BeginUpdate();
+            for (int i = 0; i < n; i++) if (lv.Columns[i].Width != want[i]) lv.Columns[i].Width = want[i];
+            lv.EndUpdate();
+        }
         public static readonly Font Body = new Font("Segoe UI", 9.5f);
         public static readonly Font Bold = new Font("Segoe UI", 9.5f, FontStyle.Bold);
         public static readonly Font Big = new Font("Segoe UI", 11f, FontStyle.Bold);

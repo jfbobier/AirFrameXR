@@ -74,11 +74,10 @@ namespace VisionALVR
             FormBorderStyle = FormBorderStyle.FixedSingle;
             StartPosition = FormStartPosition.CenterScreen;   // like ALVR's dashboard, not the top-left corner (user, 2026-10-17)
             MaximizeBox = false;
-            AutoSize = true;
-            AutoSizeMode = AutoSizeMode.GrowAndShrink;
             BackColor = Color.White;
 
-            var body = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
+            // the window is as big as its content, up to the work area; beyond that the body scrolls (Ui.AutoFitWindow)
+            var body = new TableLayoutPanel { Dock = DockStyle.None, Location = Point.Empty, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
             var gpu = check != null && check.TryGetValue("gpu", out var g) ? g as Dictionary<string, object> : null;
             runtime.Text = $"GPU: {S(gpu, "name")} ({S(gpu, "arch_name")}, driver {S(gpu, "driver")})   ·   OpenXR runtime: {(OpenXr.IsOurs() ? "VisionALVR (this folder)" : "NOT registered")}";
             runtime.ForeColor = Color.DimGray;
@@ -178,8 +177,12 @@ namespace VisionALVR
             footer.ForeColor = Color.Gray;
             body.Controls.Add(footer);
 
-            Controls.Add(body);
-            Controls.Add(Ui.CompactHeader("Streamer for ALVR headsets (Vision Pro, Quest, ...)"));
+            var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
+            scroller.Controls.Add(body);
+            Controls.Add(scroller);
+            var hdr = Ui.CompactHeader("Streamer for ALVR headsets (Vision Pro, Quest, ...)");
+            Controls.Add(hdr);
+            Ui.AutoFitWindow(this, hdr, body);
 
 
             debug.Checked = settings.Debug;
@@ -559,6 +562,21 @@ namespace VisionALVR
                     footer.Text = "Encode error: " + S(d, "message");
                     break;
             }
+        }
+
+        /// uitest.exe: the fullest the window gets (long lines, the firewall warning, every tile filled), to audit the layout at any size and scale.
+        public void ApplyDemoState()
+        {
+            headset.Text = "Headset: connected - Apple Vision Pro of Jean-Francois (192.168.100.123)"; headset.ForeColor = Color.SeaGreen;
+            findHint.Visible = true;
+            fwWarn.Text = "Windows Firewall blocks alvr_host.exe: the headset will not be found by discovery and the stream may not connect."; fwWarn.Visible = fwFix.Visible = true;
+            game.Text = "Game: Cyberpunk2077.exe (Cyberpunk 2077) after 123 min";
+            tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at 1/2"); tShown.Set("144.4 fps", "repeated periods 12.3 %", Color.Firebrick);
+            tBitrate.Set("1000 Mbps", "average"); tLatency.Set("123 ms", "enc 12 + net 12 + dec 12"); tLoss.Set("1234", "packets lost", Color.Firebrick);
+            stats.Text = "Host repeats 12.3 % (game under the cap), skipped 12.3 %. Frame generation recommendation: 1/2 next time (1/2: last run 44 fps, 38 in its slowest tenth, headset repeated 1.2 % typical (5.6 % in its heavy parts), host repeats 0.0 %)";
+            fgRateText.Text = FgRateText[2];
+            footer.Text = "config\\session.json is missing and there is no config\\session.default.json to create it from: this VisionALVR folder is incomplete. Unzip the release again (you can keep your config\\ folder).";
+            footer.ForeColor = Color.Firebrick;
         }
 
         // After a game with generation on and the DLSS-vectors tick on, if the game gave no vectors and the extractor DLL is not in its folder:
