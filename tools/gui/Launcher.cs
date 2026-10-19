@@ -124,15 +124,67 @@ namespace VisionALVR
             return card;
         }
 
-        void Launch(Tool t, string exe)
+        // The launcher steps aside while a tool is open and comes back when the last one is closed (the wizard hands over to the streamer: the launcher
+        // waits for every tool, not for the one it started).
+        static readonly string[] ToolProcesses = { "streamer", "configure", "performance" };
+        readonly Timer watch = new Timer { Interval = 500 };
+        Process launched;
+        static bool AnyToolOpen() => ToolProcesses.Any(n => Process.GetProcessesByName(n).Length > 0);
+
+        void Launch(Tool t, string exe, string extraArgs = "")
         {
             if (t.StopsStreamer && Process.GetProcessesByName("streamer").Length > 0)
             {
                 MessageBox.Show(this, t.Title + " needs the network port the streamer uses. Close the streamer window first.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            try { Process.Start(exe, t.Args); Log.Write("INFO", "launcher: started " + t.Exe); }
-            catch (Exception ex) { MessageBox.Show(this, "Could not start " + Path.GetFileName(t.Exe) + ": " + ex.Message, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            try
+            {
+                launched = Process.Start(exe, (t.Args + " " + extraArgs).Trim());
+                Log.Write("INFO", "launcher: started " + t.Exe);
+            }
+            catch (Exception ex) { MessageBox.Show(this, "Could not start " + Path.GetFileName(t.Exe) + ": " + ex.Message, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            FlowLog("hide: launched " + t.Title);
+            Hide();
+            watch.Tick -= WatchTick; watch.Tick += WatchTick; watch.Start();
+        }
+
+        void WatchTick(object s, EventArgs e)
+        {
+            if ((launched != null && !launched.HasExited) || AnyToolOpen()) return;
+            watch.Stop();
+            RefreshRuntime();     // the tool may have switched the runtime or the layers
+            Show(); Activate();
+            FlowLog("show: every tool closed");
+            if (testFlow) { var c = new Timer { Interval = 2500 }; c.Tick += (s2, e2) => { FlowLog("sample"); Close(); }; c.Start(); }   // the test ends once the launcher is back
+        }
+
+        // test harness (harness/launcher_flow.py): VISIONALVR_TEST_FLOW_LOG = a file that gets one line per state change and sample
+        static readonly string FlowLogPath = Environment.GetEnvironmentVariable("VISIONALVR_TEST_FLOW_LOG");
+        void FlowLog(string what)
+        {
+            if (string.IsNullOrEmpty(FlowLogPath)) return;
+            try { File.AppendAllText(FlowLogPath, $"{DateTime.Now:HH:mm:ss.fff} visible={(Visible ? 1 : 0)} tools={ToolProcesses.Sum(n => Process.GetProcessesByName(n).Length)} {what}\r\n"); } catch { }
+        }
+
+        /// --test-flow "<tool title>": after the window is up, launches that tool as a click would, with --screenshot so the tool closes itself, and samples the state.
+        public void StartTestFlowPublic(string title) => StartTestFlow(title);
+        bool testFlow;
+        void StartTestFlow(string title)
+        {
+            testFlow = true;
+            var t = Tools.First(x => x.Title == title);
+            var sampler = new Timer { Interval = 400 }; sampler.Tick += (s, e) => FlowLog("sample"); sampler.Start();
+            var go = new Timer { Interval = 1500 };
+            go.Tick += (s, e) =>
+            {
+                go.Stop();
+                FlowLog("before launch");
+                var shot = Path.Combine(Path.GetTempPath(), "visionalvr_flow_" + title.Replace(' ', '_') + ".png");
+                Launch(t, Path.Combine(Paths.Dir, t.Exe), "--screenshot \"" + shot + "\"");
+            };
+            go.Start();
+            var end = new Timer { Interval = 45000 }; end.Tick += (s, e) => { FlowLog("end"); Close(); }; end.Start();   // however it goes, the test ends
         }
 
         [STAThread]
@@ -141,7 +193,11 @@ namespace VisionALVR
             Log.Component = "launcher";
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new LauncherForm());
+            var args = Environment.GetCommandLineArgs();
+            var f = new LauncherForm();
+            var i = Array.IndexOf(args, "--test-flow");
+            if (i >= 0 && i + 1 < args.Length) f.Shown += (s, e) => f.StartTestFlowPublic(args[i + 1]);
+            Application.Run(f);
         }
     }
 }

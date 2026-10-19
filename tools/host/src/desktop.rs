@@ -42,9 +42,16 @@ pub fn place(head_q: Q, head_p: V3, dist: f32, fov_deg: f32, aspect: f32) -> Scr
     let f = if dot(f, f) < 1e-4 { [0.0, 0.0, -1.0] } else { norm(f) };   // looking straight up or down: keep the world forward
     let up = [0.0, 1.0, 0.0];
     let right = norm(cross(f, up));
-    let width = 2.0 * dist * (fov_deg.to_radians() / 2.0).tan();
-    Screen { center: add(add(head_p, mul(f, dist)), [0.0, -0.05, 0.0]), right, up, normal: mul(f, -1.0), width, height: width * aspect }
+    // fov_deg wide; a tall desktop (portrait, 16:10 on a short wall) would be taller than the user can see: at most MAX_TALL_DEG high, narrower then
+    let mut width = 2.0 * dist * (fov_deg.to_radians() / 2.0).tan();
+    let mut height = width * aspect;
+    let max_h = 2.0 * dist * (MAX_TALL_DEG.to_radians() / 2.0).tan();
+    if height > max_h { height = max_h; width = height / aspect; }
+    Screen { center: add(add(head_p, mul(f, dist)), [0.0, -0.05, 0.0]), right, up, normal: mul(f, -1.0), width, height }
 }
+
+/// The tallest the virtual screen gets, as an angle at the viewer.
+pub const MAX_TALL_DEG: f32 = 40.0;
 
 /// The screen's corners (top-left, top-right, bottom-left, bottom-right) in one eye's NDC (x right, y up, both -1..1 across the eye's field of
 /// view), for the head pose, the eye's offset from the head and its field of view as tangents [left, right, up, down]. None when a corner is at or
@@ -143,6 +150,25 @@ mod tests {
         assert!(near(s.center[2], -1.6) && near(s.center[1], 1.45));
         assert!(near(s.normal[2], 1.0) && near(s.right[0], 1.0));
         assert!(near(s.width, 2.0 * 1.6 * 30f32.to_radians().tan()) && near(s.height, s.width * 9.0 / 16.0));
+    }
+
+    #[test]
+    fn desktops_of_every_shape_fit_the_view() {
+        // (width, height) in pixels: 1080p, 1440p, 4K, 16:10, ultrawide, super ultrawide, portrait, square
+        for (w, h) in [(1920, 1080), (2560, 1440), (3840, 2160), (2560, 1600), (3440, 1440), (5120, 1440), (1080, 1920), (1200, 1200)] {
+            let a = h as f32 / w as f32;
+            let s = place(ID, [0.0, 1.5, 0.0], 1.6, 60.0, a);
+            assert!(near(s.height / s.width, a), "{w}x{h}: the screen keeps the desktop's shape");
+            let tall_deg = 2.0 * (s.height / 2.0 / 1.6).atan().to_degrees();
+            let wide_deg = 2.0 * (s.width / 2.0 / 1.6).atan().to_degrees();
+            assert!(tall_deg <= MAX_TALL_DEG + 0.01, "{w}x{h}: {tall_deg} degrees tall");
+            assert!(wide_deg <= 60.01, "{w}x{h}: {wide_deg} degrees wide");
+        }
+        // a 16:9 desktop is the full 60 degrees wide; a portrait one is narrower, not taller than 40 degrees
+        let wide = place(ID, [0.0, 1.5, 0.0], 1.6, 60.0, 9.0 / 16.0);
+        let portrait = place(ID, [0.0, 1.5, 0.0], 1.6, 60.0, 1920.0 / 1080.0);
+        assert!(near(wide.width, 2.0 * 1.6 * 30f32.to_radians().tan()));
+        assert!(portrait.width < wide.width * 0.5 && near(portrait.height, 2.0 * 1.6 * 20f32.to_radians().tan()));
     }
 
     #[test]

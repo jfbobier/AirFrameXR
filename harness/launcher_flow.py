@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""The launcher steps aside while a tool is open and returns when it is closed (docs/PLAN_0.5.md). For each tool: a copy of the package on the builder,
+VisionALVR.exe --test-flow "<tool>" launches the tool exactly as its Launch button does (the tool closes itself after its own screenshot), and the
+launcher samples its state to a log. Checks, per tool:
+  - the launcher is visible before the launch
+  - it hides (no visible sample while a tool process runs) and a tool really ran meanwhile
+  - it is visible again once every tool has closed
+Run python3 harness/run.py build gui package first.
+"""
+import subprocess, sys, tempfile, time
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+import lib
+
+TOOLS = ["Logs and performance", "Diagnose", "Setup wizard", "Streamer"]
+only = sys.argv[1:] or TOOLS
+fails = 0
+stamp = time.strftime("%Y%m%d_%H%M%S")
+rc, home = lib.b_run("echo %USERPROFILE%")
+base = f"{home.strip().splitlines()[-1].strip()}\\{lib.ROOTNAME}"
+for i, tool in enumerate(TOOLS):
+    if tool not in only:
+        continue
+    rid = f"flow_{stamp}_{i}"
+    lib.b_run(f"if not exist runs\\{rid} mkdir runs\\{rid}")
+    rc, out = lib.b_run(f"robocopy out\\dist\\VisionALVR runs\\{rid}\\VisionALVR /E /NFL /NDL /NJH /NJS /NP")
+    log = f"{base}\\runs\\{rid}\\flow.log"
+    body = f"runs\\{rid}\\VisionALVR\\VisionALVR.exe --test-flow \"{tool}\"\r\n"
+    proc = lib.start_limited(rid, f"va_flow{i}", "flow.bat", body, "rc.txt", env={"VISIONALVR_TEST_FLOW_LOG": log})
+    try:
+        proc.wait(120)
+    except subprocess.TimeoutExpired:
+        print(f"CHECK FAIL {tool}: the launcher did not finish in 120 s")
+        fails += 1
+        continue
+    dst = Path(tempfile.gettempdir()) / f"{rid}.log"
+    dst.unlink(missing_ok=True)
+    lib.b_get(f"runs/{rid}/flow.log", dst)
+    lines = dst.read_text(errors="replace").splitlines() if dst.exists() else []
+    def vis(l): return "visible=1" in l
+    def tools(l): return int(l.split("tools=")[1].split()[0])
+    launch_i = next((k for k, l in enumerate(lines) if "hide: launched" in l), None)
+    show_i = next((k for k, l in enumerate(lines) if "show: every tool closed" in l), None)
+    before = [l for l in lines if "before launch" in l]
+    ok_before = bool(before) and vis(before[0]) and tools(before[0]) == 0
+    during = lines[launch_i + 1:show_i] if launch_i is not None and show_i is not None else []
+    hidden_ok = launch_i is not None and show_i is not None and any(not vis(l) and tools(l) >= 1 for l in during) and not any(vis(l) and tools(l) >= 1 for l in during)
+    tool_ran = any(tools(l) >= 1 for l in during)
+    back_ok = show_i is not None and vis(lines[show_i]) and tools(lines[show_i]) == 0 and any(vis(l) and tools(l) == 0 for l in lines[show_i:])
+    for name, ok, detail in [("visible before the launch", ok_before, before[0] if before else "no line"),
+                             ("hidden while the tool is open", hidden_ok, f"{len(during)} samples, {sum(1 for l in during if not vis(l))} hidden"),
+                             ("the tool really ran", tool_ran, ""),
+                             ("back when every tool is closed", back_ok, lines[show_i] if show_i is not None else "never shown again")]:
+        print(f"CHECK {'PASS' if ok else 'FAIL'} {tool}: {name}: {detail}")
+        fails += 0 if ok else 1
+print("launcher_flow:", "OK" if fails == 0 else f"{fails} FAILED")
+sys.exit(1 if fails else 0)
