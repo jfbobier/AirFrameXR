@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 namespace VisionALVR
 {
-    public class FindHeadsetForm : Form
+    public class FindHeadsetForm : DpiForm
     {
         public string ChosenHost = "", ChosenName = "", ChosenIp = "";
         readonly Tuple<string, string, string> paired;   // (hostname, name, ip) of the headset paired now, or null

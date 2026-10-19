@@ -1,4 +1,4 @@
-// VisionALVR.exe (the launcher): the only file in the package root, the front door. One card per tool (what it does, a Launch button); every tool is its own exe so experts can run only what they
+// bin\launcher.exe: the front door, started by the stub VisionALVR.exe (the only file in the package root). One card per tool (what it does, a Launch button); every tool is its own exe so experts can run only what they
 // need. Experts can skip this window and start the exes directly.
 using System;
 using System.Diagnostics;
@@ -9,7 +9,7 @@ using System.Windows.Forms;
 
 namespace VisionALVR
 {
-    public class LauncherForm : Form
+    public class LauncherForm : DpiForm
     {
         class Tool { public string Title, What, Exe, Args = ""; public bool StopsStreamer; }
         static readonly Tool[] Tools = {
@@ -191,6 +191,9 @@ namespace VisionALVR
         static void Main()
         {
             Log.Component = "launcher";
+            bool first;
+            var one = new System.Threading.Mutex(true, "VisionALVR_Launcher", out first);
+            if (!first) return;   // a second double-click: the launcher (or the tool it stepped aside for) is already there
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             var args = Environment.GetCommandLineArgs();

@@ -11,7 +11,7 @@ using System.Windows.Forms;
 
 namespace VisionALVR
 {
-    public class ConfigureForm : Form
+    public class ConfigureForm : DpiForm
     {
         readonly AppSettings settings = new AppSettings();
         Dictionary<string, object> session = Session.Load();
@@ -56,7 +56,7 @@ namespace VisionALVR
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body;
             BackColor = Color.White;
-            Width = (int)(920 * Ui.SystemScale); Height = (int)(860 * Ui.SystemScale);
+            Width = 920; Height = 860;
             Ui.FitToWorkArea(this);
             var tabs = new TabControl { Dock = DockStyle.Fill };
             // workflow: pair, then the benchmark (it fills the settings), then review the settings
@@ -178,6 +178,7 @@ namespace VisionALVR
             idleReset.Click += (s, e) => SetIdle(Color.FromArgb(0, 255, 0));
             row("Colour when no game runs", flow(idle, idleReset));
             var remind = Ui.Line("Set the SAME colour as the chroma key in the ALVR app on the Vision Pro (Settings > Chroma key), so it shows your room.");
+            remind.MaximumSize = new Size(560, 0);   // wraps inside its column
             remind.ForeColor = Color.DimGray;
             g.Controls.Add(new Label()); g.Controls.Add(remind);
 

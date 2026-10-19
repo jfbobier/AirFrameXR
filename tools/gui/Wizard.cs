@@ -12,7 +12,7 @@ using System.Windows.Forms;
 
 namespace VisionALVR
 {
-    public class WizardForm : Form
+    public class WizardForm : DpiForm
     {
         readonly AppSettings settings = new AppSettings();
         Dictionary<string, object> session = Session.Load();
@@ -22,7 +22,7 @@ namespace VisionALVR
         HostProcess handshakeHost;
         CancellationTokenSource testCts;
         readonly Panel content = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(14) };
-        readonly Panel stepsPanel = new Panel { Dock = DockStyle.Left, Width = (int)(230 * Ui.SystemScale), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), Padding = new Padding(12) };
+        readonly Panel stepsPanel = new Panel { Dock = DockStyle.Left, Width = 230, BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), Padding = new Padding(12) };
         readonly Button back = new Button { Text = "< Back", AutoSize = true, MinimumSize = new Size(90, 30) };
         readonly Button next = new Button { Text = "Next >", AutoSize = true, MinimumSize = new Size(110, 30), Font = Ui.Bold };
         readonly Button advanced = new Button { Text = "Advanced (old tabs)", AutoSize = true };
@@ -69,13 +69,12 @@ namespace VisionALVR
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body;
             BackColor = Color.White;
-            var k = Ui.SystemScale;   // sizes set in code are raw pixels: scaled by hand, then kept inside the work area
-            Width = (int)(1080 * k); Height = (int)(900 * k);
-            MinimumSize = new Size((int)(980 * k), (int)(760 * k));
+            Width = 1080; Height = 900;   // design values at 96 dpi: scaled at load, then kept inside the work area
+            MinimumSize = new Size(980, 760);
             Ui.FitToWorkArea(this);
             for (int i = 0; i < 7; i++)
             {
-                stepLabels[i] = new Label { Text = StepNames[i], AutoSize = false, Height = (int)(30 * Ui.SystemScale), Dock = DockStyle.Top, Font = Ui.Body, ForeColor = Color.DimGray, TextAlign = ContentAlignment.MiddleLeft };
+                stepLabels[i] = new Label { Text = StepNames[i], AutoSize = false, Height = 30, Dock = DockStyle.Top, Font = Ui.Body, ForeColor = Color.DimGray, TextAlign = ContentAlignment.MiddleLeft };
             }
             for (int i = 6; i >= 0; i--) stepsPanel.Controls.Add(stepLabels[i]);
             var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 4, Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };

@@ -1,6 +1,6 @@
 # Assembles the portable VisionALVR folder out\dist\VisionALVR (what a user unzips anywhere) and out\dist\VisionALVR-<version>.zip.
-# Layout: the root holds ONE file, VisionALVR.exe (the launcher); everything else is in a subfolder:
-#   bin\   everything the launcher starts or loads: streamer.exe, configure.exe (setup wizard and --diagnose), performance.exe, alvr_host.exe,
+# Layout: the root holds ONE file, VisionALVR.exe (a stub that starts bin\launcher.exe); everything else is in a subfolder:
+#   bin\   everything the launcher starts or loads: launcher.exe, streamer.exe, configure.exe (setup wizard and --diagnose), performance.exe (each with its .exe.config), alvr_host.exe,
 #          register_openxr_runtime.ps1 and the OpenXR runtime (LibOVRRT64_1.dll, virtualdesktop-openxr.dll + .json: VDXR loads the shim from its own folder)
 #   DLSSMotionVectors\dxgi.dll (the extractor a user copies next to a game; never loaded from here), bench\, profiles\, config\, docs\, logs\ (created on use)
 $ErrorActionPreference = 'Continue'
@@ -13,8 +13,11 @@ if ($stale) { Move-Item $pkg "$pkg.old-$((Get-Date).ToString('yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Force $pkg, "$pkg\config", "$pkg\bin", "$pkg\docs" | Out-Null
 Copy-Item "$root\out\vdxr-shim\*.dll", "$root\out\vdxr-shim\*.json" "$pkg\bin" -Force                 # virtualdesktop-openxr.dll / .json, LibOVRRT64_1.dll
 Copy-Item "$root\src\ALVR-v20.14.1\target\release\alvr_host.exe" "$pkg\bin" -Force
-foreach ($f in 'streamer.exe', 'configure.exe', 'performance.exe') { if (Test-Path "$root\out\gui\$f") { Copy-Item "$root\out\gui\$f" "$pkg\bin" -Force } }
-if (Test-Path "$root\out\gui\VisionALVR.exe") { Copy-Item "$root\out\gui\VisionALVR.exe" $pkg -Force }   # the launcher: the only file in the root
+foreach ($f in 'streamer.exe', 'configure.exe', 'performance.exe', 'launcher.exe') {
+    if (Test-Path "$root\out\gui\$f") { Copy-Item "$root\out\gui\$f" "$pkg\bin" -Force }
+    Copy-Item "$root\_tmp\gui\app.exe.config" "$pkg\bin\$f.config" -Force   # WinForms' per-monitor DPI mode (tools/gui/app.exe.config)
+}
+if (Test-Path "$root\out\gui\VisionALVR.exe") { Copy-Item "$root\out\gui\VisionALVR.exe" $pkg -Force }   # the stub: the only file in the root (starts bin\launcher.exe)
 Copy-Item "$root\_tmp\install\register_openxr_runtime.ps1" "$pkg\bin" -Force
 Copy-Item "$root\_tmp\install\README.txt" "$pkg\docs" -Force
 Copy-Item "$root\_tmp\install\session.default.json" "$pkg\config\session.default.json" -Force
@@ -50,7 +53,7 @@ if (Test-Path $pfList) { foreach ($line in (Get-Content $pfList)) { $f = $line.T
 $zip = "$root\out\dist\VisionALVR-$version.zip"
 # the zip holds only what ships (never logs\, config\session.json or results a test run may have left in the folder);
 # everything sits under VisionALVR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
-$ship = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\register_openxr_runtime.ps1',
+$ship = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1',
           'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json',
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
 $ship += $persShip
@@ -66,7 +69,7 @@ foreach ($f in $ship) {
 }
 $za.Dispose(); $fs.Dispose()
 Get-ChildItem $pkg -Recurse -File | Select-Object @{n='file';e={$_.FullName.Substring($pkg.Length + 1)}}, Length | Format-Table -AutoSize | Out-String -Width 200
-$missing = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\register_openxr_runtime.ps1', 'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'docs\THIRD_PARTY_NOTICES.md', 'docs\licenses\ALVR-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
+$missing = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\launcher.exe.config', 'bin\streamer.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'docs\THIRD_PARTY_NOTICES.md', 'docs\licenses\ALVR-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
 $rootFiles = @(Get-ChildItem $pkg -File | ForEach-Object { $_.Name })
 if ($rootFiles.Count -ne 1 -or $rootFiles[0] -ne 'VisionALVR.exe') { Write-Host "RESULT: FAILED the root must hold only VisionALVR.exe, found: $($rootFiles -join ', ')"; exit 1 }
 if ($missing) { Write-Host "RESULT: FAILED missing $($missing -join ', ')" } else { Write-Host "RESULT: OK $pkg ($zip)" }

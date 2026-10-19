@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The launcher steps aside while a tool is open and returns when it is closed (docs/PLAN_0.5.md). For each tool: a copy of the package on the builder,
+"""The launcher (bin\\launcher.exe; the root VisionALVR.exe is a stub that starts it, tested last) steps aside while a tool is open and returns when it is closed (docs/PLAN_0.5.md). For each tool: a copy of the package on the builder,
 VisionALVR.exe --test-flow "<tool>" launches the tool exactly as its Launch button does (the tool closes itself after its own screenshot), and the
 launcher samples its state to a log. Checks, per tool:
   - the launcher is visible before the launch
@@ -25,7 +25,7 @@ for i, tool in enumerate(TOOLS):
     lib.b_run(f"if not exist runs\\{rid} mkdir runs\\{rid}")
     rc, out = lib.b_run(f"robocopy out\\dist\\VisionALVR runs\\{rid}\\VisionALVR /E /NFL /NDL /NJH /NJS /NP")
     log = f"{base}\\runs\\{rid}\\flow.log"
-    body = f"runs\\{rid}\\VisionALVR\\VisionALVR.exe --test-flow \"{tool}\"\r\n"
+    body = f"runs\\{rid}\\VisionALVR\\bin\\launcher.exe --test-flow \"{tool}\"\r\n"
     proc = lib.start_limited(rid, f"va_flow{i}", "flow.bat", body, "rc.txt", env={"VISIONALVR_TEST_FLOW_LOG": log})
     try:
         proc.wait(120)
@@ -53,5 +53,24 @@ for i, tool in enumerate(TOOLS):
                              ("back when every tool is closed", back_ok, lines[show_i] if show_i is not None else "never shown again")]:
         print(f"CHECK {'PASS' if ok else 'FAIL'} {tool}: {name}: {detail}")
         fails += 0 if ok else 1
+# the stub in the root: VisionALVR.exe starts bin\launcher.exe, passes the arguments on and exits at once; the whole flow then runs from it
+if not only or "Logs and performance" in only:
+    rid = f"flow_{stamp}_stub"
+    lib.b_run(f"if not exist runs\\{rid} mkdir runs\\{rid}")
+    lib.b_run(f"robocopy out\\dist\\VisionALVR runs\\{rid}\\VisionALVR /E /NFL /NDL /NJH /NJS /NP")
+    log = f"{base}\\runs\\{rid}\\flow.log"
+    root_files = lib.b_run(f"dir /b runs\\{rid}\\VisionALVR")[1].split()
+    proc = lib.start_limited(rid, "va_flowstub", "flow.bat", f"runs\\{rid}\\VisionALVR\\VisionALVR.exe --test-flow \"Logs and performance\"\r\n", "rc.txt", env={"VISIONALVR_TEST_FLOW_LOG": log})
+    proc.wait(30)   # the stub returns at once
+    ok = False
+    for _ in range(25):
+        time.sleep(2)
+        txt = lib.b_run(f"if exist runs\\{rid}\\flow.log (type runs\\{rid}\\flow.log)")[1]
+        if "show: every tool closed" in txt:
+            ok = True
+            break
+    print(f"CHECK {'PASS' if ok else 'FAIL'} root stub: VisionALVR.exe started bin\\launcher.exe with its arguments and the round trip ran from it")
+    fails += 0 if ok else 1
+    print(f"CHECK {'PASS' if sorted(x.lower() for x in root_files if x.lower().endswith('.exe') or '.' in x) == ['visionalvr.exe'] else 'FAIL'} root stub: the root holds only VisionALVR.exe ({', '.join(root_files)})")
 print("launcher_flow:", "OK" if fails == 0 else f"{fails} FAILED")
 sys.exit(1 if fails else 0)

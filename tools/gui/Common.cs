@@ -15,6 +15,9 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
+// What Visual Studio adds to every project: WinForms' per-monitor DPI support (app.config, bin\*.config) only applies to an assembly that says it targets 4.7 or newer.
+[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName=".NET Framework 4.8")]
+
 namespace VisionALVR
 {
     public static class Version
@@ -620,7 +623,7 @@ namespace VisionALVR
     }
 
     /// The layers dialog: every OpenXR API layer, the ones that load into every application ticked when they may capture input; Disable / Enable.
-    public class LayersForm : Form
+    public class LayersForm : DpiForm
     {
         readonly ListView list = new ListView { View = View.Details, CheckBoxes = true, FullRowSelect = true, Height = 230, Width = 820, HeaderStyle = ColumnHeaderStyle.Nonclickable };
         List<XrLayer> layers;
@@ -632,7 +635,7 @@ namespace VisionALVR
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body; Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
-            AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; BackColor = Color.White;
+            BackColor = Color.White;
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
             col.Controls.Add(new Label { Text = "OpenXR layers on this PC", AutoSize = true, Font = Ui.Big });
             col.Controls.Add(new Label { Text = "A layer that is enabled and implicit is loaded into every OpenXR game. Some capture or remap the controllers before the runtime (ours included) ever sees them: " +
@@ -649,7 +652,11 @@ namespace VisionALVR
             en.Click += (s, e) => Apply(true);
             row.Controls.Add(dis); row.Controls.Add(en); row.Controls.Add(close);
             col.Controls.Add(row);
-            Controls.Add(col);
+            var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
+            col.Dock = DockStyle.None; col.Location = Point.Empty;
+            scroller.Controls.Add(col);
+            Controls.Add(scroller);
+            Ui.AutoFitWindow(this, null, col);
             CancelButton = close;
             Fill();
         }
@@ -862,7 +869,7 @@ namespace VisionALVR
     }
 
     /// "Install the DLSS motion-vector DLL?" after a game that gave no vectors.
-    public class DllOfferForm : Form
+    public class DllOfferForm : DpiForm
     {
         public bool DontAsk => dont.Checked;
         readonly CheckBox dont = new CheckBox { Text = "Don't ask again for this game", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
@@ -873,7 +880,7 @@ namespace VisionALVR
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body; Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
-            AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; BackColor = Color.White;
+            BackColor = Color.White;
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
             col.Controls.Add(new Label { Text = game + ": no DLSS motion vectors were available this session.", AutoSize = true, Font = Ui.Bold, MaximumSize = new Size(480, 0) });
             col.Controls.Add(new Label { Text = "Frame generation is better when the game's own motion vectors are used. A small DLL placed next to the game's exe provides them (games that use DLSS). " +
@@ -884,14 +891,18 @@ namespace VisionALVR
             var no = new Button { Text = "Not now", AutoSize = true, DialogResult = DialogResult.No, MinimumSize = new Size(100, 30) };
             row.Controls.Add(yes); row.Controls.Add(no);
             col.Controls.Add(row);
-            Controls.Add(col);
+            var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
+            col.Dock = DockStyle.None; col.Location = Point.Empty;
+            scroller.Controls.Add(col);
+            Controls.Add(scroller);
+            Ui.AutoFitWindow(this, null, col);
             AcceptButton = yes; CancelButton = no;
         }
     }
 
     /// Vision Pro only: the chroma-key passthrough is a setting of the ALVR app on the headset that the streamer can neither set nor read, so
     /// the wizard shows where it is and asks the user to confirm.
-    public class ChromaStepForm : Form
+    public class ChromaStepForm : DpiForm
     {
         public bool Confirmed => done.Checked;
         readonly CheckBox done = new CheckBox { Text = "I have set it in the ALVR app on the Vision Pro", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
@@ -902,7 +913,7 @@ namespace VisionALVR
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body; Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
-            AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; BackColor = Color.White;
+            BackColor = Color.White;
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
             col.Controls.Add(new Label { Text = "Turn on passthrough in the ALVR app", AutoSize = true, Font = Ui.Big });
             col.Controls.Add(new Label { Text = "Between games VisionALVR shows a pure green screen, which the Vision Pro turns into your room when chroma-key passthrough is on; the game appears when it starts. " +
@@ -917,7 +928,11 @@ namespace VisionALVR
             done.CheckedChanged += (s, e) => go.Enabled = done.Checked;
             row.Controls.Add(go); row.Controls.Add(skip);
             col.Controls.Add(row);
-            Controls.Add(col);
+            var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
+            col.Dock = DockStyle.None; col.Location = Point.Empty;
+            scroller.Controls.Add(col);
+            Controls.Add(scroller);
+            Ui.AutoFitWindow(this, null, col);
             CancelButton = skip;
         }
     }
@@ -927,14 +942,33 @@ namespace VisionALVR
         readonly Label value, note;
         public Tile(string title, string v, string n)
         {
-            var k = Ui.SystemScale;   // built after the window loaded: its pixel sizes are scaled by hand
-            AutoSize = true; ColumnCount = 1; BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9); Padding = new Padding((int)(10 * k), (int)(6 * k), (int)(10 * k), (int)(6 * k)); Margin = new Padding(0, 0, (int)(8 * k), (int)(8 * k)); MinimumSize = new Size((int)(110 * k), 0);
+            // design values at 96 dpi: scaled with the window, or by Ui.LateScale when the tile is created after it loaded
+            AutoSize = true; ColumnCount = 1; BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9); Padding = new Padding(10, 6, 10, 6); Margin = new Padding(0, 0, 8, 8); MinimumSize = new Size(110, 0);
             Controls.Add(new Label { Text = title, AutoSize = true, ForeColor = Color.DimGray, Font = Ui.Body, Margin = new Padding(0) });
             value = new Label { Text = v, AutoSize = true, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Margin = new Padding(0) };
             note = new Label { Text = n, AutoSize = true, ForeColor = Color.Gray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0) };
             Controls.Add(value); Controls.Add(note);
         }
         public void Set(string v, string n, Color? color = null) { value.Text = v; note.Text = n; value.ForeColor = color ?? Color.Black; }
+    }
+
+    /// Every window of the GUI: the designer pattern WinForms' own scaling needs. Built suspended with AutoScaleMode.Dpi (design values at 96 dpi), laid out once
+    /// at load, where the framework scales the form, its docked panels and every control that is already in it to the monitor's dpi. Controls created later
+    /// (a wizard page) are not scaled by it: Ui.LateScale. With bin\*.config (PerMonitorV2) it follows the window from monitor to monitor.
+    public class DpiForm : Form
+    {
+        public DpiForm()
+        {
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            SuspendLayout();
+        }
+        protected override void OnLoad(EventArgs e)
+        {
+            ResumeLayout(false);
+            PerformLayout();
+            base.OnLoad(e);
+        }
     }
 
     public static class Ui
@@ -949,7 +983,7 @@ namespace VisionALVR
         public static void Refit(Form f) { if (refits.TryGetValue(f, out var a)) a(); }
 
         /// A window with a fixed design size (a wizard, a list window): never bigger than the work area, its minimum size too. Sizes set in code are
-        /// raw pixels the framework does not scale: multiply them by SystemScale first.
+        /// design values at 96 dpi (the framework scales them at load).
         public static void FitToWorkArea(Form f)
         {
             Action fit = () =>
@@ -981,32 +1015,18 @@ namespace VisionALVR
             body.SizeChanged += (s, e) => { if (f.IsHandleCreated) fit(); };
             refits.Remove(f); refits.Add(f, fit);
         }
-        static float systemScale;
-        /// the system dpi / 96, never the test override (the harness scales everything else itself)
-        public static float SystemScale { get {
-#if NATIVE_DPI
-            return 1f;   // experiment: WinForms' own per-monitor scaling does it
-#endif
-            if (systemScale <= 0) using (var g = Graphics.FromHwnd(IntPtr.Zero)) systemScale = g.DpiX / 96f; return systemScale; } }
-        public static int DpiOf(Control c) => DpiOverride > 0 ? DpiOverride : (c != null ? c.DeviceDpi : 96);
-        /// A size designed at 96 dpi, in pixels at the display's dpi (for what the framework does not scale itself: list columns).
-        public static int Px(Control c, int designPx) => (int)Math.Round(designPx * DpiOf(c) / 96.0);
+        /// A size designed at 96 dpi, in pixels at the control's monitor dpi (for what the framework does not scale itself: list columns). The test
+        /// harness overrides the dpi.
+        public static int Px(Control c, int designPx) => (int)Math.Round(designPx * (DpiOverride > 0 ? DpiOverride : c.DeviceDpi) / 96.0);
+        /// The reverse: pixels measured on screen (a width taken from a parent) as design units, for controls that LateScale will scale up.
+        public static int Design(Control c, int px) => (int)Math.Round(px * 96.0 / c.DeviceDpi);
         /// A details-view column whose width is a 96-dpi design value (a starting width: FitColumns sizes the columns from their content).
         public static void Col(ListView lv, string header, int designPx) => lv.Columns.Add(header, Px(lv, designPx));
 
-        /// The scale the framework applied to the window at load (the system dpi / 96): what controls created later must be given by hand.
-        public static float LoadScale(Control c)
-        {
-#if NATIVE_DPI
-            return 1f;
-#endif
-            var f = c.FindForm() ?? c as Form;
-            return f != null && f.CurrentAutoScaleDimensions.Width > 0 ? f.CurrentAutoScaleDimensions.Width / 96f : 1f;
-        }
-        /// Controls built after the window loaded (a wizard page, a rebuilt pane) are not scaled by the framework: give them the window's scale.
+        /// Controls built after the window loaded (a wizard page, a rebuilt pane) are not scaled by the framework: give them the monitor's scale.
         public static T LateScale<T>(T sub, Control owner) where T : Control
         {
-            var k = LoadScale(owner);
+            var k = owner.DeviceDpi / 96f;
             if (Math.Abs(k - 1f) > 0.01f) sub.Scale(new SizeF(k, k));
             return sub;
         }

@@ -12,7 +12,7 @@ using System.Windows.Forms;
 
 namespace VisionALVR
 {
-    public class PerformanceForm : Form
+    public class PerformanceForm : DpiForm
     {
         readonly AppSettings settings = new AppSettings();
         readonly ListBox games = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.None, Font = Ui.Body };
@@ -29,9 +29,8 @@ namespace VisionALVR
             Font = Ui.Body;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Color.White;
-            var k = Ui.SystemScale;
-            Width = (int)(1180 * k); Height = (int)(780 * k);
-            MinimumSize = new Size((int)(760 * k), (int)(520 * k));
+            Width = 1180; Height = 780;   // design values at 96 dpi
+            MinimumSize = new Size(760, 520);
             Ui.FitToWorkArea(this);
 
             var autoDel = new CheckBox { Text = "Delete the records of games that are no longer installed", AutoSize = true, Checked = settings.AutoDeleteGameLogs, Margin = new Padding(3, 6, 3, 6) };
@@ -42,7 +41,7 @@ namespace VisionALVR
             bottom.Controls.Add(autoDel);
             bottom.Controls.Add(open);
 
-            var left = new Panel { Dock = DockStyle.Left, Width = (int)(300 * Ui.SystemScale), Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
+            var left = new Panel { Dock = DockStyle.Left, Width = 300, Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
             left.Controls.Add(games);
             games.BackColor = left.BackColor;
             Controls.Add(right);
@@ -107,7 +106,7 @@ namespace VisionALVR
             var exe = S(g, "exe", stem);
             right.Controls.Add(new Label { Text = games.SelectedItem.ToString(), AutoSize = true, Font = new Font("Segoe UI", 14f, FontStyle.Bold), Margin = new Padding(3, 0, 3, 0) });
             var paths = g.TryGetValue("paths", out var po) && po is object[] pa ? pa.Select(x => x as string).Where(x => !string.IsNullOrEmpty(x)).ToArray() : new string[0];
-            right.Controls.Add(new Label { Text = exe + (paths.Length > 0 ? "   " + paths[0] : ""), AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(Math.Max(400, right.ClientSize.Width - 40), 0), Margin = new Padding(3, 0, 3, 8) });
+            right.Controls.Add(new Label { Text = exe + (paths.Length > 0 ? "   " + paths[0] : ""), AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0), Margin = new Padding(3, 0, 3, 8) });
 
             var sessions = g.TryGetValue("sessions", out var so) && so is object[] sa ? sa.OfType<Dictionary<string, object>>().ToList() : new List<Dictionary<string, object>>();
             if (sessions.Count == 0)
@@ -134,6 +133,7 @@ namespace VisionALVR
             tools.Controls.Add(export);
             tools.Controls.Add(del);
             right.Controls.Add(tools);
+            foreach (Control c in right.Controls) Ui.LateScale(c, this);   // rebuilt after the window loaded; widths above are design units
             right.ResumeLayout();
         }
 
@@ -147,7 +147,7 @@ namespace VisionALVR
         Control Tiles(Dictionary<string, object> s)
         {
             var net = O(s, "net"); var mv = O(s, "mv");
-            var f = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(Math.Max(400, right.ClientSize.Width - 40), 0), Margin = new Padding(0) };
+            var f = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0), Margin = new Padding(0) };
             var rep = D(s, "headset_repeated_typ") * 100; var hostRep = D(s, "host_repeats_typ") * 100;
             f.Controls.Add(Ui.MakeTile("Game", N(D(s, "rendered_fps")) + " fps", "slowest tenth " + N(D(s, "rendered_fps_low"))));
             f.Controls.Add(Ui.MakeTile("Streamed", N(D(s, "streamed_fps")) + " fps", "display " + N(D(s, "display_hz"), "0") + " Hz"));
@@ -172,7 +172,7 @@ namespace VisionALVR
 
         Control SessionList(List<Dictionary<string, object>> sessions)
         {
-            var lv = new ListView { View = View.Details, FullRowSelect = true, GridLines = false, Height = (int)(150 * Ui.LoadScale(right)), Width = Math.Max(400, right.ClientSize.Width - 40), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3) };
+            var lv = new ListView { View = View.Details, FullRowSelect = true, GridLines = false, Height = 150, Width = Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3) };
             string[] cols = { "Date", "Headset", "Gen.", "Min", "Game", "Shown", "Repeat %", "Lat. ms", "Vectors" };
             int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 70 };
             for (int i = 0; i < cols.Length; i++) Ui.Col(lv, cols[i], w[i]);
@@ -200,7 +200,7 @@ namespace VisionALVR
                 : st == MvDll.State.OlderCopy ? "Installed by VisionALVR but different from this release's copy (an older version): reinstall to update."
                 : st == MvDll.State.OtherDll ? "A dxgi.dll that is not ours is in the game folder; install will use version.dll."
                 : "Not installed in " + dir + ".";
-            flow.Controls.Add(new Label { Text = text, AutoSize = true, MaximumSize = new Size(Math.Max(400, right.ClientSize.Width - 80), 0), Margin = new Padding(0, 2, 0, 4) });
+            flow.Controls.Add(new Label { Text = text, AutoSize = true, MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 80)), 0), Margin = new Padding(0, 2, 0, 4) });
             var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
             bool can = st != MvDll.State.NoMaster && st != MvDll.State.NoFolder;
             var install = new Button { Text = st == MvDll.State.Installed ? "Reinstall" : "Install", AutoSize = true, Enabled = can };

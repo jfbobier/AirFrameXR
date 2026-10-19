@@ -9,10 +9,10 @@ T="/mnt/c/Users/$WUSER/AppData/Local/Temp/visionalvr_gui"; mkdir -p "$T" || exit
 FW='C:\Windows\Microsoft.NET\Framework64\v4.0.30319'; SRC=$(wslpath -w "$R/tools/gui"); OUT=$(wslpath -w "$T")
 REFS=(); for r in System.dll System.Core.dll System.Drawing.dll System.Windows.Forms.dll System.Web.Extensions.dll System.IO.Compression.dll System.IO.Compression.FileSystem.dll; do REFS+=("/r:$FW\\$r"); done
 rc=0
-for t in "streamer.exe:VisionALVR.cs FindHeadset.cs" "configure.exe:Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs" "VisionALVR.exe:Launcher.cs" "performance.exe:Performance.cs" "uitest.exe:Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs FindHeadset.cs VisionALVR.cs Launcher.cs Performance.cs UiTest.cs"; do
+for t in "streamer.exe:VisionALVR.cs FindHeadset.cs" "configure.exe:Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs" "launcher.exe:Launcher.cs" "VisionALVR.exe:Stub.cs" "performance.exe:Performance.cs" "uitest.exe:Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs FindHeadset.cs VisionALVR.cs Launcher.cs Performance.cs UiTest.cs"; do
   exe=${t%%:*}; src=${t##*:}; echo "== $exe"
-  FILES=("$SRC\\Common.cs"); for f in $src; do FILES+=("$SRC\\$f"); done
+  FILES=(); [ "$exe" = VisionALVR.exe ] || FILES+=("$SRC\\Common.cs"); for f in $src; do FILES+=("$SRC\\$f"); done
   out=$(cd "$T" && "$CSC" /nologo /noconfig /target:winexe /platform:x64 /langversion:latest /nowarn:1701,1702 "${REFS[@]}" \
-     "/win32manifest:$SRC\\app.manifest" "/resource:$SRC\\res\\logo_640.png,logo_640.png" "/resource:$SRC\\res\\chroma_passthrough.png,chroma_passthrough.png" $([ "$exe" = uitest.exe ] && echo /main:VisionALVR.UiTest) "/out:$OUT\\$exe" "${FILES[@]}" 2>&1 | tr -d '\r'); echo "$out"; echo "$out" | grep -q 'error CS' && rc=1
+     "/win32manifest:$SRC\\$([ "$exe" = VisionALVR.exe ] && echo app.stub.manifest || echo app.manifest)" "/resource:$SRC\\res\\logo_640.png,logo_640.png" "/resource:$SRC\\res\\chroma_passthrough.png,chroma_passthrough.png" $([ "$exe" = uitest.exe ] && echo /main:VisionALVR.UiTest) "/out:$OUT\\$exe" "${FILES[@]}" 2>&1 | tr -d '\r'); echo "$out"; echo "$out" | grep -q 'error CS' && rc=1
 done
 echo "check_gui: $([ $rc = 0 ] && echo OK || echo FAILED)"; exit $rc

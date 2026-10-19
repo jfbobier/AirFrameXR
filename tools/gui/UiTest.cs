@@ -72,9 +72,9 @@ namespace VisionALVR
                         {
                             f.StartPosition = FormStartPosition.Manual; f.Location = new Point(0, 0); f.ShowInTaskbar = false; f.Opacity = 0; f.MaximumSize = new Size(20000, 20000);   // Windows would clamp a window to the real screen: the pretend screens are bigger   // on the primary monitor (its dpi), invisible
                             f.Show();                       // Load: the framework scales to the real dpi; Shown is posted and never runs (no message loop)
-                            var pre = f.Width + "x" + f.Height + " dpi " + f.DeviceDpi + " auto " + f.CurrentAutoScaleDimensions.Width;
+                            var pre = f.Width + "x" + f.Height + " dpi " + f.DeviceDpi;
                             c.Prepare?.Invoke(f);
-                            double k = dpi / (double)f.CurrentAutoScaleDimensions.Width;   // what the framework applied at Load is the baseline for sizes and fonts alike
+                            double k = dpi / (double)f.DeviceDpi;   // the framework scaled the window to its monitor's dpi at Load (native per-monitor mode): that is the baseline
                             Emulate(f, k, k);
                             Ui.WorkAreaOverride = new Rectangle(0, 0, work.Width, work.Height);   // the windows' own fitting code, against the pretend screen
                             Ui.Refit(f);

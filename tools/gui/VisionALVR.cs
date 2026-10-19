@@ -12,7 +12,7 @@ using System.Windows.Forms;
 
 namespace VisionALVR
 {
-    public class RuntimeForm : Form
+    public class RuntimeForm : DpiForm
     {
         readonly AppSettings settings = new AppSettings();
         readonly HostProcess host = new HostProcess();
