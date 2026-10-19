@@ -59,8 +59,20 @@ namespace VisionALVR
                 add("Repeated head samples", $"{r.SameTsPct:0.#}% of frames", "a frame sharing the previous frame's head sample is not shown as a new picture; a few percent is normal", r.SameTsPct < 5 ? Rating.Good : r.SameTsPct < 15 ? Rating.Ok : Rating.Poor);
             }
             add("Video codec", hs.Enc10 ? "HEVC 10-bit" : "HEVC 8-bit", prof.CodecAdvice, hs.Enc10 || !prof.Tuned ? Rating.Good : Rating.Ok);
+            // OpenXR API layers that load into every game: some capture the controllers before any runtime sees them
+            var layersOn = XrLayers.ActiveImplicit();
+            var risky = layersOn.Where(l => l.MayCaptureInput).ToList();
+            add("OpenXR layers (loaded into every game)", layersOn.Count == 0 ? "none" : string.Join(", ", layersOn.Select(l => l.Name)), "none: a layer can capture the controllers before the runtime sees them",
+                risky.Count > 0 ? Rating.Poor : layersOn.Count > 0 ? Rating.Ok : Rating.Good,
+                "OpenXR layers that may capture the controllers are enabled (" + string.Join(", ", risky.Select(l => l.Name)) + "): hands and controllers may do nothing in games. Review them with the button below; switching one off is reversible.");
             add("GPU", string.IsNullOrEmpty(r.GpuName) ? "-" : r.GpuName, $"{r.Engines} hardware encoder engine(s), {r.VramMb / 1024.0:0} GB", Rating.Unknown);
             p.Controls.Add(list);
+            if (layersOn.Count > 0)
+            {
+                var review = new Button { Text = "Review OpenXR layers...", AutoSize = true, Margin = new Padding(3, 6, 3, 6) };
+                review.Click += (s2, e2) => { using (var f = new LayersForm()) f.ShowDialog(review.FindForm()); };
+                p.Controls.Add(review);
+            }
             var count = new Func<string, int>(v => list.Items.Cast<ListViewItem>().Count(x => x.SubItems[3].Text == v));
             var verdict = count("Poor") > 0 ? "Limited: some parts are below the target (see below)" : (count("Ok") > 0 ? "Good: the setup works, a few values are only acceptable" : (count("Good") > 0 ? "Excellent: everything measured meets the target" : "Not enough measurements to judge"));
             p.Controls.Add(Ui.Line(verdict, Ui.Big));

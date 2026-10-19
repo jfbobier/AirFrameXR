@@ -497,6 +497,185 @@ namespace VisionALVR
     }
 
     /// HKLM\SOFTWARE\Khronos\OpenXR\1\ActiveRuntime == this folder's manifest? Registration runs the script elevated.
+    /// OpenXR API layers (the Khronos loader's registry lists): an enabled *implicit* layer is loaded into every OpenXR application, ours included, and
+    /// some (hand-tracking and input tools) capture or remap the controllers before any runtime sees them. Reading the lists follows the loader's own
+    /// format (see also FredEmmott/openxr-api-layers-gui, MIT, which shows the same lists): ...\Khronos\OpenXR\1\ApiLayers\Implicit|Explicit under HKLM and
+    /// HKCU, in the 64-bit and the 32-bit view; a value's name is the layer manifest's path, its DWORD 0 = enabled, anything else = disabled.
+    /// Disabling sets the DWORD to 1 (reversible; what VisionALVR disabled is kept in config\layers_disabled.json so it can be put back).
+    public class XrLayer
+    {
+        public string Hive, Section, Path, Name = "", Description = "", Library = "";
+        public int View;           // 64 or 32
+        public bool Enabled;
+        public bool MayCaptureInput;
+        public string KeyPath => @"SOFTWARE\" + (View == 32 ? @"WOW6432Node\" : "") + @"Khronos\OpenXR\1\ApiLayers\" + Section;
+        public string Where => $"{Hive} {View}-bit, {Section.ToLowerInvariant()}";
+    }
+
+    public static class XrLayers
+    {
+        static readonly string[] InputHints = { "ultraleap", "leap", "toolkit", "openkneeboard", "neck", "motioncompensation", "hand", "controller", "input", "steamvr", "oculus", "vive" };
+        public static string DisabledFile => System.IO.Path.Combine(Paths.Config, "layers_disabled.json");
+
+        public static List<XrLayer> Enumerate()
+        {
+            var all = new List<XrLayer>();
+            foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
+                foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+                    foreach (var section in new[] { "Implicit", "Explicit" })
+                    {
+                        var l = new XrLayer { Hive = hive == RegistryHive.LocalMachine ? "HKLM" : "HKCU", View = view == RegistryView.Registry64 ? 64 : 32, Section = section };
+                        try
+                        {
+                            using (var k = RegistryKey.OpenBaseKey(hive, view).OpenSubKey(l.KeyPath.Replace(@"WOW6432Node\", "")))
+                            {
+                                if (k == null) continue;
+                                foreach (var name in k.GetValueNames())
+                                {
+                                    var e = new XrLayer { Hive = l.Hive, View = l.View, Section = section, Path = name, Enabled = Convert.ToInt32(k.GetValue(name) ?? 1) == 0 };
+                                    try
+                                    {
+                                        var j = Json.Load(name);
+                                        e.Name = Json.Str(j, "api_layer.name", ""); e.Description = Json.Str(j, "api_layer.description", ""); e.Library = Json.Str(j, "api_layer.library_path", "");
+                                    }
+                                    catch { }
+                                    if (e.Name.Length == 0) e.Name = System.IO.Path.GetFileNameWithoutExtension(name);
+                                    var hay = (e.Name + " " + e.Description + " " + e.Library + " " + name).ToLowerInvariant();
+                                    e.MayCaptureInput = InputHints.Any(h => hay.Contains(h));
+                                    all.Add(e);
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+            // the 64-bit and 32-bit views of one key are the same list on most PCs: a layer is shown once per (hive, section, path)
+            return all.GroupBy(x => x.Hive + "|" + x.Section + "|" + x.Path.ToLowerInvariant()).Select(g => g.First()).ToList();
+        }
+
+        /// Enabled implicit layers: the ones that load into every OpenXR application.
+        public static List<XrLayer> ActiveImplicit() => Enumerate().Where(l => l.Enabled && l.Section == "Implicit").ToList();
+
+        static string RegArgs(XrLayer l, int value) =>
+            $"reg add \"{l.Hive}\\{l.KeyPath}\" /v \"{l.Path}\" /t REG_DWORD /d {value} /f /reg:{l.View}";
+
+        /// Sets the layers' DWORD (1 = disabled, 0 = enabled): HKCU directly, HKLM through one UAC prompt. True when every one took effect.
+        public static bool Set(IEnumerable<XrLayer> layers, bool enable)
+        {
+            var list = layers.ToList();
+            var machine = list.Where(l => l.Hive == "HKLM").ToList();
+            foreach (var l in list.Where(l => l.Hive == "HKCU"))
+                try { using (var k = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, l.View == 64 ? RegistryView.Registry64 : RegistryView.Registry32).CreateSubKey(l.KeyPath.Replace(@"WOW6432Node\", ""))) k.SetValue(l.Path, enable ? 0 : 1, RegistryValueKind.DWord); } catch { }
+            if (machine.Count > 0)
+            {
+                try
+                {
+                    var psi = new ProcessStartInfo("cmd.exe", "/c " + string.Join(" & ", machine.Select(l => RegArgs(l, enable ? 0 : 1)))) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden };
+                    using (var p = Process.Start(psi)) p.WaitForExit(60000);
+                }
+                catch (System.ComponentModel.Win32Exception) { return false; }   // UAC declined
+            }
+            var now = Enumerate();
+            bool ok = list.All(l => now.Any(n => n.Hive == l.Hive && n.Section == l.Section && string.Equals(n.Path, l.Path, StringComparison.OrdinalIgnoreCase) && n.Enabled == enable));
+            if (ok)
+            {
+                Remember(list, enable);
+                Log.Write("INFO", $"OpenXR layers {(enable ? "enabled" : "disabled")}: " + string.Join(", ", list.Select(l => l.Name)));
+            }
+            return ok;
+        }
+
+        // what VisionALVR disabled, so the runtime toggle (and the layers dialog) can put it back
+        static void Remember(List<XrLayer> layers, bool enabled)
+        {
+            var root = Json.Load(DisabledFile);
+            var cur = (root.TryGetValue("layers", out var o) && o is object[] a ? a.OfType<Dictionary<string, object>>().ToList() : new List<Dictionary<string, object>>());
+            foreach (var l in layers)
+            {
+                cur.RemoveAll(d => (d["path"] as string) == l.Path && (d["hive"] as string) == l.Hive && (d["section"] as string) == l.Section);
+                if (!enabled) cur.Add(new Dictionary<string, object> { { "hive", l.Hive }, { "view", l.View }, { "section", l.Section }, { "path", l.Path }, { "name", l.Name } });
+            }
+            root["layers"] = cur.Cast<object>().ToArray();
+            Directory.CreateDirectory(Paths.Config);
+            Json.Save(DisabledFile, root);
+        }
+
+        /// The layers VisionALVR disabled earlier and that are still disabled.
+        public static List<XrLayer> DisabledByUs()
+        {
+            var root = Json.Load(DisabledFile);
+            var now = Enumerate();
+            var r = new List<XrLayer>();
+            if (root.TryGetValue("layers", out var o) && o is object[] a)
+                foreach (var d in a.OfType<Dictionary<string, object>>())
+                {
+                    var m = now.FirstOrDefault(n => n.Hive == (d["hive"] as string) && n.Section == (d["section"] as string) && string.Equals(n.Path, d["path"] as string, StringComparison.OrdinalIgnoreCase));
+                    if (m != null && !m.Enabled) r.Add(m);
+                }
+            return r;
+        }
+    }
+
+    /// The layers dialog: every OpenXR API layer, the ones that load into every application ticked when they may capture input; Disable / Enable.
+    public class LayersForm : Form
+    {
+        readonly ListView list = new ListView { View = View.Details, CheckBoxes = true, FullRowSelect = true, Height = 230, Width = 820, HeaderStyle = ColumnHeaderStyle.Nonclickable };
+        List<XrLayer> layers;
+        readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(820, 0), Margin = new Padding(3, 6, 3, 6) };
+        public LayersForm()
+        {
+            Text = "VisionALVR - OpenXR layers";
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            Font = Ui.Body; Icon = Ui.AppIcon();
+            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
+            AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; BackColor = Color.White;
+            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
+            col.Controls.Add(new Label { Text = "OpenXR layers on this PC", AutoSize = true, Font = Ui.Big });
+            col.Controls.Add(new Label { Text = "A layer that is enabled and implicit is loaded into every OpenXR game. Some capture or remap the controllers before the runtime (ours included) ever sees them: " +
+                "hands and controllers then do nothing in the game. Tick the ones to switch off; this only flips a switch in the registry, nothing is deleted, and Enable puts it back.", AutoSize = true, MaximumSize = new Size(820, 0), Margin = new Padding(3, 4, 3, 6) });
+            string[] cols = { "Layer", "Loads", "Where", "Note" }; int[] w = { 290, 95, 170, 230 };
+            for (int i = 0; i < cols.Length; i++) list.Columns.Add(cols[i], (int)(w[i] * DeviceDpi / 96.0));
+            col.Controls.Add(list);
+            col.Controls.Add(status);
+            var row = new FlowLayoutPanel { AutoSize = true };
+            var dis = new Button { Text = "Disable ticked", AutoSize = true, Font = Ui.Bold, MinimumSize = new Size(120, 30) };
+            var en = new Button { Text = "Enable ticked", AutoSize = true, MinimumSize = new Size(120, 30) };
+            var close = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.OK, MinimumSize = new Size(100, 30) };
+            dis.Click += (s, e) => Apply(false);
+            en.Click += (s, e) => Apply(true);
+            row.Controls.Add(dis); row.Controls.Add(en); row.Controls.Add(close);
+            col.Controls.Add(row);
+            Controls.Add(col);
+            CancelButton = close;
+            Fill();
+        }
+
+        void Fill()
+        {
+            layers = XrLayers.Enumerate().OrderByDescending(l => l.Enabled && l.Section == "Implicit").ThenByDescending(l => l.MayCaptureInput).ThenBy(l => l.Name).ToList();
+            list.Items.Clear();
+            foreach (var l in layers)
+            {
+                var loads = l.Enabled ? (l.Section == "Implicit" ? "every game" : "if asked") : "no";
+                var note = l.Enabled && l.Section == "Implicit" && l.MayCaptureInput ? "may capture controller input" : (l.Enabled && l.Section == "Implicit" ? "loads into every game" : "");
+                var it = new ListViewItem(new[] { l.Name, loads, l.Where, note }) { Checked = l.Enabled && l.Section == "Implicit" && l.MayCaptureInput, ToolTipText = l.Path + "\n" + l.Description };
+                if (l.Enabled && l.Section == "Implicit" && l.MayCaptureInput) it.ForeColor = Color.Firebrick;
+                list.Items.Add(it);
+            }
+            var n = layers.Count(l => l.Enabled && l.Section == "Implicit");
+            status.Text = layers.Count == 0 ? "No OpenXR API layer is registered." : $"{n} implicit layer(s) enabled. {layers.Count(l => l.Enabled && l.Section == "Implicit" && l.MayCaptureInput)} of them may capture input.";
+        }
+
+        void Apply(bool enable)
+        {
+            var picked = list.CheckedItems.Cast<ListViewItem>().Select(i => layers[i.Index]).ToList();
+            if (picked.Count == 0) { status.Text = "Tick the layers first."; return; }
+            var ok = XrLayers.Set(picked, enable);
+            Fill();
+            status.Text = (ok ? (enable ? "Enabled. " : "Disabled. ") : "Not changed (administrator permission declined?). ") + status.Text;
+        }
+    }
+
     public static class OpenXr
     {
         public static string ActiveRuntime()
@@ -510,6 +689,47 @@ namespace VisionALVR
         }
 
         public static bool IsOurs() => string.Equals(ActiveRuntime(), Paths.Manifest, StringComparison.OrdinalIgnoreCase);
+
+        /// The runtime that was active before this folder took over (saved by register_openxr_runtime.ps1; "" when there is none to go back to).
+        public static string Previous()
+        {
+            try
+            {
+                using (var k = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64).OpenSubKey(@"SOFTWARE\VisionALVR"))
+                    return k?.GetValue("PreviousActiveRuntime") as string ?? "";
+            }
+            catch { return ""; }
+        }
+
+        /// A runtime's name for people: the manifest's "runtime.name", else the folder it is in.
+        public static string Name(string manifest)
+        {
+            if (string.IsNullOrEmpty(manifest)) return "none";
+            if (string.Equals(manifest, Paths.Manifest, StringComparison.OrdinalIgnoreCase)) return "VisionALVR";
+            try
+            {
+                var j = Json.Load(manifest);
+                var n = Json.Str(j, "runtime.name", "");
+                if (n.Length > 0) return n;
+            }
+            catch { }
+            try { return Path.GetFileName(Path.GetDirectoryName(manifest)); } catch { return manifest; }
+        }
+
+        /// UAC prompt, then register_openxr_runtime.ps1 -Unregister: the previous runtime is the active one again. True if this folder is no longer active.
+        public static bool Unregister()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -File \"{Paths.RegisterScript}\" -Unregister -Quiet")
+                { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden };
+                using (var p = Process.Start(psi)) p.WaitForExit(60000);
+            }
+            catch (System.ComponentModel.Win32Exception) { return false; }
+            var ok = !IsOurs();
+            Log.Write(ok ? "INFO" : "ERROR", ok ? "OpenXR runtime: back to " + ActiveRuntime() : "unregistering the OpenXR runtime did not take effect");
+            return ok;
+        }
 
         /// UAC prompt, then register_openxr_runtime.ps1. True if this folder is the active runtime afterwards.
         public static bool Register(IWin32Window owner)

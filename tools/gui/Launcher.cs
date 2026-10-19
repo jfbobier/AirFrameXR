@@ -4,6 +4,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace VisionALVR
@@ -38,9 +39,68 @@ namespace VisionALVR
 
             var body = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
             foreach (var t in Tools) body.Controls.Add(Card(t));
+            body.Controls.Add(RuntimeRow());
             Controls.Add(body);
             Controls.Add(Ui.CompactHeader("Launcher"));
             Ui.ScreenshotWhenShown(this, 800);
+        }
+
+        // The OpenXR runtime games use: shows the current one and switches to the other (ours <-> the one that was active before), reversed after each
+        // click. Going back also puts back the OpenXR layers VisionALVR switched off.
+        readonly Label runtimeLabel = new Label { AutoSize = true, Font = Ui.Body, MaximumSize = new Size(520, 0), Margin = new Padding(0, 6, 12, 0) };
+        readonly Button runtimeBtn = new Button { AutoSize = true, MinimumSize = new Size(150, 30) };
+        readonly Button layersBtn = new Button { Text = "OpenXR layers...", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(3, 0, 0, 0) };
+
+        Control RuntimeRow()
+        {
+            var row = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
+            var text = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
+            text.Controls.Add(new Label { Text = "OpenXR runtime", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
+            text.Controls.Add(runtimeLabel);
+            var btns = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right };
+            btns.Controls.Add(runtimeBtn); btns.Controls.Add(layersBtn);
+            row.Controls.Add(text); row.Controls.Add(btns);
+            runtimeBtn.Click += (s, e) => ToggleRuntime();
+            layersBtn.Click += (s, e) => { using (var f = new LayersForm()) f.ShowDialog(this); };
+            RefreshRuntime();
+            return row;
+        }
+
+        void RefreshRuntime()
+        {
+            var cur = OpenXr.ActiveRuntime();
+            if (OpenXr.IsOurs())
+            {
+                var prev = OpenXr.Previous();
+                runtimeLabel.Text = "Games use: VisionALVR (this folder).";
+                runtimeBtn.Text = prev.Length > 0 ? "Switch back to " + OpenXr.Name(prev) : "Switch back";
+                runtimeBtn.Enabled = true;
+            }
+            else
+            {
+                runtimeLabel.Text = "Games use: " + OpenXr.Name(cur) + ". VisionALVR is not the active runtime: the streamer will not get the games.";
+                runtimeBtn.Text = "Switch to VisionALVR";
+                runtimeBtn.Enabled = File.Exists(Paths.Manifest);
+            }
+        }
+
+        void ToggleRuntime()
+        {
+            if (OpenXr.IsOurs())
+            {
+                var back = XrLayers.DisabledByUs();
+                OpenXr.Unregister();
+                if (back.Count > 0 && MessageBox.Show(this, "Also switch back on the OpenXR layers VisionALVR turned off (" + string.Join(", ", back.Select(l => l.Name)) + ")?", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                    XrLayers.Set(back, true);
+            }
+            else
+            {
+                if (!OpenXr.Register(this)) MessageBox.Show(this, "The switch did not take effect (administrator permission declined?).", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                var risky = XrLayers.ActiveImplicit().Where(l => l.MayCaptureInput).ToList();
+                if (risky.Count > 0 && MessageBox.Show(this, "These OpenXR layers load into every game and may capture the controllers before VisionALVR sees them:\n\n" + string.Join("\n", risky.Select(l => "  " + l.Name)) + "\n\nReview them now?", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+                    using (var f = new LayersForm()) f.ShowDialog(this);
+            }
+            RefreshRuntime();
         }
 
         Control Card(Tool t)

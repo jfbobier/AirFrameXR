@@ -82,5 +82,10 @@ Minimal code:
 4. **Real device checklist** (cannot be automated): AVP hands and Quest hand tracking, pinch reliability, ray offset, jitter, HDR desktop on and off.
    The harness prints the checklist and records the observed numbers from the run log.
 
+## Added during the build
+- [x] Launcher: **OpenXR runtime** row: shows the active runtime and switches to the other one (VisionALVR <-> the one active before, saved by the register script), reversed after each click; going back also offers to re-enable the OpenXR layers VisionALVR switched off.
+- [x] **OpenXR API layers** (registry lists of the Khronos loader, HKLM/HKCU, 64/32-bit, implicit/explicit): the verdict (Diagnose and the wizard) flags enabled implicit layers, rated Poor when one may capture input (hand/controller/input tools); a dialog lists them and disables/enables the ticked ones (reversible: a registry DWORD, recorded in config\layers_disabled.json). Reference: FredEmmott/openxr-api-layers-gui (MIT), same lists; no code taken.
+- [x] Per-game records verified end to end on the builder (a 26 s run wrote config/games/<exe>.json with the session, network, GPU and vectors); idle/green scenarios still pass with the mirror off.
+
 ## Order
 0 → 1 → 2 → 3 → 4 → 5. Phase 2 before the DLL popup (shared install code). Phase 5 last.
