@@ -9,22 +9,37 @@ using System.Windows.Forms;
 
 namespace VisionALVR
 {
+    /// A whole-card button: a title, one line of text, a chevron. Click, Enter or Space.
+    public class Card : Panel
+    {
+        public Card() { TabStop = true; DoubleBuffered = true; Cursor = Cursors.Hand; }
+        public void PerformClick() => OnClick(EventArgs.Empty);
+        protected override bool IsInputKey(Keys k) => k == Keys.Enter || k == Keys.Space || base.IsInputKey(k);
+        protected override void OnKeyDown(KeyEventArgs e) { if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space) { PerformClick(); e.Handled = true; } base.OnKeyDown(e); }
+        protected override void OnEnter(EventArgs e) { Invalidate(); base.OnEnter(e); }
+        protected override void OnLeave(EventArgs e) { Invalidate(); base.OnLeave(e); }
+        protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e); if (Focused) ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(2, 2, Width - 5, Height - 5)); }
+    }
+
     public class LauncherForm : DpiForm
     {
-        class Tool { public string Title, What, Exe, Args = ""; public bool StopsStreamer; }
+        class Tool { public string Title, What, Exe, Args = ""; public bool StopsStreamer, Primary; }
         static readonly Tool[] Tools = {
-            new Tool { Title = "Streamer", Exe = @"bin\streamer.exe",
-                What = "Starts streaming to your headset and shows the live state: headset, game, frame rate and latency. Brightness, eye height and frame generation are set here, applied live." },
-            new Tool { Title = "Logs and performance", Exe = @"bin\performance.exe",
-                What = "The games you played: frame rates, latency, network and frame-generation results of each session, the DLSS motion-vector DLL of each game (install / uninstall), and a one-click export of the logs." },
-            new Tool { Title = "Diagnose", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true,
-                What = "Checks your setup as it is, without changing anything: the encoder, the network, the latency and the head tracking, then tells you what is below target and why. Run it when something feels wrong. The streamer must be closed." },
-            new Tool { Title = "Setup wizard", Exe = @"bin\configure.exe", StopsStreamer = true,
-                What = "Pairs your headset, tests the connection and proposes the settings that suit your PC and headset. Run it once, and again when the setup changes. The streamer must be closed." },
+            new Tool { Title = "Streamer", Exe = @"bin\streamer.exe", Primary = true, What = "Start streaming to your headset." },
+            new Tool { Title = "Game history", Exe = @"bin\performance.exe", What = "How your games ran, and the motion-vector DLL of each." },
+            new Tool { Title = "Something feels wrong", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true, What = "Check your setup and get suggestions." },
+            new Tool { Title = "Set up a headset", Exe = @"bin\configure.exe", StopsStreamer = true, What = "Pair a headset and choose the settings." },
         };
+        static readonly Tool Advanced = new Tool { Title = "Advanced (full ALVR settings)", Exe = @"bin\configure.exe", Args = "--advanced", StopsStreamer = true };
 
-        public LauncherForm()
+        readonly FlowLayoutPanel sys = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(700, 0) };
+        FwReport firewall;           // filled in the background (PowerShell takes a few seconds)
+        readonly bool demoReady;
+
+        /// demoReady: the screenshot / harness state: everything in place, nothing checked.
+        public LauncherForm(bool demoReady = false)
         {
+            this.demoReady = demoReady;
             Text = "VisionALVR \u2013 Launcher";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);
@@ -36,95 +51,103 @@ namespace VisionALVR
             BackColor = Color.White;
 
             var body = new TableLayoutPanel { Dock = DockStyle.None, Location = Point.Empty, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
-            foreach (var t in Tools) body.Controls.Add(Card(t));
-            body.Controls.Add(RuntimeRow());
-            var help = new Button { Text = "Help (README)", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
-            help.Click += (s2, e2) => { var f = Path.Combine(Paths.Docs, "README.txt"); if (File.Exists(f)) Process.Start(f); else MessageBox.Show(this, "docs\\README.txt is missing from this folder.", "VisionALVR"); };
-            body.Controls.Add(help);
+            foreach (var t in Tools) body.Controls.Add(MakeCard(t));
+            body.Controls.Add(sys);
+            // quiet links: the full ALVR settings, and the help
+            var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            links.Controls.Add(Link("Advanced (full ALVR settings)...", () => Launch(Advanced, Path.Combine(Paths.Dir, Advanced.Exe))));
+            links.Controls.Add(Link("Help", () => { var f = Path.Combine(Paths.Docs, "README.txt"); if (File.Exists(f)) Process.Start(f); else MessageBox.Show(this, "docs\\README.txt is missing from this folder.", "VisionALVR"); }));
+            body.Controls.Add(links);
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             scroller.Controls.Add(body);
             Controls.Add(scroller);
             var hdr = Ui.CompactHeader("Launcher");
             Controls.Add(hdr);
             Ui.AutoFitWindow(this, hdr, body);
+            RefreshSystem();
+            if (!demoReady) Shown += (s, e) => System.Threading.Tasks.Task.Run(() => Firewall.Analyze(Paths.Host)).ContinueWith(t => { try { BeginInvoke((Action)(() => { firewall = t.Result; RefreshSystem(); })); } catch { } });
             Ui.ScreenshotWhenShown(this, 800);
         }
 
-        // The OpenXR runtime games use: shows the current one and switches to the other (ours <-> the one that was active before), reversed after each
-        // click. Going back also puts back the OpenXR layers VisionALVR switched off.
-        readonly Label runtimeLabel = new Label { AutoSize = true, Font = Ui.Body, MaximumSize = new Size(640, 0), Margin = new Padding(0, 0, 0, 0) };
-        readonly Button runtimeBtn = new Button { AutoSize = true, MinimumSize = new Size(150, 30) };
-        readonly Button layersBtn = new Button { Text = "OpenXR layers...", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(3, 0, 0, 0) };
-        readonly Button firewallBtn = new Button { Text = "Firewall rules...", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(3, 0, 0, 0) };
-
-        Control RuntimeRow()
+        static Button Link(string text, Action act)
         {
-            // text on top, the buttons under it: three buttons beside the text made the whole window wide
-            var row = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
-            row.Controls.Add(new Label { Text = "OpenXR runtime and Windows", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
-            row.Controls.Add(runtimeLabel);
-            var btns = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 6, 0, 0), MaximumSize = new Size(640, 0) };
-            runtimeBtn.Margin = new Padding(0, 0, 6, 0); layersBtn.Margin = new Padding(0, 0, 6, 0); firewallBtn.Margin = new Padding(0);
-            btns.Controls.Add(runtimeBtn); btns.Controls.Add(layersBtn); btns.Controls.Add(firewallBtn);
-            row.Controls.Add(btns);
-            runtimeBtn.Click += (s, e) => ToggleRuntime();
-            layersBtn.Click += (s, e) => { using (var f = new LayersForm()) f.ShowDialog(this); };
-            firewallBtn.Click += (s, e) => { using (var f = new FirewallForm()) f.ShowDialog(this); };
-            RefreshRuntime();
+            var b = new Button { Text = text, AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Ui.Accent, Cursor = Cursors.Hand, Margin = new Padding(0, 0, 14, 0), Padding = new Padding(0), BackColor = Color.Transparent };
+            b.FlatAppearance.BorderSize = 0; b.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xE6, 0xEA, 0xF2);
+            b.Click += (s, e) => act();
+            return b;
+        }
+
+        Control MakeCard(Tool t)
+        {
+            var exe = Path.Combine(Paths.Dir, t.Exe);
+            var card = new Card { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(12, 10, 12, 10), Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(700, 0), AccessibleName = t.Title + ". " + t.What, AccessibleRole = AccessibleRole.PushButton, Enabled = demoReady || File.Exists(exe) };
+            var text = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0), Dock = DockStyle.Fill };
+            text.Controls.Add(new Label { Text = t.Title, AutoSize = true, Font = t.Primary ? new Font(Ui.Big.FontFamily, 13f, FontStyle.Bold) : Ui.Big, ForeColor = t.Primary ? Ui.Accent : Color.Black, Margin = new Padding(0, 0, 0, 2) });
+            text.Controls.Add(new Label { Text = t.What, AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(620, 0), Margin = new Padding(0) });
+            var chevron = new Label { Text = "\u203A", AutoSize = true, Font = new Font(Ui.Big.FontFamily, 20f), ForeColor = Color.DimGray, Anchor = AnchorStyles.Right, Margin = new Padding(0) };
+            var grid = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0) };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            grid.Controls.Add(text, 0, 0); grid.Controls.Add(chevron, 1, 0);
+            card.Controls.Add(grid);
+            card.Click += (s, e) => Launch(t, exe);
+            // the labels are in the way of the card's click: forward them; a hover colour on the whole card
+            Action<Control> wire = null;
+            wire = c => { foreach (Control k in c.Controls) { k.Click += (s, e) => card.PerformClick(); k.Cursor = Cursors.Hand; k.MouseEnter += (s, e) => card.BackColor = Color.FromArgb(0xE6, 0xEA, 0xF2); k.MouseLeave += (s, e) => card.BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9); wire(k); } };
+            wire(card);
+            card.MouseEnter += (s, e) => card.BackColor = Color.FromArgb(0xE6, 0xEA, 0xF2); card.MouseLeave += (s, e) => card.BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9);
+            return card;
+        }
+
+        // What needs attention, and only that. The OpenXR runtime games use (VisionALVR, or the one that was active before: the same button goes back), OpenXR
+        // layers that may take the controllers, and the firewall (read in the background). Everything else lives in Something feels wrong.
+        void RefreshSystem()
+        {
+            sys.SuspendLayout();
+            sys.Controls.Clear();
+            var lines = new System.Collections.Generic.List<Control>();
+            bool ours = demoReady || OpenXr.IsOurs();
+            if (ours)
+            {
+                var prev = demoReady ? "" : OpenXr.Previous();
+                lines.Add(Row("\u2713", "Your VR games use VisionALVR.", Color.SeaGreen, prev.Length > 0 ? new[] { ("Switch back to " + OpenXr.Name(prev), (Action)SwitchBack) } : new (string, Action)[0]));
+            }
+            else
+                lines.Add(Row("\u26A0", "Your VR games are set to use " + OpenXr.Name(OpenXr.ActiveRuntime()) + ", not VisionALVR.", Color.Firebrick, File.Exists(Paths.Manifest) ? new[] { ("Use VisionALVR", (Action)UseVisionAlvr) } : new (string, Action)[0]));
+            var risky = demoReady ? new System.Collections.Generic.List<XrLayer>() : XrLayers.ActiveImplicit().Where(l => l.MayCaptureInput).ToList();
+            if (risky.Count > 0)
+                lines.Add(Row("\u26A0", risky.Count == 1 ? "An OpenXR layer may take your controllers before the game sees them." : risky.Count + " OpenXR layers may take your controllers before the game sees them.", Color.Firebrick, new[] { ("Review", (Action)(() => { using (var f = new LayersForm()) f.ShowDialog(this); RefreshSystem(); })) }));
+            if (firewall != null && (firewall.State == FirewallState.Missing || firewall.State == FirewallState.Blocked))
+                lines.Add(Row("\u26A0", firewall.State == FirewallState.Blocked ? "Windows Firewall blocks the streamer: the headset cannot connect." : "Windows Firewall has no rule for the streamer: the headset will not be found.", Color.Firebrick, new[] { ("Fix", (Action)(() => { using (var f = new FirewallForm()) f.ShowDialog(this); firewall = null; Shown_Recheck(); })) }));
+            bool allGood = lines.Count == 1 && ours;
+            sys.Controls.Add(new Label { Text = allGood ? "Ready" : "Needs attention", AutoSize = true, Font = Ui.Big, ForeColor = allGood ? Color.SeaGreen : Color.Firebrick, Margin = new Padding(0, 0, 0, 4) });
+            foreach (var l in lines) sys.Controls.Add(l);
+            sys.ResumeLayout();
+        }
+
+        void Shown_Recheck() { System.Threading.Tasks.Task.Run(() => Firewall.Analyze(Paths.Host)).ContinueWith(t => { try { BeginInvoke((Action)(() => { firewall = t.Result; RefreshSystem(); })); } catch { } }); }
+
+        Control Row(string icon, string text, Color c, (string label, Action act)[] buttons)
+        {
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 2, 0, 2), MaximumSize = new Size(660, 0) };
+            row.Controls.Add(new Label { Text = icon, AutoSize = true, ForeColor = c, Font = Ui.Bold, Margin = new Padding(0, 6, 6, 0) });
+            row.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 6, 10, 0), MaximumSize = new Size(480, 0) });
+            foreach (var b in buttons) { var bt = new Button { Text = b.label, AutoSize = true, Margin = new Padding(0, 0, 6, 0) }; var act = b.act; bt.Click += (s, e) => act(); row.Controls.Add(bt); }
             return row;
         }
 
-        void RefreshRuntime()
+        void UseVisionAlvr()
         {
-            var cur = OpenXr.ActiveRuntime();
-            if (OpenXr.IsOurs())
-            {
-                var prev = OpenXr.Previous();
-                runtimeLabel.Text = "Games use: VisionALVR (this folder).";
-                runtimeBtn.Text = prev.Length > 0 ? "Switch back to " + OpenXr.Name(prev) : "Switch back";
-                runtimeBtn.Enabled = true;
-            }
-            else
-            {
-                runtimeLabel.Text = "Games use: " + OpenXr.Name(cur) + ". VisionALVR is not the active runtime: the streamer will not get the games.";
-                runtimeBtn.Text = "Switch to VisionALVR";
-                runtimeBtn.Enabled = File.Exists(Paths.Manifest);
-            }
+            if (!OpenXr.Register(this)) MessageBox.Show(this, "The switch did not take effect (administrator permission declined?).", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            RefreshSystem();
         }
 
-        void ToggleRuntime()
+        void SwitchBack()
         {
-            if (OpenXr.IsOurs())
-            {
-                var back = XrLayers.DisabledByUs();
-                OpenXr.Unregister();
-                if (back.Count > 0 && MessageBox.Show(this, "Also switch back on the OpenXR layers VisionALVR turned off (" + string.Join(", ", back.Select(l => l.Name)) + ")?", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                    XrLayers.Set(back, true);
-            }
-            else
-            {
-                if (!OpenXr.Register(this)) MessageBox.Show(this, "The switch did not take effect (administrator permission declined?).", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                var risky = XrLayers.ActiveImplicit().Where(l => l.MayCaptureInput).ToList();
-                if (risky.Count > 0 && MessageBox.Show(this, "These OpenXR layers load into every game and may capture the controllers before VisionALVR sees them:\n\n" + string.Join("\n", risky.Select(l => "  " + l.Name)) + "\n\nReview them now?", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
-                    using (var f = new LayersForm()) f.ShowDialog(this);
-            }
-            RefreshRuntime();
-        }
-
-        Control Card(Tool t)
-        {
-            var exe = Path.Combine(Paths.Dir, t.Exe);
-            var card = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
-            card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            var text = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
-            text.Controls.Add(new Label { Text = t.Title, AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
-            text.Controls.Add(new Label { Text = t.What, AutoSize = true, Font = Ui.Body, ForeColor = Color.DimGray, MaximumSize = new Size(520, 0), Margin = new Padding(0) });
-            var go = new Button { Text = "Launch", AutoSize = true, Font = Ui.Bold, MinimumSize = new Size(100, 32), Anchor = AnchorStyles.Right, Margin = new Padding(16, 0, 0, 0), Enabled = File.Exists(exe) };
-            go.Click += (s, e) => Launch(t, exe);
-            card.Controls.Add(text);
-            card.Controls.Add(go);
-            return card;
+            var back = XrLayers.DisabledByUs();
+            OpenXr.Unregister();
+            if (back.Count > 0 && MessageBox.Show(this, "Also switch back on the OpenXR layers VisionALVR turned off (" + string.Join(", ", back.Select(l => l.Name)) + ")?", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                XrLayers.Set(back, true);
+            RefreshSystem();
         }
 
         // The launcher steps aside while a tool is open and comes back when the last one is closed (the wizard hands over to the streamer: the launcher
@@ -138,8 +161,10 @@ namespace VisionALVR
         {
             if (t.StopsStreamer && Process.GetProcessesByName("streamer").Length > 0)
             {
-                MessageBox.Show(this, t.Title + " needs the network port the streamer uses. Close the streamer window first.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                // the tool needs the streamer's network port: offer to close it rather than send the user away
+                if (MessageBox.Show(this, "The streamer is open and uses the same network port. Close it and continue?", "VisionALVR", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                foreach (var p in Process.GetProcessesByName("streamer")) { try { p.CloseMainWindow(); p.WaitForExit(10000); } catch { } }
+                if (Process.GetProcessesByName("streamer").Length > 0) { MessageBox.Show(this, "The streamer did not close. Close its window and try again.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             }
             try
             {
@@ -156,7 +181,7 @@ namespace VisionALVR
         {
             if ((launched != null && !launched.HasExited) || AnyToolOpen()) return;
             watch.Stop();
-            RefreshRuntime();     // the tool may have switched the runtime or the layers
+            RefreshSystem();      // the tool may have switched the runtime or the layers
             Show(); Activate();
             FlowLog("show: every tool closed");
             if (testFlow) { var c = new Timer { Interval = 2500 }; c.Tick += (s2, e2) => { FlowLog("sample"); Close(); }; c.Start(); }   // the test ends once the launcher is back

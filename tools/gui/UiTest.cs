@@ -45,6 +45,7 @@ namespace VisionALVR
         static IEnumerable<Case> Cases()
         {
             yield return new Case { Name = "launcher", Make = () => new LauncherForm() };
+            yield return new Case { Name = "launcher-ready", Make = () => new LauncherForm(true) };
             yield return new Case { Name = "streamer", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState() };
             yield return new Case { Name = "streamer-clean", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };
             yield return new Case { Name = "streamer-empty", Make = () => new RuntimeForm(null) };
