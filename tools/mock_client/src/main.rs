@@ -794,8 +794,10 @@ fn tracking(
                 let p = (t / period).fract();
                 if p < 0.5 { p * 2.0 } else { 2.0 - p * 2.0 }
             };
-            // MOCK_HAND_YAW_DEG: the hands' orientation about the vertical (the Vision Pro's hand convention is 180 degrees from the aim the shim hands to games)
-            let hand_q = Quat::from_rotation_y(std::env::var("MOCK_HAND_YAW_DEG").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0).to_radians());
+            // MOCK_HAND_YAW_DEG: the hands' orientation about the vertical
+            // MOCK_HAND_PITCH_DEG: the hands' pitch (the runtime's aim pose is the sent pose turned 45 degrees down: a hand sent pitched 45 degrees up aims straight ahead)
+            let env_deg = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0).to_radians();
+            let hand_q = Quat::from_rotation_y(env_deg("MOCK_HAND_YAW_DEG")) * Quat::from_rotation_x(env_deg("MOCK_HAND_PITCH_DEG"));
             let lpos = Vec3::new(-0.25, 1.2 + 0.05 * (t * 1.3).sin(), -0.3);
             let rpos = Vec3::new(0.25 + 0.1 * (std::f32::consts::TAU * 0.5 * t).sin(), 1.3, -0.3 + 0.05 * (t * 0.7).cos());
             for (id, pos) in [(*HAND_LEFT_ID, lpos), (*HAND_RIGHT_ID, rpos)] {

@@ -48,7 +48,19 @@ static void sendMouse(LONG dx, LONG dy, DWORD flags) {
     INPUT i{}; i.type = INPUT_MOUSE; i.mi.dx = dx; i.mi.dy = dy; i.mi.dwFlags = flags;
     SendInput(1, &i, sizeof i);
 }
-static void mouseTo(float u, float v) { sendMouse((LONG)(std::max(0.f, std::min(1.f, u)) * 65535.f), (LONG)(std::max(0.f, std::min(1.f, v)) * 65535.f), MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE); }
+// The captured monitor is the primary one; with several monitors its rectangle is only a part of the virtual desktop, and an absolute move is over the whole of it
+// (MOUSEEVENTF_VIRTUALDESK). The process is per-monitor DPI aware, so every number here is a physical pixel.
+static RECT g_mon{ 0, 0, 1920, 1080 };
+static void findPrimaryMonitor() {
+    const HMONITOR m = MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi{ sizeof mi }; if (GetMonitorInfoW(m, &mi)) g_mon = mi.rcMonitor;
+}
+static void mouseTo(float u, float v) {
+    const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN), vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    const double px = g_mon.left + std::max(0.f, std::min(1.f, u)) * (g_mon.right - g_mon.left - 1), py = g_mon.top + std::max(0.f, std::min(1.f, v)) * (g_mon.bottom - g_mon.top - 1);
+    sendMouse((LONG)((px - vx) * 65535.0 / std::max(1, vw - 1) + 0.5), (LONG)((py - vy) * 65535.0 / std::max(1, vh - 1) + 0.5), MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK);
+}
+static void wheel(int ticks) { INPUT i{}; i.type = INPUT_MOUSE; i.mi.dwFlags = MOUSEEVENTF_WHEEL; i.mi.mouseData = (DWORD)(ticks * WHEEL_DELTA); SendInput(1, &i, sizeof i); }
 
 int main(int argc, char** argv) {
     std::string logPath; int seconds = 0; bool mouse = true; uint32_t clear = 0x00FF00;
@@ -64,6 +76,8 @@ int main(int argc, char** argv) {
         CreateDirectoryA((d + "\\logs").c_str(), nullptr);
         logPath = d + "\\logs\\mirrordesktop.log";
     }
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    findPrimaryMonitor();
     g_log = fopen(logPath.c_str(), "a");
     L("start (clear colour %06x, mouse %s)", clear, mouse ? "on" : "off");
     HANDLE gameEvent = CreateEventW(nullptr, TRUE, FALSE, L"Local\\VisionALVR_GameStarting");   // the shim of a game that starts sets it
@@ -107,16 +121,17 @@ int main(int argc, char** argv) {
 
     // the controllers: aim pose, trigger, grip (the Touch profile: what the runtime offers for hands and controllers alike)
     XrPath hands[2]; xrStringToPath(inst, "/user/hand/left", &hands[0]); xrStringToPath(inst, "/user/hand/right", &hands[1]);
-    XrActionSet aset; XrAction aAim{}, aTrigger{}, aSqueeze{};
+    XrActionSet aset; XrAction aAim{}, aTrigger{}, aSqueeze{}, aStick{};
     { XrActionSetCreateInfo asci{ XR_TYPE_ACTION_SET_CREATE_INFO }; strcpy(asci.actionSetName, "mirror"); strcpy(asci.localizedActionSetName, "Desktop mirror"); CK(xrCreateActionSet(inst, &asci, &aset)); }
     auto mk = [&](const char* name, XrActionType type, XrAction* out) { XrActionCreateInfo ai{ XR_TYPE_ACTION_CREATE_INFO }; strcpy(ai.actionName, name); strcpy(ai.localizedActionName, name); ai.actionType = type; ai.countSubactionPaths = 2; ai.subactionPaths = hands; return xrCreateAction(aset, &ai, out); };
-    CK(mk("aim", XR_ACTION_TYPE_POSE_INPUT, &aAim)); CK(mk("trigger", XR_ACTION_TYPE_FLOAT_INPUT, &aTrigger)); CK(mk("squeeze", XR_ACTION_TYPE_FLOAT_INPUT, &aSqueeze));
+    CK(mk("aim", XR_ACTION_TYPE_POSE_INPUT, &aAim)); CK(mk("trigger", XR_ACTION_TYPE_FLOAT_INPUT, &aTrigger)); CK(mk("squeeze", XR_ACTION_TYPE_FLOAT_INPUT, &aSqueeze)); CK(mk("stick", XR_ACTION_TYPE_VECTOR2F_INPUT, &aStick));
     {
         std::vector<XrActionSuggestedBinding> b;
         auto bind = [&](XrAction a, const char* path) { XrPath p; xrStringToPath(inst, path, &p); b.push_back({ a, p }); };
         bind(aAim, "/user/hand/left/input/aim/pose"); bind(aAim, "/user/hand/right/input/aim/pose");
         bind(aTrigger, "/user/hand/left/input/trigger/value"); bind(aTrigger, "/user/hand/right/input/trigger/value");
         bind(aSqueeze, "/user/hand/left/input/squeeze/value"); bind(aSqueeze, "/user/hand/right/input/squeeze/value");
+        bind(aStick, "/user/hand/left/input/thumbstick"); bind(aStick, "/user/hand/right/input/thumbstick");
         XrPath prof; xrStringToPath(inst, "/interaction_profiles/oculus/touch_controller", &prof);
         XrInteractionProfileSuggestedBinding sb{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING }; sb.interactionProfile = prof; sb.countSuggestedBindings = (uint32_t)b.size(); sb.suggestedBindings = b.data();
         CK(xrSuggestInteractionProfileBindings(inst, &sb));
@@ -142,7 +157,7 @@ int main(int argc, char** argv) {
 
     // state
     Screen screen{}; bool haveScreen = false, replace = true, moving = false; int64_t lastTime = 0;
-    bool seenHand = false, seenHit = false; bool left = false, right = false;
+    bool seenHand = false, seenHit = false; bool left = false, right = false; ULONGLONG lastWheel = 0;
     ULONGLONG t0 = GetTickCount64(); bool running = false, exiting = false, endKey = false; uint64_t frames = 0;
     int rc = 0;
     while (!exiting) {
@@ -176,7 +191,7 @@ int main(int argc, char** argv) {
                 if (!haveScreen || replace) { screen = target; haveScreen = true; replace = false; moving = false; } else screen = follow(screen, target, moving, dt);
 
                 // the pointer: the right controller (the left one when the right is not tracked); its aim along -Z
-                bool aimOk = false; V3 o{}, d{}; int hand = 1; float trig = 0, sq = 0;
+                bool aimOk = false; V3 o{}, d{}; int hand = 1; float trig = 0, sq = 0, stickY = 0;
                 for (int k = 0; k < 2 && !aimOk; k++) {
                     hand = k == 0 ? 1 : 0;
                     XrSpaceLocation al{ XR_TYPE_SPACE_LOCATION }; xrLocateSpace(aimSpace[hand], space, fs.predictedDisplayTime, &al);
@@ -186,10 +201,12 @@ int main(int argc, char** argv) {
                         XrActionStateFloat st{ XR_TYPE_ACTION_STATE_FLOAT };
                         gi.action = aTrigger; xrGetActionStateFloat(sess, &gi, &st); trig = st.isActive ? st.currentState : 0;
                         gi.action = aSqueeze; xrGetActionStateFloat(sess, &gi, &st); sq = st.isActive ? st.currentState : 0;
+                        XrActionStateVector2f sv{ XR_TYPE_ACTION_STATE_VECTOR2F }; gi.action = aStick; xrGetActionStateVector2f(sess, &gi, &sv); stickY = sv.isActive ? sv.currentState.y : 0;
                     }
                 }
                 float cu = -1, cv = -1; bool hit = false; float u = 0, v = 0;
                 if (aimOk) {
+                    if (frames % 300 == 0 && frames < 3000) L("aim: %s hand at (%.2f %.2f %.2f) pointing (%.2f %.2f %.2f); screen centre (%.2f %.2f %.2f) normal (%.2f %.2f %.2f) %.2fx%.2f m; head (%.2f %.2f %.2f)", hand ? "right" : "left", o.x, o.y, o.z, d.x, d.y, d.z, screen.center.x, screen.center.y, screen.center.z, screen.normal.x, screen.normal.y, screen.normal.z, screen.width, screen.height, hp.x, hp.y, hp.z);
                     if (!seenHand) { seenHand = true; L("the %s controller / hand is tracked: its beam is drawn", hand ? "right" : "left"); }
                     hit = rayHit(screen, o, d, u, v);
                     if (hit) { cu = u; cv = v; if (!seenHit) { seenHit = true; L("the pointer is on the screen"); } }
@@ -200,6 +217,8 @@ int main(int argc, char** argv) {
                     if (l != left) sendMouse(0, 0, l ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
                     if (r != right) sendMouse(0, 0, r ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP);
                     left = l; right = r;
+                    // the thumbstick scrolls (a tick every 120 ms at full deflection, over the screen only)
+                    if (hit && std::fabs(stickY) > 0.5f && GetTickCount64() - lastWheel > (ULONGLONG)(220 - 100 * std::fabs(stickY))) { wheel(stickY > 0 ? 1 : -1); lastWheel = GetTickCount64(); }
                 }
 
                 // the picture

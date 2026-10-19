@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Desktop mirror checks (docs/PLAN_0.5.md, phase 5). Everything that can be checked without a headset, across the desktops people have:
 
-  1. input maths: `rustc --test tools/host/src/desktop.rs` (screen placement for every desktop shape, per-eye projection, hand ray -> desktop pixel, clicks)
+  1. input maths: tools/mirrordesktop/math_test.cpp (screen placement for every desktop shape, the lazy follow, per-eye projection, ray -> screen point, the beam)
   2. the picture on the builder's GPU (tools/probe/desktop_probe.cpp), for 7 desktop shapes x 4 display modes:
        desktops: 1080p, 1440p, 4K, 16:10, ultrawide 21:9, super ultrawide 32:9, portrait (names without ':' - not valid in a Windows file name)
        modes   : SDR, and HDR (scRGB) with Windows' SDR white level at 80, 200 and 480 nits
@@ -56,16 +56,22 @@ def quad_for(w, h):
     return -hx, hx, cy + hy, cy - hy
 
 
-# ---- 1. the maths -------------------------------------------------------------------------------------------------------------
+# ---- 1. the maths (tools/mirrordesktop/mirror_math.h: placement, follow, projection, ray against the screen, the beam) --------------------------------
 with tempfile.TemporaryDirectory() as t:
-    exe = Path(t) / "desktop_test"
-    p = subprocess.run(["rustc", "--edition", "2021", "--test", str(ROOT / "tools/host/src/desktop.rs"), "-o", str(exe)], capture_output=True, text=True)
-    if p.returncode:
-        check("input maths compile", False, p.stderr[-300:])
+    exe = Path(t) / "math_test"
+    cxx = next((c for c in ("g++", "clang++") if subprocess.run(["which", c], capture_output=True).returncode == 0), None)
+    if cxx is None:
+        check("input maths compile", False, "no C++ compiler (g++ / clang++) on this machine")
     else:
-        r = subprocess.run([str(exe)], capture_output=True, text=True)
-        last = [l for l in r.stdout.splitlines() if l.startswith("test result")]
-        check("input maths (desktop.rs unit tests)", r.returncode == 0, last[0] if last else r.stdout[-200:])
+        p = subprocess.run([cxx, "-std=c++17", "-O1", "-o", str(exe), str(ROOT / "tools/mirrordesktop/math_test.cpp")], capture_output=True, text=True)
+        if p.returncode:
+            check("input maths compile", False, p.stderr[-300:])
+        else:
+            r = subprocess.run([str(exe)], capture_output=True, text=True)
+            fails_ = [l for l in r.stdout.splitlines() if l.startswith("FAIL")]
+            check("input maths (mirror_math.h tests)", r.returncode == 0, r.stdout.strip().splitlines()[-1] if r.stdout.strip() else "no output")
+            for l in fails_:
+                print("   ", l)
 
 # ---- 2. the picture on the builder ---------------------------------------------------------------------------------------------
 DESKTOPS = [("1080p", 1920, 1080), ("1440p", 2560, 1440), ("4K", 3840, 2160), ("16x10", 2560, 1600), ("21x9", 3440, 1440), ("32x9", 5120, 1440), ("portrait", 1080, 1920)]
@@ -73,7 +79,7 @@ MODES = [("SDR", None), ("HDR80", 1.0), ("HDR200", 2.5), ("HDR480", 6.0)]
 rid = "mirror_" + time.strftime("%Y%m%d_%H%M%S")
 for d in ("_tmp\\mirror", f"runs\\{rid}"):
     lib.b_run(f"if not exist {d} mkdir {d}")
-for f in ("tools/probe/desktop_probe.cpp", "nvenc/hostlib/desktop.cpp", "nvenc/hostlib/desktop.h"):
+for f in ("tools/probe/desktop_probe.cpp", "tools/mirrordesktop/desktop.cpp", "tools/mirrordesktop/desktop.h"):
     lib.b_put(ROOT / f, f"_tmp/mirror/{Path(f).name}")
 rc, home = lib.b_run("echo %USERPROFILE%")
 base = f"{home.strip().splitlines()[-1].strip()}\\{lib.ROOTNAME}"
