@@ -1,5 +1,5 @@
 #!/bin/bash
-# Compiles the two C# GUIs with the Windows Roslyn compiler through WSL interop (sources read over \\wsl.localhost, output in a
+# Compiles the C# GUIs with the Windows Roslyn compiler through WSL interop (sources read over \\wsl.localhost, output in a
 # Windows temp folder), the same flags as tools/remote/stage16_gui.ps1. A compile check only: the exes are not deployed.
 R=$(cd "$(dirname "$0")/../.." && pwd)
 CSC=$(ls "/mnt/c/Program Files (x86)/Microsoft Visual Studio/"*/BuildTools/MSBuild/Current/Bin/Roslyn/csc.exe 2>/dev/null | head -1)
@@ -9,7 +9,7 @@ T="/mnt/c/Users/$WUSER/AppData/Local/Temp/visionalvr_gui"; mkdir -p "$T" || exit
 FW='C:\Windows\Microsoft.NET\Framework64\v4.0.30319'; SRC=$(wslpath -w "$R/tools/gui"); OUT=$(wslpath -w "$T")
 REFS=(); for r in System.dll System.Core.dll System.Drawing.dll System.Windows.Forms.dll System.Web.Extensions.dll; do REFS+=("/r:$FW\\$r"); done
 rc=0
-for t in "VisionALVR.exe:VisionALVR.cs FindHeadset.cs" "configure.exe:Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs"; do
+for t in "VisionALVR.exe:VisionALVR.cs FindHeadset.cs" "configure.exe:Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs" "launcher.exe:Launcher.cs"; do
   exe=${t%%:*}; src=${t##*:}; echo "== $exe"
   FILES=("$SRC\\Common.cs"); for f in $src; do FILES+=("$SRC\\$f"); done
   out=$(cd "$T" && "$CSC" /nologo /noconfig /target:winexe /platform:x64 /langversion:latest /nowarn:1701,1702 "${REFS[@]}" \

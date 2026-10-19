@@ -12,16 +12,17 @@ any pixel constant is a 96-dpi design value (`AutoScaleDimensions = 96,96`).
 
 ## Phase 0: groundwork
 - [x] DPI scaling fix in all four forms (AutoScaleDimensions) — verified at 125 % on the 3080 Ti laptop; 150-200 % still to check.
-- [ ] Remove the remaining absolute sizes: `Ui.CompactHeader` Height 84, stats box and live group `Location`.
+- [x] Remove the remaining absolute sizes: `Ui.CompactHeader` Height 84, stats box and live group `Location`.
 - [ ] Shared code in `Common.cs`: game record reader/writer, install helper (DLL), diagnose engine (extracted from `Wizard.cs`).
 - [ ] `tools/wsl/check_gui.sh` and `harness/gui_shot.py` build every new EXE; shots at 100/125/150/200 % become part of the GUI check.
 
 ## Phase 1: launcher menu + streamer window
-- [ ] `launcher.exe`: cards for each tool, each launching its EXE. Reads the same folder layout as today.
+- [x] `launcher.exe` (Launcher.cs; Streamer + Setup wizard cards, more as tools appear; a temporary Open logs folder button until the Logs window): cards for each tool, each launching its EXE. Reads the same folder layout as today.
 - [ ] Streamer window:
-  - remove Logs and Configure buttons (the wizard stays reachable from the launcher);
-  - bottom bar: **Debug logging, off by default** (default changes; saved value kept for existing users);
-  - **Recenter** moves next to Eye height (it re-anchors forward + position, it is not a frame-generation setting; already sent at every game start);
+  - [x] remove Logs and Configure buttons (the wizard stays reachable from the launcher);
+  - [x] bottom bar: **Debug logging, off by default** (default changes; saved value kept for existing users);
+  - [x] **Recenter** moves next to Defaults in the Position group (it re-anchors forward + position, it is not a frame-generation setting; already sent at every game start);
+  - still to do in this window: Apple-style mirror toggle (Phase 5), stats tiles, DLL popup;
   - new toggle under Frame generation: **Mirror Windows desktop between sessions** (off by default);
   - live stats and post-session verdict as tiles: game / streamed / shown fps, bitrate, latency split (encode + network + decode + other) as a
     stacked bar, frames not streamed, packets lost; the verdict is one status line plus the same tiles for the last run.

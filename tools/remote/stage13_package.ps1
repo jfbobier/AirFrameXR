@@ -8,7 +8,7 @@ $pkg = "$root\out\dist\VisionALVR"   # a folder no earlier layout used (out\visi
 New-Item -ItemType Directory -Force $pkg, "$pkg\config" | Out-Null
 Copy-Item "$root\out\vdxr-shim\*" $pkg -Force                 # virtualdesktop-openxr.dll / .json, LibOVRRT64_1.dll
 Copy-Item "$root\src\ALVR-v20.14.1\target\release\alvr_host.exe" $pkg -Force
-foreach ($f in 'VisionALVR.exe', 'configure.exe') { if (Test-Path "$root\out\gui\$f") { Copy-Item "$root\out\gui\$f" $pkg -Force } }
+foreach ($f in 'VisionALVR.exe', 'configure.exe', 'launcher.exe') { if (Test-Path "$root\out\gui\$f") { Copy-Item "$root\out\gui\$f" $pkg -Force } }
 foreach ($f in 'register_openxr_runtime.ps1', 'register_openxr_runtime.bat', 'unregister_openxr_runtime.bat', 'README.txt') { Copy-Item "$root\_tmp\install\$f" $pkg -Force }
 Copy-Item "$root\_tmp\install\session.default.json" "$pkg\config\session.default.json" -Force
 # licences: notices, the project licence (if present) and the upstream texts
@@ -43,7 +43,7 @@ if (Test-Path $pfList) { foreach ($line in (Get-Content $pfList)) { $f = $line.T
 $zip = "$root\out\dist\VisionALVR-$version.zip"
 # the zip holds only what ships (never logs\, config\session.json or results a test run may have left in the folder);
 # everything sits under VisionALVR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
-$ship = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'LibOVRRT64_1.dll', 'virtualdesktop-openxr.dll', 'virtualdesktop-openxr.json',
+$ship = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'launcher.exe', 'LibOVRRT64_1.dll', 'virtualdesktop-openxr.dll', 'virtualdesktop-openxr.json',
           'register_openxr_runtime.ps1', 'register_openxr_runtime.bat', 'unregister_openxr_runtime.bat', 'README.txt',
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'THIRD_PARTY_NOTICES.md', 'LICENSE.txt')
 $ship += $persShip
@@ -59,5 +59,5 @@ foreach ($f in $ship) {
 }
 $za.Dispose(); $fs.Dispose()
 Get-ChildItem $pkg -Recurse -File | Select-Object @{n='file';e={$_.FullName.Substring($pkg.Length + 1)}}, Length | Format-Table -AutoSize | Out-String -Width 200
-$missing = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'LibOVRRT64_1.dll', 'virtualdesktop-openxr.dll', 'virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'THIRD_PARTY_NOTICES.md', 'licenses\ALVR-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
+$missing = @('alvr_host.exe', 'VisionALVR.exe', 'configure.exe', 'launcher.exe', 'LibOVRRT64_1.dll', 'virtualdesktop-openxr.dll', 'virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'THIRD_PARTY_NOTICES.md', 'licenses\ALVR-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
 if ($missing) { Write-Host "RESULT: FAILED missing $($missing -join ', ')" } else { Write-Host "RESULT: OK $pkg ($zip)" }

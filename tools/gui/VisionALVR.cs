@@ -46,7 +46,7 @@ namespace VisionALVR
         readonly Label fgRateText = Ui.Line("");
         readonly CheckBox fgMv = new CheckBox { Text = "DLSS motion vectors", AutoSize = true, Margin = new Padding(14, 3, 0, 0) };
         readonly CheckBox fgRecommend = new CheckBox { Text = "Recommended", AutoSize = true, Margin = new Padding(8, 3, 0, 0) };
-        readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(14, 0, 0, 0) };
+        readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(8, 3, 3, 3) };
         bool fgRateFromHost;   // the slider follows the host's rate: no command back
         // Game profiles (config\games.json, written by the streamer at every game end: per game, headset and level the last run's numbers). The
         // launcher proposes a level from them when "Recommended" is ticked: the slider is set and greyed; unticked, the slider is yours again.
@@ -118,10 +118,11 @@ namespace VisionALVR
             var reset = new Button { Text = "Defaults", AutoSize = true };
             reset.Click += (s, e) => { foreach (var k in knobs) k.Bar.Value = (int)Math.Round(k.Def * 100); };
             tips.SetToolTip(reset, "Eye height 1.30 m, gamma 1.2, the rest neutral.");
-            lt.Controls.Add(reset);
-            lt.SetColumnSpan(reset, 2);
-            lt.Controls.Add(debug);
-            lt.SetColumnSpan(debug, 4);
+            var util = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
+            util.Controls.Add(reset);
+            util.Controls.Add(recenter);
+            lt.Controls.Add(util);
+            lt.SetColumnSpan(util, 6);
             var fgRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
             fgRow.Controls.Add(frameGen);
             var fgText = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
@@ -140,7 +141,6 @@ namespace VisionALVR
             fgOpts.Controls.Add(new Label { Text = "2/3", AutoSize = true, Font = Ui.Body, Margin = new Padding(2, 6, 0, 0) });
             fgOpts.Controls.Add(fgRecommend);
             fgOpts.Controls.Add(fgMv);
-            fgOpts.Controls.Add(recenter);
             lt.Controls.Add(fgOpts);
             lt.SetColumnSpan(fgOpts, 6);
             fgRateText.Margin = new Padding(44, 0, 0, 4);
@@ -154,14 +154,8 @@ namespace VisionALVR
             live.Controls.Add(lt);
             body.Controls.Add(live);
 
-            var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
-            var logs = new Button { Text = "Open logs folder", AutoSize = true };
-            logs.Click += (s, e) => { Directory.CreateDirectory(Paths.Logs); Process.Start("explorer.exe", Paths.Logs); };
-            var conf = new Button { Text = "Configure... (stops streaming)", AutoSize = true };
-            conf.Click += (s, e) => OpenConfigure();
-            buttons.Controls.Add(logs);
-            buttons.Controls.Add(conf);
-            body.Controls.Add(buttons);
+            debug.Margin = new Padding(3, 8, 3, 3);   // a diagnostic aid, off unless asked for: it lives at the bottom
+            body.Controls.Add(debug);
             footer.ForeColor = Color.Gray;
             body.Controls.Add(footer);
 
@@ -527,16 +521,6 @@ namespace VisionALVR
                     footer.Text = "Encode error: " + S(d, "message");
                     break;
             }
-        }
-
-        void OpenConfigure()
-        {
-            if (MessageBox.Show(this, "configure.exe needs the network port the streamer uses: streaming stops while it is open. Continue?",
-                    "VisionALVR", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
-            closing = true;
-            host.Stop();
-            Process.Start(Paths.Configure);
-            Close();
         }
 
         [STAThread]
