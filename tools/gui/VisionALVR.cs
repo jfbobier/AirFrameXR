@@ -206,12 +206,13 @@ namespace VisionALVR
                 settings.Debug = debug.Checked;
                 settings.Save();
             };
+            mirrorTimer.Tick += (s, e) => MirrorStart();
             frameGen.Checked = settings.FrameGen;
             mirror.Checked = settings.MirrorDesktop;
             mirror.CheckedChanged += (s, e) =>
             {
-                host.Send("mirror " + (mirror.Checked ? "on" : "off"));
                 settings.MirrorDesktop = mirror.Checked;
+                MirrorSync();
                 settings.Save();
                 Log.Write("INFO", "desktop mirror " + (mirror.Checked ? "on" : "off"));
             };
@@ -268,10 +269,49 @@ namespace VisionALVR
                 if (autoFind) { var t = new Timer { Interval = 3000 }; t.Tick += (a, b) => { t.Stop(); FindHeadset(true); }; t.Start(); }
             };
             Ui.ScreenshotWhenShown(this, 12000);
-            FormClosing += (s, e) => { closing = true; footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); Log.Write("INFO", "streamer.exe closed"); };
+            FormClosing += (s, e) => { closing = true; MirrorSync(); footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); Log.Write("INFO", "streamer.exe closed"); };
         }
 
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 400 };
+
+        // The desktop mirror is an OpenXR app of its own (bin\mirrordesktop.exe): it runs while the toggle is on, a headset is connected and no game runs. A game
+        // starting takes the headset (the app leaves by itself when the shim signals it; this only makes sure it is gone), and the mirror returns when it ends.
+        Process mirrorProc; bool headsetConnected; int mirrorFails; DateTime mirrorStarted;
+        readonly Timer mirrorTimer = new Timer { Interval = 1500 };
+        void MirrorSync()
+        {
+            mirrorTimer.Stop();
+            bool want = mirror.Checked && headsetConnected && !gameRunning && !closing && !finding && mirrorFails < 3;
+            bool alive = mirrorProc != null && !mirrorProc.HasExited;
+            if (!want && alive) { try { mirrorProc.Kill(); } catch { } mirrorProc = null; Log.Write("INFO", "desktop mirror stopped"); }
+            else if (want && !alive) { mirrorTimer.Start(); }   // a moment after a game ends or the headset connects: the previous session has to be gone
+        }
+        void MirrorStart()
+        {
+            mirrorTimer.Stop();
+            if (!(mirror.Checked && headsetConnected && !gameRunning && !closing && !finding) || (mirrorProc != null && !mirrorProc.HasExited)) return;
+            if (!File.Exists(Paths.MirrorDesktop)) { footer.Text = "bin\\mirrordesktop.exe is missing: the desktop mirror cannot start."; footer.ForeColor = Color.Firebrick; return; }
+            try
+            {
+                var p = Process.Start(new ProcessStartInfo(Paths.MirrorDesktop) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Paths.Bin });
+                p.EnableRaisingEvents = true;
+                mirrorProc = p; mirrorStarted = DateTime.Now;
+                p.Exited += (s, e) => BeginInvoke((Action)(() =>
+                {
+                    if (mirrorProc != p) return;
+                    mirrorProc = null;
+                    int code = 0; try { code = p.ExitCode; } catch { }
+                    bool quick = (DateTime.Now - mirrorStarted).TotalSeconds < 8;
+                    Log.Write(code == 0 || !quick ? "INFO" : "WARN", $"desktop mirror ended (code {code})");
+                    if (code == 2) { mirrorFails = 3; footer.Text = "The desktop mirror cannot capture the screen (a locked or protected display): see logs\\mirrordesktop.log."; footer.ForeColor = Color.Firebrick; }
+                    else if (quick && code != 0) mirrorFails++;
+                    else mirrorFails = 0;
+                    MirrorSync();
+                }));
+                Log.Write("INFO", "desktop mirror started");
+            }
+            catch (Exception e) { Log.Write("ERROR", "desktop mirror: " + e.Message); mirrorFails = 3; }
+        }
 
         void NeedFind(bool on) { findHint.Visible = find.Visible = on; }
 
@@ -415,6 +455,7 @@ namespace VisionALVR
 
         void StartHost()
         {
+            headsetConnected = false; MirrorSync();
             var hs = Session.Headset(Session.Load());
             pairedName = hs?.Item2 ?? "";
             pairedIp = hs?.Item3 ?? "";
@@ -510,9 +551,11 @@ namespace VisionALVR
                     headset.Text = $"Headset: connected - {(n.Length > 0 ? n : pairedName)} ({(ip.Length > 0 ? ip : pairedIp)})";
                     headset.ForeColor = Color.SeaGreen;
                     NeedFind(false);
+                    headsetConnected = true; MirrorSync();
                     if (ip.Length > 0 && ip != settings.HeadsetIp) { settings.HeadsetIp = ip; settings.Save(); }
                     break;
                 case "client_disconnected":
+                    headsetConnected = false; MirrorSync();
                     NeedFind(true);
                     headset.Text = $"Headset: searching for {pairedName} ({pairedIp}) ...";
                     headset.ForeColor = Color.DarkOrange;
@@ -530,14 +573,14 @@ namespace VisionALVR
                     break;
                 case "game_started":
                     game.Text = "Game: " + S(d, "exe");
-                    gameRunning = true;
+                    gameRunning = true; MirrorSync();
                     currentExe = S(d, "exe");
                     lastSession = false;
                     statsBox.Text = "Streaming (updated every 10 s)";
                     ApplyRecommendation(fgRecommend.Checked);
                     break;
                 case "game_ended":
-                    gameRunning = false;
+                    gameRunning = false; MirrorSync();
                     game.Text = $"Game: none (last: {S(d, "exe")}, {F(D(d, "seconds") / 60, "0.0")} min)";
                     break;
                 case "game_run":

@@ -4,7 +4,7 @@ Builds VisionALVR on Windows from this checkout (see docs/DEVELOPMENT.md for the
     powershell -ExecutionPolicy Bypass -File build.ps1                 # everything for the release zip
     powershell -ExecutionPolicy Bypass -File build.ps1 host gui        # only some parts (setup runs first if needed)
 
-Add `debug` to keep the debug traces (default flavour: release). Targets, in build order: vdxr host shim gui package (default: all five), plus client probe (test tools for the harness).
+Add `debug` to keep the debug traces (default flavour: release). Targets, in build order: vdxr host shim mirrordesktop gui package (default: all five), plus client probe (test tools for the harness).
 The first run clones ALVR v20.14.1 and VirtualDesktop-OpenXR at the commits in deps.lock.json into src\ and builds their
 prerequisites (tools\remote\setup_builder.ps1, idempotent). Output: out\dist\VisionALVR\ and out\dist\VisionALVR-<version>.zip.
 Logs: logs\build_<step>.txt. Nothing outside this folder is changed (no registry, no OpenXR runtime registration).
@@ -13,7 +13,7 @@ param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Targets)
 $ErrorActionPreference = 'Continue'
 $repo = $PSScriptRoot
 $env:VISIONALVR_ROOT = $repo          # the build scripts work in <root>\src, <root>\out, <root>\_tmp, <root>\logs
-$all = @('vdxr', 'host', 'shim', 'gui', 'package')
+$all = @('vdxr', 'host', 'shim', 'mirrordesktop', 'gui', 'package')
 # flavour: the release build (default) compiles the per-frame debug traces out; `debug` as a target keeps them (harness / developers)
 $flavour = if ($Targets -contains 'debug') { 'debug' } else { 'release' }
 $Targets = @($Targets | Where-Object { $_ -ne 'debug' -and $_ -ne 'release' })
@@ -91,6 +91,7 @@ if ($Targets -contains 'vdxr')    { Stage 'vdxr'    'stage15_vdxr.ps1'       'RE
 if ($Targets -contains 'host')    { Stage 'host'    'stage8_host.ps1'        'Finished' }
 if ($Targets -contains 'client')  { Stage 'client'  'stage7_mockclient.ps1'  'Finished' }
 if ($Targets -contains 'shim')    { Stage 'shim'    'stage11_ovrshim.ps1'    'RESULT: OK' }
+if ($Targets -contains 'mirrordesktop') { Stage 'mirrordesktop' 'stage20_mirrordesktop.ps1' 'RESULT: OK' }
 if ($Targets -contains 'probe')   { Stage 'probe'   'stage12_probe_build.ps1' 'RESULT: OK' }
 if ($Targets -contains 'gui')     { Stage 'gui'     'stage16_gui.ps1'        'RESULT: OK' }
 if ($Targets -contains 'package') { Stage 'package' 'stage13_package.ps1'    'RESULT: OK' }

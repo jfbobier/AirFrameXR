@@ -7,7 +7,6 @@
 #include "ipc_win.h"
 #include "FFR.h"
 #include "framegen.h"
-#include "desktop.h"
 #include <dxgi.h>
 #include <algorithm>
 #include <cmath>
@@ -94,9 +93,6 @@ struct Nvh {
     std::unique_ptr<FFR> fgFfr;
     ID3D11Texture2D* fgFfrTex = nullptr;
     bool fgLast = false;
-    // desktop mirror (desktop.h): the idle frame shows the Windows desktop; a foveation pass bound to its target like the generator's
-    std::unique_ptr<DesktopMirror> desk;
-    std::unique_ptr<FFR> deskFfr;
 };
 
 // host options that are not ALVR settings
@@ -518,33 +514,6 @@ double nvh_encode_green(void* hh, uint32_t frame_no, uint64_t ts_ns, int force_i
 
 static double encodeWithFfr(Nvh* n, FFR* ffr, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
 
-// ---- desktop mirror ------------------------------------------------------------------------------------------------------------
-int nvh_desk_start(void* hh, int* w, int* h, int* hdr, char* err, int errlen) {
-    auto* n = (Nvh*)hh; if (!n) return 0;
-    n->deskFfr.reset(); n->desk.reset();
-    const auto& S = Settings::Instance();
-    auto d = std::make_unique<DesktopMirror>(n->render->GetDevice(), n->render->GetContext(), (int)S.m_renderWidth, (int)S.m_renderHeight,
-                                             n->bits == 10 ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM);
-    if (!d->Init(err, errlen)) return 0;
-    *w = d->DesktopW(); *h = d->DesktopH(); *hdr = d->Hdr() ? 1 : 0;
-    n->desk = std::move(d);
-    return 1;
-}
-
-void nvh_desk_stop(void* hh) { auto* n = (Nvh*)hh; if (n) { n->deskFfr.reset(); n->desk.reset(); } }
-
-double nvh_encode_desktop(void* hh, const float* ndc16, const float* cursor10, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
-    auto* n = (Nvh*)hh;
-    if (!n || !n->desk) { seterr(err, errlen, "desktop mirror off"); return -1; }
-    ID3D11Texture2D* tex = n->desk->Render(ndc16, cursor10, g_idleRgb, err, errlen);
-    if (!tex) return -1;
-    if (!n->deskFfr) {
-        try { n->deskFfr = std::make_unique<FFR>(n->render->GetDevice()); n->deskFfr->Initialize(tex); }
-        catch (Exception& e) { n->deskFfr.reset(); seterr(err, errlen, e.what()); return -1; }
-        catch (std::exception& e) { n->deskFfr.reset(); seterr(err, errlen, e.what()); return -1; }
-    }
-    return encodeWithFfr(n, n->deskFfr.get(), frame_no, ts_ns, force_idr, err, errlen);
-}
 
 #ifdef VISIONALVR_SIMRIG
 // simrig (see simviewer.cpp): the viewer shares the encoder's D3D11 device and reads the shim's slots through it.

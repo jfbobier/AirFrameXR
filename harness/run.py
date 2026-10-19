@@ -210,6 +210,19 @@ def build(what):
                 print(o[-1200:])
                 return 2
             continue
+        if w == "mirrordesktop":   # the desktop mirror, an OpenXR app: tools/mirrordesktop/*.cpp|h compiled on the builder
+            lib.b_run("if not exist tools\\mirrordesktop mkdir tools\\mirrordesktop")
+            for f in sorted((lib.ROOT / "tools/mirrordesktop").glob("*")):
+                if f.suffix in (".cpp", ".h"):
+                    lib.b_put(f, f"tools/mirrordesktop/{f.name}")
+            r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage20_mirrordesktop.ps1"], cwd=lib.ROOT, capture_output=True)
+            o = r.stdout.decode(errors="replace").replace("\x00", "")
+            ok = "RESULT: OK" in o
+            print(f"build mirrordesktop: {'ok' if ok else 'FAILED'}")
+            if not ok:
+                print(o[-1500:])
+                return 2
+            continue
         if w == "probe":     # the OpenXR test app (+ the benchmark scene renderer it can show, and the scene file)
             lib.b_put(lib.ROOT / "tools/probe/xr_probe.cpp", "_tmp/xr_probe.cpp")
             lib.b_run("if not exist nvenc\\hostlib mkdir nvenc\\hostlib")
@@ -347,7 +360,7 @@ def main(argv):
                 print(line.rstrip())
         if "RESULT: OK" not in out:
             return 2
-        return 0 if extra else build(["nvenc", "vdxr", "client", "host", "shim", "probe", "gui", "package"])
+        return 0 if extra else build(["nvenc", "vdxr", "client", "host", "shim", "probe", "mirrordesktop", "gui", "package"])
     if cmd == "test-zip":          # the shipped zip, unzipped into a fresh folder and run from there (no registry)
         r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage18_zip_test.ps1"], cwd=lib.ROOT, capture_output=True, timeout=600)
         out = r.stdout.decode(errors="replace").replace("\x00", "")

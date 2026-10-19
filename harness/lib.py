@@ -215,7 +215,8 @@ def launch_app(app, rid, rd, log):
            f"set XR_RUNTIME_JSON={home}\\{ROOTNAME}\\{rt}\\virtualdesktop-openxr.json\r\n"
            + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\{ROOTNAME}\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\{ROOTNAME}\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_timing.csv", **app.get("env", {})}.items()) +
            f"cd /d {home}\\{ROOTNAME}\r\n"
-           f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n"
+           + (f"out\\mirrordesktop\\mirrordesktop.exe --log {rd}\\app.log --seconds {app.get('seconds', 25)} --no-mouse > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "mirrordesktop" else
+              f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n") +
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
     local = CACHE / "app.cmd"
     CACHE.mkdir(parents=True, exist_ok=True)
@@ -711,6 +712,37 @@ def negotiated_cfg(outdir):
     return cfg
 
 
+def analyse_mirror(sc, outdir):
+    """The desktop mirror (tools/mirrordesktop, an OpenXR app): in the decoded stream everything outside the screen is 00FF00 (the headset's alpha), the screen
+    straight ahead of the head shows the desktop (not green), and the host did not record the app as a game."""
+    cfg = negotiated_cfg(outdir)
+    ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
+    pts = [(30, 30), (ew - 30, eh - 30), (ew + 30, 30), (2 * ew - 30, eh - 30), (ew // 2, eh // 2)]
+    frames = read_rgb_at(outdir / "client.hevc", pts)[20:]
+    def green(px): return abs(px[0]) < 45 and px[1] > 205 and abs(px[2]) < 45
+    ok = sum(1 for fr in frames if all(green(fr[i]) for i in range(4)) and not green(fr[4]))
+    recorded = False
+    for line in open(outdir / "host_stdout.txt", errors="replace"):
+        if '"game_started"' in line and "mirrordesktop" in line.lower():
+            recorded = True
+    res = {"frames": len(frames), "ok": ok, "samples": [[list(p) for p in fr] for fr in frames[:2]], "recorded_as_game": recorded}
+    if sc["checks"]["mirror"].get("beam"):
+        # the controller's beam: the left eye scaled to 160 x 144 (area), a 3 px orange line blends with the green or the desktop into pixels with red > 35 over a strong green
+        W, H = 160, 144
+        p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", str(outdir / "client.hevc"), "-vf", f"crop={ew}:{eh}:0:0,scale={W}:{H}:flags=area,format=rgb24", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                           capture_output=True, timeout=3600)
+        d, n = p.stdout, W * H * 3
+        counts = []
+        for o in range(0, len(d) - n + 1, n):
+            f = d[o:o + n]
+            counts.append(sum(1 for i in range(0, n, 3) if f[i] > 35 and f[i + 1] > 100 and f[i + 2] < 70 and f[i] < 200))
+        counts = counts[20:]
+        res["beam_frames"] = len(counts); res["beam_ok"] = sum(1 for c in counts if c >= 6); res["beam_pixels_median"] = sorted(counts)[len(counts) // 2] if counts else 0
+        log = (outdir / "app.log").read_text(errors="replace") if (outdir / "app.log").exists() else ""
+        res["tracked_logged"] = "is tracked" in log; res["pointer_logged"] = "the pointer is on the screen" in log
+    return res
+
+
 def analyse_layers(sc, outdir):
     cfg = negotiated_cfg(outdir)
     ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
@@ -1030,6 +1062,8 @@ def analyse(sc, outdir: Path):
     cl = outdir / "client.hevc"
     if sc.get("checks", {}).get("layers") and cl.exists() and cl.stat().st_size > 0:
         a["layers"] = analyse_layers(sc, outdir)
+    if sc.get("checks", {}).get("mirror") and cl.exists() and cl.stat().st_size > 0:
+        a["mirror"] = analyse_mirror(sc, outdir)
     if sc.get("checks", {}).get("qpmap"):
         a["qpmap"] = analyse_qpmap(sc, outdir, a.get("host") or {})
     if sc.get("checks", {}).get("pacing") and sc.get("app"):
@@ -1194,6 +1228,17 @@ def evaluate(sc, a):
                 frac = r["ok"] / r["n"] if r["n"] else 0.0
                 chk(f"layer.p{r['phase']}.{name}", r["n"] >= need and frac >= ck["layers"].get("min_ok_frac", 0.9),
                     {"frames": r["n"], "ok_frac": round(frac, 2), "samples": r["samples"][:2]}, f"expected {r['expected']} at the projected point in >= {ck['layers'].get('min_ok_frac', 0.9)} of {need}+ frames")
+    if "mirror" in a:
+        M_ = a["mirror"]; mk = ck["mirror"]
+        frac = M_["ok"] / M_["frames"] if M_["frames"] else 0.0
+        chk("mirror_picture", M_["frames"] >= mk.get("min_frames", 20) and frac >= mk.get("min_ok_frac", 0.9), {"frames": M_["frames"], "ok_frac": round(frac, 2), "samples": M_["samples"]},
+            "00FF00 in the corners of both eyes and the desktop (not green) straight ahead, in >= 90 % of the decoded frames")
+        if mk.get("beam"):
+            bf = M_["beam_ok"] / M_["beam_frames"] if M_.get("beam_frames") else 0.0
+            chk("mirror_beam", M_.get("beam_frames", 0) >= mk.get("min_frames", 20) and bf >= mk.get("min_ok_frac", 0.9), {"frames": M_.get("beam_frames"), "ok_frac": round(bf, 2), "median_pixels": M_.get("beam_pixels_median")},
+                "the controller's orange beam is in the left eye (>= 6 beam-coloured pixels at 160x144) in >= 90 % of the frames")
+            chk("mirror_controller_seen", M_.get("tracked_logged") and M_.get("pointer_logged"), {"tracked": M_.get("tracked_logged"), "pointer_on_screen": M_.get("pointer_logged")}, "the app tracked the controller through OpenXR and its ray met the screen")
+        chk("mirror_not_a_game", not M_["recorded_as_game"], M_["recorded_as_game"], "the host did not record mirrordesktop.exe as a game")
     if "qpmap" in ck:
         qk, qa = ck["qpmap"], a.get("qpmap") or {}
         chk("qpmap_enabled_in_nvenc", qa.get("nvenc_qp_map_mode") == (2 if qk.get("on", True) else 0), qa.get("nvenc_qp_map_mode"), "NVENC reports qpMapMode 2 (delta) when the map is on, 0 when off")

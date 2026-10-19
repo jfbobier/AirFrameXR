@@ -185,7 +185,6 @@ void FFR::RenderTo(ID3D11Texture2D* target) {\n\
         .include(nvenc.join("../third_party/nvof")) // NVIDIA Optical Flow API headers (MIT notice); the engine is in the driver (nvofapi64.dll)
         .file(nvenc.join("hostlib/nvh.cpp"))
         .file(nvenc.join("hostlib/framegen.cpp"))
-        .file(nvenc.join("hostlib/desktop.cpp"))
         .file(nvenc.join("hostlib/bench.cpp"))
         .file(nvenc.join("shim/shim.cpp"))
         .file(&enc_cpp_path)

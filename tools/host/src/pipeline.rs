@@ -1218,8 +1218,12 @@ impl Pipeline {
                     self.fg_real_due.store(false, Ordering::Relaxed);
                 }
             } else {
-                // real timings for ALVR's statistics: the app presented at submit_s, the shim finished composing then
-                let since_submit = Duration::from_secs_f64((unsafe { nvh::nvh_qpc_seconds() } - submit_s).max(0.0));
+                // real timings for ALVR's statistics: the app presented at submit_s, the shim finished composing then. In generation mode every
+                // output (the real frame, the synthetic one, a repeat) is presented at its own boundary: the real frame's submit time would be
+                // reported twice (the synthetic output carries it too), ALVR's present interval would read zero and its server fps, bitrate
+                // and latency figures run off to 1e6 / 1e9 (Lies of P 2026-10-19: "latency 4958802102 ms" in the game record).
+                let since_submit = if matches!(plan, Plan::Fg { .. }) { Duration::ZERO }
+                    else { Duration::from_secs_f64((unsafe { nvh::nvh_qpc_seconds() } - submit_s).max(0.0)) };
                 self.ctx.report_present(ts, since_submit);
                 self.ctx.report_composed(ts, since_submit);
                 self.green_active.store(false, Ordering::Relaxed);
@@ -1237,21 +1241,7 @@ impl Pipeline {
                 Plan::Fg { mode, t, age, q, .. } => unsafe {
                     nvh::nvh_fg_encode(handle, ipc, *mode, *t, *age, q.as_ptr(), counter as u32, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256)
                 },
-                Plan::Green | Plan::Skip => {
-                    // desktop mirror (mirror.rs): between games the frame is the Windows desktop on a virtual screen, stamped with the head sample it was drawn for
-                    let mirrored = if crate::mirror::enabled() && crate::mirror::ensure_started(handle) {
-                        crate::mirror::frame_params().map(|(ndc, cur, head_ts)| unsafe {
-                            nvh::nvh_encode_desktop(handle, ndc.as_ptr(), cur.as_ptr(), 0, head_ts.max(*self.last_sent_ts.lock()).as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256)
-                        })
-                    } else {
-                        if !crate::mirror::enabled() { crate::mirror::stop(handle); }
-                        None
-                    };
-                    match mirrored {
-                        Some(ms) => ms,
-                        None => unsafe { nvh::nvh_encode_green(handle, 0, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256) },
-                    }
-                }
+                Plan::Green | Plan::Skip => unsafe { nvh::nvh_encode_green(handle, 0, ts.as_nanos() as u64, force_idr as i32, err.as_mut_ptr(), 256) },
             };
             if let Some(s) = slot {
                 // the foveation pass consumed the slot (Transmit returns after the packet is out): the shim may reuse it

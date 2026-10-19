@@ -1955,6 +1955,10 @@ namespace {
             {
                 const std::wstring name = shimlog::ExeName();
                 wcsncpy_s(m_ipc.state->shim.appExe, name.c_str(), _TRUNCATE);
+                // the desktop mirror (mirrordesktop.exe, an app like any other) holds the headset between games: any other app starting tells it to leave
+                if (_wcsicmp(name.c_str(), L"mirrordesktop.exe") != 0) {
+                    if (HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\VisionALVR_GameStarting")) { SetEvent(ev); CloseHandle(ev); }
+                }
             }
             UpdateDebugDir();
             ShimLog("start: %s: host IPC open (%ls namespace, %s), client %s", exe, IpcNamespace(),
@@ -2018,6 +2022,7 @@ namespace {
             }
             m_sbsWidth = (uint32_t)h.eyeWidth * 2;
             m_sbsHeight = (uint32_t)h.eyeHeight;
+            m_ngx.SetEyeSize((uint32_t)h.eyeWidth, (uint32_t)h.eyeHeight);   // the tap tells an eye's DLSS stream from the flat window's
             const DXGI_FORMAT fmt = h.encodeBits == 10 ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
 
             D3D11_TEXTURE2D_DESC desc{};

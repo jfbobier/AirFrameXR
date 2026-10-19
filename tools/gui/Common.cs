@@ -46,6 +46,7 @@ namespace VisionALVR
         public static string SessionDefault => Path.Combine(Config, "session.default.json");
         public static string Settings => Path.Combine(Config, "visionalvr.json");
         public static string Host => Path.Combine(Bin, "alvr_host.exe");
+        public static string MirrorDesktop => Path.Combine(Bin, "mirrordesktop.exe");
         public static string Manifest => Path.Combine(Bin, "virtualdesktop-openxr.json");
         public static string RegisterScript => Path.Combine(Bin, "register_openxr_runtime.ps1");
         public static string Configure => Path.Combine(Bin, "configure.exe");

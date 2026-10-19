@@ -103,6 +103,14 @@ public:
         m_depth = GetEnvironmentVariableA("OVRSHIM_MV_DEPTH", v, sizeof(v)) > 0 && atoi(v) != 0;   // the generator does not read depth yet: off by default
     }
 
+    /// The eye size the game renders for the headset: a DLSS stream whose output is that size is an eye; the game's flat window (its own DLSS
+    /// pass at the monitor's size, seen first in UEVR titles: 1920x1080 in Valor Mortis, 2560x1440 in Lies of P) is not.
+    void SetEyeSize(uint32_t w, uint32_t h) {
+        std::lock_guard<std::mutex> g(m_mutex);
+        m_eyeW = w;
+        m_eyeH = h;
+    }
+
     // Finds the provider among the loaded modules (by its export) and registers the consumer. Cheap when there is none; call until it returns true.
     bool TryAttach() {
         if (m_attached || m_off) {
@@ -184,12 +192,21 @@ public:
                 i++;
             }
         }
-        // eye order = order of first appearance (Unreal evaluates the left view first)
+        // eye order = the streams whose output is the eye size first (the flat window's DLSS pass is not an eye), then the order of first
+        // appearance (Unreal evaluates the left view first)
         std::vector<Stream*> order;
         for (auto& s : m_streams) {
             order.push_back(&s);
         }
-        std::sort(order.begin(), order.end(), [](const Stream* a, const Stream* b) { return a->firstSeen < b->firstSeen; });
+        const uint32_t eyeW = m_eyeW, eyeH = m_eyeH;
+        auto isEye = [eyeW, eyeH](const Stream* s) { return eyeW == 0 || (s->info.outputW == eyeW && s->info.outputH == eyeH); };
+        std::sort(order.begin(), order.end(), [&](const Stream* a, const Stream* b) {
+            const bool ea = isEye(a), eb = isEye(b);
+            if (ea != eb) {
+                return ea;
+            }
+            return a->firstSeen < b->firstSeen;
+        });
         out.streams = (uint32_t)order.size();
         for (int e = 0; e < 2 && e < (int)order.size(); e++) {
             Stream& s = *order[e];
@@ -582,6 +599,7 @@ private:
     bool m_depth = false;
     bool m_removedLogged = false;      // sources whose shared copy could not be made (each logged once)
     D3D12_RESOURCE_STATES m_srcState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;   // what DLSS requires of its inputs
+    uint32_t m_eyeW = 0, m_eyeH = 0;   // SetEyeSize: 0 = unknown, every stream counts as an eye
     std::vector<Stream> m_streams;
     SlotTex m_slotTex[visionalvr_ipc::kSlots][2][2];   // [slot][eye][0 vectors, 1 depth]
 };

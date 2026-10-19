@@ -17,6 +17,7 @@ foreach ($f in 'streamer.exe', 'configure.exe', 'performance.exe', 'launcher.exe
     if (Test-Path "$root\out\gui\$f") { Copy-Item "$root\out\gui\$f" "$pkg\bin" -Force }
     Copy-Item "$root\_tmp\gui\app.exe.config" "$pkg\bin\$f.config" -Force   # WinForms' per-monitor DPI mode (tools/gui/app.exe.config)
 }
+if (Test-Path "$root\out\mirrordesktop\mirrordesktop.exe") { Copy-Item "$root\out\mirrordesktop\mirrordesktop.exe" "$pkg\bin" -Force }   # the desktop mirror (an OpenXR app the streamer starts)
 if (Test-Path "$root\out\gui\VisionALVR.exe") { Copy-Item "$root\out\gui\VisionALVR.exe" $pkg -Force }   # the stub: the only file in the root (starts bin\launcher.exe)
 Copy-Item "$root\_tmp\install\register_openxr_runtime.ps1" "$pkg\bin" -Force
 Copy-Item "$root\_tmp\install\README.txt" "$pkg\docs" -Force
@@ -57,7 +58,7 @@ if (Test-Path $pfList) { foreach ($line in (Get-Content $pfList)) { $f = $line.T
 $zip = "$root\out\dist\VisionALVR-$version.zip"
 # the zip holds only what ships (never logs\, config\session.json or results a test run may have left in the folder);
 # everything sits under VisionALVR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
-$ship = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
+$ship = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\mirrordesktop.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
           'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json',
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
 $ship += $persShip

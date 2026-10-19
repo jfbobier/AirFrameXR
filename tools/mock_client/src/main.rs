@@ -794,10 +794,12 @@ fn tracking(
                 let p = (t / period).fract();
                 if p < 0.5 { p * 2.0 } else { 2.0 - p * 2.0 }
             };
+            // MOCK_HAND_YAW_DEG: the hands' orientation about the vertical (the Vision Pro's hand convention is 180 degrees from the aim the shim hands to games)
+            let hand_q = Quat::from_rotation_y(std::env::var("MOCK_HAND_YAW_DEG").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0).to_radians());
             let lpos = Vec3::new(-0.25, 1.2 + 0.05 * (t * 1.3).sin(), -0.3);
             let rpos = Vec3::new(0.25 + 0.1 * (std::f32::consts::TAU * 0.5 * t).sin(), 1.3, -0.3 + 0.05 * (t * 0.7).cos());
             for (id, pos) in [(*HAND_LEFT_ID, lpos), (*HAND_RIGHT_ID, rpos)] {
-                motions.push((id, DeviceMotion { pose: Pose { orientation: Quat::IDENTITY, position: pos }, linear_velocity: Vec3::ZERO, angular_velocity: Vec3::ZERO }));
+                motions.push((id, DeviceMotion { pose: Pose { orientation: hand_q, position: pos }, linear_velocity: Vec3::ZERO, angular_velocity: Vec3::ZERO }));
             }
             let trigger_r = tri(t, 4.0);
             let squeeze_l = tri(t + 1.0, 3.0) * 0.8;
