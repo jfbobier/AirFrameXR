@@ -30,8 +30,8 @@ any pixel constant is a 96-dpi design value (`AutoScaleDimensions = 96,96`).
   with "don't show for this game again" (stored in the game's JSON).
 
 ## Phase 2: Logs and performance window + per-game data
-Data model: `config\games\<exe name>.json`, one file per game (UEVR style), replacing `config\games.json` (migrated on first run; the
-launcher's "Recommended" reads the new files).
+Data model: `config\games\<exe name>.json`, one file per game (UEVR style), replacing `config\games.json` (no migration: old records are not carried over;
+the launcher's "Recommended" reads the new files). The streamer's own log, `logs\VisionALVR.log`, stays one file, independent of the games.
 - Display name = the game's main window title (fallback: exe name). Paths seen. Preferences (don't-ask flags).
 - Per session: start/end, headset, generation level, game / streamed / shown fps (mean, p1), repeated and missed period shares, bitrate,
   latency split, packet loss and network stats (as ALVR's summary), DLSS-vectors DLL present and **actually used** (flow skipped counters),
@@ -64,7 +64,8 @@ Minimal code:
 - **Capture**: Windows Graphics Capture (or DXGI desktop duplication) of the primary monitor, only while no game session runs and the toggle is on.
   **HDR**: if the desktop is HDR (scRGB / PQ), one small pass converts to SDR (tone-map + sRGB) before the existing encode path; SDR passes through.
 - **Idle frame**: today the between-sessions view is the chroma-key frame; with the toggle on, the desktop replaces it on a virtual screen
-  (position in front of the user, set at session start).
+  (position in front of the user, set at session start). That overrides the chroma key by design, and it is fine: UEVR/desktop-launched games keep the
+  passthrough technique (toggle off, the default); the mirror is for true VR-controller games started from the headset, where you need room.
 - **Input**: the pointer is the hand's aim ray intersected with the virtual screen; pinch (or trigger on controllers) = left click, a second
   gesture/button = right click; applied with `SendInput`. Hands arrive as emulated Quest 2 controllers in the shim today: **first step is to find out
   exactly what the AVP client and the Quest client send** (pose, aim, pinch as button value) and map from that.

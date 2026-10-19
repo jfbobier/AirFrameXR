@@ -48,7 +48,7 @@ namespace VisionALVR
         readonly CheckBox fgRecommend = new CheckBox { Text = "Recommended", AutoSize = true, Margin = new Padding(8, 3, 0, 0) };
         readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(8, 3, 3, 3) };
         bool fgRateFromHost;   // the slider follows the host's rate: no command back
-        // Game profiles (config\games.json, written by the streamer at every game end: per game, headset and level the last run's numbers). The
+        // Game profiles (config\games\<exe>.json, written by the streamer at every game end: per game, headset and level the last run's numbers). The
         // launcher proposes a level from them when "Recommended" is ticked: the slider is set and greyed; unticked, the slider is yours again.
         // No run recorded for the game on this headset: nothing proposed, the slider stays live. The streamer itself decides nothing.
         string currentExe = "", headsetName = "";
@@ -148,7 +148,7 @@ namespace VisionALVR
             lt.Controls.Add(fgRateText);
             lt.SetColumnSpan(fgRateText, 6);
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
-            tips.SetToolTip(fgRecommend, "The slider is set from this game's recorded runs on this headset (config\\games.json): the fastest rate whose typical 10-second window repeated under 5 % of the headset's periods; a rate that filled its cap suggests the next one once. Untick to choose yourself.");
+            tips.SetToolTip(fgRecommend, "The slider is set from this game's recorded runs on this headset (config\\games\\<game>.json): the fastest rate whose typical 10-second window repeated under 5 % of the headset's periods; a rate that filled its cap suggests the next one once. Untick to choose yourself.");
             tips.SetToolTip(recenter, "Turn the tracking space so your current forward is forward and your position the origin (sent on its own at every game start).");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the OptiScaler-DLSSMotionVectorExtractor DLL is in the game folder (else optical flow).");
             live.Controls.Add(lt);
@@ -279,7 +279,7 @@ namespace VisionALVR
         bool heightFromHeadset;
         Action fgEnableAll;
 
-        // The proposal from config\games.json for the running game on the connected headset (null = no run recorded). Levels in order; a level
+        // The proposal from config\games\<exe>.json for the running game on the connected headset (null = no run recorded). Levels in order; a level
         // counts when its last run lasted 30 s or more; "clean" = in the typical 10-second window the headset repeated under 5 % of its periods
         // AND the host repeated under 5 % of its outputs (a game under the level's cap makes the host re-send its last frame: the headset shows a
         // frame every period, frozen content; Valor Mortis at 1/2 on the Vision Pro read 0.4 % headset / 14 % host, 2026-10-17). The fastest
@@ -291,8 +291,8 @@ namespace VisionALVR
         {
             try
             {
-                var all = Json.Load(Path.Combine(Paths.Config, "games.json"));
-                if (!(all.TryGetValue(exe, out var g) && g is Dictionary<string, object> gd && gd.TryGetValue(hs, out var h) && h is Dictionary<string, object> runs)) return null;
+                var gd = Games.Load(exe);
+                if (!(gd.TryGetValue("levels", out var lv) && lv is Dictionary<string, object> byHeadset && byHeadset.TryGetValue(hs, out var h) && h is Dictionary<string, object> runs)) return null;
                 int best = -1; bool bestClean = false; double bestScore = 9.0; Dictionary<string, object> bestRun = null;
                 for (int i = 0; i < Levels.Length; i++)
                 {

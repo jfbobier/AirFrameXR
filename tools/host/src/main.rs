@@ -14,6 +14,7 @@ use alvr_server_core::{ServerCoreContext, ServerCoreEvent};
 use alvr_session::CodecType;
 mod bench_quality;
 mod discovery;
+mod games;
 mod logs;
 mod nvidia_profile;
 mod phase;
@@ -1365,12 +1366,56 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
         "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf }));
 }
 
+/// What a run collects besides the display periods: the headset's 10-second client windows (network, latency), packets lost, the generator's
+/// motion-vector counters at the segment's start and now, and the game's window title and path (found once its window exists).
+#[derive(Default)]
+struct RunStats {
+    net: Vec<serde_json::Value>,
+    lost: u64,
+    mv0: (u64, u64),
+    mv_now: (u64, u64),
+    meta: Option<games::Meta>,
+}
+
+impl RunStats {
+    fn restart(&mut self, mv: (u64, u64)) {
+        self.net.clear();
+        self.lost = 0;
+        self.mv0 = mv;
+        self.mv_now = mv;
+    }
+    /// Mean of each latency / rate field over the windows, the 95th percentile of the total latency, and the packets lost.
+    fn net_summary(&self) -> serde_json::Value {
+        let mean = |k: &str| -> f64 {
+            let v: Vec<f64> = self.net.iter().filter_map(|w| w[k].as_f64()).collect();
+            if v.is_empty() { 0.0 } else { (v.iter().sum::<f64>() / v.len() as f64 * 100.0).round() / 100.0 }
+        };
+        let mut tot: Vec<f64> = self.net.iter().filter_map(|w| w["total_latency_ms"].as_f64()).collect();
+        tot.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p95 = if tot.is_empty() { 0.0 } else { tot[(((tot.len() - 1) as f64) * 0.95).round() as usize] };
+        json!({ "windows": self.net.len(), "bitrate_mbps": mean("bitrate_mbps"), "throughput_mbps": mean("throughput_mbps"), "displayed_fps": mean("displayed_fps"),
+            "latency_ms": mean("total_latency_ms"), "latency_p95_ms": p95, "encode_ms": mean("encode_ms"), "network_ms": mean("network_ms"), "decode_ms": mean("decode_ms"),
+            "packets_lost": self.lost })
+    }
+}
+
+/// (frames with game vectors, eye passes synthesised from them) so far on the generator (zeros when it is off).
+fn fg_mv_counts(p: &Option<Arc<pipeline::Pipeline>>) -> (u64, u64) {
+    let Some(p) = p.as_ref() else { return (0, 0) };
+    let g = p.enc.lock();
+    let mut buf = [0 as std::ffi::c_char; 768];
+    unsafe { nvh::nvh_fg_stats(g.handle, buf.as_mut_ptr(), 768) };
+    let t = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
+    let v: serde_json::Value = serde_json::from_str(&t).unwrap_or(serde_json::Value::Null);
+    (v["mv"]["frames"].as_u64().unwrap_or(0), v["mv"]["used_eyes"].as_u64().unwrap_or(0))
+}
+
 /// What the host records per game (config/games.json, keyed by the executable's file name, then the headset's name, then the generation level:
 /// the rate name or "off"): the last run at that level, for the launcher's "Recommended" tick. The host records and decides nothing; the
 /// launcher reads the file and proposes. A run shorter than 20 s is not recorded. The headset's repeated-period share is given as the median
 /// 10-second window of the run (what the game is like most of the time) and its 90th percentile (its heavy parts): the proposal is made on the
 /// typical window, hiccups being a fact of life in VR (user, 2026-10-17).
-fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64, f64)], skipped: f64) {
+fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64, f64)], skipped: f64, run: &RunStats, gpu: &serde_json::Value) {
     let pct = |v: &mut Vec<f64>, q: f64| -> f64 {
         if v.is_empty() { return 0.0; }
         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1384,15 +1429,17 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
     let mut rec = json!({ "seconds": secs, "display_hz": hz, "rendered_fps": rendered_fps, "rendered_fps_low": if f.is_empty() { rendered_fps } else { pct(&mut f, 0.1) }, "streamed_fps": streamed_fps,
         "headset_repeated_typ": pct(&mut c, 0.5), "headset_repeated_p90": pct(&mut c, 0.9), "host_repeats_typ": pct(&mut h, 0.5),
         "skipped": skipped, "windows": windows.len(), "updated": unix });
-    let path = args.config_dir.join("games.json");
-    let mut all = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).filter(|v| v.is_object()).unwrap_or_else(|| json!({}));
-    let runs = all[exe][headset][level]["runs"].as_u64().unwrap_or(0) + 1;
-    rec["runs"] = json!(runs);
-    all[exe][headset][level] = rec.clone();
-    if let Ok(t) = serde_json::to_string_pretty(&all) {
-        let _ = std::fs::create_dir_all(args.config_dir.as_path());
-        let _ = std::fs::write(&path, t);
-    }
+    let session = {
+        let mut ses = rec.clone();
+        ses["start"] = json!(unix.saturating_sub(secs as u64));
+        ses["headset"] = json!(headset);
+        ses["level"] = json!(level);
+        ses["net"] = run.net_summary();
+        ses["mv"] = json!({ "enabled": args.game_motion_vectors, "frames": run.mv_now.0.saturating_sub(run.mv0.0), "used_eyes": run.mv_now.1.saturating_sub(run.mv0.1) });
+        ses["gpu"] = json!({ "name": gpu["name"], "driver": gpu["driver"] });
+        ses
+    };
+    let runs = games::record(args.config_dir.as_path(), exe, headset, level, rec.clone(), session, run.meta.as_ref());
     logs::general("INFO", &format!("game run recorded: {exe} on {headset} at {level}, {secs:.0} s, {rendered_fps:.1} fps rendered (slowest tenth {:.1}), {streamed_fps:.1} streamed, headset repeated {:.1} % typical / {:.1} % worst (run {runs})",
         rec["rendered_fps_low"].as_f64().unwrap_or(0.0), rec["headset_repeated_typ"].as_f64().unwrap_or(0.0) * 100.0, rec["headset_repeated_p90"].as_f64().unwrap_or(0.0) * 100.0));
     rec["exe"] = json!(exe);
@@ -2226,6 +2273,7 @@ fn main() {
     let mut game: Option<GameRun> = None;
     // the run record (games.json): one (headset repeated share, host repeat share) sample per status tick (10 s) while a game runs
     let mut run_windows: Vec<(f64, f64, f64)> = Vec::new();
+    let mut run_stats = RunStats::default();
     let mut run_client0 = (0u64, 0u64);
     let mut run_rep0 = (0u64, 0u64);
     // scripted input (--auto-input): index of the next event to fire and the release instant of a pressed one
@@ -2240,7 +2288,7 @@ fn main() {
     };
     // the level changed during a run (the launcher, or the user): the segment played so far is recorded under the level it ran at (20 s or
     // more; the 2/3 segment of a Gears of War run was lost without this, 2026-10-17) and the record restarts here: a record belongs to one level
-    let restart_segment = |game: &mut Option<GameRun>, pipeline: &Option<std::sync::Arc<pipeline::Pipeline>>, ipc: *mut std::ffi::c_void, windows: &mut Vec<(f64, f64, f64)>, client0: &mut (u64, u64), rep0: &mut (u64, u64), old_level: &str, args: &Args| {
+    let restart_segment = |game: &mut Option<GameRun>, pipeline: &Option<std::sync::Arc<pipeline::Pipeline>>, ipc: *mut std::ffi::c_void, windows: &mut Vec<(f64, f64, f64)>, client0: &mut (u64, u64), rep0: &mut (u64, u64), old_level: &str, args: &Args, stats: &mut RunStats| {
         if let Some(g) = game.as_mut() {
             let (s, o) = fg_counts(pipeline);
             let seg_secs = g.seg_start.elapsed().as_secs_f64();
@@ -2251,7 +2299,8 @@ fn main() {
                 let seg_submitted = shim_submitted(ipc).wrapping_sub(g.seg_submitted0);
                 let headset = shared.headset.lock().clone().map(|(_, n, _)| n).unwrap_or_default();
                 let hz = pipeline.as_ref().map(|p| 1.0 / p.period().as_secs_f64()).unwrap_or(args.fps);
-                games_record_run(args, origin, &g.exe, &headset, hz, old_level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, windows, skipped);
+                stats.mv_now = fg_mv_counts(pipeline);
+                games_record_run(args, origin, &g.exe, &headset, hz, old_level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, windows, skipped, stats, &gpu_info);
             }
             g.seg_start = Instant::now();
             g.seg_frames0 = shared.frames_sent.load(Ordering::Relaxed);
@@ -2259,6 +2308,7 @@ fn main() {
             g.seg_skips0 = s;
             g.seg_outputs0 = o;
             windows.clear();
+            stats.restart(fg_mv_counts(pipeline));
             *client0 = logs::client_stats::client_frames_missed();
             *rep0 = pipeline.as_ref().map(|p| (p.fg_repeats.load(Ordering::Relaxed), p.fg_synths.load(Ordering::Relaxed) + p.fg_reals.load(Ordering::Relaxed))).unwrap_or((0, 0));
         }
@@ -2316,7 +2366,7 @@ fn main() {
                 if let Some(p) = pipeline.as_ref() {
                     set_frame_gen_live(origin, p.as_ref(), &args, want, &mut fg_active, ipc, "frame_gen");
                 }
-                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args);
+                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args, &mut run_stats);
             }
             // frame generation rate, the game's motion vectors, the fps cap and the content lag from VisionALVR.exe (live; the settings are read at start too)
             let rate = vision::FG_RATE_REQ.swap(-1, Ordering::SeqCst);
@@ -2329,7 +2379,7 @@ fn main() {
                 }
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_rate");
-                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args);
+                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args, &mut run_stats);
             }
             let mv = vision::GAME_MV_REQ.swap(-1, Ordering::SeqCst);
             if mv >= 0 {
@@ -2365,6 +2415,8 @@ fn main() {
                 logs::general("INFO", &format!("game started: {exe}"));
                 event(origin, "game_started", json!({ "exe": exe }));
                 run_windows.clear();
+                run_stats = RunStats::default();
+                run_stats.mv0 = fg_mv_counts(&pipeline);
                 run_client0 = logs::client_stats::client_frames_missed();
                 run_rep0 = pipeline.as_ref().map(|p| (p.fg_repeats.load(Ordering::Relaxed), p.fg_synths.load(Ordering::Relaxed) + p.fg_reals.load(Ordering::Relaxed))).unwrap_or((0, 0));
                 let (skips0, outputs0) = fg_counts(&pipeline);
@@ -2387,9 +2439,10 @@ fn main() {
                     let seg_frames = shared.frames_sent.load(Ordering::Relaxed) - g.seg_frames0;
                     let seg_submitted = shim_submitted(ipc).wrapping_sub(g.seg_submitted0);
                     let level = if fg_active { args.fg_rate.unwrap_or(FgRate::Half).name() } else { "off" };
+                    run_stats.mv_now = fg_mv_counts(&pipeline);
                     let headset = shared.headset.lock().clone().map(|(_, n, _)| n).unwrap_or_default();
                     let hz = pipeline.as_ref().map(|p| 1.0 / p.period().as_secs_f64()).unwrap_or(args.fps);
-                    games_record_run(&args, origin, &g.exe, &headset, hz, level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, &run_windows, skipped);
+                    games_record_run(&args, origin, &g.exe, &headset, hz, level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, &run_windows, skipped, &run_stats, &gpu_info);
                 }
             }
             if let Some(g) = &game {
@@ -2415,6 +2468,8 @@ fn main() {
                 shim_submitted(ipc), logs::client_stats::packets_lost_total());
             let rendered = submitted.wrapping_sub(st_submitted) as usize;
             let streamed = frames - st_frames;
+            let client_window = logs::client_stats::take(1);
+            let lost_delta = lost.saturating_sub(st_lost);
             event(origin, "status", json!({
                 "connected": shared.client_connected.load(Ordering::SeqCst),
                 "headset": shared.headset.lock().clone().map(|(h, n, ip)| json!({ "hostname": h, "name": n, "ip": ip })),
@@ -2423,12 +2478,17 @@ fn main() {
                 "frames_not_streamed": rendered.saturating_sub(streamed),
                 "mbps": (bytes - st_bytes) as f64 * 8.0 / secs / 1e6,
                 "packets_lost": lost.saturating_sub(st_lost),
-                "client": logs::client_stats::take(1),
+                "client": client_window,
                 "gamma": user_gamma, "debug": debug_on,
                 "fg_on": fg_active, "fg_rate": args.fg_rate.unwrap_or(FgRate::Half).name(),
             }));
             (st_frames, st_bytes, st_submitted, st_lost) = (frames, bytes, submitted, lost);
             status_at = Instant::now();
+            if let Some(g) = game.as_ref() {
+                if let Some(w) = client_window.clone() { run_stats.net.push(w); }
+                run_stats.lost += lost_delta as u64;
+                if run_stats.meta.as_ref().map(|m| m.title.is_empty()).unwrap_or(true) { run_stats.meta = games::find_meta(&g.exe).or(run_stats.meta.take()); }
+            }
             if game.is_some() {
                 // one window of the run record: the headset's repeated display periods (its own statistics) and the host's repeats
                 let (cf, cm) = logs::client_stats::client_frames_missed();

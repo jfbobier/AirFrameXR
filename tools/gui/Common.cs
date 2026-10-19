@@ -38,6 +38,153 @@ namespace VisionALVR
         public static string Runtime => Path.Combine(Dir, "VisionALVR.exe");
     }
 
+    /// config\games\<exe name without .exe>.json, one file per game, written by the streamer (tools/host/src/games.rs documents the layout).
+    public static class Games
+    {
+        public static string Dir => Path.Combine(Paths.Config, "games");
+        public static string Stem(string exe)
+        {
+            var n = Path.GetFileName(exe ?? "");
+            if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) n = n.Substring(0, n.Length - 4);
+            foreach (var c in "<>:\"/\\|?*") n = n.Replace(c, '_');
+            return n.Length == 0 ? "unknown" : n;
+        }
+        public static string FileOf(string exe) => Path.Combine(Dir, Stem(exe) + ".json");
+        public static Dictionary<string, object> Load(string exe) => Json.Load(FileOf(exe));
+        public static IEnumerable<string> Files() => Directory.Exists(Dir) ? Directory.GetFiles(Dir, "*.json") : new string[0];
+    }
+
+    /// The DLSS motion-vector extractor (OptiScaler-DLSSMotionVectorExtractor, one DLL) in a game folder. The package's DLSSMotionVectors\dxgi.dll is the
+    /// master copy and is never touched: install = copy it next to the game's exe (as dxgi.dll, or version.dll when dxgi.dll is already someone
+    /// else's), uninstall = delete that copy. config\mv_dll.json (the launcher's own file) keeps what was installed where (file, MD5, time) so an
+    /// uninstall is one click and an old copy from an earlier release is recognised by its MD5.
+    public static class MvDll
+    {
+        public static string Master => Path.Combine(Paths.Dir, "DLSSMotionVectors", "dxgi.dll");
+        public static string Record => Path.Combine(Paths.Config, "mv_dll.json");
+        public static readonly string[] Names = { "dxgi.dll", "version.dll" };
+
+        public enum State { NoMaster, NoFolder, NotInstalled, Installed, OlderCopy, OtherDll }
+
+        public static string Md5(string path)
+        {
+            try { using (var m = System.Security.Cryptography.MD5.Create()) using (var f = File.OpenRead(path)) return BitConverter.ToString(m.ComputeHash(f)).Replace("-", "").ToLowerInvariant(); }
+            catch { return ""; }
+        }
+
+        /// The game's folder: where its exe is (the first recorded path that still exists).
+        public static string GameDir(Dictionary<string, object> game)
+        {
+            if (game != null && game.TryGetValue("paths", out var p) && p is object[] arr)
+                foreach (var o in arr) { var s = o as string; if (!string.IsNullOrEmpty(s) && File.Exists(s)) return Path.GetDirectoryName(s); }
+            return null;
+        }
+
+        /// What is next to the exe: our copy (MD5 equals the master), an older copy we installed, someone else's proxy DLL, or nothing.
+        public static State Check(string gameDir, string stem, out string file)
+        {
+            file = null;
+            if (!File.Exists(Master)) return State.NoMaster;
+            if (gameDir == null) return State.NoFolder;
+            var master = Md5(Master);
+            var mine = Installed(stem);
+            State best = State.NotInstalled;
+            foreach (var n in Names)
+            {
+                var f = Path.Combine(gameDir, n);
+                if (!File.Exists(f)) continue;
+                var md5 = Md5(f);
+                if (md5 == master) { file = f; return State.Installed; }
+                if (mine != null && string.Equals(mine, n, StringComparison.OrdinalIgnoreCase)) { file = f; best = State.OlderCopy; }
+                else if (best == State.NotInstalled && n == "dxgi.dll") { file = f; best = State.OtherDll; }
+            }
+            return best;
+        }
+
+        static Dictionary<string, object> Load() => Json.Load(Record);
+        static Dictionary<string, object> Installs(Dictionary<string, object> r)
+        {
+            if (!(r.TryGetValue("installs", out var o) && o is Dictionary<string, object> d)) { d = new Dictionary<string, object>(); r["installs"] = d; }
+            return d;
+        }
+        public static string Installed(string stem)
+        {
+            var r = Load();
+            return Installs(r).TryGetValue(stem, out var o) && o is Dictionary<string, object> e && e.TryGetValue("file", out var f) ? f as string : null;
+        }
+        static void Save(Dictionary<string, object> r) { Directory.CreateDirectory(Paths.Config); Json.Save(Record, r); }
+
+        public static bool Dismissed(string stem)
+        {
+            var r = Load();
+            return r.TryGetValue("dismissed", out var o) && o is object[] a && a.Any(x => (x as string) == stem);
+        }
+        public static void Dismiss(string stem)
+        {
+            var r = Load();
+            var l = (r.TryGetValue("dismissed", out var o) && o is object[] a ? a.Select(x => x as string).ToList() : new List<string>());
+            if (!l.Contains(stem)) l.Add(stem);
+            r["dismissed"] = l.Cast<object>().ToArray();
+            Save(r);
+        }
+
+        /// Copies the master next to the game's exe. dxgi.dll unless a different one is there (then version.dll). Elevated copy when the folder is
+        /// not writable. Returns a message for the user, and the file name through `installed` (null on failure).
+        public static string Install(string gameDir, string stem, out string installed)
+        {
+            installed = null;
+            if (!File.Exists(Master)) return "The DLL is not in this release (DLSSMotionVectors\\dxgi.dll is missing).";
+            var master = Md5(Master);
+            string name = "dxgi.dll";
+            var d = Path.Combine(gameDir, "dxgi.dll");
+            if (File.Exists(d) && Md5(d) != master && Installed(stem) != "dxgi.dll") name = "version.dll";
+            var target = Path.Combine(gameDir, name);
+            if (File.Exists(target) && Md5(target) != master && Installed(stem) != name) return $"{name} and dxgi.dll in the game folder belong to something else; nothing was changed.";
+            if (!CopyMaybeElevated(Master, target)) return "The copy did not happen (administrator permission refused?).";
+            if (Md5(target) != master) return "The copy is not identical to the release's DLL; check the game folder.";
+            var r = Load();
+            Installs(r)[stem] = new Dictionary<string, object> { { "file", name }, { "dir", gameDir }, { "md5", master }, { "time", DateTime.Now.ToString("s") } };
+            Save(r);
+            Log.Write("INFO", $"motion-vector DLL installed for {stem}: {target}");
+            installed = name;
+            return $"Installed as {name} in {gameDir}. Uninstall from the Logs window removes exactly this file.";
+        }
+
+        public static string Uninstall(string gameDir, string stem)
+        {
+            var name = Installed(stem);
+            if (name == null) return "Nothing recorded as installed for this game by VisionALVR; remove the DLL by hand if you put it there.";
+            var target = Path.Combine(gameDir, name);
+            if (File.Exists(target) && !DeleteMaybeElevated(target)) return "The file was not removed (administrator permission refused?).";
+            var r = Load();
+            Installs(r).Remove(stem);
+            Save(r);
+            Log.Write("INFO", $"motion-vector DLL removed for {stem}: {target}");
+            return $"Removed {name} from {gameDir}.";
+        }
+
+        static bool CopyMaybeElevated(string from, string to)
+        {
+            try { File.Copy(from, to, true); return true; } catch (UnauthorizedAccessException) { } catch (IOException) { }
+            return Elevated($"/c copy /y \"{from}\" \"{to}\"") && File.Exists(to);
+        }
+        static bool DeleteMaybeElevated(string path)
+        {
+            try { File.Delete(path); return true; } catch (UnauthorizedAccessException) { } catch (IOException) { }
+            return Elevated($"/c del /f /q \"{path}\"") && !File.Exists(path);
+        }
+        static bool Elevated(string args)
+        {
+            try
+            {
+                var p = Process.Start(new ProcessStartInfo("cmd.exe", args) { Verb = "runas", UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
+                p.WaitForExit(30000);
+                return true;
+            }
+            catch { return false; }   // the user refused the prompt
+        }
+    }
+
     /// JSON as Dictionary / object[] trees (JavaScriptSerializer), written back indented so session.json stays hand-editable.
     public static class Json
     {
@@ -173,6 +320,8 @@ namespace VisionALVR
         public string HeadsetIp { get => Json.Str(Root, "headset.ip", ""); set => Json.Set(Root, "headset.ip", value); }
         public string EncodeProfile { get => Json.Str(Root, "video.encode_profile", "foveated"); set => Json.Set(Root, "video.encode_profile", value); }
         /// NVENC split-frame encoding ("3" = one strip per engine, up to 3; "off"): on by default, the reason the project exists on a multi-engine GPU
+        /// the Logs window deletes the records of games whose exe no longer exists (on by default)
+        public bool AutoDeleteGameLogs { get => Json.Bool(Root, "logs.auto_delete_uninstalled", true); set => Json.Set(Root, "logs.auto_delete_uninstalled", value); }
         public bool SplitEncode { get => Json.Str(Root, "video.split_encode", "3") != "off"; set => Json.Set(Root, "video.split_encode", value ? "3" : "off"); }
         public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", "00ff00"); set => Json.Set(Root, "video.idle_rgb", value); }
         /// frame generation (docs/FRAME_GENERATION.md): the game renders every other frame, the streamer interpolates the one in between (off by default)
@@ -548,6 +697,16 @@ namespace VisionALVR
                 f.Close();
             };
             f.Shown += (s, e) => t.Start();
+        }
+
+        /// A statistics tile: small title, a big value, a one-line note. Sizes from its text (no fixed width), so it follows the display scale.
+        public static Control Tile(string title, string value, string note, Color? valueColor = null)
+        {
+            var t = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), Padding = new Padding(10, 6, 10, 6), Margin = new Padding(0, 0, 8, 8), MinimumSize = new Size(110, 0) };
+            t.Controls.Add(new Label { Text = title, AutoSize = true, ForeColor = Color.DimGray, Font = Body, Margin = new Padding(0) });
+            t.Controls.Add(new Label { Text = value, AutoSize = true, Font = new Font("Segoe UI", 15f, FontStyle.Bold), ForeColor = valueColor ?? Color.Black, Margin = new Padding(0) });
+            t.Controls.Add(new Label { Text = note, AutoSize = true, ForeColor = Color.Gray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0) });
+            return t;
         }
 
         public static Label Line(string text, Font f = null) =>

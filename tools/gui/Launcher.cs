@@ -14,6 +14,8 @@ namespace VisionALVR
         static readonly Tool[] Tools = {
             new Tool { Title = "Streamer", Exe = "VisionALVR.exe",
                 What = "Starts streaming to your headset and shows the live state: headset, game, frame rate and latency. Brightness, eye height and frame generation are set here, applied live." },
+            new Tool { Title = "Logs and performance", Exe = "performance.exe",
+                What = "The games you played: frame rates, latency, network and frame-generation results of each session, the DLSS motion-vector DLL of each game (install / uninstall), and a one-click export of the logs." },
             new Tool { Title = "Setup wizard", Exe = "configure.exe", StopsStreamer = true,
                 What = "Pairs your headset, tests the connection and proposes the settings that suit your PC and headset. Run it once, and again when the setup changes. The streamer must be closed." },
         };
@@ -34,9 +36,6 @@ namespace VisionALVR
 
             var body = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
             foreach (var t in Tools) body.Controls.Add(Card(t));
-            var logs = new Button { Text = "Open logs folder", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
-            logs.Click += (s, e) => { Directory.CreateDirectory(Paths.Logs); Process.Start("explorer.exe", Paths.Logs); };
-            body.Controls.Add(logs);
             Controls.Add(body);
             Controls.Add(Ui.CompactHeader("Launcher"));
             Ui.ScreenshotWhenShown(this, 800);
