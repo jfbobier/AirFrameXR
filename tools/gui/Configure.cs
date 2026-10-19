@@ -68,8 +68,11 @@ namespace VisionALVR
             save.Click += (s, e) => SaveSettings(true);
             var launch = new Button { Text = "Save and start VisionALVR", AutoSize = true };
             launch.Click += (s, e) => { if (SaveSettings(false)) { System.Diagnostics.Process.Start(Paths.Runtime); Close(); } };
+            var import = new Button { Text = "Import ALVR settings...", AutoSize = true };
+            import.Click += (s, e) => { if (AlvrImport.Run(this)) { session = Session.Load(); LoadSettings(); ShowPaired(); MessageBox.Show(this, "Imported. The settings tab shows what was read from it.", Text); } };
             bottom.Controls.Add(launch);
             bottom.Controls.Add(save);
+            bottom.Controls.Add(import);
             Controls.Add(tabs);
             Controls.Add(bottom);
             LoadSettings();

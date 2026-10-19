@@ -485,6 +485,9 @@ namespace VisionALVR
                 var mbps = Json.Num(session, V + "bitrate.mode.ConstantMbps", 0);
                 modePanel.Controls.Add(Ui.Line("Your current settings (config\\session.json and visionalvr.json) are used exactly as they are: the tests check them on this PC and your link, and nothing is changed or searched."));
                 modePanel.Controls.Add(Ui.Line($"Now: {(int)Json.Num(session, V + "preferred_fps", 90)} Hz, {(mbps > 0 ? mbps.ToString("0", CultureInfo.InvariantCulture) + " Mbps" : "adaptive bitrate")}, encoding '{settings.EncodeProfile}'. At the end you can still change anything."));
+                var imp = new Button { Text = "Import my working ALVR session.json...", AutoSize = true };
+                imp.Click += (s, e) => { if (AlvrImport.Run(this)) RenderMode(real); };
+                modePanel.Controls.Add(imp);
                 hsGo.Enabled = true;
             }
             else

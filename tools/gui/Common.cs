@@ -362,6 +362,96 @@ namespace VisionALVR
     }
 
     /// The session (ALVR settings, paired headset). Created from session.default.json on first use.
+    /// Brings a working ALVR session.json into config\: the user points at their ALVR folder (or the file), we look for session.json around it, check it is an ALVR session,
+    /// keep a backup of the current one and copy it over.
+    public static class AlvrImport
+    {
+        public static string Guess()
+        {
+            foreach (var d in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles) + "\\ALVR", Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86) + "\\ALVR",
+                                      Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\ALVR", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "\\Downloads" })
+                if (Directory.Exists(d)) return d;
+            return "";
+        }
+
+        /// session.json files found in `path` (a file or a folder): the folder itself, config\, its parent, then two levels down.
+        public static List<string> Find(string path)
+        {
+            var r = new List<string>();
+            if (File.Exists(path)) { r.Add(path); return r; }
+            if (!Directory.Exists(path)) return r;
+            foreach (var c in new[] { Path.Combine(path, "session.json"), Path.Combine(path, "config", "session.json"), Path.Combine(path, "..", "session.json") })
+                if (File.Exists(c)) r.Add(Path.GetFullPath(c));
+            if (r.Count == 0)
+                try
+                {
+                    foreach (var d1 in Directory.GetDirectories(path))
+                    {
+                        var f1 = Path.Combine(d1, "session.json"); if (File.Exists(f1)) r.Add(f1);
+                        foreach (var d2 in Directory.GetDirectories(d1)) { var f2 = Path.Combine(d2, "session.json"); if (File.Exists(f2)) r.Add(f2); }
+                    }
+                }
+                catch { }   // an unreadable folder: what was found so far stands
+            return r.Distinct(StringComparer.OrdinalIgnoreCase).Where(f => !f.StartsWith(Paths.Config, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        public static string Check(string file)
+        {
+            var d = Json.Load(file);
+            return d.ContainsKey("session_settings") ? null : "That file is not an ALVR session (no session_settings in it).";
+        }
+
+        /// Backs up config\session.json and replaces it. Returns the backup path, or null with `error`.
+        public static string Import(string file, out string error)
+        {
+            error = Check(file);
+            if (error != null) return null;
+            try
+            {
+                Directory.CreateDirectory(Paths.Config);
+                string bak = null;
+                if (File.Exists(Paths.Session)) { bak = Paths.Session + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"); File.Copy(Paths.Session, bak, true); }
+                File.Copy(file, Paths.Session, true);
+                return bak ?? "";
+            }
+            catch (Exception e) { error = "Cannot import: " + e.Message; return null; }
+        }
+
+        /// The whole dialog flow: ask for the ALVR folder, pick the file, confirm. True when config\session.json was replaced.
+        public static bool Run(IWin32Window owner)
+        {
+            string pick;
+            using (var dlg = new FolderBrowserDialog { Description = "Choose your ALVR folder (where ALVR is installed, or any folder holding the session.json that works for you).", ShowNewFolderButton = false })
+            {
+                var g = Guess(); if (g.Length > 0) dlg.SelectedPath = g;
+                if (dlg.ShowDialog(owner) != DialogResult.OK) return false;
+                pick = dlg.SelectedPath;
+            }
+            var found = Find(pick);
+            if (found.Count == 0)
+            {
+                MessageBox.Show(owner, "No session.json found in that folder or just below it.\nIf you know the file, choose it directly in the next window.", "Import ALVR settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                using (var f = new OpenFileDialog { Title = "Choose session.json", Filter = "session.json|session.json|JSON (*.json)|*.json", CheckFileExists = true })
+                {
+                    if (f.ShowDialog(owner) != DialogResult.OK) return false;
+                    found.Add(f.FileName);
+                }
+            }
+            var file = found[0];
+            if (found.Count > 1)
+            {
+                var lines = string.Join("\n", found.Select((x, i) => (i + 1) + ". " + x + "  (" + File.GetLastWriteTime(x).ToString("yyyy-MM-dd HH:mm") + ")"));
+                if (MessageBox.Show(owner, "Several session.json files were found:\n\n" + lines + "\n\nUse the most recent one?\n" + found.OrderByDescending(File.GetLastWriteTime).First(), "Import ALVR settings", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
+                file = found.OrderByDescending(File.GetLastWriteTime).First();
+            }
+            if (MessageBox.Show(owner, "Import these ALVR settings?\n\n" + file + "\n\nYour current config\\session.json is kept as a backup next to it.", "Import ALVR settings", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
+            var bak = Import(file, out var err);
+            if (bak == null) { MessageBox.Show(owner, err, "Import ALVR settings", MessageBoxButtons.OK, MessageBoxIcon.Warning); return false; }
+            Log.Write("INFO", "imported ALVR session " + file + (bak.Length > 0 ? ", backup " + bak : ""));
+            return true;
+        }
+    }
+
     public static class Session
     {
         public static Dictionary<string, object> Load()
