@@ -156,7 +156,7 @@ namespace VisionALVR
             lt.SetColumnSpan(fgRateText, 6);
             tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
             tips.SetToolTip(fgRecommend, "The slider is set from this game's recorded runs on this headset (config\\games\\<game>.json): the fastest rate whose typical 10-second window repeated under 5 % of the headset's periods; a rate that filled its cap suggests the next one once. Untick to choose yourself.");
-            tips.SetToolTip(recenter, "Turn the tracking space so your current forward is forward and your position the origin (sent on its own at every game start).");
+            tips.SetToolTip(recenter, "Turn the tracking space so your current forward is forward and your position the origin (done by the streamer on its own at every game start; the hotkey Ctrl+Alt+R does the same while playing).");
             tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the OptiScaler-DLSSMotionVectorExtractor DLL is in the game folder (else optical flow).");
             live.Controls.Add(lt);
             body.Controls.Add(live);
@@ -487,8 +487,6 @@ namespace VisionALVR
                     lastSession = false;
                     statsBox.Text = "Streaming (updated every 10 s)";
                     ApplyRecommendation(fgRecommend.Checked);
-                    host.Send("recenter");   // the player's forward at game start is forward, on every headset (the Vision Pro's own centring agrees)
-                    Log.Write("INFO", "recenter at game start");
                     break;
                 case "game_ended":
                     gameRunning = false;

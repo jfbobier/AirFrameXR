@@ -74,6 +74,8 @@ pub struct Settings {
     pub gamma: Option<f32>,
     /// headset height above the floor handed to games (m); 0 = the headset's own floor estimate
     pub height_m: Option<f32>,
+    /// key combination that recentres while playing (`controls.recenter_key`, e.g. "Ctrl+Alt+R", "F9", "Insert"; "off" disables)
+    pub recenter_key: Option<String>,
     /// hand pose convention fix for the Oculus-emulation path: rotation (deg, XYZ Euler, left hand; the right mirrors y/z) and
     /// position offset (m) applied in the hand's local frame by the shim; default [0, 180, 0] (palm/back and aim were inverted)
     pub hand_rotation_deg: Option<[f32; 3]>,
@@ -123,6 +125,7 @@ pub fn load_settings(path: &Path) -> Settings {
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
         height_m: v["headset"]["height_m"].as_f64().map(|g| g as f32),
+        recenter_key: v["controls"]["recenter_key"].as_str().map(str::to_string),
         hand_rotation_deg: arr3(&v["controllers"]["hand_rotation_deg"]),
         hand_position_m: arr3(&v["controllers"]["hand_position_m"]),
         color: ["brightness", "contrast", "saturation", "sharpening"].map(|k| v["display"][k].as_f64().unwrap_or(0.0) as f32),
@@ -222,6 +225,59 @@ pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 /// `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
+/// Virtual-key codes of a combination like "Ctrl+Alt+R" (modifiers, then one key: a letter or digit, F1-F24, Insert, Delete, Home, End, PageUp,
+/// PageDown, Pause); None for "off" or a name that is not understood.
+pub fn parse_hotkey(s: &str) -> Option<Vec<i32>> {
+    let mut keys = Vec::new();
+    for t in s.split('+').map(|t| t.trim().to_ascii_lowercase()) {
+        let vk = match t.as_str() {
+            "ctrl" | "control" => 0x11,
+            "alt" => 0x12,
+            "shift" => 0x10,
+            "insert" | "ins" => 0x2D,
+            "delete" | "del" => 0x2E,
+            "home" => 0x24,
+            "end" => 0x23,
+            "pageup" => 0x21,
+            "pagedown" => 0x22,
+            "pause" => 0x13,
+            k if k.len() == 1 && k.as_bytes()[0].is_ascii_alphanumeric() => k.as_bytes()[0].to_ascii_uppercase() as i32,
+            k if k.starts_with('f') && k[1..].parse::<i32>().map(|n| (1..=24).contains(&n)).unwrap_or(false) => 0x70 + k[1..].parse::<i32>().unwrap() - 1,
+            _ => return None,
+        };
+        keys.push(vk);
+    }
+    if keys.is_empty() { None } else { Some(keys) }
+}
+
+/// Polls the key combination and requests a recenter on every press (any window has the focus: the game does). Windows only.
+#[cfg(windows)]
+pub fn spawn_recenter_hotkey(spec: &str) {
+    extern "system" {
+        fn GetAsyncKeyState(vk: i32) -> i16;
+    }
+    let Some(keys) = parse_hotkey(spec) else {
+        crate::logs::general("WARN", &format!("recenter key '{spec}' is not understood (e.g. Ctrl+Alt+R, F9, Insert): no recenter hotkey"));
+        return;
+    };
+    crate::logs::general("INFO", &format!("recenter hotkey: {spec}"));
+    thread::spawn(move || {
+        let mut was = false;
+        loop {
+            let down = keys.iter().all(|&k| unsafe { GetAsyncKeyState(k) } < 0);
+            if down && !was {
+                RECENTER_REQ.store(true, Ordering::SeqCst);
+                crate::logs::general("INFO", "recenter (hotkey)");
+            }
+            was = down;
+            thread::sleep(Duration::from_millis(25));
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn spawn_recenter_hotkey(_spec: &str) {}
+
 pub fn spawn_stdin_control() {
     thread::spawn(|| {
         let stdin = std::io::stdin();

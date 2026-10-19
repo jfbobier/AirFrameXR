@@ -53,9 +53,9 @@ the launcher's "Recommended" reads the new files). The streamer's own log, `logs
   confirmation with the screenshot.
 
 ## Phase 4: in-VR keys
-- [ ] Remove the stock VDXR dialog opened with INSERT (patch in the VDXR fork, see layers-and-vdxr-patches).
-- [ ] Replace with a simple global hotkey for a full recenter while playing (proposal: Ctrl+Alt+R, host side).
-- [ ] Check head pose at session start: forward + horizontal position (X, Z) are re-anchored by `recenter` at game start, height by Eye height;
+- [ ] Remove the stock VDXR dialog opened with INSERT. **Not found**: no key handling for INSERT in `external/VDXR/virtualdesktop-openxr`, `ovrshim` or the host (searched GetAsyncKeyState, VK_*, hotkeys, HUD). It needs a runtime trace on a PC with the headset (which module owns the dialog window / loads when INSERT is pressed) before a patch can be written.
+- [x] Global hotkey for a full recenter while playing: host polls the key (`controls.recenter_key` in visionalvr.json, default Ctrl+Alt+R, e.g. `F9` or `Insert`, `off` disables).
+- [x] (code read; lab test still to do) Head pose at session start: forward + horizontal position (X, Z) are re-anchored by `recenter` at game start, height by Eye height;
   verify with a test that X/Z really are zero at start (lab: simrig with an off-centre start pose) instead of assuming.
 
 ## Phase 5: desktop mirror between sessions (last, optional, experimental)

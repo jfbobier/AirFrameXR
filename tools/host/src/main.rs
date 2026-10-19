@@ -112,6 +112,7 @@ struct Args {
     /// on the floor by default (Moss, Titan Isles) assume a standing user; the Vision Pro's floor estimate is unreliable, so
     /// the launcher sets a plausible seated height (1.3 m) and the headset's own vertical movement is kept on top of it.
     height_m: f32,
+    recenter_key: String,
     /// hand pose convention fix (shim, Oculus-emulation path): local rotation in degrees (XYZ Euler, left hand; right hand mirrors
     /// y and z like ALVR's controller offsets) and local position offset in metres (in the LibOVR frame, after the rotation).
     /// Default (derived 2026-10-13, see docs/progress.md): ALVR's hand motion is the OpenXR grip pose turned by its Quest 2 offset (-15 deg
@@ -199,6 +200,7 @@ fn parse_args() -> Result<Args, String> {
         discover: None,
         gamma: None,
         height_m: 1.3,
+        recenter_key: "Ctrl+Alt+R".to_string(),
         hand_rotation_deg: [-45.0, 0.0, 0.0],
         hand_position_m: [0.0, -0.048, 0.038],
         bench_network: None,
@@ -532,6 +534,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if a.gamma.is_none() {
         a.gamma = st.gamma;
+    }
+    if let Some(k) = st.recenter_key.clone() {
+        a.recenter_key = k;
     }
     if let Some(h) = st.height_m {
         a.height_m = h;
@@ -1560,6 +1565,9 @@ fn main() {
     if args.gui {
         vision::spawn_stdin_control();
     }
+    if args.discover.is_none() && !args.recenter_key.eq_ignore_ascii_case("off") {
+        vision::spawn_recenter_hotkey(&args.recenter_key);
+    }
     if let Some(secs) = args.discover {
         // GUI pairing: ALVR's two discovery protocols (mDNS for the Vision Pro, UDP 9943 broadcasts), nothing else runs
         let stop = Arc::new(AtomicBool::new(false));
@@ -2416,6 +2424,7 @@ fn main() {
                 let exe = if exe.is_empty() { "(unknown app)".to_string() } else { exe };
                 logs::general("INFO", &format!("game started: {exe}"));
                 event(origin, "game_started", json!({ "exe": exe }));
+                vision::RECENTER_REQ.store(true, Ordering::SeqCst);   // the player's forward and position at game start are the game's forward and origin, on every headset, with or without the launcher
                 run_windows.clear();
                 run_stats = RunStats::default();
                 run_stats.mv0 = fg_mv_counts(&pipeline);
