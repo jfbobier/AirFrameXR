@@ -167,7 +167,7 @@ namespace VisionALVR
             mirrorRow.Controls.Add(mirror);
             var mirrorText = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
             mirrorText.Controls.Add(new Label { Text = "Mirror Windows desktop between sessions", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 4, 0, 0) });
-            mirrorText.Controls.Add(new Label { Text = "Shows the desktop in the headset when no game runs, and your right hand is the mouse (pinch = click). For games you start from the headset; replaces the passthrough screen while on.", AutoSize = true, Font = Ui.Body, ForeColor = Color.DimGray, MaximumSize = new Size(560, 0), Margin = new Padding(0) });
+            mirrorText.Controls.Add(new Label { Text = "A monitor-sized screen floats in front of you on the green passthrough background when no game runs, and follows you when you turn away. Your right hand is the mouse (pinch = click).", AutoSize = true, Font = Ui.Body, ForeColor = Color.DimGray, MaximumSize = new Size(560, 0), Margin = new Padding(0) });
             mirrorRow.Controls.Add(mirrorText);
             var between = new GroupBox { Text = "Between games", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
             mirrorRow.Font = Ui.Body; mirrorRow.Dock = DockStyle.Fill;

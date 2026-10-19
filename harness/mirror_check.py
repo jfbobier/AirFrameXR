@@ -43,9 +43,9 @@ def near(a, b, tol):
     return all(abs(x - y) <= tol for x, y in zip(a, b))
 
 
-# the screen as desktop.rs places it: 1.6 m ahead, 60 degrees wide, at most 40 degrees tall, 5 cm below the eyes; the eye sees +-1.2 (tangent) each way
+# the screen as desktop.rs places it: 1.5 m ahead, 45 degrees wide, at most 40 degrees tall, 5 cm below the eyes; the eye sees +-1.2 (tangent) each way
 def quad_for(w, h):
-    dist, fov, max_tall, tan = 1.6, 60.0, 40.0, 1.2
+    dist, fov, max_tall, tan = 1.5, 45.0, 40.0, 1.2
     width = 2 * dist * math.tan(math.radians(fov / 2))
     height = width * h / w
     max_h = 2 * dist * math.tan(math.radians(max_tall / 2))
@@ -170,12 +170,12 @@ else:
 
 print("""
 BY HAND (needs the headset; record what you see in the run notes):
-  [ ] Vision Pro: between games the desktop floats ~1.6 m ahead, readable, steady when you turn your head (no swimming)
+  [ ] Vision Pro: between games the desktop floats ~1.5 m ahead on the green passthrough background, readable; small head movements leave it alone, turning away makes it glide back in front of you
   [ ] Quest (hand tracking): same
   [ ] the dot follows your right hand's pointing; offset or jitter: note how far and when
   [ ] pinch (index + thumb) = left click, grip = right click; no clicks while the pointer is off the screen
   [ ] End (the recenter key) puts the screen in front of you again
-  [ ] a 4K desktop: text readable in the headset (it is shown scaled to ~60 degrees); a portrait or ultrawide monitor looks right (not stretched)
+  [ ] a 4K desktop: text readable in the headset (it is shown scaled to ~45 degrees); a portrait or ultrawide monitor looks right (not stretched)
   [ ] HDR desktop on / off in Windows, and its SDR brightness slider moved: white stays white, no washed-out grey
   [ ] more than one monitor: the primary one is mirrored and the pointer lands on it
   [ ] starting a game removes the screen and gives the hand back to the game

@@ -50,6 +50,26 @@ pub fn place(head_q: Q, head_p: V3, dist: f32, fov_deg: f32, aspect: f32) -> Scr
     Screen { center: add(add(head_p, mul(f, dist)), [0.0, -0.05, 0.0]), right, up, normal: mul(f, -1.0), width, height }
 }
 
+/// Lazy follow: the screen stays where it is while the head moves a little, and glides after the user when they turn or walk away (the way
+/// Virtual Desktop and Meta's desktop keep the screen in front). `moving` is the hysteresis: it starts when the screen is more than TURN_DEG off the
+/// front or MOVE_M away from where `place` would put it, and ends when it has caught up. `dt` in seconds; the glide takes about 0.25 s to cover 63 %.
+pub const FOLLOW_TURN_DEG: f32 = 25.0;
+pub const FOLLOW_MOVE_M: f32 = 0.5;
+pub fn follow(cur: &Screen, target: &Screen, moving: &mut bool, dt: f32) -> Screen {
+    let cosang = dot(cur.normal, target.normal).clamp(-1.0, 1.0);
+    let ang = cosang.acos().to_degrees();
+    let dist = dot(sub(target.center, cur.center), sub(target.center, cur.center)).sqrt();
+    if !*moving && (ang > FOLLOW_TURN_DEG || dist > FOLLOW_MOVE_M) { *moving = true; }
+    if *moving && ang < 2.0 && dist < 0.03 { *moving = false; }
+    if !*moving { return *cur; }
+    let a = 1.0 - (-dt.clamp(0.0, 0.1) / 0.25).exp();
+    let n = norm([cur.normal[0] + (target.normal[0] - cur.normal[0]) * a, 0.0, cur.normal[2] + (target.normal[2] - cur.normal[2]) * a]);
+    let n = if dot(n, n) < 0.5 { target.normal } else { n };   // facing the opposite way: no halfway direction, jump
+    let up = [0.0, 1.0, 0.0];
+    let right = norm(cross(mul(n, -1.0), up));
+    Screen { center: add(cur.center, mul(sub(target.center, cur.center), a)), right, up, normal: n, width: target.width, height: target.height }
+}
+
 /// The tallest the virtual screen gets, as an angle at the viewer.
 pub const MAX_TALL_DEG: f32 = 40.0;
 
@@ -137,6 +157,23 @@ mod tests {
     const TAN: [f32; 4] = [1.2, 1.2, 1.2, 1.2];
     fn yaw(deg: f32) -> Q { let h = deg.to_radians() / 2.0; [0.0, h.sin(), 0.0, h.cos()] }
     fn near(a: f32, b: f32) -> bool { (a - b).abs() < 1e-3 }
+
+    #[test]
+    fn follow_ignores_small_turns_and_catches_up_after_big_ones() {
+        let start = place(ID, [0.0, 1.5, 0.0], 1.5, 45.0, 0.5625);
+        let mut moving = false;
+        // 10 degrees: nothing moves
+        let t = place(yaw(10.0), [0.0, 1.5, 0.0], 1.5, 45.0, 0.5625);
+        let s = follow(&start, &t, &mut moving, 0.004);
+        assert!(!moving && near(s.normal[0], start.normal[0]));
+        // 60 degrees: it glides, and after a couple of seconds it faces the user again
+        let t = place(yaw(60.0), [0.0, 1.5, 0.0], 1.5, 45.0, 0.5625);
+        let mut s = start;
+        for _ in 0..600 { s = follow(&s, &t, &mut moving, 0.004); }
+        assert!(near(dot(s.normal, t.normal), 1.0) || dot(s.normal, t.normal) > 0.9995, "{:?}", s.normal);
+        assert!(!moving);
+        assert!(near(s.width, t.width));
+    }
 
     #[test]
     fn rotate_turns_forward_left() {

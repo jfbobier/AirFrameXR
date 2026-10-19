@@ -13,8 +13,9 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 /// A game is running: the mirror is not drawn and the mouse is left alone.
 static GAME: AtomicBool = AtomicBool::new(false);
 
-const DIST_M: f32 = 1.6;
-const FOV_DEG: f32 = 60.0;
+/// A monitor-sized screen at arm's length: 45 degrees wide at 1.5 m (about 1.24 m, a 16:9 desktop 0.7 m tall), easy to point at with a hand.
+const DIST_M: f32 = 1.5;
+const FOV_DEG: f32 = 45.0;
 
 #[derive(Default)]
 struct State {
@@ -22,6 +23,8 @@ struct State {
     views: Option<([f32; 8], [f32; 6])>,
     screen: Option<Screen>,
     place: bool,
+    moving: bool,
+    last_head: Option<Duration>,
     desk: (i32, i32),
     started: bool,
     cursor: Option<(f32, f32)>,
@@ -53,10 +56,16 @@ pub fn on_views(fov8: [f32; 8], off6: [f32; 6]) { with(|s| s.views = Some((fov8,
 pub fn on_head(ts: Duration, q: Q, p: V3) {
     if !enabled() { return; }
     with(|s| {
+        let dt = s.last_head.map(|l| ts.saturating_sub(l).as_secs_f32()).unwrap_or(0.0);
+        s.last_head = Some(ts);
         s.head = Some((ts, q, p));
-        if s.place && s.desk.0 > 0 {
-            s.screen = Some(desktop::place(q, p, DIST_M, FOV_DEG, s.desk.1 as f32 / s.desk.0 as f32));
-            s.place = false;
+        if s.desk.0 > 0 {
+            let target = desktop::place(q, p, DIST_M, FOV_DEG, s.desk.1 as f32 / s.desk.0 as f32);
+            // placed in front at once when enabled or recentred; afterwards it follows the user lazily (small head movements leave it alone)
+            match s.screen {
+                Some(cur) if !s.place => { let mut mv = s.moving; s.screen = Some(desktop::follow(&cur, &target, &mut mv, dt)); s.moving = mv; }
+                _ => { s.screen = Some(target); s.place = false; s.moving = false; }
+            }
         }
     });
 }
