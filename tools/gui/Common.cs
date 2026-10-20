@@ -1264,11 +1264,12 @@ namespace VisionALVR
             switch (k)
             {
                 case Kind.Worked: return $"Game motion vectors worked ({frames.ToString("0", CultureInfo.InvariantCulture)} frames)";
-                case Kind.Blind: return "Generation ran blind (optical flow only): the DLL is installed but no vectors arrived. Check its version and that the game's upscaler is DLSS.";
+                case Kind.Blind: return "Generation ran blind (optical flow only): the DLL is installed but no vectors arrived.";
                 case Kind.NoDll: return "No game vectors: install the extractor?";
                 default: return "";
             }
         }
+        public const string BlindHint = "Check the DLL version and that the game's upscaler is DLSS.";
         public static Color ColorOf(Kind k) => k == Kind.Worked ? Color.SeaGreen : k == Kind.Blind ? Color.DarkOrange : Color.DimGray;
     }
 
@@ -1337,6 +1338,9 @@ namespace VisionALVR
             Controls.Add(value); Controls.Add(note);
         }
         static readonly ToolTip tip = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
+        public string Value => value.Text;
+        public string Note => note.Text;
+        public Color ValueColor => value.ForeColor;
         public void Set(string v, string n, Color? color = null, string tooltip = null)
         {
             value.Text = v; note.Text = n; value.ForeColor = color ?? Color.Black;
@@ -1390,10 +1394,13 @@ namespace VisionALVR
 
         /// A window exactly as big as its content: the header (docked at the top) plus the body, which sits in a scrolling host. When that is more
         /// than the work area allows (1080p at 150 %, a long message) the window stops at the work area and the body scrolls instead of being cut.
-        public static void AutoFitWindow(Form f, Control header, Control body)
+        ///
+        /// refitOnChange false (the streamer): the window is sized at load and by Ui.Refit only, so a notice appearing or a number getting longer never moves or resizes it.
+        /// `measure` (optional) gets the sizing action and runs it with the window's fullest content showing, so the fixed size has room for everything that can appear.
+        public static void AutoFitWindow(Form f, Control header, Control body, bool refitOnChange = true, Action<Action> measure = null)
         {
             if (body is Panel bp) bp.AutoSizeMode = AutoSizeMode.GrowAndShrink;   // the default GrowOnly keeps the size the framework scaled it to: empty space below the content
-            Action fit = () =>
+            Action size = () =>
             {
                 var wa = WorkArea(f);
                 var chrome = new Size(f.Width - f.ClientSize.Width, f.Height - f.ClientSize.Height);
@@ -1405,8 +1412,9 @@ namespace VisionALVR
                 if (cw > maxW) { cw = maxW; ch = Math.Min(maxH, ch + SystemInformation.HorizontalScrollBarHeight); }
                 f.ClientSize = new Size(cw, ch);
             };
+            Action fit = measure == null ? size : () => measure(size);
             f.Load += (s, e) => fit();
-            body.SizeChanged += (s, e) => { if (f.IsHandleCreated) fit(); };
+            if (refitOnChange) body.SizeChanged += (s, e) => { if (f.IsHandleCreated) fit(); };
             refits.Remove(f); refits.Add(f, fit);
         }
         /// A size designed at 96 dpi, in pixels at the control's monitor dpi (for what the framework does not scale itself: list columns). The test
@@ -1518,14 +1526,14 @@ namespace VisionALVR
         }
 
         /// A collapsed section: a flat "> title" button that shows or hides its content. For what most people never need (progressive disclosure).
-        public static Control Expander(string title, Control content, bool open = false)
+        public static Control Expander(string title, Control content, bool open = false, Action onToggle = null)
         {
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
             var b = new Button { FlatStyle = FlatStyle.Flat, AutoSize = true, TextAlign = ContentAlignment.MiddleLeft, Font = Bold, Cursor = Cursors.Hand, Margin = new Padding(0), BackColor = Color.Transparent, TabStop = true, AccessibleName = title };
             b.FlatAppearance.BorderSize = 0; b.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xE6, 0xEA, 0xF2);
             Action paint = () => { b.Text = (content.Visible ? "\u25BE  " : "\u25B8  ") + title; };
             content.Visible = open; paint();
-            b.Click += (s, e) => { content.Visible = !content.Visible; paint(); };
+            b.Click += (s, e) => { content.Visible = !content.Visible; paint(); onToggle?.Invoke(); };
             p.Controls.Add(b); p.Controls.Add(content);
             return p;
         }

@@ -123,6 +123,15 @@ def main():
         if not txt.exists():
             print(f"CHECK FAIL {name}: no replay.txt"); fails += 1; continue
         snaps = sections(txt.read_text(errors="replace"))
+        if name == "window_size":   # the window is fixed: connect, play, notices, disconnect never change its size; only Advanced does, and closing it restores it
+            sizes = {k: re.search(r"clientsize (\d+x\d+)", v).group(1) for k, v in snaps.items() if re.search(r"clientsize (\d+x\d+)", v)}
+            fixed = {k: v for k, v in sizes.items() if k not in ("advanced_open",)}
+            ok = len(set(fixed.values())) == 1
+            print(f"CHECK {'PASS' if ok else 'FAIL'} window_size/fixed: {sorted(set(fixed.values()))}")
+            fails += not ok
+            ok2 = sizes.get("advanced_open") != sizes.get("start") and sizes.get("advanced_closed") == sizes.get("start")
+            print(f"CHECK {'PASS' if ok2 else 'FAIL'} window_size/advanced: open {sizes.get('advanced_open')}, closed {sizes.get('advanced_closed')}, start {sizes.get('start')}")
+            fails += not ok2
         for label, must, mustnt in EXPECT[name]:
             s = snaps.get(label)
             if s is None:

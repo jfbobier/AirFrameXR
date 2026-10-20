@@ -57,6 +57,9 @@ footer: one inline notice at a time (firewall, setup error, encode error), with 
 ```
 
 Rules:
+- **Fixed window**: the streamer is sized once, at load, for its fullest ordinary content (long numbers, the vectors line, the vectors tick, the height report); notices that come and go
+  (vectors line, export result, audio line, the footer) have reserved lines, so nothing resizes or moves the window while you use it. Only *Advanced* changes its size (and back), and a
+  blocking message (the firewall warning at the top, a long error in the footer) makes it grow once to show it. `harness/streamer_events.py` window_size holds this.
 - **Frame generation** is its own component: the switch, the rate (Auto + three segments; Auto = the rate proposed from the game's recorded runs), the
   DLSS-vectors tick (visible only while the extractor DLL is installed for the running game). The generated-frame state of the *last session* is shown here
   (green worked / orange blind / the install offer), never as a pop-up. Frame generation is forced off while `mirrordesktop.exe` runs (command `frame_gen off`

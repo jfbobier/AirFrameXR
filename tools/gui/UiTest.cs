@@ -195,6 +195,7 @@ namespace VisionALVR
         {
             var o = new StringBuilder();
             var made = new List<string>();   // files a setup line created: removed at the end
+            Ui.WorkAreaOverride = new Rectangle(0, 0, 3840, 2100);   // a big pretend screen: window sizes are the content's, never the builder's screen
             using (var f = new RuntimeForm(null))
             {
                 f.StartPosition = FormStartPosition.Manual; f.Location = new Point(0, 0); f.ShowInTaskbar = false; f.Opacity = 0;

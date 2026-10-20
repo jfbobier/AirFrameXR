@@ -16,3 +16,7 @@
 {"dump": "next_game"}
 {"event": "client_disconnected", "data": {}}
 {"dump": "disconnected"}
+{"ui": "advanced", "value": ""}
+{"dump": "advanced_open"}
+{"ui": "advanced", "value": ""}
+{"dump": "advanced_closed"}

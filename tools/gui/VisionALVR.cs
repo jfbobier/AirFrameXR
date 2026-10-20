@@ -51,10 +51,10 @@ namespace VisionALVR
         readonly Segmented heightMode = new Segmented("Auto", "Manual") { AccessibleName = "Eye height mode" };
         readonly NumericUpDown heightBox = new NumericUpDown { DecimalPlaces = 2, Increment = 0.05m, Minimum = 0.5m, Maximum = 2.2m, Width = 64, AccessibleName = "Eye height in metres" };
         readonly Label heightReport = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(8, 7, 0, 0), Visible = false };
-        readonly Label vecLine = new Label { AutoSize = true, Margin = new Padding(3, 7, 8, 0), MaximumSize = new Size(560, 0) };
+        readonly Label vecLine = new Label { AutoSize = true, Margin = new Padding(3, 7, 8, 0), MaximumSize = new Size(740, 0) };
         readonly Button vecInstall = new Button { Text = "Install", AutoSize = true, Visible = false };
         readonly Button vecDismiss = new Button { Text = "Not for this game", AutoSize = true, Visible = false };
-        readonly FlowLayoutPanel vecRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Visible = false, Margin = new Padding(0, 4, 0, 0), MaximumSize = new Size(600, 0) };
+        readonly FlowLayoutPanel vecRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 4, 0, 0), MinimumSize = new Size(0, 26), MaximumSize = new Size(740, 0) };   // always present: its line is reserved, so a result appearing never moves the window
         readonly Label audioLine = new Label { AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };   // the virtual audio device's volume, only when it matters
         bool audioForced;
         readonly Label exportStatus = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };
@@ -100,17 +100,19 @@ namespace VisionALVR
             findHint.ForeColor = Color.DimGray;
             findHint.Font = new Font("Segoe UI", 8.5f);
             body.Controls.Add(hrow);
-            body.Controls.Add(findHint);
+            tips.SetToolTip(find, "Not connecting? Search the network for the headset.");
+            var fwRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };   // a blocking problem: at the top, and the window grows to show it (Refit below)
+            fwRow.Controls.Add(fwWarn); fwRow.Controls.Add(fwFix);
+            body.Controls.Add(fwRow);
             fwWarn.ForeColor = Color.Firebrick;
             fwWarn.Visible = fwFix.Visible = false;
             fwFix.Click += (s, e) => { Firewall.Allow(Paths.Host); CheckFirewall(); };
-            body.Controls.Add(fwWarn);
-            body.Controls.Add(fwFix);
             body.Controls.Add(game);
             body.Controls.Add(runtime);
 
             var box = statsBox;
             stats.Font = new Font("Segoe UI", 9f);
+            stats.MinimumSize = new Size(0, 22);   // its line is reserved
             stats.ForeColor = Color.DimGray;
             var tiles = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Font = Ui.Body };
             foreach (var t in new[] { tGame, tStreamed, tShown, tBitrate, tLatency, tLoss }) tiles.Controls.Add(t);
@@ -137,10 +139,9 @@ namespace VisionALVR
             fgRateText.On = t => { foreach (var c in new Control[] { frameGen, fgRecommend }.Concat(fgRate.Controls.Cast<Control>())) tips.SetToolTip(c, t); };
             var fgCol = Col();
             var fgRow = Row();
-            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate);
+            fgMv.Margin = new Padding(14, 8, 0, 0);
+            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate); fgRow.Controls.Add(fgMv);   // the vectors tick shares the line
             fgCol.Controls.Add(fgRow);
-            fgMv.Margin = new Padding(3, 4, 0, 0);
-            fgCol.Controls.Add(fgMv);
             vecRow.Controls.Add(vecLine); vecRow.Controls.Add(vecInstall); vecRow.Controls.Add(vecDismiss);
             vecInstall.Click += (s, e) => VectorsInstall();
             vecDismiss.Click += (s, e) => VectorsDismiss();
@@ -160,8 +161,8 @@ namespace VisionALVR
             body.Controls.Add(Group("Position", posRow));
 
             // Picture: the two settings people touch; the rest behind Advanced
-            var pic = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Font = Ui.Body, Margin = new Padding(0) };
-            var adv = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Font = Ui.Body };
+            var pic = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Font = Ui.Body, Margin = new Padding(0) };
+            var adv = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Font = Ui.Body };
             AddKnob(pic, "Gamma", 50, 200, AppSettings.DefaultGamma, () => settings.Gamma, v => settings.Gamma = v, "Above 1 is brighter.");
             AddKnob(pic, "Sharpening", 0, 100, 0, () => settings.Sharpening, v => settings.Sharpening = v);
             AddKnob(adv, "Brightness", -30, 30, 0, () => settings.Brightness, v => settings.Brightness = v);
@@ -173,7 +174,7 @@ namespace VisionALVR
             var picCol = Col();
             picCol.Controls.Add(pic);
             var advRow = Row();   // Advanced and Defaults share a line: the window stays short
-            advRow.Controls.Add(Ui.Expander("Advanced", adv));
+            advRow.Controls.Add(Ui.Expander("Advanced", adv, false, () => Ui.Refit(this)));
             reset.Margin = new Padding(24, 0, 3, 3);
             advRow.Controls.Add(reset);
             advRow.WrapContents = false;
@@ -206,17 +207,18 @@ namespace VisionALVR
             body.Controls.Add(dbgRow);
             var exportRow = Row();
             exportRow.Controls.Add(exportStatus); exportRow.Controls.Add(exportLink);
-            body.Controls.Add(exportRow);
-            body.Controls.Add(audioLine);
             footer.ForeColor = Color.DimGray;
-            body.Controls.Add(footer);
+            // one slot for the notices (export result, audio, the footer line): two lines are reserved, so they never move the window
+            var notices = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0), MinimumSize = new Size(0, 46) };
+            notices.Controls.Add(exportRow); notices.Controls.Add(audioLine); notices.Controls.Add(footer);
+            body.Controls.Add(notices);
 
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             scroller.Controls.Add(body);
             Controls.Add(scroller);
             var hdr = Ui.CompactHeader("Streamer for ALVR headsets (Vision Pro, Quest, ...)");
             Controls.Add(hdr);
-            Ui.AutoFitWindow(this, hdr, body);
+            Ui.AutoFitWindow(this, hdr, body, false, WithWorstCase);   // fixed size: only Advanced changes it
 
 
             debug.Checked = settings.Debug;
@@ -290,6 +292,9 @@ namespace VisionALVR
             recenter.Click += (s, e) => { host.Send("recenter"); Log.Write("INFO", "recenter"); };
 
 
+            // a blocking message (firewall, a setup or encode error in the footer) is shown in full: the window grows for it, once
+            fwWarn.VisibleChanged += (s, e) => { if (IsHandleCreated) BeginInvoke((Action)(() => Ui.Refit(this))); };
+            footer.TextChanged += (s, e) => { if (IsHandleCreated) BeginInvoke((Action)(() => Ui.Refit(this))); };
             host.OnSend += l => Sent.Add(l);
             host.OnEvent += (name, data) => BeginInvoke((Action)(() => HostEvent(name, data)));
             host.OnExit += code => BeginInvoke((Action)(() => HostExited(code)));
@@ -664,7 +669,6 @@ namespace VisionALVR
                         var latBad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms"));
                         tLatency.Set(latBad ? "n/a" : F(D(net, "latency_ms"), "0") + " ms", latBad ? "not measured" : $"p95 {F(D(net, "latency_p95_ms"), "0")}", null, latBad ? Latency.Why : null);
                         tLoss.Set(F(D(net, "packets_lost"), "0"), "packets lost", D(net, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
-                        stats.Visible = true;
                         stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} %, skipped {F(D(d, "skipped") * 100, "0.0")} %." + (rec == null ? "" : $"  Next time: {(ri >= 0 ? names[ri] : rec.Value.level)}.");
                         ShowVectors(d);
                     }
@@ -687,7 +691,7 @@ namespace VisionALVR
                         var liveBad = Latency.Absurd(D(c, "total_latency_ms"), D(c, "latency_outliers"), D(c, "samples"));
                         tLatency.Set(liveBad ? "n/a" : F(D(c, "total_latency_ms"), "0") + " ms", liveBad ? "not measured" : $"enc {F(D(c, "encode_ms"), "0")} + net {F(D(c, "network_ms"), "0")} + dec {F(D(c, "decode_ms"), "0")}", null, liveBad ? Latency.Why : null);
                         tLoss.Set(S(d, "packets_lost"), "packets lost", D(d, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
-                        stats.Text = ""; stats.Visible = false;
+                        stats.Text = "";
                     }
                     break;
                 case "audio_volume_forced":
@@ -734,6 +738,13 @@ namespace VisionALVR
                 case "saturation": bar("Saturation"); break;
                 case "debug": debug.Checked = on; break;
                 case "mirror": mirror.Checked = on; break;
+                case "advanced":
+                    {
+                        Button b = null; var todo = new Stack<Control>(); todo.Push(this);
+                        while (todo.Count > 0 && b == null) { var c = todo.Pop(); if (c is Button bb && bb.AccessibleName == "Advanced") b = bb; foreach (Control k in c.Controls) todo.Push(k); }
+                        b?.PerformClick();
+                        break;
+                    }
                 case "vec_install": vecInstall.PerformClick(); break;
                 case "vec_dismiss": vecDismiss.PerformClick(); break;
             }
@@ -743,6 +754,41 @@ namespace VisionALVR
 
         void SetAudioLine(string text, Color c) { audioLine.Text = text; audioLine.ForeColor = c; audioLine.Visible = text.Length > 0; }
         public void DemoAudio(bool bad) => SetAudioLine(bad ? "Audio: cannot set CABLE Input (VB-Audio Virtual Cable) to 100 %. The headset's volume follows the PC's." : "Audio: CABLE Input (VB-Audio Virtual Cable) held at 100 % (was 40 %)", bad ? Color.DarkOrange : Color.DimGray);
+        /// Runs `doFit` with everything that can appear showing at its longest (the firewall warning, Find headset, the vectors, audio and export lines, the
+        /// vectors tick, the height report, the long footer, the widest tiles), then puts the window's real state back: the window is sized for the fullest case once.
+        void WithWorstCase(Action doFit)
+        {
+            var tiles = new[] { tGame, tStreamed, tShown, tBitrate, tLatency, tLoss };
+            var labels = new Control[] { headset, game, runtime, vecLine, heightReport, stats, statsBox };
+            var shown = new Control[] { find, heightReport, fgMv };
+            var hidden = new Control[] { audioLine, exportStatus, exportLink };   // their line is reserved by the notices slot
+            var hidBack = hidden.Select(c => (c, c.Visible)).ToList();
+            var textBack = labels.Select(c => (c, c.Text, c.ForeColor)).ToList();
+            var visBack = shown.Select(c => (c, c.Visible)).ToList();
+            var tileBack = tiles.Select(t => (t, t.Value, t.Note, t.ValueColor)).ToList();
+            try
+            {
+                headset.Text = "Headset: connected - Apple Vision Pro (192.168.100.123)";
+                game.Text = "Game: Cyberpunk2077.exe (last: Cyberpunk2077.exe, 123.4 min)";
+                vecLine.Text = VectorsLine.Text(VectorsLine.Kind.Blind, 0);
+                heightReport.Text = "headset reports 1.62 m";
+                stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: 1/2.";
+                statsBox.Text = "Streaming: last session, Cyberpunk2077.exe, 123.4 min, Apple Vision Pro";
+                tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at 1/2"); tShown.Set("144.4 fps", "repeated periods 12.3 %");
+                tBitrate.Set("1000 Mbps", "average"); tLatency.Set("123 ms", "enc 12 + net 12 + dec 12"); tLoss.Set("1234", "packets lost");
+                foreach (var c in shown) c.Visible = true;
+                foreach (var c in hidden) c.Visible = false;
+                doFit();
+            }
+            finally
+            {
+                foreach (var (c, t, col) in textBack) { c.Text = t; c.ForeColor = col; }
+                foreach (var (c, v) in visBack) c.Visible = v;
+                foreach (var (c, v) in hidBack) c.Visible = v;
+                foreach (var (t, v, n, col) in tileBack) t.Set(v, n, col == Color.Black ? (Color?)null : col);
+            }
+        }
+
         public void DemoVectors(VectorsLine.Kind k) => SetVectorsLine(k, VectorsLine.Text(k, 2558), k == VectorsLine.Kind.NoDll);
         public void DemoDebugOn() { debug.Checked = true; settings.Debug = false; settings.Save(); exportStatus.Text = "Saved to C:\\Users\\someone\\Documents\\VisionALVR-logs-20261020-1200.zip"; exportStatus.ForeColor = Color.SeaGreen; exportStatus.Visible = exportLink.Visible = true; }
 
@@ -759,7 +805,7 @@ namespace VisionALVR
                 game.Text = "Game: Cyberpunk2077.exe";
                 tGame.Set("44.8 fps", "average, slowest tenth 38.2"); tStreamed.Set("89.7 fps", "25.0 min at 1/2"); tShown.Set("89.1 fps", "repeated periods 1.0 %");
                 tBitrate.Set("120 Mbps", "average"); tLatency.Set("57 ms", "enc 6 + net 9 + dec 14"); tLoss.Set("0", "packets lost");
-                stats.Text = ""; stats.Visible = false; frameGen.SetCheckedInstant(true);
+                stats.Text = ""; frameGen.SetCheckedInstant(true);
                 return;
             }
             NeedFind(true);
@@ -767,7 +813,7 @@ namespace VisionALVR
             game.Text = "Game: Cyberpunk2077.exe (Cyberpunk 2077) after 123 min";
             tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at 1/2"); tShown.Set("144.4 fps", "repeated periods 12.3 %", Color.Firebrick);
             tBitrate.Set("1000 Mbps", "average"); tLatency.Set("123 ms", "enc 12 + net 12 + dec 12"); tLoss.Set("1234", "packets lost", Color.Firebrick);
-            stats.Visible = true; stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: 1/2.";
+            stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: 1/2.";
             fgRateText.Text = FgRateText[2];
             footer.Text = "config\\session.json is missing: this folder is incomplete. Unzip the release again (keep your config\\ folder).";
             footer.ForeColor = Color.Firebrick;
@@ -796,8 +842,8 @@ namespace VisionALVR
         void SetVectorsLine(VectorsLine.Kind kind, string text, bool offer)
         {
             vecLine.Text = text; vecLine.ForeColor = VectorsLine.ColorOf(kind);
+            tips.SetToolTip(vecLine, kind == VectorsLine.Kind.Blind ? VectorsLine.BlindHint : null);
             vecInstall.Visible = vecDismiss.Visible = offer;
-            vecRow.Visible = kind != VectorsLine.Kind.None;
         }
 
         void VectorsInstall()
