@@ -1,0 +1,84 @@
+{
+  "description": "U7 repro (user, 2026-10-20: mirror record shows 12 067 860 491 ms with generation off while enc/net/dec are fine): the mirror app run long enough for game_run, debug on so the raw outlier samples are kept.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 100000,
+    "debug": true
+  },
+  "client": {
+    "seconds": 65,
+    "connect_timeout": 45,
+    "yaw_amp": 0,
+    "controllers": true
+  },
+  "client_env": {
+    "RUST_LOG": "warn",
+    "MOCK_HAND_YAW_DEG": "0",
+    "MOCK_HAND_PITCH_DEG": "45"
+  },
+  "app": {
+    "exe": "mirrordesktop",
+    "seconds": 30,
+    "timeout_s": 90,
+    "synthetic": true
+  },
+  "gpu_sample": true,
+  "timeout_s": 200,
+  "checks": {
+    "client_min_frames": 300,
+    "max_duplicate_timestamps": 1000,
+    "game_run": {
+      "max_latency_ms": 200,
+      "max_latency_outliers": 0
+    }
+  },
+  "name": "e2e_mirror_latency"
+}
