@@ -67,6 +67,72 @@ namespace VisionALVR
         public static string FileOf(string exe) => Path.Combine(Dir, Stem(exe) + ".json");
         public static Dictionary<string, object> Load(string exe) => Json.Load(FileOf(exe));
         public static IEnumerable<string> Files() => Directory.Exists(Dir) ? Directory.GetFiles(Dir, "*.json") : new string[0];
+        /// The desktop mirror is a game to the engine (it keeps its record and log) but not to the person: no list, label, advice or clean-up shows it.
+        public static bool IsHidden(string exe) => string.Equals(Path.GetFileName(exe ?? ""), "mirrordesktop.exe", StringComparison.OrdinalIgnoreCase);
+        /// The same for a record file name (config\games\mirrordesktop.json).
+        public static bool IsHiddenFile(string file) => IsHidden(Path.GetFileNameWithoutExtension(file) + ".exe");
+    }
+
+    /// One zip for a bug report: a game's record (when given), the general log, the newest debug run, the DLL install record, info.txt. No dialog of its own and
+    /// nothing is started: the caller shows where the file went.
+    public static class LogExport
+    {
+        public static string DefaultName(string stem) => $"VisionALVR-{(string.IsNullOrEmpty(stem) ? "logs" : stem)}-{DateTime.Now:yyyyMMdd-HHmm}.zip";
+
+        /// Writes the zip to `path` (replacing a file there) and returns the entry names.
+        public static List<string> Write(string path, string stem)
+        {
+            var names = new List<string>();
+            if (File.Exists(path)) File.Delete(path);
+            using (var z = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                void add(string file, string name)
+                {
+                    if (!File.Exists(file)) return;
+                    // the logs are being written by the streamer: read with sharing
+                    using (var src = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var dst = z.CreateEntry(name).Open()) src.CopyTo(dst);
+                    names.Add(name);
+                }
+                if (!string.IsNullOrEmpty(stem)) add(Games.FileOf(stem), "game/" + stem + ".json");
+                add(Path.Combine(Paths.Logs, "VisionALVR.log"), "VisionALVR.log");
+                add(MvDll.Record, "mv_dll.json");
+                var dbg = Path.Combine(Paths.Logs, "debug");
+                if (Directory.Exists(dbg))
+                {
+                    var newest = new DirectoryInfo(dbg).GetDirectories().OrderByDescending(d => d.LastWriteTime).FirstOrDefault();
+                    if (newest != null) foreach (var f in newest.GetFiles()) add(f.FullName, "debug/" + newest.Name + "/" + f.Name);
+                }
+                using (var w = new StreamWriter(z.CreateEntry("info.txt").Open())) w.WriteLine($"VisionALVR {Version.Text}\n{DateTime.Now:s}\n{Environment.OSVersion}");
+                names.Add("info.txt");
+            }
+            Log.Write("INFO", "logs exported to " + path);
+            return names;
+        }
+
+        /// Save dialog (disposed before the work starts), the export, and the inline result in `status`: "Saved to <file>" with an Open folder link. Never starts Explorer itself.
+        public static void Run(IWin32Window owner, string stem, Label status, LinkLabel open)
+        {
+            string path;
+            using (var dlg = new SaveFileDialog { Filter = "Zip|*.zip", FileName = DefaultName(stem) })
+            {
+                if (dlg.ShowDialog(owner) != DialogResult.OK) return;
+                path = dlg.FileName;
+            }
+            try
+            {
+                Write(path, stem);
+                status.ForeColor = Color.SeaGreen; status.Text = "Saved to " + path;
+                open.Tag = path; open.Visible = true;
+            }
+            catch (Exception ex) { status.ForeColor = Color.Firebrick; status.Text = "Export failed: " + ex.Message; open.Visible = false; Log.Write("ERROR", "log export failed: " + ex.Message); }
+            status.Visible = true;
+        }
+
+        public static void Reveal(string path)
+        {
+            try { Process.Start("explorer.exe", "/select,\"" + path + "\""); } catch { }
+        }
     }
 
     /// The DLSS motion-vector extractor (OptiScaler-DLSSMotionVectorExtractor, one DLL) in a game folder. The package's DLSSMotionVectors\dxgi.dll is the

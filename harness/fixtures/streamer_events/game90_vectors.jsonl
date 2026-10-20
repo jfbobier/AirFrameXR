@@ -1,0 +1,13 @@
+{"event": "setup_error", "data": {"message": ""}}
+{"event": "client_connected", "data": {"name": "Apple Vision Pro", "ip": "192.168.1.50"}}
+{"dump": "idle"}
+{"event": "game_started", "data": {"exe": "LiesOfP.exe"}}
+{"event": "status", "data": {"app_fps": 44.8, "stream_fps": 89.7, "mbps": 120, "packets_lost": 0, "frames_not_streamed": 0, "client": {"displayed_fps": 89.1, "total_latency_ms": 57, "encode_ms": 6, "network_ms": 9, "decode_ms": 14}}}
+{"dump": "live"}
+{"event": "status", "data": {"app_fps": 45.1, "stream_fps": 90.0, "mbps": 118, "packets_lost": 0, "frames_not_streamed": 0, "client": {"displayed_fps": 89.5, "total_latency_ms": 58, "encode_ms": 6, "network_ms": 9, "decode_ms": 14}}}
+{"event": "game_ended", "data": {"exe": "LiesOfP.exe", "seconds": 90}}
+{"dump": "ended"}
+{"event": "game_run", "data": {"exe": "LiesOfP.exe", "headset": "Apple Vision Pro", "level": "half", "seconds": 90, "rendered_fps": 44.8, "rendered_fps_low": 38.2, "streamed_fps": 89.7, "headset_repeated_typ": 0.01, "host_repeats_typ": 0.0, "skipped": 0.0, "recorded": true, "net": {"displayed_fps": 89.1, "bitrate_mbps": 120, "latency_ms": 57, "latency_p95_ms": 67, "packets_lost": 0}, "mv": {"enabled": true, "frames": 2558}}}
+{"dump": "after_run"}
+{"event": "status", "data": {"app_fps": 0, "stream_fps": 0, "mbps": 0, "packets_lost": 0, "client": {}}}
+{"dump": "idle_status_after"}

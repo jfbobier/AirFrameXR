@@ -1430,7 +1430,7 @@ fn fg_mv_counts(p: &Option<Arc<pipeline::Pipeline>>) -> (u64, u64) {
 /// launcher reads the file and proposes. A run shorter than 20 s is not recorded. The headset's repeated-period share is given as the median
 /// 10-second window of the run (what the game is like most of the time) and its 90th percentile (its heavy parts): the proposal is made on the
 /// typical window, hiccups being a fact of life in VR (user, 2026-10-17).
-fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64, f64)], skipped: f64, run: &RunStats, gpu: &serde_json::Value) {
+fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64, f64)], skipped: f64, run: &RunStats, gpu: &serde_json::Value, recorded: bool) {
     let pct = |v: &mut Vec<f64>, q: f64| -> f64 {
         if v.is_empty() { return 0.0; }
         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1455,9 +1455,13 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
         ses["gpu"] = json!({ "name": gpu["name"], "driver": gpu["driver"] });
         ses
     };
-    let runs = games::record(args.config_dir.as_path(), exe, headset, level, rec.clone(), session, run.meta.as_ref());
-    logs::general("INFO", &format!("game run recorded: {exe} on {headset} at {level}, {secs:.0} s, {rendered_fps:.1} fps rendered (slowest tenth {:.1}), {streamed_fps:.1} streamed, headset repeated {:.1} % typical / {:.1} % worst (run {runs})",
-        rec["rendered_fps_low"].as_f64().unwrap_or(0.0), rec["headset_repeated_typ"].as_f64().unwrap_or(0.0) * 100.0, rec["headset_repeated_p90"].as_f64().unwrap_or(0.0) * 100.0));
+    // a run too short to keep still reports its numbers (the streamer's tiles show the last session), flagged recorded:false; the file is not touched
+    if recorded {
+        let runs = games::record(args.config_dir.as_path(), exe, headset, level, rec.clone(), session, run.meta.as_ref());
+        logs::general("INFO", &format!("game run recorded: {exe} on {headset} at {level}, {secs:.0} s, {rendered_fps:.1} fps rendered (slowest tenth {:.1}), {streamed_fps:.1} streamed, headset repeated {:.1} % typical / {:.1} % worst (run {runs})",
+            rec["rendered_fps_low"].as_f64().unwrap_or(0.0), rec["headset_repeated_typ"].as_f64().unwrap_or(0.0) * 100.0, rec["headset_repeated_p90"].as_f64().unwrap_or(0.0) * 100.0));
+    }
+    rec["recorded"] = json!(recorded);
     rec["net"] = run.net_summary();
     rec["mv"] = json!({ "enabled": args.game_motion_vectors, "frames": run.mv_now.0.saturating_sub(run.mv0.0) });
     rec["exe"] = json!(exe);
@@ -2321,7 +2325,7 @@ fn main() {
                 let headset = shared.headset.lock().clone().map(|(_, n, _)| n).unwrap_or_default();
                 let hz = pipeline.as_ref().map(|p| 1.0 / p.period().as_secs_f64()).unwrap_or(args.fps);
                 stats.mv_now = fg_mv_counts(pipeline);
-                games_record_run(args, origin, &g.exe, &headset, hz, old_level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, windows, skipped, stats, &gpu_info);
+                games_record_run(args, origin, &g.exe, &headset, hz, old_level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, windows, skipped, stats, &gpu_info, true);
             }
             g.seg_start = Instant::now();
             g.seg_frames0 = shared.frames_sent.load(Ordering::Relaxed);
@@ -2455,7 +2459,7 @@ fn main() {
                     g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline)));
                 event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames }));
                 let seg_secs = g.seg_start.elapsed().as_secs_f64();
-                if seg_secs > 20.0 {
+                if seg_secs > 2.0 {
                     let (s0, o0) = fg_counts(&pipeline);
                     let (s, o) = (s0.wrapping_sub(g.seg_skips0), o0.wrapping_sub(g.seg_outputs0));
                     let skipped = if s + o > 0 { s as f64 / (s + o) as f64 } else { 0.0 };
@@ -2465,7 +2469,7 @@ fn main() {
                     run_stats.mv_now = fg_mv_counts(&pipeline);
                     let headset = shared.headset.lock().clone().map(|(_, n, _)| n).unwrap_or_default();
                     let hz = pipeline.as_ref().map(|p| 1.0 / p.period().as_secs_f64()).unwrap_or(args.fps);
-                    games_record_run(&args, origin, &g.exe, &headset, hz, level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, &run_windows, skipped, &run_stats, &gpu_info);
+                    games_record_run(&args, origin, &g.exe, &headset, hz, level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, &run_windows, skipped, &run_stats, &gpu_info, seg_secs > 20.0);
                 }
             }
             if let Some(g) = &game {

@@ -66,7 +66,7 @@ namespace VisionALVR
         // a record whose game has recorded paths and none of them exists any more: the game was uninstalled
         void Scan()
         {
-            foreach (var f in Games.Files().ToList())
+            foreach (var f in Games.Files().Where(f => !Games.IsHiddenFile(f)).ToList())
             {
                 var g = Json.Load(f);
                 if (g.TryGetValue("paths", out var p) && p is object[] arr && arr.Length > 0 && !arr.Any(o => File.Exists(o as string ?? "")))
@@ -80,7 +80,7 @@ namespace VisionALVR
         {
             games.Items.Clear(); stems.Clear(); data.Clear();
             var rows = new List<(string stem, string label, long when)>();
-            foreach (var f in Games.Files())
+            foreach (var f in Games.Files().Where(f => !Games.IsHiddenFile(f)))
             {
                 var g = Json.Load(f);
                 var stem = Path.GetFileNameWithoutExtension(f);
@@ -126,7 +126,10 @@ namespace VisionALVR
             right.Controls.Add(DllBox(stem, g));
             var tools = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
             var export = new Button { Text = "Export log...", AutoSize = true };
-            export.Click += (s, e) => Export(stem);
+            var exported = new Label { AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0) };
+            var reveal = new LinkLabel { Text = "Open folder", AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0) };
+            reveal.LinkClicked += (s, e) => LogExport.Reveal(reveal.Tag as string);
+            export.Click += (s, e) => LogExport.Run(this, stem, exported, reveal);
             var del = new Button { Text = "Forget this game", AutoSize = true };
             del.Click += (s, e) =>
             {
@@ -137,6 +140,9 @@ namespace VisionALVR
             tools.Controls.Add(export);
             tools.Controls.Add(del);
             right.Controls.Add(tools);
+            var result = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
+            result.Controls.Add(exported); result.Controls.Add(reveal);
+            right.Controls.Add(result);
             foreach (Control c in right.Controls) Ui.LateScale(c, this);   // rebuilt after the window loaded; widths above are design units
             right.ResumeLayout();
             right.AutoScrollPosition = Point.Empty;   // a rebuilt pane starts at its top, whatever the last one was scrolled to
@@ -218,44 +224,6 @@ namespace VisionALVR
             row.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 6, 12, 0) });
             if (action != null) { var b = new Button { Text = action, AutoSize = true, Margin = new Padding(0) }; b.Click += (s, e) => { act(); Render(); }; row.Controls.Add(b); }
             return row;
-        }
-
-        // one zip with what a bug report needs: this game's record, the general log, the newest debug run, the DLL install record
-        void Export(string stem)
-        {
-            using (var dlg = new SaveFileDialog { Filter = "Zip|*.zip", FileName = $"VisionALVR-{stem}-{DateTime.Now:yyyyMMdd-HHmm}.zip" })
-            {
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                try
-                {
-                    if (File.Exists(dlg.FileName)) File.Delete(dlg.FileName);
-                    using (var z = ZipFile.Open(dlg.FileName, ZipArchiveMode.Create))
-                    {
-                        Add(z, Games.FileOf(stem), "game/" + stem + ".json");
-                        Add(z, Path.Combine(Paths.Logs, "VisionALVR.log"), "VisionALVR.log");
-                        Add(z, MvDll.Record, "mv_dll.json");
-                        var dbg = Path.Combine(Paths.Logs, "debug");
-                        if (Directory.Exists(dbg))
-                        {
-                            var newest = new DirectoryInfo(dbg).GetDirectories().OrderByDescending(d => d.LastWriteTime).FirstOrDefault();
-                            if (newest != null) foreach (var f in newest.GetFiles()) Add(z, f.FullName, "debug/" + newest.Name + "/" + f.Name);
-                        }
-                        var info = z.CreateEntry("info.txt");
-                        using (var w = new StreamWriter(info.Open())) w.WriteLine($"VisionALVR {Version.Text}\n{DateTime.Now:s}\n{Environment.OSVersion}");
-                    }
-                    Log.Write("INFO", "logs exported to " + dlg.FileName);
-                    Process.Start("explorer.exe", "/select,\"" + dlg.FileName + "\"");
-                }
-                catch (Exception ex) { MessageBox.Show(this, "Export failed: " + ex.Message, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-            }
-        }
-
-        static void Add(ZipArchive z, string file, string name)
-        {
-            if (!File.Exists(file)) return;
-            // the logs are being written by the streamer: read with sharing
-            using (var src = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (var dst = z.CreateEntry(name).Open()) src.CopyTo(dst);
         }
 
         [STAThread]

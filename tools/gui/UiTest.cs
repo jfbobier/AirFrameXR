@@ -156,6 +156,44 @@ namespace VisionALVR
             return r;
         }
 
+        /// Text of every visible control, one line each, in tree order: what a person would read in the window.
+        static void DumpControls(Control c, StringBuilder o, int depth)
+        {
+            if (!c.Visible) return;
+            var t = (c is Label || c is ButtonBase || c is GroupBox) ? c.Text : "";
+            string kind = c is CheckBox cb ? "check[" + (cb.Checked ? "x" : " ") + "]" : c is RadioButton ? "radio" : c is Button ? "button" : c is LinkLabel ? "link" : c is Label ? "label" : c is GroupBox ? "group" : c.GetType().Name;
+            if (c is ToggleSwitch ts) o.AppendLine(new string(' ', depth) + "switch " + (c.AccessibleName ?? "") + " " + (ts.Checked ? "on" : "off"));
+            else if (t.Length > 0) o.AppendLine(new string(' ', depth) + kind + " " + t.Replace("\r", "").Replace("\n", " / "));
+            foreach (Control k in c.Controls) DumpControls(k, o, depth + 1);
+        }
+
+        /// One JSON object per line: {"event":...,"data":{...}} goes to RuntimeForm.HostEvent (the function the live host drives); {"dump":"label"} writes the window's text
+        /// under that label. The last state is always dumped, and a screenshot written.
+        static int Replay(string file, string outDir)
+        {
+            var o = new StringBuilder();
+            using (var f = new RuntimeForm(null))
+            {
+                f.StartPosition = FormStartPosition.Manual; f.Location = new Point(0, 0); f.ShowInTaskbar = false; f.Opacity = 0;
+                f.Show();   // no message loop: Shown (which would start the streamer) never runs
+                void dump(string label) { o.AppendLine("== " + label); DumpControls(f, o, 0); }
+                int n = 0;
+                foreach (var line in File.ReadAllLines(file))
+                {
+                    if (line.Trim().Length == 0 || line.TrimStart().StartsWith("#")) continue;
+                    var d = global::VisionALVR.Json.Parse(line);
+                    n++;
+                    if (d.TryGetValue("dump", out var lab)) { dump(Convert.ToString(lab)); continue; }
+                    if (!d.TryGetValue("event", out var ev)) continue;
+                    f.HostEvent(Convert.ToString(ev), d.TryGetValue("data", out var x) ? x as Dictionary<string, object> : null);
+                }
+                dump("end");
+                try { using (var bmp = new Bitmap(f.Width, f.Height)) { f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height)); bmp.Save(Path.Combine(outDir, "replay.png"), ImageFormat.Png); } } catch { }
+            }
+            File.WriteAllText(Path.Combine(outDir, "replay.txt"), o.ToString());
+            return 0;
+        }
+
         [STAThread]
         static int Main(string[] args)
         {
@@ -166,6 +204,16 @@ namespace VisionALVR
             Directory.CreateDirectory(outDir);
             var only = Arg("--only");
             if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);
+            var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
+            if (replay != null) return Replay(replay, outDir);
+            var exportTo = Arg("--export-selftest");   // harness/export_logs.py: the export to a path with no dialog; lists the entries
+            if (exportTo != null)
+            {
+                Log.Write("INFO", "export selftest");   // makes sure a general log exists
+                var names = LogExport.Write(exportTo, Arg("--game"));
+                File.WriteAllLines(Path.Combine(outDir, "export.txt"), names.Concat(new[] { "open_forms=" + Application.OpenForms.Count }));
+                return 0;
+            }
             var fwExe = Arg("--firewall");   // harness/firewall_check.py: print the firewall analysis of this exe and stop
             if (fwExe != null)
             {

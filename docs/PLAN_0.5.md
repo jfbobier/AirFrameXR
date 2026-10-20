@@ -128,7 +128,7 @@ for the UI; where a number is wrong at its source (latency, U7) the fix is in th
 item is not done until that test exists and passes. Items marked (host) change the engine's reporting only.
 
 ### A harness for the streamer window first (shared by most items)
-- [ ] **Event replay.** `uitest.exe --replay <events.jsonl>` builds the streamer, feeds the lines to `RuntimeForm.HostEvent` (the same function the live host drives) with a
+- [x] **Event replay.** `uitest.exe --replay <events.jsonl>` builds the streamer, feeds the lines to `RuntimeForm.HostEvent` (the same function the live host drives) with a
   fake clock, and writes a text dump of the window (every visible label, tile, switch state, notice) and a screenshot. `harness/streamer_events.py` runs scripted event
   sequences on the builder and asserts the dump: a 90 s game with vectors; a game without the DLL; the DLL installed but no vectors; a 12 s run (shorter than the 20 s
   the engine records); the mirror starting and stopping before, during and after a game; an absurd latency window; a Vision Pro and a Quest connecting. Scripts are
@@ -137,7 +137,7 @@ item is not done until that test exists and passes. Items marked (host) change t
   `streamer-debug-on`) so the layout is audited at every desktop size and scale; `UiTest` can already put the window in a demo state (`ApplyDemoState`).
 
 ### Bugs
-- [ ] **U1. Export logs leaves a dialog open** (Game history, *Export log...*). Likely cause: after the zip is written the code starts `explorer.exe /select,<zip>`, a new
+- [x] **U1. Export logs leaves a dialog open** (Game history, *Export log...*). Likely cause: after the zip is written the code starts `explorer.exe /select,<zip>`, a new
   Explorer window that looks like a folder-selection dialog, and the work runs inside the `using` of the Save dialog. Fix: dispose the dialog before the work; do the
   work; show an inline line under the buttons "Saved to <file>  [Open folder]" (no Explorer unless clicked). One `LogExport` class (Common.cs) used by Game history and the
   streamer's new Export button (U4). Test: `uitest --export-selftest <zip>` runs the export to a path without any dialog, checks the zip's entries (game record, general
@@ -156,11 +156,11 @@ item is not done until that test exists and passes. Items marked (host) change t
   (synthetic samples with a wrapped duration; clean samples unchanged; all-outlier window gives none), `streamer_events` / `ui_matrix` with the absurd record, and an e2e
   with generation on (`FRAME_GEN` scenarios in the simrig and the mock client) asserting `net.latency_ms` < 200 and `latency_outliers` == 0 on clean runs; then find
   which frames produce them (the debug samples) and fix the cause if it is in our re-stamping.
-- [ ] **U8. The desktop mirror is not a game in the UI.** It is a game to the engine (it keeps its record and log) and stays so; the UI hides it: one
+- [x] **U8. The desktop mirror is not a game in the UI.** It is a game to the engine (it keeps its record and log) and stays so; the UI hides it: one
   `Games.IsHidden(exe)` (exe name `mirrordesktop.exe`, case-insensitive) used by the game list, the Game line, the Diagnose facts (`LogFacts`), the advice and the
   auto-delete of logs. Test: `ui_matrix` performance fixture with a mirror record (the list must not show it), `streamer_events` (the mirror's `game_started/ended/run` never
   change the Game line, the tiles or the DLL offer).
-- [ ] **U9. The last session's statistics must be on the streamer when a session ends.** Today the tiles follow `status` while `lastSession` is false and the `game_run` event
+- [x] **U9. The last session's statistics must be on the streamer when a session ends.** Today the tiles follow `status` while `lastSession` is false and the `game_run` event
   fills them once; the engine emits `game_run` only for runs of 20 s or more, so after a short run the tiles keep (or fall back to) live values, and anything that
   restarts `status` after the game (the mirror, an idle window) can overwrite them. Rules: the tiles have two states, *live* (a game runs) and *last session* (the last
   real game's `game_run`), the latter kept until the next real game starts; a run shorter than 20 s sends a short `game_run` (`recorded:false`, same numbers) so the
@@ -194,6 +194,9 @@ item is not done until that test exists and passes. Items marked (host) change t
   after the host started), log the result on every change, and show it in the streamer as one line under the debug row only when it matters ("Audio: VB-Audio Cable held at
   100 %"; orange when the device is missing or the call fails). Test: an e2e on the builder that sets the default device's volume to 40 % through the Core Audio API before
   and after the host starts and asserts `audio_volume_forced` and the volume back at 100 % within 6 s (the device selected by a test variable, restored at the end).
+
+### Status (2026-10-20)
+Done and passing on the builder: U1 (`harness/export_logs.py`), U8, U9 (`game_run` now also sent, `recorded:false`, for runs of 2-20 s), and the replay harness (`harness/streamer_events.py`, three fixtures; the other sequences join the items they test). `ui_matrix` 0 FAIL. Added by the user mid-session: shorter text everywhere in the streamer (done with U5).
 
 ### Order
 U1, U8, U9 + the replay harness (small, bugs) → U7 (engine aggregator + tests) → U5 / U5b / U3 (layout, height, debug row) → U6 + U2 (Frame generation component) → U10.

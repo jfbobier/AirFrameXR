@@ -276,7 +276,7 @@ namespace VisionALVR
 
         // The desktop mirror is an OpenXR app of its own (bin\mirrordesktop.exe): it runs while the toggle is on, a headset is connected and no game runs. A game
         // starting takes the headset (the app leaves by itself when the shim signals it; this only makes sure it is gone), and the mirror returns when it ends.
-        static bool IsMirrorApp(string exe) => string.Equals(exe, "mirrordesktop.exe", StringComparison.OrdinalIgnoreCase);
+        static bool IsMirrorApp(string exe) => Games.IsHidden(exe);
         bool mirrorInHost;
         Process mirrorProc; bool headsetConnected; int mirrorFails; DateTime mirrorStarted;
         readonly Timer mirrorTimer = new Timer { Interval = 1500 };
@@ -539,7 +539,7 @@ namespace VisionALVR
         static double D(Dictionary<string, object> d, string k) { try { return d != null && d.TryGetValue(k, out var v) && v != null ? Convert.ToDouble(v, CultureInfo.InvariantCulture) : double.NaN; } catch { return double.NaN; } }
         static string F(double v, string fmt) => double.IsNaN(v) ? "  -" : v.ToString(fmt, CultureInfo.InvariantCulture);
 
-        void HostEvent(string name, Dictionary<string, object> d)
+        internal void HostEvent(string name, Dictionary<string, object> d)
         {
             switch (name)
             {
@@ -579,7 +579,6 @@ namespace VisionALVR
                         // the desktop mirror is an OpenXR app like a game (the engine records it as one), but it is not played: no generation (it would only add latency to a
                         // static screen), and it must not count as a game for the mirror's own start/stop logic
                         mirrorInHost = true;
-                        game.Text = "Game: none (the desktop mirror is on)";
                         if (frameGen.Checked) host.Send("frame_gen off");
                         break;
                     }
@@ -587,7 +586,7 @@ namespace VisionALVR
                     gameRunning = true; MirrorSync();
                     currentExe = S(d, "exe");
                     lastSession = false;
-                    statsBox.Text = "Streaming (updated every 10 s)";
+                    statsBox.Text = "Streaming (live, updated every 10 s)";
                     ApplyRecommendation(fgRecommend.Checked);
                     break;
                 case "game_ended":
@@ -606,7 +605,8 @@ namespace VisionALVR
                     // (no pop-up; the live numbers come back with the next game)
                     {
                         lastSession = true;
-                        statsBox.Text = "Streaming (last session stats)";
+                        var mins = D(d, "seconds") / 60;
+                        statsBox.Text = $"Streaming: last session, {S(d, "exe")}, {F(mins, "0.0")} min, {S(d, "headset")}";
                         string[] names = { "1/3", "1/2", "2/3" };
                         var lvl = S(d, "level"); var li = Array.IndexOf(FgRates, lvl);
                         var rec = Recommend(S(d, "exe"), S(d, "headset"));
@@ -634,7 +634,7 @@ namespace VisionALVR
                         var pos = Array.IndexOf(FgRates, S(d, "fg_rate"));
                         if (pos >= 0 && fgRate.Value != pos) { fgRateFromHost = true; fgRate.Value = pos; fgRateFromHost = false; }
                     }
-                    if (!lastSession)
+                    if (gameRunning)   // only a real game's windows are shown; a mirror or idle window never replaces the last session's numbers
                     {
                         tGame.Set(F(D(d, "app_fps"), "0.0") + " fps", "");
                         tStreamed.Set(F(D(d, "stream_fps"), "0.0") + " fps", "not streamed " + S(d, "frames_not_streamed"));
