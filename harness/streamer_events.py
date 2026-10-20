@@ -74,6 +74,7 @@ EXPECT = {
         ("failed", ["Audio: cannot set CABLE Input (VB-Audio Virtual Cable) to 100 %"], []),
         ("missing", ["Audio: the device named in the audio settings (Headphones (Realtek)) was not found."], []),
     ],
+    "window_size": [],
     "short12": [
         ("ended", [], []),
         ("after_short_run", ["last session, Short.exe, 0.2 min", "60.0 fps", "50 ms"], ["Streaming (live"]),   # a run under 20 s still updates the tiles

@@ -1,0 +1,18 @@
+{"dump": "start"}
+{"event": "client_connected", "data": {"name": "Apple Vision Pro", "ip": "192.168.1.50"}}
+{"dump": "connected"}
+{"setup": "game", "exe": "SizeGame.exe", "dll": "installed"}
+{"event": "game_started", "data": {"exe": "SizeGame.exe"}}
+{"event": "status", "data": {"app_fps": 44.8, "stream_fps": 89.7, "mbps": 120, "packets_lost": 0, "client": {"displayed_fps": 89, "total_latency_ms": 57, "encode_ms": 6, "network_ms": 9, "decode_ms": 14}}}
+{"dump": "playing"}
+{"event": "game_ended", "data": {"exe": "SizeGame.exe", "seconds": 300}}
+{"event": "game_run", "data": {"exe": "SizeGame.exe", "headset": "Apple Vision Pro", "level": "half", "seconds": 300, "rendered_fps": 44, "rendered_fps_low": 38, "streamed_fps": 89, "headset_repeated_typ": 0.01, "host_repeats_typ": 0, "skipped": 0, "recorded": true, "net": {"displayed_fps": 89, "bitrate_mbps": 120, "latency_ms": 57, "latency_p95_ms": 70, "packets_lost": 0}, "mv": {"enabled": true, "frames": 0}}}
+{"dump": "after_blind"}
+{"event": "audio_volume_forced", "data": {"device": "CABLE Input (VB-Audio Virtual Cable)", "was": 0.4, "set_ok": true}}
+{"dump": "audio"}
+{"event": "height_calibrated", "data": {"headset_y": 1.62}}
+{"dump": "height_report"}
+{"event": "game_started", "data": {"exe": "Other.exe"}}
+{"dump": "next_game"}
+{"event": "client_disconnected", "data": {}}
+{"dump": "disconnected"}

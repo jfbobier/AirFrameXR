@@ -199,7 +199,7 @@ namespace VisionALVR
             {
                 f.StartPosition = FormStartPosition.Manual; f.Location = new Point(0, 0); f.ShowInTaskbar = false; f.Opacity = 0;
                 f.Show();   // no message loop: Shown (which would start the streamer) never runs
-                void dump(string label) { o.AppendLine("== " + label); DumpControls(f, o, 0); }
+                void dump(string label) { o.AppendLine("== " + label); o.AppendLine("clientsize " + f.ClientSize.Width + "x" + f.ClientSize.Height + " at " + f.Location.X + "," + f.Location.Y); DumpControls(f, o, 0); }
                 int n = 0;
                 foreach (var line in File.ReadAllLines(file))
                 {

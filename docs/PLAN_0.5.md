@@ -13,12 +13,12 @@ any pixel constant is a 96-dpi design value (`AutoScaleDimensions = 96,96`).
 ## Phase 0: groundwork
 - [x] DPI scaling fix in all four forms (AutoScaleDimensions) — verified at 125 % on the 3080 Ti laptop; 150-200 % still to check.
 - [x] Remove the remaining absolute sizes: `Ui.CompactHeader` Height 84, stats box and live group `Location`.
-- [ ] Shared code in `Common.cs`: game record reader/writer, install helper (DLL), diagnose engine (extracted from `Wizard.cs`).
-- [ ] `tools/wsl/check_gui.sh` and `harness/gui_shot.py` build every new EXE; shots at 100/125/150/200 % become part of the GUI check.
+- [x] Shared code in `Common.cs`: game record reader/writer, install helper (DLL), diagnose engine (extracted from `Wizard.cs`). (Done: `Games` / `MvDll` / `VectorsLine` / `LogExport` / `Latency` in Common.cs; the diagnose engine is `Verdict.cs` + `Advice.cs`, extracted from Wizard.cs.)
+- [x] `tools/wsl/check_gui.sh` and `harness/gui_shot.py` build every new EXE; shots at 100/125/150/200 % become part of the GUI check. (Done through `check_gui.sh` (every exe) and `harness/ui_matrix.py` (every window at 1080p/1440p/4K x 100-200 %, one PNG each); `gui_shot.py` stays the single-page tool for the PC. 150-200 % on a real display is not chased: an unusual resolution scrolls.)
 
 ## Phase 1: launcher menu + streamer window
 - [x] `launcher.exe` (Launcher.cs; Streamer + Setup wizard cards, more as tools appear; a temporary Open logs folder button until the Logs window): cards for each tool, each launching its EXE. Reads the same folder layout as today.
-- [ ] Streamer window:
+- [x] Streamer window:
   - [x] remove Logs and Configure buttons (the wizard stays reachable from the launcher);
   - [x] bottom bar: **Debug logging, off by default** (default changes; saved value kept for existing users);
   - [x] **Recenter** moves next to Defaults in the Position group (it re-anchors forward + position, it is not a frame-generation setting; already sent at every game start);
@@ -26,7 +26,7 @@ any pixel constant is a 96-dpi design value (`AutoScaleDimensions = 96,96`).
   - new toggle under Frame generation: **Mirror Windows desktop between sessions** (off by default);
   - live stats and post-session verdict as tiles: game / streamed / shown fps, bitrate, latency split (encode + network + decode + other) as a
     stacked bar, frames not streamed, packets lost; the verdict is one status line plus the same tiles for the last run.
-- [ ] "DLSS motion vectors" ticked but the DLL absent: after the game ends, a popup offers to install it (uninstallable from the Logs window),
+- [x] "DLSS motion vectors" ticked but the DLL absent: after the game ends, a popup offers to install it (uninstallable from the Logs window), (Done as U2/U6: inline offer in the Frame generation component, no pop-up.)
   with "don't show for this game again" (stored in the game's JSON).
 
 ## Phase 2: Logs and performance window + per-game data
@@ -45,15 +45,12 @@ the launcher's "Recommended" reads the new files). The streamer's own log, `logs
   - **Auto-delete logs of uninstalled games**: on open, delete a game's file when its exe no longer exists (setting, default on).
 
 ## Phase 3: Diagnose window + wizard refactor
-- [ ] The wizard's verdict (measurement / value / target / verdict table, Wizard.cs) becomes a shared class; wizard steps and a standalone
+- [x] The wizard's verdict (measurement / value / target / verdict table, Wizard.cs) becomes a shared class; wizard steps and a standalone (Done: `Verdict.cs`, used by the wizard's result page and `configure.exe --diagnose`.)
   **Diagnose** window both use it. No copied code.
-- [ ] AVP-only wizard step for chroma passthrough: try to set it from the host, query the AVP to verify; if refused, show
-  `ALVR_VisionOS_Chroma_Passthrough.png` (move from the repo root to `tools/gui/res`), re-check, continue.
-  **Open question:** whether ALVR exposes setting or reading it from the server; check the visionOS client protocol first. Fallback: manual
-  confirmation with the screenshot.
+- Not pursued (user, 2026-10-20): auto-configuring the Vision Pro's chroma passthrough from the host. The wizard shows where the user sets it on the client (`ALVR_VisionOS_Chroma_Passthrough.png`); a Quest accepts the passthrough command, so only the Vision Pro needs the picture.
 
 ## Phase 4: in-VR keys
-- [ ] The INSERT dialog in VR (user: VDXR captures the key, two presses turn it off so UEVR gets it). **Checked on the built binaries (2026-10-19): not VDXR, not our shim, not our host.** `virtualdesktop-openxr.dll` imports no keyboard API (no GetAsyncKeyState/GetKeyState/RegisterHotKey/hooks/raw input; its only 'Insert' string is `cJSON_InsertItemInArray`; GameInput is used for gamepads only, `GameInputKindGamepad`). `LibOVRRT64_1.dll` (our shim) polls only R W A S D Q E U I O P, and only without a host connection (`!m_ipc.state`). The host reads no INSERT either (its only key is the recenter key). So the dialog is something else in the game process: UEVR's own VR overlay (INSERT is its menu key; placement relative to the controller/world would explain 'unreadable on the Vision Pro'), an OpenXR API layer (the new layers check lists them), or a game-specific overlay. To settle it on a PC: same game and UEVR under SteamVR or the Oculus runtime (dialog still there = not ours), and the layers dialog (any enabled implicit layer?).
+- Not planned: the INSERT dialog in VR (user: VDXR captures the key). Checked on the built binaries (2026-10-19): not VDXR, not our shim, not our host; most likely UEVR's own overlay. Left alone.
 - [x] Global hotkey for a full recenter while playing: host polls the key (`controls.recenter_key` in visionalvr.json, default **End** (used by no mod known: UEVR is Insert, Luke Pause, Mutar F11), `off` disables); chosen in the wizard's configuration page.
 - [x] (code read; lab test still to do) Head pose at session start: forward + horizontal position (X, Z) are re-anchored by `recenter` at game start, height by Eye height;
   verify with a test that X/Z really are zero at start (lab: simrig with an off-centre start pose) instead of assuming.
@@ -106,20 +103,17 @@ extractor DLL in the game folder, with vectors off, with the 0.4 shim and host. 
 attached and copied cleanly, and the run that worked had the same chain with vectors on. So the engine must not turn vectors off on this
 signal; it would hide the real cause and change nothing on the headset. What the UI should do instead:
 
-- [ ] **Debug logging stays a checkbox in the streamer**, on and off, as in 0.4. The 0.5 notice-only variant leaves the user unable to turn
+- [x] **Debug logging stays a checkbox in the streamer**, on and off, as in 0.4. The 0.5 notice-only variant leaves the user unable to turn (Done in UI round 2.)
   debug back on without editing `config\visionalvr.json` by hand (the user hit this on 2026-10-19). Default off is fine; the control must
   be reversible in the window.
-- [ ] **Orange flag after a run: "motion vectors did not reach the streamer".** Conditions: the DLL is installed in the game's folder
+- [x] **Orange flag after a run: "motion vectors did not reach the streamer".** Conditions: the DLL is installed in the game's folder (Done in UI round 2.)
   (MvDll.State.Installed / OlderCopy), the tick was on, generation was on, and the record's `mv.frames` is 0 (or the per-window
   `status.mv.share` stayed under, say, 0.5 for the whole run). Orange, not red: the game played, generation ran on optical flow, only the
   vectors are missing; that is the engine's failsafe (`vecSource` falls back to flow per eye, nothing to switch). Text: what was expected,
   what the shim saw (`motion_tap` streams and evaluates, "sources not copied"), and the one action: the DLL version and the game's DLSS
   setting. Data: `game_run.mv` / the game record's `mv`, the `status.mv` window counters, `motion_tap` events.
-- [ ] No flag for a black screen: the user sees it. What the night cost was the *why*, so the diagnosis goes where one looks for it: one
-  line in the general log at game end when the game rendered for more than ~10 s and no frame carried a projection layer ("the game
-  rendered N frames but never sent a stereo picture: the VR injector did not set up, VisionALVR received no image to stream"), and the
-  same sentence in the Logs window's last-run summary and the exported zip. Not a tile, not a colour.
-- [ ] The orange flag belongs to the per-game page (Performance / inventory) as a line under the tiles, with the same wording in the Logs window.
+- Not planned (user, 2026-10-20): the black-screen diagnosis line and the "no stereo picture" log sentence.
+- [x] The orange flag belongs to the per-game page (Performance / inventory) as a line under the tiles, with the same wording in the Logs window. (Done in UI round 2.)
 
 ## UI round 2 (2026-10-20, from a night of play on the Vision Pro and the Quest 3)
 
@@ -133,7 +127,7 @@ item is not done until that test exists and passes. Items marked (host) change t
   sequences on the builder and asserts the dump: a 90 s game with vectors; a game without the DLL; the DLL installed but no vectors; a 12 s run (shorter than the 20 s
   the engine records); the mirror starting and stopping before, during and after a game; an absurd latency window; a Vision Pro and a Quest connecting. Scripts are
   committed (`harness/fixtures/streamer_events/*.jsonl`), several taken from real `host_stdout.txt` files of past runs.
-- [ ] `ui_matrix` gets the new states of the streamer as cases (`streamer-avp-auto`, `streamer-quest`, `streamer-after-ok`, `streamer-after-blind`, `streamer-no-dll`,
+- [x] `ui_matrix` gets the new states of the streamer as cases (`streamer-avp-auto`, `streamer-quest`, `streamer-after-ok`, `streamer-after-blind`, `streamer-no-dll`, (Done in UI round 2.)
   `streamer-debug-on`) so the layout is audited at every desktop size and scale; `UiTest` can already put the window in a demo state (`ApplyDemoState`).
 
 ### Bugs
