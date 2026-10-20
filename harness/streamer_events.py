@@ -68,6 +68,12 @@ EXPECT = {
         ("tick_off", [], ["worked", "ran blind", "No game vectors"]),
         ("mirror", [], ["worked", "ran blind", "No game vectors"]),
     ],
+    "audio_line": [
+        ("quiet", [], ["Audio:"]),   # a device that was never touched says nothing
+        ("forced", ["Audio: CABLE Input (VB-Audio Virtual Cable) held at 100 % (was 40 %)"], []),
+        ("failed", ["Audio: cannot set CABLE Input (VB-Audio Virtual Cable) to 100 %"], []),
+        ("missing", ["Audio: the device named in the audio settings (Headphones (Realtek)) was not found."], []),
+    ],
     "short12": [
         ("ended", [], []),
         ("after_short_run", ["last session, Short.exe, 0.2 min", "60.0 fps", "50 ms"], ["Streaming (live"]),   # a run under 20 s still updates the tiles

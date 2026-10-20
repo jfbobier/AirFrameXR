@@ -55,6 +55,8 @@ namespace VisionALVR
         readonly Button vecInstall = new Button { Text = "Install", AutoSize = true, Visible = false };
         readonly Button vecDismiss = new Button { Text = "Not for this game", AutoSize = true, Visible = false };
         readonly FlowLayoutPanel vecRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Visible = false, Margin = new Padding(0, 4, 0, 0), MaximumSize = new Size(600, 0) };
+        readonly Label audioLine = new Label { AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };   // the virtual audio device's volume, only when it matters
+        bool audioForced;
         readonly Label exportStatus = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };
         readonly LinkLabel exportLink = new LinkLabel { Text = "Open folder", AutoSize = true, Margin = new Padding(3, 4, 3, 0) };
         readonly CheckBox fgMv = new CheckBox { Text = "Use the game's DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0), Visible = false };   // shown only where the extractor DLL is installed for the running game
@@ -205,6 +207,7 @@ namespace VisionALVR
             var exportRow = Row();
             exportRow.Controls.Add(exportStatus); exportRow.Controls.Add(exportLink);
             body.Controls.Add(exportRow);
+            body.Controls.Add(audioLine);
             footer.ForeColor = Color.DimGray;
             body.Controls.Add(footer);
 
@@ -687,6 +690,16 @@ namespace VisionALVR
                         stats.Text = ""; stats.Visible = false;
                     }
                     break;
+                case "audio_volume_forced":
+                    // the engine found the virtual cable device below 100 % and put it back: say so once, orange when that failed
+                    audioForced = true;
+                    if (d != null && d.TryGetValue("set_ok", out var so) && so is bool sok && !sok) SetAudioLine($"Audio: cannot set {S(d, "device")} to 100 %. The headset's volume follows the PC's.", Color.DarkOrange);
+                    else SetAudioLine($"Audio: {S(d, "device")} held at 100 % (was {F(D(d, "was") * 100, "0")} %)", Color.DimGray);
+                    break;
+                case "audio_volume_state":
+                    if (S(d, "state") == "missing") SetAudioLine($"Audio: the device named in the audio settings ({S(d, "device")}) was not found.", Color.DarkOrange);
+                    else if (audioForced && S(d, "state") == "held") SetAudioLine($"Audio: {S(d, "device")} held at 100 %", Color.DimGray);
+                    break;
                 case "height_calibrated":
                     reportedHeight = D(d, "headset_y"); UpdateHeightUi();
                     break;
@@ -728,6 +741,8 @@ namespace VisionALVR
         public decimal HeightMin => heightBox.Minimum;
         public decimal HeightMax => heightBox.Maximum;
 
+        void SetAudioLine(string text, Color c) { audioLine.Text = text; audioLine.ForeColor = c; audioLine.Visible = text.Length > 0; }
+        public void DemoAudio(bool bad) => SetAudioLine(bad ? "Audio: cannot set CABLE Input (VB-Audio Virtual Cable) to 100 %. The headset's volume follows the PC's." : "Audio: CABLE Input (VB-Audio Virtual Cable) held at 100 % (was 40 %)", bad ? Color.DarkOrange : Color.DimGray);
         public void DemoVectors(VectorsLine.Kind k) => SetVectorsLine(k, VectorsLine.Text(k, 2558), k == VectorsLine.Kind.NoDll);
         public void DemoDebugOn() { debug.Checked = true; settings.Debug = false; settings.Save(); exportStatus.Text = "Saved to C:\\Users\\someone\\Documents\\VisionALVR-logs-20261020-1200.zip"; exportStatus.ForeColor = Color.SeaGreen; exportStatus.Visible = exportLink.Visible = true; }
 

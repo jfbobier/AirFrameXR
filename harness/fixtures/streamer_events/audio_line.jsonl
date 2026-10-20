@@ -1,0 +1,8 @@
+{"event": "audio_volume_state", "data": {"device": "CABLE Input (VB-Audio Virtual Cable)", "state": "held"}}
+{"dump": "quiet"}
+{"event": "audio_volume_forced", "data": {"device": "CABLE Input (VB-Audio Virtual Cable)", "was": 0.4, "set_ok": true}}
+{"dump": "forced"}
+{"event": "audio_volume_forced", "data": {"device": "CABLE Input (VB-Audio Virtual Cable)", "was": 0.7, "set_ok": false}}
+{"dump": "failed"}
+{"event": "audio_volume_state", "data": {"device": "Headphones (Realtek)", "state": "missing"}}
+{"dump": "missing"}

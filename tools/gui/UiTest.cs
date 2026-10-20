@@ -54,6 +54,7 @@ namespace VisionALVR
             yield return new Case { Name = "streamer-after-ok", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.Worked); } };
             yield return new Case { Name = "streamer-after-blind", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.Blind); } };
             yield return new Case { Name = "streamer-no-dll", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.NoDll); } };
+            yield return new Case { Name = "streamer-audio-bad", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoAudio(true); } };
             yield return new Case { Name = "streamer-debug-on", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoDebugOn(); } };
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             for (int p = 0; p <= 6; p++)

@@ -1713,26 +1713,48 @@ fn main() {
     event(origin, "game_audio", audio_cfg.clone());
     // The headset's sound level must not follow the PC's volume: ALVR loop-back captures the default output, and when that is the VB-Audio cable
     // device its endpoint volume scales what is captured (the PC's volume keys then change the headset's volume). Keep that device at 100 %
-    // while the host runs (checked every 3 s, so a change is undone within seconds). VISIONALVR_FORCE_CABLE_VOLUME=0 disables it.
+    // while the host runs, checked every 3 s so a change is undone within seconds: the default output (the streamer's user script switches it after
+    // the host started) and the device named in the audio settings, when their name says cable / vb-audio. VISIONALVR_FORCE_CABLE_VOLUME=0 disables it;
+    // VISIONALVR_FORCE_VOLUME_DEVICE=<name part, or * for any> adds devices (the lab test uses it). Every change of device or state is logged and sent as an event.
     #[cfg(windows)]
     if audio_cfg["enabled"].as_bool().unwrap_or(true) && std::env::var("VISIONALVR_FORCE_CABLE_VOLUME").map(|v| v != "0").unwrap_or(true) {
+        let session_path = layout.session();
         std::thread::spawn(move || {
-            let mut last_logged = -1.0f32;
+            let extra = std::env::var("VISIONALVR_FORCE_VOLUME_DEVICE").ok().map(|v| v.to_ascii_lowercase());
+            let mut last_logged: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+            let mut last_state: std::collections::HashMap<String, &'static str> = std::collections::HashMap::new();
             loop {
-                if let Ok(dev) = alvr_audio::AudioDevice::new_output(None) {
-                    if let Ok(name) = dev.name() {
-                        let lower = name.to_ascii_lowercase();
-                        if lower.contains("cable") || lower.contains("vb-audio") {
-                            if let Ok((vol, _muted)) = alvr_audio::get_volume_windows_device(&dev) {
-                                if vol < 0.999 {
-                                    let ok = alvr_audio::set_volume_windows_device(&dev, 1.0).is_ok();
-                                    if (vol - last_logged).abs() > 0.01 {
-                                        last_logged = vol;
-                                        event(origin, "audio_volume_forced", json!({ "device": name, "was": vol, "set_ok": ok }));
-                                    }
-                                }
-                            }
+                // the default output, and the device named in the audio settings (by name part)
+                let mut devices: Vec<(&'static str, Option<alvr_audio::AudioDevice>)> = vec![("default", alvr_audio::AudioDevice::new_output(None).ok())];
+                let s: serde_json::Value = fs::read_to_string(&session_path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+                let g = &s["session_settings"]["audio"]["game_audio"]["content"]["device"];
+                if g["set"].as_bool() == Some(true) {
+                    if let Some(part) = g["content"]["NameSubstring"].as_str() {
+                        let cfg = alvr_session::CustomAudioDeviceConfig::NameSubstring(part.to_string());
+                        let dev = alvr_audio::AudioDevice::new_output(Some(&cfg)).ok();
+                        if dev.is_none() && last_state.insert(format!("missing:{part}"), "missing").is_none() {
+                            logs::general("WARN", &format!("audio: the device named in the audio settings (\"{part}\") was not found"));
+                            event(origin, "audio_volume_state", json!({ "device": part, "state": "missing" }));
                         }
+                        devices.push(("settings", dev));
+                    }
+                }
+                for (_which, dev) in devices {
+                    let Some(dev) = dev else { continue };
+                    let Ok(name) = dev.name() else { continue };
+                    let lower = name.to_ascii_lowercase();
+                    if !(lower.contains("cable") || lower.contains("vb-audio") || extra.as_ref().map(|e| e == "*" || lower.contains(e.as_str())).unwrap_or(false)) { continue; }
+                    let Ok((vol, _muted)) = alvr_audio::get_volume_windows_device(&dev) else { continue };
+                    if vol < 0.999 {
+                        let ok = alvr_audio::set_volume_windows_device(&dev, 1.0).is_ok();
+                        if ok || (vol - last_logged.get(&name).copied().unwrap_or(-1.0)).abs() > 0.01 {   // every successful correction is news; a failing one is reported once per level
+                            last_logged.insert(name.clone(), vol);
+                            logs::general(if ok { "INFO" } else { "WARN" }, &format!("audio: {name} was at {:.0} %, {}", vol * 100.0, if ok { "set back to 100 %" } else { "could not be set to 100 %" }));
+                            event(origin, "audio_volume_forced", json!({ "device": name, "was": vol, "set_ok": ok }));
+                        }
+                    } else if last_state.insert(name.clone(), "held") != Some("held") {
+                        logs::general("INFO", &format!("audio: {name} is at 100 %, held there while the streamer runs"));
+                        event(origin, "audio_volume_state", json!({ "device": name, "state": "held" }));
                     }
                 }
                 std::thread::sleep(Duration::from_secs(3));
