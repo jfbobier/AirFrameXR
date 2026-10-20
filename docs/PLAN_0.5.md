@@ -121,5 +121,83 @@ signal; it would hide the real cause and change nothing on the headset. What the
   same sentence in the Logs window's last-run summary and the exported zip. Not a tile, not a colour.
 - [ ] The orange flag belongs to the per-game page (Performance / inventory) as a line under the tiles, with the same wording in the Logs window.
 
+## UI round 2 (2026-10-20, from a night of play on the Vision Pro and the Quest 3)
+
+Spec of the target windows: **docs/UI_SPEC.md** (written with this section). The rule for everything below: the engine (`alvr_host.exe`, the shim) is not touched
+for the UI; where a number is wrong at its source (latency, U7) the fix is in the engine's aggregator and says so. Every item names the harness that proves it; an
+item is not done until that test exists and passes. Items marked (host) change the engine's reporting only.
+
+### A harness for the streamer window first (shared by most items)
+- [ ] **Event replay.** `uitest.exe --replay <events.jsonl>` builds the streamer, feeds the lines to `RuntimeForm.HostEvent` (the same function the live host drives) with a
+  fake clock, and writes a text dump of the window (every visible label, tile, switch state, notice) and a screenshot. `harness/streamer_events.py` runs scripted event
+  sequences on the builder and asserts the dump: a 90 s game with vectors; a game without the DLL; the DLL installed but no vectors; a 12 s run (shorter than the 20 s
+  the engine records); the mirror starting and stopping before, during and after a game; an absurd latency window; a Vision Pro and a Quest connecting. Scripts are
+  committed (`harness/fixtures/streamer_events/*.jsonl`), several taken from real `host_stdout.txt` files of past runs.
+- [ ] `ui_matrix` gets the new states of the streamer as cases (`streamer-avp-auto`, `streamer-quest`, `streamer-after-ok`, `streamer-after-blind`, `streamer-no-dll`,
+  `streamer-debug-on`) so the layout is audited at every desktop size and scale; `UiTest` can already put the window in a demo state (`ApplyDemoState`).
+
+### Bugs
+- [ ] **U1. Export logs leaves a dialog open** (Game history, *Export log...*). Likely cause: after the zip is written the code starts `explorer.exe /select,<zip>`, a new
+  Explorer window that looks like a folder-selection dialog, and the work runs inside the `using` of the Save dialog. Fix: dispose the dialog before the work; do the
+  work; show an inline line under the buttons "Saved to <file>  [Open folder]" (no Explorer unless clicked). One `LogExport` class (Common.cs) used by Game history and the
+  streamer's new Export button (U4). Test: `uitest --export-selftest <zip>` runs the export to a path without any dialog, checks the zip's entries (game record, general
+  log, newest debug run, DLL record, info.txt) and that `Application.OpenForms` holds only the window; `harness/export_logs.py` runs it on the builder.
+- [ ] **U2. The "no motion vectors" pop-up** (streamer): eliminated. Root cause of "Install does nothing" is not known (the offer is non-modal; the click should run
+  `MvDll.Install` in the form's `FormClosed`): first log each step (offer shown, button, `MvDll.Install` result and elevated-copy outcome) and reproduce in
+  `uitest --dll-install-selftest` (install / update / remove in a temporary game folder, including the elevated fallback and a read-only folder). The offer becomes
+  the inline line of U6 (Frame generation component). Test: the selftest + `streamer_events` (offer appears only after a run that used generation, the vectors tick on, with no
+  DLL and no vectors, not dismissed for that game; *Not for this game* hides it for good: `MvDll.Dismiss`; installing it flips the line to "installed: takes effect next session").
+- [ ] **U7. Absurd latency numbers** (Lies of P: 4 958 802 102 ms, p95 29 752 812 252 ms, encode 137 ms average; the other tiles are fine). The per-window means in
+  `logs.rs` (`take`) sum every client sample; a handful of garbage samples (a duration that went negative and wrapped, most likely from a generated or re-stamped frame whose
+  timestamps do not pair with the client's) dominate the mean, and `net_summary` takes the mean of means. (host) Fix at the source of the aggregate: drop samples
+  with any component above 2 s (or total above 5 s), count them (`latency_outliers` in the window and the run's `net`), keep the first ten raw samples in the debug log
+  (`client_stats_outlier` events) to find the cause, and report the median and p95 of per-window **medians**, not means. UI: a value above 1 s, or a run where outliers
+  are more than 10 % of the samples, shows "n/a" with a tooltip saying why (Game history tile, sessions table, streamer tile). Tests: Rust unit tests on the aggregator
+  (synthetic samples with a wrapped duration; clean samples unchanged; all-outlier window gives none), `streamer_events` / `ui_matrix` with the absurd record, and an e2e
+  with generation on (`FRAME_GEN` scenarios in the simrig and the mock client) asserting `net.latency_ms` < 200 and `latency_outliers` == 0 on clean runs; then find
+  which frames produce them (the debug samples) and fix the cause if it is in our re-stamping.
+- [ ] **U8. The desktop mirror is not a game in the UI.** It is a game to the engine (it keeps its record and log) and stays so; the UI hides it: one
+  `Games.IsHidden(exe)` (exe name `mirrordesktop.exe`, case-insensitive) used by the game list, the Game line, the Diagnose facts (`LogFacts`), the advice and the
+  auto-delete of logs. Test: `ui_matrix` performance fixture with a mirror record (the list must not show it), `streamer_events` (the mirror's `game_started/ended/run` never
+  change the Game line, the tiles or the DLL offer).
+- [ ] **U9. The last session's statistics must be on the streamer when a session ends.** Today the tiles follow `status` while `lastSession` is false and the `game_run` event
+  fills them once; the engine emits `game_run` only for runs of 20 s or more, so after a short run the tiles keep (or fall back to) live values, and anything that
+  restarts `status` after the game (the mirror, an idle window) can overwrite them. Rules: the tiles have two states, *live* (a game runs) and *last session* (the last
+  real game's `game_run`), the latter kept until the next real game starts; a run shorter than 20 s sends a short `game_run` (`recorded:false`, same numbers) so the
+  tiles update (the record is still not saved) (host: one extra flag on an existing event); `status` windows from the mirror or with no game never touch the tiles; the
+  caption says "Last session: <game>, <minutes>, <headset>" or "Live". Test: `streamer_events` with the six sequences above, asserting tile text and caption after each event.
+
+### New behaviour
+- [ ] **U3. Debug logging is always visible** at the bottom of the streamer: the checkbox (on or off), *Export logs...* (U1's `LogExport`) and *Open logs folder*, so sharing
+  feedback is one click from anywhere. (This replaces the "notice only" variant and completes the item "Debug logging stays a checkbox" of the 2026-10-19 night section.)
+  Test: `ui_matrix` cases with debug off and on; `streamer_events` (toggle sends `debug on|off`, persists `debug`).
+- [ ] **U5. The streamer's component layout** (docs/UI_SPEC.md): *Streaming*, *Frame generation*, *Position*, *Picture*, *Desktop mirror*, then the debug row. Frame generation:
+  switch + Auto/1-3/1-2/2-3 + the vectors tick, no explanatory text; Desktop mirror: the switch only, no "Between games" caption; Picture: gamma and sharpening, with
+  *Advanced* unfolding brightness, contrast and saturation (and *Defaults*); Position: height and *Recenter* together. Size from content as always. Test: `ui_matrix`
+  at every size and scale (0 FAIL), `streamer_events` (every control still sends its command: `gamma`, `color`, `frame_gen`, `frame_gen_rate`, `game_mv`, `recenter`, `height`),
+  README screenshot regenerated.
+- [ ] **U5b. Eye height: Auto and Manual (Vision Pro only).** Auto sends `height 0` (already the engine's meaning: the headset's own floor estimate, `eye_height = headset y`
+  at the 45th sample); Manual sends the typed value, a number box with 1.30 m as the default (0.5-2.2 m) instead of the slider. Saved as `display.height_mode` (`auto` |
+  `manual`; existing users stay on Manual) next to `display.height_m`. In Auto the window shows what the headset reported (`height_calibrated.eye_height_m`: "headset
+  reports 1.62 m"). A Quest or any non-Apple headset is shown as Auto and disabled (its floor is right). Hint: Auto is right when the headset saw the room (standing at the
+  start of the session), Manual when seated. Test: e2e with the mock client at two head heights (`--height`), asserting `height_calibrated` for Auto (the head's y) and
+  Manual (the typed value); `streamer_events` for the AVP and the Quest states; the number box's range.
+- [ ] **U6. Frame generation component: what the last session did with vectors.** After a session that used generation: **green** "Game motion vectors worked (N frames)" when
+  `game_run.mv.frames` > 0; **orange** "Generation ran blind (optical flow only): the DLL is installed but no vectors arrived" with the cause list (DLL version, the game's DLSS setting,
+  upscaler not DLSS) when the DLL is installed (`MvDll.State.Installed` / `OlderCopy`), the tick was on and `mv.frames` is 0 (the same wording as the Game history page's
+  orange line, from one function); **plain** "No game vectors: install the extractor  [Install]  [Not for this game]" when the DLL is not installed. Nothing for a session without
+  generation, and nothing for the mirror. The line stays until the next real game. Test: `streamer_events` (worked / blind / no DLL / dismissed / generation off), the simrig
+  motion-vector scenarios (`harness/simrig/check_mv.py`) asserting `game_run.mv.frames` on both sides of the line, `dll_install_selftest`.
+- [ ] **U10. The virtual audio device's volume is held at 100 % while the streamer is up.** The engine already does it (a thread in `main.rs` sets the endpoint volume of the
+  default output to 1.0 every 3 s when its name contains "cable" or "vb-audio", event `audio_volume_forced`). Check on the 5090's logs whether it fired; extend it so it
+  also covers the device named in the audio settings (not only the default one) and the moment the streamer switches the default (the user's `startvisionalvr.bat` does it
+  after the host started), log the result on every change, and show it in the streamer as one line under the debug row only when it matters ("Audio: VB-Audio Cable held at
+  100 %"; orange when the device is missing or the call fails). Test: an e2e on the builder that sets the default device's volume to 40 % through the Core Audio API before
+  and after the host starts and asserts `audio_volume_forced` and the volume back at 100 % within 6 s (the device selected by a test variable, restored at the end).
+
+### Order
+U1, U8, U9 + the replay harness (small, bugs) → U7 (engine aggregator + tests) → U5 / U5b / U3 (layout, height, debug row) → U6 + U2 (Frame generation component) → U10.
+Each step: tests first for the state it changes, `ui_matrix` at 0 FAIL, README screenshots regenerated at the end.
+
 ## Order
 0 → 1 → 2 → 3 → 4 → 5. Phase 2 before the DLL popup (shared install code). Phase 5 last.
