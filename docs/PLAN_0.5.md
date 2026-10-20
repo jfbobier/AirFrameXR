@@ -147,7 +147,7 @@ item is not done until that test exists and passes. Items marked (host) change t
   `uitest --dll-install-selftest` (install / update / remove in a temporary game folder, including the elevated fallback and a read-only folder). The offer becomes
   the inline line of U6 (Frame generation component). Test: the selftest + `streamer_events` (offer appears only after a run that used generation, the vectors tick on, with no
   DLL and no vectors, not dismissed for that game; *Not for this game* hides it for good: `MvDll.Dismiss`; installing it flips the line to "installed: takes effect next session").
-- [ ] **U7. Absurd latency numbers** (Lies of P: 4 958 802 102 ms, p95 29 752 812 252 ms, encode 137 ms average; the other tiles are fine). The per-window means in
+- [x] **U7. Absurd latency numbers** (Lies of P: 4 958 802 102 ms, p95 29 752 812 252 ms, encode 137 ms average; the other tiles are fine). The per-window means in
   `logs.rs` (`take`) sum every client sample; a handful of garbage samples (a duration that went negative and wrapped, most likely from a generated or re-stamped frame whose
   timestamps do not pair with the client's) dominate the mean, and `net_summary` takes the mean of means. (host) Fix at the source of the aggregate: drop samples
   with any component above 2 s (or total above 5 s), count them (`latency_outliers` in the window and the run's `net`), keep the first ten raw samples in the debug log
@@ -197,6 +197,8 @@ item is not done until that test exists and passes. Items marked (host) change t
 
 ### Status (2026-10-20)
 Done and passing on the builder: U1 (`harness/export_logs.py`), U8, U9 (`game_run` now also sent, `recorded:false`, for runs of 2-20 s), and the replay harness (`harness/streamer_events.py`, three fixtures; the other sequences join the items they test). `ui_matrix` 0 FAIL. Added by the user mid-session: shorter text everywhere in the streamer (done with U5).
+
+U7 done 2026-10-20: `logs.rs` drops samples with a component outside 0-2 s or a total above 5 s (counted: `latency_outliers`, run `latency_samples`; first ten raw in `client_stats_outliers.jsonl` of the debug run), windows and the run report medians; the UI shows n/a (`Latency` in Common.cs). Tests: `harness/host_tests.py` (6 unit tests), `harness/performance_check.py`, `streamer_events` (absurd_latency), `e2e_fg_latency` (generation on: median 43 ms, 0 outliers; the garbage did not occur in the lab, so the cause is still to find from the debug samples of a real run).
 
 ### Order
 U1, U8, U9 + the replay harness (small, bugs) → U7 (engine aggregator + tests) → U5 / U5b / U3 (layout, height, debug row) → U6 + U2 (Frame generation component) → U10.

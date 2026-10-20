@@ -164,7 +164,23 @@ namespace VisionALVR
             string kind = c is CheckBox cb ? "check[" + (cb.Checked ? "x" : " ") + "]" : c is RadioButton ? "radio" : c is Button ? "button" : c is LinkLabel ? "link" : c is Label ? "label" : c is GroupBox ? "group" : c.GetType().Name;
             if (c is ToggleSwitch ts) o.AppendLine(new string(' ', depth) + "switch " + (c.AccessibleName ?? "") + " " + (ts.Checked ? "on" : "off"));
             else if (t.Length > 0) o.AppendLine(new string(' ', depth) + kind + " " + t.Replace("\r", "").Replace("\n", " / "));
+            if (c is ListBox lb) foreach (var it in lb.Items) o.AppendLine(new string(' ', depth) + "item " + it);
+            if (c is ListView lv) foreach (ListViewItem r in lv.Items) o.AppendLine(new string(' ', depth) + "row " + string.Join("|", r.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(x => x.Text)));
             foreach (Control k in c.Controls) DumpControls(k, o, depth + 1);
+        }
+
+        /// harness/performance_check.py: the Game history window on the fixture records, as text.
+        static int DumpPerformance(string game, string outDir)
+        {
+            var o = new StringBuilder();
+            using (var f = new PerformanceForm(game))
+            {
+                f.StartPosition = FormStartPosition.Manual; f.Location = new Point(0, 0); f.ShowInTaskbar = false; f.Opacity = 0;
+                f.Show();
+                DumpControls(f, o, 0);
+            }
+            File.WriteAllText(Path.Combine(outDir, "performance.txt"), o.ToString());
+            return 0;
         }
 
         /// One JSON object per line: {"event":...,"data":{...}} goes to RuntimeForm.HostEvent (the function the live host drives); {"dump":"label"} writes the window's text
@@ -206,6 +222,8 @@ namespace VisionALVR
             if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);
             var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
             if (replay != null) return Replay(replay, outDir);
+            var perfGame = Arg("--dump-performance");
+            if (perfGame != null) return DumpPerformance(perfGame, outDir);
             var exportTo = Arg("--export-selftest");   // harness/export_logs.py: the export to a path with no dialog; lists the entries
             if (exportTo != null)
             {

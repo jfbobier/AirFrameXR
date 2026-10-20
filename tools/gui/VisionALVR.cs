@@ -617,7 +617,8 @@ namespace VisionALVR
                         tStreamed.Set(F(D(d, "streamed_fps"), "0.0") + " fps", $"{F(D(d, "seconds") / 60, "0.0")} min at {(li >= 0 ? names[li] : lvl)}");
                         tShown.Set(F(D(net, "displayed_fps"), "0.0") + " fps", $"repeated periods {F(rep, "0.0")} %", rep >= 5 ? Color.Firebrick : (Color?)null);
                         tBitrate.Set(F(D(net, "bitrate_mbps"), "0") + " Mbps", "average");
-                        tLatency.Set(F(D(net, "latency_ms"), "0") + " ms", $"p95 {F(D(net, "latency_p95_ms"), "0")}");
+                        var latBad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms"));
+                        tLatency.Set(latBad ? "n/a" : F(D(net, "latency_ms"), "0") + " ms", latBad ? "not measured" : $"p95 {F(D(net, "latency_p95_ms"), "0")}", null, latBad ? Latency.Why : null);
                         tLoss.Set(F(D(net, "packets_lost"), "0"), "packets lost", D(net, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
                         stats.Visible = true;
                         stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} % (game under the cap), skipped {F(D(d, "skipped") * 100, "0.0")} %. " +
@@ -640,7 +641,8 @@ namespace VisionALVR
                         tStreamed.Set(F(D(d, "stream_fps"), "0.0") + " fps", "not streamed " + S(d, "frames_not_streamed"));
                         tShown.Set(F(double.IsNaN(D(c, "displayed_fps")) ? D(c, "client_fps") : D(c, "displayed_fps"), "0.0") + " fps", "");
                         tBitrate.Set(F(D(d, "mbps"), "0") + " Mbps", "");
-                        tLatency.Set(F(D(c, "total_latency_ms"), "0") + " ms", $"enc {F(D(c, "encode_ms"), "0")} + net {F(D(c, "network_ms"), "0")} + dec {F(D(c, "decode_ms"), "0")}");
+                        var liveBad = Latency.Absurd(D(c, "total_latency_ms"), D(c, "latency_outliers"), D(c, "samples"));
+                        tLatency.Set(liveBad ? "n/a" : F(D(c, "total_latency_ms"), "0") + " ms", liveBad ? "not measured" : $"enc {F(D(c, "encode_ms"), "0")} + net {F(D(c, "network_ms"), "0")} + dec {F(D(c, "decode_ms"), "0")}", null, liveBad ? Latency.Why : null);
                         tLoss.Set(S(d, "packets_lost"), "packets lost", D(d, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
                         stats.Text = ""; stats.Visible = false;
                     }

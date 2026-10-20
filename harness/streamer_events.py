@@ -23,6 +23,11 @@ EXPECT = {
         ("after_run", ["last session, LiesOfP.exe, 1.5 min, Apple Vision Pro", "44.8 fps", "57 ms"], []),
         ("idle_status_after", ["last session, LiesOfP.exe", "44.8 fps"], ["Streaming (live"]),   # a status with no game never replaces the last session's numbers
     ],
+    "absurd_latency": [
+        ("live_absurd", ["n/a", "not measured"], ["4958802102", "137"]),
+        ("run_absurd", ["n/a", "not measured"], ["4958802102", "29752812252"]),
+        ("run_clean", ["57 ms", "p95 70"], ["n/a"]),   # 2 outliers of 800 samples: still believable
+    ],
     "short12": [
         ("ended", [], []),
         ("after_short_run", ["last session, Short.exe, 0.2 min", "60.0 fps", "50 ms"], ["Streaming (live"]),   # a run under 20 s still updates the tiles

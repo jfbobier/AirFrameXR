@@ -1307,6 +1307,18 @@ namespace VisionALVR
         }
     }
 
+    /// A latency the engine could not measure is shown as n/a, not as a number: above one second, or when over 10 % of the run's client samples were dropped
+    /// by the engine's aggregator as garbage (`latency_outliers` of `samples`; docs/PLAN_0.5.md U7).
+    public static class Latency
+    {
+        public const string Why = "n/a: the headset's latency samples were not usable (a duration that wrapped, or too many dropped). The other numbers are fine.";
+        public static bool Absurd(double ms, double outliers = 0, double samples = 0) =>
+            ms < 0 || ms > 1000 || (samples > 0 && !double.IsNaN(outliers) && outliers / samples > 0.10);
+        /// "-" when nothing was measured, "n/a" when it was and is not believable, else the number.
+        public static string Text(double ms, double outliers = 0, double samples = 0, string fmt = "0") =>
+            double.IsNaN(ms) ? "-" : Absurd(ms, outliers, samples) ? "n/a" : ms.ToString(fmt, CultureInfo.InvariantCulture);
+    }
+
     public class Tile : TableLayoutPanel
     {
         readonly Label value, note;
@@ -1319,7 +1331,12 @@ namespace VisionALVR
             note = new Label { Text = n, AutoSize = true, ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0) };
             Controls.Add(value); Controls.Add(note);
         }
-        public void Set(string v, string n, Color? color = null) { value.Text = v; note.Text = n; value.ForeColor = color ?? Color.Black; }
+        static readonly ToolTip tip = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
+        public void Set(string v, string n, Color? color = null, string tooltip = null)
+        {
+            value.Text = v; note.Text = n; value.ForeColor = color ?? Color.Black;
+            foreach (Control c in new Control[] { this, value, note }) tip.SetToolTip(c, tooltip);
+        }
     }
 
     /// Every window of the GUI: the designer pattern WinForms' own scaling needs. Built suspended with AutoScaleMode.Dpi (design values at 96 dpi), laid out once

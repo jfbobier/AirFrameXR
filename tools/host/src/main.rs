@@ -1399,19 +1399,30 @@ impl RunStats {
         self.mv0 = mv;
         self.mv_now = mv;
     }
-    /// Mean of each latency / rate field over the windows, the 95th percentile of the total latency, and the packets lost.
+    /// Rates: mean over the windows. Latencies: median and 95th percentile of the windows' medians (a window with no sane sample gives none);
+    /// `latency_outliers` / `latency_samples` count the client samples dropped as garbage and all of them (the streamer shows n/a above 10 %).
     fn net_summary(&self) -> serde_json::Value {
-        let mean = |k: &str| -> f64 {
-            let v: Vec<f64> = self.net.iter().filter_map(|w| w[k].as_f64()).collect();
-            if v.is_empty() { 0.0 } else { (v.iter().sum::<f64>() / v.len() as f64 * 100.0).round() / 100.0 }
-        };
-        let mut tot: Vec<f64> = self.net.iter().filter_map(|w| w["total_latency_ms"].as_f64()).collect();
-        tot.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let p95 = if tot.is_empty() { 0.0 } else { tot[(((tot.len() - 1) as f64) * 0.95).round() as usize] };
-        json!({ "windows": self.net.len(), "bitrate_mbps": mean("bitrate_mbps"), "throughput_mbps": mean("throughput_mbps"), "displayed_fps": mean("displayed_fps"),
-            "latency_ms": mean("total_latency_ms"), "latency_p95_ms": p95, "encode_ms": mean("encode_ms"), "network_ms": mean("network_ms"), "decode_ms": mean("decode_ms"),
-            "packets_lost": self.lost })
+        net_summary_of(&self.net, self.lost)
     }
+}
+
+fn net_summary_of(net: &[serde_json::Value], lost: u64) -> serde_json::Value {
+    let mean = |k: &str| -> f64 {
+        let v: Vec<f64> = net.iter().filter_map(|w| w[k].as_f64()).collect();
+        if v.is_empty() { 0.0 } else { (v.iter().sum::<f64>() / v.len() as f64 * 100.0).round() / 100.0 }
+    };
+    let sorted = |k: &str| -> Vec<f64> {
+        let mut v: Vec<f64> = net.iter().filter_map(|w| w[k].as_f64()).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v
+    };
+    let at = |v: &[f64], q: f64| if v.is_empty() { 0.0 } else { v[(((v.len() - 1) as f64) * q).round() as usize] };
+    let (tot, enc, netw, dec) = (sorted("total_latency_ms"), sorted("encode_ms"), sorted("network_ms"), sorted("decode_ms"));
+    let outliers: u64 = net.iter().filter_map(|w| w["latency_outliers"].as_u64()).sum();
+    let samples: u64 = net.iter().filter_map(|w| w["samples"].as_u64()).sum();
+    json!({ "windows": net.len(), "bitrate_mbps": mean("bitrate_mbps"), "throughput_mbps": mean("throughput_mbps"), "displayed_fps": mean("displayed_fps"),
+        "latency_ms": at(&tot, 0.5), "latency_p95_ms": at(&tot, 0.95), "encode_ms": at(&enc, 0.5), "network_ms": at(&netw, 0.5), "decode_ms": at(&dec, 0.5),
+        "latency_outliers": outliers, "latency_samples": samples, "packets_lost": lost })
 }
 
 /// (frames with game vectors, eye passes synthesised from them) so far on the generator (zeros when it is off).
@@ -2994,4 +3005,32 @@ fn main() {
     drop(ctx);
     logs::general("INFO", &format!("host stop ({} frames streamed{})", frames, if encode_errors > 0 { format!(", {encode_errors} encode errors") } else { String::new() }));
     std::process::exit(if !connected { 2 } else if pass { 0 } else { 1 });
+}
+
+#[cfg(test)]
+mod net_summary_tests {
+    use super::*;
+
+    fn win(total: f64, outliers: u64) -> serde_json::Value {
+        json!({ "samples": 900, "latency_outliers": outliers, "total_latency_ms": total, "encode_ms": 6.0, "network_ms": 9.0, "decode_ms": 14.0, "displayed_fps": 90.0, "bitrate_mbps": 120.0, "throughput_mbps": 118.0 })
+    }
+
+    #[test]
+    fn the_run_reports_medians_of_the_windows() {
+        let net = vec![win(50.0, 0), win(52.0, 0), win(900.0, 3), win(51.0, 0), win(53.0, 0)];
+        let s = net_summary_of(&net, 7);
+        assert_eq!(s["latency_ms"].as_f64().unwrap(), 52.0);
+        assert_eq!(s["latency_outliers"], 3);
+        assert_eq!(s["latency_samples"], 4500);
+        assert_eq!(s["packets_lost"], 7);
+        assert!(s["latency_p95_ms"].as_f64().unwrap() >= 53.0);
+    }
+
+    #[test]
+    fn windows_without_latency_are_skipped() {
+        let mut w = win(0.0, 900);
+        w["total_latency_ms"] = serde_json::Value::Null;
+        let s = net_summary_of(&[w, win(50.0, 0)], 0);
+        assert_eq!(s["latency_ms"].as_f64().unwrap(), 50.0);
+    }
 }

@@ -1,0 +1,11 @@
+{"event": "client_connected", "data": {"name": "Apple Vision Pro", "ip": "192.168.1.50"}}
+{"event": "game_started", "data": {"exe": "LiesOfP-Win64-Shipping.exe"}}
+{"event": "status", "data": {"app_fps": 44, "stream_fps": 89, "mbps": 120, "packets_lost": 0, "client": {"displayed_fps": 89, "total_latency_ms": 4958802102, "encode_ms": 137, "network_ms": 9, "decode_ms": 14, "latency_outliers": 40, "samples": 800}}}
+{"dump": "live_absurd"}
+{"event": "game_ended", "data": {"exe": "LiesOfP-Win64-Shipping.exe", "seconds": 300}}
+{"event": "game_run", "data": {"exe": "LiesOfP-Win64-Shipping.exe", "headset": "Apple Vision Pro", "level": "half", "seconds": 300, "rendered_fps": 44, "rendered_fps_low": 38, "streamed_fps": 89, "headset_repeated_typ": 0.01, "host_repeats_typ": 0, "skipped": 0, "recorded": true, "net": {"displayed_fps": 89, "bitrate_mbps": 120, "latency_ms": 4958802102, "latency_p95_ms": 29752812252, "packets_lost": 0}, "mv": {"enabled": false, "frames": 0}}}
+{"dump": "run_absurd"}
+{"event": "game_started", "data": {"exe": "Clean.exe"}}
+{"event": "game_ended", "data": {"exe": "Clean.exe", "seconds": 300}}
+{"event": "game_run", "data": {"exe": "Clean.exe", "headset": "Apple Vision Pro", "level": "half", "seconds": 300, "rendered_fps": 44, "rendered_fps_low": 38, "streamed_fps": 89, "headset_repeated_typ": 0.01, "host_repeats_typ": 0, "skipped": 0, "recorded": true, "net": {"displayed_fps": 89, "bitrate_mbps": 120, "latency_ms": 57, "latency_p95_ms": 70, "latency_outliers": 2, "latency_samples": 800, "packets_lost": 0}, "mv": {"enabled": false, "frames": 0}}}
+{"dump": "run_clean"}

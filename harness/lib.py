@@ -1028,6 +1028,7 @@ def analyse(sc, outdir: Path):
     hs = (outdir / "host_stdout.txt").read_text(errors="replace") if (outdir / "host_stdout.txt").exists() else ""
     a["host_event_names"] = sorted(set(re.findall(r'"event":"([a-z_]+)"', hs)))
     a["bench_steps"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"bench_step"' in l]
+    a["game_runs"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"game_run"' in l]   # the run summary the streamer shows (net block: latency medians, outliers)
     lg = outdir / "logs"
     if lg.exists():
         dbg = sorted((lg / "debug").glob("*")) if (lg / "debug").exists() else []
@@ -1332,6 +1333,14 @@ def evaluate(sc, a):
             if pc2.get("gpu_sched_class") is not None:
                 g = pp.get("gpu_scheduling") or {}
                 chk("pipeline_gpu_sched_class", g.get("class") == pc2["gpu_sched_class"] and g.get("status") == 0, g, f"class {pc2['gpu_sched_class']} granted")
+    if "game_run" in ck:   # U7: the run's latency is believable on a clean run (no garbage samples, medians of the windows)
+        g = ck["game_run"]
+        runs = a.get("game_runs") or []
+        net = (runs[-1].get("net") or {}) if runs else {}
+        chk("game_run_reported", bool(runs), len(runs), ">= 1")
+        if runs:
+            chk("game_run_latency_ms", 0 < net.get("latency_ms", 0) < g.get("max_latency_ms", 200), net.get("latency_ms"), f"0 < x < {g.get('max_latency_ms', 200)}")
+            chk("game_run_latency_outliers", net.get("latency_outliers", 99) <= g.get("max_latency_outliers", 0), net.get("latency_outliers"), f"<= {g.get('max_latency_outliers', 0)}")
     if "app_timing" in ck:
         at, ak = ck["app_timing"], a.get("app_timing")
         chk("app_timing_measured", ak is not None, ak is not None, "xr_probe per-frame timing")

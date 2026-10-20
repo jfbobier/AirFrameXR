@@ -1,0 +1,46 @@
+{
+ "exe": "mirrordesktop.exe",
+ "name": "VisionALVR desktop mirror",
+ "paths": [
+  "C:\\Games\\VisionALVR\\bin\\mirrordesktop.exe"
+ ],
+ "levels": {},
+ "sessions": [
+  {
+   "start": 1760900000,
+   "headset": "Apple Vision Pro",
+   "level": "third",
+   "seconds": 900,
+   "display_hz": 90,
+   "rendered_fps": 31.0,
+   "rendered_fps_low": 27,
+   "streamed_fps": 89.5,
+   "headset_repeated_typ": 0.08,
+   "host_repeats_typ": 0.02,
+   "updated": 1760900900,
+   "net": {
+    "windows": 90,
+    "bitrate_mbps": 110,
+    "throughput_mbps": 108,
+    "displayed_fps": 84.0,
+    "latency_ms": 4958802102,
+    "latency_p95_ms": 29752812252,
+    "encode_ms": 137,
+    "network_ms": 12,
+    "decode_ms": 15,
+    "packets_lost": 0,
+    "latency_outliers": 40,
+    "latency_samples": 800
+   },
+   "mv": {
+    "enabled": true,
+    "frames": 0,
+    "used_eyes": 0
+   },
+   "gpu": {
+    "name": "RTX 5090",
+    "driver": "617.42"
+   }
+  }
+ ]
+}

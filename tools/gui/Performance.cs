@@ -165,7 +165,12 @@ namespace VisionALVR
             // the four numbers that answer "how did it go"; the rest is one click away
             main.Controls.Add(Ui.MakeTile("Game", N(D(s, "rendered_fps")) + " fps", "slowest tenth " + N(D(s, "rendered_fps_low"))));
             if (net != null) main.Controls.Add(Ui.MakeTile("Headset shows", N(D(net, "displayed_fps")) + " fps", "repeated periods " + N(rep) + " %", rep >= 5 ? Color.Firebrick : (Color?)null));
-            if (net != null) main.Controls.Add(Ui.MakeTile("Latency", N(D(net, "latency_ms"), "0") + " ms", $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}"));
+            if (net != null) {
+                var bad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms"));
+                var lt = Ui.MakeTile("Latency", bad ? "n/a" : N(D(net, "latency_ms"), "0") + " ms", bad ? "not measured" : $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}");
+                if (bad) lt.Set("n/a", "not measured", null, Latency.Why);
+                main.Controls.Add(lt);
+            }
             if (mv != null)
             {
                 var frames = D(mv, "frames");
@@ -197,7 +202,7 @@ namespace VisionALVR
             {
                 var net = O(s, "net"); var mv = O(s, "mv");
                 lv.Items.Add(new ListViewItem(new[] { When(s), S(s, "headset"), Mode(S(s, "level")).Replace("generation ", ""), N(D(s, "seconds") / 60), N(D(s, "rendered_fps")), net != null ? N(D(net, "displayed_fps")) : "-",
-                    N(D(s, "headset_repeated_typ") * 100), net != null ? N(D(net, "latency_ms"), "0") : "-",
+                    N(D(s, "headset_repeated_typ") * 100), net != null ? Latency.Text(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) : "-",
                     mv != null ? (D(mv, "frames") > 0 ? "working" : "-") : "-" }));
             }
             Ui.FitColumns(lv);
