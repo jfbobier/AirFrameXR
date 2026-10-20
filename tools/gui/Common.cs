@@ -22,8 +22,8 @@ namespace VisionALVR
 {
     public static class Version
     {
-        public const string Number = "0.5 alpha";
-        /// "0.5 alpha", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
+        public const string Number = "0.5";
+        /// "0.5", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
         {

@@ -1,4 +1,4 @@
-VisionALVR 0.5 alpha - PC streamer for the ALVR app on Apple Vision Pro (OpenXR games, NVIDIA RTX 40 series or newer)
+VisionALVR 0.5 - PC streamer for the ALVR app on Apple Vision Pro (OpenXR games, NVIDIA RTX 40 series or newer)
 ALPHA SOFTWARE - TEST AT YOUR OWN RISK. Tested on a real headset by one person on one PC. Games may crash or show a broken
 image, the stream may stutter. It registers this folder as your OpenXR runtime and adds a firewall rule (undone by
 the launcher's "Switch back" button). Take the headset off if the image freezes or judders. Provided "as is", without warranty

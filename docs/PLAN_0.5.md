@@ -1,4 +1,4 @@
-# 0.5-alpha plan: UI and just enough data for performance stats
+# 0.5 plan: UI and just enough data for performance stats
 
 Focus of 0.5: specialised, uncluttered windows, and enough recorded data per game to tell the user how it performed.
 Rule for every window (0.4 high-DPI lesson): size from content (AutoSize, flow/table layout, no absolute `Location`, no fixed container heights);

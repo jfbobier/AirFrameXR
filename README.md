@@ -300,7 +300,7 @@ judder scenarios and the simrig need them. A **release build** (`--release`: car
 `VISIONALVR_RELEASE`) compiles them out; the periodic statistics behind Game history, Diagnose and its suggestions stay in both. Build one
 with `python3 harness/run.py build host shim gui package` (debug) or `... package --release` (release; what a public release uses);
 `build.ps1` is the other way round (release by default, `debug` as a target). A debug package says so: its zip name ends in `-debug` and
-the windows show "version 0.5 alpha (debug build)". New per-frame telemetry must sit behind the flag (`docs/DEVELOPMENT.md`).
+the windows show "version 0.5 (debug build)". New per-frame telemetry must sit behind the flag (`docs/DEVELOPMENT.md`).
 
 **Pull requests.** A change to anything on the frame path (shim, pipeline, generator, encoder, pacing) is accepted only with the lab's proof
 in the description: the scenarios relevant to the change, their verdicts before and after, and the compile checks. "It looks fine in my
