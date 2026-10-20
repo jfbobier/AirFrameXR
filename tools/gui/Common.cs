@@ -1245,36 +1245,31 @@ namespace VisionALVR
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
     }
 
-    /// "Install the DLSS motion-vector DLL?" after a game that gave no vectors.
-    public class DllOfferForm : DpiForm
+    /// What the last session did with the game's motion vectors, one function for the streamer's Frame generation component and Game history's line
+    /// (docs/PLAN_0.5.md U6): worked (green), ran blind (orange: the DLL is there, nothing arrived), no DLL (plain, with the install offer), or nothing.
+    public static class VectorsLine
     {
-        public bool DontAsk => dont.Checked;
-        readonly CheckBox dont = new CheckBox { Text = "Don't ask again for this game", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
-        public DllOfferForm(string game)
+        public enum Kind { None, Worked, Blind, NoDll }
+        public static Kind Of(string level, bool tickOn, double frames, MvDll.State st, bool dismissed)
         {
-            Text = "VisionALVR \u2013 DLSS motion vectors";
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
-            Font = Ui.Body; Icon = Ui.AppIcon();
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
-            BackColor = Color.White;
-            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
-            col.Controls.Add(new Label { Text = game + ": no DLSS motion vectors were available this session.", AutoSize = true, Font = Ui.Bold, MaximumSize = new Size(480, 0) });
-            col.Controls.Add(new Label { Text = "Frame generation is better when the game's own motion vectors are used. A small DLL placed next to the game's exe provides them (games that use DLSS). " +
-                "It can be removed again from the Logs window, which lists what was installed. Install it for this game?", AutoSize = true, MaximumSize = new Size(480, 0), Margin = new Padding(3, 8, 3, 3) });
-            col.Controls.Add(dont);
-            var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
-            var yes = new Button { Text = "Install", AutoSize = true, DialogResult = DialogResult.Yes, Font = Ui.Bold, MinimumSize = new Size(100, 30) };
-            var no = new Button { Text = "Not now", AutoSize = true, DialogResult = DialogResult.No, MinimumSize = new Size(100, 30) };
-            row.Controls.Add(yes); row.Controls.Add(no);
-            col.Controls.Add(row);
-            var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
-            col.Dock = DockStyle.None; col.Location = Point.Empty;
-            scroller.Controls.Add(col);
-            Controls.Add(scroller);
-            Ui.AutoFitWindow(this, null, col);
-            AcceptButton = yes; CancelButton = no;
+            if (string.IsNullOrEmpty(level) || level == "off") return Kind.None;   // no generation, nothing to say
+            if (frames > 0) return Kind.Worked;
+            if (!tickOn) return Kind.None;
+            if (st == MvDll.State.Installed || st == MvDll.State.OlderCopy) return Kind.Blind;
+            if ((st == MvDll.State.NotInstalled || st == MvDll.State.OtherDll) && !dismissed) return Kind.NoDll;
+            return Kind.None;
         }
+        public static string Text(Kind k, double frames)
+        {
+            switch (k)
+            {
+                case Kind.Worked: return $"Game motion vectors worked ({frames.ToString("0", CultureInfo.InvariantCulture)} frames)";
+                case Kind.Blind: return "Generation ran blind (optical flow only): the DLL is installed but no vectors arrived. Check its version and that the game's upscaler is DLSS.";
+                case Kind.NoDll: return "No game vectors: install the extractor?";
+                default: return "";
+            }
+        }
+        public static Color ColorOf(Kind k) => k == Kind.Worked ? Color.SeaGreen : k == Kind.Blind ? Color.DarkOrange : Color.DimGray;
     }
 
     /// Vision Pro only: the chroma-key passthrough is a setting of the ALVR app on the headset that the streamer can neither set nor read, so

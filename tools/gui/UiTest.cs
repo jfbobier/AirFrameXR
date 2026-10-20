@@ -51,6 +51,9 @@ namespace VisionALVR
             yield return new Case { Name = "streamer-empty", Make = () => new RuntimeForm(null) };
             yield return new Case { Name = "streamer-avp-auto", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };   // the fixture config has no height set: a Vision Pro starts on Auto
             yield return new Case { Name = "streamer-quest", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_connected", new Dictionary<string, object> { { "name", "Meta Quest 3" }, { "ip", "192.168.1.60" } }); } };
+            yield return new Case { Name = "streamer-after-ok", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.Worked); } };
+            yield return new Case { Name = "streamer-after-blind", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.Blind); } };
+            yield return new Case { Name = "streamer-no-dll", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.NoDll); } };
             yield return new Case { Name = "streamer-debug-on", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoDebugOn(); } };
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             for (int p = 0; p <= 6; p++)
@@ -60,7 +63,6 @@ namespace VisionALVR
             }
             yield return new Case { Name = "configure-advanced", Make = () => new ConfigureForm(null) };
             yield return new Case { Name = "find-headset", Make = () => new FindHeadsetForm(Tuple.Create("1234.client.alvr", "Apple Vision Pro", "192.168.100.123")) };
-            yield return new Case { Name = "dll-offer", Make = () => new DllOfferForm("Cyberpunk 2077 (C) 2020 by CD Projekt RED - Phantom Liberty Edition") };
             yield return new Case { Name = "chroma-step", Make = () => new ChromaStepForm() };
             yield return new Case { Name = "openxr-layers", Make = () => new LayersForm() };
             yield return new Case { Name = "suggestions", Make = () => new AdviceHost() };
@@ -191,6 +193,7 @@ namespace VisionALVR
         static int Replay(string file, string outDir)
         {
             var o = new StringBuilder();
+            var made = new List<string>();   // files a setup line created: removed at the end
             using (var f = new RuntimeForm(null))
             {
                 f.StartPosition = FormStartPosition.Manual; f.Location = new Point(0, 0); f.ShowInTaskbar = false; f.Opacity = 0;
@@ -203,6 +206,7 @@ namespace VisionALVR
                     var d = global::VisionALVR.Json.Parse(line);
                     n++;
                     if (d.TryGetValue("dump", out var lab)) { dump(Convert.ToString(lab)); foreach (var c in f.Sent) o.AppendLine("sent " + c); continue; }
+                    if (d.TryGetValue("setup", out var su)) { made.AddRange(ReplaySetup(Convert.ToString(su), d)); continue; }
                     if (d.TryGetValue("ui", out var ui)) { f.Sent.Clear(); f.UiAction(Convert.ToString(ui), d.TryGetValue("value", out var uv) ? Convert.ToString(uv) : ""); continue; }
                     if (!d.TryGetValue("event", out var ev)) continue;
                     f.HostEvent(Convert.ToString(ev), d.TryGetValue("data", out var x) ? x as Dictionary<string, object> : null);
@@ -211,8 +215,71 @@ namespace VisionALVR
                 o.AppendLine("range height " + f.HeightMin.ToString(CultureInfo.InvariantCulture) + " " + f.HeightMax.ToString(CultureInfo.InvariantCulture));
                 try { using (var bmp = new Bitmap(f.Width, f.Height)) { f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height)); bmp.Save(Path.Combine(outDir, "replay.png"), ImageFormat.Png); } } catch { }
             }
+            foreach (var m in made) try { if (Directory.Exists(m)) Directory.Delete(m, true); else File.Delete(m); } catch { }
             File.WriteAllText(Path.Combine(outDir, "replay.txt"), o.ToString());
             return 0;
+        }
+
+        /// {"setup":"game","exe":"X.exe","dll":"installed"|"none"}: a game record whose exe sits in a temporary folder, with the motion-vector DLL next to it or not.
+        /// Returns what was created.
+        static IEnumerable<string> ReplaySetup(string what, Dictionary<string, object> d)
+        {
+            var made = new List<string>();
+            if (what != "game") return made;
+            var exe = Convert.ToString(d["exe"]);
+            var dir = Path.Combine(Path.GetTempPath(), "va_replay_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir); made.Add(dir);
+            File.WriteAllText(Path.Combine(dir, exe), "x");
+            if (Convert.ToString(d["dll"]) == "installed" && File.Exists(MvDll.Master)) File.Copy(MvDll.Master, Path.Combine(dir, "dxgi.dll"));
+            Directory.CreateDirectory(Games.Dir);
+            var rec = Games.FileOf(exe);
+            File.WriteAllText(rec, "{\"exe\": \"" + exe + "\", \"name\": \"" + exe + "\", \"paths\": [" + Newtonsoft(Path.Combine(dir, exe)) + "], \"levels\": {}, \"sessions\": []}");
+            made.Add(rec);
+            return made;
+        }
+        static string Newtonsoft(string s) => "\"" + s.Replace("\\", "\\\\") + "\"";
+
+        /// harness/dll_install_check.py: install / update / remove of the motion-vector DLL in a temporary game folder, a foreign dxgi.dll, the dismissal, and the vectors line's decision table.
+        static int DllInstallSelfTest(string outDir)
+        {
+            var o = new StringBuilder(); int fails = 0;
+            void check(string name, bool ok, string detail = "") { if (!ok) fails++; o.AppendLine($"CHECK {(ok ? "PASS" : "FAIL")} {name}" + (ok ? "" : ": " + detail)); }
+            var dir = Path.Combine(Path.GetTempPath(), "va_dll_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            const string stem = "SelfTestGame";
+            try
+            {
+                check("master present", File.Exists(MvDll.Master), MvDll.Master);
+                check("not installed at first", MvDll.Check(dir, stem, out _) == MvDll.State.NotInstalled);
+                var msg = MvDll.Install(dir, stem, out var f1);
+                check("install as dxgi.dll", f1 == "dxgi.dll" && MvDll.Check(dir, stem, out _) == MvDll.State.Installed, msg);
+                File.WriteAllText(Path.Combine(dir, "dxgi.dll"), "an older copy");
+                check("an older copy is recognised", MvDll.Check(dir, stem, out _) == MvDll.State.OlderCopy);
+                msg = MvDll.Install(dir, stem, out var f2);
+                check("update restores the master", f2 == "dxgi.dll" && MvDll.Check(dir, stem, out _) == MvDll.State.Installed, msg);
+                msg = MvDll.Uninstall(dir, stem);
+                check("remove", !File.Exists(Path.Combine(dir, "dxgi.dll")) && MvDll.Check(dir, stem, out _) == MvDll.State.NotInstalled, msg);
+                File.WriteAllText(Path.Combine(dir, "dxgi.dll"), "someone else's proxy");
+                check("a foreign dxgi.dll is flagged", MvDll.Check(dir, stem, out _) == MvDll.State.OtherDll);
+                msg = MvDll.Install(dir, stem, out var f3);
+                check("install beside a foreign dxgi.dll as version.dll", f3 == "version.dll" && File.ReadAllText(Path.Combine(dir, "dxgi.dll")) == "someone else's proxy" && MvDll.Check(dir, stem, out _) == MvDll.State.Installed, msg);
+                MvDll.Uninstall(dir, stem);
+                check("the foreign file survives the removal", File.Exists(Path.Combine(dir, "dxgi.dll")));
+                check("not dismissed", !MvDll.Dismissed(stem));
+                MvDll.Dismiss(stem);
+                check("dismissed", MvDll.Dismissed(stem));
+                var K = VectorsLine.Kind.None;
+                check("vectors line: generation off says nothing", VectorsLine.Of("off", true, 0, MvDll.State.Installed, false) == K);
+                check("vectors line: worked", VectorsLine.Of("half", true, 10, MvDll.State.Installed, false) == VectorsLine.Kind.Worked);
+                check("vectors line: blind", VectorsLine.Of("half", true, 0, MvDll.State.Installed, false) == VectorsLine.Kind.Blind && VectorsLine.Of("half", true, 0, MvDll.State.OlderCopy, false) == VectorsLine.Kind.Blind);
+                check("vectors line: no DLL offers the install", VectorsLine.Of("half", true, 0, MvDll.State.NotInstalled, false) == VectorsLine.Kind.NoDll);
+                check("vectors line: dismissed offer is silent", VectorsLine.Of("half", true, 0, MvDll.State.NotInstalled, true) == K);
+                check("vectors line: tick off is silent", VectorsLine.Of("half", false, 0, MvDll.State.Installed, false) == K);
+                check("vectors line: no folder is silent", VectorsLine.Of("half", true, 0, MvDll.State.NoFolder, false) == K);
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+            File.WriteAllText(Path.Combine(outDir, "dll_install.txt"), o.ToString());
+            return fails == 0 ? 0 : 1;
         }
 
         [STAThread]
@@ -227,6 +294,7 @@ namespace VisionALVR
             if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);
             var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
             if (replay != null) return Replay(replay, outDir);
+            if (args.Contains("--dll-install-selftest")) return DllInstallSelfTest(outDir);
             var perfGame = Arg("--dump-performance");
             if (perfGame != null) return DumpPerformance(perfGame, outDir);
             var exportTo = Arg("--export-selftest");   // harness/export_logs.py: the export to a path with no dialog; lists the entries

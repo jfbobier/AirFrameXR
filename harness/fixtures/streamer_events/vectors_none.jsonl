@@ -1,0 +1,15 @@
+{"event": "client_connected", "data": {"name": "Apple Vision Pro", "ip": "192.168.1.50"}}
+{"setup": "game", "exe": "ReplayOff.exe", "dll": "installed"}
+{"event": "game_started", "data": {"exe": "ReplayOff.exe"}}
+{"event": "game_ended", "data": {"exe": "ReplayOff.exe", "seconds": 300}}
+{"event": "game_run", "data": {"exe": "ReplayOff.exe", "headset": "Apple Vision Pro", "level": "off", "seconds": 300, "rendered_fps": 44, "rendered_fps_low": 38, "streamed_fps": 89, "headset_repeated_typ": 0.01, "host_repeats_typ": 0, "skipped": 0, "recorded": true, "net": {"displayed_fps": 89, "bitrate_mbps": 120, "latency_ms": 57, "latency_p95_ms": 70, "packets_lost": 0}, "mv": {"enabled": true, "frames": 0}}}
+{"dump": "generation_off"}
+{"setup": "game", "exe": "ReplayTickOff.exe", "dll": "installed"}
+{"event": "game_started", "data": {"exe": "ReplayTickOff.exe"}}
+{"event": "game_ended", "data": {"exe": "ReplayTickOff.exe", "seconds": 300}}
+{"event": "game_run", "data": {"exe": "ReplayTickOff.exe", "headset": "Apple Vision Pro", "level": "half", "seconds": 300, "rendered_fps": 44, "rendered_fps_low": 38, "streamed_fps": 89, "headset_repeated_typ": 0.01, "host_repeats_typ": 0, "skipped": 0, "recorded": true, "net": {"displayed_fps": 89, "bitrate_mbps": 120, "latency_ms": 57, "latency_p95_ms": 70, "packets_lost": 0}, "mv": {"enabled": false, "frames": 0}}}
+{"dump": "tick_off"}
+{"event": "game_started", "data": {"exe": "mirrordesktop.exe"}}
+{"event": "game_ended", "data": {"exe": "mirrordesktop.exe", "seconds": 60}}
+{"event": "game_run", "data": {"exe": "mirrordesktop.exe", "headset": "Apple Vision Pro", "level": "off", "seconds": 60, "rendered_fps": 90, "streamed_fps": 90, "recorded": true, "net": {}, "mv": {"enabled": true, "frames": 0}}}
+{"dump": "mirror"}

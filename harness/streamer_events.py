@@ -48,6 +48,26 @@ EXPECT = {
         ("quest", ["Meta Quest 3"], ["headset reports"]),
         ("quest_manual", ["sent height 0.00"], []),   # a Quest's floor is right: whatever the choice, the engine is told 0
     ],
+    "vectors_worked": [
+        ("worked", ["Game motion vectors worked (2558 frames)"], ["ran blind", "No game vectors"]),
+        ("next_game", [], ["worked", "ran blind"]),   # the line stays until the next real game starts
+    ],
+    "vectors_blind": [
+        ("blind", ["Generation ran blind (optical flow only)", "no vectors arrived"], ["worked", "button Install"]),
+        ("next_game", [], ["ran blind"]),
+    ],
+    "vectors_nodll": [
+        ("offer", ["No game vectors", "button Install", "button Not for this game"], ["ran blind"]),
+        ("installed", ["Installed (dxgi.dll): takes effect next session"], ["button Install", "button Not for this game"]),
+        ("offer2", ["No game vectors", "button Not for this game"], []),
+        ("dismissed", [], ["No game vectors", "button Not for this game"]),
+        ("not_again", [], ["No game vectors"]),   # not for this game means never again
+    ],
+    "vectors_none": [
+        ("generation_off", [], ["worked", "ran blind", "No game vectors"]),
+        ("tick_off", [], ["worked", "ran blind", "No game vectors"]),
+        ("mirror", [], ["worked", "ran blind", "No game vectors"]),
+    ],
     "short12": [
         ("ended", [], []),
         ("after_short_run", ["last session, Short.exe, 0.2 min", "60.0 fps", "50 ms"], ["Streaming (live"]),   # a run under 20 s still updates the tiles

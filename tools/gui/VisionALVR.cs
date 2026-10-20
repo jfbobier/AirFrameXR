@@ -51,6 +51,10 @@ namespace VisionALVR
         readonly Segmented heightMode = new Segmented("Auto", "Manual") { AccessibleName = "Eye height mode" };
         readonly NumericUpDown heightBox = new NumericUpDown { DecimalPlaces = 2, Increment = 0.05m, Minimum = 0.5m, Maximum = 2.2m, Width = 64, AccessibleName = "Eye height in metres" };
         readonly Label heightReport = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(8, 7, 0, 0), Visible = false };
+        readonly Label vecLine = new Label { AutoSize = true, Margin = new Padding(3, 7, 8, 0), MaximumSize = new Size(560, 0) };
+        readonly Button vecInstall = new Button { Text = "Install", AutoSize = true, Visible = false };
+        readonly Button vecDismiss = new Button { Text = "Not for this game", AutoSize = true, Visible = false };
+        readonly FlowLayoutPanel vecRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Visible = false, Margin = new Padding(0, 4, 0, 0), MaximumSize = new Size(600, 0) };
         readonly Label exportStatus = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };
         readonly LinkLabel exportLink = new LinkLabel { Text = "Open folder", AutoSize = true, Margin = new Padding(3, 4, 3, 0) };
         readonly CheckBox fgMv = new CheckBox { Text = "Use the game's DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0), Visible = false };   // shown only where the extractor DLL is installed for the running game
@@ -135,6 +139,10 @@ namespace VisionALVR
             fgCol.Controls.Add(fgRow);
             fgMv.Margin = new Padding(3, 4, 0, 0);
             fgCol.Controls.Add(fgMv);
+            vecRow.Controls.Add(vecLine); vecRow.Controls.Add(vecInstall); vecRow.Controls.Add(vecDismiss);
+            vecInstall.Click += (s, e) => VectorsInstall();
+            vecDismiss.Click += (s, e) => VectorsDismiss();
+            fgCol.Controls.Add(vecRow);
             body.Controls.Add(Group("Frame generation", fgCol));
 
             // Position: eye height (Auto = the headset's own floor estimate, Vision Pro only; Manual = the typed value) and Recenter
@@ -162,8 +170,12 @@ namespace VisionALVR
             tips.SetToolTip(reset, "Gamma 1.2, the rest neutral.");
             var picCol = Col();
             picCol.Controls.Add(pic);
-            picCol.Controls.Add(Ui.Expander("Advanced", adv));
-            picCol.Controls.Add(reset);
+            var advRow = Row();   // Advanced and Defaults share a line: the window stays short
+            advRow.Controls.Add(Ui.Expander("Advanced", adv));
+            reset.Margin = new Padding(24, 0, 3, 3);
+            advRow.Controls.Add(reset);
+            advRow.WrapContents = false;
+            picCol.Controls.Add(advRow);
             body.Controls.Add(Group("Picture", picCol));
 
             // Desktop mirror: a switch only (the streamer starts bin\mirrordesktop.exe between games while a headset is connected; docs/DESKTOP_MIRROR.md)
@@ -357,7 +369,7 @@ namespace VisionALVR
         void AddKnob(TableLayoutPanel t, string name, int min, int max, double def, Func<double> get, Action<double> set, string tip = null)
         {
             var k = new Knob { Name = name, Def = def, Get = get, Set = set, Value = Ui.Line("0.00"),
-                               Bar = new TrackBar { Minimum = min, Maximum = max, TickFrequency = (max - min) / 6, SmallChange = 5, LargeChange = 10, Width = 170, AutoSize = false, Height = 32, AccessibleName = name } };
+                               Bar = new TrackBar { Minimum = min, Maximum = max, TickStyle = TickStyle.None, SmallChange = 5, LargeChange = 10, Width = 170, AutoSize = false, Height = 26, AccessibleName = name } };
             k.Bar.Value = (int)Math.Max(min, Math.Min(max, Math.Round(get() * 100)));
             k.Value.Text = (k.Bar.Value / 100.0).ToString("0.00", CultureInfo.InvariantCulture);
             k.Bar.ValueChanged += (s, e) =>
@@ -614,6 +626,7 @@ namespace VisionALVR
                     gameRunning = true; MirrorSync();
                     currentExe = S(d, "exe");
                     lastSession = false;
+                    SetVectorsLine(VectorsLine.Kind.None, "", false);   // the last session's vectors line goes when the next real game starts
                     statsBox.Text = "Streaming (live, updated every 10 s)";
                     ApplyRecommendation(fgRecommend.Checked);
                     break;
@@ -650,7 +663,7 @@ namespace VisionALVR
                         tLoss.Set(F(D(net, "packets_lost"), "0"), "packets lost", D(net, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
                         stats.Visible = true;
                         stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} %, skipped {F(D(d, "skipped") * 100, "0.0")} %." + (rec == null ? "" : $"  Next time: {(ri >= 0 ? names[ri] : rec.Value.level)}.");
-                        OfferDll(d);
+                        ShowVectors(d);
                     }
                     break;
                 case "status":
@@ -708,11 +721,14 @@ namespace VisionALVR
                 case "saturation": bar("Saturation"); break;
                 case "debug": debug.Checked = on; break;
                 case "mirror": mirror.Checked = on; break;
+                case "vec_install": vecInstall.PerformClick(); break;
+                case "vec_dismiss": vecDismiss.PerformClick(); break;
             }
         }
         public decimal HeightMin => heightBox.Minimum;
         public decimal HeightMax => heightBox.Maximum;
 
+        public void DemoVectors(VectorsLine.Kind k) => SetVectorsLine(k, VectorsLine.Text(k, 2558), k == VectorsLine.Kind.NoDll);
         public void DemoDebugOn() { debug.Checked = true; settings.Debug = false; settings.Save(); exportStatus.Text = "Saved to C:\\Users\\someone\\Documents\\VisionALVR-logs-20261020-1200.zip"; exportStatus.ForeColor = Color.SeaGreen; exportStatus.Visible = exportLink.Visible = true; }
 
         public void ApplyDemoState(bool worstCase = true)
@@ -742,29 +758,50 @@ namespace VisionALVR
             footer.ForeColor = Color.Firebrick;
         }
 
-        // After a game with generation on and the DLSS-vectors tick on, if the game gave no vectors and the extractor DLL is not in its folder:
-        // offer to install it (once per game unless asked again). Installed copies are managed in the Logs window.
-        void OfferDll(Dictionary<string, object> d)
+        // The Frame generation component's line about the last session's motion vectors (VectorsLine): worked, ran blind, or the install offer. It stays until the
+        // next real game. Install runs here, inline: every step is logged, the line says what happened.
+        string vecExe = "";
+        void ShowVectors(Dictionary<string, object> d)
         {
             try
             {
-                var exe = S(d, "exe"); var stem = Games.Stem(exe);
+                vecExe = S(d, "exe");
+                var stem = Games.Stem(vecExe);
                 var mv = d != null && d.TryGetValue("mv", out var mo) ? mo as Dictionary<string, object> : null;
-                if (S(d, "level") == "off" || mv == null || !(mv.TryGetValue("enabled", out var eo) && eo is bool en && en) || D(mv, "frames") > 0) return;
-                if (MvDll.Dismissed(stem)) return;
-                var dir = MvDll.GameDir(Games.Load(exe));
+                var dir = MvDll.GameDir(Games.Load(vecExe));
                 var st = MvDll.Check(dir, stem, out _);
-                if (st == MvDll.State.NoMaster || st == MvDll.State.NoFolder || st == MvDll.State.Installed) return;
-                var dlg = new DllOfferForm(S(Games.Load(exe), "name").Length > 0 ? S(Games.Load(exe), "name") : exe);
-                dlg.FormClosed += (s, e) =>
-                {
-                    if (dlg.DontAsk) MvDll.Dismiss(stem);
-                    if (dlg.DialogResult == DialogResult.Yes) MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR");
-                    dlg.Dispose();
-                };
-                dlg.Show(this);   // not modal: the streamer window keeps working while the offer waits
+                var tick = mv != null && mv.TryGetValue("enabled", out var eo) && eo is bool en && en;
+                var kind = VectorsLine.Of(S(d, "level"), tick, mv == null ? 0 : D(mv, "frames"), st, MvDll.Dismissed(stem));
+                Log.Write("INFO", $"vectors line for {vecExe}: {kind} (dll {st}, tick {tick})");
+                SetVectorsLine(kind, VectorsLine.Text(kind, mv == null ? 0 : D(mv, "frames")), kind == VectorsLine.Kind.NoDll);
             }
-            catch (Exception e) { Log.Write("WARN", "DLL offer failed: " + e.Message); }
+            catch (Exception e) { Log.Write("WARN", "vectors line failed: " + e.Message); }
+        }
+
+        void SetVectorsLine(VectorsLine.Kind kind, string text, bool offer)
+        {
+            vecLine.Text = text; vecLine.ForeColor = VectorsLine.ColorOf(kind);
+            vecInstall.Visible = vecDismiss.Visible = offer;
+            vecRow.Visible = kind != VectorsLine.Kind.None;
+        }
+
+        void VectorsInstall()
+        {
+            var stem = Games.Stem(vecExe);
+            var dir = MvDll.GameDir(Games.Load(vecExe));
+            Log.Write("INFO", $"vectors install clicked for {vecExe} (folder {dir})");
+            if (dir == null) { SetVectorsLine(VectorsLine.Kind.Blind, "The game's folder is not known: run it once more with the streamer.", false); return; }
+            var msg = MvDll.Install(dir, stem, out var file);
+            Log.Write("INFO", "vectors install result: " + msg);
+            if (file != null) SetVectorsLine(VectorsLine.Kind.Worked, $"Installed ({file}): takes effect next session.", false);
+            else SetVectorsLine(VectorsLine.Kind.Blind, msg, true);
+        }
+
+        void VectorsDismiss()
+        {
+            MvDll.Dismiss(Games.Stem(vecExe));
+            Log.Write("INFO", "vectors offer dismissed for " + vecExe);
+            SetVectorsLine(VectorsLine.Kind.None, "", false);
         }
 
         [STAThread]

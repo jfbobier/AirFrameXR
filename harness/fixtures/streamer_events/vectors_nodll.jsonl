@@ -1,0 +1,19 @@
+{"event": "client_connected", "data": {"name": "Apple Vision Pro", "ip": "192.168.1.50"}}
+{"setup": "game", "exe": "ReplayNoDll.exe", "dll": "none"}
+{"event": "game_started", "data": {"exe": "ReplayNoDll.exe"}}
+{"event": "game_ended", "data": {"exe": "ReplayNoDll.exe", "seconds": 300}}
+{"event": "game_run", "data": {"exe": "ReplayNoDll.exe", "headset": "Apple Vision Pro", "level": "half", "seconds": 300, "rendered_fps": 44, "rendered_fps_low": 38, "streamed_fps": 89, "headset_repeated_typ": 0.01, "host_repeats_typ": 0, "skipped": 0, "recorded": true, "net": {"displayed_fps": 89, "bitrate_mbps": 120, "latency_ms": 57, "latency_p95_ms": 70, "packets_lost": 0}, "mv": {"enabled": true, "frames": 0}}}
+{"dump": "offer"}
+{"ui": "vec_install", "value": ""}
+{"dump": "installed"}
+{"setup": "game", "exe": "ReplayDismiss.exe", "dll": "none"}
+{"event": "game_started", "data": {"exe": "ReplayDismiss.exe"}}
+{"event": "game_ended", "data": {"exe": "ReplayDismiss.exe", "seconds": 300}}
+{"event": "game_run", "data": {"exe": "ReplayDismiss.exe", "headset": "Apple Vision Pro", "level": "half", "seconds": 300, "rendered_fps": 44, "rendered_fps_low": 38, "streamed_fps": 89, "headset_repeated_typ": 0.01, "host_repeats_typ": 0, "skipped": 0, "recorded": true, "net": {"displayed_fps": 89, "bitrate_mbps": 120, "latency_ms": 57, "latency_p95_ms": 70, "packets_lost": 0}, "mv": {"enabled": true, "frames": 0}}}
+{"dump": "offer2"}
+{"ui": "vec_dismiss", "value": ""}
+{"dump": "dismissed"}
+{"event": "game_started", "data": {"exe": "ReplayDismiss.exe"}}
+{"event": "game_ended", "data": {"exe": "ReplayDismiss.exe", "seconds": 300}}
+{"event": "game_run", "data": {"exe": "ReplayDismiss.exe", "headset": "Apple Vision Pro", "level": "half", "seconds": 300, "rendered_fps": 44, "rendered_fps_low": 38, "streamed_fps": 89, "headset_repeated_typ": 0.01, "host_repeats_typ": 0, "skipped": 0, "recorded": true, "net": {"displayed_fps": 89, "bitrate_mbps": 120, "latency_ms": 57, "latency_p95_ms": 70, "packets_lost": 0}, "mv": {"enabled": true, "frames": 0}}}
+{"dump": "not_again"}

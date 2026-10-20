@@ -120,6 +120,10 @@ namespace VisionALVR
                 var last = sessions[sessions.Count - 1];
                 right.Controls.Add(new Label { Text = $"Last session: {When(last)}, {N(D(last, "seconds") / 60)} min on {S(last, "headset")}, {Mode(S(last, "level"))}", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 0, 3, 4) });
                 right.Controls.Add(Tiles(last));
+                var lmv = O(last, "mv");
+                var vk = VectorsLine.Of(S(last, "level"), lmv != null && lmv.TryGetValue("enabled", out var le) && le is bool lb && lb, lmv == null ? 0 : D(lmv, "frames"), MvDll.Check(MvDll.GameDir(g), stem, out _), false);
+                if (vk == VectorsLine.Kind.Blind)   // the same wording and function as the streamer's Frame generation component
+                    right.Controls.Add(new Label { Text = VectorsLine.Text(vk, 0), AutoSize = true, ForeColor = VectorsLine.ColorOf(vk), Margin = new Padding(3, 0, 3, 4), MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0) });
                 right.Controls.Add(new Label { Text = $"Sessions (the last {sessions.Count}, newest first)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                 right.Controls.Add(SessionList(sessions));
             }
