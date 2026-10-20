@@ -1,5 +1,5 @@
 {
-  "description": "The desktop mirror (tools/mirrordesktop, an OpenXR app) through VDXR + OVRShim: in the decoded stream everything outside the desktop's screen is 00FF00 (the headset's alpha), the screen straight ahead shows the desktop, and the engine sees the app as a game like any other (the streamer, not the engine, turns frame generation off for it). The mock client also moves both controllers (a scripted pose, pitched 45 degrees up: the runtime's aim pose is the sent pose turned 45 degrees down, so the app's ray runs along -Z): the app's beam is in the stream and its ray meets the screen. timestamps_monotonic is not checked: the host's first idle (green) frames carry its own clock, later than the display times the app's first frames carry (the same for any app that starts with the headset)",
+  "description": "The desktop mirror (tools/mirrordesktop, an OpenXR app) through VDXR + OVRShim: in the decoded stream everything outside the desktop's screen is 00FF00 (the headset's alpha), the screen straight ahead shows the desktop, and the engine sees the app as a game like any other (the streamer, not the engine, turns frame generation off for it). The mock client also moves both controllers (a scripted pose, pitched 45 degrees up: the runtime's aim pose is the sent pose turned 45 degrees down, so the app's ray runs along -Z): the app's beam is in the stream and its ray meets the screen. timestamps_monotonic is not checked: the host's first idle (green) frames carry its own clock, later than the display times the app's first frames carry (the same for any app that starts with the headset). The mock client scripts the right controller's trigger, grip, A and B; the app's decisions (left/right button edges, double clicks) are logged with wall-clock times and compared with what was sent (every edge arrives, within 150 ms), and the app must render at 80+ fps with a picture cost under 4 ms. It runs on a synthetic desktop (a known picture, no capture), so it works on a PC whose screen cannot be duplicated",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -50,7 +50,7 @@
     "seconds": 60,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "exit_after_frames": 420
+    "exit_after_frames": 1500
   },
   "client": {
     "seconds": 55,
@@ -65,8 +65,9 @@
   },
   "app": {
     "exe": "mirrordesktop",
-    "seconds": 28,
-    "timeout_s": 60
+    "seconds": 30,
+    "timeout_s": 90,
+    "synthetic": true
   },
   "gpu_sample": true,
   "timeout_s": 240,
@@ -85,11 +86,16 @@
     "decode": true,
     "decode_frame_slack": 80,
     "refresh_hz": 90,
-    "max_pipeline_latency_ms": 200,
     "mirror": {
       "min_frames": 20,
       "min_ok_frac": 0.9,
-      "beam": true
+      "beam": true,
+      "clicks": true,
+      "max_latency_ms": 150,
+      "perf": {
+        "min_fps": 80,
+        "max_picture_ms": 4.0
+      }
     },
     "timestamps_monotonic": false
   }

@@ -128,8 +128,25 @@ struct DesktopMirror::Impl {
             }
         }
         if (!output) { seterr(err, errlen, "no desktop output found"); return false; }
-        if (FAILED(D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &capDev, nullptr, &capCtx))) { seterr(err, errlen, "capture device"); return false; }
-        if (!OpenDuplication(err, errlen)) return false;
+        // the output's adapter is the renderer's: duplicate with the renderer's own device and copy on the GPU (no round trip through the CPU, which at 2560 x 1440
+        // HDR is 29 MB per changed frame); otherwise a device of its own on the output's adapter and the copy through the CPU
+        {
+            ComPtr<IDXGIDevice> dd; ComPtr<IDXGIAdapter> ra;
+            DXGI_ADAPTER_DESC1 a1{}, a2{}; adapter->GetDesc1(&a1);
+            if (SUCCEEDED(dev->QueryInterface(__uuidof(IDXGIDevice), (void**)&dd)) && SUCCEEDED(dd->GetAdapter(&ra))) {
+                DXGI_ADAPTER_DESC d2{}; ra->GetDesc(&d2);
+                sameAdapter = memcmp(&a1.AdapterLuid, &d2.AdapterLuid, sizeof(LUID)) == 0;
+            }
+        }
+        if (sameAdapter) { capDev = dev; capCtx = ctx; }
+        else if (FAILED(D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &capDev, nullptr, &capCtx))) { seterr(err, errlen, "capture device"); return false; }
+        if (!OpenDuplication(err, errlen)) {
+            if (!sameAdapter) return false;
+            // the renderer's device would not duplicate (an unusual device): the safe way, a device of its own and the copy through the CPU
+            sameAdapter = false; capDev.Reset(); capCtx.Reset();
+            if (FAILED(D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &capDev, nullptr, &capCtx))) { seterr(err, errlen, "capture device"); return false; }
+            if (!OpenDuplication(err, errlen)) return false;
+        }
         DXGI_OUTDUPL_DESC dd; dup->GetDesc(&dd);
         dw = (int)dd.ModeDesc.Width; dh = (int)dd.ModeDesc.Height;
         hdr = dd.ModeDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -137,11 +154,11 @@ struct DesktopMirror::Impl {
         white = hdr ? SdrWhite() : 1.f;
         D3D11_TEXTURE2D_DESC td{}; td.Width = dw; td.Height = dh; td.MipLevels = 1; td.ArraySize = 1; td.Format = dfmt; td.SampleDesc.Count = 1;
         td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        if (FAILED(capDev->CreateTexture2D(&td, nullptr, &staging))) { seterr(err, errlen, "staging texture"); return false; }
+        if (!sameAdapter && FAILED(capDev->CreateTexture2D(&td, nullptr, &staging))) { seterr(err, errlen, "staging texture"); return false; }
         return InitGpu(err, errlen);
     }
 
-    bool testMode = false;
+    bool testMode = false, sameAdapter = false;
     bool InitGpu(char* err, int errlen) {
         D3D11_TEXTURE2D_DESC td{}; td.Width = dw; td.Height = dh; td.MipLevels = 1; td.ArraySize = 1; td.Format = dfmt; td.SampleDesc.Count = 1;
         td.Usage = D3D11_USAGE_DEFAULT; td.CPUAccessFlags = 0; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -182,14 +199,17 @@ struct DesktopMirror::Impl {
                     dfmt = d.Format; dw = (int)d.Width; dh = (int)d.Height; hdr = dfmt == DXGI_FORMAT_R16G16B16A16_FLOAT; white = hdr ? SdrWhite() : 1.f; have = false;
                     D3D11_TEXTURE2D_DESC sd{}; sd.Width = dw; sd.Height = dh; sd.MipLevels = 1; sd.ArraySize = 1; sd.Format = dfmt; sd.SampleDesc.Count = 1; sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
                     staging.Reset(); char e[8];
-                    if (FAILED(capDev->CreateTexture2D(&sd, nullptr, &staging)) || !InitGpu(e, 8)) { dup->ReleaseFrame(); dup.Reset(); return; }
+                    if ((!sameAdapter && FAILED(capDev->CreateTexture2D(&sd, nullptr, &staging))) || !InitGpu(e, 8)) { dup->ReleaseFrame(); dup.Reset(); return; }
                 }
-                capCtx->CopyResource(staging.Get(), tex.Get());
-                D3D11_MAPPED_SUBRESOURCE m;
-                if (SUCCEEDED(capCtx->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &m))) {
-                    ctx->UpdateSubresource(src.Get(), 0, nullptr, m.pData, m.RowPitch, 0);
-                    capCtx->Unmap(staging.Get(), 0);
-                    have = true;
+                if (sameAdapter) { ctx->CopyResource(src.Get(), tex.Get()); have = true; }   // GPU to GPU
+                else {
+                    capCtx->CopyResource(staging.Get(), tex.Get());
+                    D3D11_MAPPED_SUBRESOURCE m;
+                    if (SUCCEEDED(capCtx->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+                        ctx->UpdateSubresource(src.Get(), 0, nullptr, m.pData, m.RowPitch, 0);
+                        capCtx->Unmap(staging.Get(), 0);
+                        have = true;
+                    }
                 }
             }
         }

@@ -12,7 +12,7 @@ use alvr_common::{
     parking_lot::Mutex,
     DeviceMotion, Fov, Pose, RelaxedAtomic, ViewParams, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID, LEFT_SQUEEZE_VALUE_ID,
     LEFT_THUMBSTICK_X_ID, LEFT_THUMBSTICK_Y_ID, LEFT_X_CLICK_ID, QUEST_CONTROLLER_PROFILE_ID, RIGHT_A_CLICK_ID,
-    RIGHT_TRIGGER_VALUE_ID,
+    RIGHT_B_CLICK_ID, RIGHT_SQUEEZE_VALUE_ID, RIGHT_TRIGGER_VALUE_ID,
 };
 use alvr_packets::{ButtonEntry, ButtonValue, FaceData};
 use serde_json::json;
@@ -432,7 +432,7 @@ fn main() {
     });
     if let Some(p) = &args.controllers_csv {
         let mut f = File::create(p).expect("create --controllers-csv");
-        writeln!(f, "ts_ns,trigger_r,squeeze_l,a_r,stick_lx,stick_ly,x_l,rx,ry,rz,lx,ly,lz").ok();
+        writeln!(f, "ts_ns,trigger_r,squeeze_l,a_r,stick_lx,stick_ly,x_l,rx,ry,rz,lx,ly,lz,squeeze_r,b_r,wall_ns").ok();
         for l in &s.controller_log {
             writeln!(f, "{l}").ok();
         }
@@ -772,7 +772,7 @@ fn tracking(
         ctx.send_active_interaction_profile(*HAND_LEFT_ID, *QUEST_CONTROLLER_PROFILE_ID);
         ctx.send_active_interaction_profile(*HAND_RIGHT_ID, *QUEST_CONTROLLER_PROFILE_ID);
     }
-    let mut last_buttons: [Option<ButtonValue>; 3] = [None, None, None];
+    let mut last_buttons: [Option<ButtonValue>; 4] = [None, None, None, None];
     let vp = ViewParams { pose: Pose::default(), fov: Fov { left: -1.0, right: 1.0, up: 1.0, down: -1.0 } };
     let mut views_sent = false;
     let mut next = Instant::now();
@@ -806,16 +806,19 @@ fn tracking(
             let trigger_r = tri(t, 4.0);
             let squeeze_l = tri(t + 1.0, 3.0) * 0.8;
             let a_r = (t as i64) % 2 == 1;
+            let squeeze_r = tri(t + 2.0, 5.0) * 0.9;
+            let b_r = (t as i64) % 3 == 1;
             let stick = ((std::f32::consts::TAU * t / 3.0).sin(), (std::f32::consts::TAU * t / 3.0).cos() * 0.5);
             let x_l = (t as i64) % 3 == 2;
             // continuous values every tick, clicks only on change (like the headset)
             let mut entries = vec![
                 ButtonEntry { path_id: *RIGHT_TRIGGER_VALUE_ID, value: ButtonValue::Scalar(trigger_r) },
                 ButtonEntry { path_id: *LEFT_SQUEEZE_VALUE_ID, value: ButtonValue::Scalar(squeeze_l) },
+                ButtonEntry { path_id: *RIGHT_SQUEEZE_VALUE_ID, value: ButtonValue::Scalar(squeeze_r) },
                 ButtonEntry { path_id: *LEFT_THUMBSTICK_X_ID, value: ButtonValue::Scalar(stick.0) },
                 ButtonEntry { path_id: *LEFT_THUMBSTICK_Y_ID, value: ButtonValue::Scalar(stick.1) },
             ];
-            for (i, (path, on)) in [(*RIGHT_A_CLICK_ID, a_r), (*LEFT_X_CLICK_ID, x_l)].into_iter().enumerate() {
+            for (i, (path, on)) in [(*RIGHT_A_CLICK_ID, a_r), (*LEFT_X_CLICK_ID, x_l), (*RIGHT_B_CLICK_ID, b_r)].into_iter().enumerate() {
                 let v = ButtonValue::Binary(on);
                 let changed = match (&last_buttons[i], &v) {
                     (Some(ButtonValue::Binary(p)), ButtonValue::Binary(n)) => p != n,
@@ -828,8 +831,9 @@ fn tracking(
             }
             ctx.send_buttons(entries);
             shared.lock().controller_log.push(format!(
-                "{},{},{},{},{},{},{},{},{},{},{},{},{}",
-                ts.as_nanos(), trigger_r, squeeze_l, a_r as u8, stick.0, stick.1, x_l as u8, rpos.x, rpos.y, rpos.z, lpos.x, lpos.y, lpos.z
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                ts.as_nanos(), trigger_r, squeeze_l, a_r as u8, stick.0, stick.1, x_l as u8, rpos.x, rpos.y, rpos.z, lpos.x, lpos.y, lpos.z,
+                squeeze_r, b_r as u8, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
             ));
         }
         ctx.send_tracking(
