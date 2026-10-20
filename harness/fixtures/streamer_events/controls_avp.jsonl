@@ -1,0 +1,27 @@
+{"event": "client_connected", "data": {"name": "Apple Vision Pro", "ip": "192.168.1.50"}}
+{"event": "height_calibrated", "data": {"target_m": 0, "headset_y": 1.62, "offset_m": -1.62, "eye_height_m": 1.62}}
+{"dump": "avp_auto"}
+{"ui": "frame_gen", "value": "on"}
+{"dump": "frame_gen_on"}
+{"ui": "rate", "value": "2"}
+{"dump": "rate"}
+{"ui": "mv", "value": "off"}
+{"dump": "mv"}
+{"ui": "recenter", "value": ""}
+{"dump": "recenter"}
+{"ui": "height_mode", "value": "manual"}
+{"dump": "manual"}
+{"ui": "height", "value": "1.55"}
+{"dump": "height"}
+{"ui": "height_mode", "value": "auto"}
+{"dump": "auto_again"}
+{"ui": "gamma", "value": "1.5"}
+{"dump": "gamma"}
+{"ui": "sharpening", "value": "0.4"}
+{"dump": "sharpening"}
+{"ui": "saturation", "value": "0.1"}
+{"dump": "color"}
+{"ui": "debug", "value": "on"}
+{"dump": "debug_on"}
+{"ui": "debug", "value": "off"}
+{"dump": "debug_off"}

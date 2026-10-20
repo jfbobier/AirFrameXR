@@ -31,7 +31,7 @@ CLIENT_FLAGS = {"seconds": "--seconds", "connect_timeout": "--connect-timeout", 
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views"}
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views", "height": "--height"}
 
 
 class Blocked(Exception):
@@ -1028,6 +1028,7 @@ def analyse(sc, outdir: Path):
     hs = (outdir / "host_stdout.txt").read_text(errors="replace") if (outdir / "host_stdout.txt").exists() else ""
     a["host_event_names"] = sorted(set(re.findall(r'"event":"([a-z_]+)"', hs)))
     a["bench_steps"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"bench_step"' in l]
+    a["height_calibrated"] = next((json.loads(l)["data"] for l in hs.splitlines() if '"event":"height_calibrated"' in l), None)
     a["game_runs"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"game_run"' in l]   # the run summary the streamer shows (net block: latency medians, outliers)
     lg = outdir / "logs"
     if lg.exists():
@@ -1333,6 +1334,12 @@ def evaluate(sc, a):
             if pc2.get("gpu_sched_class") is not None:
                 g = pp.get("gpu_scheduling") or {}
                 chk("pipeline_gpu_sched_class", g.get("class") == pc2["gpu_sched_class"] and g.get("status") == 0, g, f"class {pc2['gpu_sched_class']} granted")
+    if "height_calibrated" in ck:   # U5b: Auto (host height 0) anchors on the head's own height, Manual on the typed value
+        hc, want = a.get("height_calibrated"), ck["height_calibrated"]
+        chk("height_calibrated_reported", hc is not None, hc is not None, True)
+        if hc:
+            chk("height_calibrated_eye_height", abs(hc.get("eye_height_m", -9) - want["eye_height_m"]) <= want.get("tol", 0.02), hc.get("eye_height_m"), f"{want['eye_height_m']} +- {want.get('tol', 0.02)}")
+            chk("height_calibrated_headset_y", abs(hc.get("headset_y", -9) - want["headset_y"]) <= want.get("tol", 0.02), hc.get("headset_y"), f"{want['headset_y']} +- {want.get('tol', 0.02)}")
     if "game_run" in ck:   # U7: the run's latency is believable on a clean run (no garbage samples, medians of the windows)
         g = ck["game_run"]
         runs = a.get("game_runs") or []

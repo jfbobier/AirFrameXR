@@ -168,15 +168,15 @@ item is not done until that test exists and passes. Items marked (host) change t
   caption says "Last session: <game>, <minutes>, <headset>" or "Live". Test: `streamer_events` with the six sequences above, asserting tile text and caption after each event.
 
 ### New behaviour
-- [ ] **U3. Debug logging is always visible** at the bottom of the streamer: the checkbox (on or off), *Export logs...* (U1's `LogExport`) and *Open logs folder*, so sharing
+- [x] **U3. Debug logging is always visible** at the bottom of the streamer: the checkbox (on or off), *Export logs...* (U1's `LogExport`) and *Open logs folder*, so sharing
   feedback is one click from anywhere. (This replaces the "notice only" variant and completes the item "Debug logging stays a checkbox" of the 2026-10-19 night section.)
   Test: `ui_matrix` cases with debug off and on; `streamer_events` (toggle sends `debug on|off`, persists `debug`).
-- [ ] **U5. The streamer's component layout** (docs/UI_SPEC.md): *Streaming*, *Frame generation*, *Position*, *Picture*, *Desktop mirror*, then the debug row. Frame generation:
+- [x] **U5. The streamer's component layout** (docs/UI_SPEC.md): *Streaming*, *Frame generation*, *Position*, *Picture*, *Desktop mirror*, then the debug row. Frame generation:
   switch + Auto/1-3/1-2/2-3 + the vectors tick, no explanatory text; Desktop mirror: the switch only, no "Between games" caption; Picture: gamma and sharpening, with
   *Advanced* unfolding brightness, contrast and saturation (and *Defaults*); Position: height and *Recenter* together. Size from content as always. Test: `ui_matrix`
   at every size and scale (0 FAIL), `streamer_events` (every control still sends its command: `gamma`, `color`, `frame_gen`, `frame_gen_rate`, `game_mv`, `recenter`, `height`),
   README screenshot regenerated.
-- [ ] **U5b. Eye height: Auto and Manual (Vision Pro only).** Auto sends `height 0` (already the engine's meaning: the headset's own floor estimate, `eye_height = headset y`
+- [x] **U5b. Eye height: Auto and Manual (Vision Pro only).** Auto sends `height 0` (already the engine's meaning: the headset's own floor estimate, `eye_height = headset y`
   at the 45th sample); Manual sends the typed value, a number box with 1.30 m as the default (0.5-2.2 m) instead of the slider. Saved as `display.height_mode` (`auto` |
   `manual`; existing users stay on Manual) next to `display.height_m`. In Auto the window shows what the headset reported (`height_calibrated.eye_height_m`: "headset
   reports 1.62 m"). A Quest or any non-Apple headset is shown as Auto and disabled (its floor is right). Hint: Auto is right when the headset saw the room (standing at the
@@ -199,6 +199,8 @@ item is not done until that test exists and passes. Items marked (host) change t
 Done and passing on the builder: U1 (`harness/export_logs.py`), U8, U9 (`game_run` now also sent, `recorded:false`, for runs of 2-20 s), and the replay harness (`harness/streamer_events.py`, three fixtures; the other sequences join the items they test). `ui_matrix` 0 FAIL. Added by the user mid-session: shorter text everywhere in the streamer (done with U5).
 
 U7 done 2026-10-20: `logs.rs` drops samples with a component outside 0-2 s or a total above 5 s (counted: `latency_outliers`, run `latency_samples`; first ten raw in `client_stats_outliers.jsonl` of the debug run), windows and the run report medians; the UI shows n/a (`Latency` in Common.cs). Tests: `harness/host_tests.py` (6 unit tests), `harness/performance_check.py`, `streamer_events` (absurd_latency), `e2e_fg_latency` (generation on: median 43 ms, 0 outliers; the garbage did not occur in the lab, so the cause is still to find from the debug samples of a real run).
+
+U3 / U5 / U5b done 2026-10-20 (the README screenshots are regenerated at the end of the round): components Frame generation / Position / Picture (Advanced folded) / Desktop mirror, the debug row with Export logs, Auto/Manual eye height (`display.height_mode`, number box 0.5-2.2 m, "headset reports"), explanations moved to tooltips and every long line shortened (the user's request). Tests: `streamer_events` controls_avp / controls_quest (every command), `ui_matrix` streamer-avp-auto / -quest / -debug-on (0 FAIL), `e2e_height_auto` / `e2e_height_manual`. Game history also shows ALVR's breakdown, `Streamer latency = encoder + transport + decoder` (last-session line and a sessions column), by the user's request.
 
 ### Order
 U1, U8, U9 + the replay harness (small, bugs) → U7 (engine aggregator + tests) → U5 / U5b / U3 (layout, height, debug row) → U6 + U2 (Frame generation component) → U10.

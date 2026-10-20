@@ -1,0 +1,4 @@
+{"event": "client_connected", "data": {"name": "Meta Quest 3", "ip": "192.168.1.60"}}
+{"dump": "quest"}
+{"ui": "height_mode", "value": "manual"}
+{"dump": "quest_manual"}

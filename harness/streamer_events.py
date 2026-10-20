@@ -28,6 +28,26 @@ EXPECT = {
         ("run_absurd", ["n/a", "not measured"], ["4958802102", "29752812252"]),
         ("run_clean", ["57 ms", "p95 70"], ["n/a"]),   # 2 outliers of 800 samples: still believable
     ],
+    "controls_avp": [
+        ("avp_auto", ["headset reports 1.62 m", "Eye height", "Debug logging", "Export logs...", "Open logs folder", "Frame generation", "Position", "Picture", "Desktop mirror"], ["Between games"]),
+        ("frame_gen_on", ["sent frame_gen on"], []),
+        ("rate", ["sent frame_gen_rate two_thirds"], []),
+        ("mv", ["sent game_mv off"], []),
+        ("recenter", ["sent recenter"], []),
+        ("manual", ["sent height 1.30"], ["headset reports"]),
+        ("height", ["sent height 1.55"], []),
+        ("auto_again", ["sent height 0.00", "headset reports 1.62 m"], []),
+        ("gamma", ["sent gamma 1.50"], []),
+        ("sharpening", ["sent color 0.00 0.00 0.00 0.40"], []),
+        ("color", ["sent color 0.00 0.00 0.10 0.40"], []),
+        ("debug_on", ["sent debug on", "check[x] Debug logging", "button Export logs..."], []),   # the export row is there with debug on
+        ("debug_off", ["sent debug off", "check[ ] Debug logging", "button Export logs...", "button Open logs folder"], []),   # and off
+        ("end", ["range height 0.5 2.2"], []),
+    ],
+    "controls_quest": [
+        ("quest", ["Meta Quest 3"], ["headset reports"]),
+        ("quest_manual", ["sent height 0.00"], []),   # a Quest's floor is right: whatever the choice, the engine is told 0
+    ],
     "short12": [
         ("ended", [], []),
         ("after_short_run", ["last session, Short.exe, 0.2 min", "60.0 fps", "50 ms"], ["Streaming (live"]),   # a run under 20 s still updates the tiles

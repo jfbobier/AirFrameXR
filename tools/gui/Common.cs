@@ -435,6 +435,12 @@ namespace VisionALVR
         /// headset height above the floor handed to games (m), re-anchored live; 1.3 = a seated adult. 0 = the headset's floor estimate
         public const double DefaultHeight = 1.3;
         public double Height { get => Json.Num(Root, "headset.height_m", DefaultHeight); set => Json.Set(Root, "headset.height_m", value); }
+        /// "auto" = the headset's own floor estimate (height 0 to the engine), "manual" = Height. Someone who already set a height stays on manual; a new user starts on auto.
+        public string HeightMode
+        {
+            get { var m = Json.Str(Root, "display.height_mode", ""); return m == "auto" || m == "manual" ? m : (Json.Get(Root, "headset.height_m") == null || Json.Num(Root, "headset.height_m", 0) <= 0 ? "auto" : "manual"); }
+            set => Json.Set(Root, "display.height_mode", value);
+        }
         public void Save() => Json.Save(Paths.Settings, Root);
     }
 
@@ -670,7 +676,8 @@ namespace VisionALVR
 
         int SafeExitCode() { try { return p.ExitCode; } catch { return -1; } }
 
-        public void Send(string line) { try { if (Running) { p.StandardInput.WriteLine(line); p.StandardInput.Flush(); } } catch { } }
+        public event Action<string> OnSend;   // every command, running or not (harness/streamer_events.py)
+        public void Send(string line) { OnSend?.Invoke(line); try { if (Running) { p.StandardInput.WriteLine(line); p.StandardInput.Flush(); } } catch { } }
 
         /// Asks the host to quit (it un-mutes the PC speakers on the way out); kills it after the timeout.
         public void Stop(int timeoutMs = 6000)
@@ -1314,6 +1321,9 @@ namespace VisionALVR
         public const string Why = "n/a: the headset's latency samples were not usable (a duration that wrapped, or too many dropped). The other numbers are fine.";
         public static bool Absurd(double ms, double outliers = 0, double samples = 0) =>
             ms < 0 || ms > 1000 || (samples > 0 && !double.IsNaN(outliers) && outliers / samples > 0.10);
+        /// ALVR's own breakdown of the streamer's share of the latency: encoder + transport (network) + decoder, in ms; null when any part is missing or not believable.
+        public static double? Streamer(double enc, double net, double dec, double outliers = 0, double samples = 0) =>
+            double.IsNaN(enc) || double.IsNaN(net) || double.IsNaN(dec) || Absurd(enc, outliers, samples) || Absurd(net, outliers, samples) || Absurd(dec, outliers, samples) ? (double?)null : enc + net + dec;
         /// "-" when nothing was measured, "n/a" when it was and is not believable, else the number.
         public static string Text(double ms, double outliers = 0, double samples = 0, string fmt = "0") =>
             double.IsNaN(ms) ? "-" : Absurd(ms, outliers, samples) ? "n/a" : ms.ToString(fmt, CultureInfo.InvariantCulture);

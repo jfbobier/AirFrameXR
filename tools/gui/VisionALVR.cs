@@ -18,10 +18,10 @@ namespace VisionALVR
         readonly HostProcess host = new HostProcess();
         readonly Label headset = Ui.Line("Headset: -", Ui.Big);
         readonly Button find = new Button { Text = "Find headset...", AutoSize = true, Margin = new Padding(12, 0, 0, 0) };
-        readonly Label findHint = Ui.Line("VisionALVR dials the saved address and re-finds a paired headset by name. If it does not connect (new address, another headset), use Find headset.");
+        readonly Label findHint = Ui.Line("Not connecting? Use Find headset.");
         // Windows Firewall: the rule belongs to this exact folder; a missing or blocking rule means no discovery and no connection
         readonly Label fwWarn = Ui.Line("", Ui.Bold);
-        readonly Button fwFix = new Button { Text = "Allow VisionALVR through the firewall (asks for administrator)", AutoSize = true };
+        readonly Button fwFix = new Button { Text = "Allow through the firewall", AutoSize = true };
         readonly Dictionary<string, object> check;
         readonly bool autoFind;
         bool finding, gameRunning;
@@ -36,21 +36,26 @@ namespace VisionALVR
         // display controls: (label, min, max, default, settings getter/setter), values x100 on the track bars
         class Knob { public string Name; public TrackBar Bar; public Label Value; public double Def; public Func<double> Get; public Action<double> Set; }
         readonly List<Knob> knobs = new List<Knob>();
-        readonly CheckBox debug = new CheckBox { Text = "Debug logging (files in logs\\debug\\)", AutoSize = true, Font = Ui.Body };
+        readonly CheckBox debug = new CheckBox { Text = "Debug logging", AutoSize = true, Font = Ui.Body };
         readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Frame generation" };
         readonly ToggleSwitch mirror = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Mirror the Windows desktop between sessions" };
         // the game's rate as a fraction of the display rate: 1/3, 1/2 (default), 2/3 (settings video.frame_gen_rate third | half | two_thirds)
         static readonly string[] FgRates = { "third", "half", "two_thirds" };
         static readonly string[] FgRateText = {
-            "1/3: the game at a third of the display rate, two generated frames per rendered one (games at 34-49 fps)",
-            "1/2: the game at half the display rate, one generated frame per rendered one (the default)",
-            "2/3: the game held to two thirds of the display rate, every frame sent is interpolated (games above 67 fps)" };
+            "1/3: two generated frames per rendered one (games at 34-49 fps).",
+            "1/2: one generated frame per rendered one (default).",
+            "2/3: every frame sent is interpolated (games above 67 fps)." };
         readonly Segmented fgRate = new Segmented("1/3", "1/2", "2/3") { AccessibleName = "Game rate" };
-        readonly Label fgRateText = Ui.Line("");
+        class TipText { public Action<string> On; public string Text { set { On?.Invoke(value); } } }   // explanations go to tooltips, not to the window
+        readonly TipText fgRateText = new TipText();
+        readonly Segmented heightMode = new Segmented("Auto", "Manual") { AccessibleName = "Eye height mode" };
+        readonly NumericUpDown heightBox = new NumericUpDown { DecimalPlaces = 2, Increment = 0.05m, Minimum = 0.5m, Maximum = 2.2m, Width = 64, AccessibleName = "Eye height in metres" };
+        readonly Label heightReport = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(8, 7, 0, 0), Visible = false };
+        readonly Label exportStatus = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };
+        readonly LinkLabel exportLink = new LinkLabel { Text = "Open folder", AutoSize = true, Margin = new Padding(3, 4, 3, 0) };
         readonly CheckBox fgMv = new CheckBox { Text = "Use the game's DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0), Visible = false };   // shown only where the extractor DLL is installed for the running game
         readonly ToggleButton fgRecommend = new ToggleButton { Text = "Auto", Margin = new Padding(0, 0, 8, 0), AccessibleName = "Choose the game rate automatically from this game's recorded runs" };
-        readonly FlowLayoutPanel debugNotice = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Visible = false, Margin = new Padding(0, 8, 0, 0) };
-        readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(8, 3, 3, 3) };
+                readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(8, 3, 3, 3) };
         bool fgRateFromHost;   // the slider follows the host's rate: no command back
         // Game profiles (config\games\<exe>.json, written by the streamer at every game end: per game, headset and level the last run's numbers). The
         // launcher proposes a level from them when "Recommended" is ticked: the slider is set and greyed; unticked, the slider is yours again.
@@ -109,83 +114,85 @@ namespace VisionALVR
             box.Controls.Add(statsCol);
             body.Controls.Add(box);
 
-            // Position and picture, two knobs per row so the window fits a laptop screen. Games with the action on the floor by default (Moss,
-            // Titan Isles) assume a standing user; the headset's floor estimate is unreliable, so the streamer hands games the eye height set here
-            // (above the floor) when you enter VR and keeps your own vertical movement on top of it. Everything is applied live.
-            var live = new GroupBox { Text = "Position and picture (applied live)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
-            var lt = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Dock = DockStyle.Fill, Font = Ui.Body };
-            var pic = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Font = Ui.Body };   // the look of the picture: behind the "Picture" expander
+            // Components, top to bottom (docs/UI_SPEC.md): Streaming (above), Frame generation, Position, Picture, Desktop mirror, then the debug row. Everything applies live.
             if (!settings.HasDisplay) { settings.Gamma = AppSettings.DefaultGamma; settings.Save(); } // the streamer reads it at start
-            AddKnob(lt, "Eye height, m", 0, 220, AppSettings.DefaultHeight, () => settings.Height, v => settings.Height = v,
-                    "Your eye height above the floor, as games see it: about 1.30 m seated, 1.6-1.7 m standing; 0 = the headset's own floor estimate. Games that place you from the floor use it; moving it re-anchors at your current head position.");
-            heightKnob = knobs[knobs.Count - 1];
-            AddKnob(pic, "Gamma (>1 brighter)", 50, 200, AppSettings.DefaultGamma, () => settings.Gamma, v => settings.Gamma = v);
-            AddKnob(pic, "Brightness", -30, 30, 0, () => settings.Brightness, v => settings.Brightness = v);
-            AddKnob(pic, "Contrast", -30, 30, 0, () => settings.Contrast, v => settings.Contrast = v);
-            AddKnob(pic, "Saturation", -50, 50, 0, () => settings.Saturation, v => settings.Saturation = v, "Below 0: less vivid.");
-            AddKnob(pic, "Sharpening", 0, 100, 0, () => settings.Sharpening, v => settings.Sharpening = v);
-            var reset = new Button { Text = "Defaults", AutoSize = true };
-            reset.Click += (s, e) => { foreach (var k in knobs) k.Bar.Value = (int)Math.Round(k.Def * 100); };
-            tips.SetToolTip(reset, "Eye height 1.30 m, gamma 1.2, the rest neutral.");
-            pic.Controls.Add(reset);
-            pic.SetColumnSpan(reset, 6);
-            var util = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
-            util.Controls.Add(recenter);
-            lt.Controls.Add(util);
-            lt.SetColumnSpan(util, 6);
-            var picture = Ui.Expander("Picture", pic);
-            lt.Controls.Add(picture);
-            lt.SetColumnSpan(picture, 6);
-            var fgRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
-            fgRow.Controls.Add(frameGen);
-            var fgText = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
-            fgText.Controls.Add(new Label { Text = "Frame generation", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 4, 0, 0) });
-            fgText.Controls.Add(new Label { Text = "The game renders at half the display rate and the streamer fills the frame in between. For games that cannot hold 70-75 fps; applies at once.", AutoSize = true, Font = Ui.Body, ForeColor = Color.DimGray, MaximumSize = new Size(560, 0), Margin = new Padding(0) });
-            fgRow.Controls.Add(fgText);
-            lt.Controls.Add(fgRow);
-            lt.SetColumnSpan(fgRow, 6);
-            // the generation's knobs (docs/FRAME_GENERATION.md): the game's rate as a fraction of the display rate (1/3, 1/2, 2/3) and the game's
-            // motion vectors. Every change is sent to the running streamer, saved, and logged by both sides. The uncapped rate, the fps cap and
-            // the content lag stay available in config\visionalvr.json and on the host's command line for experiments.
-            var fgOpts = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(44, 2, 0, 0) };
-            fgOpts.Controls.Add(new Label { Text = "Game rate", AutoSize = true, Font = Ui.Body, Margin = new Padding(0, 6, 6, 0) });
-            fgOpts.Controls.Add(fgRecommend);
-            fgOpts.Controls.Add(fgRate);
-            lt.Controls.Add(fgOpts);
-            lt.SetColumnSpan(fgOpts, 6);
-            fgMv.Margin = new Padding(44, 0, 0, 0);
-            lt.Controls.Add(fgMv);
-            lt.SetColumnSpan(fgMv, 6);
-            fgRateText.Margin = new Padding(44, 0, 0, 4);
-            fgRateText.ForeColor = Color.DimGray;
-            lt.Controls.Add(fgRateText);
-            lt.SetColumnSpan(fgRateText, 6);
-            // the desktop mirror: between games the headset shows the Windows desktop on a virtual screen and the right hand (pinch = click, grip = right
-            // click) is the mouse. For games started from the headset (VR controller games); off by default: the green passthrough screen is for games
-            // started from the desktop (UEVR). While on, the passthrough key colour is not shown between games.
-            var mirrorRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
-            mirrorRow.Controls.Add(mirror);
-            var mirrorText = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
-            mirrorText.Controls.Add(new Label { Text = "Mirror Windows desktop between sessions", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 4, 0, 0) });
-            mirrorText.Controls.Add(new Label { Text = "A monitor-sized screen floats in front of you on the green passthrough background when no game runs, and follows you when you turn away. Your right hand is the mouse (pinch = click).", AutoSize = true, Font = Ui.Body, ForeColor = Color.DimGray, MaximumSize = new Size(560, 0), Margin = new Padding(0) });
-            mirrorRow.Controls.Add(mirrorText);
-            var between = new GroupBox { Text = "Between games", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
-            mirrorRow.Font = Ui.Body; mirrorRow.Dock = DockStyle.Fill;
-            between.Controls.Add(mirrorRow);
-            tips.SetToolTip(fgRate, "How fast the game renders, as a fraction of the display rate; the streamer generates the frames in between. 1/2 is the default.");
-            tips.SetToolTip(fgRecommend, "The slider is set from this game's recorded runs on this headset (config\\games\\<game>.json): the fastest rate whose typical 10-second window repeated under 5 % of the headset's periods; a rate that filled its cap suggests the next one once. Untick to choose yourself.");
-            tips.SetToolTip(recenter, "Turn the tracking space so your current forward is forward and your position the origin (done by the streamer on its own at every game start; the recenter key (End by default, set in the wizard) does the same while playing).");
-            tips.SetToolTip(fgMv, "Synthesise from the game's DLSS motion vectors when the OptiScaler-DLSSMotionVectorExtractor DLL is in the game folder (else optical flow).");
-            live.Controls.Add(lt);
-            body.Controls.Add(live);
-            body.Controls.Add(between);
+            GroupBox Group(string title, Control content)
+            {
+                var g2 = new GroupBox { Text = title, AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
+                content.Font = Ui.Body; content.Dock = DockStyle.Fill;
+                g2.Controls.Add(content);
+                return g2;
+            }
+            FlowLayoutPanel Col() => new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill };
+            FlowLayoutPanel Row() => new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
 
-            // debug logging is a diagnostic aid, off unless asked for: it is switched on in the Game history window; here only a notice while it is on
-            debugNotice.Controls.Add(new Label { Text = "Debug logging is on (files in logs\\debug\\).", AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(3, 7, 6, 0) });
-            var debugOff = new Button { Text = "Turn off", AutoSize = true };
-            debugOff.Click += (s, e) => debug.Checked = false;
-            debugNotice.Controls.Add(debugOff);
-            body.Controls.Add(debugNotice);
+            // Frame generation: the switch, the game's rate (Auto = proposed from the game's recorded runs, or 1/3, 1/2, 2/3 of the display rate) and the vectors tick
+            // (shown only where the extractor DLL is installed). The explanations are tooltips; the last session's vectors line (U6) sits under the tick.
+            fgRateText.On = t => { foreach (var c in new Control[] { frameGen, fgRecommend }.Concat(fgRate.Controls.Cast<Control>())) tips.SetToolTip(c, t); };
+            var fgCol = Col();
+            var fgRow = Row();
+            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate);
+            fgCol.Controls.Add(fgRow);
+            fgMv.Margin = new Padding(3, 4, 0, 0);
+            fgCol.Controls.Add(fgMv);
+            body.Controls.Add(Group("Frame generation", fgCol));
+
+            // Position: eye height (Auto = the headset's own floor estimate, Vision Pro only; Manual = the typed value) and Recenter
+            var posRow = Row();
+            posRow.Controls.Add(new Label { Text = "Eye height", AutoSize = true, Margin = new Padding(3, 7, 6, 0) });
+            posRow.Controls.Add(heightMode);
+            heightBox.Margin = new Padding(8, 2, 2, 0);
+            posRow.Controls.Add(heightBox);
+            posRow.Controls.Add(new Label { Text = "m", AutoSize = true, Margin = new Padding(0, 7, 6, 0) });
+            posRow.Controls.Add(heightReport);
+            recenter.Margin = new Padding(16, 0, 3, 0);
+            posRow.Controls.Add(recenter);
+            body.Controls.Add(Group("Position", posRow));
+
+            // Picture: the two settings people touch; the rest behind Advanced
+            var pic = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Font = Ui.Body, Margin = new Padding(0) };
+            var adv = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Font = Ui.Body };
+            AddKnob(pic, "Gamma", 50, 200, AppSettings.DefaultGamma, () => settings.Gamma, v => settings.Gamma = v, "Above 1 is brighter.");
+            AddKnob(pic, "Sharpening", 0, 100, 0, () => settings.Sharpening, v => settings.Sharpening = v);
+            AddKnob(adv, "Brightness", -30, 30, 0, () => settings.Brightness, v => settings.Brightness = v);
+            AddKnob(adv, "Contrast", -30, 30, 0, () => settings.Contrast, v => settings.Contrast = v);
+            AddKnob(adv, "Saturation", -50, 50, 0, () => settings.Saturation, v => settings.Saturation = v, "Below 0: less vivid.");
+            var reset = new Button { Text = "Defaults", AutoSize = true, Margin = new Padding(3, 4, 3, 3) };
+            reset.Click += (s, e) => { foreach (var k in knobs) k.Bar.Value = (int)Math.Round(k.Def * 100); };
+            tips.SetToolTip(reset, "Gamma 1.2, the rest neutral.");
+            var picCol = Col();
+            picCol.Controls.Add(pic);
+            picCol.Controls.Add(Ui.Expander("Advanced", adv));
+            picCol.Controls.Add(reset);
+            body.Controls.Add(Group("Picture", picCol));
+
+            // Desktop mirror: a switch only (the streamer starts bin\mirrordesktop.exe between games while a headset is connected; docs/DESKTOP_MIRROR.md)
+            var mirrorRow = Row();
+            mirrorRow.Controls.Add(mirror);
+            body.Controls.Add(Group("Desktop mirror", mirrorRow));
+            tips.SetToolTip(mirror, "Between games the headset shows the Windows desktop on a floating screen; your hand is the mouse (pinch = click). Off by default.");
+            tips.SetToolTip(fgRecommend, "Auto: the rate is set from this game's recorded runs on this headset, the fastest one that stayed clean. Pick 1/3, 1/2 or 2/3 yourself to leave Auto.");
+            tips.SetToolTip(recenter, "Forward becomes forward and your position the origin. Done at every game start; the recenter key (End by default) does the same while playing.");
+            tips.SetToolTip(fgMv, "Generate from the game's DLSS motion vectors when the extractor DLL is in the game folder (else optical flow).");
+            tips.SetToolTip(heightMode, "Auto: the headset's own floor estimate, right when it saw the room (start standing). Manual: the value you type (about 1.30 m seated).");
+            tips.SetToolTip(heightBox, "Eye height above the floor, 0.5-2.2 m.");
+
+            // debug and feedback: always visible, on or off (U3)
+            var dbgRow = Row();
+            dbgRow.Margin = new Padding(0, 8, 0, 0);
+            var exportBtn = new Button { Text = "Export logs...", AutoSize = true };
+            var openLogs = new Button { Text = "Open logs folder", AutoSize = true };
+            exportStatus.Visible = exportLink.Visible = false;
+            exportLink.LinkClicked += (s, e) => LogExport.Reveal(exportLink.Tag as string);
+            exportBtn.Click += (s, e) => LogExport.Run(this, currentExe.Length > 0 ? Games.Stem(currentExe) : null, exportStatus, exportLink);
+            openLogs.Click += (s, e) => { Directory.CreateDirectory(Paths.Logs); Process.Start("explorer.exe", Paths.Logs); };
+            debug.Margin = new Padding(3, 6, 12, 0);
+            tips.SetToolTip(debug, "Writes files to logs\\debug\\ (costs about 4.6 ms per frame): turn it on to report a problem, off after.");
+            dbgRow.Controls.Add(debug); dbgRow.Controls.Add(exportBtn); dbgRow.Controls.Add(openLogs);
+            body.Controls.Add(dbgRow);
+            var exportRow = Row();
+            exportRow.Controls.Add(exportStatus); exportRow.Controls.Add(exportLink);
+            body.Controls.Add(exportRow);
             footer.ForeColor = Color.DimGray;
             body.Controls.Add(footer);
 
@@ -198,14 +205,22 @@ namespace VisionALVR
 
 
             debug.Checked = settings.Debug;
-            debugNotice.Visible = debug.Checked;
             debug.CheckedChanged += (s, e) =>
             {
-                debugNotice.Visible = debug.Checked;
                 host.Send("debug " + (debug.Checked ? "on" : "off"));
                 settings.Debug = debug.Checked;
                 settings.Save();
             };
+            heightBox.Value = (decimal)Math.Max(0.5, Math.Min(2.2, settings.Height > 0 ? settings.Height : AppSettings.DefaultHeight));
+            UpdateHeightUi();
+            heightMode.ValueChanged += (s, e) =>
+            {
+                if (heightUiFromCode) return;
+                settings.HeightMode = heightMode.Value == 0 ? "auto" : "manual"; settings.Save();
+                Log.Write("INFO", "eye height " + settings.HeightMode);
+                UpdateHeightUi(); SendDisplay();
+            };
+            heightBox.ValueChanged += (s, e) => { settings.Height = (double)heightBox.Value; settings.Save(); if (!HeightAuto) SendDisplay(); };
             mirrorTimer.Tick += (s, e) => MirrorStart();
             frameGen.Checked = settings.FrameGen;
             mirror.Checked = settings.MirrorDesktop;
@@ -229,7 +244,7 @@ namespace VisionALVR
             // "uncapped" (config only) shows at the 2/3 position and is kept until the slider moves
             var savedRate = Array.IndexOf(FgRates, settings.FrameGenRate);
             fgRate.Value = savedRate >= 0 ? savedRate : (settings.FrameGenRate == "uncapped" ? 2 : 1);
-            fgRateText.Text = settings.FrameGenRate == "uncapped" ? "uncapped (config): the game runs free, every frame sent is interpolated" : FgRateText[fgRate.Value];
+            fgRateText.Text = settings.FrameGenRate == "uncapped" ? "Uncapped (set in the config file)." : FgRateText[fgRate.Value];
             fgMv.Checked = settings.GameMotionVectors;
             fgRecommend.Checked = settings.FrameGenRecommended;
             fgEnable();
@@ -260,6 +275,7 @@ namespace VisionALVR
             recenter.Click += (s, e) => { host.Send("recenter"); Log.Write("INFO", "recenter"); };
 
 
+            host.OnSend += l => Sent.Add(l);
             host.OnEvent += (name, data) => BeginInvoke((Action)(() => HostEvent(name, data)));
             host.OnExit += code => BeginInvoke((Action)(() => HostExited(code)));
             Shown += (s, e) =>
@@ -329,8 +345,8 @@ namespace VisionALVR
                         var st = t.Result;
                         var bad = st == FirewallState.Blocked || st == FirewallState.Missing;
                         fwWarn.Visible = fwFix.Visible = bad;
-                        fwWarn.Text = st == FirewallState.Blocked ? "Windows Firewall BLOCKS alvr_host.exe in this folder (a dismissed Windows prompt does that): the headset will not be found and cannot connect."
-                                    : "Windows Firewall has no rule for alvr_host.exe in this folder: the headset may not be found or may not connect until it is allowed (the rule belongs to this exact folder).";
+                        fwWarn.Text = st == FirewallState.Blocked ? "Windows Firewall blocks alvr_host.exe: the headset cannot connect."
+                                    : "No Windows Firewall rule for alvr_host.exe in this folder: the headset may not connect.";
                         Log.Write(bad ? "WARN" : "INFO", "firewall: " + st);
                     }));
                 }
@@ -363,8 +379,8 @@ namespace VisionALVR
         // The eye-height override exists for the Vision Pro, whose floor estimate is unreliable. A Quest (or any other headset) reports its
         // floor height correctly, and the override only displaced the user (Valor Mortis, 2026-10-17): for those the knob is greyed out and
         // the host is handed 0 = the headset's own floor; the saved value stays for the next Vision Pro session.
-        Knob heightKnob;
-        bool heightFromHeadset;
+        bool heightFromHeadset, heightUiFromCode;
+        double reportedHeight;
         Action fgEnableAll;
 
         // The proposal from config\games\<exe>.json for the running game on the connected headset (null = no run recorded). Levels in order; a level
@@ -419,18 +435,18 @@ namespace VisionALVR
             var rec = Recommend(currentExe, headsetName);
             if (rec == null)
             {
-                fgRateText.Text = $"No run recorded yet for {currentExe} on {headsetName}: the slider is yours; the run is recorded when the game ends.";
+                fgRateText.Text = $"No run recorded yet for {currentExe} on {headsetName}.";
             }
             else if (apply)
             {
                 var pos = Array.IndexOf(FgRates, rec.Value.level);
                 if (pos >= 0 && fgRate.Value != pos) fgRate.Value = pos;   // sends frame_gen_rate and saves, like a hand move
                 recommendationApplied = true;
-                fgRateText.Text = $"Recommended for {currentExe} on {headsetName}: {rec.Value.why}";
+                fgRateText.Text = $"Auto for {currentExe}: {rec.Value.why}";
             }
             else
             {
-                fgRateText.Text = $"Recorded for {currentExe} on {headsetName}: {rec.Value.why} (untick Recommended keeps the slider yours)";
+                fgRateText.Text = $"Recorded for {currentExe}: {rec.Value.why}";
             }
             fgEnableAll?.Invoke();
         }
@@ -442,16 +458,28 @@ namespace VisionALVR
             var fromHeadset = !headsetName.Contains("Apple");
             if (fromHeadset == heightFromHeadset) return;
             heightFromHeadset = fromHeadset;
-            heightKnob.Bar.Enabled = !fromHeadset;
-            tips.SetToolTip(heightKnob.Bar, fromHeadset ? $"{headsetName} reports its own floor height: the override is off for it." : "Your eye height above the floor, as games see it: about 1.30 m seated, 1.6-1.7 m standing; 0 = the headset's own floor estimate.");
+            UpdateHeightUi();
             SendDisplay();
+        }
+
+        // Auto (or any non-Apple headset, whose floor is right) sends 0 = the headset's own floor estimate; Manual sends the typed value
+        bool HeightAuto => heightFromHeadset || settings.HeightMode == "auto";
+        void UpdateHeightUi()
+        {
+            heightUiFromCode = true;
+            heightMode.Enabled = !heightFromHeadset;
+            heightMode.Value = HeightAuto ? 0 : 1;
+            heightBox.Enabled = !HeightAuto;
+            heightReport.Visible = HeightAuto && reportedHeight > 0;
+            heightReport.Text = reportedHeight > 0 ? "headset reports " + reportedHeight.ToString("0.00", CultureInfo.InvariantCulture) + " m" : "";
+            heightUiFromCode = false;
         }
 
         void SendDisplay()
         {
             string f(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
             host.Send("gamma " + f(settings.Gamma));
-            host.Send("height " + f(heightFromHeadset ? 0 : settings.Height));
+            host.Send("height " + f(HeightAuto ? 0 : settings.Height));
             host.Send($"color {f(settings.Brightness)} {f(settings.Contrast)} {f(settings.Saturation)} {f(settings.Sharpening)}");
         }
 
@@ -472,7 +500,7 @@ namespace VisionALVR
                 Log.Write("ERROR", err);
                 return;
             }
-            footer.Text = "Streamer running. Open the ALVR app on the headset; it connects by itself. Close this window to stop.";
+            footer.Text = "Streamer running. Open ALVR on the headset.";
             Log.Write("INFO", "streamer started: alvr_host " + args);
         }
 
@@ -621,8 +649,7 @@ namespace VisionALVR
                         tLatency.Set(latBad ? "n/a" : F(D(net, "latency_ms"), "0") + " ms", latBad ? "not measured" : $"p95 {F(D(net, "latency_p95_ms"), "0")}", null, latBad ? Latency.Why : null);
                         tLoss.Set(F(D(net, "packets_lost"), "0"), "packets lost", D(net, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
                         stats.Visible = true;
-                        stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} % (game under the cap), skipped {F(D(d, "skipped") * 100, "0.0")} %. " +
-                                     $"Frame generation recommendation: {(rec == null ? "none yet" : (ri >= 0 ? names[ri] : rec.Value.level) + " next time (" + rec.Value.why + ")")}";
+                        stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} %, skipped {F(D(d, "skipped") * 100, "0.0")} %." + (rec == null ? "" : $"  Next time: {(ri >= 0 ? names[ri] : rec.Value.level)}.");
                         OfferDll(d);
                     }
                     break;
@@ -647,6 +674,9 @@ namespace VisionALVR
                         stats.Text = ""; stats.Visible = false;
                     }
                     break;
+                case "height_calibrated":
+                    reportedHeight = D(d, "headset_y"); UpdateHeightUi();
+                    break;
                 case "encode_error":
                     footer.Text = "Encode error: " + S(d, "message");
                     break;
@@ -654,8 +684,41 @@ namespace VisionALVR
         }
 
         /// uitest.exe: the fullest the window gets (long lines, the firewall warning, every tile filled), to audit the layout at any size and scale.
+        /// Commands sent to the engine, in order (the test harness reads them; the live window ignores them).
+        public readonly List<string> Sent = new List<string>();
+
+        /// Operates a control the way a person would (harness/streamer_events.py): name = frame_gen | rate | auto | mv | recenter | height_mode | height | gamma | sharpening | brightness | contrast | saturation | debug | mirror.
+        public void UiAction(string name, string value)
+        {
+            bool on = value == "on";
+            void bar(string n) { var k = knobs.First(x => x.Bar.AccessibleName == n); k.Bar.Value = (int)Math.Round(double.Parse(value, CultureInfo.InvariantCulture) * 100); }
+            switch (name)
+            {
+                case "frame_gen": frameGen.Checked = on; break;
+                case "rate": fgRate.Value = int.Parse(value); break;
+                case "auto": fgRecommend.Checked = on; break;
+                case "mv": fgMv.Checked = on; break;
+                case "recenter": recenter.PerformClick(); break;
+                case "height_mode": heightMode.Value = value == "auto" ? 0 : 1; break;
+                case "height": heightBox.Value = decimal.Parse(value, CultureInfo.InvariantCulture); break;
+                case "gamma": bar("Gamma"); break;
+                case "sharpening": bar("Sharpening"); break;
+                case "brightness": bar("Brightness"); break;
+                case "contrast": bar("Contrast"); break;
+                case "saturation": bar("Saturation"); break;
+                case "debug": debug.Checked = on; break;
+                case "mirror": mirror.Checked = on; break;
+            }
+        }
+        public decimal HeightMin => heightBox.Minimum;
+        public decimal HeightMax => heightBox.Maximum;
+
+        public void DemoDebugOn() { debug.Checked = true; settings.Debug = false; settings.Save(); exportStatus.Text = "Saved to C:\\Users\\someone\\Documents\\VisionALVR-logs-20261020-1200.zip"; exportStatus.ForeColor = Color.SeaGreen; exportStatus.Visible = exportLink.Visible = true; }
+
         public void ApplyDemoState(bool worstCase = true)
         {
+            HostEvent("client_connected", new Dictionary<string, object> { { "name", "Apple Vision Pro" }, { "ip", "192.168.1.50" } });
+            HostEvent("height_calibrated", new Dictionary<string, object> { { "headset_y", 1.62 } });
             headset.Text = worstCase ? "Headset: connected - Apple Vision Pro of a person with a long name (192.168.100.123)" : "Headset: connected - Apple Vision Pro (192.168.1.50)"; headset.ForeColor = Color.SeaGreen;
             demoMv = true; ShowMvTick();
             runtime.Text = "GPU: NVIDIA GeForce RTX 5090 (Blackwell, driver 617.42)   \u00B7   OpenXR runtime: VisionALVR (this folder)";
@@ -669,13 +732,13 @@ namespace VisionALVR
                 return;
             }
             NeedFind(true);
-            fwWarn.Text = "Windows Firewall blocks alvr_host.exe: the headset will not be found by discovery and the stream may not connect."; fwWarn.Visible = fwFix.Visible = true;
+            fwWarn.Text = "Windows Firewall blocks alvr_host.exe: the headset cannot connect."; fwWarn.Visible = fwFix.Visible = true;
             game.Text = "Game: Cyberpunk2077.exe (Cyberpunk 2077) after 123 min";
             tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at 1/2"); tShown.Set("144.4 fps", "repeated periods 12.3 %", Color.Firebrick);
             tBitrate.Set("1000 Mbps", "average"); tLatency.Set("123 ms", "enc 12 + net 12 + dec 12"); tLoss.Set("1234", "packets lost", Color.Firebrick);
-            stats.Visible = true; stats.Text = "Host repeats 12.3 % (game under the cap), skipped 12.3 %. Frame generation recommendation: 1/2 next time (1/2: last run 44 fps, 38 in its slowest tenth, headset repeated 1.2 % typical (5.6 % in its heavy parts), host repeats 0.0 %)";
+            stats.Visible = true; stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: 1/2.";
             fgRateText.Text = FgRateText[2];
-            footer.Text = "config\\session.json is missing and there is no config\\session.default.json to create it from: this VisionALVR folder is incomplete. Unzip the release again (you can keep your config\\ folder).";
+            footer.Text = "config\\session.json is missing: this folder is incomplete. Unzip the release again (keep your config\\ folder).";
             footer.ForeColor = Color.Firebrick;
         }
 

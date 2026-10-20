@@ -82,7 +82,7 @@ mirror scenarios (`e2e_mirror`, `e2e_mirror_desktop`).
 
 ### Game history (`bin\performance.exe`)
 Left: the games with a record (newest first; **the desktop mirror is not listed**). Right, for the selected game: name and path; the last session in one line
-(date, minutes, headset, generation level); four tiles (Game fps, Headset shows, Latency, DLSS vectors) and *More numbers*; the sessions table (the last ones, newest
+(date, minutes, headset, generation level); four tiles (Game fps, Headset shows, Latency, DLSS vectors) and *More numbers*; under them ALVR's own breakdown on one line, `Streamer latency N ms = encoder + transport + decoder` (n/a when not believable); the sessions table (the last ones, newest
 first: date, headset, generation, minutes, game fps, shown fps, repeated %, latency, vectors); the DLL line (one status and one action: Install / Update / Remove /
 Restore); *Export log...*, *Forget this game*; a post-run line under the tiles (orange: vectors did not reach the streamer; the wording is the one of the
 streamer's Frame generation component). *Troubleshooting and settings* (collapsed): debug logging, auto-delete of uninstalled games' logs, *Open logs folder*.

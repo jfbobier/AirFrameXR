@@ -33,5 +33,6 @@ for game in ("Cyberpunk2077.exe", "LiesOfP-Win64-Shipping.exe", "mirrordesktop.e
     if stem == "LiesOfP-Win64-Shipping":
         check("absurd latency shows n/a", "n/a" in txt and "4958802102" not in txt and "4958802102" not in txt.replace(" ", ""), "no n/a or the number leaked")
     if stem == "Cyberpunk2077":
+        check("streamer latency line (encoder + transport + decoder)", "Streamer latency 33 ms = encoder 6 + transport 12 + decoder 15" in txt, "line missing or wrong")
         check("list holds the real games", "item Lies of P" in txt, "games missing")
 sys.exit(1 if fails else 0)

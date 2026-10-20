@@ -187,15 +187,23 @@ namespace VisionALVR
                 more.Controls.Add(Ui.MakeTile("Packets lost", N(lost, "0"), "during the session", lost > 0 ? Color.Firebrick : (Color?)null));
             }
             var all = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
-            all.Controls.Add(main); all.Controls.Add(Ui.Expander("More numbers", more));
+            all.Controls.Add(main);
+            if (net != null)
+            {
+                // ALVR's own stats line, to tell a slow encoder or decoder from a slow network: streamer latency = encoder + transport + decoder
+                double enc = D(net, "encode_ms"), tr = D(net, "network_ms"), dec = D(net, "decode_ms");
+                var st = Latency.Streamer(enc, tr, dec, D(net, "latency_outliers"), D(net, "latency_samples"));
+                all.Controls.Add(new Label { AutoSize = true, Font = Ui.Body, Margin = new Padding(3, 0, 3, 4),
+                    Text = st == null ? "Streamer latency: n/a" : $"Streamer latency {N(st.Value, "0")} ms = encoder {N(enc, "0")} + transport {N(tr, "0")} + decoder {N(dec, "0")}" });
+            } all.Controls.Add(Ui.Expander("More numbers", more));
             return all;
         }
 
         Control SessionList(List<Dictionary<string, object>> sessions)
         {
             var lv = new ListView { View = View.Details, FullRowSelect = true, GridLines = false, Height = 150, Width = Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3) };
-            string[] cols = { "Date", "Headset", "Generation", "Minutes", "Game fps", "Shown fps", "Repeated %", "Latency ms", "Vectors" };
-            int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 70 };
+            string[] cols = { "Date", "Headset", "Generation", "Minutes", "Game fps", "Shown fps", "Repeated %", "Latency ms", "Enc+net+dec ms", "Vectors" };
+            int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 90, 70 };
             for (int i = 0; i < cols.Length; i++) Ui.Col(lv, cols[i], w[i]);
             right.Resize += (s, e) => lv.Width = Math.Max(400, right.ClientSize.Width - 40);
             foreach (var s in Enumerable.Reverse(sessions))
@@ -203,6 +211,7 @@ namespace VisionALVR
                 var net = O(s, "net"); var mv = O(s, "mv");
                 lv.Items.Add(new ListViewItem(new[] { When(s), S(s, "headset"), Mode(S(s, "level")).Replace("generation ", ""), N(D(s, "seconds") / 60), N(D(s, "rendered_fps")), net != null ? N(D(net, "displayed_fps")) : "-",
                     N(D(s, "headset_repeated_typ") * 100), net != null ? Latency.Text(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) : "-",
+                    net != null ? (Latency.Streamer(D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) is double sl ? N(sl, "0") : "n/a") : "-",
                     mv != null ? (D(mv, "frames") > 0 ? "working" : "-") : "-" }));
             }
             Ui.FitColumns(lv);

@@ -49,6 +49,9 @@ namespace VisionALVR
             yield return new Case { Name = "streamer", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState() };
             yield return new Case { Name = "streamer-clean", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };
             yield return new Case { Name = "streamer-empty", Make = () => new RuntimeForm(null) };
+            yield return new Case { Name = "streamer-avp-auto", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };   // the fixture config has no height set: a Vision Pro starts on Auto
+            yield return new Case { Name = "streamer-quest", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_connected", new Dictionary<string, object> { { "name", "Meta Quest 3" }, { "ip", "192.168.1.60" } }); } };
+            yield return new Case { Name = "streamer-debug-on", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoDebugOn(); } };
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             for (int p = 0; p <= 6; p++)
             {
@@ -199,11 +202,13 @@ namespace VisionALVR
                     if (line.Trim().Length == 0 || line.TrimStart().StartsWith("#")) continue;
                     var d = global::VisionALVR.Json.Parse(line);
                     n++;
-                    if (d.TryGetValue("dump", out var lab)) { dump(Convert.ToString(lab)); continue; }
+                    if (d.TryGetValue("dump", out var lab)) { dump(Convert.ToString(lab)); foreach (var c in f.Sent) o.AppendLine("sent " + c); continue; }
+                    if (d.TryGetValue("ui", out var ui)) { f.Sent.Clear(); f.UiAction(Convert.ToString(ui), d.TryGetValue("value", out var uv) ? Convert.ToString(uv) : ""); continue; }
                     if (!d.TryGetValue("event", out var ev)) continue;
                     f.HostEvent(Convert.ToString(ev), d.TryGetValue("data", out var x) ? x as Dictionary<string, object> : null);
                 }
                 dump("end");
+                o.AppendLine("range height " + f.HeightMin.ToString(CultureInfo.InvariantCulture) + " " + f.HeightMax.ToString(CultureInfo.InvariantCulture));
                 try { using (var bmp = new Bitmap(f.Width, f.Height)) { f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height)); bmp.Save(Path.Combine(outDir, "replay.png"), ImageFormat.Png); } } catch { }
             }
             File.WriteAllText(Path.Combine(outDir, "replay.txt"), o.ToString());
