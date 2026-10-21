@@ -14,6 +14,7 @@ import lib
 
 ROOT = lib.ROOT
 PC = "Realtek"
+MIC = "icro"   # a recording device whose name has this (Microphone / Prise microphone); skipped when none is active
 SINK = PC   # the mock headset plays into the (muted) PC speakers: nothing audible, and its process loopback hears it whatever the output's mute; the 16ch cable answered DEVICE_IN_USE and process loopback silence
 rid = "audio_chain"
 rd = f"runs\\{rid}"
@@ -83,8 +84,18 @@ lib.b_put(tone, "runs/audio/tone.wav")
 try:
     route(f'setdefault "{PC}"'); route(f'mute "{PC}" 0'); route(f'set "{PC}" 0.55'); route(f'set "CABLE Input" 0.40')
     # -- control: the speakers' loopback hears a tone played to the default output
-    ctl = level(chain(f'control "{level_exe}" "{base}\\runs\\audio\\tone.wav" "{PC}"'), "control_speakers")
+    route(f'set "{PC}" 1.0')   # the control is as loud as it gets: the laptop's microphone array is a weak witness
+    mic_base = chain(f'micbaseline "{level_exe}" "{MIC}"')
+    mic_on = not any("ERROR" in l for l in mic_base if l.startswith("mic_baseline"))
+    print("microphone:", "present" if mic_on else "none active (the builder's only microphone endpoint is not enumerated): the acoustic check is skipped")
+    ctl_lines = chain(f'control "{level_exe}" "{base}\\runs\\audio\\tone.wav" "{PC}" "{MIC}"')
+    ctl = level(ctl_lines, "control_speakers")
+    route(f'set "{PC}" 0.55')
     check("control: the speakers' loopback hears a tone (the measurement works)", ctl is not None and ctl[1] > 0.05, ctl)
+    if mic_on:
+        mb, mc = level(mic_base, "mic_baseline"), level(ctl_lines, "control_mic")
+        print("microphone: room", mb, "tone from the speakers", mc)
+        # informational only: the room is noisy and varies between runs; the positive control that counts is the unmuted client output during the run, under the same noise
 
     # -- the portable folder as a user unzips it, a trusted mock client, the streamer
     lib.kill_stale()
@@ -104,7 +115,7 @@ try:
     time.sleep(12)   # connected, streaming, the music playing (each helper call below takes ~10 s: the app runs 85 s)
     runs_lv, during_state = [], None
     for i in range(3):   # the music starts a few seconds after the scene loads and the headset's buffer a little later: the best of three measurements counts
-        lv = chain(f'levels "{level_exe}" 6 "{PC}" "{SINK}" "{base}\\runs\\audio\\proc_loopback.exe"')
+        lv = chain(f'levels "{level_exe}" 6 "{PC}" "{SINK}" "{base}\\runs\\audio\\proc_loopback.exe" "{MIC if mic_on else ''}"')
         print(f"levels #{i + 1}:", " | ".join(lv))
         runs_lv.append(lv)
         if during_state is None:
@@ -124,7 +135,15 @@ try:
     check("during: the PC speakers are muted, their volume unchanged", during_state["device"][pc] == (0.55, True), during_state["device"][pc])
     c, s, k = best("cable"), quiet("speakers"), best("sink")
     check("during: the cable carries the scene's music (loopback)", c is not None and c[1] > 0.01, c)
-    print("info: the muted speakers' own loopback reads", s, "(an output's mute does not silence its loopback, so it proves nothing; the builder has no microphone: the mute is checked on the endpoint state above)")
+    if mic_on:
+        # the same stream, the same fan noise (the GPU is busy): the client plays into the PC speakers, muted by the streamer; unmuted for a few seconds it must be heard
+        mm = max((level(l, "mic") or (0, 0) for l in runs_lv), key=lambda v: v[1])
+        route(f'mute "{PC}" 0')
+        mu = level(chain(f'micbaseline "{level_exe}" "{MIC}"'), "mic_baseline")
+        route(f'mute "{PC}" 1')
+        print("microphone: muted", mm, "unmuted", mu)
+        check("during: the microphone hears the client's output only when the PC speakers are unmuted (muted = silent)", mu is not None and mu[1] > 3 * mm[1], (mm, mu))
+    print("info: the muted speakers' own loopback reads", s, "(an output's mute does not silence its loopback, so it proves nothing; the microphone check above is the acoustic proof)")
     check("during: the mock headset received the audio over the network and played it (process loopback of the client)", k is not None and k[1] > 0.01, k)
     check("after: the streamer exited when its window was closed", any("exited" in l for l in close), close)
     check("after: defaults are back on the PC output, speakers unmuted", all(after["default"].get(r) == pc for r in ("console", "multimedia", "communications")) and after["device"][pc][1] is False, (after["default"], after["device"][pc]))

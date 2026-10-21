@@ -1,13 +1,16 @@
 # Lab helper (harness/audio_chain_check.py), interactive session.
 #   audio_chain.ps1 levels <audio_level.exe> <seconds> <pc name part> <sink name part (unused)> <proc_loopback.exe>   -> the cable's and the speakers' loopback, then what the mock client process plays
 #   audio_chain.ps1 control <audio_level.exe> <tone.wav> <pc name part>                  -> a tone played to the default output: the speakers' loopback must hear it
+#   audio_chain.ps1 micbaseline <audio_level.exe> <mic name part>
 #   audio_chain.ps1 closestreamer                                                         -> closes the streamer window, prints how long it took to exit
-param([string]$Action, [string]$A = "", [string]$B = "", [string]$C = "", [string]$D = "", [string]$E = "")
+param([string]$Action, [string]$A = "", [string]$B = "", [string]$C = "", [string]$D = "", [string]$E = "", [string]$F = "")
 function Start-Level($exe, $mode, $part, $sec, $file) { Start-Process -FilePath $exe -ArgumentList "$mode `"$part`" $sec" -PassThru -WindowStyle Hidden -RedirectStandardOutput $file }
 if ($Action -eq "levels") {
   $t = [IO.Path]::GetTempPath()
   $jobs = @(@{ n = "cable"; p = (Start-Level $A loopback "CABLE Input" $B "$t\lv_cable.txt") }, @{ n = "speakers"; p = (Start-Level $A loopback $C $B "$t\lv_spk.txt") })
+  $mic = if ($F) { Start-Level $A capture $F $B "$t\lv_mic.txt" }
   $jobs | ForEach-Object { [void]$_.p.WaitForExit(60000) }
+  if ($mic) { [void]$mic.WaitForExit(60000); "mic: " + (Get-Content "$t\lv_mic.txt" -ErrorAction SilentlyContinue) }
   "cable: "    + (Get-Content "$t\lv_cable.txt" -ErrorAction SilentlyContinue)
   "speakers: " + (Get-Content "$t\lv_spk.txt" -ErrorAction SilentlyContinue)
   # what the mock headset plays: process loopback of the client process (the 16ch sink device itself answers DEVICE_IN_USE to a second loopback client)
@@ -19,9 +22,14 @@ elseif ($Action -eq "control") {
   $player = Start-Process powershell -PassThru -WindowStyle Hidden -ArgumentList "-NoProfile -Command `"(New-Object Media.SoundPlayer '$B').PlayLooping(); Start-Sleep 12`""
   Start-Sleep -Seconds 2
   $t = [IO.Path]::GetTempPath()
-  $p = Start-Level $A loopback $C 3 "$t\lv_ctl.txt"; [void]$p.WaitForExit(30000)
+  $p = Start-Level $A loopback $C 3 "$t\lv_ctl.txt"; $m = Start-Level $A capture $D 3 "$t\lv_ctlmic.txt"; [void]$p.WaitForExit(30000); [void]$m.WaitForExit(30000)
   "control_speakers: " + (Get-Content "$t\lv_ctl.txt" -ErrorAction SilentlyContinue)
+  "control_mic: " + (Get-Content "$t\lv_ctlmic.txt" -ErrorAction SilentlyContinue)
   Stop-Process -Id $player.Id -Force
+}
+elseif ($Action -eq "micbaseline") {   # the room, nothing playing
+  $t = [IO.Path]::GetTempPath(); $m = Start-Level $A capture $B 3 "$t\lv_base.txt"; [void]$m.WaitForExit(30000)
+  "mic_baseline: " + (Get-Content "$t\lv_base.txt" -ErrorAction SilentlyContinue)
 }
 elseif ($Action -eq "closestreamer") {
   $p = Get-Process streamer -ErrorAction SilentlyContinue | Select-Object -First 1
