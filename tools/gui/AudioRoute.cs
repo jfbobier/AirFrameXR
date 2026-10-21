@@ -427,4 +427,107 @@ namespace VisionALVR
             Ui.AutoFitWindow(this, null, col);
         }
     }
+
+    /// Measures the PC's sound with Windows' process loopback, the capture API the host uses in "process" mode (everything except this process): the wizard's audio test calls it while the
+    /// scene plays its music. Same calls as harness/probes/proc_loopback.cs. Error = Windows without the API (before Windows 10 2004) or the activation refused.
+    public static class ProcessLoopbackMeter
+    {
+        [ComImport, Guid("41D949AB-9862-444A-80F6-C261334DA5EB"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IActivateCompletionHandler { void ActivateCompleted(IActivateAsyncOperation op); }
+        [ComImport, Guid("72A22D78-CDE4-431D-B8CC-843A71199B6D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IActivateAsyncOperation { void GetActivateResult(out int hr, [MarshalAs(UnmanagedType.IUnknown)] out object iface); }
+        [ComImport, Guid("94EA2B94-E9CC-49E0-C0FF-EE64CA8F5B90"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IAgile { }
+        [ComImport, Guid("1CB9AD4C-DBFA-4C32-B178-C2F568A703B2"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IClient
+        {
+            [PreserveSig] int Initialize(int shareMode, uint flags, long bufferDuration, long periodicity, IntPtr format, IntPtr sessionGuid);
+            [PreserveSig] int GetBufferSize(out uint n);
+            [PreserveSig] int GetStreamLatency(out long l);
+            [PreserveSig] int GetCurrentPadding(out uint n);
+            [PreserveSig] int IsFormatSupported(int mode, IntPtr f, out IntPtr closest);
+            [PreserveSig] int GetMixFormat(out IntPtr f);
+            [PreserveSig] int GetDevicePeriod(out long def, out long min);
+            [PreserveSig] int Start();
+            [PreserveSig] int Stop();
+            [PreserveSig] int Reset();
+            [PreserveSig] int SetEventHandle(IntPtr h);
+            [PreserveSig] int GetService(ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object o);
+        }
+        [ComImport, Guid("C8ADBD64-E71E-48A0-A4DE-185C395CD317"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface ICapture
+        {
+            [PreserveSig] int GetBuffer(out IntPtr data, out uint frames, out uint flags, out ulong devPos, out ulong qpcPos);
+            [PreserveSig] int ReleaseBuffer(uint frames);
+            [PreserveSig] int GetNextPacketSize(out uint n);
+        }
+
+        [ClassInterface(ClassInterfaceType.None)]
+        class Handler : IActivateCompletionHandler, IAgile
+        {
+            public readonly ManualResetEvent Done = new ManualResetEvent(false);
+            public int Hr; public object Iface;
+            public void ActivateCompleted(IActivateAsyncOperation op) { op.GetActivateResult(out Hr, out Iface); Done.Set(); }
+        }
+
+        [DllImport("Mmdevapi.dll", ExactSpelling = true, PreserveSig = false)]
+        static extern void ActivateAudioInterfaceAsync([MarshalAs(UnmanagedType.LPWStr)] string path, ref Guid iid, IntPtr activationParams, IActivateCompletionHandler handler, out IActivateAsyncOperation op);
+        [DllImport("kernel32.dll")] static extern IntPtr CreateEvent(IntPtr attributes, bool manualReset, bool initialState, string name);
+        [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle, uint ms);
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+
+        /// Listens for `seconds` to everything the PC plays except this process; peak and rms are 0..1 of 16-bit stereo samples. Returns null on success, else the reason.
+        public static string Measure(double seconds, out double peak, out double rms)
+        {
+            peak = rms = 0;
+            IntPtr prm = IntPtr.Zero, pv = IntPtr.Zero, fmt = IntPtr.Zero, ev = IntPtr.Zero;
+            try
+            {
+                // AUDIOCLIENT_ACTIVATION_PARAMS { PROCESS_LOOPBACK = 1; pid; mode EXCLUDE_TARGET_PROCESS_TREE = 1 } in a VT_BLOB PROPVARIANT (24 bytes on x64)
+                prm = Marshal.AllocHGlobal(12); Marshal.WriteInt32(prm, 0, 1); Marshal.WriteInt32(prm, 4, System.Diagnostics.Process.GetCurrentProcess().Id); Marshal.WriteInt32(prm, 8, 1);
+                pv = Marshal.AllocHGlobal(24); for (int i = 0; i < 24; i++) Marshal.WriteByte(pv, i, 0);
+                Marshal.WriteInt16(pv, 0, 65); Marshal.WriteInt32(pv, 8, 12); Marshal.WriteIntPtr(pv, 16, prm);
+                var h = new Handler(); var iid = typeof(IClient).GUID; IActivateAsyncOperation op;
+                ActivateAudioInterfaceAsync("VAD\\Process_Loopback", ref iid, pv, h, out op);
+                if (!h.Done.WaitOne(10000)) return "the activation timed out";
+                if (h.Hr < 0) return $"the activation was refused (0x{h.Hr:X8})";
+                var client = (IClient)h.Iface;
+                fmt = Marshal.AllocHGlobal(18);   // 48 kHz stereo 16-bit PCM, what the host asks for
+                Marshal.WriteInt16(fmt, 0, 1); Marshal.WriteInt16(fmt, 2, 2); Marshal.WriteInt32(fmt, 4, 48000); Marshal.WriteInt32(fmt, 8, 192000); Marshal.WriteInt16(fmt, 12, 4); Marshal.WriteInt16(fmt, 14, 16); Marshal.WriteInt16(fmt, 16, 0);
+                int hr = client.Initialize(0, 0x00020000u | 0x00040000u | 0x80000000u | 0x08000000u, 200000, 0, fmt, IntPtr.Zero);   // loopback | event | auto-convert | default SRC
+                if (hr < 0) return $"Initialize failed (0x{hr:X8})";
+                ev = CreateEvent(IntPtr.Zero, false, false, null); client.SetEventHandle(ev);
+                var gi = typeof(ICapture).GUID; object o; hr = client.GetService(ref gi, out o);
+                if (hr < 0) return $"GetService failed (0x{hr:X8})";
+                var cap = (ICapture)o;
+                client.Start();
+                double sum = 0; long samples = 0; var end = DateTime.UtcNow.AddSeconds(seconds);
+                while (DateTime.UtcNow < end)
+                {
+                    WaitForSingleObject(ev, 100);
+                    uint n; cap.GetNextPacketSize(out n);
+                    while (n > 0)
+                    {
+                        IntPtr data; uint fr, fl; ulong dp, qp;
+                        if (cap.GetBuffer(out data, out fr, out fl, out dp, out qp) < 0) break;
+                        if ((fl & 2) == 0)
+                            for (int i = 0; i < fr * 2; i++) { double v = Math.Abs(Marshal.ReadInt16(data, i * 2) / 32768.0); if (v > peak) peak = v; sum += v * v; samples++; }
+                        else samples += fr * 2;
+                        cap.ReleaseBuffer(fr); cap.GetNextPacketSize(out n);
+                    }
+                }
+                client.Stop();
+                rms = samples > 0 ? Math.Sqrt(sum / samples) : 0;
+                return null;
+            }
+            catch (Exception ex) { return ex.Message; }
+            finally
+            {
+                if (ev != IntPtr.Zero) CloseHandle(ev);
+                if (fmt != IntPtr.Zero) Marshal.FreeHGlobal(fmt);
+                if (pv != IntPtr.Zero) Marshal.FreeHGlobal(pv);
+                if (prm != IntPtr.Zero) Marshal.FreeHGlobal(prm);
+            }
+        }
+    }
 }

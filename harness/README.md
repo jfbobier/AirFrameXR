@@ -46,6 +46,24 @@ Results: `harness/results/<UTC>_<scenario>/` (`result.json`, `analysis.json`, ho
 `frames.csv`, logs); `harness/results/latest` points at the newest. A scenario is BLOCKED (not FAIL) when the
 infrastructure is missing (builder unreachable, binary or source absent, impossible topology).
 
+## Audio harnesses (2026-10-21)
+
+The game audio has three layers that fail in different ways (Windows' device state, ALVR's capture, the network to the headset), so it is tested from the
+system's side with WASAPI, not from the host's counters. All run from WSL on the builder (stdlib Python plus small C# probes compiled on the builder, `harness/probes/`);
+each prints `CHECK PASS/FAIL` lines. The Core Audio calls only work in the interactive desktop session, so the helpers run as limited scheduled tasks like the OpenXR app.
+
+| Harness | What it checks | Run | Needs |
+|---|---|---|---|
+| `audio_chain_check.py` | the whole chain driven by the streamer: `streamer.exe --test` starts the host in a fresh portable copy, the mock headset connects (it plays the received audio into the PC speakers; the host excludes its process, a real headset is another machine) and `xr_probe` renders Littlest Tokyo with its music. Default mode = process loopback: the default output is left alone, the cable carries nothing, the host log says process loopback, the headset's own process loopback hears the music. `--device` = the cable path: the cable is the default for all three roles, carries the music, the speakers are muted at the endpoint. Both: the streamer exits when its window closes, defaults and mute are restored. With a microphone in a quiet room: the client's output is silent while muted and about 10 times louder unmuted (skipped when the room noise is above rms 0.002) | `python3 harness/audio_chain_check.py [--device]` | `run.py build client probe gui package`; VB-CABLE on the builder |
+| `audio_route_check.py` | the cable path in detail: defaults / mute / 100 % / 2 ch 48 kHz, audio.mute_pc off, a default stolen and the cable muted while running (healed in 7 s), a named device, no cable (`VISIONALVR_FAKE_NO_CABLE=1`), the format fixed from 44.1 kHz, crash recovery | `python3 harness/audio_route_check.py` | `run.py build gui package` |
+| `process_loopback_probe.py` | Windows process loopback from plain .NET (`probes/proc_loopback.cs`): include a process, include another (silent), exclude; at the output muted / 10 % / 100 % and at 44.1 / 96 kHz device formats | `python3 harness/process_loopback_probe.py` | builder only |
+| `elevated_audio_check.py` | an elevated (high integrity) tone player is heard in include and exclude mode by a normal-token process (UEVR and mods run elevated) | `python3 harness/elevated_audio_check.py` | someone accepts the UAC prompt on the builder |
+
+What the lab taught: a muted output's own loopback is not silent (use the microphone or the endpoint state to prove mute); processes started from the SSH session
+live in another logon session and process loopback does not hear them (start the mock headset with `lib.start_limited`); the builder wrapper silently ignores `rmdir` / `del`
+(use `robocopy /MIR` for a clean copy); the VB 16ch cable refuses a second loopback client. The scene music: `tools/bench_scene/sakura_breeze.mp3`
+(credits in `THIRD_PARTY_NOTICES.md`), played by `xr_probe` when it renders a scene (`XR_PROBE_SOUND=0` silences it, `XR_PROBE_SOUND=<file>` picks another).
+
 ## Topology
 Note: a client on a loopback address makes `server_core` treat it as *wired* and force the **TCP** stream protocol, so loopback
 scenarios do not exercise ALVR's UDP stream (the real AVP uses UDP).

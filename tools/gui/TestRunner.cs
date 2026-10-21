@@ -256,6 +256,7 @@ namespace VisionALVR
                     double frames = 0, fpsW = 0, sameTs = 0, trkN = 0, gapP95 = 0, slices = 0, encMs = 0;
                     double w = 0, total = 0, game = 0, enc = 0, net = 0, dec = 0, dq = 0, vq = 0, cf = 0, df = 0, mbps = 0;
                     var host = new HostProcess();
+                    Environment.SetEnvironmentVariable("VISIONALVR_AUDIO_CAPTURE", new AppSettings().AudioCapture == "process" ? "process" : null);   // the host captures like the streamer does
                     host.OnEvent += (n, d) =>
                     {
                         try
@@ -304,7 +305,16 @@ namespace VisionALVR
                         psi.EnvironmentVariables["XR_PROBE_SCENE"] = scene;
                         try { app = System.Diagnostics.Process.Start(psi); } catch (Exception e) { throw new TestFailed("cannot start the scene app: " + e.Message); }
                         ctx.Status("Scene test: you are inside Littlest Tokyo. Look around slowly (left, right, up, down) for about 30 seconds...");
+                        // the scene plays its music: Windows' process loopback (the API the host captures the game audio with) listens for 4 s once the scene has loaded
+                        var audioTask = Task.Run(() =>
+                        {
+                            for (int i = 0; i < 40 && !ctx.Ct.IsCancellationRequested; i++) System.Threading.Thread.Sleep(200);
+                            if (app.HasExited) return;
+                            var err = ProcessLoopbackMeter.Measure(4, out var pk, out var rm);
+                            ctx.R.AudioError = err; if (err == null) { ctx.R.AudioPeak = pk; ctx.R.AudioRms = rm; }
+                        });
                         await Task.Run(() => { while (!app.HasExited && !ctx.Ct.IsCancellationRequested) System.Threading.Thread.Sleep(200); });
+                        try { await audioTask; } catch { }
                         if (error != null) throw new TestFailed(error);
                     }
                     finally
@@ -381,6 +391,31 @@ namespace VisionALVR
                 Name = "Audio output",
                 Run = async (ctx, st) =>
                 {
+                    var mode = new AppSettings().AudioCapture;
+                    if (mode == "process")
+                    {
+                        // no virtual cable: the scene test played its music and Windows' process loopback listened to it
+                        if (!ctx.R.SceneRan) throw new TestSkipped("the scene test (it plays music through this PC's sound) did not run");
+                        if (ctx.R.AudioError != null)
+                        {
+                            ctx.R.AudioNote = "Windows' process loopback could not start: " + ctx.R.AudioError;
+                            st.Warn();
+                            return ctx.R.AudioNote + ". This needs Windows 10 version 2004 or newer; in the Advanced settings choose \"Virtual cable (VB-CABLE)\" for the game audio instead.";
+                        }
+                        if (ctx.R.AudioPeak < 0)
+                        {
+                            ctx.R.AudioNote = "not measured (the scene ended too early)";
+                            throw new TestSkipped("the scene test ended before the music could be measured");
+                        }
+                        if (ctx.R.AudioPeak < 0.02)
+                        {
+                            ctx.R.AudioNote = $"silence during the scene test (peak {ctx.R.AudioPeak:0.000})";
+                            st.Warn();
+                            return ctx.R.AudioNote + " although the scene plays music: check that Windows' sound output is not muted and the volume mixer does not have xr_probe.exe at zero. The streamer can mute your PC speakers while it runs; this test hears the sound before that.";
+                        }
+                        ctx.R.AudioNote = $"the scene's music was captured by Windows' process loopback (peak {ctx.R.AudioPeak * 100:0} %)";
+                        return ctx.R.AudioNote + ": the headset gets the PC's sound, no virtual cable needed (games started as administrator are captured too)";
+                    }
                     var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe", "-NoProfile -Command \"Get-CimInstance Win32_SoundDevice | ForEach-Object { $_.Name }\"")
                     { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
                     string text;
