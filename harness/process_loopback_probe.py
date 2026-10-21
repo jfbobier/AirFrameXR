@@ -26,13 +26,14 @@ assert "error" not in out.lower(), out
 home = lib.b_run("echo %USERPROFILE%")[1].strip().splitlines()[-1].strip()
 base = f"{home}\\{lib.ROOTNAME}\\runs\\audio"
 _n = [0]
+_run = time.strftime("%H%M%S")   # file names unique per run: a finished task is recognised by its rc file, a stale one would end the wait at once
 def run_ps(script, args, timeout=120):
     _n[0] += 1
     n = _n[0]
-    body = f"powershell -NoProfile -ExecutionPolicy Bypass -File runs\\audio\\{script} {args} > runs\\audio\\pl{n}.txt 2>&1\r\n"
-    lib.start_limited("audio", f"va_pl{n}", f"pl{n}.bat", body, f"rcpl{n}.txt").wait(timeout)
-    dst = ROOT / "harness/cache" / f"pl{n}.txt"; dst.unlink(missing_ok=True)
-    lib.b_get(f"runs/audio/pl{n}.txt", dst)
+    body = f"powershell -NoProfile -ExecutionPolicy Bypass -File runs\\audio\\{script} {args} > runs\\audio\\pl{_run}_{n}.txt 2>&1\r\n"
+    lib.start_limited("audio", f"va_pl{n}", f"pl{_run}_{n}.bat", body, f"rcpl{_run}_{n}.txt").wait(timeout)
+    dst = ROOT / "harness/cache" / f"pl{_run}_{n}.txt"; dst.unlink(missing_ok=True)
+    lib.b_get(f"runs/audio/pl{_run}_{n}.txt", dst)
     return dst.read_text(errors="replace").splitlines() if dst.exists() else []
 
 snap = run_ps("audio_route.ps1", "snapshot")

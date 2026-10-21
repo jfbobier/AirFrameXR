@@ -89,7 +89,7 @@ static class P
             }
         }
         client.Stop();
-        Console.WriteLine("frames={0} peak={1:0.000} rms={2:0.000} silent_packets={3}", frames, peak, frames > 0 ? Math.Sqrt(sum / (frames * 2)) : 0, silent);
+        Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "frames={0} peak={1:0.000} rms={2:0.000} silent_packets={3}", frames, peak, frames > 0 ? Math.Sqrt(sum / (frames * 2)) : 0, silent));
         return 0;
     }
 }
