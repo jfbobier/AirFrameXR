@@ -41,9 +41,8 @@ namespace VisionALVR
                     Endpoints.Dev cable = null;
                     foreach (var d in devices)
                         if (!string.IsNullOrEmpty(wantedPart) && d.Name.IndexOf(wantedPart, StringComparison.OrdinalIgnoreCase) >= 0) { cable = d; break; }
-                    if (cable == null)
-                        foreach (var d in devices)
-                            if (d.Name.IndexOf("cable input", StringComparison.OrdinalIgnoreCase) >= 0 || d.Name.IndexOf("vb-audio", StringComparison.OrdinalIgnoreCase) >= 0) { cable = d; break; }
+                    foreach (var key in new[] { "cable input", "vb-audio" })   // the plain stereo input first: the 16-channel one is a VB-Audio device too
+                        if (cable == null) cable = devices.Find(d => d.Name.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0);
                     if (cable == null) { Say("WARN", "no virtual audio cable found (VB-CABLE); the game audio follows the Windows default output"); return; }
                     cableId = cable.Id; cableName = cable.Name;
 
@@ -129,7 +128,7 @@ namespace VisionALVR
         {
             public sealed class Dev { public string Id, Name; }
 
-            [ComImport, Guid("BCDE0395-E52F-49B4-B4B2-1E8DF2F4DAC7")] class MMDeviceEnumeratorCom { }
+            [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorCom { }
             [ComImport, Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9")] class PolicyConfigCom { }
 
             [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
