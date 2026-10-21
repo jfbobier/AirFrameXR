@@ -54,7 +54,7 @@ if ((Test-Path $persFile) -and ((Get-Content $persFile -Raw).Trim().Length -gt 2
 # personal build: extra files from the build PC (tools of the owner's own session, e.g. an audio switcher) in extras\ (never in the root)
 $persFiles = @()
 $pfList = "$root\_tmp\install\personal_files.txt"
-if (Test-Path $pfList) { foreach ($line in (Get-Content $pfList)) { $f = $line.Trim(); if (-not $f) { continue }; if (-not (Test-Path $f)) { Write-Host "FAILED: personal extra file missing: $f (a personal release must ship startvisionalvr.bat and svcl.exe; backup in private\personal_files)"; exit 1 }; New-Item -ItemType Directory -Force "$pkg\extras" | Out-Null; Copy-Item $f "$pkg\extras" -Force; $persFiles += ("extras\" + (Split-Path $f -Leaf)) } }
+if (Test-Path $pfList) { foreach ($line in (Get-Content $pfList)) { $f = $line.Trim(); if (-not $f) { continue }; if (-not (Test-Path $f)) { Write-Host "FAILED: personal extra file missing: $f (listed in extra_files)"; exit 1 }; New-Item -ItemType Directory -Force "$pkg\extras" | Out-Null; Copy-Item $f "$pkg\extras" -Force; $persFiles += ("extras\" + (Split-Path $f -Leaf)) } }
 $zip = "$root\out\dist\VisionALVR-$version.zip"
 # the zip holds only what ships (never logs\, config\session.json or results a test run may have left in the folder);
 # everything sits under VisionALVR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
