@@ -17,6 +17,9 @@
       "idle_rgb": "00ff00"
     },
     "debug": true,
+    "system": {
+      "power_plan": "9cef84cd-d1dc-4fca-a325-b3a4282b2757"
+    },
     "display": {
       "gamma": 1.2
     },
