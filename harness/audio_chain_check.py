@@ -112,7 +112,8 @@ try:
     streamer = lib.start_limited(rid, "va_chain_streamer", "streamer.bat", f"{inst}\\bin\\streamer.exe --test\r\n", "streamer.rc",
                                  env={"VISIONALVR_AUDIO_EXCLUDE_PROCESS": "alvr_client_headless.exe"} if MODE == "process" else None)
     time.sleep(8)
-    # the client runs in the interactive session like the host and the app (not elevated like the SSH session): a process-loopback capture cannot attach to an elevated process
+    # the client runs in the interactive session like the host and the app: processes started from the SSH session live in another logon session, and process loopback
+    # (include or exclude) does not hear them (measured; the earlier explanation 'elevated' was wrong, this builder's UAC makes no difference)
     client = lib.start_limited(rid, "va_chain_client", "client.bat",
                                f'{lib.CLIENT_EXE} --report {rd}\\client_report.json --frames-csv {rd}\\frames.csv --seconds 100 --connect-timeout 45 --yaw-amp 0.5 --yaw-hz 0.25 > {rd}\\client_stdout.txt 2>&1\r\n',
                                "client.rc", env={"ALVR_BIND_IP": "127.0.0.2", "RUST_LOG": "warn", "VISIONALVR_CLIENT_AUDIO_DEVICE": SINK})
