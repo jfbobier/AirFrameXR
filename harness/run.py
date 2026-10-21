@@ -88,7 +88,7 @@ def build(what):
               "client": ("tools/mock_client/Cargo.toml", "tools/mock_client/src/main.rs", "_tmp/mock_client", "tools/remote/stage7_mockclient.ps1")}
     if any(w in ("client", "host") for w in (what or ["client", "host"])):
         lib.b_run("if not exist _tmp mkdir _tmp")
-        for pn in ("loopback-client.patch", "client-stats-log.patch", "client-caps-log.patch", "audio-trace.patch", "audio-volume.patch"):
+        for pn in ("loopback-client.patch", "client-stats-log.patch", "client-caps-log.patch", "audio-trace.patch", "client-audio-device.patch"):
             lib.b_put(lib.ROOT / "tools/patches" / pn, f"_tmp/{pn}")
         r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage9_patch.ps1"], cwd=lib.ROOT, capture_output=True)
         o = r.stdout.decode(errors="replace").replace("\x00", "")
