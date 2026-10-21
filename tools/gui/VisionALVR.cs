@@ -16,6 +16,7 @@ namespace VisionALVR
     {
         readonly AppSettings settings = new AppSettings();
         readonly HostProcess host = new HostProcess();
+        readonly AudioRoute audio = new AudioRoute();
         readonly Label headset = Ui.Line("Headset: -", Ui.Big);
         readonly Button find = new Button { Text = "Find headset...", AutoSize = true, Margin = new Padding(12, 0, 0, 0) };
         readonly Label findHint = Ui.Line("Not connecting? Use Find headset.");
@@ -305,7 +306,7 @@ namespace VisionALVR
                 if (autoFind) { var t = new Timer { Interval = 3000 }; t.Tick += (a, b) => { t.Stop(); FindHeadset(true); }; t.Start(); }
             };
             Ui.ScreenshotWhenShown(this, 12000);
-            FormClosing += (s, e) => { closing = true; MirrorSync(); footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); Log.Write("INFO", "streamer.exe closed"); };
+            FormClosing += (s, e) => { closing = true; MirrorSync(); footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); audio.Stop(); Log.Write("INFO", "streamer.exe closed"); };
         }
 
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 400 };
@@ -503,6 +504,16 @@ namespace VisionALVR
             host.Send($"color {f(settings.Brightness)} {f(settings.Contrast)} {f(settings.Saturation)} {f(settings.Sharpening)}");
         }
 
+        /// The virtual cable as the default output, the PC's output muted, the cable held at 100 %: what startvisionalvr.bat did, restored when the streamer closes.
+        void StartAudioRoute()
+        {
+            var s = Session.Load();
+            var enabled = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
+            var part = Json.Bool(s, "session_settings.audio.game_audio.content.device.set", false) ? Convert.ToString(Json.Get(s, "session_settings.audio.game_audio.content.device.content.NameSubstring")) : "";
+            audio.Report += (level, text) => { try { BeginInvoke((Action)(() => { if (!closing) SetAudioLine("Audio: " + text, level == "WARN" ? Color.DarkOrange : Color.DimGray); })); } catch { } };
+            System.Threading.Tasks.Task.Run(() => audio.Start(part, enabled));
+        }
+
         void StartHost()
         {
             headsetConnected = false; MirrorSync();
@@ -513,6 +524,7 @@ namespace VisionALVR
             headset.ForeColor = Color.DarkOrange;
             NeedFind(true);
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
+            Environment.SetEnvironmentVariable("VISIONALVR_FORCE_CABLE_VOLUME", "0");   // the streamer holds the cable's volume itself (AudioRoute), the host's thread would only repeat it
             var err = host.Start(args);
             if (err != null)
             {
@@ -522,6 +534,7 @@ namespace VisionALVR
             }
             footer.Text = "Streamer running. Open ALVR on the headset.";
             Log.Write("INFO", "streamer started: alvr_host " + args);
+            StartAudioRoute();
         }
 
         /// The streamer owns UDP 9943 (headset discovery), so it stops while the dialog searches; a chosen headset is paired (saved address) and
