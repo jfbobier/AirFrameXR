@@ -74,6 +74,7 @@ def fresh_copy(session_edit=None, settings=None):
             if not sess.exists(): continue
             d = json.loads(sess.read_text(encoding="utf-8-sig")); session_edit(d); sess.write_text(json.dumps(d))
             lib.b_put(sess, f"runs/audio_route/VisionALVR/config/{name}")
+    settings = {**(settings or {}), "audio": {**((settings or {}).get("audio") or {}), "capture": "device"}}   # this check is about the cable path; process loopback is audio_chain_check's default
     if settings is not None:
         f = ROOT / "harness/cache/audio_route_settings.json"; f.write_text(json.dumps(settings))
         lib.b_put(f, "runs/audio_route/VisionALVR/config/visionalvr.json")
