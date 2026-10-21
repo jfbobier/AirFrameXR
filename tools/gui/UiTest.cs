@@ -64,6 +64,7 @@ namespace VisionALVR
             }
             yield return new Case { Name = "configure-advanced", Make = () => new ConfigureForm(null) };
             yield return new Case { Name = "find-headset", Make = () => new FindHeadsetForm(Tuple.Create("1234.client.alvr", "Apple Vision Pro", "192.168.100.123")) };
+            yield return new Case { Name = "cable-missing", Make = () => new CableForm() };
             yield return new Case { Name = "chroma-step", Make = () => new ChromaStepForm() };
             yield return new Case { Name = "openxr-layers", Make = () => new LayersForm() };
             yield return new Case { Name = "suggestions", Make = () => new AdviceHost() };

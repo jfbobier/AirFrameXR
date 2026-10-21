@@ -516,6 +516,7 @@ namespace VisionALVR
                 Json.Set(s, "session_settings.audio.game_audio.content.mute_when_streaming", false);
                 try { Json.Save(Paths.Session, s); Log.Write("INFO", "audio: ALVR's mute_when_streaming switched off (the streamer mutes the PC output itself)"); } catch (Exception e) { Log.Write("WARN", "audio: cannot write session.json: " + e.Message); }
             }
+            if (audio.CableMissing && !Environment.GetCommandLineArgs().Contains("--test") && Ui.ScreenshotPath() == null) using (var f = new CableForm()) f.ShowDialog(this);
             var plan = new AppSettings().PowerPlan;
             if (plan.Length > 0) System.Threading.Tasks.Task.Run(() => { var m = PowerPlan.Apply(plan); if (m != null) Log.Write("INFO", m); });
         }

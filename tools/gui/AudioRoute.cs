@@ -4,6 +4,8 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Linq;
 using System.Threading;
+using System.Drawing;
+using System.Windows.Forms;
 
 namespace VisionALVR
 {
@@ -19,7 +21,7 @@ namespace VisionALVR
         static readonly string[] Roles = { "console", "multimedia", "communications" };
 
         readonly object gate = new object();
-        Timer timer;
+        System.Threading.Timer timer;
         string cableId, cableName, pcId, pcName;
         string[] oldDefaults = new string[3];
         bool pcWasMuted, running;
@@ -34,6 +36,8 @@ namespace VisionALVR
         public bool Start(string wantedPart, bool enabled, bool mutePc)
         {
             if (!enabled || Environment.GetEnvironmentVariable("VISIONALVR_AUDIO_ROUTE") == "0") return false;
+            CableMissing = false;
+            if (Environment.GetEnvironmentVariable("VISIONALVR_FAKE_NO_CABLE") == "1") { CableMissing = true; Say("WARN", "no usable virtual audio cable found (VB-CABLE, at most 8 channels); the game audio follows the Windows default output"); return false; }
             try
             {
                 RestoreLeftover();
@@ -41,14 +45,11 @@ namespace VisionALVR
                 {
                     var devices = Endpoints.Render();
                     Endpoints.Dev cable = null;
-                    var capturable = devices.FindAll(d => d.Channels <= MaxChannels);
                     foreach (var d in devices)
                         if (d.Channels > MaxChannels && (string.IsNullOrEmpty(wantedPart) || d.Name.IndexOf(wantedPart, StringComparison.OrdinalIgnoreCase) >= 0) && IsCable(d.Name))
                             Say("WARN", $"{d.Name} has {d.Channels} channels: ALVR cannot capture more than {MaxChannels}, it is not used");
-                    if (!string.IsNullOrEmpty(wantedPart)) cable = capturable.Find(d => d.Name.IndexOf(wantedPart, StringComparison.OrdinalIgnoreCase) >= 0);
-                    foreach (var key in new[] { "cable input", "vb-audio" })   // the plain stereo input first
-                        if (cable == null) cable = capturable.Find(d => d.Name.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0);
-                    if (cable == null) { Say("WARN", "no usable virtual audio cable found (VB-CABLE, at most 8 channels); the game audio follows the Windows default output"); return false; }
+                    cable = Pick(devices, wantedPart);
+                    if (cable == null) { CableMissing = true; Say("WARN", "no usable virtual audio cable found (VB-CABLE, at most 8 channels); the game audio follows the Windows default output"); return false; }
                     cableId = cable.Id; cableName = cable.Name;
                     EnsurePlainPcm();
 
@@ -64,7 +65,7 @@ namespace VisionALVR
                     Say("INFO", $"{cableName} is now the default output" + (pcId != null && mutePc ? $", {pcName} muted (restored when the streamer closes)" : ""));
                 }
                 Hold(null);
-                timer = new Timer(Hold, null, 3000, 3000);
+                timer = new System.Threading.Timer(Hold, null, 3000, 3000);
                 return true;
             }
             catch (Exception ex) { Say("WARN", "could not route the game audio to the virtual cable: " + ex.Message); return false; }
@@ -99,6 +100,26 @@ namespace VisionALVR
         }
 
         static string EndpointGuid(string id) { var i = id.LastIndexOf('.'); return i >= 0 ? id.Substring(i + 1) : id; }
+
+        /// True after Start found no usable virtual cable (the caller asks the user to install one).
+        public bool CableMissing;
+
+        static Endpoints.Dev Pick(List<Endpoints.Dev> devices, string wantedPart)
+        {
+            var capturable = devices.FindAll(d => d.Channels <= MaxChannels);
+            Endpoints.Dev cable = null;
+            if (!string.IsNullOrEmpty(wantedPart)) cable = capturable.Find(d => d.Name.IndexOf(wantedPart, StringComparison.OrdinalIgnoreCase) >= 0);
+            foreach (var key in new[] { "cable input", "vb-audio" })   // the plain stereo input first
+                if (cable == null) cable = capturable.Find(d => d.Name.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0);
+            return cable;
+        }
+
+        /// The name of the virtual cable the streamer would use, or null (VISIONALVR_FAKE_NO_CABLE=1: the lab pretends there is none).
+        public static string FindCable(string wantedPart = "")
+        {
+            if (Environment.GetEnvironmentVariable("VISIONALVR_FAKE_NO_CABLE") == "1") return null;
+            try { return Pick(Endpoints.Render(), wantedPart)?.Name; } catch { return null; }
+        }
 
         const int MaxChannels = 8;   // alvr_audio refuses a capture device with more
         static bool IsCable(string name) => name.IndexOf("cable", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("vb-audio", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -346,6 +367,40 @@ namespace VisionALVR
             public static void SetVolume(string id, float v) { var g = Guid.Empty; Check(Volume(id).SetMasterVolumeLevelScalar(v, ref g), "SetMasterVolumeLevelScalar"); }
             public static bool GetMute(string id) { Check(Volume(id).GetMute(out var m), "GetMute"); return m; }
             public static void SetMute(string id, bool m) { var g = Guid.Empty; Check(Volume(id).SetMute(m, ref g), "SetMute"); }
+        }
+    }
+
+    /// Shown (blocking) when the PC has no virtual audio cable: the game audio reaches the headset through one (VB-CABLE by VB-Audio, a separate product).
+    public class CableForm : DpiForm
+    {
+        public const string DownloadUrl = "https://vb-audio.com/Cable/index.htm";
+
+        public CableForm()
+        {
+            Text = "VisionALVR \u2013 Virtual audio cable";
+            Font = Ui.Body; Icon = Ui.AppIcon();
+            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen;
+            BackColor = Color.White;
+            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
+            col.Controls.Add(new Label { Text = "No virtual audio cable found", AutoSize = true, Font = Ui.Big });
+            col.Controls.Add(new Label
+            {
+                Text = "The game's sound reaches the headset through a virtual audio device: VisionALVR makes it the Windows output while it streams, mutes your speakers, and puts everything back when it closes. " +
+                       "Without one, the headset has no game sound.\n\n" +
+                       "VB-CABLE (VB-Audio) is a free virtual cable. Click \"Open the download page\", install it (administrator rights, a restart may be needed), then start the streamer again.\n\n" +
+                       "VB-CABLE is a separate product of VB-Audio Software, not part of VisionALVR. VisionALVR does not distribute, control or support it and accepts no responsibility for it: " +
+                       "read its licence and install it at your own risk.",
+                AutoSize = true, MaximumSize = new Size(560, 0), Margin = new Padding(3, 8, 3, 8)
+            });
+            var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
+            var open = new Button { Text = "Open the download page", AutoSize = true, Font = Ui.Bold, MinimumSize = new Size(130, 30) };
+            var go = new Button { Text = "Continue without game sound", AutoSize = true, MinimumSize = new Size(130, 30), DialogResult = DialogResult.Cancel };
+            open.Click += (s, e) => { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(DownloadUrl) { UseShellExecute = true }); } catch { } };
+            row.Controls.Add(open); row.Controls.Add(go);
+            col.Controls.Add(row);
+            Controls.Add(col);
+            AcceptButton = open; CancelButton = go;
+            Ui.AutoFitWindow(this, null, col);
         }
     }
 }

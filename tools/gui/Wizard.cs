@@ -624,6 +624,7 @@ namespace VisionALVR
             panel.Load();
             ctx = new TestContext { HS = hs, Check = check, Fps = ctxFps, HeadsetAvailable = hs.FromHeadset };
             ctx.R.TestFps = ctxFps;
+            ctx.AskCable = () => { try { Invoke((Action)(() => { using (var f = new CableForm()) f.ShowDialog(this); })); } catch { } };
             var existing = modeExisting != null && modeExisting.Checked;
             if (existing)
             {

@@ -32,6 +32,8 @@ namespace VisionALVR
         public Dictionary<string, object> Check;
         public Results R = new Results();
         public double Fps = 90;
+        /// shows the blocking "no virtual audio cable" dialog (set by the wizard; null in the lab)
+        public Action AskCable;
         public bool HeadsetAvailable;
         public string NetSteps = "100,150,200,250,300,350,400,500";
         /// the community profile in use (null: the generic path with its searches) and the bitrate it asks for; the tests then verify that configuration
@@ -384,10 +386,12 @@ namespace VisionALVR
                     string text;
                     using (var p = System.Diagnostics.Process.Start(psi)) { text = await Task.Run(() => { var o = p.StandardOutput.ReadToEnd(); p.WaitForExit(15000); return o; }); }
                     var names = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
-                    var cable = names.FirstOrDefault(x => x.IndexOf("cable", StringComparison.OrdinalIgnoreCase) >= 0 || x.IndexOf("virtual", StringComparison.OrdinalIgnoreCase) >= 0 || x.IndexOf("VB-Audio", StringComparison.OrdinalIgnoreCase) >= 0);
-                    ctx.R.AudioNote = names.Count == 0 ? "no audio device found" : (cable != null ? $"{names.Count} audio device(s), virtual device: {cable}" : $"{names.Count} audio device(s), no virtual cable");
-                    if (names.Count == 0) { st.Warn(); }
-                    return ctx.R.AudioNote + " (game audio is captured from the Windows default output)";
+                    var cable = AudioRoute.FindCable();
+                    ctx.R.AudioNote = names.Count == 0 ? "no audio device found" : (cable != null ? $"{names.Count} audio device(s), virtual cable: {cable}" : $"{names.Count} audio device(s), NO virtual cable");
+                    if (names.Count == 0 || cable == null) st.Warn();
+                    if (cable == null && ctx.AskCable != null) ctx.AskCable();
+                    return cable != null ? ctx.R.AudioNote + " (the streamer makes it the Windows output while it runs)"
+                                         : ctx.R.AudioNote + ": the headset gets no game sound until a virtual cable (VB-CABLE, vb-audio.com/Cable) is installed";
                 },
             });
             return steps;

@@ -7,6 +7,7 @@
   disturb  while it runs the default is moved back to the PC, the cable is muted and set to 30 % (Windows / a game / ALVR's own mute): all healed within 7 s
   named    the audio settings name the 16ch cable device: it is the default while the streamer runs
   format   the cable's Default format is 44.1 kHz before the start: set to plain 2 ch / 48000 Hz PCM
+  nocable  no virtual cable (the lab pretends): the PC's audio is left alone
   crash    the streamer is killed (defaults stay on the cable, PC muted); the next start restores them first, and its close leaves the PC as it was
 The volumes are restored at the end. Exit 0 = pass."""
 import json, re, sys, time
@@ -141,6 +142,14 @@ try:
     out = run()
     during = section(out, "during")
     check("format: while the streamer runs the cable mixes 2 channels at 48000 Hz", str(during.get("fmt", {}).get(cable)).startswith("2ch/48000/"), during.get("fmt", {}).get(cable))
+
+    # -- no virtual cable on the PC: nothing is touched (the streamer asks the user to install one; --test skips the dialog)
+    reset(); fresh_copy()
+    out = run("nocable", 8)
+    during = section(out, "during")
+    check("nocable: the default output and the PC volume are left alone", all(during["default"].get(r) == pc for r in ROLES) and during["device"][pc] == (0.55, False), (during["default"], during["device"][pc]))
+    log = lib.b_run("type runs\\audio_route\\VisionALVR\\logs\\VisionALVR.log")[1]
+    check("nocable: the log says no usable virtual audio cable was found", "no usable virtual audio cable found" in log, log[-400:])
 
     # -- crash and recovery
     reset(); fresh_copy()

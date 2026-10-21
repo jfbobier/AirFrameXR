@@ -58,6 +58,7 @@ elseif ($Action -eq "setdefault") { 0..2 | ForEach-Object { [Au]::SetDefault($A,
 elseif ($Action -eq "format") { [Au]::SetFormat($A, [int]$B, 2); [Au]::Snapshot() }
 elseif ($Action -eq "mute") { [Au]::SetMute($A, $B -eq "1"); [Au]::Snapshot() }
 elseif ($Action -eq "run") {
+  if ($Mode -eq "nocable") { $env:VISIONALVR_FAKE_NO_CABLE = "1" }   # the lab pretends no virtual cable is installed
   $p = Start-Process -FilePath $A -ArgumentList "--test" -PassThru -WorkingDirectory (Split-Path $A)
   Start-Sleep -Seconds ([int]$B)
   "== during"; [Au]::Snapshot()
