@@ -121,6 +121,30 @@ namespace VisionALVR
             try { return Pick(Endpoints.Render(), wantedPart)?.Name; } catch { return null; }
         }
 
+        /// Process-loopback capture (AudioCapture "process"): ALVR hears the PC's audio whatever the output's mute, volume and format, so nothing is switched and no cable is
+        /// needed; the only thing left to do is to mute the PC's own output while streaming (when asked), restored at close or after a crash.
+        public void StartMuteOnly(bool enabled, bool mutePc)
+        {
+            if (!enabled || !mutePc || Environment.GetEnvironmentVariable("VISIONALVR_AUDIO_ROUTE") == "0") return;
+            try
+            {
+                RestoreLeftover();
+                lock (gate)
+                {
+                    for (int i = 0; i < 3; i++) oldDefaults[i] = Endpoints.Default(i);
+                    pcId = oldDefaults[0];
+                    if (pcId == null) return;
+                    pcName = Endpoints.Render().Find(x => x.Id == pcId)?.Name ?? pcId;
+                    pcWasMuted = Endpoints.GetMute(pcId);
+                    File.WriteAllText(StateFile, string.Join("\n", oldDefaults.Select(x => x ?? "")) + "\n" + pcId + "\n" + (pcWasMuted ? "1" : "0") + "\n");
+                    Endpoints.SetMute(pcId, true);
+                    running = true;
+                    Say("INFO", $"{pcName} muted while streaming (restored when the streamer closes); the game audio is captured per process, no virtual cable");
+                }
+            }
+            catch (Exception ex) { Say("WARN", "could not mute the PC output: " + ex.Message); }
+        }
+
         const int MaxChannels = 8;   // alvr_audio refuses a capture device with more
         static bool IsCable(string name) => name.IndexOf("cable", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("vb-audio", StringComparison.OrdinalIgnoreCase) >= 0;
 

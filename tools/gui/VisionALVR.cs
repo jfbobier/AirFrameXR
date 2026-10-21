@@ -511,12 +511,23 @@ namespace VisionALVR
             var enabled = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             var part = Json.Bool(s, "session_settings.audio.game_audio.content.device.set", false) ? Convert.ToString(Json.Get(s, "session_settings.audio.game_audio.content.device.content.NameSubstring")) : "";
             audio.Report += AudioNote;
-            if (audio.Start(part, enabled, new AppSettings().MuteSpeakers) && Json.Bool(s, "session_settings.audio.game_audio.content.mute_when_streaming", true))
+            var cfg = new AppSettings();
+            if (cfg.AudioCapture == "process")
             {
-                Json.Set(s, "session_settings.audio.game_audio.content.mute_when_streaming", false);
-                try { Json.Save(Paths.Session, s); Log.Write("INFO", "audio: ALVR's mute_when_streaming switched off (the streamer mutes the PC output itself)"); } catch (Exception e) { Log.Write("WARN", "audio: cannot write session.json: " + e.Message); }
+                // Windows' process loopback: ALVR captures the PC's audio itself (the host inherits this variable), nothing else to route
+                Environment.SetEnvironmentVariable("VISIONALVR_AUDIO_CAPTURE", "process");
+                audio.StartMuteOnly(enabled, cfg.MuteSpeakers);
             }
-            if (audio.CableMissing && !Environment.GetCommandLineArgs().Contains("--test") && Ui.ScreenshotPath() == null) using (var f = new CableForm()) f.ShowDialog(this);
+            else
+            {
+                Environment.SetEnvironmentVariable("VISIONALVR_AUDIO_CAPTURE", null);
+                if (audio.Start(part, enabled, cfg.MuteSpeakers) && Json.Bool(s, "session_settings.audio.game_audio.content.mute_when_streaming", true))
+                {
+                    Json.Set(s, "session_settings.audio.game_audio.content.mute_when_streaming", false);
+                    try { Json.Save(Paths.Session, s); Log.Write("INFO", "audio: ALVR's mute_when_streaming switched off (the streamer mutes the PC output itself)"); } catch (Exception e) { Log.Write("WARN", "audio: cannot write session.json: " + e.Message); }
+                }
+                if (audio.CableMissing && !Environment.GetCommandLineArgs().Contains("--test") && Ui.ScreenshotPath() == null) using (var f = new CableForm()) f.ShowDialog(this);
+            }
             var plan = new AppSettings().PowerPlan;
             if (plan.Length > 0) System.Threading.Tasks.Task.Run(() => { var m = PowerPlan.Apply(plan); if (m != null) Log.Write("INFO", m); });
         }

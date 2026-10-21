@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Continue'
 $root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
 Set-Location "$root\src\ALVR-v20.14.1"
 $ok = $true
-foreach ($name in 'loopback-client.patch', 'client-stats-log.patch', 'client-caps-log.patch', 'audio-trace.patch', 'client-audio-device.patch') {
+foreach ($name in 'loopback-client.patch', 'client-stats-log.patch', 'client-caps-log.patch', 'audio-trace.patch', 'audio-process-loopback.patch', 'client-audio-device.patch') {
     $patch = "$root\_tmp\$name"
     if (-not (Test-Path $patch)) { Write-Host "patch: $name missing in _tmp"; $ok = $false; continue }
     git apply --reverse --check $patch 2>$null

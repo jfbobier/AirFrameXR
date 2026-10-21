@@ -29,6 +29,7 @@ namespace VisionALVR
         public readonly NumericUpDown Packet = Num(500, 4000, 100);
         public readonly NumericUpDown Haptics = Dec(0m, 5m);
         public readonly CheckBox DebugDefault = new CheckBox { Text = "Debug logging at every start (costs a few ms per frame)", AutoSize = true };
+        public readonly ComboBox CaptureBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 330 };
         public readonly ComboBox PowerPlanBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
         List<PowerPlan.Plan> plans = new List<PowerPlan.Plan>();
         public readonly ComboBox RecenterKey = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 130 };
@@ -88,6 +89,8 @@ namespace VisionALVR
 
             section("Audio");
             note(Audio);
+            CaptureBox.Items.AddRange(new object[] { "Process loopback (no virtual cable needed)", "Virtual cable (VB-CABLE)" });
+            row("Game audio capture", CaptureBox);
             note(Mute);
 
             section("Network and controllers");
@@ -155,6 +158,7 @@ namespace VisionALVR
             Haptics.Value = Clamp(Haptics, Json.Num(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", 1));
             DebugDefault.Checked = settings.Debug;
             RecenterKey.Text = settings.RecenterKey;
+            CaptureBox.SelectedIndex = settings.AudioCapture == "device" ? 1 : 0;
             plans = PowerPlan.List();
             PowerPlanBox.Items.Clear(); PowerPlanBox.Items.Add("(leave unchanged)");
             foreach (var p in plans) PowerPlanBox.Items.Add(p.Name);
@@ -220,6 +224,7 @@ namespace VisionALVR
             settings.FrameGen = FrameGen.Checked;
             settings.IdleRgb = $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}";
             settings.MuteSpeakers = Mute.Checked;
+            settings.AudioCapture = CaptureBox.SelectedIndex == 1 ? "device" : "process";
             settings.Debug = DebugDefault.Checked;
             settings.RecenterKey = RecenterKey.Text.Trim().Length > 0 ? RecenterKey.Text.Trim() : "End";
             settings.PowerPlan = PowerPlanBox.SelectedIndex > 0 && PowerPlanBox.SelectedIndex <= plans.Count ? plans[PowerPlanBox.SelectedIndex - 1].Guid : (PowerPlanBox.SelectedIndex < 0 ? settings.PowerPlan : "");

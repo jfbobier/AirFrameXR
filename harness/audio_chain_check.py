@@ -6,7 +6,8 @@ with its music) plays to the Windows default output, and the levels are measured
       cable loopback   = music (the scene reaches the cable the host captures)
       sink              = music (process loopback of the mock headset: what it received over the network and played, into the muted PC speakers)
   - after the streamer's window is closed: defaults and the PC speakers' mute state are back.
-Needs: python3 harness/run.py build client probe gui package. Exit 0 = pass."""
+Needs: python3 harness/run.py build client probe gui package. Default mode: Windows process loopback (no cable; the default output must stay the PC's
+own); --device: the VB-CABLE path. Exit 0 = pass."""
 import json, re, sys, threading, time, wave, struct, math
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -14,6 +15,7 @@ import lib
 
 ROOT = lib.ROOT
 PC = "Realtek"
+MODE = "device" if "--device" in sys.argv else "process"   # process: Windows process loopback, no cable (default); --device: the VB-CABLE path
 MIC = "icro"   # a recording device whose name has this (Microphone / Prise microphone); skipped when none is active
 SINK = PC   # the mock headset plays into the (muted) PC speakers: nothing audible, and its process loopback hears it whatever the output's mute; the 16ch cable answered DEVICE_IN_USE and process loopback silence
 rid = "audio_chain"
@@ -104,7 +106,11 @@ try:
     sess = ROOT / "harness/cache/audio_chain_session.json"
     lib.derive_session(sc, sess, pin)
     lib.b_put(sess, f"runs/{rid}/VisionALVR/config/session.json")
-    streamer = lib.start_limited(rid, "va_chain_streamer", "streamer.bat", f"{inst}\\bin\\streamer.exe --test\r\n", "streamer.rc")
+    cfgf = ROOT / "harness/cache/audio_chain_visionalvr.json"; cfgf.write_text(json.dumps({"audio": {"capture": MODE}, "debug": True}))
+    lib.b_put(cfgf, f"runs/{rid}/VisionALVR/config/visionalvr.json")
+    # the mock headset plays on this PC: the host must not capture its own client again (a real headset is another machine)
+    streamer = lib.start_limited(rid, "va_chain_streamer", "streamer.bat", f"{inst}\\bin\\streamer.exe --test\r\n", "streamer.rc",
+                                 env={"VISIONALVR_AUDIO_EXCLUDE_PROCESS": "alvr_client_headless.exe"} if MODE == "process" else None)
     time.sleep(8)
     # the client runs in the interactive session like the host and the app (not elevated like the SSH session): a process-loopback capture cannot attach to an elevated process
     client = lib.start_limited(rid, "va_chain_client", "client.bat",
@@ -131,10 +137,16 @@ try:
     after = parse(route("snapshot"))
 
     for role in ("console", "multimedia", "communications"):
-        check(f"during: {role} default is the VB-Audio cable", cable in during_state["default"].get(role, ""), during_state["default"].get(role))
+        if MODE == "device":
+            check(f"during: {role} default is the VB-Audio cable", cable in during_state["default"].get(role, ""), during_state["default"].get(role))
+        else:
+            check(f"during: {role} default output is left alone (no cable involved)", during_state["default"].get(role) == pc, during_state["default"].get(role))
     check("during: the PC speakers are muted, their volume unchanged", during_state["device"][pc] == (0.55, True), during_state["device"][pc])
     c, s, k = best("cable"), quiet("speakers"), best("sink")
-    check("during: the cable carries the scene's music (loopback)", c is not None and c[1] > 0.01, c)
+    if MODE == "device":
+        check("during: the cable carries the scene's music (loopback)", c is not None and c[1] > 0.01, c)
+    else:
+        check("during: the cable carries nothing (process loopback does not use it)", c is not None and c[1] < 0.001, c)
     if mic_on:
         # the same stream, the same fan noise (the GPU is busy): the client plays into the PC speakers, muted by the streamer; unmuted for a few seconds it must be heard
         mm = max((level(l, "mic") or (0, 0) for l in runs_lv), key=lambda v: v[1])
@@ -142,7 +154,10 @@ try:
         mu = level(chain(f'micbaseline "{level_exe}" "{MIC}"'), "mic_baseline")
         route(f'mute "{PC}" 1')
         print("microphone: muted", mm, "unmuted", mu)
-        check("during: the microphone hears the client's output only when the PC speakers are unmuted (muted = silent)", mu is not None and mu[1] > 3 * mm[1], (mm, mu))
+        if mb is not None and mb[1] > 0.002:   # a noisy room (fans, a voice) buries the speakers: nothing can be concluded, nothing is failed
+            print(f"SKIP microphone check: the room is too noisy for the laptop's microphone array (rms {mb[1]:.4f}, quiet is below 0.001)")
+        else:
+            check("during: the microphone hears the client's output only when the PC speakers are unmuted (muted = silent)", mu is not None and mu[1] > 3 * mm[1], (mm, mu))
     print("info: the muted speakers' own loopback reads", s, "(an output's mute does not silence its loopback, so it proves nothing; the microphone check above is the acoustic proof)")
     check("during: the mock headset received the audio over the network and played it (process loopback of the client)", k is not None and k[1] > 0.01, k)
     check("after: the streamer exited when its window was closed", any("exited" in l for l in close), close)
@@ -150,6 +165,8 @@ try:
     for f in ("app.log", "client_stdout.txt"):
         lib.b_get(f"{rd.replace(chr(92), '/')}/{f}", ROOT / "harness/cache" / f"chain_{f}")
     applog = (ROOT / "harness/cache/chain_app.log").read_text(errors="replace") if (ROOT / "harness/cache/chain_app.log").exists() else ""
+    hostlog = lib.b_run(f"findstr /s /i /c:\"process loopback\" {rd}\\VisionALVR\\logs\\alvr.log {rd}\\VisionALVR\\logs\\debug\\*\\alvr.log")[1]
+    check("the host captured with process loopback" if MODE == "process" else "the host did not use process loopback", ("process loopback" in hostlog) == (MODE == "process"), hostlog[-300:])
     check("the scene app started its music", "scene sound" in applog and "playing" in applog, applog[-400:])
 finally:
     lib.kill_stale()

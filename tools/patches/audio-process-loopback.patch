@@ -1,0 +1,289 @@
+--- a/alvr/audio/Cargo.toml
++++ b/alvr/audio/Cargo.toml
+@@ -17,10 +17,16 @@
+ 
+ [target.'cfg(windows)'.dependencies]
+ widestring = "1"
++windows-core = "0.60"   # the `implement` macro of the process-loopback completion handler names this crate
+ windows = { version = "0.60", features = [
+     "Win32_Devices_FunctionDiscovery",
+     "Win32_Foundation",
++    "Win32_Media_Audio",
++    "Win32_Security",
++    "Win32_System_Diagnostics_ToolHelp",
+     "Win32_Media_Audio_Endpoints",
++    "Win32_System_Com",
++    "Win32_System_Threading",
+     "Win32_System_Com_StructuredStorage",
+     "Win32_System_Variant",
+     "Win32_UI_Shell_PropertiesSystem",
+--- a/alvr/audio/src/lib.rs
++++ b/alvr/audio/src/lib.rs
+@@ -7,6 +7,18 @@
+ #[cfg(windows)]
+ pub use crate::windows::*;
+ 
++// VisionALVR: game audio from Windows' process loopback instead of a device loopback (tools/patches/audio-process-loopback.patch)
++#[cfg(windows)]
++mod process_loopback;
++#[cfg(windows)]
++pub use process_loopback::{process_loopback_enabled, record_process_loopback_blocking, PROCESS_LOOPBACK_SAMPLE_RATE};
++#[cfg(not(windows))]
++pub fn process_loopback_enabled() -> bool {
++    false
++}
++#[cfg(not(windows))]
++pub const PROCESS_LOOPBACK_SAMPLE_RATE: u32 = 48000;
++
+ use alvr_common::{
+     anyhow::{self, anyhow, bail, Context, Result},
+     info,
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -759,7 +759,12 @@
+                 // Game audio will loop back to the game microphone if they are set to the same VA-CABLE-X device.
+             }
+ 
+-            game_audio_device.input_sample_rate().to_con()?
++            // VisionALVR: the process-loopback capture is always 48 kHz (tools/patches/audio-process-loopback.patch)
++            if alvr_audio::process_loopback_enabled() {
++                alvr_audio::PROCESS_LOOPBACK_SAMPLE_RATE
++            } else {
++                game_audio_device.input_sample_rate().to_con()?
++            }
+         }
+         #[cfg(target_os = "linux")]
+         44100
+@@ -915,6 +920,23 @@
+ 
+                 #[cfg(not(target_os = "linux"))]
+                 {
++                    // VisionALVR: capture the PC's audio with Windows' process loopback, no device involved (tools/patches/audio-process-loopback.patch)
++                    if alvr_audio::process_loopback_enabled() {
++                        #[cfg(windows)]
++                        if let Err(e) = alvr_audio::record_process_loopback_blocking(
++                            Arc::new({
++                                let client_hostname = client_hostname.clone();
++                                move || is_streaming(&client_hostname)
++                            }),
++                            game_audio_sender.clone(),
++                            2,
++                        ) {
++                            error!("Audio record error: {e:?}");
++                            thread::sleep(RETRY_CONNECT_MIN_INTERVAL);
++                        }
++                        continue;
++                    }
++
+                     let device = match alvr_audio::AudioDevice::new_output(config.device.as_ref()) {
+                         Ok(data) => data,
+                         Err(e) => {
+--- /dev/null
++++ b/alvr/audio/src/process_loopback.rs
+@@ -0,0 +1,206 @@
++//! VisionALVR (tools/patches/audio-process-loopback.patch): game audio captured with Windows' process loopback (ActivateAudioInterfaceAsync on
++//! "VAD\Process_Loopback"): everything the PC plays except this process tree, taken before the output device's volume, mute and format, as plain
++//! 48 kHz stereo 16-bit PCM. No virtual audio cable and no change of the Windows default output are needed. Selected with VISIONALVR_AUDIO_CAPTURE=process;
++//! VISIONALVR_AUDIO_PROCESS=<pid> captures only that process tree instead; VISIONALVR_AUDIO_EXCLUDE_PROCESS=<exe name> excludes that process tree (the lab's mock
++//! headset plays on the same PC, a real headset is another machine).
++use alvr_common::{
++    anyhow::{anyhow, bail, Result},
++    info,
++};
++use alvr_sockets::StreamSender;
++use std::{
++    mem::ManuallyDrop,
++    sync::{Arc, Condvar, Mutex},
++    time::{Duration, Instant},
++};
++use ::windows::{
++    core::{implement, w, Interface, Ref, Result as WinResult},
++    Win32::{
++        Foundation::{CloseHandle, WAIT_OBJECT_0},
++        Media::Audio::{
++            ActivateAudioInterfaceAsync, IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
++            IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient, AUDCLNT_BUFFERFLAGS_SILENT,
++            AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
++            AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS,
++            AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
++            PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, WAVEFORMATEX,
++        },
++        System::{
++            Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS},
++            Com::{CoInitializeEx, StructuredStorage::{PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0}, BLOB, COINIT_MULTITHREADED},
++            Threading::{CreateEventW, WaitForSingleObject},
++            Variant::VT_BLOB,
++        },
++    },
++};
++
++/// What the client is told: the capture is always converted to this.
++pub const PROCESS_LOOPBACK_SAMPLE_RATE: u32 = 48000;
++
++pub fn process_loopback_enabled() -> bool {
++    std::env::var("VISIONALVR_AUDIO_CAPTURE").map(|v| v == "process").unwrap_or(false)
++}
++
++/// The pid of the first running process with this exe name (case-insensitive).
++fn pid_of(exe: &str) -> Option<u32> {
++    unsafe {
++        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
++        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
++        let mut found = None;
++        let mut ok = Process32FirstW(snapshot, &mut entry).is_ok();
++        while ok {
++            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
++            if String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case(exe) {
++                found = Some(entry.th32ProcessID);
++                break;
++            }
++            ok = Process32NextW(snapshot, &mut entry).is_ok();
++        }
++        CloseHandle(snapshot).ok();
++        found
++    }
++}
++
++type Activated = Arc<(Mutex<Option<WinResult<IAudioClient>>>, Condvar)>;
++
++#[implement(IActivateAudioInterfaceCompletionHandler)]
++struct Handler {
++    done: Activated,
++}
++
++impl IActivateAudioInterfaceCompletionHandler_Impl for Handler_Impl {
++    fn ActivateCompleted(&self, operation: Ref<'_, IActivateAudioInterfaceAsyncOperation>) -> WinResult<()> {
++        let result = (|| -> WinResult<IAudioClient> {
++            let op = operation.ok()?;
++            let mut hr = ::windows::core::HRESULT(0);
++            let mut unknown = None;
++            unsafe { op.GetActivateResult(&mut hr, &mut unknown)? };
++            hr.ok()?;
++            unknown.ok_or_else(|| ::windows::core::Error::from(::windows::Win32::Foundation::E_FAIL))?.cast::<IAudioClient>()
++        })();
++        let (lock, cv) = &*self.done;
++        *lock.lock().unwrap() = Some(result);
++        cv.notify_all();
++        Ok(())
++    }
++}
++
++fn activate(pid: u32, include: bool) -> Result<IAudioClient> {
++    let params = AUDIOCLIENT_ACTIVATION_PARAMS {
++        ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
++        Anonymous: AUDIOCLIENT_ACTIVATION_PARAMS_0 {
++            ProcessLoopbackParams: AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
++                TargetProcessId: pid,
++                ProcessLoopbackMode: if include { PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE } else { PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE },
++            },
++        },
++    };
++    // never dropped: PROPVARIANT's Drop would PropVariantClear it and CoTaskMemFree the blob, which lives on this stack
++    let prop = ManuallyDrop::new(PROPVARIANT {
++        Anonymous: PROPVARIANT_0 {
++            Anonymous: ManuallyDrop::new(PROPVARIANT_0_0 {
++                vt: VT_BLOB,
++                wReserved1: 0,
++                wReserved2: 0,
++                wReserved3: 0,
++                Anonymous: PROPVARIANT_0_0_0 {
++                    blob: BLOB { cbSize: std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32, pBlobData: &params as *const _ as *mut u8 },
++                },
++            }),
++        },
++    });
++    let done: Activated = Arc::new((Mutex::new(None), Condvar::new()));
++    let handler: IActivateAudioInterfaceCompletionHandler = Handler { done: Arc::clone(&done) }.into();
++    let _op = unsafe { ActivateAudioInterfaceAsync(w!("VAD\\Process_Loopback"), &IAudioClient::IID, Some(&*prop), &handler)? };
++    let (lock, cv) = &*done;
++    let (mut guard, timeout) = cv.wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(10), |r| r.is_none()).unwrap();
++    if timeout.timed_out() {
++        bail!("process loopback activation timed out");
++    }
++    guard.take().ok_or_else(|| anyhow!("process loopback activation gave nothing"))?.map_err(|e| anyhow!("process loopback activation failed: {e}"))
++}
++
++pub fn record_process_loopback_blocking(
++    is_running: Arc<dyn Fn() -> bool + Send + Sync>,
++    mut sender: StreamSender<()>,
++    channels_count: u16,
++) -> Result<()> {
++    if channels_count != 2 {
++        bail!("process loopback capture is stereo only");
++    }
++    unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok().ok() };   // already initialised on this thread (S_FALSE) is fine
++    let (pid, include) = match std::env::var("VISIONALVR_AUDIO_PROCESS").ok().and_then(|v| v.parse::<u32>().ok()) {
++        Some(p) => (p, true),
++        None => match std::env::var("VISIONALVR_AUDIO_EXCLUDE_PROCESS").ok().and_then(|n| pid_of(&n)) {
++            Some(p) => (p, false),
++            None => (std::process::id(), false),
++        },
++    };
++    let client = activate(pid, include)?;
++    let format = WAVEFORMATEX {
++        wFormatTag: 1, // WAVE_FORMAT_PCM
++        nChannels: 2,
++        nSamplesPerSec: PROCESS_LOOPBACK_SAMPLE_RATE,
++        nAvgBytesPerSec: PROCESS_LOOPBACK_SAMPLE_RATE * 4,
++        nBlockAlign: 4,
++        wBitsPerSample: 16,
++        cbSize: 0,
++    };
++    let flags = (AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY);
++    unsafe { client.Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 1_000_000, 0, &format, None)? };
++    let event = unsafe { CreateEventW(None, false, false, None)? };
++    unsafe { client.SetEventHandle(event)? };
++    let capture: IAudioCaptureClient = unsafe { client.GetService()? };
++    info!("game audio: process loopback ({} of process {pid}), 48 kHz stereo", if include { "only" } else { "everything but" });
++    if let Some(h) = crate::TRACE.get() {
++        h("S", Instant::now(), [PROCESS_LOOPBACK_SAMPLE_RATE as u64, 2, 0, 0]);
++    }
++    unsafe { client.Start()? };
++
++    let mut last_callback: Option<Instant> = None;
++    let mut result = Ok(());
++    while is_running() {
++        if unsafe { WaitForSingleObject(event, 100) } != WAIT_OBJECT_0 {
++            continue;
++        }
++        let t_in = Instant::now();
++        loop {
++            let available = unsafe { capture.GetNextPacketSize() };
++            match available {
++                Ok(0) => break,
++                Ok(_) => {}
++                Err(e) => {
++                    result = Err(anyhow!("process loopback: {e}"));
++                    break;
++                }
++            }
++            let (mut data, mut frames, mut buffer_flags) = (std::ptr::null_mut::<u8>(), 0u32, 0u32);
++            if let Err(e) = unsafe { capture.GetBuffer(&mut data, &mut frames, &mut buffer_flags, None, None) } {
++                result = Err(anyhow!("process loopback: {e}"));
++                break;
++            }
++            let len = frames as usize * 4;
++            let mut buffer = sender.get_buffer(&()).unwrap();
++            if buffer_flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() {
++                buffer.get_range_mut(0, len).fill(0);
++            } else {
++                buffer.get_range_mut(0, len).copy_from_slice(unsafe { std::slice::from_raw_parts(data, len) });
++            }
++            let failed = sender.send(buffer).is_err();
++            unsafe { capture.ReleaseBuffer(frames).ok() };
++            if let Some(h) = crate::TRACE.get() {
++                let gap = last_callback.map(|l| t_in.duration_since(l).as_micros() as u64).unwrap_or(0);
++                h("C", t_in, [frames as u64, failed as u64, gap, t_in.elapsed().as_micros() as u64]);
++            }
++            last_callback = Some(t_in);
++        }
++        if result.is_err() {
++            break;
++        }
++    }
++    unsafe {
++        client.Stop().ok();
++        CloseHandle(event).ok();
++    }
++    result
++}

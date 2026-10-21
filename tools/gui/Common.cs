@@ -427,6 +427,9 @@ namespace VisionALVR
         public string PowerPlan { get => Json.Str(Root, "system.power_plan", ""); set => Json.Set(Root, "system.power_plan", value); }
         /// the PC's own output is muted while the streamer routes the game audio to the virtual cable (on by default)
         public bool MuteSpeakers { get => Json.Bool(Root, "audio.mute_pc", true); set => Json.Set(Root, "audio.mute_pc", value); }
+        /// how the game audio is captured: "process" = Windows' process loopback (no virtual cable, the default output stays as it is), "device" = the VB-CABLE path
+        /// (the streamer makes the cable the default output, ALVR captures it)
+        public string AudioCapture { get => Json.Str(Root, "audio.capture", "process") == "device" ? "device" : "process"; set => Json.Set(Root, "audio.capture", value == "device" ? "device" : "process"); }
         public bool Debug { get => Json.Bool(Root, "debug", false); set => Json.Set(Root, "debug", value); }
         /// display (live in VisionALVR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral
         public const double DefaultGamma = 1.2;
