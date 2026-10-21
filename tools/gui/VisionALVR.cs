@@ -306,7 +306,7 @@ namespace VisionALVR
                 if (autoFind) { var t = new Timer { Interval = 3000 }; t.Tick += (a, b) => { t.Stop(); FindHeadset(true); }; t.Start(); }
             };
             Ui.ScreenshotWhenShown(this, 12000);
-            FormClosing += (s, e) => { closing = true; MirrorSync(); footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); audio.Stop(); Log.Write("INFO", "streamer.exe closed"); };
+            FormClosing += (s, e) => { closing = true; MirrorSync(); footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); audio.Stop(); { var m = PowerPlan.Restore(); if (m != null) Log.Write("INFO", m); } Log.Write("INFO", "streamer.exe closed"); };
         }
 
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 400 };
@@ -512,6 +512,8 @@ namespace VisionALVR
             var part = Json.Bool(s, "session_settings.audio.game_audio.content.device.set", false) ? Convert.ToString(Json.Get(s, "session_settings.audio.game_audio.content.device.content.NameSubstring")) : "";
             audio.Report += (level, text) => { try { BeginInvoke((Action)(() => { if (!closing) SetAudioLine("Audio: " + text, level == "WARN" ? Color.DarkOrange : Color.DimGray); })); } catch { } };
             System.Threading.Tasks.Task.Run(() => audio.Start(part, enabled));
+            var plan = new AppSettings().PowerPlan;
+            if (plan.Length > 0) System.Threading.Tasks.Task.Run(() => { var m = PowerPlan.Apply(plan); if (m != null) Log.Write("INFO", m); });
         }
 
         void StartHost()

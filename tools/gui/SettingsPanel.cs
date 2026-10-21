@@ -29,6 +29,8 @@ namespace VisionALVR
         public readonly NumericUpDown Packet = Num(500, 4000, 100);
         public readonly NumericUpDown Haptics = Dec(0m, 5m);
         public readonly CheckBox DebugDefault = new CheckBox { Text = "Debug logging at every start (costs a few ms per frame)", AutoSize = true };
+        public readonly ComboBox PowerPlanBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
+        List<PowerPlan.Plan> plans = new List<PowerPlan.Plan>();
         public readonly ComboBox RecenterKey = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 130 };
         const string V = "session_settings.video.";
 
@@ -99,6 +101,12 @@ namespace VisionALVR
             keyNote.ForeColor = Color.DimGray;
             note(keyNote);
 
+            section("System");
+            row("Windows power plan while streaming", PowerPlanBox);
+            var planNote = Ui.Line("The streamer switches to this plan when it starts and puts the previous one back when it closes.");
+            planNote.ForeColor = Color.DimGray;
+            note(planNote);
+
             section("Logging");
             note(DebugDefault);
             var more = Ui.Line("Everything else (ALVR's advanced options) stays in config\\session.json.");
@@ -147,6 +155,11 @@ namespace VisionALVR
             Haptics.Value = Clamp(Haptics, Json.Num(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", 1));
             DebugDefault.Checked = settings.Debug;
             RecenterKey.Text = settings.RecenterKey;
+            plans = PowerPlan.List();
+            PowerPlanBox.Items.Clear(); PowerPlanBox.Items.Add("(leave unchanged)");
+            foreach (var p in plans) PowerPlanBox.Items.Add(p.Name);
+            var cur = plans.FindIndex(p => string.Equals(p.Guid, settings.PowerPlan, StringComparison.OrdinalIgnoreCase));
+            PowerPlanBox.SelectedIndex = cur >= 0 ? cur + 1 : 0;
         }
 
         /// Puts a proposal into the controls (nothing is written to disk until Save).
@@ -209,6 +222,7 @@ namespace VisionALVR
             settings.IdleRgb = $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}";
             settings.Debug = DebugDefault.Checked;
             settings.RecenterKey = RecenterKey.Text.Trim().Length > 0 ? RecenterKey.Text.Trim() : "End";
+            settings.PowerPlan = PowerPlanBox.SelectedIndex > 0 && PowerPlanBox.SelectedIndex <= plans.Count ? plans[PowerPlanBox.SelectedIndex - 1].Guid : (PowerPlanBox.SelectedIndex < 0 ? settings.PowerPlan : "");
             settings.Save();
             Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {rate} Hz, {Bitrate.Value} Mbps, {settings.EncodeProfile}, split {settings.SplitEncode}, frame generation {settings.FrameGen}, idle #{settings.IdleRgb}, audio {Audio.Checked}, {Proto.SelectedItem}, debug {settings.Debug}");
             return true;

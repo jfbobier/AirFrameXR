@@ -423,6 +423,8 @@ namespace VisionALVR
         /// arrival margin of the phase lock in ms (host default 7; the host reads it at start) and the GPU keepalive duty in % (0 = off); 0 = not set
         public double PhaseMarginMs { get => Json.Num(Root, "video.phase_margin_ms", 0); set => Json.Set(Root, "video.phase_margin_ms", value); }
         public int GpuKeepalive { get => (int)Json.Num(Root, "video.gpu_keepalive", 0); set => Json.Set(Root, "video.gpu_keepalive", (double)value); }
+        /// the Windows power plan the streamer switches to while it runs (a GUID; "" = leave it alone); the plan that was active comes back when the streamer closes
+        public string PowerPlan { get => Json.Str(Root, "system.power_plan", ""); set => Json.Set(Root, "system.power_plan", value); }
         public bool Debug { get => Json.Bool(Root, "debug", false); set => Json.Set(Root, "debug", value); }
         /// display (live in VisionALVR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral
         public const double DefaultGamma = 1.2;
@@ -442,6 +444,64 @@ namespace VisionALVR
             set => Json.Set(Root, "display.height_mode", value);
         }
         public void Save() => Json.Save(Paths.Settings, Root);
+    }
+
+    /// Windows power plans through powercfg (what startvisionalvr.bat did): the configured plan is set while the streamer runs and the previous one is put back at the end.
+    /// The plan to restore is written to logs\power_plan.txt first, so a streamer that crashed is undone at the next start.
+    public static class PowerPlan
+    {
+        public sealed class Plan { public string Guid, Name; public bool Active; }
+        static string StateFile => Path.Combine(Paths.Logs, "power_plan.txt");
+        static readonly System.Text.RegularExpressions.Regex Line = new System.Text.RegularExpressions.Regex(@"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\s+\((.*?)\)\s*(\*)?");
+        static string previous;
+
+        static string Powercfg(string args)
+        {
+            try
+            {
+                var p = Process.Start(new ProcessStartInfo("powercfg.exe", args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.Default });
+                var o = p.StandardOutput.ReadToEnd(); p.WaitForExit(5000); return p.ExitCode == 0 ? o : null;
+            }
+            catch { return null; }
+        }
+
+        public static List<Plan> List()
+        {
+            var res = new List<Plan>();
+            foreach (var l in (Powercfg("/list") ?? "").Split('\n'))
+            {
+                var m = Line.Match(l);
+                if (m.Success) res.Add(new Plan { Guid = m.Groups[1].Value.ToLowerInvariant(), Name = m.Groups[2].Value, Active = m.Groups[3].Success });
+            }
+            return res;
+        }
+
+        /// Sets `wanted` (a GUID or a plan name) and remembers the plan that was active; returns the log line.
+        public static string Apply(string wanted)
+        {
+            if (string.IsNullOrWhiteSpace(wanted)) return null;
+            Restore();   // a leftover from a streamer that did not close cleanly
+            var plans = List();
+            var want = plans.FirstOrDefault(x => string.Equals(x.Guid, wanted.Trim(), StringComparison.OrdinalIgnoreCase) || string.Equals(x.Name, wanted.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (want == null) return "power plan \"" + wanted + "\" not found; left as it is";
+            var cur = plans.FirstOrDefault(x => x.Active);
+            if (cur != null && cur.Guid == want.Guid) return $"power plan {want.Name} is already active";
+            if (Powercfg("/setactive " + want.Guid) == null) return $"could not set the power plan {want.Name}";
+            previous = cur?.Guid;
+            if (previous != null) { try { Directory.CreateDirectory(Paths.Logs); File.WriteAllText(StateFile, previous); } catch { } }
+            return $"power plan {want.Name} set (was {cur?.Name ?? "unknown"}, restored when the streamer closes)";
+        }
+
+        /// Puts the remembered plan back (this run's, or the one a crashed run left in the file); returns the log line, null when there was nothing to restore.
+        public static string Restore()
+        {
+            var g = previous;
+            previous = null;
+            try { if (g == null && File.Exists(StateFile)) g = File.ReadAllText(StateFile).Trim(); } catch { }
+            try { File.Delete(StateFile); } catch { }
+            if (string.IsNullOrEmpty(g)) return null;
+            return Powercfg("/setactive " + g) != null ? "power plan restored" : "could not restore the power plan " + g;
+        }
     }
 
     /// The session (ALVR settings, paired headset). Created from session.default.json on first use.
