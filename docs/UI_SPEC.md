@@ -31,7 +31,7 @@ layers that may take the controllers, the Windows Firewall (read in the backgrou
 steps aside while a tool is open and returns when all are closed; starting the streamer from it first offers to close a running one. Single instance.
 
 ### Streamer (`bin\streamer.exe`) **[target layout]**
-Top to bottom; every block is a titled component (group box) except the first two lines.
+Top to bottom. Controls are grouped where they balance the window (Picture and Position side by side), not one box per feature.
 
 ```
 [logo header: Streamer for ALVR headsets · version]
@@ -45,13 +45,12 @@ Game: Lies of P   (none while the mirror runs)    GPU ... · OpenXR runtime ...
 |  after a session that used it: green "Game motion vectors worked (2558 frames)"            |
 |                           or orange "Ran blind: no vectors reached the streamer" (+ cause)  |
 |                           or, DLL missing: "No game vectors"  [Install]  [Not for this game] |
-+- Position -----------------------------------------------------------------------+
-|  Eye height  (o) Auto  ( ) Manual  [ 1.30 ] m                      [Recenter]      |   Auto only on the Vision Pro; "headset reports 1.62 m" shown in Auto
-+- Picture ------------------------------------------------------------------------+
-|  Gamma [----o---]  Sharpening [o-------]            [Defaults]   > Advanced         |   Advanced: brightness, contrast, saturation
-+- Desktop mirror -----------------------------------------------------------------+
-|  [switch]                                                                          |   no text; no "Between games" caption
-+------------------------------------------------------------------------------------+
++- Picture ----------------------+- Position ------------------------------------+
+|  Gamma      [----o---]  1.20   |  Eye height (o) Auto ( ) Manual [1.30] m        |   Auto only on the Vision Pro; "headset reports 1.62 m" under it
+|  Sharpening [o-------]  0.00   |  [Recenter]   Desktop mirror [switch]           |
+|  [Defaults]                    |                                                 |
++--------------------------------+-------------------------------------------------+
+> Advanced   (opens full width: Brightness, Contrast, Saturation, Resolution scale + "Apply (restarts the streamer)")
 Debug logging [ ]    [Export logs...]  [Open logs folder]            <- always visible, on or off
 footer: one inline notice at a time (firewall, setup error, encode error), with its action button
 ```
@@ -67,8 +66,10 @@ Rules:
 - **Position**: *Auto* sends height 0 (the engine uses the headset's own floor estimate: correct when the Vision Pro saw enough of the room, i.e. standing at the
   start of the session); *Manual* sends the number (default 1.30 m, recommended seated). A Quest or other headset reports its floor correctly: the choice is
   shown as Auto and disabled. The number replaces the slider (saves space; typed or stepped with the arrows, 0.5-2.2 m).
-- **Picture**: the two settings people touch; the rest behind *Advanced*. Everything applies live.
-- **Desktop mirror**: a switch only. The streamer starts `bin\mirrordesktop.exe` while a headset is connected and no game runs (docs/DESKTOP_MIRROR.md). The mirror is
+- **Picture**: the two settings people touch; the rest behind *Advanced*. Everything applies live except the **resolution scale** (0.50-2.00, default 1.00 = nothing; above 1 is
+  supersampling): it multiplies the per-eye resolution and reaches the engine through `session.json` (`EyeScale`; the unscaled size is kept in `visionalvr.json`), which is negotiated at
+  connection, so it is applied by a streamer restart (button) and the game restarted. The setup panel shows and saves the unscaled size.
+- **Desktop mirror**: a switch next to Recenter (no box of its own). The streamer starts `bin\mirrordesktop.exe` while a headset is connected and no game runs (docs/DESKTOP_MIRROR.md). The mirror is
   an app like a game to the engine but is **hidden from every game list and label** (Game line, Game history, Diagnose facts).
 - **Debug and feedback** are one row at the bottom, always visible: the checkbox (default off), *Export logs...* (the same zip as Game history: the general log, the
   newest debug run, the game records) and *Open logs folder*. Exporting never leaves a dialog open and ends with an inline "Saved to ..." line with a link.

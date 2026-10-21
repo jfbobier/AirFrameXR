@@ -148,43 +148,45 @@ namespace VisionALVR
             fgCol.Controls.Add(vecRow);
             body.Controls.Add(Group("Frame generation", fgCol));
 
-            // Position: eye height (Auto = the headset's own floor estimate, Vision Pro only; Manual = the typed value) and Recenter
-            var posRow = Row();
-            posRow.Controls.Add(new Label { Text = "Eye height", AutoSize = true, Margin = new Padding(3, 7, 6, 0) });
-            posRow.Controls.Add(heightMode);
+            // Position and Picture side by side, each a short stack (the window stays narrow); the desktop mirror switch sits with Recenter, the Advanced picture
+            // settings (and the resolution scale) open full width below. Not one titled box per feature: the space goes where the controls are.
+            var posCol = Col();
+            var heightRow = Row();
+            heightRow.Controls.Add(new Label { Text = "Eye height", AutoSize = true, Margin = new Padding(3, 7, 6, 0) });
+            heightRow.Controls.Add(heightMode);
             heightBox.Margin = new Padding(8, 2, 2, 0);
-            posRow.Controls.Add(heightBox);
-            posRow.Controls.Add(new Label { Text = "m", AutoSize = true, Margin = new Padding(0, 7, 6, 0) });
-            posRow.Controls.Add(heightReport);
-            recenter.Margin = new Padding(16, 0, 3, 0);
+            heightRow.Controls.Add(heightBox);
+            heightRow.Controls.Add(new Label { Text = "m", AutoSize = true, Margin = new Padding(0, 7, 6, 0) });
+            posCol.Controls.Add(heightRow);
+            heightReport.Margin = new Padding(3, 0, 0, 2);
+            posCol.Controls.Add(heightReport);
+            var posRow = Row();
+            recenter.Margin = new Padding(3, 3, 18, 3);
             posRow.Controls.Add(recenter);
-            body.Controls.Add(Group("Position", posRow));
+            posRow.Controls.Add(new Label { Text = "Desktop mirror", AutoSize = true, Margin = new Padding(3, 8, 0, 0) });
+            posRow.Controls.Add(mirror);
+            posCol.Controls.Add(posRow);
 
-            // Picture: the two settings people touch; the rest behind Advanced
-            var pic = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Font = Ui.Body, Margin = new Padding(0) };
+            // Picture: the two settings people touch, stacked; the rest behind Advanced
+            var pic = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Font = Ui.Body, Margin = new Padding(0) };
             var adv = new TableLayoutPanel { AutoSize = true, ColumnCount = 6, Font = Ui.Body };
             AddKnob(pic, "Gamma", 50, 200, AppSettings.DefaultGamma, () => settings.Gamma, v => settings.Gamma = v, "Above 1 is brighter.");
             AddKnob(pic, "Sharpening", 0, 100, 0, () => settings.Sharpening, v => settings.Sharpening = v);
             AddKnob(adv, "Brightness", -30, 30, 0, () => settings.Brightness, v => settings.Brightness = v);
             AddKnob(adv, "Contrast", -30, 30, 0, () => settings.Contrast, v => settings.Contrast = v);
             AddKnob(adv, "Saturation", -50, 50, 0, () => settings.Saturation, v => settings.Saturation = v, "Below 0: less vivid.");
+            AddScaleRow(adv);
             var reset = new Button { Text = "Defaults", AutoSize = true, Margin = new Padding(3, 4, 3, 3) };
             reset.Click += (s, e) => { foreach (var k in knobs) k.Bar.Value = (int)Math.Round(k.Def * 100); };
-            tips.SetToolTip(reset, "Gamma 1.2, the rest neutral.");
+            tips.SetToolTip(reset, "Gamma 1.2, the rest neutral (the resolution scale is applied with its own button).");
             var picCol = Col();
             picCol.Controls.Add(pic);
-            var advRow = Row();   // Advanced and Defaults share a line: the window stays short
-            advRow.Controls.Add(Ui.Expander("Advanced", adv, false, () => Ui.Refit(this)));
-            reset.Margin = new Padding(24, 0, 3, 3);
-            advRow.Controls.Add(reset);
-            advRow.WrapContents = false;
-            picCol.Controls.Add(advRow);
-            body.Controls.Add(Group("Picture", picCol));
-
-            // Desktop mirror: a switch only (the streamer starts bin\mirrordesktop.exe between games while a headset is connected; docs/DESKTOP_MIRROR.md)
-            var mirrorRow = Row();
-            mirrorRow.Controls.Add(mirror);
-            body.Controls.Add(Group("Desktop mirror", mirrorRow));
+            picCol.Controls.Add(reset);
+            var pair = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Dock = DockStyle.Fill, Margin = new Padding(0) };
+            pair.Controls.Add(Group("Picture", picCol));
+            pair.Controls.Add(Group("Position", posCol));
+            body.Controls.Add(pair);
+            body.Controls.Add(Ui.Expander("Advanced", adv, false, () => Ui.Refit(this)));
             tips.SetToolTip(mirror, "Between games the headset shows the Windows desktop on a floating screen; your hand is the mouse (pinch = click). Off by default.");
             tips.SetToolTip(fgRecommend, "Auto: the rate is set from this game's recorded runs on this headset, the fastest one that stayed clean. Pick 1/3, 1/2 or 2/3 yourself to leave Auto.");
             tips.SetToolTip(recenter, "Forward becomes forward and your position the origin. Done at every game start; the recenter key (End by default) does the same while playing.");
@@ -394,6 +396,49 @@ namespace VisionALVR
             t.Controls.Add(k.Value);
             if (tip != null) { tips.SetToolTip(label, tip); tips.SetToolTip(k.Bar, tip); }
             knobs.Add(k);
+        }
+
+        // Resolution scale: the game renders (and the stream is encoded) at this multiple of the configured eye resolution; above 1 is supersampling. It reaches the
+        // engine as the per-eye resolution in session.json (EyeScale), which is negotiated at connection: so it is applied by a streamer restart, not live.
+        void AddScaleRow(TableLayoutPanel t)
+        {
+            EyeScale.Current(settings, Session.Load(), out scaleBaseW, out scaleBaseH, out var cur);
+            scaleBar = new TrackBar { Minimum = 50, Maximum = 200, TickStyle = TickStyle.None, SmallChange = 5, LargeChange = 10, Width = 170, AutoSize = false, Height = 26, AccessibleName = "Resolution scale", Value = (int)Math.Max(50, Math.Min(200, Math.Round(cur * 100))) };
+            scaleValue = Ui.Line("");
+            scaleApply = new Button { Text = "Apply (restarts the streamer)", AutoSize = true, Visible = false, Margin = new Padding(3, 0, 3, 3) };
+            scaleApplied = scaleBar.Value;
+            scaleBar.ValueChanged += (s, e) => ScaleShow();
+            scaleApply.Click += (s, e) => ScaleApply();
+            var label = Ui.Line("Resolution scale:");
+            t.Controls.Add(label); t.Controls.Add(scaleBar); t.Controls.Add(scaleValue);
+            var tip = "Multiplies the eye resolution: 1.00 changes nothing, above 1 is supersampling (sharper, costs GPU), below 1 is lighter. Applied when the streamer restarts and the headset reconnects; the game has to be restarted too.";
+            tips.SetToolTip(label, tip); tips.SetToolTip(scaleBar, tip); tips.SetToolTip(scaleApply, tip);
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            row.Controls.Add(scaleApply);
+            t.Controls.Add(row);
+            t.SetColumnSpan(row, 6);
+            ScaleShow();
+        }
+        TrackBar scaleBar; Label scaleValue; Button scaleApply; int scaleApplied, scaleBaseW, scaleBaseH;
+        void ScaleShow()
+        {
+            var z = EyeScale.Scaled(scaleBaseW, scaleBaseH, scaleBar.Value / 100.0);
+            scaleValue.Text = (scaleBar.Value / 100.0).ToString("0.00", CultureInfo.InvariantCulture) + $"   {z[0]} x {z[1]}";
+            var changed = scaleBar.Value != scaleApplied;
+            if (scaleApply.Visible != changed) { scaleApply.Visible = changed; if (IsHandleCreated) BeginInvoke((Action)(() => Ui.Refit(this))); }
+        }
+        void ScaleApply()
+        {
+            if (gameRunning && MessageBox.Show(this, "A game is running. Applying restarts the streamer: the game loses the headset. Continue?", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (!EyeScale.Apply(settings, scaleBar.Value / 100.0, out var err)) { footer.Text = err; footer.ForeColor = Color.Firebrick; return; }
+            scaleApplied = scaleBar.Value;
+            ScaleShow();
+            closing = true;
+            host.Stop();
+            closing = false;
+            restarts = 0;
+            StartHost();
+            footer.Text = "Resolution scale applied: the streamer restarted. Restart the game too.";
         }
 
         // The eye-height override exists for the Vision Pro, whose floor estimate is unreliable. A Quest (or any other headset) reports its

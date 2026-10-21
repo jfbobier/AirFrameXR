@@ -439,6 +439,9 @@ namespace VisionALVR
         public double Saturation { get => Json.Num(Root, "display.saturation", 0); set => Json.Set(Root, "display.saturation", value); }
         public double Sharpening { get => Json.Num(Root, "display.sharpening", 0); set => Json.Set(Root, "display.sharpening", value); }
         public bool HasDisplay => Json.Get(Root, "display.gamma") != null;
+        /// resolution scale (supersampling when above 1): what EyeScale last wrote into session.json, with the unscaled eye size it started from and the size it wrote (to tell it from an edit made elsewhere)
+        public double RenderScale { get => Json.Num(Root, "display.render_scale", 1); set => Json.Set(Root, "display.render_scale", value); }
+        public int[] ScaleSizes { get => new[] { (int)Json.Num(Root, "display.scale_base_w", 0), (int)Json.Num(Root, "display.scale_base_h", 0), (int)Json.Num(Root, "display.scale_w", 0), (int)Json.Num(Root, "display.scale_h", 0) }; set { Json.Set(Root, "display.scale_base_w", value[0]); Json.Set(Root, "display.scale_base_h", value[1]); Json.Set(Root, "display.scale_w", value[2]); Json.Set(Root, "display.scale_h", value[3]); } }
         /// headset height above the floor handed to games (m), re-anchored live; 1.3 = a seated adult. 0 = the headset's floor estimate
         public const double DefaultHeight = 1.3;
         public double Height { get => Json.Num(Root, "headset.height_m", DefaultHeight); set => Json.Set(Root, "headset.height_m", value); }
@@ -449,6 +452,54 @@ namespace VisionALVR
             set => Json.Set(Root, "display.height_mode", value);
         }
         public void Save() => Json.Save(Paths.Settings, Root);
+    }
+
+    /// The streamer's resolution scale (supersampling above 1) is passed to the engine the way the setup does: as the per-eye resolution in
+    /// session.json, which the engine negotiates with the headset at connection. The unscaled size is kept in visionalvr.json; when session.json
+    /// holds something else than what was written here (the wizard or the setup panel changed it), that is the new unscaled size and the scale is 1.
+    public static class EyeScale
+    {
+        const string V = "session_settings.video.";
+        public static int[] Size(Dictionary<string, object> s) => new[] { (int)Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552), (int)Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200) };
+
+        /// The unscaled size and the scale in effect, from what is on disk.
+        public static void Current(AppSettings st, Dictionary<string, object> s, out int baseW, out int baseH, out double scale)
+        {
+            var now = Size(s); var k = st.ScaleSizes;
+            if (k[0] > 0 && k[1] > 0 && k[2] == now[0] && k[3] == now[1]) { baseW = k[0]; baseH = k[1]; scale = st.RenderScale; }
+            else { baseW = now[0]; baseH = now[1]; scale = 1; }
+        }
+
+        public static int[] Scaled(int baseW, int baseH, double scale) =>
+            Math.Abs(scale - 1) < 0.005 ? new[] { baseW, baseH } : new[] { (int)Math.Round(baseW * scale / 32) * 32, (int)Math.Round(baseH * scale / 2) * 2 };   // ALVR aligns widths to 32
+
+        /// Writes the unscaled size (the current one when 0) times `scale` into session.json and remembers it. False with the reason when the file cannot be written.
+        public static bool Apply(AppSettings st, double scale, out string error, int baseW = 0, int baseH = 0)
+        {
+            error = null;
+            var s = Session.Load();
+            if (baseW <= 0 || baseH <= 0) Current(st, s, out baseW, out baseH, out _);
+            scale = Math.Max(0.5, Math.Min(2.0, scale));
+            var z = Scaled(baseW, baseH, scale);
+            foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
+            {
+                Json.Set(s, V + k + ".variant", "Absolute");
+                Json.Set(s, V + k + ".Absolute.width", z[0]);
+                Json.Set(s, V + k + ".Absolute.height.set", true);
+                Json.Set(s, V + k + ".Absolute.height.content", z[1]);
+            }
+            Json.Set(s, "openvr_config.eye_resolution_width", z[0]);
+            Json.Set(s, "openvr_config.eye_resolution_height", z[1]);
+            Json.Set(s, "openvr_config.target_eye_resolution_width", z[0]);
+            Json.Set(s, "openvr_config.target_eye_resolution_height", z[1]);
+            try { Json.Save(Paths.Session, s); }
+            catch (Exception e) { error = "Cannot write config\\session.json: " + e.Message; return false; }
+            st.RenderScale = scale;
+            st.ScaleSizes = Math.Abs(scale - 1) < 0.005 ? new[] { 0, 0, 0, 0 } : new[] { baseW, baseH, z[0], z[1] };
+            st.Save();
+            Log.Write("INFO", $"resolution scale {scale:0.00}: {z[0]}x{z[1]} per eye (unscaled {baseW}x{baseH})");
+            return true;
+        }
     }
 
     /// Windows power plans through powercfg (what startvisionalvr.bat did): the configured plan is set while the streamer runs and the previous one is put back at the end.
@@ -1465,6 +1516,7 @@ namespace VisionALVR
         public static void AutoFitWindow(Form f, Control header, Control body, bool refitOnChange = true, Action<Action> measure = null)
         {
             if (body is Panel bp) bp.AutoSizeMode = AutoSizeMode.GrowAndShrink;   // the default GrowOnly keeps the size the framework scaled it to: empty space below the content
+            bool placed = false;
             Action size = () =>
             {
                 var wa = WorkArea(f);
@@ -1476,6 +1528,15 @@ namespace VisionALVR
                 if (ch > maxH) { ch = maxH; cw += SystemInformation.VerticalScrollBarWidth; }
                 if (cw > maxW) { cw = maxW; ch = Math.Min(maxH, ch + SystemInformation.HorizontalScrollBarHeight); }
                 f.ClientSize = new Size(cw, ch);
+                // CenterScreen centred the window at its design size, before this fit made it bigger: centre it once now, later fits only keep it on screen
+                int x = f.Left, y = f.Top;
+                if (!placed)
+                {
+                    placed = true;
+                    var around = f.StartPosition == FormStartPosition.CenterParent && f.Owner != null ? f.Owner.Bounds : (f.StartPosition == FormStartPosition.CenterScreen ? wa : Rectangle.Empty);
+                    if (around != Rectangle.Empty) { x = around.Left + (around.Width - f.Width) / 2; y = around.Top + (around.Height - f.Height) / 2; }
+                }
+                f.Location = new Point(Math.Max(wa.Left, Math.Min(x, wa.Right - f.Width)), Math.Max(wa.Top, Math.Min(y, wa.Bottom - f.Height)));
             };
             Action fit = measure == null ? size : () => measure(size);
             f.Load += (s, e) => fit();

@@ -135,8 +135,9 @@ namespace VisionALVR
         {
             session = Session.Load();
             var s = session;
-            EyeW.Value = Clamp(EyeW, Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552));
-            EyeH.Value = Clamp(EyeH, Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200));
+            EyeScale.Current(settings, s, out var baseW, out var baseH, out _);   // the unscaled size: the streamer's resolution scale is applied on top of it
+            EyeW.Value = Clamp(EyeW, baseW);
+            EyeH.Value = Clamp(EyeH, baseH);
             var f = ((int)Json.Num(s, V + "preferred_fps", 90)).ToString(CultureInfo.InvariantCulture);
             if (!Fps.Items.Contains(f)) Fps.Items.Add(f);
             Fps.SelectedItem = f;
@@ -187,6 +188,7 @@ namespace VisionALVR
             error = null;
             session = Session.Load(); // keep anything edited meanwhile (e.g. pairing)
             var s = session;
+            EyeScale.Current(settings, s, out _, out _, out var scale);
             int w = (int)EyeW.Value / 32 * 32, h = (int)EyeH.Value; // ALVR aligns widths to 32
             var rate = double.Parse((string)Fps.SelectedItem, CultureInfo.InvariantCulture);
             foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
@@ -219,6 +221,7 @@ namespace VisionALVR
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)Haptics.Value);
             try { Json.Save(Paths.Session, s); }
             catch (Exception e) { error = "Cannot write config\\session.json: " + e.Message; return false; }
+            if (Math.Abs(scale - 1) >= 0.005 && !EyeScale.Apply(settings, scale, out error, w, h)) return false;   // the typed size is the unscaled one: put the streamer's scale back on it
             settings.EncodeProfile = ProfFull.Checked ? "full-split" : "foveated";
             settings.SplitEncode = Split.Checked || ProfFull.Checked;   // the full-frame profile forces 3 strips whatever this says
             settings.FrameGen = FrameGen.Checked;
