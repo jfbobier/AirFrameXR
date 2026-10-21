@@ -37,7 +37,7 @@ $inv = [Globalization.CultureInfo]::InvariantCulture
 if ($Action -eq "snapshot") { [Au]::Snapshot() }
 elseif ($Action -eq "set") { [Au]::SetVol($A, [single]::Parse($B, $inv)); [Au]::Snapshot() }
 elseif ($Action -eq "run") {
-  $p = Start-Process -FilePath $A -PassThru -WorkingDirectory (Split-Path $A)
+  $p = Start-Process -FilePath $A -ArgumentList "--test" -PassThru -WorkingDirectory (Split-Path $A)
   Start-Sleep -Seconds ([int]$B)
   "== during"; [Au]::Snapshot()
   $sw = [Diagnostics.Stopwatch]::StartNew()
