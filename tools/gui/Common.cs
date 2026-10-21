@@ -425,6 +425,8 @@ namespace VisionALVR
         public int GpuKeepalive { get => (int)Json.Num(Root, "video.gpu_keepalive", 0); set => Json.Set(Root, "video.gpu_keepalive", (double)value); }
         /// the Windows power plan the streamer switches to while it runs (a GUID; "" = leave it alone); the plan that was active comes back when the streamer closes
         public string PowerPlan { get => Json.Str(Root, "system.power_plan", ""); set => Json.Set(Root, "system.power_plan", value); }
+        /// the PC's own output is muted while the streamer routes the game audio to the virtual cable (on by default)
+        public bool MuteSpeakers { get => Json.Bool(Root, "audio.mute_pc", true); set => Json.Set(Root, "audio.mute_pc", value); }
         public bool Debug { get => Json.Bool(Root, "debug", false); set => Json.Set(Root, "debug", value); }
         /// display (live in VisionALVR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral
         public const double DefaultGamma = 1.2;

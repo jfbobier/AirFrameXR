@@ -224,7 +224,7 @@ namespace VisionALVR
             fry.Value = Clamp(fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
             try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
             audio.Checked = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
-            mute.Checked = Json.Bool(s, "session_settings.audio.game_audio.content.mute_when_streaming", true);
+            mute.Checked = settings.MuteSpeakers;
             proto.SelectedItem = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp") == "Tcp" ? "Tcp" : "Udp";
             packet.Value = Clamp(packet, Json.Num(s, "session_settings.connection.packet_size", 1400));
             haptics.Value = Clamp(haptics, Json.Num(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", 1));
@@ -256,7 +256,7 @@ namespace VisionALVR
             Json.Set(s, V + "foveated_encoding.content.edge_ratio_x", (double)frx.Value);
             Json.Set(s, V + "foveated_encoding.content.edge_ratio_y", (double)fry.Value);
             Json.Set(s, "session_settings.audio.game_audio.enabled", audio.Checked);
-            Json.Set(s, "session_settings.audio.game_audio.content.mute_when_streaming", mute.Checked);
+            settings.MuteSpeakers = mute.Checked;
             Json.Set(s, "session_settings.connection.stream_protocol.variant", (string)proto.SelectedItem);
             Json.Set(s, "session_settings.connection.packet_size", (int)packet.Value);
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)haptics.Value);

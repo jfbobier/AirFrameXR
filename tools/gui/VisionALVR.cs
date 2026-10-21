@@ -57,7 +57,6 @@ namespace VisionALVR
         readonly Button vecDismiss = new Button { Text = "Not for this game", AutoSize = true, Visible = false };
         readonly FlowLayoutPanel vecRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 4, 0, 0), MinimumSize = new Size(0, 26), MaximumSize = new Size(740, 0) };   // always present: its line is reserved, so a result appearing never moves the window
         readonly Label audioLine = new Label { AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };   // the virtual audio device's volume, only when it matters
-        bool audioForced;
         readonly Label exportStatus = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };
         readonly LinkLabel exportLink = new LinkLabel { Text = "Open folder", AutoSize = true, Margin = new Padding(3, 4, 3, 0) };
         readonly CheckBox fgMv = new CheckBox { Text = "Use the game's DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0), Visible = false };   // shown only where the extractor DLL is installed for the running game
@@ -505,15 +504,25 @@ namespace VisionALVR
         }
 
         /// The virtual cable as the default output, the PC's output muted, the cable held at 100 %: what startvisionalvr.bat did, restored when the streamer closes.
+        /// Before the host starts: ALVR's own mute_when_streaming mutes the captured device (the cable now), so the streamer switches it off in session.json.
         void StartAudioRoute()
         {
             var s = Session.Load();
             var enabled = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             var part = Json.Bool(s, "session_settings.audio.game_audio.content.device.set", false) ? Convert.ToString(Json.Get(s, "session_settings.audio.game_audio.content.device.content.NameSubstring")) : "";
-            audio.Report += (level, text) => { try { BeginInvoke((Action)(() => { if (!closing) SetAudioLine("Audio: " + text, level == "WARN" ? Color.DarkOrange : Color.DimGray); })); } catch { } };
-            System.Threading.Tasks.Task.Run(() => audio.Start(part, enabled));
+            audio.Report += AudioNote;
+            if (audio.Start(part, enabled, new AppSettings().MuteSpeakers) && Json.Bool(s, "session_settings.audio.game_audio.content.mute_when_streaming", true))
+            {
+                Json.Set(s, "session_settings.audio.game_audio.content.mute_when_streaming", false);
+                try { Json.Save(Paths.Session, s); Log.Write("INFO", "audio: ALVR's mute_when_streaming switched off (the streamer mutes the PC output itself)"); } catch (Exception e) { Log.Write("WARN", "audio: cannot write session.json: " + e.Message); }
+            }
             var plan = new AppSettings().PowerPlan;
             if (plan.Length > 0) System.Threading.Tasks.Task.Run(() => { var m = PowerPlan.Apply(plan); if (m != null) Log.Write("INFO", m); });
+        }
+
+        void AudioNote(string level, string text)
+        {
+            try { BeginInvoke((Action)(() => { if (!closing) SetAudioLine("Audio: " + text, level == "WARN" ? Color.DarkOrange : Color.DimGray); })); } catch { }
         }
 
         void StartHost()
@@ -526,7 +535,7 @@ namespace VisionALVR
             headset.ForeColor = Color.DarkOrange;
             NeedFind(true);
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
-            Environment.SetEnvironmentVariable("VISIONALVR_FORCE_CABLE_VOLUME", "0");   // the streamer holds the cable's volume itself (AudioRoute), the host's thread would only repeat it
+            StartAudioRoute();
             var err = host.Start(args);
             if (err != null)
             {
@@ -536,7 +545,6 @@ namespace VisionALVR
             }
             footer.Text = "Streamer running. Open ALVR on the headset.";
             Log.Write("INFO", "streamer started: alvr_host " + args);
-            StartAudioRoute();
         }
 
         /// The streamer owns UDP 9943 (headset discovery), so it stops while the dialog searches; a chosen headset is paired (saved address) and
@@ -709,15 +717,8 @@ namespace VisionALVR
                         stats.Text = "";
                     }
                     break;
-                case "audio_volume_forced":
-                    // the engine found the virtual cable device below 100 % and put it back: say so once, orange when that failed
-                    audioForced = true;
-                    if (d != null && d.TryGetValue("set_ok", out var so) && so is bool sok && !sok) SetAudioLine($"Audio: cannot set {S(d, "device")} to 100 %. The headset's volume follows the PC's.", Color.DarkOrange);
-                    else SetAudioLine($"Audio: {S(d, "device")} held at 100 % (was {F(D(d, "was") * 100, "0")} %)", Color.DimGray);
-                    break;
-                case "audio_volume_state":
-                    if (S(d, "state") == "missing") SetAudioLine($"Audio: the device named in the audio settings ({S(d, "device")}) was not found.", Color.DarkOrange);
-                    else if (audioForced && S(d, "state") == "held") SetAudioLine($"Audio: {S(d, "device")} held at 100 %", Color.DimGray);
+                case "audio_note":   // what AudioRoute reports (also replayed by the streamer_events harness)
+                    SetAudioLine("Audio: " + S(d, "text"), S(d, "level") == "WARN" ? Color.DarkOrange : Color.DimGray);   // already on the UI thread here
                     break;
                 case "height_calibrated":
                     reportedHeight = D(d, "headset_y"); UpdateHeightUi();

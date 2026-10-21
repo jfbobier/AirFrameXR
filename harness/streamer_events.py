@@ -69,10 +69,10 @@ EXPECT = {
         ("mirror", [], ["worked", "ran blind", "No game vectors"]),
     ],
     "audio_line": [
-        ("quiet", [], ["Audio:"]),   # a device that was never touched says nothing
-        ("forced", ["Audio: CABLE Input (VB-Audio Virtual Cable) held at 100 % (was 40 %)"], []),
-        ("failed", ["Audio: cannot set CABLE Input (VB-Audio Virtual Cable) to 100 %"], []),
-        ("missing", ["Audio: the device named in the audio settings (Headphones (Realtek)) was not found."], []),
+        ("quiet", [], ["Audio:"]),   # nothing reported, nothing said
+        ("forced", ["Audio: CABLE Input (VB-Audio Virtual Cable) was at 40 %, set back to 100 %"], []),
+        ("failed", ["Audio: CABLE Input (VB-Audio Virtual Cable) could not be set to 100 %"], []),
+        ("channels", ["has 16 channels: ALVR cannot capture more than 8"], []),
     ],
     "window_size": [],
     "short12": [

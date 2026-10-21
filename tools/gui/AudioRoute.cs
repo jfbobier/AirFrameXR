@@ -10,7 +10,8 @@ namespace VisionALVR
     /// What startvisionalvr.bat did with svcl.exe, done in-process with the Core Audio API while the streamer runs: the virtual cable (VB-CABLE / the device named
     /// in the audio settings) becomes the default output for every role (games that play to another role would bypass ALVR's capture), the PC's own output is muted,
     /// the cable is unmuted and held at 100 % (its endpoint volume scales what ALVR captures, so the PC's volume keys would change the headset's volume).
-    /// Stop() puts everything back. The state to restore is written to logs\audio_route.txt first, so a streamer that crashed is undone at the next start.
+    /// Every 3 s the default and the cable's volume and mute are put back if anything moved them (Windows when a device appears, a game, ALVR's own mute_when_streaming).
+    /// A virtual device with more than 8 channels is never chosen: ALVR's capture refuses it (alvr_audio lib.rs). Stop() puts everything back. The state to restore is written to logs\audio_route.txt first, so a streamer that crashed is undone at the next start.
     /// VISIONALVR_AUDIO_ROUTE=0 disables it.
     public sealed class AudioRoute
     {
@@ -29,9 +30,10 @@ namespace VisionALVR
 
         void Say(string level, string text) { Log.Write(level, "audio: " + text); try { Report?.Invoke(level, text); } catch { } }
 
-        public void Start(string wantedPart, bool enabled)
+        /// True when the cable is the default output and held (the caller then switches ALVR's own mute off). Call it before the host starts: it takes a few milliseconds.
+        public bool Start(string wantedPart, bool enabled, bool mutePc)
         {
-            if (!enabled || Environment.GetEnvironmentVariable("VISIONALVR_AUDIO_ROUTE") == "0") return;
+            if (!enabled || Environment.GetEnvironmentVariable("VISIONALVR_AUDIO_ROUTE") == "0") return false;
             try
             {
                 RestoreLeftover();
@@ -39,29 +41,67 @@ namespace VisionALVR
                 {
                     var devices = Endpoints.Render();
                     Endpoints.Dev cable = null;
+                    var capturable = devices.FindAll(d => d.Channels <= MaxChannels);
                     foreach (var d in devices)
-                        if (!string.IsNullOrEmpty(wantedPart) && d.Name.IndexOf(wantedPart, StringComparison.OrdinalIgnoreCase) >= 0) { cable = d; break; }
-                    foreach (var key in new[] { "cable input", "vb-audio" })   // the plain stereo input first: the 16-channel one is a VB-Audio device too
-                        if (cable == null) cable = devices.Find(d => d.Name.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0);
-                    if (cable == null) { Say("WARN", "no virtual audio cable found (VB-CABLE); the game audio follows the Windows default output"); return; }
+                        if (d.Channels > MaxChannels && (string.IsNullOrEmpty(wantedPart) || d.Name.IndexOf(wantedPart, StringComparison.OrdinalIgnoreCase) >= 0) && IsCable(d.Name))
+                            Say("WARN", $"{d.Name} has {d.Channels} channels: ALVR cannot capture more than {MaxChannels}, it is not used");
+                    if (!string.IsNullOrEmpty(wantedPart)) cable = capturable.Find(d => d.Name.IndexOf(wantedPart, StringComparison.OrdinalIgnoreCase) >= 0);
+                    foreach (var key in new[] { "cable input", "vb-audio" })   // the plain stereo input first
+                        if (cable == null) cable = capturable.Find(d => d.Name.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (cable == null) { Say("WARN", "no usable virtual audio cable found (VB-CABLE, at most 8 channels); the game audio follows the Windows default output"); return false; }
                     cableId = cable.Id; cableName = cable.Name;
+                    EnsurePlainPcm();
 
                     for (int i = 0; i < 3; i++) oldDefaults[i] = Endpoints.Default(i);
                     var pc = oldDefaults[0] != null && oldDefaults[0] != cableId ? oldDefaults[0] : null;
                     if (pc != null) { pcId = pc; pcName = devices.Find(x => x.Id == pc)?.Name ?? pc; pcWasMuted = Endpoints.GetMute(pc); }
                     File.WriteAllText(StateFile, string.Join("\n", oldDefaults.Select(x => x ?? "")) + "\n" + (pcId ?? "") + "\n" + (pcWasMuted ? "1" : "0") + "\n");
 
-                    if (pcId != null) Endpoints.SetMute(pcId, true);
+                    if (pcId != null && mutePc) Endpoints.SetMute(pcId, true);
                     for (int i = 0; i < 3; i++)
                         if (oldDefaults[i] != cableId) Endpoints.SetDefault(cableId, i);
                     running = true;
-                    Say("INFO", $"{cableName} is now the default output" + (pcId != null ? $", {pcName} muted (restored when the streamer closes)" : ""));
+                    Say("INFO", $"{cableName} is now the default output" + (pcId != null && mutePc ? $", {pcName} muted (restored when the streamer closes)" : ""));
                 }
                 Hold(null);
                 timer = new Timer(Hold, null, 3000, 3000);
+                return true;
             }
-            catch (Exception ex) { Say("WARN", "could not route the game audio to the virtual cable: " + ex.Message); }
+            catch (Exception ex) { Say("WARN", "could not route the game audio to the virtual cable: " + ex.Message); return false; }
         }
+
+        /// The game audio reaches the headset as plain PCM at the device's rate (ALVR tells the client the rate it captures at): 2 channels, 48 kHz (what the headsets
+        /// play natively, nothing to resample), 16 bit. Checked at start; a different Default format is set back, a refusal is reported. Spatial sound (Windows Sonic)
+        /// on the device changes the mix too: it is only reported (the setting lives in Windows' protected store, it cannot be switched from here).
+        void EnsurePlainPcm()
+        {
+            var f = Endpoints.MixFormat(cableId);
+            if (f == null) { Say("WARN", $"{cableName}: the format cannot be read"); return; }
+            if (f[0] != 2 || f[1] != 48000)
+            {
+                try
+                {
+                    Endpoints.SetPcmFormat(cableId, 2, 48000);
+                    var g = Endpoints.MixFormat(cableId);
+                    if (g != null && g[0] == 2 && g[1] == 48000) { Say("INFO", $"{cableName} was {f[0]} ch / {f[1]} Hz, set to plain PCM, 2 ch / 48000 Hz"); return; }
+                    Say("WARN", $"{cableName} is {f[0]} ch / {f[1]} Hz and could not be set to 2 ch / 48000 Hz: set it in Sound > {cableName} > Properties > Advanced");
+                }
+                catch (Exception ex) { Say("WARN", $"{cableName} is {f[0]} ch / {f[1]} Hz and could not be set to 2 ch / 48000 Hz ({ex.Message}): set it in Sound > Properties > Advanced"); }
+            }
+            else Log.Write("INFO", $"audio: {cableName} format {f[0]} ch / {f[1]} Hz / {f[2]} bit");
+            try
+            {
+                var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\" + EndpointGuid(cableId) + @"\FxProperties");
+                var spatial = key?.GetValue("{b3f8fa53-0004-438e-9003-51a46e139bfc},6") as string;
+                if (!string.IsNullOrEmpty(spatial)) Say("WARN", $"spatial sound is on for {cableName} ({spatial}): switch it to Off in Sound > Properties > Spatial sound, the headset hears the plain stereo mix otherwise altered");
+            }
+            catch { }
+        }
+
+        static string EndpointGuid(string id) { var i = id.LastIndexOf('.'); return i >= 0 ? id.Substring(i + 1) : id; }
+
+        const int MaxChannels = 8;   // alvr_audio refuses a capture device with more
+        static bool IsCable(string name) => name.IndexOf("cable", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("vb-audio", StringComparison.OrdinalIgnoreCase) >= 0;
 
         /// Cable unmuted and at 100 %; reports the first state and every correction.
         void Hold(object _)
@@ -71,6 +111,8 @@ namespace VisionALVR
                 if (!running || cableId == null) return;
                 try
                 {
+                    for (int i = 0; i < 3; i++)   // something moved the default (a device that appeared, a game, a driver): back to the cable
+                        if (Endpoints.Default(i) != cableId) { Endpoints.SetDefault(cableId, i); Say("INFO", $"the {Roles[i]} default output had changed, set back to {cableName}"); }
                     var vol = Endpoints.GetVolume(cableId);
                     var muted = Endpoints.GetMute(cableId);
                     if (vol < 0.999f || muted)
@@ -126,7 +168,7 @@ namespace VisionALVR
         // ---- Core Audio COM ----------------------------------------------------------------------------------------------------------------------------
         static class Endpoints
         {
-            public sealed class Dev { public string Id, Name; }
+            public sealed class Dev { public string Id, Name; public int Channels; }
 
             [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorCom { }
             [ComImport, Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9")] class PolicyConfigCom { }
@@ -187,7 +229,7 @@ namespace VisionALVR
                 [PreserveSig] int GetMixFormat(IntPtr a, IntPtr b);
                 [PreserveSig] int GetDeviceFormat(IntPtr a, int b, IntPtr c);
                 [PreserveSig] int ResetDeviceFormat(IntPtr a);
-                [PreserveSig] int SetDeviceFormat(IntPtr a, IntPtr b, IntPtr c);
+                [PreserveSig] int SetDeviceFormat([MarshalAs(UnmanagedType.LPWStr)] string id, IntPtr endpointFormat, IntPtr mixFormat);
                 [PreserveSig] int GetProcessingPeriod(IntPtr a, int b, IntPtr c, IntPtr d);
                 [PreserveSig] int SetProcessingPeriod(IntPtr a, IntPtr b);
                 [PreserveSig] int GetShareMode(IntPtr a, IntPtr b);
@@ -211,9 +253,35 @@ namespace VisionALVR
                 for (int i = 0; i < n; i++)
                 {
                     col.Item(i, out var d); d.GetId(out var id);
-                    res.Add(new Dev { Id = id, Name = NameOf(d) });
+                    res.Add(new Dev { Id = id, Name = NameOf(d), Channels = ChannelsOf(d) });
                 }
                 return res;
+            }
+
+            [ComImport, Guid("1CB9AD4C-DBFA-4C32-B178-C2F568A703B2"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+            interface IAudioClient
+            {
+                [PreserveSig] int Initialize(int mode, int flags, long bufferDuration, long periodicity, IntPtr format, IntPtr sessionGuid);
+                [PreserveSig] int GetBufferSize(out uint n);
+                [PreserveSig] int GetStreamLatency(out long l);
+                [PreserveSig] int GetCurrentPadding(out uint n);
+                [PreserveSig] int IsFormatSupported(int mode, IntPtr format, out IntPtr closest);
+                [PreserveSig] int GetMixFormat(out IntPtr format);
+            }
+
+            /// The device's shared-mode mix format channel count (WAVEFORMATEX.nChannels), the format ALVR's loopback capture gets; 2 when it cannot be read.
+            static int ChannelsOf(IMMDevice d)
+            {
+                try
+                {
+                    var iid = typeof(IAudioClient).GUID;
+                    if (d.Activate(ref iid, ClsCtxAll, IntPtr.Zero, out var o) < 0) return 2;
+                    ((IAudioClient)o).GetMixFormat(out var fmt);
+                    var n = Marshal.ReadInt16(fmt, 2);
+                    Marshal.FreeCoTaskMem(fmt);
+                    return n;
+                }
+                catch { return 2; }
             }
 
             static string NameOf(IMMDevice d)
@@ -228,6 +296,39 @@ namespace VisionALVR
                     return s ?? "";
                 }
                 catch { return ""; }
+            }
+
+            /// (channels, sample rate, bits, format tag) of the shared-mode mix format, the device's "Default format" in the Sound control panel; null when unreadable.
+            public static int[] MixFormat(string id)
+            {
+                try
+                {
+                    Check(Enumerator().GetDevice(id, out var d), "GetDevice");
+                    var iid = typeof(IAudioClient).GUID;
+                    Check(d.Activate(ref iid, ClsCtxAll, IntPtr.Zero, out var o), "Activate(IAudioClient)");
+                    Check(((IAudioClient)o).GetMixFormat(out var f), "GetMixFormat");
+                    var r = new[] { (int)Marshal.ReadInt16(f, 2), Marshal.ReadInt32(f, 4), (int)Marshal.ReadInt16(f, 14), (int)(ushort)Marshal.ReadInt16(f, 0) };
+                    Marshal.FreeCoTaskMem(f);
+                    return r;
+                }
+                catch { return null; }
+            }
+
+            /// Sets the device's Default format to plain PCM: `channels`, `rate`, 16 bit (WAVEFORMATEXTENSIBLE: the plain WAVEFORMATEX is refused with NOT_FOUND).
+            /// Shared mode then mixes at that rate and channel count (the engine's own mix stays 32-bit float).
+            public static void SetPcmFormat(string id, int channels, int rate)
+            {
+                var f = Marshal.AllocHGlobal(40);
+                try
+                {
+                    for (int i = 0; i < 40; i++) Marshal.WriteByte(f, i, 0);
+                    Marshal.WriteInt16(f, 0, unchecked((short)0xFFFE)); Marshal.WriteInt16(f, 2, (short)channels); Marshal.WriteInt32(f, 4, rate);
+                    Marshal.WriteInt32(f, 8, rate * channels * 2); Marshal.WriteInt16(f, 12, (short)(channels * 2)); Marshal.WriteInt16(f, 14, 16);
+                    Marshal.WriteInt16(f, 16, 22); Marshal.WriteInt16(f, 18, 16); Marshal.WriteInt32(f, 20, channels == 2 ? 3 : 0);
+                    Marshal.Copy(new Guid("00000001-0000-0010-8000-00aa00389b71").ToByteArray(), 0, f + 24, 16);   // KSDATAFORMAT_SUBTYPE_PCM
+                    Check(((IPolicyConfig)new PolicyConfigCom()).SetDeviceFormat(id, f, f), "SetDeviceFormat");
+                }
+                finally { Marshal.FreeHGlobal(f); }
             }
 
             public static string Default(int role) { return Enumerator().GetDefaultAudioEndpoint(FlowRender, role, out var d) < 0 ? null : (d.GetId(out var id) < 0 ? null : id); }

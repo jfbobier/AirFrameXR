@@ -149,7 +149,7 @@ namespace VisionALVR
             Fry.Value = Clamp(Fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
             try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
             Audio.Checked = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
-            Mute.Checked = Json.Bool(s, "session_settings.audio.game_audio.content.mute_when_streaming", true);
+            Mute.Checked = settings.MuteSpeakers;
             Proto.SelectedItem = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp") == "Tcp" ? "Tcp" : "Udp";
             Packet.Value = Clamp(Packet, Json.Num(s, "session_settings.connection.packet_size", 1400));
             Haptics.Value = Clamp(Haptics, Json.Num(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", 1));
@@ -210,7 +210,6 @@ namespace VisionALVR
             Json.Set(s, "openvr_config.refresh_rate", (int)rate);
             Json.Set(s, "openvr_config.enable_foveated_encoding", ProfFov.Checked);
             Json.Set(s, "session_settings.audio.game_audio.enabled", Audio.Checked);
-            Json.Set(s, "session_settings.audio.game_audio.content.mute_when_streaming", Mute.Checked);
             Json.Set(s, "session_settings.connection.stream_protocol.variant", (string)Proto.SelectedItem);
             Json.Set(s, "session_settings.connection.packet_size", (int)Packet.Value);
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)Haptics.Value);
@@ -220,6 +219,7 @@ namespace VisionALVR
             settings.SplitEncode = Split.Checked || ProfFull.Checked;   // the full-frame profile forces 3 strips whatever this says
             settings.FrameGen = FrameGen.Checked;
             settings.IdleRgb = $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}";
+            settings.MuteSpeakers = Mute.Checked;
             settings.Debug = DebugDefault.Checked;
             settings.RecenterKey = RecenterKey.Text.Trim().Length > 0 ? RecenterKey.Text.Trim() : "End";
             settings.PowerPlan = PowerPlanBox.SelectedIndex > 0 && PowerPlanBox.SelectedIndex <= plans.Count ? plans[PowerPlanBox.SelectedIndex - 1].Guid : (PowerPlanBox.SelectedIndex < 0 ? settings.PowerPlan : "");

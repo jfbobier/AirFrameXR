@@ -209,3 +209,6 @@ Each step: tests first for the state it changes, `ui_matrix` at 0 FAIL, README s
 
 ## Order
 0 → 1 → 2 → 3 → 4 → 5. Phase 2 before the DLL popup (shared install code). Phase 5 last.
+
+
+Audio setup moved to .NET 2026-10-21: `tools/gui/AudioRoute.cs` (Core Audio + IPolicyConfig) sets the cable as default for all roles, mutes the PC output (`audio.mute_pc` in visionalvr.json), holds the cable unmuted at 100 % and the default every 3 s, sets its Default format to PCM 2 ch / 48 kHz, skips devices over 8 channels, switches ALVR's `mute_when_streaming` off in session.json, restores everything on close or after a crash (`logs\audio_route.txt`); Windows power plan in `PowerPlan` (Common.cs, `system.power_plan`). The Rust volume thread and its `audio_volume_*` events are gone. Test: `harness/audio_route_check.py` (24 checks on the builder: plain, nomute, disturb, named device, format, crash recovery), `streamer_events` audio_line. Not covered: more-than-8-channel refusal (the lab driver mixes 2 ch), spatial sound (Windows Sonic) is only reported from the registry, never switched, untested; no headset connected during the run.
