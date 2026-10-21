@@ -330,7 +330,8 @@ VisionALVR stands on the shoulders of giants: the projects below made it possibl
   game-compatibility work live in that project.
 - NVIDIA Video Codec SDK and Optical Flow SDK headers (MIT). cgltf (MIT), stb_image (public domain / MIT), Draco (Apache-2.0, offline converter only).
 - Benchmark scene: "Littlest Tokyo" by Glen Fox ([glenatron](https://sketchfab.com/glenatron)), CC-BY-4.0, converted and placed
-  in a textured room.
+  in a textured room. Its music: "Sakura Breeze" by [Roa Music](https://soundcloud.com/roa_music1031), royalty-free music from
+  [free-stock-music.com](https://www.free-stock-music.com), CC BY 3.0 ([licence](https://creativecommons.org/licenses/by/3.0/deed.en_US)), shortened and re-encoded.
 
 Details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). VisionALVR is not affiliated with or endorsed by the ALVR project,
 Apple, NVIDIA, Virtual Desktop, OFXR-Bridge or OptiScaler. Apple Vision Pro and visionOS are trademarks of Apple Inc.

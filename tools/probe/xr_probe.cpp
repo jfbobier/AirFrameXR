@@ -33,6 +33,7 @@
 #define STBI_ONLY_JPEG
 #include "bench_scene.h"
 #include <vector>
+#include <mmsystem.h>   // MCI: the scene's music (winmm.lib)
 #define XR_USE_GRAPHICS_API_D3D11
 #define XR_USE_PLATFORM_WIN32
 #include <openxr/openxr.h>
@@ -273,11 +274,26 @@ int main(int argc, char** argv) {
     const bool movingWall = getenv("XR_PROBE_MOVING_CLOCK") && strcmp(getenv("XR_PROBE_MOVING_CLOCK"), "wall") == 0;
     double movingWallT0 = 0.0, movingFrameStartMs = 0.0;
     long long movingT0 = 0;
+    bool soundOn = false;
     if (const char* scenePath = dotsOn ? nullptr : getenv("XR_PROBE_SCENE")) {
         std::string err;
         sceneOn = LoadScene(dev, ctx, scenePath, scene, err);
         if (sceneOn && !scene.room.count) MakeRoom(dev, scene);
         L("scene %s: %s", scenePath, sceneOn ? "loaded" : err.c_str());
+        // the scene's music (Sakura Breeze, CC BY 3.0: THIRD_PARTY_NOTICES.md) loops through the Windows default output, like a game's sound: the audio lab and the wizard's
+        // scene test hear it end to end. XR_PROBE_SOUND=<file> picks another file, XR_PROBE_SOUND=0 is silence; by default sakura_breeze.mp3 next to the scene file.
+        if (sceneOn) {
+            const char* sv = getenv("XR_PROBE_SOUND");
+            std::string snd = sv ? sv : std::string(scenePath).substr(0, std::string(scenePath).find_last_of("\\/") + 1) + "sakura_breeze.mp3";
+            if (!(sv && strcmp(sv, "0") == 0) && GetFileAttributesA(snd.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                char cmd[1024], ret[128];
+                snprintf(cmd, sizeof cmd, "open \"%s\" type mpegvideo alias xrbgm", snd.c_str());
+                MCIERROR e = mciSendStringA(cmd, ret, sizeof ret, nullptr);
+                if (!e) e = mciSendStringA("play xrbgm repeat", ret, sizeof ret, nullptr);
+                soundOn = !e;
+                L("scene sound %s: %s", snd.c_str(), soundOn ? "playing" : "FAILED");
+            }
+        }
     }
     // the scene is normalised around the origin (~3 m); the benchmark looks at it from (0, 0.2, 1.9): put it where a standing
     // viewer at the mock headset's height (1.5 m) sees the same picture
@@ -756,6 +772,7 @@ int main(int argc, char** argv) {
         if (timingF) { fprintf(timingF, "%d,%lld,%.3f,%.3f,%.3f\n", done + 1, (long long)fs.predictedDisplayTime, tWaitRet, qpcMs(), lf); if (done % 30 == 0) fflush(timingF); }
         done++;
     }
+    if (soundOn) mciSendStringA("close xrbgm", nullptr, 0, nullptr);
     L("loop done: frames=%d ready=%d synchronized=%d", done, sawReady, sawSync);
     if (synMvOn || truthMvOn) L("motion vectors: %llu publications, consumer %s", (unsigned long long)synMv.published, g_mvConsumer ? "registered" : "never registered");
     if (done > 1) L("app fps %.2f over %d frames", (done - 1) * 1000.0 / (qpcMs() - loopStartMs), done - 1);

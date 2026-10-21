@@ -23,5 +23,7 @@ Logs: logs\VisionALVR.log (always), logs\debug\<date-time>\ (when debug logging 
 Credits: the benchmark scene bench\littlest_tokyo.vab is "Littlest Tokyo" by Glen Fox (glenatron,
 https://sketchfab.com/glenatron), licensed CC-BY-4.0 (https://creativecommons.org/licenses/by/4.0/), from the three.js
 examples. Changed: converted to VisionALVR's own format (meshes decompressed, simplified shading) and shown inside a room
-tiled with the scene's own texture. stb_image (public domain / MIT) decodes its textures.
+tiled with the scene's own texture. Its music bench\sakura_breeze.mp3 is "Sakura Breeze" by Roa Music
+(https://soundcloud.com/roa_music1031), Royalty Free Music by https://www.free-stock-music.com, Creative Commons / Attribution 3.0
+Unported License (CC BY 3.0, https://creativecommons.org/licenses/by/3.0/deed.en_US); changed: the first 75 seconds, re-encoded. stb_image (public domain / MIT) decodes its textures.
 Third-party licences: docs\THIRD_PARTY_NOTICES.md and docs\licenses\.

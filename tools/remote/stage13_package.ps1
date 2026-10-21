@@ -30,6 +30,7 @@ Copy-Item "$root\_tmp\install\licenses\*.txt" "$pkg\docs\licenses" -Force
 # the benchmark scene (tools/bench_scene/build.sh, uploaded by `run.py build host`)
 New-Item -ItemType Directory -Force "$pkg\bench" | Out-Null
 if (Test-Path "$root\bench\littlest_tokyo.vab") { Copy-Item "$root\bench\littlest_tokyo.vab" "$pkg\bench\littlest_tokyo.vab" -Force }
+if (Test-Path "$root\bench\sakura_breeze.mp3") { Copy-Item "$root\bench\sakura_breeze.mp3" "$pkg\bench\sakura_breeze.mp3" -Force }   # the scene's music (credits in THIRD_PARTY_NOTICES.md)
 # the OpenXR scene app of the wizard's scene test (renders that scene through the real shim path with the headset's head pose)
 if (Test-Path "$root\build\probe\xr_probe.exe") { Copy-Item "$root\build\probe\xr_probe.exe" "$pkg\bench\xr_probe.exe" -Force }
 # the DLSS motion-vector extractor (OptiScaler fork, GPL-3.0; source and licence named in THIRD_PARTY_NOTICES.md): a user copies it next to a game's exe
@@ -60,7 +61,7 @@ $zip = "$root\out\dist\VisionALVR-$version.zip"
 # everything sits under VisionALVR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
 $ship = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\mirrordesktop.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
           'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json',
-          'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
+          'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\sakura_breeze.mp3', 'bench\xr_probe.exe', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
 $ship += $persShip
 $ship += $persFiles
 if ($shipDlssvec) { $ship += 'DLSSMotionVectors\dxgi.dll' }
