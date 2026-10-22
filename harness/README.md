@@ -78,10 +78,11 @@ faults, host_stdout.txt, mem.csv, ballast.log, soak_plan.json, result.json). Run
 | `host_freeze_30s` / `_fgoff` | the whole host process suspended for 30 s (NtSuspendProcess) | back within the freeze + 15 s, the watchdog reports it |
 | `client_freeze_5s` / `_30s` | the mock headset frozen (the host drops the connection at 30 s) | back within a few seconds of resuming |
 | `reconnect_storm` | 15 client sessions of 8-25 s against one daemon host | every session streams, first frame within 6 s |
+| `gui_pipe_stall_30s` | the streamer window stops reading the host's stdout for 30 s (the host's stdout goes through a frozen `findstr`) | no stall over 2 s (a host thread blocked in `println!` froze the stream for 27 s before the event queue) |
 | `memory_baseline_fullres` | none: what the chain holds at the Vision Pro's size | no growth, memory events present |
 | `vram_cap_loose`, `vram_squeeze`, `ram_squeeze` | the ballast leaves the chain 4 GB / 1.8 GB of VRAM, 2.3 GB of RAM (squeezes released at +95 s) | alive at the end |
 | `mv_clean`, `mv_loss`, `mv_churn`, `mv_garbage` | probe vector faults (`XR_PROBE_MV_FAULT`: drop, blackout, churn, resize, recreate, garbage, null) | vectors used, no generator errors, no stall, no growth |
-| `soak_tokyo` | `--seconds N` (default 900) of seeded plausible events: re-centre, eye height, gamma, generation off/on and rate, game vectors, debug logging, blackouts, vector faults, host and client freezes | every stall inside an injected freeze, host and probe memory flat |
+| `soak_tokyo` | `--seconds N` (default 900) of seeded plausible events: re-centre, eye height, gamma, generation off/on and rate, game vectors, debug logging, blackouts, vector faults, host and client freezes, audio events (default output muted / volume / switched to the cable and back, restored afterwards; `--no-audio` leaves them out) | every stall inside an injected freeze, the host sees the audio changes, host and probe memory flat |
 
 Machinery: `memory_limit` in a scenario (`vram_cap_mb`, `ram_cap_mb`, `at_s`, `release_s`) starts `tools/stability/vram_ballast.cpp` (built by `run.py build ballast`) so the machine
 behaves as if the chain had only that much (the dev PCs have far more than many users); `faults` (`suspend` of a process for N s), `stdin_feed` (host commands at given times),
