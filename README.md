@@ -336,7 +336,7 @@ VisionALVR stands on the shoulders of giants: the projects below made it possibl
 - **[VirtualDesktop-OpenXR (VDXR)](https://github.com/mbucchia/VirtualDesktop-OpenXR)** (MIT) by Matthieu Bucchianeri and its
   contributors: the excellent, highly optimized OpenXR runtime every game here runs on; OVRShim started as its OVRNull sample.
   Thanks also for the many other OpenXR tools from the same author that the PC VR community relies on.
-- **[OFXR-Bridge](https://github.com/tig3rmast3r/OFXR-Bridge)** (MIT) by tig3rmast3r: the frame-generation synthesis recipe
+- **[OFXR-Bridge](https://github.com/tig3rmast3r/OFXR-Bridge)** (LGPL-3.0) by tig3rmast3r: the frame-generation synthesis recipe
   (rotation-compensated residual flow, midpoint sampling, confidence and crossfade fallback) and its never-block safety rules were
   studied from its code and re-implemented here; its DLSS provider interface is the model for ours.
 - **[OptiScaler](https://github.com/optiscaler/OptiScaler)** (GPL-3.0) and its contributors: the DLSS motion-vector tap for frame

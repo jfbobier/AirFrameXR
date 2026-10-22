@@ -148,7 +148,7 @@ rendered and encoded for real in the rig (the viewer shows the encoder's input).
 
 Live harness: variant setting `{"frame_gen": true}`; scenario key `frame_gen` in `harness/scenarios/*.json`.
 
-## Borrowed from OFXR-Bridge (MIT, github.com/tig3rmast3r/OFXR-Bridge)
+## Borrowed from OFXR-Bridge (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge)
 
 The synthesis: rotation-compensated flow (there analytically subtracted, here by aligning A into B's camera before the engine),
 midpoint sampling at ±flow/2, confidence = saturate(1 - 6 max|dRGB|) x (1 - cost/255), crossfade fallback, no hole filling; the
