@@ -107,6 +107,15 @@ Debug-only allocation counters are not built yet.
 (Windows pages) or 2.3 GB of RAM is survived. Vector loss, churn (new stream ids, size changes, textures re-created) and garbage do not stall, error or grow.
 Not yet run: hours-long soaks (`soak_tokyo --seconds 14400`), and the leak verdicts need them.
 
-**Open:** the 30 s host freeze itself (layer 1); a D3D12 vector provider and the debug allocation counters (`harness-dlss-coverage-gap`); audio events in the soak
+**A second cause of the 30 s freeze was found and fixed.** The streamer window reads the host's stdout through a pipe; `event()` used a blocking `println!`, so a reader that
+stops (a modal dialog, a busy UI thread) froze every thread that printed an event, the main loop and the new watchdog included: lab `gui_pipe_stall_30s`, a 30 s reader stall
+stopped the stream for 27 s. Events now go through a bounded queue to one writer thread (`send_event_line` in `main.rs`; past 4096 queued lines they are dropped and
+counted). Lab: 27 s -> 44 ms. Whether this is what happened in Gears is not proven; the watchdog will say next time.
+
+**Suite 2026-10-22:** all 18 scenarios pass (`run_stability.py run all`, about 90 minutes on the 3080 Ti laptop; `client_freeze_5s` once needed a re-run for a lab pairing flake,
+which the runner now retries). A 15-minute `soak_tokyo`: every stall inside an injected freeze, host +8 MB and probe +0 MB over 11 minutes. `e2e_baseline` fails its pacing
+limits on this laptop with or without these changes (checked against the host built from 373ea48), and `e2e_installed_layout` was already failing on 2026-10-19.
+
+**Open:** the cause of the Gears host freeze if it was not the pipe; a D3D12 vector provider and the debug allocation counters (`harness-dlss-coverage-gap`); audio events in the soak
 (default device changes, mute, volume: the helpers exist in `harness/audio_route.ps1`); a pipe-stall test (the GUI not reading the host's stdout: a blocked reader would
 freeze threads that print, one candidate for layer 1).

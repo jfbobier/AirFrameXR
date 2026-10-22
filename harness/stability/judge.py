@@ -121,9 +121,13 @@ def judge(outdir, crit):
     # tracking blackouts injected by the mock client: the stream must keep flowing through them and the uplink must come back
     bo = [e for e in ev if e.get("event") == "tracking_blackout"]
     res = {e["data"]["blackout"]: e for e in ev if e.get("event") == "tracking_resumed"}
+    run_end_s = max([e["t_ms"] / 1000 for e in ev if "t_ms" in e] + [arr[-1]])
     for e in bo:
         i = e["data"]["blackout"]
         r = res.get(i)
+        # a reconnect restarts the mock client's schedule, so a blackout can begin shortly before the run ends: not judged when its planned end is past the end
+        if r is None and e["t_ms"] / 1000 + e["data"]["dur_s"] > run_end_s:
+            continue
         if crit.get("blackouts_resume", True):
             chk(f"blackout{i}_tracking_resumed", r is not None, (f"after {r['data']['silent_s']:.1f} s" if r else "never"), f"tracking resumes (planned {e['data']['dur_s']} s" + (", and only once a frame arrives)" if e["data"].get("until_frame") else ")"))
         if r is not None and "min_fps_during_blackout" in crit:

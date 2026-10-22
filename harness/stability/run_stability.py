@@ -71,7 +71,23 @@ def build(name, seconds=None, host_env=None):
     return sc, spec["criteria"]
 
 
-def run(name, seconds=None, host_env=None):
+def never_paired(outdir):
+    """The mock client never reached a stream (it only searched for the streamer): the lab's pairing flake, not a verdict on the product."""
+    p = Path(outdir) / "client_stdout.txt"
+    return p.exists() and "streaming_started" not in p.read_text(errors="replace")
+
+
+def run(name, seconds=None, host_env=None, tries=2):
+    import lib
+    for attempt in range(tries):
+        status, outdir = run_once(name, seconds, host_env)
+        if status != "FAIL" or attempt == tries - 1 or "reconnect_storm" in SPEC["scenarios"][name].get("override", {}) or not never_paired(outdir):
+            return status
+        print(f"   the client never paired with the host (lab flake): running {name} again")
+    return status
+
+
+def run_once(name, seconds=None, host_env=None):
     import lib
     sc, crit = build(name, seconds, host_env)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -92,7 +108,7 @@ def run(name, seconds=None, host_env=None):
     for c in result["checks"]:
         print(f"    [{'PASS' if c['ok'] else 'FAIL'}] {c['name']}: {c['value']}  (expected {c['expected']})")
     print(f"   -> {result['status']}" + (f" ({result['reason']})" if result.get("reason") else "") + f"   [{outdir}]")
-    return result["status"]
+    return result["status"], outdir
 
 
 def main(argv):
