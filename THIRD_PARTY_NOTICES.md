@@ -31,7 +31,7 @@ Versions, sources and checksums: `third_party/README.md`, `deps.lock.json`.
   VisionALVR's format (meshes decompressed, simplified shading), shown inside a room tiled with the scene's own texture.
 
 ## Related projects (not in this repository, not in the zip)
-- **OFXR-Bridge** (MIT, github.com/tig3rmast3r/OFXR-Bridge): the frame-generation synthesis recipe and safety rules were studied from its
+- **OFXR-Bridge** (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge): the frame-generation synthesis recipe and safety rules were studied from its
   code and re-implemented in `nvenc/hostlib/framegen.cpp`; no code copied. Its DLSS provider ABI is the model for VisionALVR's motion-vector
   interface.
 - **OptiScaler** (GPL-3.0, github.com/optiscaler/OptiScaler): the DLSS motion-vector extractor is a separate fork,
