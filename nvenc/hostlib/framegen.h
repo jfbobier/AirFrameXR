@@ -4,8 +4,9 @@
 // flow between the previous rendered frame A (rotated into B's camera first, so the flow is in-scene motion only, never head rotation) and B
 // with the GPU's optical-flow engine (NVIDIA Optical Flow API, driver nvofapi64.dll, Turing and later), and renders either B itself or the
 // midpoint between A and B, rotated to the head sample the frame is stamped with. The output texture has the frame's size and format and
-// feeds the usual foveation pass + NVENC like a shim slot. The synthesis follows OFXR-Bridge's shader (rotation-compensated residual
-// flow, confidence from colour disagreement and the engine's cost, crossfade fallback), ported to one D3D11 pass per eye.
+// feeds the usual foveation pass + NVENC like a shim slot. The synthesis re-implements the recipe studied in OFXR-Bridge (rotation-compensated
+// residual flow, confidence from colour disagreement and the engine's cost, crossfade fallback) as our own D3D11 pass per eye; no OFXR-Bridge
+// code is used (the flow comes from the NVIDIA Optical Flow SDK directly).
 #pragma once
 #include <d3d11.h>
 #include <cstdint>
