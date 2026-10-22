@@ -2020,8 +2020,15 @@ fn main() {
                                     height_offset = -m.pose.position.y;
                                     height_anchored = true;
                                     unsafe { nvh::nvh_ipc_set_eye_height(ipc, eye_height) };
-                                    logs::general("INFO", &format!("height: headset at {:.2} m -> eye-level origin (published y {:+.2}), eye height {:.2} m for floor-level games",
-                                        m.pose.position.y, m.pose.position.y + height_offset, eye_height));
+                                    // dragging the eye-height slider re-anchors many times a second (429 lines in the gears 2026-10-20 log): one line a second
+                                    static HEIGHT_LOGGED_NS: AtomicU64 = AtomicU64::new(0);
+                                    let now_ns = origin.elapsed().as_nanos() as u64;
+                                    let last_ns = HEIGHT_LOGGED_NS.load(Ordering::Relaxed);
+                                    if last_ns == 0 || now_ns.saturating_sub(last_ns) >= 1_000_000_000 {
+                                        HEIGHT_LOGGED_NS.store(now_ns.max(1), Ordering::Relaxed);
+                                        logs::general("INFO", &format!("height: headset at {:.2} m -> eye-level origin (published y {:+.2}), eye height {:.2} m for floor-level games",
+                                            m.pose.position.y, m.pose.position.y + height_offset, eye_height));
+                                    }
                                     event(origin, "height_calibrated", json!({ "target_m": height_target, "headset_y": m.pose.position.y, "offset_m": height_offset, "eye_height_m": eye_height }));
                                 }
                                 // Head: pose only, zero velocity, exactly like ALVR's SteamVR driver (Hmd::OnPoseUpdated). The
@@ -2325,7 +2332,7 @@ fn main() {
     let mut status_at = Instant::now();
     let mut motion_tap_seen = (0u32, 0u32);
     let (mut perf_rel, mut perf_late) = (0u64, 0u64);   // shim release counters at the last fg_perf line
-    let mut perf_fg = [0u64; 6];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand
+    let mut perf_fg = [0u64; 7];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand, stale_stamps
     // (tap state, streams) last reported: the shim's DLSS motion-vector tap (docs/MOTION_VECTORS.md)
     struct BenchState {
         i: usize,
@@ -2532,24 +2539,26 @@ fn main() {
                         unsafe { std::ffi::CStr::from_ptr(gb.as_ptr()) }.to_string_lossy().to_string()
                     } else { String::new() };
                     let gen = p.fg_stats_json();
-                    let (d_rel, d_late) = (rel.wrapping_sub(perf_rel), late.wrapping_sub(perf_late));
+                    // the shim's counters restart with every game: a smaller value is a new game's own count, not a negative delta (gears 2026-10-20: 1.8e19 "releases late")
+                    let (d_rel, d_late) = if rel < perf_rel || late < perf_late { (rel, late) } else { (rel - perf_rel, late - perf_late) };
                     (perf_rel, perf_late) = (rel, late);
                     logs::general("INFO", &format!("frame generation perf: app {:.1} fps (envelope {app_ms:.1} ms, {d_late}/{d_rel} releases late), stream {:.1} fps, game period {:.1} ms (p50 {:.1} p95 {:.1} max {:.1}), lag {:.1} ms (slack p5 {:.1} p50 {:.1}), mean t {:.2} mean age {:.2}, behind {} ahead {}, gpu [{gpu}]",
                         rendered as f64 / secs, streamed as f64 / secs, u.game_period_ms, u.interval_p50, u.interval_p95, u.interval_max, u.lag_ms, u.slack_p5, u.slack_p50, u.mean_t, u.mean_age, u.behind, u.ahead));
                     // the tracking samples the outputs are stamped with: skipped boundaries (none newer than the last sent frame), waits for one,
                     // stamps that left one in hand, and the spacing of the headset's samples at the host (the cause of the misses, 2026-10-16)
                     let now_fg = [p.fg_synths.load(Ordering::Relaxed), p.fg_reals.load(Ordering::Relaxed), p.fg_no_sample.load(Ordering::Relaxed),
-                        p.fg_sample_waits.load(Ordering::Relaxed), p.fg_sample_wait_us.load(Ordering::Relaxed), p.fg_in_hand.load(Ordering::Relaxed)];
+                        p.fg_sample_waits.load(Ordering::Relaxed), p.fg_sample_wait_us.load(Ordering::Relaxed), p.fg_in_hand.load(Ordering::Relaxed),
+                        p.fg_stale_stamps.load(Ordering::Relaxed)];
                     let d: Vec<u64> = now_fg.iter().zip(perf_fg.iter()).map(|(a, b)| a.wrapping_sub(*b)).collect();
                     perf_fg = now_fg;
                     let outputs = d[0] + d[1];
                     let (gap_p95, gap_max, gap_over15, gap_n) = *TRACKING_GAP_LAST.lock();
                     if outputs + d[2] > 0 {
-                        logs::general("INFO", &format!("frame generation samples: {} outputs, {} boundaries skipped for want of a tracking sample ({:.1} %), {} waited for one (mean {:.1} ms), {} stamped with one in hand; tracking spacing p95 {gap_p95:.1} ms max {gap_max:.1} ({gap_over15}/{gap_n} gaps over 15 ms)",
-                            outputs, d[2], 100.0 * d[2] as f64 / (outputs + d[2]) as f64, d[3], if d[3] > 0 { d[4] as f64 / 1000.0 / d[3] as f64 } else { 0.0 }, d[5]));
+                        logs::general("INFO", &format!("frame generation samples: {} outputs, {} boundaries skipped for want of a tracking sample ({:.1} %), {} waited for one (mean {:.1} ms), {} stamped with one in hand, {} with a stale one (tracking dark); tracking spacing p95 {gap_p95:.1} ms max {gap_max:.1} ({gap_over15}/{gap_n} gaps over 15 ms)",
+                            outputs, d[2], 100.0 * d[2] as f64 / (outputs + d[2]) as f64, d[3], if d[3] > 0 { d[4] as f64 / 1000.0 / d[3] as f64 } else { 0.0 }, d[5], d[6]));
                     }
                     event(origin, "fg_perf", json!({ "app_fps": rendered as f64 / secs, "stream_fps": streamed as f64 / secs, "app_envelope_ms": app_ms,
-                        "outputs": outputs, "no_sample": d[2], "sample_waits": d[3], "sample_wait_ms_sum": d[4] as f64 / 1000.0, "in_hand": d[5],
+                        "outputs": outputs, "no_sample": d[2], "sample_waits": d[3], "sample_wait_ms_sum": d[4] as f64 / 1000.0, "in_hand": d[5], "stale_stamps": d[6],
                         "tracking_gap_p95_ms": gap_p95, "tracking_gap_max_ms": gap_max, "tracking_gaps_over_15ms": gap_over15, "tracking_gaps": gap_n,
                         "releases": d_rel, "releases_late": d_late, "slot_waits": waits, "game_period_ms": u.game_period_ms, "lag_ms": u.lag_ms, "mean_t": u.mean_t,
                         "unc_synths": u.synths, "mean_age": u.mean_age, "behind": u.behind, "ahead": u.ahead, "arrivals": u.arrivals, "slack_ms_p5": u.slack_p5, "slack_ms_p50": u.slack_p50,
