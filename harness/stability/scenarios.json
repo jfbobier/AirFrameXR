@@ -152,6 +152,360 @@
     "alive_at_end_s": 3,
     "host_memory_events": 2
    }
+  },
+  "memory_baseline_fullres": {
+   "description": "What the chain holds at the Vision Pro's size (3552x3200 per eye) with generation on for 150 s: the reference for the memory scenarios (host private bytes, handles, dedicated VRAM per process in mem.csv).",
+   "override": {
+    "session_overrides": {
+     "openvr_config.eye_resolution_width": 3552,
+     "openvr_config.eye_resolution_height": 3200,
+     "openvr_config.target_eye_resolution_width": 3552,
+     "openvr_config.target_eye_resolution_height": 3200,
+     "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     },
+     "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     }
+    },
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 160
+    },
+    "app": {
+     "timeout_s": 150
+    },
+    "timeout_s": 330
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 3,
+    "mem": {
+     "min_duration_s": 100,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
+  },
+  "vram_squeeze": {
+   "description": "Resource exhaustion: at +35 s the ballast leaves the chain only 1.8 GB of VRAM (it holds 2.8 GB at the Vision Pro's size), released at +95 s. Pass: no crash or hang, the stream is alive at the end (degraded meanwhile is fine, with a logged reason).",
+   "override": {
+    "session_overrides": {
+     "openvr_config.eye_resolution_width": 3552,
+     "openvr_config.eye_resolution_height": 3200,
+     "openvr_config.target_eye_resolution_width": 3552,
+     "openvr_config.target_eye_resolution_height": 3200,
+     "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     },
+     "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     }
+    },
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 160
+    },
+    "app": {
+     "timeout_s": 150
+    },
+    "timeout_s": 330,
+    "memory_limit": {
+     "vram_cap_mb": 1800,
+     "at_s": 35,
+     "release_s": 95
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "alive_at_end_s": 3,
+    "ballast_effective": true,
+    "host_memory_events": 3
+   }
+  },
+  "ram_squeeze": {
+   "description": "Resource exhaustion: at +35 s the ballast leaves the chain only 2.3 GB of RAM (the host alone holds 1.9 GB), released at +95 s. Pass: no crash or hang, alive at the end.",
+   "override": {
+    "session_overrides": {
+     "openvr_config.eye_resolution_width": 3552,
+     "openvr_config.eye_resolution_height": 3200,
+     "openvr_config.target_eye_resolution_width": 3552,
+     "openvr_config.target_eye_resolution_height": 3200,
+     "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     },
+     "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     }
+    },
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 160
+    },
+    "app": {
+     "timeout_s": 150
+    },
+    "timeout_s": 330,
+    "memory_limit": {
+     "ram_cap_mb": 2300,
+     "at_s": 35,
+     "release_s": 95
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "alive_at_end_s": 3,
+    "ballast_effective": true,
+    "host_memory_events": 3
+   }
+  },
+  "vram_cap_loose": {
+   "description": "A 4 GB VRAM machine (the chain holds 2.8 GB at the Vision Pro's size): must run clean.",
+   "override": {
+    "session_overrides": {
+     "openvr_config.eye_resolution_width": 3552,
+     "openvr_config.eye_resolution_height": 3200,
+     "openvr_config.target_eye_resolution_width": 3552,
+     "openvr_config.target_eye_resolution_height": 3200,
+     "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     },
+     "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     }
+    },
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 160
+    },
+    "app": {
+     "timeout_s": 150
+    },
+    "timeout_s": 330,
+    "memory_limit": {
+     "vram_cap_mb": 4096,
+     "at_s": 5
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "alive_at_end_s": 3,
+    "ballast_effective": true,
+    "host_memory_events": 3,
+    "max_stall_ms": 1500,
+    "host_stalls_max": 0
+   }
+  },
+  "mv_clean": {
+   "description": "Reference for the vector scenarios: the probe's exact vectors, no fault (the host must use them: mv.frames > 0, no flow errors).",
+   "override": {
+    "app": {
+     "env": {
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70",
+      "XR_PROBE_MV": "truth",
+      "XR_PROBE_MOVING": "25:0.25",
+      "XR_PROBE_SCENE": "dots",
+      "XR_PROBE_MV_FAULT": ""
+     }
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 2,
+    "mv_ok": true,
+    "mem": {
+     "min_duration_s": 80,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
+  },
+  "mv_loss": {
+   "description": "Motion vectors lost at random: 10 % of the publications dropped, a 10 s blackout at +40 s and another at +80 s. The generator must fall back to flow and come back, no stall, no growth.",
+   "override": {
+    "app": {
+     "env": {
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70",
+      "XR_PROBE_MV": "truth",
+      "XR_PROBE_MOVING": "25:0.25",
+      "XR_PROBE_SCENE": "dots",
+      "XR_PROBE_MV_FAULT": "drop:0.1,blackout:40:10,blackout:80:10"
+     }
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 2,
+    "mv_ok": true,
+    "mem": {
+     "min_duration_s": 80,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
+  },
+  "mv_churn": {
+   "description": "A game's DLSS feature re-created: new stream ids every 5 s, the render size alternating full/half every 7 s, the vector textures destroyed and created again every 3 s. No stall, no leak (tap copies and ring slots freed).",
+   "override": {
+    "app": {
+     "env": {
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70",
+      "XR_PROBE_MV": "truth",
+      "XR_PROBE_MOVING": "25:0.25",
+      "XR_PROBE_SCENE": "dots",
+      "XR_PROBE_MV_FAULT": "churn:5,resize:7,recreate:3"
+     }
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 2,
+    "mv_ok": true,
+    "mem": {
+     "min_duration_s": 80,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
+  },
+  "mv_garbage": {
+   "description": "A misbehaving provider: 5 % of the publications carry +-9000 px vectors and 5 % a null vector texture. The host must not crash, hang or leak, and must not show garbage for long (stream stays alive, no stall).",
+   "override": {
+    "app": {
+     "env": {
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70",
+      "XR_PROBE_MV": "truth",
+      "XR_PROBE_MOVING": "25:0.25",
+      "XR_PROBE_SCENE": "dots",
+      "XR_PROBE_MV_FAULT": "garbage:0.05,null:0.05"
+     }
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 2,
+    "mv_ok": true,
+    "mem": {
+     "min_duration_s": 80,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
   }
  }
 }

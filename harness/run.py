@@ -115,6 +115,16 @@ def build(what):
                 print(o[-1500:])
                 return 2
             continue
+        if w == "ballast":   # the stability harness' VRAM / RAM ballast (tools/stability/vram_ballast.cpp)
+            lib.b_run("if not exist _tmp mkdir _tmp")
+            lib.b_put(lib.ROOT / "tools/stability/vram_ballast.cpp", "_tmp/vram_ballast.cpp")
+            r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage21_ballast.ps1"], cwd=lib.ROOT, capture_output=True)
+            o = r.stdout.decode(errors="replace").replace("\x00", "")
+            print(f"build ballast: {'ok' if 'RESULT: OK' in o else 'FAILED'}")
+            if "RESULT: OK" not in o:
+                print(o[-1500:])
+                return 2
+            continue
         if w == "gui":       # VisionALVR.exe + configure.exe (C# WinForms, .NET Framework 4.8)
             lib.b_run("if not exist _tmp\\gui\\res mkdir _tmp\\gui\\res")
             for src in sorted((lib.ROOT / "tools/gui").glob("*.cs")) + [lib.ROOT / "tools/gui/app.manifest", lib.ROOT / "tools/gui/app.stub.manifest", lib.ROOT / "tools/gui/app.exe.config"]:

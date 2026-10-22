@@ -84,6 +84,61 @@ struct SyntheticMv {
     ID3D11Texture2D* mv[2] = {}; ID3D11Texture2D* depth[2] = {}; ID3D11DepthStencilView* dsv[2] = {}; ID3D11RenderTargetView* rtv[2] = {};
     UINT w = 0, h = 0; uint64_t frame = 0; uint64_t published = 0;
     bool truth = false;
+    // XR_PROBE_MV_FAULT (stability harness, docs/STABILITY_PLAN.md): comma separated  drop:<p> (skip a publication with probability p), blackout:<start_s>:<dur_s> (none in the
+    // window, repeatable), churn:<s> (new stream ids every s seconds: a game's DLSS feature re-created at a level change), resize:<s> (the render size alternates between full
+    // and half every s seconds), recreate:<s> (the vector and depth textures are destroyed and created again right after a publication), garbage:<p> (the vectors hold
+    // +-9000 px for a publication), null:<p> (a publication whose vector texture is null: a provider bug)
+    struct Fault { double dropP = 0, churnS = 0, resizeS = 0, recreateS = 0, garbageP = 0, nullP = 0; std::vector<std::pair<double, double>> blackouts; } f;
+    uint32_t epoch = 0; bool halfSize = false; double lastChurn = 0, lastResize = 0, lastRecreate = 0;
+    uint64_t skipped = 0, churned = 0, recreated = 0, garbaged = 0, nulled = 0;
+    ID3D11Device* dev = nullptr; UINT eyeW = 0, eyeH = 0; uint64_t rng = 0x9E3779B97F4A7C15ull;
+    double rnd() { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return (double)(rng >> 11) / 9007199254740992.0; }
+    static double nowS() {
+        static LARGE_INTEGER fq = [] { LARGE_INTEGER x; QueryPerformanceFrequency(&x); return x; }();
+        static LARGE_INTEGER t0 = [] { LARGE_INTEGER x; QueryPerformanceCounter(&x); return x; }();
+        LARGE_INTEGER n; QueryPerformanceCounter(&n); return (double)(n.QuadPart - t0.QuadPart) / (double)fq.QuadPart;
+    }
+    void parseFault(const char* spec) {
+        std::string t(spec ? spec : ""); size_t pos = 0;
+        while (pos < t.size()) {
+            size_t e = t.find(',', pos); if (e == std::string::npos) e = t.size();
+            std::string it = t.substr(pos, e - pos); pos = e + 1;
+            std::vector<std::string> a; size_t q = 0;
+            while (q <= it.size()) { size_t c = it.find(':', q); if (c == std::string::npos) c = it.size(); a.push_back(it.substr(q, c - q)); q = c + 1; }
+            const double v1 = a.size() > 1 ? atof(a[1].c_str()) : 0, v2 = a.size() > 2 ? atof(a[2].c_str()) : 0;
+            if (a[0] == "drop") f.dropP = v1; else if (a[0] == "blackout") f.blackouts.push_back({v1, v1 + v2}); else if (a[0] == "churn") f.churnS = v1;
+            else if (a[0] == "resize") f.resizeS = v1; else if (a[0] == "recreate") f.recreateS = v1; else if (a[0] == "garbage") f.garbageP = v1; else if (a[0] == "null") f.nullP = v1;
+        }
+    }
+    // false: do not publish this eye now (a drop or a blackout). Also advances the timed faults (churn, resize) once per frame (eye 0).
+    bool faultGate(int eye) {
+        const double t = nowS();
+        if (eye == 0) {
+            if (f.churnS > 0 && t - lastChurn >= f.churnS) { lastChurn = t; epoch++; churned++; }
+            if (f.resizeS > 0 && t - lastResize >= f.resizeS) { lastResize = t; halfSize = !halfSize; }
+        }
+        for (auto& b : f.blackouts) if (t >= b.first && t < b.second) { skipped++; return false; }
+        if (f.dropP > 0 && rnd() < f.dropP) { skipped++; return false; }
+        return true;
+    }
+    void garbageFill(ID3D11DeviceContext* ctx, int eye) {
+        if (f.garbageP <= 0 || rnd() >= f.garbageP) return;
+        std::vector<uint16_t> g((size_t)w * h * 2, half(9000.f)); ctx->UpdateSubresource(mv[eye], 0, nullptr, g.data(), w * 4, 0); garbaged++;
+    }
+    void releaseTextures() {
+        for (int e = 0; e < 2; e++) {
+            if (rtv[e]) { rtv[e]->Release(); rtv[e] = nullptr; } if (dsv[e]) { dsv[e]->Release(); dsv[e] = nullptr; }
+            if (mv[e]) { mv[e]->Release(); mv[e] = nullptr; } if (depth[e]) { depth[e]->Release(); depth[e] = nullptr; }
+        }
+    }
+    // after the last eye of a frame: the textures just published are destroyed and created again (the consumer must have its own copies by now)
+    void maybeRecreate(int eye) {
+        if (eye != 1 || f.recreateS <= 0 || !dev) return;
+        const double t = nowS(); if (t - lastRecreate < f.recreateS) return; lastRecreate = t;
+        releaseTextures();
+        if (init(dev, eyeW, eyeH) && truth) for (int e = 0; e < 2; e++) dev->CreateRenderTargetView(mv[e], nullptr, &rtv[e]);
+        recreated++;
+    }
     // truth mode: the shader and the per-eye state of the previous frame
     ID3D11VertexShader* vs = nullptr; ID3D11PixelShader* ps = nullptr; ID3D11Buffer* cb = nullptr;
     struct TruthCb { float tanF[4]; float mA[4], mB[4], mC[4]; float marker[4]; float disp[4]; };
@@ -126,6 +181,7 @@ float2 PS(VSOut i) : SV_Target {
     }
     void publishTruth(ID3D11DeviceContext* ctx, int eye, UINT outW, UINT outH, const float tanF[4], const float q[4]) {
         if (!g_mvConsumer || !mv[eye] || !truth) return;
+        if (!faultGate(eye)) { memcpy(prevQ[eye], q, sizeof prevQ[eye]); prevValid[eye] = true; markerValid[eye] = false; if (eye == 1) frame++; return; }
         TruthCb c{};
         memcpy(c.tanF, tanF, sizeof c.tanF);
         float rc[9], rp[9];
@@ -150,15 +206,18 @@ float2 PS(VSOut i) : SV_Target {
         ctx->Draw(3, 0);
         ID3D11RenderTargetView* nullRtv = nullptr; ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
         ctx->ClearDepthStencilView(dsv[eye], D3D11_CLEAR_DEPTH, 0.5f, 0);
-        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye; p.frame = frame; p.cmd = ctx;
-        p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = w; p.render_h = h; p.output_w = outW; p.output_h = outH;
+        garbageFill(ctx, eye);
+        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye + 10 * epoch; p.frame = frame; p.cmd = ctx;
+        p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = halfSize ? w / 2 : w; p.render_h = halfSize ? h / 2 : h; p.output_w = outW; p.output_h = outH;
         p.mv_scale_x = p.mv_scale_y = 1.f; p.reset = prevValid[eye] ? 0 : 1; p.flags = 0x2 | 0x8;
+        if (f.nullP > 0 && rnd() < f.nullP) { p.motion_vectors = nullptr; nulled++; }
         g_mvConsumer(&p, g_mvConsumerUser);
         published++;
         memcpy(prevQ[eye], q, sizeof prevQ[eye]); prevValid[eye] = true;
         prevMarkerValid[eye] = markerValid[eye]; prevMarkerC[eye][0] = markerC[eye][0]; prevMarkerC[eye][1] = markerC[eye][1];
         markerValid[eye] = false;
         if (eye == 1) frame++;
+        maybeRecreate(eye);
     }
     static uint16_t half(float f) {   // float -> IEEE half (round to nearest, values here are small)
         uint32_t x; memcpy(&x, &f, 4); const uint32_t sign = (x >> 16) & 0x8000; int e = (int)((x >> 23) & 0xff) - 127 + 15; uint32_t m = x & 0x7fffff;
@@ -184,16 +243,20 @@ float2 PS(VSOut i) : SV_Target {
     }
     void publish(ID3D11DeviceContext* ctx, int eye, UINT outW, UINT outH) {
         if (!g_mvConsumer || !mv[eye]) return;
+        if (!faultGate(eye)) return;
+        garbageFill(ctx, eye);
         uint16_t block[16 * 16 * 2];
         for (int i = 0; i < 256; i++) { block[i * 2] = half((float)(frame % 32)); block[i * 2 + 1] = half(0.f); }
         D3D11_BOX box{ 0, 0, 0, 16, 16, 1 };
         ctx->UpdateSubresource(mv[eye], 0, &box, block, 16 * 4, 0);
         ctx->ClearDepthStencilView(dsv[eye], D3D11_CLEAR_DEPTH, frame % 2 ? 0.75f : 0.25f, 0);
-        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye; p.frame = frame; p.cmd = ctx;
-        p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = w; p.render_h = h; p.output_w = outW; p.output_h = outH;
+        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye + 10 * epoch; p.frame = frame; p.cmd = ctx;
+        p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = halfSize ? w / 2 : w; p.render_h = halfSize ? h / 2 : h; p.output_w = outW; p.output_h = outH;
         p.mv_scale_x = p.mv_scale_y = 1.f; p.reset = frame == 0 ? 1 : 0; p.flags = 0x2 | 0x8;   // MVLowRes, DepthInverted
+        if (f.nullP > 0 && rnd() < f.nullP) { p.motion_vectors = nullptr; nulled++; }
         g_mvConsumer(&p, g_mvConsumerUser);
         published++;
+        maybeRecreate(eye);
     }
 };
 
@@ -388,6 +451,8 @@ int main(int argc, char** argv) {
     const bool truthMvOn = getenv("XR_PROBE_MV") && strcmp(getenv("XR_PROBE_MV"), "truth") == 0;
     if (synMvOn || truthMvOn) {
         std::string merr;
+        synMv.dev = dev; synMv.eyeW = vcv[0].recommendedImageRectWidth; synMv.eyeH = vcv[0].recommendedImageRectHeight;
+        if (getenv("XR_PROBE_MV_FAULT")) { synMv.parseFault(getenv("XR_PROBE_MV_FAULT")); L("motion vector faults: %s", getenv("XR_PROBE_MV_FAULT")); }
         if (!synMv.init(dev, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight)) L("FAIL motion vectors: textures");
         else if (truthMvOn && !synMv.initTruth(dev, merr)) L("FAIL motion vectors (truth): %s", merr.c_str());
         else L("ok   %s motion vectors %ux%u per eye (provider ABI exported)", truthMvOn ? "ground-truth" : "synthetic", synMv.w, synMv.h);
@@ -775,6 +840,7 @@ int main(int argc, char** argv) {
     if (soundOn) mciSendStringA("close xrbgm", nullptr, 0, nullptr);
     L("loop done: frames=%d ready=%d synchronized=%d", done, sawReady, sawSync);
     if (synMvOn || truthMvOn) L("motion vectors: %llu publications, consumer %s", (unsigned long long)synMv.published, g_mvConsumer ? "registered" : "never registered");
+    if (synMvOn || truthMvOn) L("motion vector faults injected: %llu skipped, %llu stream-id changes, %llu texture re-creations, %llu garbage, %llu null", (unsigned long long)synMv.skipped, (unsigned long long)synMv.churned, (unsigned long long)synMv.recreated, (unsigned long long)synMv.garbaged, (unsigned long long)synMv.nulled);
     if (done > 1) L("app fps %.2f over %d frames", (done - 1) * 1000.0 / (qpcMs() - loopStartMs), done - 1);
     if (rc == 0 && done < frames) rc = 4;
     if (running) { xrRequestExitSession(sess); }

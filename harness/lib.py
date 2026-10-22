@@ -354,6 +354,25 @@ def run_scenario(sc, outdir: Path, log=print):
                 + f' > {rd}\\client{sfx}_stdout.txt 2>&1')
     clientcmd = make_client_cmd()
     client_p = b_popen(clientcmd)
+    # stability harness memory limit: {"vram_cap_mb": 6000, "ram_cap_mb": 8000, "at_s": 20, "release_s": 90} makes the machine behave as if the chain (host, app, client)
+    # had only that much VRAM / RAM: the ballast (tools/stability/vram_ballast.cpp) takes what is free now minus the cap, from `at_s` on (and gives it back at `release_s`)
+    ballast_started = False
+    ml = sc.get("memory_limit")
+    if ml:
+        rc, o = b_run("nvidia-smi --query-gpu=memory.total,memory.used --format=csv,noheader,nounits")
+        tot, used = [int(x) for x in o.strip().splitlines()[-1].replace(" ", "").split(",")[:2]]
+        rc, o = b_run('powershell -NoProfile -Command "[int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024)"')
+        free_ram = int(o.strip().splitlines()[-1])
+        vb = max(0, (tot - used) - ml["vram_cap_mb"]) if ml.get("vram_cap_mb") else 0
+        rb = max(0, free_ram - ml["ram_cap_mb"]) if ml.get("ram_cap_mb") else 0
+        at, rel = ml.get("at_s", 0), ml.get("release_s")
+        sched = lambda mb: f"{at}:{mb}" + (f",{rel}:0" if rel else "")
+        steps["memory_limit"] = {"vram_ballast_mb": vb, "ram_ballast_mb": rb, "gpu_total_mb": tot, "gpu_used_mb": used, "ram_free_mb": free_ram}
+        log(f"  memory limit: ballast {vb} MB VRAM, {rb} MB RAM (GPU {tot} MB, {used} used; RAM free {free_ram} MB)")
+        body = (f'build\\stability\\vram_ballast.exe --vram "{sched(vb)}" --ram "{sched(rb)}" --seconds {sc.get("timeout_s", 300)} '
+                f'--stop-file runs\\{rid}\\ballast.stop --log runs\\{rid}\\ballast.log\r\n')
+        start_limited(rid, "openxr_ballast_tmp", "ballast.cmd", body, "ballast.rc")
+        ballast_started = True
     # stability harness faults on the builder's processes, timed from the client start: {"type": "suspend", "process": "alvr_host", "at_s": 40, "for_s": 30}
     fault_logs = []
     for i, f in enumerate(sc.get("faults", [])):
@@ -397,6 +416,10 @@ def run_scenario(sc, outdir: Path, log=print):
     if mem_p:
         b_run(f"echo x > {rd}\\mem.stop")
         time.sleep(2)
+    if ballast_started:
+        b_run(f"echo x > {rd}\\ballast.stop")
+        time.sleep(2)
+        b_run("schtasks /delete /tn openxr_ballast_tmp /f")
     steps["wall_s"] = round(time.time() - t0, 1)
     log("  fetching artifacts")
     if h is not None and topo["host"] == "builder":
@@ -414,6 +437,8 @@ def run_scenario(sc, outdir: Path, log=print):
         b_get(f"runs/{rid}/gpu.csv", outdir / "gpu.csv")
     if mem_p:
         b_get(f"runs/{rid}/mem.csv", outdir / "mem.csv")
+    if ballast_started:
+        b_get(f"runs/{rid}/ballast.log", outdir / "ballast.log")
     for fl in fault_logs:
         b_get(f"runs/{rid}/{fl}", outdir / fl)
     if app:

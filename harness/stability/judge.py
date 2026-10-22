@@ -117,6 +117,10 @@ def judge(outdir, crit):
         if r is not None and "max_recovery_s" in crit:
             over = r["data"]["silent_s"] - e["data"]["dur_s"]
             chk(f"blackout{i}_recovery", over <= crit["max_recovery_s"], f"{over:.1f} s past the planned end", f"<= {crit['max_recovery_s']} s")
+    if crit.get("ballast_effective"):
+        bl = outdir / "ballast.log"
+        txt = bl.read_text(errors="replace") if bl.exists() else ""
+        chk("ballast_took_its_share", bool(txt) and "(SHORT)" not in txt, "ok" if txt and "(SHORT)" not in txt else ("short of memory: " + ([l for l in txt.splitlines() if "SHORT" in l] or ["no ballast log"])[0][:140]), "the ballast held what it was asked (else the limit was not applied)")
     # the host's own stall events (watchdog.rs: "stall_detected" in its stdout events) and memory lines
     hev = events(outdir / "host_stdout.txt")
     stalls = [e for e in hev if e.get("event") == "stall_detected"]
@@ -125,6 +129,14 @@ def judge(outdir, crit):
     if "host_stalls_min" in crit:
         kinds = sorted({e["data"].get("kind") for e in stalls})
         chk("host_noticed_the_stall", len(stalls) >= crit["host_stalls_min"], f"{len(stalls)} ({', '.join(map(str, kinds))})", f">= {crit['host_stalls_min']} stall_detected events")
+    if crit.get("mv_ok"):
+        gens = [e["data"].get("gen") for e in hev if e.get("event") == "fg_perf" and isinstance(e["data"].get("gen"), dict)]
+        g = next((x for x in reversed(gens) if x.get("on")), gens[-1] if gens else {})
+        mv = g.get("mv") or {}
+        chk("vectors_used", mv.get("frames", 0) > 0 and mv.get("used_eyes", 0) > 0, f"{mv.get('frames', 0)} frames, {mv.get('used_eyes', 0)} eye passes", "the generator took the game's vectors (> 0)")
+        errs = {k: g.get(k, 0) for k in ("flow_errors", "render_errors")}
+        errs["mv_errors"] = mv.get("errors", 0)
+        chk("generator_errors", not any(errs.values()), errs, "no flow, render or vector errors")
     if crit.get("host_memory_events"):
         n = sum(1 for e in hev if e.get("event") == "memory")
         chk("host_memory_events", n >= crit["host_memory_events"], n, f">= {crit['host_memory_events']} memory events (one every 30 s while connected)")
@@ -143,7 +155,10 @@ def judge(outdir, crit):
             for kind, lim in m.get("max_growth_mb_per_h", {}).items():
                 series = [(t, v) for t, v in d[kind] if t >= cut]
                 s = slope_per_hour(series)
-                chk(f"mem_{name}_{kind}_growth", s <= lim, f"{s:+.0f} per hour (peak {max(v for _, v in d[kind]):.0f})", f"<= {lim} per hour after {int(m.get('warmup_frac', 0.2) * 100)} % warmup")
+                span = (series[-1][0] - series[0][0]) if len(series) > 1 else 0
+                grown = s * span / 3600.0   # what the fit says was gained over the window: a short run's hourly slope is noise unless this is real memory
+                floor = m.get("min_growth_mb", 25) if kind != "handles" else m.get("min_growth_handles", 300)
+                chk(f"mem_{name}_{kind}_growth", s <= lim or grown < floor, f"{s:+.0f} per hour, {grown:+.0f} over {span:.0f} s (peak {max(v for _, v in d[kind]):.0f})", f"<= {lim} per hour (or under {floor} gained) after {int(m.get('warmup_frac', 0.2) * 100)} % warmup")
         if "max_gpu_mb" in m and sysrows["vram_used"]:
             peak = max(v for _, v in sysrows["vram_used"])
             chk("vram_peak", peak <= m["max_gpu_mb"], f"{peak:.0f} MB", f"<= {m['max_gpu_mb']} MB used on the GPU")

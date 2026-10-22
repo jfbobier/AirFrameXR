@@ -4,6 +4,7 @@
 # CSV: t_s,kind,name,pid,private_mb,ws_mb,handles,gpu_mb   (kind = proc | sys; sys rows: name=ram_free_mb in private_mb, gpu_mb = total VRAM used)
 param([string]$Out, [string[]]$Names = @("alvr_host", "xr_probe", "alvr_client_headless", "vram_ballast", "mirrordesktop"), [string]$StopFile = "")
 $ErrorActionPreference = "SilentlyContinue"
+[System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture   # the builder is French: no decimal commas in the CSV
 Set-Content -Path $Out -Value "t_s,kind,name,pid,private_mb,ws_mb,handles,gpu_mb"
 $t0 = Get-Date
 while ($true) {
