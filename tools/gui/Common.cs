@@ -1498,11 +1498,16 @@ namespace VisionALVR
         /// design values at 96 dpi (the framework scales them at load).
         public static void FitToWorkArea(Form f)
         {
+            bool placed = false;
             Action fit = () =>
             {
                 var wa = WorkArea(f);
                 f.MinimumSize = new Size(Math.Min(f.MinimumSize.Width, wa.Width), Math.Min(f.MinimumSize.Height, wa.Height));
                 f.Size = new Size(Math.Min(f.Width, wa.Width), Math.Min(f.Height, wa.Height));
+                // the size was set after CenterScreen placed the window: centre it again (once), and keep it inside the work area
+                int x = f.Left, y = f.Top;
+                if (!placed) { placed = true; if (f.StartPosition == FormStartPosition.CenterScreen) { x = wa.Left + (wa.Width - f.Width) / 2; y = wa.Top + (wa.Height - f.Height) / 2; } }
+                f.Location = new Point(Math.Max(wa.Left, Math.Min(x, wa.Right - f.Width)), Math.Max(wa.Top, Math.Min(y, wa.Bottom - f.Height)));
             };
             f.Load += (s, e) => fit();
             refits.Remove(f); refits.Add(f, fit);

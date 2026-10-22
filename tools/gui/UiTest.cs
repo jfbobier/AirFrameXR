@@ -48,6 +48,7 @@ namespace VisionALVR
             yield return new Case { Name = "launcher-ready", Make = () => new LauncherForm(true) };
             yield return new Case { Name = "streamer", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState() };
             yield return new Case { Name = "streamer-clean", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };
+            yield return new Case { Name = "streamer-advanced", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).UiAction("advanced", "on"); } };
             yield return new Case { Name = "streamer-empty", Make = () => new RuntimeForm(null) };
             yield return new Case { Name = "streamer-avp-auto", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };   // the fixture config has no height set: a Vision Pro starts on Auto
             yield return new Case { Name = "streamer-quest", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_connected", new Dictionary<string, object> { { "name", "Meta Quest 3" }, { "ip", "192.168.1.60" } }); } };
@@ -285,6 +286,24 @@ namespace VisionALVR
             return fails == 0 ? 0 : 1;
         }
 
+        // harness/center_check.py: a window that starts centred (CenterScreen) is centred on its screen's work area once its content has sized it
+        static int CenterSelfTest(string outDir)
+        {
+            var o = new StringBuilder(); int fails = 0;
+            foreach (var make in new Func<Form>[] { () => new RuntimeForm(null), () => new PerformanceForm("Cyberpunk2077.exe") })
+                using (var f = make())
+                {
+                    f.Opacity = 0; f.ShowInTaskbar = false; f.Show();
+                    var wa = Screen.FromControl(f).WorkingArea;
+                    int dx = (f.Left + f.Width / 2) - (wa.Left + wa.Width / 2), dy = (f.Top + f.Height / 2) - (wa.Top + wa.Height / 2);
+                    bool ok = Math.Abs(dx) <= 2 && (Math.Abs(dy) <= 2 || f.Height >= wa.Height - 2) && f.Left >= wa.Left && f.Top >= wa.Top && f.Right <= wa.Right && f.Bottom <= wa.Bottom;
+                    if (!ok) fails++;
+                    o.AppendLine($"CHECK {(ok ? "PASS" : "FAIL")} {f.GetType().Name}: window {f.Bounds}, work area {wa}, off centre ({dx},{dy})");
+                }
+            File.WriteAllText(Path.Combine(outDir, "center.txt"), o.ToString());
+            return fails == 0 ? 0 : 1;
+        }
+
         [STAThread]
         static int Main(string[] args)
         {
@@ -295,6 +314,7 @@ namespace VisionALVR
             Directory.CreateDirectory(outDir);
             var only = Arg("--only");
             if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);
+            if (args.Contains("--center-selftest")) return CenterSelfTest(outDir);
             var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
             if (replay != null) return Replay(replay, outDir);
             if (args.Contains("--dll-install-selftest")) return DllInstallSelfTest(outDir);
