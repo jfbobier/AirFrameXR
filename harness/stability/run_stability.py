@@ -59,6 +59,8 @@ def build(name, seconds=None, host_env=None):
         sc["client"]["track_blackout"] = soak_plan["client_blackouts"]
         sc["app"].setdefault("env", {})["XR_PROBE_MV_FAULT"] = soak_plan["mv_fault"]
         sc["faults"] = soak_plan["faults"]
+        if spec["soak"].get("audio") and "--no-audio" not in sys.argv:
+            sc["audio_events"] = soak_plan["audio"]
         sc["host"]["seconds"] = total + 15
         sc["client"]["seconds"] = total
         sc["app"]["timeout_s"] = total - 5

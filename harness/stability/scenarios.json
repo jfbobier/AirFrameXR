@@ -612,10 +612,11 @@
    }
   },
   "soak_tokyo": {
-   "description": "The soak: Little Tokyo (with its music) at the Vision Pro's size, generation and synthetic vectors on, for --seconds (default 900) with a seeded schedule of plausible events (soak.py): re-centre, eye height, gamma, generation off/on and rate, game vectors off/on, debug logging, tracking blackouts, vector faults and re-creation, host and client freezes. Every stall must be explained by an injected freeze; host and probe memory must not grow.",
+   "description": "The soak: Little Tokyo (with its music) at the Vision Pro's size, generation and synthetic vectors on, for --seconds (default 900) with a seeded schedule of plausible events (soak.py): re-centre, eye height, gamma, generation off/on and rate, game vectors off/on, debug logging, tracking blackouts, vector faults and re-creation, host and client freezes. Every stall must be explained by an injected freeze; host and probe memory must not grow. Audio events too (the default output muted/unmuted, its volume moved, the default switched and back; the PC's original state is restored; --no-audio leaves them out).",
    "soak": {
     "seconds": 900,
-    "seed": 7
+    "seed": 7,
+    "audio": true
    },
    "override": {
     "session_overrides": {
@@ -690,7 +691,8 @@
       "gpu": 120,
       "handles": 600
      }
-    }
+    },
+    "host_audio_events": 2
    }
   },
   "gui_pipe_stall_30s": {

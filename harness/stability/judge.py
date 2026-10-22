@@ -156,6 +156,9 @@ def judge(outdir, crit):
         errs = {k: g.get(k, 0) for k in ("flow_errors", "render_errors")}
         errs["mv_errors"] = mv.get("errors", 0)
         chk("generator_errors", not any(errs.values()), errs, "no flow, render or vector errors")
+    if crit.get("host_audio_events"):
+        n = sum(1 for e in hev if e.get("event") == "audio_device" and (e.get("data") or {}).get("n", 0) > 0)
+        chk("host_saw_audio_changes", n >= crit["host_audio_events"], n, f">= {crit['host_audio_events']} audio_device events after the start (the injected mute / volume / default changes)")
     if crit.get("host_memory_events"):
         n = sum(1 for e in hev if e.get("event") == "memory")
         chk("host_memory_events", n >= crit["host_memory_events"], n, f">= {crit['host_memory_events']} memory events (one every 30 s while connected)")

@@ -211,6 +211,89 @@ def start_limited(rid, task, script_name, body, rc_name, env=None):
     return TaskProc(rid, task, rc_name)
 
 
+def _audio_ps(rid, n, args, timeout=120):
+    """audio_route.ps1 <args> in the interactive session; returns its output lines."""
+    body = f"powershell -NoProfile -ExecutionPolicy Bypass -File runs\\{rid}\\audio_route.ps1 {args} > runs\\{rid}\\audio{n}.txt 2>&1\r\n"
+    start_limited(rid, f"va_stab_au{n % 4}", f"au{n}.bat", body, f"au{n}.rc").wait(timeout)
+    dst = CACHE / f"stab_audio_{rid}_{n}.txt"
+    dst.unlink(missing_ok=True)
+    b_get(f"runs/{rid}/audio{n}.txt", dst)
+    return dst.read_text(errors="replace").splitlines() if dst.exists() else []
+
+
+def _audio_parse(lines):
+    d = {"default": {}, "device": {}}
+    for l in lines:
+        m = re.match(r"default (\w+) (.*)", l)
+        if m:
+            d["default"][m.group(1)] = m.group(2).strip()
+        m = re.match(r"device (.*) \| vol=([\d.]+) mute=(\d)", l)
+        if m:
+            d["device"][m.group(1).strip()] = (float(m.group(2)), m.group(3) == "1")
+    return d
+
+
+def _audio_start(events, rid, rd, log):
+    """Takes the audio snapshot and starts the thread that plays `events`. Returns the state `_audio_restore` needs."""
+    b_put(ROOT / "harness" / "audio_route.ps1", f"runs/{rid}/audio_route.ps1")
+    snap = _audio_parse(_audio_ps(rid, 0, "snapshot"))
+    default = snap["default"].get("console")
+    others = [n for n in snap["device"] if n != default and "cable" not in n.lower()] or [n for n in snap["device"] if n != default and "16ch" not in n.lower()]   # no second real output: the stereo cable (a stolen default)
+    st = {"default": default, "orig": snap["device"].get(default), "other": others[0] if others else None, "log": [], "switched": False}
+    log(f"  audio events: default output '{default}' (volume/mute {st['orig']}), alternative '{st['other']}'")
+    if not default:
+        st["log"].append("no default output: audio events skipped")
+        return st
+    t0 = time.time()
+
+    def play():
+        n = 0
+        for e in sorted(events, key=lambda e: e["t"]):
+            w = e["t"] - (time.time() - t0)
+            if w > 0:
+                time.sleep(w)
+            n += 1
+            a, v = e["action"], e.get("value")
+            try:
+                if a in ("mute", "unmute"):
+                    args = f'mute "{default}" {1 if a == "mute" else 0}'
+                elif a == "volume":
+                    args = f'set "{default}" {v}'
+                elif a == "switch" and st["other"]:
+                    args = f'setdefault "{st["other"]}"'
+                    st["switched"] = True
+                elif a == "switch_back":
+                    args = f'setdefault "{default}"'
+                    st["switched"] = False
+                else:
+                    st["log"].append(f"{e['t']:.0f}s {a}: skipped")
+                    continue
+                _audio_ps(rid, 100 + n, args)
+                st["log"].append(f"{e['t']:.0f}s {a} {v if v is not None else ''} done at +{time.time() - t0:.0f}s")
+            except Exception as ex:   # an audio helper failing must not end the run
+                st["log"].append(f"{e['t']:.0f}s {a}: {ex}")
+    st["thread"] = threading.Thread(target=play)
+    st["thread"].start()
+    return st
+
+
+def _audio_restore(st, rid, log):
+    if not st.get("default"):
+        return
+    try:
+        _audio_ps(rid, 900, f'setdefault "{st["default"]}"')
+        _audio_ps(rid, 901, f'mute "{st["default"]}" 0')
+        if st.get("orig"):
+            _audio_ps(rid, 902, f'set "{st["default"]}" {st["orig"][0]}')
+        if st["orig"] and st["orig"][1]:
+            _audio_ps(rid, 903, f'mute "{st["default"]}" 1')
+        st["log"].append("restored the original default output, mute and volume")
+        log("  audio restored")
+    except Exception as ex:
+        st["log"].append(f"RESTORE FAILED: {ex}")
+        log(f"  AUDIO RESTORE FAILED: {ex} (set the default output, unmute and the volume by hand)")
+
+
 def launch_app(app, rid, rd, log):
     """Runs the OpenXR app (xr_probe) against VDXR+OVRShim as a NON-elevated process: the SSH session is elevated and the
     OpenXR loader ignores XR_RUNTIME_JSON for elevated processes, so it goes through a temporary LIMITED scheduled task."""
@@ -395,6 +478,13 @@ def run_scenario(sc, outdir: Path, log=print):
                 f'--stop-file runs\\{rid}\\ballast.stop --log runs\\{rid}\\ballast.log\r\n')
         start_limited(rid, "openxr_ballast_tmp", "ballast.cmd", body, "ballast.rc")
         ballast_started = True
+    # stability harness audio disturbances while the chain streams: [{"t": s, "action": "mute"|"unmute"|"volume"|"switch"|"switch_back", "value": 0.3}], seconds from the client start. They go through
+    # harness/audio_route.ps1 in the interactive session (Core Audio is not reachable from the SSH session) on the DEFAULT output; the original default, mute and volume are restored at the end
+    audio_thread = None
+    audio_state = {}
+    if sc.get("audio_events"):
+        audio_state = _audio_start(sc["audio_events"], rid, rd, log)
+        audio_thread = audio_state.get("thread")
     # stability harness faults on the builder's processes, timed from the client start: {"type": "suspend", "process": "alvr_host", "at_s": 40, "for_s": 30}
     fault_logs = []
     for i, f in enumerate(sc.get("faults", [])):
@@ -462,6 +552,10 @@ def run_scenario(sc, outdir: Path, log=print):
         shutil.rmtree(wdir, ignore_errors=True)
     if gpu_p:
         b_run("taskkill /f /im nvidia-smi.exe >nul 2>&1")
+    if audio_thread:
+        audio_thread.join(timeout=120)
+    if audio_state:
+        _audio_restore(audio_state, rid, log)
     if mem_p:
         b_run(f"echo x > {rd}\\mem.stop")
         time.sleep(2)
@@ -490,6 +584,8 @@ def run_scenario(sc, outdir: Path, log=print):
         b_get(f"runs/{rid}/ballast.log", outdir / "ballast.log")
     for fl in fault_logs:
         b_get(f"runs/{rid}/{fl}", outdir / fl)
+    if audio_state:
+        (outdir / "audio_events.log").write_text("\n".join(audio_state.get("log", [])) + "\n")
     if app:
         for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log", "mirror_events.csv"):
             b_get(f"runs/{rid}/{f}", outdir / f)

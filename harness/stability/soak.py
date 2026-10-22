@@ -35,6 +35,16 @@ def plan(seconds, seed=7):
     for t in _times(rng, seconds, 3):
         stdin += [{"t": t, "line": "debug on"}, {"t": round(t + rng.uniform(10, 60), 1), "line": "debug off"}]
     stdin.sort(key=lambda e: e["t"])
+    # what happens to the PC's audio while a game plays: the user (or another app) mutes the output and unmutes it, moves the volume, switches the default
+    # output (a headset plugged in) and back; the video chain must not care, and the audio capture must follow (host audio events, no stall)
+    audio = []
+    for t in _times(rng, seconds, 5, first=60):
+        audio += [{"t": t, "action": "mute"}, {"t": round(t + rng.uniform(4, 25), 1), "action": "unmute"}]
+    for t in _times(rng, seconds, 8, first=60):
+        audio.append({"t": t, "action": "volume", "value": rng.choice([0.2, 0.35, 0.5, 0.7, 0.9])})
+    for t in _times(rng, seconds, 4, first=90):
+        audio += [{"t": t, "action": "switch"}, {"t": round(t + rng.uniform(8, 30), 1), "action": "switch_back"}]
+    audio.sort(key=lambda e: e["t"])
     # the headset's tracking goes quiet (the client's own clock, from the stream start)
     bo = []
     for t in _times(rng, seconds, 12, first=60):
@@ -54,4 +64,4 @@ def plan(seconds, seed=7):
         dur = round(rng.choice([3, 6, 12]), 1)
         faults.append({"type": "suspend", "process": "alvr_client_headless", "at_s": t, "for_s": dur})
         windows.append({"kind": "client_freeze", "t": t, "dur": dur})
-    return {"stdin": stdin, "client_blackouts": ",".join(bo), "mv_fault": ",".join(mvf), "faults": faults, "windows": windows}
+    return {"stdin": stdin, "audio": audio, "client_blackouts": ",".join(bo), "mv_fault": ",".join(mvf), "faults": faults, "windows": windows}
