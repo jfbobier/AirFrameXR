@@ -64,6 +64,31 @@ live in another logon session and process loopback does not hear them (start the
 (use `robocopy /MIR` for a clean copy); the VB 16ch cable refuses a second loopback client. The scene music: `tools/bench_scene/sakura_breeze.mp3`
 (credits in `THIRD_PARTY_NOTICES.md`), played by `xr_probe` when it renders a scene (`XR_PROBE_SOUND=0` silences it, `XR_PROBE_SOUND=<file>` picks another).
 
+## Stability harness (2026-10-22, docs/STABILITY_PLAN.md)
+
+`python3 harness/stability/run_stability.py list | run <name>[,<name>|all] [--seconds N] [--host-env K=V ...] | judge <results dir> <scenario>`: fault injection and soak
+scenarios on the real chain (host + shim + probe + mock client on the builder), judged by `harness/stability/judge.py` (`--selftest`). Scenarios are `stability/scenarios.json`
+(a base derived from `e2e_fg_latency`, an override, criteria); results go to `harness/results/stability/<UTC>_<name>/` (frames.csv, client_stdout.txt with the injected
+faults, host_stdout.txt, mem.csv, ballast.log, soak_plan.json, result.json). Run the **debug** flavour (`run.py build nvenc vdxr host shim probe ballast`).
+
+| Scenario | Fault | Pass means |
+|---|---|---|
+| `tracking_blackout_frame` / `_fgoff` | the pose uplink silent for 5 s, resumed only after 30 frames arrive (visionOS-like) | frames keep flowing, recovery under 2 s (the `_fgoff` control passes without the fix too) |
+| `tracking_blackout_timed` | 0.5 / 5 / 30 s silences that end by themselves | no stall beyond the silence |
+| `host_freeze_30s` / `_fgoff` | the whole host process suspended for 30 s (NtSuspendProcess) | back within the freeze + 15 s, the watchdog reports it |
+| `client_freeze_5s` / `_30s` | the mock headset frozen (the host drops the connection at 30 s) | back within a few seconds of resuming |
+| `reconnect_storm` | 15 client sessions of 8-25 s against one daemon host | every session streams, first frame within 6 s |
+| `memory_baseline_fullres` | none: what the chain holds at the Vision Pro's size | no growth, memory events present |
+| `vram_cap_loose`, `vram_squeeze`, `ram_squeeze` | the ballast leaves the chain 4 GB / 1.8 GB of VRAM, 2.3 GB of RAM (squeezes released at +95 s) | alive at the end |
+| `mv_clean`, `mv_loss`, `mv_churn`, `mv_garbage` | probe vector faults (`XR_PROBE_MV_FAULT`: drop, blackout, churn, resize, recreate, garbage, null) | vectors used, no generator errors, no stall, no growth |
+| `soak_tokyo` | `--seconds N` (default 900) of seeded plausible events: re-centre, eye height, gamma, generation off/on and rate, game vectors, debug logging, blackouts, vector faults, host and client freezes | every stall inside an injected freeze, host and probe memory flat |
+
+Machinery: `memory_limit` in a scenario (`vram_cap_mb`, `ram_cap_mb`, `at_s`, `release_s`) starts `tools/stability/vram_ballast.cpp` (built by `run.py build ballast`) so the machine
+behaves as if the chain had only that much (the dev PCs have far more than many users); `faults` (`suspend` of a process for N s), `stdin_feed` (host commands at given times),
+`reconnect_storm`, `sample_memory` (`memsample.ps1`: RAM, handles, dedicated VRAM per process once a second, `mem.csv`). Mock client flags: `--track-blackout start:dur[:frame]`,
+`--track-after-frame`, `--track-frames-needed N`. `--host-env VISIONALVR_FG_DARK_MS=0` turns the dark-tracking fix off (the freeze scenarios then fail: that is how the harness is
+known to see the bug).
+
 ## Topology
 Note: a client on a loopback address makes `server_core` treat it as *wired* and force the **TCP** stream protocol, so loopback
 scenarios do not exercise ALVR's UDP stream (the real AVP uses UDP).

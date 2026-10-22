@@ -85,4 +85,28 @@ Each fix keeps its performance cost near zero.
 4. Ballast, `mv_loss` and `stream_churn` scenarios.
 5. The overnight soak.
 
-Nothing here is built or run yet; no builder was connected when this was written.
+
+## Status 2026-10-22 (3080 Ti laptop, Vision Pro size, debug flavour)
+
+The harness exists and runs: `harness/README.md` (Stability harness), `harness/stability/`. What the lab found:
+
+**The Gears stall is reproduced and fixed.** Two layers, both seen in the logs:
+1. Something held the host for about 30 s (stall 1: the statistics line missing for 38 s and a 29.5 s gap between tracking events; the game kept releasing frames
+   meanwhile). The cause is not known yet; the watchdog (below) names it next time. Whole-process suspension is the closest lab model.
+2. With generation on, a boundary without a fresh tracking sample sent nothing; the visionOS client only sends tracking while frames reach it, so any pause turned into a
+   stall far longer than the pause (lab: 5 s of silent uplink -> 61 s; a 30 s host freeze -> 86 s; a 30 s client freeze -> 56 s). Generation off was never affected.
+   Fix (`pipeline.rs`, `fg_stale_sample`): after 100 ms without a fresh sample (`VISIONALVR_FG_DARK_MS`, 0 = off) boundaries send frames stamped with the last real
+   sample, as the generation-off path does. Lab: 5 s silence -> 0.1 s stall; 30 s host freeze -> 31 s (the freeze itself); 30 s client freeze passes. Normal operation
+   is unchanged (a late sample still skips one boundary, as before; `e2e_fg_latency` passes).
+
+**Phase 0 (release flavour):** `watchdog.rs`: `stall_detected` / `stall_ended` events and log lines naming the cause (process not running, main loop, tracking, frames) and a
+memory line every 30 s (host private / working set / handles, RAM, GPU used, host VRAM and its budget); the per-game counter wrap and the height log flood fixed.
+Debug-only allocation counters are not built yet.
+
+**Memory:** at the Vision Pro's size the chain holds host 1.9 GB RAM + 2.0 GB VRAM, probe 0.8 GB VRAM (2.8 GB in all); no growth in 150 s runs; a squeeze to 1.8 GB of VRAM
+(Windows pages) or 2.3 GB of RAM is survived. Vector loss, churn (new stream ids, size changes, textures re-created) and garbage do not stall, error or grow.
+Not yet run: hours-long soaks (`soak_tokyo --seconds 14400`), and the leak verdicts need them.
+
+**Open:** the 30 s host freeze itself (layer 1); a D3D12 vector provider and the debug allocation counters (`harness-dlss-coverage-gap`); audio events in the soak
+(default device changes, mute, volume: the helpers exist in `harness/audio_route.ps1`); a pipe-stall test (the GUI not reading the host's stdout: a blocked reader would
+freeze threads that print, one candidate for layer 1).

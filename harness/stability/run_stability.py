@@ -48,10 +48,26 @@ def build(name, seconds=None, host_env=None):
         sc["timeout_s"] = seconds + 160
     if spec.get("faults"):
         sc["faults"] = spec["faults"]
+    soak_plan = None
+    if spec.get("soak"):
+        # a seeded schedule of plausible events (soak.py): host commands through the stdin feed, tracking blackouts, vector faults, process freezes
+        import soak
+        total = seconds or spec["soak"].get("seconds", 900)
+        soak_plan = soak.plan(total, spec["soak"].get("seed", 7))
+        soak_plan["seconds"] = total
+        sc["stdin_feed"] = {"events": soak_plan["stdin"], "hold_s": total + 20}
+        sc["client"]["track_blackout"] = soak_plan["client_blackouts"]
+        sc["app"].setdefault("env", {})["XR_PROBE_MV_FAULT"] = soak_plan["mv_fault"]
+        sc["faults"] = soak_plan["faults"]
+        sc["host"]["seconds"] = total + 15
+        sc["client"]["seconds"] = total
+        sc["app"]["timeout_s"] = total - 5
+        sc["timeout_s"] = total + 200
     if host_env:
         sc["host"].setdefault("env", {}).update(host_env)
     sc["name"] = name
     sc["description"] = spec["description"]
+    sc["_soak_plan"] = soak_plan
     return sc, spec["criteria"]
 
 
@@ -61,9 +77,12 @@ def run(name, seconds=None, host_env=None):
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     outdir = lib.RESULTS / "stability" / f"{stamp}_{name}"
     print(f"== {name}: {sc['description']}")
+    plan = sc.pop("_soak_plan", None)
     result = {"scenario": name, "started": stamp, "outdir": str(outdir)}
     try:
         steps = lib.run_scenario(sc, outdir, log=print)
+        if plan:
+            (outdir / "soak_plan.json").write_text(json.dumps(plan, indent=1))
         checks = J.judge(outdir, crit)
         result.update(status="PASS" if checks and all(c["ok"] for c in checks) else "FAIL", steps=steps, checks=checks)
     except lib.Blocked as e:

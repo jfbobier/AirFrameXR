@@ -101,6 +101,19 @@ def judge(outdir, crit):
     if "max_stall_ms" in crit:
         worst = max(gp, key=lambda g: g[1]) if gp else (0, 0)
         chk("max_stall", worst[1] * 1000 <= crit["max_stall_ms"], f"{worst[1] * 1000:.0f} ms at +{worst[0] - arr[0]:.0f} s ({len(big)} gaps > 1 s)", f"<= {crit['max_stall_ms']} ms between frames")
+    # soak: every stall must be explained by an injected disturbance (soak_plan.json: host / client freezes), and be over soon after it
+    plan_f = outdir / "soak_plan.json"
+    if crit.get("soak") and plan_f.exists():
+        wins = [w for w in json.loads(plan_f.read_text())["windows"] if w["kind"] in ("host_freeze", "client_freeze")]
+        rec = crit["soak"].get("recovery_s", 12)
+        unexplained = []
+        for st, g in gp:
+            if g <= crit["soak"].get("min_stall_s", 1.5):
+                continue
+            rel = st - arr[0]
+            if not any(w["t"] - 8 <= rel <= w["t"] + w["dur"] + 8 and g <= w["dur"] + rec for w in wins):
+                unexplained.append(f"{g:.1f} s at +{rel:.0f} s")
+        chk("soak_unexplained_stalls", not unexplained, "none" if not unexplained else "; ".join(unexplained[:5]), f"every stall over {crit['soak'].get('min_stall_s', 1.5)} s lies in an injected freeze (+ {rec} s recovery)")
     # the stream must be alive at the end of the run (a deadlock leaves the tail silent, which no gap between two frames shows)
     if "alive_at_end_s" in crit:
         end_s = max([e["t_ms"] / 1000 for e in ev if "t_ms" in e] + [arr[-1]])

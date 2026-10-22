@@ -94,8 +94,14 @@ def preflight(sc):
 
 
 def kill_stale():
-    for exe in ("alvr_host.exe", "alvr_client_headless.exe"):
+    # the scheduled tasks first: `schtasks /run` does nothing while a task is still running (a feeder or a frozen host left by an aborted run kept the next run's
+    # host from starting), and /end takes the task's whole process tree (cmd, feeder, host)
+    for task in ("openxr_host_tmp", "openxr_app_tmp", "openxr_ballast_tmp", "openxr_dbg"):
+        b_run(f"schtasks /end /tn {task} >nul 2>&1")
+    for exe in ("alvr_host.exe", "alvr_client_headless.exe", "xr_probe.exe", "vram_ballast.exe", "findstr.exe"):
         b_run(f"taskkill /f /im {exe} >nul 2>&1")
+    # helper scripts of an aborted stability run (the sampler loops until its stop file exists, the freezers sleep): end them by their command line
+    b_run('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \'*memsample.ps1*\' -or $_.CommandLine -like \'*suspend.ps1*\' -or $_.CommandLine -like \'*feed.ps1*\' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1')
 
 
 def derive_session(sc, dst: Path, pin=None):
@@ -345,7 +351,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "send_pacing": "--send-pacing", "running_start_ms": "--running-start-ms", "boundary_offset_ms": "--boundary-offset-ms",
                                      "gpu_sched_class": "--gpu-sched-class", "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order", "no_follow_rate": "--no-follow-rate",
                                      "frame_gen": "--frame-gen", "frame_gen_flow_scale": "--frame-gen-flow-scale", "frame_gen_perf": "--frame-gen-perf", "frame_gen_t": "--frame-gen-t"})
-                       + f' > {rd}\\host_stdout.txt 2>&1')
+                       + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
                 host_p = start_limited(rid, "openxr_host_tmp", "host.cmd", hostcmd + "\r\n", "host.rc")
