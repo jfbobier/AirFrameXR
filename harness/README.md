@@ -84,6 +84,8 @@ faults, host_stdout.txt, mem.csv, ballast.log, soak_plan.json, result.json). Run
 | `mv_clean`, `mv_loss`, `mv_churn`, `mv_garbage` | probe vector faults (`XR_PROBE_MV_FAULT`: drop, blackout, churn, resize, recreate, garbage, null) | vectors used, no generator errors, no stall, no growth |
 | `soak_tokyo` | `--seconds N` (default 900) of seeded plausible events: re-centre, eye height, gamma, generation off/on and rate, game vectors, debug logging, blackouts, vector faults, host and client freezes, audio events (default output muted / volume / switched to the cable and back, restored afterwards; `--no-audio` leaves them out) | every stall inside an injected freeze, the host sees the audio changes, host and probe memory flat |
 
+**When to run it:** it is optional on a new build. The suite takes about 90 minutes and a soak hours, so run it after a major change (frame generation, the tracking / timestamp path, the vector tap, audio capture, the host's threading) and before a release that carries one, not on every commit.
+
 Machinery: `memory_limit` in a scenario (`vram_cap_mb`, `ram_cap_mb`, `at_s`, `release_s`) starts `tools/stability/vram_ballast.cpp` (built by `run.py build ballast`) so the machine
 behaves as if the chain had only that much (the dev PCs have far more than many users); `faults` (`suspend` of a process for N s), `stdin_feed` (host commands at given times),
 `reconnect_storm`, `sample_memory` (`memsample.ps1`: RAM, handles, dedicated VRAM per process once a second, `mem.csv`). Mock client flags: `--track-blackout start:dur[:frame]`,
