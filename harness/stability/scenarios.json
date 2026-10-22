@@ -38,7 +38,8 @@
     "blackouts_resume": true,
     "min_fps_during_blackout": 20,
     "max_recovery_s": 2,
-    "alive_at_end_s": 3
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
    }
   },
   "tracking_blackout_frame_fgoff": {
@@ -59,7 +60,8 @@
     "blackouts_resume": true,
     "min_fps_during_blackout": 20,
     "max_recovery_s": 2,
-    "alive_at_end_s": 3
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
    }
   },
   "tracking_blackout_timed": {
@@ -83,7 +85,8 @@
     "blackouts_resume": true,
     "min_fps_during_blackout": 20,
     "max_recovery_s": 2,
-    "alive_at_end_s": 3
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
    }
   },
   "host_freeze_30s": {
@@ -113,7 +116,9 @@
    "criteria": {
     "warmup_s": 15,
     "max_stall_ms": 45000,
-    "alive_at_end_s": 3
+    "alive_at_end_s": 3,
+    "host_stalls_min": 1,
+    "host_memory_events": 2
    }
   },
   "host_freeze_30s_fgoff": {
@@ -144,7 +149,8 @@
    "criteria": {
     "warmup_s": 15,
     "max_stall_ms": 45000,
-    "alive_at_end_s": 3
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
    }
   }
  }

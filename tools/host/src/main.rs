@@ -24,6 +24,7 @@ use pipeline::FgRate;
 mod simrig;
 mod telemetry;
 mod timing;
+mod watchdog;
 mod vision;
 
 use serde_json::json;
@@ -892,6 +893,7 @@ mod nvh {
         pub fn nvh_ipc_set_color(ipc: *mut c_void, brightness: f32, contrast: f32, saturation: f32, sharpening: f32);
         pub fn nvh_gpu_info(buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_gpu_sample(buf: *mut c_char, len: i32) -> i32;
+        pub fn nvh_mem_sample(buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_ipc_shim_stats(ipc: *mut c_void, submit_mode: *mut u32, ts_matched: *mut u32, ts_fallback: *mut u32);
         pub fn nvh_ipc_slot_busy(ipc: *mut c_void, slot: u32, busy: i32);
         pub fn nvh_ipc_set_pacing(ipc: *mut c_void, boundary_offset_ms: f32, running_start_ms: f32);
@@ -1690,6 +1692,7 @@ fn main() {
     let (ctx, events) = ServerCoreContext::new();
     let ctx = Arc::new(ctx);
     let shared = Arc::new(Shared::default());
+    watchdog::start(origin, Arc::clone(&shared));
 
     // live NVENC encoder (settings from the session's openvr_config, like ALVR's C++ Settings.cpp)
     let mut live: Option<Box<LiveCtx>> = None;
@@ -2348,6 +2351,7 @@ fn main() {
     let (mut st_frames, mut st_bytes, mut st_submitted, mut st_lost) = (0usize, 0u64, 0u32, 0usize);
     let mut st_mv = (0u64, 0u64, 0u64);   // (vector frames, eye passes synthesised from vectors, synthetic outputs) at the previous status
     loop {
+        watchdog::main_beat(origin);
         if vision::QUIT.load(Ordering::SeqCst) {
             logs::general("INFO", "stop requested (VisionALVR.exe closed or sent quit)");
             break;

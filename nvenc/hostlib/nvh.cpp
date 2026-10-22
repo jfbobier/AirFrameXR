@@ -8,6 +8,9 @@
 #include "FFR.h"
 #include "framegen.h"
 #include <dxgi.h>
+#include <dxgi1_4.h>
+#define PSAPI_VERSION 2   // GetProcessMemoryInfo from kernel32 (K32...), no extra import library
+#include <psapi.h>
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -957,6 +960,29 @@ bool nvml_chosen_ids(unsigned* dev, unsigned* sub) {
     return true;
 }
 
+static LUID g_adapterLuid{}; static bool g_haveAdapterLuid = false;   // the adapter the encoder runs on (for nvh_mem_sample)
+
+// One CSV row for the periodic memory line (release builds: a handful of cheap calls every 30 s): this process' private MB, working set MB, handles,
+// free RAM MB, total RAM MB, the GPU's used MB and total MB (NVML, every process), this process' VRAM MB and its budget MB (DXGI: the budget shrinks when
+// other applications want memory, the usage is what the host and its shared textures hold).
+int nvh_mem_sample(char* buf, int len) {
+    PROCESS_MEMORY_COUNTERS_EX pc{}; pc.cb = sizeof pc;
+    K32GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pc, sizeof pc);
+    DWORD handles = 0; GetProcessHandleCount(GetCurrentProcess(), &handles);
+    MEMORYSTATUSEX ms{}; ms.dwLength = sizeof ms; GlobalMemoryStatusEx(&ms);
+    unsigned long long gpuUsed = 0, gpuTotal = 0, vcur = 0, vbud = 0;
+    if (nvml() && g_nvml.mem) { NvmlMem m{}; g_nvml.mem(g_nvml.dev, &m); gpuUsed = m.used >> 20; gpuTotal = m.total >> 20; }
+    static IDXGIAdapter3* ad3 = nullptr; static bool tried = false;
+    if (!tried && g_haveAdapterLuid) {
+        tried = true;
+        IDXGIFactory4* f = nullptr;
+        if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory4), (void**)&f)) && f) { f->EnumAdapterByLuid(g_adapterLuid, __uuidof(IDXGIAdapter3), (void**)&ad3); f->Release(); }
+    }
+    if (ad3) { DXGI_QUERY_VIDEO_MEMORY_INFO vi{}; if (SUCCEEDED(ad3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &vi))) { vcur = vi.CurrentUsage >> 20; vbud = vi.Budget >> 20; } }
+    return snprintf(buf, len, "%llu,%llu,%lu,%llu,%llu,%llu,%llu,%llu,%llu", (unsigned long long)(pc.PrivateUsage >> 20), (unsigned long long)(pc.WorkingSetSize >> 20), (unsigned long)handles,
+                    (unsigned long long)(ms.ullAvailPhys >> 20), (unsigned long long)(ms.ullTotalPhys >> 20), gpuUsed, gpuTotal, vcur, vbud);
+}
+
 static int pickNvidiaAdapter(IDXGIFactory1* fac, Nvh* n) {
     unsigned wantDev = 0, wantSub = 0;
     const bool have = nvml_chosen_ids(&wantDev, &wantSub);   // NVML chose the best GPU (VISIONALVR_GPU can force one): find its DXGI adapter
@@ -975,6 +1001,7 @@ static int pickNvidiaAdapter(IDXGIFactory1* fac, Nvh* n) {
     if (fac->EnumAdapters1((UINT)pick, &ad) == S_OK) {
         DXGI_ADAPTER_DESC1 d; ad->GetDesc1(&d); ad->Release();
         n->luid = d.AdapterLuid;
+        g_adapterLuid = d.AdapterLuid; g_haveAdapterLuid = true;
         char nm[128]; WideCharToMultiByte(CP_UTF8, 0, d.Description, -1, nm, sizeof nm, nullptr, nullptr);
         n->gpuName = nm;
     }

@@ -6,7 +6,7 @@
 
 Criteria (all optional): {"warmup_s": 15, "alive_at_end_s": 3, "max_stall_ms": 1500, "blackouts_resume": true, "min_fps_during_blackout": 20, "max_recovery_s": 2,
 "mem": {"warmup_frac": 0.2, "min_duration_s": 120, "max_growth_mb_per_h": {"private": 200, "gpu": 200, "handles": 2000}, "max_gpu_mb": 8000,
-"processes": ["alvr_host", "xr_probe"]}, "host_stalls": 0}
+"processes": ["alvr_host", "xr_probe"]}, "host_stalls_max": 0, "host_stalls_min": 1, "host_memory_events": 2}
 Stdlib only."""
 import csv, json, sys
 from pathlib import Path
@@ -117,14 +117,17 @@ def judge(outdir, crit):
         if r is not None and "max_recovery_s" in crit:
             over = r["data"]["silent_s"] - e["data"]["dur_s"]
             chk(f"blackout{i}_recovery", over <= crit["max_recovery_s"], f"{over:.1f} s past the planned end", f"<= {crit['max_recovery_s']} s")
-    # the host's own stall events (Phase 0: "stall:" lines in its stdout / general log)
-    if "host_stalls" in crit:
-        n = 0
-        for p in ("host_stdout.txt",):
-            f = outdir / p
-            if f.exists():
-                n += sum(1 for l in f.read_text(errors="replace").splitlines() if "stall" in l.lower() and "detected" in l.lower())
-        chk("host_reported_stalls", n <= crit["host_stalls"], n, f"<= {crit['host_stalls']}")
+    # the host's own stall events (watchdog.rs: "stall_detected" in its stdout events) and memory lines
+    hev = events(outdir / "host_stdout.txt")
+    stalls = [e for e in hev if e.get("event") == "stall_detected"]
+    if "host_stalls_max" in crit:
+        chk("host_reported_stalls", len(stalls) <= crit["host_stalls_max"], len(stalls), f"<= {crit['host_stalls_max']}")
+    if "host_stalls_min" in crit:
+        kinds = sorted({e["data"].get("kind") for e in stalls})
+        chk("host_noticed_the_stall", len(stalls) >= crit["host_stalls_min"], f"{len(stalls)} ({', '.join(map(str, kinds))})", f">= {crit['host_stalls_min']} stall_detected events")
+    if crit.get("host_memory_events"):
+        n = sum(1 for e in hev if e.get("event") == "memory")
+        chk("host_memory_events", n >= crit["host_memory_events"], n, f">= {crit['host_memory_events']} memory events (one every 30 s while connected)")
     m = crit.get("mem")
     if m:
         procs, sysrows = read_mem(outdir / "mem.csv")
