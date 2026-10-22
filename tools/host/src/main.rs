@@ -742,8 +742,60 @@ impl StatsWindow {
 pub(crate) fn event(origin: Instant, name: &str, extra: serde_json::Value) {
     let wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
     let line = json!({ "t_ms": origin.elapsed().as_secs_f64() * 1000.0, "unix_s": wall, "event": name, "data": extra }).to_string();
-    println!("{line}");
+    send_event_line(line.clone());
     logs::event_line(&line);
+}
+
+// ---- stdout events never block the host ------------------------------------------------------------------------------------
+// The streamer window reads the host's stdout through a pipe. A println! into a full pipe blocks the calling thread until the reader drains it, and a reader that
+// stops (a modal dialog, a busy UI thread) froze the whole host for as long: lab 2026-10-22 (harness/stability gui_pipe_stall_30s), a 30 s reader stall stopped the
+// stream for 27 s, the main loop, the watchdog and the pipeline all waiting on stdout. Events now go through a bounded queue to one writer thread, which alone waits
+// for the reader; past `EVENT_QUEUE` queued lines an event is dropped (counted, logged when the reader is back) rather than the host blocked.
+const EVENT_QUEUE: usize = 4096;
+static EVENT_TX: std::sync::OnceLock<std::sync::mpsc::SyncSender<String>> = std::sync::OnceLock::new();
+static EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0);
+static EVENTS_QUEUED: AtomicUsize = AtomicUsize::new(0);
+
+fn send_event_line(line: String) {
+    let tx = EVENT_TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<String>(EVENT_QUEUE);
+        std::thread::Builder::new().name("stdout-events".into()).spawn(move || {
+            use std::io::Write;
+            for line in rx {
+                {
+                    let out = std::io::stdout();
+                    let mut out = out.lock();
+                    let _ = writeln!(out, "{line}"); // blocks here, and only here, while the reader is stalled
+                    let _ = out.flush();
+                }
+                EVENTS_QUEUED.fetch_sub(1, Ordering::Relaxed);
+                let dropped = EVENTS_DROPPED.swap(0, Ordering::Relaxed);
+                if dropped > 0 {
+                    logs::general("WARN", &format!("the host's stdout reader stalled: {dropped} events were dropped"));
+                }
+            }
+        }).ok();
+        tx
+    });
+    EVENTS_QUEUED.fetch_add(1, Ordering::Relaxed);
+    if tx.try_send(line).is_err() {
+        EVENTS_QUEUED.fetch_sub(1, Ordering::Relaxed);
+        EVENTS_DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Waits (at most 2 s) until the writer thread has written everything queued: before the host exits and before lines printed directly.
+pub(crate) fn flush_events() {
+    let t0 = Instant::now();
+    while EVENTS_QUEUED.load(Ordering::Relaxed) > 0 && t0.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// `std::process::exit` after the queued events are out.
+fn exit_now(code: i32) -> ! {
+    flush_events();
+    std::process::exit(code)
 }
 
 // ---- HEVC Annex-B access-unit splitter ------------------------------------------------------------------
@@ -1086,7 +1138,7 @@ fn setup_fail(origin: Instant, message: &str) -> ! {
     eprintln!("{message}");
     logs::general("ERROR", message);
     event(origin, "setup_error", json!({ "message": message }));
-    std::process::exit(EXIT_SETUP);
+    exit_now(EXIT_SETUP);
 }
 
 /// The session ALVR, the encoder and the benchmarks read: present and valid JSON, else a message that says what to do.
@@ -1535,7 +1587,7 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             eprintln!("{e}");
-            std::process::exit(3);
+            exit_now(3);
         }
     };
     let origin = Instant::now();
@@ -1548,7 +1600,7 @@ fn main() {
     if args.system_check {
         let v = vision::system_check(gpu_info);
         println!("{}", json!({ "event": "system_check", "data": v }));
-        std::process::exit(if v["ok"] == true { 0 } else { 6 });
+        exit_now(if v["ok"] == true { 0 } else { 6 });
     }
     let install = args.install_dir.as_deref().map(vision::Install::new);
     let mut seeded = false;
@@ -1616,9 +1668,9 @@ fn main() {
         });
         if let Err(e) = r {
             event(origin, "discovery_error", json!({ "message": e.to_string() }));
-            std::process::exit(6);
+            exit_now(6);
         }
-        std::process::exit(0);
+        exit_now(0);
     }
     vision::spawn_gpu_sampler(|| {
         let mut b = vec![0 as std::ffi::c_char; 256];
@@ -1645,7 +1697,7 @@ fn main() {
             Ok(changed) => event(origin, "nvidia_profile", json!({ "overrides": changed })),
             Err(e) => {
                 eprintln!("cannot apply NVIDIA profile to session.json: {e}");
-                std::process::exit(3);
+                exit_now(3);
             }
         }
         // benchmarks try profiles without changing the user's session (they set the encoder's foveation directly)
@@ -1657,12 +1709,12 @@ fn main() {
             })),
             Err(e) => {
                 eprintln!("cannot apply the encode profile to session.json: {e}");
-                std::process::exit(3);
+                exit_now(3);
             }
         }
     }
     if args.bench_quality {
-        std::process::exit(run_quality_bench(origin, &args, &layout, install.as_ref()));
+        exit_now(run_quality_bench(origin, &args, &layout, install.as_ref()));
     }
     let (aus, idr_count) = if args.live {
         (vec![], 0)
@@ -1673,7 +1725,7 @@ fn main() {
         event(origin, "source", json!({ "file": args.file, "bytes": stream.len(), "access_units": aus.len(), "idr": idr_count }));
         if aus.is_empty() || !aus[0].is_idr {
             eprintln!("source must start with an IDR access unit");
-            std::process::exit(3);
+            exit_now(3);
         }
         (aus, idr_count)
     };
@@ -1744,7 +1796,7 @@ fn main() {
         if enc_handle.is_null() {
             let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();
             eprintln!("NVENC init failed: {msg}");
-            std::process::exit(4);
+            exit_now(4);
         }
         // network benchmark: no game keeps the GPU clocked, and a lightly loaded GPU downclocks NVENC (~3x slower on the laptop)
         let keepalive = args.gpu_keepalive.or(if args.bench_network.is_some() { Some(90) } else { None });
@@ -1760,7 +1812,7 @@ fn main() {
         ipc = unsafe { nvh::nvh_ipc_open() };
         if ipc.is_null() {
             eprintln!("cannot open the OVRShim IPC objects");
-            std::process::exit(4);
+            exit_now(4);
         }
         event(origin, "ipc", json!({ "shim_alive": unsafe { nvh::nvh_ipc_shim_alive(ipc) } }));
     }
@@ -1778,7 +1830,7 @@ fn main() {
             let ms = unsafe { nvh::nvh_encode(enc_handle, i as u32, i as u64 * 11_000_000, (i == 0) as i32, err.as_mut_ptr(), 256) };
             if ms < 0.0 {
                 println!("{}", json!({ "event": "bench_error", "frame": i, "message": unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy() }));
-                std::process::exit(5);
+                exit_now(5);
             }
             v.push(ms);
             if args.bench_sleep_ms > 0 {
@@ -1801,7 +1853,7 @@ fn main() {
         println!("{}", json!({ "event": "bench", "data": data }));
         logs::general("INFO", &format!("encoder benchmark {:?} {}x{}: p50 {p50:.1} ms, p95 {p95:.1} ms ({} at {} Hz)", args.encode_profile, enc_size.0, enc_size.1,
             if p95 < budget * 0.9 { "fits" } else { "does NOT fit" }, args.fps));
-        std::process::exit(0);
+        exit_now(0);
     }
     // Shim mode: the staged pipeline owns the encoder from here on (intake / clock pick / encoder / sender threads).
     let mut pipeline: Option<Arc<pipeline::Pipeline>> = None;
@@ -2619,7 +2671,7 @@ fn main() {
                     g.handle = unsafe { nvh::nvh_create(ew, eh, args.noise, on_packet, on_params, user, err.as_mut_ptr(), 256) };
                     if g.handle.is_null() {
                         eprintln!("NVENC re-init failed: {}", unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy());
-                        std::process::exit(4);
+                        exit_now(4);
                     }
                     if let Some(duty) = args.gpu_keepalive {
                         unsafe { nvh::nvh_keepalive(g.handle, 1, duty) };
@@ -2986,11 +3038,12 @@ fn main() {
             eprintln!("\ncannot write report {}: {e}", p.display());
         }
     }
+    flush_events();
     println!("{}", json!({ "event": "report", "data": report }));
     // dropping ServerCoreContext joins its threads (ALVR un-mutes the PC speakers here); do it explicitly before exit
     drop(ctx);
     logs::general("INFO", &format!("host stop ({} frames streamed{})", frames, if encode_errors > 0 { format!(", {encode_errors} encode errors") } else { String::new() }));
-    std::process::exit(if !connected { 2 } else if pass { 0 } else { 1 });
+    exit_now(if !connected { 2 } else if pass { 0 } else { 1 });
 }
 
 #[cfg(test)]
