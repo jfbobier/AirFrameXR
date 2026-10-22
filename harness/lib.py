@@ -31,7 +31,7 @@ CLIENT_FLAGS = {"seconds": "--seconds", "connect_timeout": "--connect-timeout", 
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views", "height": "--height"}
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "track_blackout": "--track-blackout", "track_after_frame": "--track-after-frame", "track_frames_needed": "--track-frames-needed", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views", "height": "--height"}
 
 
 class Blocked(Exception):
@@ -275,6 +275,11 @@ def run_scenario(sc, outdir: Path, log=print):
         # sample the NVIDIA GPU on the builder during the run (state, clocks, engine utilization, power, throttle reasons)
         gpu_p = b_popen(f'nvidia-smi --query-gpu=timestamp,pstate,clocks.sm,clocks.video,clocks.mem,utilization.gpu,utilization.encoder,'
                         f'utilization.decoder,power.draw,temperature.gpu,clocks_throttle_reasons.active --format=csv -lms 500 > {rd}\\gpu.csv 2>&1')
+    mem_p = None
+    if sc.get("sample_memory"):
+        # stability harness: per process RAM / handles / dedicated VRAM once a second (harness/stability/memsample.ps1) -> mem.csv
+        b_put(ROOT / "harness" / "stability" / "memsample.ps1", f"runs/{rid}/memsample.ps1")
+        mem_p = b_popen(f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\memsample.ps1 -Out {rd}\\mem.csv -StopFile {rd}\\mem.stop")
     host_exe = HOST_EXE
     if sc.get("install"):
         # the portable folder exactly as a user unzips it (no registry: the app gets XR_RUNTIME_JSON); the host runs from it
@@ -349,6 +354,13 @@ def run_scenario(sc, outdir: Path, log=print):
                 + f' > {rd}\\client{sfx}_stdout.txt 2>&1')
     clientcmd = make_client_cmd()
     client_p = b_popen(clientcmd)
+    # stability harness faults on the builder's processes, timed from the client start: {"type": "suspend", "process": "alvr_host", "at_s": 40, "for_s": 30}
+    fault_logs = []
+    for i, f in enumerate(sc.get("faults", [])):
+        if f["type"] == "suspend":
+            b_put(ROOT / "harness" / "stability" / "suspend.ps1", f"runs/{rid}/suspend.ps1")
+            b_popen(f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\suspend.ps1 -Name {f['process']} -After {f['at_s']} -For {f['for_s']} -Log {rd}\\fault{i}.txt")
+            fault_logs.append(f"fault{i}.txt")
     app = sc.get("app")
     if app:
         if app.get("delay_s"):
@@ -382,6 +394,9 @@ def run_scenario(sc, outdir: Path, log=print):
         shutil.rmtree(wdir, ignore_errors=True)
     if gpu_p:
         b_run("taskkill /f /im nvidia-smi.exe >nul 2>&1")
+    if mem_p:
+        b_run(f"echo x > {rd}\\mem.stop")
+        time.sleep(2)
     steps["wall_s"] = round(time.time() - t0, 1)
     log("  fetching artifacts")
     if h is not None and topo["host"] == "builder":
@@ -397,6 +412,10 @@ def run_scenario(sc, outdir: Path, log=print):
             b_get(f"runs/{rid}/qpmap.json", outdir / "qpmap.json")   # what ALVR negotiated (openvr_config)
     if gpu_p:
         b_get(f"runs/{rid}/gpu.csv", outdir / "gpu.csv")
+    if mem_p:
+        b_get(f"runs/{rid}/mem.csv", outdir / "mem.csv")
+    for fl in fault_logs:
+        b_get(f"runs/{rid}/{fl}", outdir / fl)
     if app:
         for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log", "mirror_events.csv"):
             b_get(f"runs/{rid}/{f}", outdir / f)

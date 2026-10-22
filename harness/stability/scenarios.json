@@ -1,0 +1,151 @@
+{
+ "base_from": "e2e_fg_latency",
+ "base": {
+  "sample_memory": true,
+  "host": {
+   "seconds": 110,
+   "exit_after_frames": 1000000
+  },
+  "client": {
+   "seconds": 100,
+   "views_after_first_frame": true
+  },
+  "app": {
+   "frames": 1000000,
+   "timeout_s": 90,
+   "env": {
+    "XR_PROBE_CPU_MS": "1",
+    "XR_PROBE_GPU_COPIES": "0",
+    "XR_PROBE_LOAD": "fps:50:70"
+   }
+  },
+  "timeout_s": 260,
+  "checks": {}
+ },
+ "scenarios": {
+  "tracking_blackout_frame": {
+   "description": "AVP behaviour: the pose uplink goes silent for 5 s at +30 s and resumes only once a frame arrives. The gears 2026-10-20 stall: generation on must keep sending frames (the last pose) so the client resumes.",
+   "override": {
+    "client": {
+     "track_blackout": "30:5:frame",
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    }
+   },
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 1500,
+    "blackouts_resume": true,
+    "min_fps_during_blackout": 20,
+    "max_recovery_s": 2,
+    "alive_at_end_s": 3
+   }
+  },
+  "tracking_blackout_frame_fgoff": {
+   "description": "The same with generation off: the control (the shim repeats the last pose after 3 ms, frames keep flowing), must pass today.",
+   "override": {
+    "host": {
+     "frame_gen": null
+    },
+    "client": {
+     "track_blackout": "30:5:frame",
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    }
+   },
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 1500,
+    "blackouts_resume": true,
+    "min_fps_during_blackout": 20,
+    "max_recovery_s": 2,
+    "alive_at_end_s": 3
+   }
+  },
+  "tracking_blackout_timed": {
+   "description": "A 0.5 s, then a 5 s, then a 30 s silence of the uplink that resumes by itself (a Wi-Fi hiccup): the stream must not stall beyond the silence.",
+   "override": {
+    "host": {
+     "seconds": 150
+    },
+    "client": {
+     "seconds": 140,
+     "track_blackout": "25:0.5,40:5,60:30"
+    },
+    "app": {
+     "timeout_s": 130
+    },
+    "timeout_s": 330
+   },
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 1500,
+    "blackouts_resume": true,
+    "min_fps_during_blackout": 20,
+    "max_recovery_s": 2,
+    "alive_at_end_s": 3
+   }
+  },
+  "host_freeze_30s": {
+   "description": "The gears 2026-10-20 pattern: the whole host process freezes for 30 s at +55 s (every thread, like a stuck driver call), the client's connection times out and it reconnects, and like the visionOS client it sends tracking only once a frame arrives. Generation on must resume streaming (no boundary may wait for a pose that only a frame can bring).",
+   "override": {
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 150,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "timeout_s": 140
+    },
+    "timeout_s": 340
+   },
+   "faults": [
+    {
+     "type": "suspend",
+     "process": "alvr_host",
+     "at_s": 55,
+     "for_s": 30
+    }
+   ],
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 45000,
+    "alive_at_end_s": 3
+   }
+  },
+  "host_freeze_30s_fgoff": {
+   "description": "The same freeze with generation off: the control.",
+   "override": {
+    "host": {
+     "seconds": 170,
+     "frame_gen": null
+    },
+    "client": {
+     "seconds": 150,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "timeout_s": 140
+    },
+    "timeout_s": 340
+   },
+   "faults": [
+    {
+     "type": "suspend",
+     "process": "alvr_host",
+     "at_s": 55,
+     "for_s": 30
+    }
+   ],
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 45000,
+    "alive_at_end_s": 3
+   }
+  }
+ }
+}

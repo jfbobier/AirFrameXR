@@ -64,6 +64,15 @@ struct Args {
     /// "p:ms": each tracking sample is delayed by `ms` with probability p (FIFO: later samples queue behind it), plus 0-2 ms of
     /// jitter: the headset's uplink arriving late and bunched (measured on the real headset: gaps p95 13-16 ms, max 40)
     track_late: String,
+    /// "start:dur[:frame][,start:dur[:frame]...]" (seconds after the stream started): the tracking uplink goes silent for `dur` seconds (stability
+    /// harness). With `:frame` tracking only resumes once a new frame has arrived after the silence (the visionOS client sends views and tracking
+    /// only while it is being fed frames: a host that waits for a pose before sending anything then never gets one)
+    track_blackout: String,
+    /// the tracking uplink starts (and views are sent) only once a frame has arrived since the stream (re)started, like the visionOS client
+    /// after a reconnect (gears 2026-10-20: 0 samples for 10 s while the host skipped every boundary for want of one)
+    track_after_frame: bool,
+    /// how many frames "a frame has arrived" means for --track-after-frame and the `:frame` blackouts (default 1; a keepalive frame every few seconds is not a stream)
+    track_frames_needed: usize,
     /// timestamp jitter (ns, sd) on the tracking samples' target timestamps, quantised to 1/24 us like the real client's
     ts_jitter_ns: f64,
     /// every tracking sample sent: target timestamp, yaw, send time
@@ -108,6 +117,9 @@ fn parse_args() -> Result<Args, String> {
         noise_mdeg: 0.0,
         bunch: false,
         track_late: String::new(),
+        track_blackout: String::new(),
+        track_after_frame: false,
+        track_frames_needed: 1,
         ts_jitter_ns: 0.0,
         poses_csv: None,
         replay: None,
@@ -152,6 +164,9 @@ fn parse_args() -> Result<Args, String> {
             "--noise-mdeg" => a.noise_mdeg = v()?.parse().map_err(|e| format!("{e}"))?,
             "--bunch" => a.bunch = true,
             "--track-late" => a.track_late = v()?,
+            "--track-blackout" => a.track_blackout = v()?,
+            "--track-after-frame" => a.track_after_frame = true,
+            "--track-frames-needed" => a.track_frames_needed = v()?.parse().map_err(|e| format!("{e}"))?,
             "--ts-jitter-ns" => a.ts_jitter_ns = v()?.parse().map_err(|e| format!("{e}"))?,
             "--stop-file" => a.stop_file = Some(v()?),
             "--replay-start-file" => a.replay_start_file = Some(v()?),
@@ -285,7 +300,10 @@ fn main() {
                         let replay_samples: Arc<Vec<ReplaySample>> = Arc::new(args.replay.as_deref().map(load_replay).unwrap_or_default());
                         let (replay_gate_arg, real_views_arg) = (args.replay_start_file.clone(), args.real_views);
                         let late: (f64, f64) = args.track_late.split_once(':').map(|(p, m)| (p.parse().unwrap_or(0.0), m.parse().unwrap_or(0.0))).unwrap_or((0.0, 0.0));
-                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, replay_gate_arg, real_views_arg, late_views)));
+                        let blackouts = parse_blackouts(&args.track_blackout);
+                        let after_frame = args.track_after_frame;
+                        let need = args.track_frames_needed.max(1);
+                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, replay_gate_arg, real_views_arg, late_views, blackouts, after_frame, need)));
                     } else {
                         tracking_thread = Some(thread::spawn(move || tracking(c, s, sh, origin, fps, motion, controllers, late_views)));
                     }
@@ -601,7 +619,14 @@ fn display(
     replay_gate: Option<String>,
     real_views: bool,
     late_views: bool,
+    blackouts: Vec<Blackout>,
+    after_frame: bool,
+    need: usize,
 ) {
+    let started_at = Instant::now();
+    let frames0 = shared.lock().frames.len(); // frames of earlier stream sessions of this process do not count
+    let mut dark: Option<(usize, usize, Instant)> = None; // (blackout index, frames at its start, when it started)
+    let mut done = vec![false; blackouts.len()];
     let period = Duration::from_secs_f64(1.0 / fps as f64);
     let vp = ViewParams { pose: Pose::default(), fov: Fov { left: -1.0, right: 1.0, up: 1.0, down: -1.0 } };
     let vps: [ViewParams; 2] = if real_views {
@@ -634,13 +659,35 @@ fn display(
     };
     let face = || FaceData { eye_gazes: [None, None], fb_face_expression: None, htc_eye_expression: None, htc_lip_expression: None };
     while streaming.value() {
+        // the stability harness's silences: the whole tracking path (views stay sent) stops, queued samples are lost like a stalled uplink's
+        {
+            let t = started_at.elapsed().as_secs_f64();
+            let frames_now = shared.lock().frames.len();
+            if let Some((i, f0, t0)) = dark {
+                let b = &blackouts[i];
+                let over = t >= b.start + b.dur && (!b.until_frame || frames_now >= f0 + need);
+                if over {
+                    event(origin, "tracking_resumed", json!({ "blackout": i, "silent_s": t0.elapsed().as_secs_f64(), "frames_during": frames_now - f0 }));
+                    dark = None;
+                    done[i] = true;
+                }
+            } else if let Some(i) = (0..blackouts.len()).find(|&i| !done[i] && t >= blackouts[i].start) {
+                event(origin, "tracking_blackout", json!({ "blackout": i, "dur_s": blackouts[i].dur, "until_frame": blackouts[i].until_frame }));
+                dark = Some((i, frames_now, Instant::now()));
+            }
+        }
+        if dark.is_some() {
+            outq.clear();
+            held = None;
+        }
         // tracking for the frame that will be presented at the next tick
-        if !views_sent && (!late_views || !shared.lock().frames.is_empty()) {
+        let fed = shared.lock().frames.len() >= frames0 + need;
+        if !views_sent && (!(late_views || after_frame) || fed) {
             ctx.send_view_params(vps);
             views_sent = true;
             shared.lock().views_sent_at_ms = Some(origin.elapsed().as_secs_f64() * 1000.0);
         }
-        if replay.is_empty() {
+        if replay.is_empty() && dark.is_none() && (!after_frame || fed) {
             let nominal = tick.duration_since(origin) + period;
             let (yaw, m) = head_motion(&motion, nominal, tick_idx);
             // the real client's target timestamps jitter by a few tens of ns around the regular grid (quantised to 1/24 us)
@@ -729,6 +776,25 @@ fn display(
             thread::sleep(Duration::from_micros(200).min(tick.saturating_duration_since(Instant::now())));
         }
     }
+}
+
+struct Blackout {
+    start: f64,
+    dur: f64,
+    until_frame: bool,
+}
+
+/// "start:dur[:frame],..." -> silences of the tracking uplink (see Args::track_blackout)
+fn parse_blackouts(spec: &str) -> Vec<Blackout> {
+    let mut v: Vec<Blackout> = spec.split(',').filter_map(|p| {
+        let f: Vec<&str> = p.trim().split(':').collect();
+        if f.len() < 2 {
+            return None;
+        }
+        Some(Blackout { start: f[0].parse().ok()?, dur: f[1].parse().ok()?, until_frame: f.get(2) == Some(&"frame") })
+    }).collect();
+    v.sort_by(|a, b| a.start.total_cmp(&b.start));
+    v
 }
 
 /// Repeats / skips / dwell of the emulated display: the headset-side numbers that separate a smooth stream from a juddering one.
