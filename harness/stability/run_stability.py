@@ -3,7 +3,8 @@
 judged by judge.py (stalls, tracking resumption, memory growth).
 
     python3 harness/stability/run_stability.py list
-    python3 harness/stability/run_stability.py run <name>[,<name>...|all] [--seconds N]   # --seconds stretches a scenario (host/client/app), e.g. for a soak
+    python3 harness/stability/run_stability.py run <name>[,<name>...|all] [--seconds N] [--host-env K=V ...]   # --seconds stretches a scenario (host/client/app), e.g. for a soak;
+                                                                                                          # --host-env sets host variables (VISIONALVR_FG_DARK_MS=0 turns the dark-tracking fix off)
     python3 harness/stability/run_stability.py judge <results dir> <scenario>              # re-judge an existing run
 
 A scenario is scenarios.json: a base (derived from a regular harness scenario, `base_from`) + an override (deep merge; null removes a key) + criteria
@@ -34,7 +35,7 @@ def merge(a, b):
     return r
 
 
-def build(name, seconds=None):
+def build(name, seconds=None, host_env=None):
     import lib
     spec = SPEC["scenarios"][name]
     base = json.load(open(lib.ROOT / "harness" / "scenarios" / f"{SPEC['base_from']}.json"))
@@ -47,14 +48,16 @@ def build(name, seconds=None):
         sc["timeout_s"] = seconds + 160
     if spec.get("faults"):
         sc["faults"] = spec["faults"]
+    if host_env:
+        sc["host"].setdefault("env", {}).update(host_env)
     sc["name"] = name
     sc["description"] = spec["description"]
     return sc, spec["criteria"]
 
 
-def run(name, seconds=None):
+def run(name, seconds=None, host_env=None):
     import lib
-    sc, crit = build(name, seconds)
+    sc, crit = build(name, seconds, host_env)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     outdir = lib.RESULTS / "stability" / f"{stamp}_{name}"
     print(f"== {name}: {sc['description']}")
@@ -87,7 +90,8 @@ def main(argv):
     if argv[1] == "run":
         seconds = int(argv[argv.index("--seconds") + 1]) if "--seconds" in argv else None
         names = list(SPEC["scenarios"]) if argv[2] == "all" else argv[2].split(",")
-        st = [run(n, seconds) for n in names]
+        host_env = dict(a.split("=", 1) for a in argv[argv.index("--host-env") + 1:] if "=" in a) if "--host-env" in argv else None   # e.g. --host-env VISIONALVR_FG_DARK_MS=0
+        st = [run(n, seconds, host_env) for n in names]
         print("\n" + "\n".join(f"{s:8} {n}" for s, n in zip(st, names)))
         return 0 if all(s == "PASS" for s in st) else 1
     print(__doc__)

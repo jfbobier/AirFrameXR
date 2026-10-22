@@ -86,6 +86,8 @@ def judge(outdir, crit):
         out.append({"name": name, "ok": bool(ok), "value": value, "expected": expected})
 
     outdir = Path(outdir)
+    if crit.get("storm"):
+        return judge_storm(outdir, crit, out)
     ev = events(outdir / "client_stdout.txt")
     arr = arrivals(outdir / "frames.csv")
     start_s = next((e["t_ms"] / 1000 for e in ev if e.get("event") == "streaming_started"), 0.0)
@@ -162,6 +164,39 @@ def judge(outdir, crit):
         if "max_gpu_mb" in m and sysrows["vram_used"]:
             peak = max(v for _, v in sysrows["vram_used"])
             chk("vram_peak", peak <= m["max_gpu_mb"], f"{peak:.0f} MB", f"<= {m['max_gpu_mb']} MB used on the GPU")
+    return out
+
+
+def judge_storm(outdir, crit, out):
+    """Reconnect storm: every client session of the run must stream, quickly after it connects."""
+    def chk(name, ok, value, expected):
+        out.append({"name": name, "ok": bool(ok), "value": value, "expected": expected})
+    sc = crit["storm"]
+    sessions = sorted(outdir.glob("frames_s*.csv"), key=lambda p: int(p.stem.split("_s")[1]))
+    chk("sessions_ran", len(sessions) >= sc.get("min_sessions", 1), len(sessions), f">= {sc.get('min_sessions', 1)} client sessions")
+    bad = []
+    worst_first = 0.0
+    for p in sessions:
+        i = int(p.stem.split("_s")[1])
+        arr = arrivals(p)
+        ev = events(outdir / f"client_s{i}_stdout.txt")
+        started = next((e["t_ms"] / 1000 for e in ev if e.get("event") == "streaming_started"), None)
+        if started is None or len(arr) < sc.get("min_frames", 100):
+            bad.append(f"session {i}: {'never streamed' if started is None else str(len(arr)) + ' frames'}")
+            continue
+        first = arr[0] - started
+        worst_first = max(worst_first, first)
+        if first > sc.get("max_first_frame_s", 6):
+            bad.append(f"session {i}: first frame {first:.1f} s after the stream started")
+    chk("every_session_streams", not bad, "all " + str(len(sessions)) + " streamed" if not bad else "; ".join(bad[:4]), f"each session >= {sc.get('min_frames', 100)} frames, the first within {sc.get('max_first_frame_s', 6)} s of the stream starting")
+    chk("worst_first_frame", worst_first <= sc.get("max_first_frame_s", 6), f"{worst_first:.1f} s", f"<= {sc.get('max_first_frame_s', 6)} s")
+    hev = events(outdir / "host_stdout.txt")
+    if "host_stalls_max" in crit:
+        n = sum(1 for e in hev if e.get("event") == "stall_detected")
+        chk("host_reported_stalls", n <= crit["host_stalls_max"], n, f"<= {crit['host_stalls_max']}")
+    if crit.get("host_memory_events"):
+        n = sum(1 for e in hev if e.get("event") == "memory")
+        chk("host_memory_events", n >= crit["host_memory_events"], n, f">= {crit['host_memory_events']}")
     return out
 
 

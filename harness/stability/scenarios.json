@@ -506,6 +506,110 @@
      }
     }
    }
+  },
+  "reconnect_storm": {
+   "description": "The headset comes and goes: 15 client sessions of 8-25 s with 1-6 s between them against one daemon host while the app runs, generation on, and every client behaving like the visionOS one (tracking only after 30 frames have arrived). Each session must stream, the first frame within 6 s of connecting; each new session also restarts the client clock.",
+   "override": {
+    "host": {
+     "daemon": true,
+     "seconds": 400,
+     "exit_after_frames": 10000000
+    },
+    "client": {
+     "no_stream_dump": true,
+     "track_after_frame": true,
+     "track_frames_needed": 30,
+     "seconds": 30
+    },
+    "app": {
+     "frames": 1000000,
+     "timeout_s": 260
+    },
+    "reconnect_storm": {
+     "count": 15,
+     "on_s": [
+      8,
+      25
+     ],
+     "gap_s": [
+      1,
+      6
+     ],
+     "seed": 11
+    },
+    "timeout_s": 480
+   },
+   "criteria": {
+    "storm": {
+     "min_sessions": 15,
+     "min_frames": 100,
+     "max_first_frame_s": 6
+    },
+    "host_stalls_max": 0,
+    "host_memory_events": 1
+   }
+  },
+  "client_freeze_5s": {
+   "description": "The headset stops answering for 5 s (the client process is frozen: Wi-Fi hiccup, headset busy) and then comes back, generation on, visionOS-like tracking (after 30 frames). The stream must be back within 3 s of the client resuming.",
+   "override": {
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 150,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "timeout_s": 140
+    },
+    "timeout_s": 340
+   },
+   "faults": [
+    {
+     "type": "suspend",
+     "process": "alvr_client_headless",
+     "at_s": 55,
+     "for_s": 5
+    }
+   ],
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 8000,
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
+   }
+  },
+  "client_freeze_30s": {
+   "description": "The same for 30 s: the host drops the connection and the client has to reconnect by itself; the stream must be back within 8 s of the client resuming.",
+   "override": {
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 150,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "timeout_s": 140
+    },
+    "timeout_s": 340
+   },
+   "faults": [
+    {
+     "type": "suspend",
+     "process": "alvr_client_headless",
+     "at_s": 55,
+     "for_s": 30
+    }
+   ],
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 38000,
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
+   }
   }
  }
 }

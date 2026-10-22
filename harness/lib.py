@@ -320,7 +320,22 @@ def run_scenario(sc, outdir: Path, log=print):
             src_arg = "" if (h.get("live") or h.get("shim")) else f'--file {sc["source"].replace("/", chr(92))} '
             dump_arg = f"--dump-qpmap {rd}\\qpmap.json " if h.get("dump_qpmap") else ""
             envpre = "".join(f"set {k}={v}&& " for k, v in {"VISIONALVR_PIPELINE_CSV": f"{rd}\\host_pipeline.csv", "VISIONALVR_HEAD_CSV": f"{rd}\\host_head.csv", **(h.get("env") or {})}.items())
-            hostcmd = (envpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
+            feedpre = ""
+            if sc.get("stdin_feed"):
+                # stability harness: host commands at given times (the GUI's stdin lines: frame_gen, recenter, height, gamma, ...), seconds after the host starts. The pipe is held open
+                # until `hold_s` (the host quits on EOF).
+                feed = sorted(sc["stdin_feed"]["events"], key=lambda e: e["t"])
+                ps = ["$ErrorActionPreference = 'SilentlyContinue'", "$t0 = Get-Date",
+                      "function At([double]$t, [string]$l) { $w = $t - ((Get-Date) - $t0).TotalSeconds; if ($w -gt 0) { Start-Sleep -Milliseconds ([int]($w * 1000)) }; [Console]::Out.WriteLine($l); [Console]::Out.Flush() }"]
+                ps += [f"At {e['t']} '{e['line']}'" for e in feed]
+                ps.append(f"Start-Sleep -Seconds {int(sc['stdin_feed'].get('hold_s', 600))}")
+                fl = CACHE / "feed.ps1"
+                CACHE.mkdir(parents=True, exist_ok=True)
+                fl.write_text("\r\n".join(ps) + "\r\n")
+                b_put(fl, f"runs/{rid}/feed.ps1")
+                feedpre = f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\feed.ps1 | "
+                steps["stdin_feed_events"] = len(feed)
+            hostcmd = (envpre + feedpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
                        f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv '
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
                                      "width": "--width", "height": "--height", "height_m": "--height-m", "noise": "--noise", "qp_map": "--qp-map",
@@ -344,16 +359,17 @@ def run_scenario(sc, outdir: Path, log=print):
         env += f"set {k}={v}&& "
     if c.get("replay"):
         b_put(ROOT / c["replay"], f"runs/{rid}/replay.csv")   # a recorded head trace (harness/fixtures/headtraces)
-    def make_client_cmd(sfx=""):
+    def make_client_cmd(sfx="", over=None):
         return (env + f'{CLIENT_EXE} --report {rd}\\client{sfx}_report.json --frames-csv {rd}\\frames{sfx}.csv ' + ('' if c.get('no_stream_dump') else f'--out {rd}\\client{sfx}.hevc ')
-                + argline(c, CLIENT_FLAGS)
+                + argline({**c, **(over or {})}, CLIENT_FLAGS)
                 + (f" --controllers-csv {rd}\\controllers.csv" if c.get("controllers") and not sfx else "")
                 + (f" --display-csv {rd}\\display{sfx}.csv" if c.get("display_sim") else "")
                 + (f" --poses-csv {rd}\\poses.csv" if not sfx else "")
                 + (f" --replay {rd}\\replay.csv" if c.get("replay") and not sfx else "")
                 + f' > {rd}\\client{sfx}_stdout.txt 2>&1')
     clientcmd = make_client_cmd()
-    client_p = b_popen(clientcmd)
+    storm = sc.get("reconnect_storm")
+    client_p = None if storm else b_popen(clientcmd)
     # stability harness memory limit: {"vram_cap_mb": 6000, "ram_cap_mb": 8000, "at_s": 20, "release_s": 90} makes the machine behave as if the chain (host, app, client)
     # had only that much VRAM / RAM: the ballast (tools/stability/vram_ballast.cpp) takes what is free now minus the cap, from `at_s` on (and gives it back at `release_s`)
     ballast_started = False
@@ -381,13 +397,40 @@ def run_scenario(sc, outdir: Path, log=print):
             b_popen(f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\suspend.ps1 -Name {f['process']} -After {f['at_s']} -For {f['for_s']} -Log {rd}\\fault{i}.txt")
             fault_logs.append(f"fault{i}.txt")
     app = sc.get("app")
-    if app:
+    app_thread = None
+    storm_sessions = 0
+    if storm:
+        # stability harness: the headset comes and goes many times while the app runs (sleep, Wi-Fi drop, the user taking it off): `count` client sessions of `on_s` seconds
+        # (min, max) with `gap_s` between them, seeded, against the one daemon host
+        import random
+        rng = random.Random(storm.get("seed", 1))
+        if app:
+            def _app():
+                steps["app"] = launch_app(app, rid, rd, log)
+            app_thread = threading.Thread(target=_app)
+            app_thread.start()
+        for i in range(storm["count"]):
+            on = round(rng.uniform(*storm["on_s"]), 1)
+            log(f"  storm session {i}: {on} s")
+            p = b_popen(make_client_cmd(f"_s{i}", {"seconds": on, "connect_timeout": storm.get("connect_timeout", 40)}))
+            try:
+                p.wait(timeout=on + storm.get("connect_timeout", 40) + 60)
+            except subprocess.TimeoutExpired:
+                steps["storm_timeout"] = i
+                break
+            storm_sessions = i + 1
+            time.sleep(round(rng.uniform(*storm["gap_s"]), 1))
+        steps["storm_sessions"] = storm_sessions
+        if app_thread:
+            app_thread.join(timeout=(app or {}).get("timeout_s", 60) + 60)
+    elif app:
         if app.get("delay_s"):
             time.sleep(app["delay_s"])     # let the stream run green first
         steps["app"] = launch_app(app, rid, rd, log)
     budget = sc.get("timeout_s", 120)
     try:
-        client_p.wait(timeout=budget)
+        if client_p:
+            client_p.wait(timeout=budget)
         if sc.get("reconnect"):
             # the headset went away and comes back (sleep, Wi-Fi drop, app restart): the daemon host must serve it again
             time.sleep(sc["reconnect"].get("gap_s", 3))
@@ -444,16 +487,22 @@ def run_scenario(sc, outdir: Path, log=print):
     if app:
         for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log", "mirror_events.csv"):
             b_get(f"runs/{rid}/{f}", outdir / f)
-    for f in ("client_report.json", "client_stdout.txt", "frames.csv") + (() if sc.get("client", {}).get("no_stream_dump") else ("client.hevc",)):
-        b_get(f"runs/{rid}/{f}", outdir / f)
+    if storm:
+        for i in range(storm_sessions):
+            for f in (f"client_s{i}_report.json", f"client_s{i}_stdout.txt", f"frames_s{i}.csv", f"display_s{i}.csv"):
+                b_get(f"runs/{rid}/{f}", outdir / f)
+    else:
+        for f in ("client_report.json", "client_stdout.txt", "frames.csv") + (() if sc.get("client", {}).get("no_stream_dump") else ("client.hevc",)):
+            b_get(f"runs/{rid}/{f}", outdir / f)
     if sc.get("reconnect"):
         for f in ("client2_report.json", "client2_stdout.txt", "frames2.csv", "client2.hevc"):
             b_get(f"runs/{rid}/{f}", outdir / f)
     if sc.get("client", {}).get("controllers"):
         b_get(f"runs/{rid}/controllers.csv", outdir / "controllers.csv")
-    if sc.get("client", {}).get("display_sim"):
+    if sc.get("client", {}).get("display_sim") and not storm:
         b_get(f"runs/{rid}/display.csv", outdir / "display.csv")
-    b_get(f"runs/{rid}/poses.csv", outdir / "poses.csv")
+    if not storm:
+        b_get(f"runs/{rid}/poses.csv", outdir / "poses.csv")
     return steps
 
 
