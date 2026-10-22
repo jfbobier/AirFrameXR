@@ -1,3 +1,4 @@
+<!-- posted 2026-10-22: https://github.com/alvr-org/ALVR/issues/3427 -->
 **Title:** Windows game audio: capture with process loopback (no virtual audio cable, constant volume) - working patch available
 
 **Body:**

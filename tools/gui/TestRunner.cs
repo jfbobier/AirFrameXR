@@ -34,6 +34,8 @@ namespace VisionALVR
         public double Fps = 90;
         /// shows the blocking "no virtual audio cable" dialog (set by the wizard; null in the lab)
         public Action AskCable;
+        /// asks the person whether they heard the scene's music in the headset (set by the wizard; null in the lab, then the answer stays unknown)
+        public Func<bool?> AskHeard;
         public bool HeadsetAvailable;
         public string NetSteps = "100,150,200,250,300,350,400,500";
         /// the community profile in use (null: the generic path with its searches) and the bitrate it asks for; the tests then verify that configuration
@@ -327,6 +329,7 @@ namespace VisionALVR
                     if (frames <= 0) throw new TestFailed("the scene app streamed no frames (see logs): the runtime may be registered for another folder or the scene app could not start");
                     var r = ctx.R;
                     r.SceneRan = true;
+                    r.HeardMusic = ctx.AskHeard?.Invoke();   // the music has just stopped: the question is about the last 30 seconds
                     var secs = frames / Math.Max(1, fpsW / frames);
                     r.SceneAppFps = fpsW / frames;
                     r.SameTsPct = 100.0 * sameTs / frames;
@@ -414,7 +417,13 @@ namespace VisionALVR
                             return ctx.R.AudioNote + " although the scene plays music: check that Windows' sound output is not muted and the volume mixer does not have xr_probe.exe at zero. The streamer can mute your PC speakers while it runs; this test hears the sound before that.";
                         }
                         ctx.R.AudioNote = $"the scene's music was captured by Windows' process loopback (peak {ctx.R.AudioPeak * 100:0} %)";
-                        return ctx.R.AudioNote + ": the headset gets the PC's sound, no virtual cable needed (games started as administrator are captured too)";
+                        if (ctx.R.HeardMusic == false)
+                        {
+                            ctx.R.AudioNote += "; you did not hear it in the headset";
+                            st.Warn();
+                            return ctx.R.AudioNote + ". The PC side works, so check the headset side: the volume in the headset, the ALVR app's sound settings, and that \"Stream game audio\" is ticked in the Advanced settings.";
+                        }
+                        return ctx.R.AudioNote + (ctx.R.HeardMusic == true ? "; you heard it in the headset" : "") + ": the headset gets the PC's sound, no virtual cable needed (games started as administrator are captured too)";
                     }
                     var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe", "-NoProfile -Command \"Get-CimInstance Win32_SoundDevice | ForEach-Object { $_.Name }\"")
                     { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
