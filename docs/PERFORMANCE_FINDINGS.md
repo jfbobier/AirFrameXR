@@ -344,3 +344,34 @@ network's jitter (the tracking samples show the Wi-Fi bunching: p95 11-18 ms for
 on one night (debug on costs 5 ms per frame, so that bug comes first), then decide whether a send-side change (a fixed send phase, a
 smaller encode variance) can narrow the cluster so the margin can come back down. The 3 -> 7 ms change buys smoothness with the headset's
 own latency quantum; the deep dive is about buying it for nothing.
+
+## 2026-10-23: a GPU-bound game at the 1/2 cap (the Gears of War case), OFXR-Bridge's pacing ideas tried in the rig
+
+Headset (5090, Vision Pro at 100 Hz, so 1/2 = 50 fps): Gears renders 36-50 fps, GPU 94-99 % at the power cap, and frame generation is
+"sometimes perfect, sometimes bad", switching after a hiccup or a graphics change. None of the host's or headset's numbers followed the
+user's impression; the encoder's reference frames were not the cause (docs/FG_REFERENCE_FRAMES.md). OFXR-Bridge's active fork
+(djules75/OFXR-Bridge, 0.2.13-0.2.14) describes the same symptom ("the release moment was wherever the session landed") and fixes it with a
+closed loop on the release phase, a one-refresh buffer ("Prefer FPS over latency") and display-time placement of generated frames.
+
+Rig (3080 Ti, `harness/simrig` scenarios `gpu_fg` / `gpu_fg_spikes`, `SIM_GPU_COPIES` = the GPU load, stream 3520x1600 at 100 Hz):
+- The edge reproduces: 60 copies 50.0 fps SMOOTH; 66 copies 48.9 fps, 2 % repeats; 70 copies 45-47 fps, JUDDER, 5-10 % repeats. Near the edge the
+  app moves between ~48 and ~49.7 fps at the same load within one run (late releases 95 % vs 70 %). The last ~20 s of every run read good
+  whatever the setting: an end-of-run artefact of the rig, not a state change.
+- In the slow state the app's frame is released ~20 ms before the previous one is GPU-complete: release -> done = 40 ms = two game periods
+  for a ~20 ms GPU frame. The 50-90 ms envelopes seen on the headset are that queue.
+- Capping the running-start lead below one game period (so the release can never be "already past"): no effect at all, the app itself
+  asks late (GPU-bound). Not kept. A release held until the previous frame is done is the just-in-time pacing removed on 2026-10-17
+  (VDXR calls WaitToBeginFrame right before the submit).
+- Our own GPU cost: at 7104x3200 on the 3080 Ti synthesis 2.3 ms and flow 4.1 ms per generated frame (flow mostly on the optical-flow
+  engine). Flow scale 0.25 instead of 0.5 cut flow 2.2 -> 1.6 ms and changed nothing else (49.2-49.3 vs 48.8-49.4 fps, same repeats).
+- A one-refresh buffer cannot help a game below the cap: two outputs per game frame at 47.5 fps are 95 per 100 refreshes, the rest are
+  repeats whatever the buffer. What helps is placing each output at its content time: the uncapped mode.
+
+| 3520x1600, 100 Hz | fixed 1/2 | uncapped |
+|---|---|---|
+| 70 copies (game 45 fps, under the cap) | JUDDER, frozen 10.2 %, repeats 10 % | SMOOTH, frozen 1.8 %, repeats 0.2 %, lag 70 ms |
+| 60 copies (game holds the cap) | SMOOTH, frozen 1.2 %, step_cv 0.23 | SMOOTH, frozen 1.2 %, step_cv 0.46, lag 62 ms |
+
+Fixed 1/2 is better while the game holds the cap (even steps, no content lag), uncapped clearly better when it cannot: the 2026-10-15
+headset verdict again. A game swinging around the cap (Gears at 100 Hz) sits on the line; next is a headset A/B of uncapped
+(`video.frame_gen_rate: "uncapped"`, optionally `frame_gen_cap_fps`) against 1/2 on the same section.
