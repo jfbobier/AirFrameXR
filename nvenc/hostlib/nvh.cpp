@@ -99,7 +99,7 @@ struct Nvh {
 };
 
 // host options that are not ALVR settings
-static uint32_t g_idleRgb = 0x00FF00;   // solid frame sent while no OpenXR app runs (8-bit coded values)
+static uint32_t g_idleRgb = 0x107C10;   // solid frame sent while no OpenXR app runs (8-bit coded values)
 static int g_gpuThreadPriority = 0;     // -7..7, 0 = leave the default
 static int g_noiseBlock = 16;           // noise == 2: side of the random blocks (the floor: what is left at the coarsest quantizer)
 static int g_noiseAmp = 48;             // noise == 2: per-pixel noise on top, in 10-bit levels (the ceiling: kept at fine quantizers)

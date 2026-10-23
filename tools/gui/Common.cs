@@ -410,7 +410,7 @@ namespace VisionALVR
         /// the Windows desktop on a virtual screen between games, the right hand (pinch = click) as the mouse; off by default
         public bool MirrorDesktop { get => Json.Bool(Root, "display.mirror_desktop", false); set => Json.Set(Root, "display.mirror_desktop", value); }
         public bool SplitEncode { get => Json.Str(Root, "video.split_encode", "3") != "off"; set => Json.Set(Root, "video.split_encode", value ? "3" : "off"); }
-        public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", "00ff00"); set => Json.Set(Root, "video.idle_rgb", value); }
+        public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", "107c10"); set => Json.Set(Root, "video.idle_rgb", value); }
         /// frame generation (docs/FRAME_GENERATION.md): the game renders every other frame, the streamer interpolates the one in between (off by default)
         public bool FrameGen { get => Json.Bool(Root, "video.frame_gen", false); set => Json.Set(Root, "video.frame_gen", value); }
         // frame generation rate: "third" | "half" (default) | "two_thirds" (the game's rate as a fraction of the display rate, the streamer generates the
@@ -1405,8 +1405,8 @@ namespace VisionALVR
             BackColor = Color.White;
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
             col.Controls.Add(new Label { Text = "Turn on passthrough in the ALVR app", AutoSize = true, Font = Ui.Big });
-            col.Controls.Add(new Label { Text = "Between games VisionALVR shows a pure green screen, which the Vision Pro turns into your room when chroma-key passthrough is on; the game appears when it starts. " +
-                "This is a setting of the ALVR app on the headset: VisionALVR cannot change or read it. In the ALVR app, tick \"Enable Chroma Keyed Passthrough\" and set the colour to pure green (#00FF00), as in the picture.",
+            col.Controls.Add(new Label { Text = "Between games VisionALVR shows a plain dark green screen (#107C10), which the Vision Pro turns into your room when chroma-key passthrough is on; the game appears when it starts. " +
+                "This is a setting of the ALVR app on the headset: VisionALVR cannot change or read it. In the ALVR app, tick \"Enable Chroma Keyed Passthrough\" as in the picture. The App Store app keys #107C10 by itself; if your ALVR app has a Chroma Key Color picker, set it to #107C10 too (or change the streamer's idle colour to match what you set).",
                 AutoSize = true, MaximumSize = new Size(560, 0), Margin = new Padding(3, 6, 3, 6) });
             var img = Ui.Resource("chroma_passthrough.png");
             if (img != null) col.Controls.Add(new PictureBox { Image = img, SizeMode = PictureBoxSizeMode.Zoom, Width = 440, Height = (int)(440.0 * img.Height / img.Width), Margin = new Padding(3) });

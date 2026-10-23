@@ -93,9 +93,9 @@
             "threshold": 0.5
           },
           "RgbChromaKey": {
-            "red": 0,
-            "green": 255,
-            "blue": 0,
+            "red": 16,
+            "green": 124,
+            "blue": 16,
             "distance_threshold": 50,
             "feathering": 0.19999999
           },
