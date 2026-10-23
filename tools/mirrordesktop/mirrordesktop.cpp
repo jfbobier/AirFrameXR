@@ -3,10 +3,10 @@
 // actions), except that the host does not record it as a game. Its own jobs: a monitor-sized screen that floats in front of the user and follows them
 // when they walk away (and a quarter of the room at a time when they turn), a laser beam from the controller, and the mouse (SendInput): the beam moves the cursor,
 // trigger = left button, A / X = double click, grip or B / Y = right button, thumbstick = scroll.
-// Everything that is not the screen is 00FF00, which the headset shows as passthrough.
+// Everything that is not the screen is the idle colour (107C10 by default), which the headset shows as passthrough.
 //
 //   mirrordesktop.exe [--log <file>] [--seconds N] [--no-mouse] [--clear RRGGBB] [--synthetic] [--input-log <csv>]
-//   (the background colour is the streamer's idle colour, config\visionalvr.json video.idle_rgb, 00FF00 by default; --synthetic: a known test picture instead of the
+//   (the background colour is the streamer's idle colour, config\visionalvr.json video.idle_rgb, 107C10 by default; --synthetic: a known test picture instead of the
 //    desktop, for the harness; --input-log: every button event with its wall-clock time, for the harness's timing checks)
 //
 // The picture (desktop capture, HDR -> SDR, the quad, the beam) is desktop.cpp, tested on the GPU by harness/mirror_check.py.
@@ -65,21 +65,21 @@ static void mouseTo(float u, float v) {
 }
 static void wheel(int ticks) { INPUT i{}; i.type = INPUT_MOUSE; i.mi.dwFlags = MOUSEEVENTF_WHEEL; i.mi.mouseData = (DWORD)(ticks * WHEEL_DELTA); SendInput(1, &i, sizeof i); }
 
-// The streamer's idle colour (what the headset takes as alpha) from config\visionalvr.json: video.idle_rgb, "RRGGBB" (or "#RRGGBB"); 00FF00 when absent.
+// The streamer's idle colour (what the headset takes as alpha) from config\visionalvr.json: video.idle_rgb, "RRGGBB" (or "#RRGGBB"); 107C10 when absent.
 static uint32_t idleColour(const std::string& path) {
-    FILE* f = fopen(path.c_str(), "rb"); if (!f) return 0x00FF00;
+    FILE* f = fopen(path.c_str(), "rb"); if (!f) return 0x107C10;
     std::string t; char buf[4096]; size_t n; while ((n = fread(buf, 1, sizeof buf, f)) > 0) t.append(buf, n); fclose(f);
-    const size_t k = t.find("\"idle_rgb\""); if (k == std::string::npos) return 0x00FF00;
-    const size_t q1 = t.find('"', t.find(':', k) + 1); if (q1 == std::string::npos) return 0x00FF00;
-    const size_t q2 = t.find('"', q1 + 1); if (q2 == std::string::npos) return 0x00FF00;
+    const size_t k = t.find("\"idle_rgb\""); if (k == std::string::npos) return 0x107C10;
+    const size_t q1 = t.find('"', t.find(':', k) + 1); if (q1 == std::string::npos) return 0x107C10;
+    const size_t q2 = t.find('"', q1 + 1); if (q2 == std::string::npos) return 0x107C10;
     std::string v = t.substr(q1 + 1, q2 - q1 - 1); if (!v.empty() && v[0] == '#') v.erase(0, 1);
-    if (v.size() != 6) return 0x00FF00;
+    if (v.size() != 6) return 0x107C10;
     char* end = nullptr; const unsigned long c = strtoul(v.c_str(), &end, 16);
-    return end && *end == 0 ? (uint32_t)(c & 0xFFFFFF) : 0x00FF00;
+    return end && *end == 0 ? (uint32_t)(c & 0xFFFFFF) : 0x107C10;
 }
 
 int main(int argc, char** argv) {
-    std::string logPath, inputLogPath; int seconds = 0; bool mouse = true, synthetic = false; uint32_t clear = 0x00FF00; bool clearGiven = false;
+    std::string logPath, inputLogPath; int seconds = 0; bool mouse = true, synthetic = false; uint32_t clear = 0x107C10; bool clearGiven = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--log") && i + 1 < argc) logPath = argv[++i];
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = atoi(argv[++i]);

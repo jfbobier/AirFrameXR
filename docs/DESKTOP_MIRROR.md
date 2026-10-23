@@ -8,7 +8,7 @@ layer with the views the runtime gives it, and reads the controllers through Ope
 - **Switch it on** in the streamer window ("Between games"). The streamer starts the app while a headset is connected and no game runs, and starts it again
   after a game ends. Or run `bin\mirrordesktop.exe` by hand (`--seconds N`, `--no-mouse`, `--clear RRGGBB`, `--log file`).
 - **The picture:** DXGI desktop duplication of the primary monitor (SDR, or HDR converted to SDR with Windows' SDR white level), the screen 56.5 degrees wide
-  (1.6 m) at 1.5 m, a perspective-correct quad, everything else the streamer's idle colour (`video.idle_rgb` in `config\visionalvr.json`, `00FF00` by default: the
+  (1.6 m) at 1.5 m, a perspective-correct quad, everything else the streamer's idle colour (`video.idle_rgb` in `config\visionalvr.json`, `107C10` by default: the
   headset's alpha / passthrough). The screen has four positions a quarter turn apart (where you looked when it started, to its left, behind, to its right):
   it stays in one until your head is 55 degrees from it, then glides to the nearest. It follows you when you walk (more than 15 cm away from where it would
   be in front of you); End starts the four positions again from where you look now. The capture is copied on the GPU when the screen's adapter is the

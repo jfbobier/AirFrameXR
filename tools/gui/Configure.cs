@@ -180,10 +180,10 @@ namespace VisionALVR
                 using (var cd = new ColorDialog { Color = idle.BackColor, FullOpen = true })
                     if (cd.ShowDialog(this) == DialogResult.OK) SetIdle(cd.Color);
             };
-            var idleReset = new Button { Text = "Pure green (recommended)", AutoSize = true };
-            idleReset.Click += (s, e) => SetIdle(Color.FromArgb(0, 255, 0));
+            var idleReset = new Button { Text = "Default (#107C10)", AutoSize = true };
+            idleReset.Click += (s, e) => SetIdle(Color.FromArgb(16, 124, 16));
             row("Colour when no game runs", flow(idle, idleReset));
-            var remind = Ui.Line("Set the SAME colour as the chroma key in the ALVR app on the Vision Pro (Settings > Chroma key), so it shows your room.");
+            var remind = Ui.Line("Turn on Enable Chroma Keyed Passthrough in the ALVR app on the Vision Pro. The default #107C10 is the key colour the App Store app uses; if your ALVR app has a Chroma Key Color picker, set the same colour there.");
             remind.MaximumSize = new Size(560, 0);   // wraps inside its column
             remind.ForeColor = Color.DimGray;
             g.Controls.Add(new Label()); g.Controls.Add(remind);
@@ -237,7 +237,7 @@ namespace VisionALVR
             fsy.Value = Clamp(fsy, Json.Num(s, V + "foveated_encoding.content.center_shift_y", 0.1));
             frx.Value = Clamp(frx, Json.Num(s, V + "foveated_encoding.content.edge_ratio_x", 4));
             fry.Value = Clamp(fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
-            try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
+            try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(16, 124, 16)); }
             audio.Checked = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             mute.Checked = settings.MuteSpeakers;
             captureBox.SelectedIndex = settings.AudioCapture == "device" ? 1 : 0;

@@ -36,13 +36,12 @@ configure.exe is a setup wizard: it checks the PC (NVIDIA GPU with a driver that
 **Quest:** the Meta store version of the ALVR app is 20.14.0; the protocol id only depends on the major version (20), and ALVR's own diff from 20.14.0 to 20.14.1 touches only audio-device handling and the dashboard (no client/server packet or stream change), so it connects to this streamer (not yet tried on a real Quest 3 at the time of writing). It appears in the list as untrusted until you pick it once.
 
 1. Unzip. 2. Double-click `VisionALVR.exe`, click **Switch to VisionALVR** in the OpenXR runtime row (administrator prompt; moved the folder? click it again from the new place; the same button switches back). 3. **Setup wizard**:
-open the ALVR app on the Vision Pro, select it, **Pair**; check the settings; set the ALVR app's chroma key to the "colour when no
-game runs" (default #00FF00). 4. **Streamer**, then start an OpenXR game. Close SteamVR and ALVR's own launcher first (same ports).
+open the ALVR app on the Vision Pro, select it, **Pair**; check the settings; turn on the ALVR app's chroma key (the idle frame, "colour when no
+game runs", defaults to #107C10, the colour that app keys). 4. **Streamer**, then start an OpenXR game. Close SteamVR and ALVR's own launcher first (same ports).
 
-**Passthrough:** `video.passthrough` is enabled by default with an RGB chroma key on pure green (#00FF00, threshold 50, feathering 0.2), in the default session and in every shipped profile. The Vision Pro app has its own chroma-key setting and ignores it; the Quest app (and other ALVR clients with passthrough) use it, so the idle green frame is transparent there without touching the ALVR dashboard.
+**Passthrough:** `video.passthrough` is enabled by default with an RGB chroma key on the idle colour (#107C10, threshold 50, feathering 0.2), in the default session and in every shipped profile. The Vision Pro app has its own chroma-key setting and ignores it; the Quest app (and other ALVR clients with passthrough) use it, so the idle green frame is transparent there without touching the ALVR dashboard.
 
-**A plain green screen on connecting is normal**: it is the idle frame while no game runs; set the chroma-key colour in the ALVR app to that
-green (#00FF00) and it turns transparent. Network advice (a Wi-Fi 6 access point in dumb-AP mode on 5 GHz with a 160 MHz channel for the first Vision Pro, PC on Ethernet, fixed IP by MAC): see the
+**A plain green screen on connecting is normal**: it is the idle frame while no game runs; turn on **Enable Chroma Keyed Passthrough** in the ALVR app and it turns transparent: the idle colour is #107C10, the key colour the App Store app uses and cannot change (an ALVR app with a Chroma Key Color picker: set #107C10 there, or change the idle colour in the streamer to match). Network advice (a Wi-Fi 6 access point in dumb-AP mode on 5 GHz with a 160 MHz channel for the first Vision Pro, PC on Ethernet, fixed IP by MAC): see the
 README's "Recommended network setup".
 
 VisionALVR.exe needs an NVIDIA GPU whose driver supports NVENC API 12.2 or newer (any current driver) and refuses to start otherwise. Older RTX/GTX cards work, with one NVENC chip, so no split encoding and a lower resolution/bitrate ceiling.

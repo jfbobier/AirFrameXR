@@ -81,10 +81,10 @@ namespace VisionALVR
                 using (var cd = new ColorDialog { Color = idle.BackColor, FullOpen = true })
                     if (cd.ShowDialog(this) == DialogResult.OK) SetIdle(cd.Color);
             };
-            var idleReset = new Button { Text = "Pure green (recommended)", AutoSize = true };
-            idleReset.Click += (s, e) => SetIdle(Color.FromArgb(0, 255, 0));
+            var idleReset = new Button { Text = "Default (#107C10)", AutoSize = true };
+            idleReset.Click += (s, e) => SetIdle(Color.FromArgb(16, 124, 16));
             row("Colour when no game runs", flow(idle, idleReset), idle);
-            var remind = Ui.Line("Set the SAME colour as the chroma key in the ALVR app on the headset (Settings > Chroma key), so it shows your room.");
+            var remind = Ui.Line("Turn on Enable Chroma Keyed Passthrough in the ALVR app on the headset. The default #107C10 is the key colour the App Store app uses; if your ALVR app has a Chroma Key Color picker, set the same colour there.");
             remind.ForeColor = Color.DimGray;
             note(remind);
 
@@ -154,7 +154,7 @@ namespace VisionALVR
             Fsy.Value = Clamp(Fsy, Json.Num(s, V + "foveated_encoding.content.center_shift_y", 0.1));
             Frx.Value = Clamp(Frx, Json.Num(s, V + "foveated_encoding.content.edge_ratio_x", 4));
             Fry.Value = Clamp(Fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
-            try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
+            try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(16, 124, 16)); }
             Audio.Checked = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             Mute.Checked = settings.MuteSpeakers;
             Proto.SelectedItem = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp") == "Tcp" ? "Tcp" : "Udp";

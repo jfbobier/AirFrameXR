@@ -46,7 +46,7 @@ It is not affiliated with or supported by NVIDIA, Apple or the ALVR project.
   settings, defaults and the idle chroma-key frame are tuned for the Vision Pro. Reports and small fixes for them are welcome, with no
   promise of an answer or a fix; nothing that makes the Vision Pro path worse will be merged.
 - **A plain green screen when the headset connects is normal and intended**: it is the streamer's idle frame while no game runs. On the
-  Vision Pro set the ALVR app's **chroma-key colour to pure green (#00FF00)** and the green becomes transparent: you see your room between
+  Vision Pro turn on the ALVR app's **Enable Chroma Keyed Passthrough** and the idle colour (#107C10, the App Store app's own key colour) becomes transparent: you see your room between
   games and the game appears when it starts. If the headset stays green, the chroma key is not set. VisionALVR does not mirror the Windows
   desktop into the headset between sessions (Virtual Desktop's way) by design: see-through is the cleaner idle state.
 - **AMD / Intel GPUs**: not supported and not planned. The encode path is NVENC only; you are welcome to fork and adapt it.

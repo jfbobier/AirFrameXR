@@ -304,7 +304,7 @@ def launch_app(app, rid, rd, log):
            f"set XR_RUNTIME_JSON={home}\\{ROOTNAME}\\{rt}\\virtualdesktop-openxr.json\r\n"
            + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\{ROOTNAME}\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\{ROOTNAME}\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_timing.csv", **app.get("env", {})}.items()) +
            f"cd /d {home}\\{ROOTNAME}\r\n"
-           + (f"out\\mirrordesktop\\mirrordesktop.exe --log {rd}\\app.log --seconds {app.get('seconds', 25)} --no-mouse --input-log {rd}\\mirror_events.csv{' --synthetic' if app.get('synthetic') else ''} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "mirrordesktop" else
+           + (f"out\\mirrordesktop\\mirrordesktop.exe --log {rd}\\app.log --seconds {app.get('seconds', 25)} --no-mouse --clear 00FF00 --input-log {rd}\\mirror_events.csv{' --synthetic' if app.get('synthetic') else ''} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "mirrordesktop" else
               f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n") +
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
     local = CACHE / "app.cmd"
@@ -425,7 +425,7 @@ def run_scenario(sc, outdir: Path, log=print):
                 feedpre = f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\feed.ps1 | "
                 steps["stdin_feed_events"] = len(feed)
             hostcmd = (envpre + feedpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
-                       f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv '
+                       f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv ' + ('' if 'idle_rgb' in h else '--idle-rgb 00ff00 ')
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
                                      "width": "--width", "height": "--height", "height_m": "--height-m", "noise": "--noise", "qp_map": "--qp-map",
                                      "idle_rgb": "--idle-rgb", "gpu_priority": "--gpu-priority", "encode_profile": "--encode-profile",

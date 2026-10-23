@@ -13,7 +13,7 @@ may connect (same protocol) but are not tested or supported: use ALVR itself for
    runtime and alvr_host.exe is allowed through the firewall. The same button reads "Switch back to ..." afterwards and puts your
    previous runtime back. Moved the folder? Click the switch again from the new place.
 4. Click Launch on "Setup wizard": open the ALVR app on the Vision Pro, pair it, check the settings. On the Vision Pro set the ALVR
-   app's chroma key to the "colour when no game runs" (default pure green #00FF00), as the wizard shows.
+   app's chroma key to the "colour when no game runs" (the idle frame is #107C10, the App Store app's own key colour: just turn the chroma key on), as the wizard shows.
 5. Click Launch on "Streamer" and keep it open while you play. It connects to the headset by itself; start any OpenXR game.
    Close SteamVR and ALVR's own launcher/dashboard first: they use the same network ports.
 "Diagnose" re-checks your setup when something feels wrong; "Logs and performance" shows how each game went.
