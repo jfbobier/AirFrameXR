@@ -565,7 +565,16 @@ namespace VisionALVR
             var part = Json.Bool(s, "session_settings.audio.game_audio.content.device.set", false) ? Convert.ToString(Json.Get(s, "session_settings.audio.game_audio.content.device.content.NameSubstring")) : "";
             audio.Report += AudioNote;
             var cfg = new AppSettings();
-            if (cfg.AudioCapture == "process")
+            var micOn = Json.Bool(s, "session_settings.audio.microphone.enabled", false);
+            // the headset microphone and the cable route cannot coexist (ALVR refuses a microphone that points at the captured cable): the microphone wants process loopback
+            var process = cfg.AudioCapture == "process" || micOn;
+            if (micOn && cfg.AudioCapture != "process") Log.Write("INFO", "audio: the microphone is on, game audio is captured with process loopback (the cable is the microphone's)");
+            if (micOn)
+            {
+                audio.StartMicrophone(true);
+                if (AudioRoute.FindMicrophoneCable() == null && !Environment.GetCommandLineArgs().Contains("--test") && Ui.ScreenshotPath() == null) using (var f = new CableForm(true)) f.ShowDialog(this);
+            }
+            if (process)
             {
                 // Windows' process loopback: ALVR captures the PC's audio itself (the host inherits this variable), nothing else to route
                 Environment.SetEnvironmentVariable("VISIONALVR_AUDIO_CAPTURE", "process");

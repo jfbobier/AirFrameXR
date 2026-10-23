@@ -30,6 +30,10 @@ namespace VisionALVR
         readonly Button idle = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
         readonly CheckBox audio = new CheckBox { Text = "Stream game audio (Windows default output)", AutoSize = true };
         readonly CheckBox mute = new CheckBox { Text = "Mute the PC speakers while streaming", AutoSize = true };
+        readonly ComboBox captureBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 330 };
+        readonly CheckBox mic = new CheckBox { Text = "Headset microphone for games (VRChat voice; needs VB-CABLE)", AutoSize = true };
+        readonly ComboBox planBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
+        List<PowerPlan.Plan> plans = new List<PowerPlan.Plan>();
         readonly ComboBox proto = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         readonly NumericUpDown packet = Num(500, 4000, 100);
         readonly NumericUpDown haptics = Dec(0m, 5m);
@@ -187,6 +191,17 @@ namespace VisionALVR
             section("Audio");
             g.Controls.Add(new Label()); g.Controls.Add(audio);
             g.Controls.Add(new Label()); g.Controls.Add(mute);
+            captureBox.Items.AddRange(new object[] { "Process loopback (no virtual cable needed)", "Virtual cable (VB-CABLE)" });
+            row("Game audio capture", captureBox);
+            g.Controls.Add(new Label()); g.Controls.Add(mic);
+            mic.Click += (s, e) => { if (mic.Checked && AudioRoute.FindMicrophoneCable() == null) using (var f = new CableForm(true)) { f.ShowDialog(this); if (AudioRoute.FindMicrophoneCable() == null) mic.Checked = false; } };
+
+            section("System");
+            row("Windows power plan while streaming", planBox);
+            var planNote = Ui.Line("The streamer switches to this plan when it starts and puts the previous one back when it closes.");
+            planNote.ForeColor = Color.DimGray;
+            planNote.MaximumSize = new Size(560, 0);   // wraps inside its column
+            g.Controls.Add(new Label()); g.Controls.Add(planNote);
 
             section("Network and controllers");
             proto.Items.AddRange(new object[] { "Udp", "Tcp" });
@@ -225,6 +240,13 @@ namespace VisionALVR
             try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
             audio.Checked = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             mute.Checked = settings.MuteSpeakers;
+            captureBox.SelectedIndex = settings.AudioCapture == "device" ? 1 : 0;
+            mic.Checked = Json.Bool(s, "session_settings.audio.microphone.enabled", false);
+            plans = PowerPlan.List();
+            planBox.Items.Clear(); planBox.Items.Add("(leave unchanged)");
+            foreach (var p in plans) planBox.Items.Add(p.Name);
+            var curPlan = plans.FindIndex(p => string.Equals(p.Guid, settings.PowerPlan, StringComparison.OrdinalIgnoreCase));
+            planBox.SelectedIndex = curPlan >= 0 ? curPlan + 1 : 0;
             proto.SelectedItem = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp") == "Tcp" ? "Tcp" : "Udp";
             packet.Value = Clamp(packet, Json.Num(s, "session_settings.connection.packet_size", 1400));
             haptics.Value = Clamp(haptics, Json.Num(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", 1));
@@ -257,6 +279,9 @@ namespace VisionALVR
             Json.Set(s, V + "foveated_encoding.content.edge_ratio_y", (double)fry.Value);
             Json.Set(s, "session_settings.audio.game_audio.enabled", audio.Checked);
             settings.MuteSpeakers = mute.Checked;
+            settings.AudioCapture = captureBox.SelectedIndex == 1 ? "device" : "process";
+            Json.Set(s, "session_settings.audio.microphone.enabled", mic.Checked);
+            settings.PowerPlan = planBox.SelectedIndex > 0 && planBox.SelectedIndex <= plans.Count ? plans[planBox.SelectedIndex - 1].Guid : (planBox.SelectedIndex < 0 ? settings.PowerPlan : "");
             Json.Set(s, "session_settings.connection.stream_protocol.variant", (string)proto.SelectedItem);
             Json.Set(s, "session_settings.connection.packet_size", (int)packet.Value);
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)haptics.Value);

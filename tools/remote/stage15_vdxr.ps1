@@ -2,6 +2,8 @@
 #  1. frame.cpp: honor eyeVisibility on quad/cylinder/cube layers also in "Oculus runtime" mode (VDXR computes the per-eye
 #     flags but only sets them when Virtual Desktop's own server is running; OVRShim implements the flags).
 #  2. d3d11_native.cpp: copy all 6 faces (and mips) of a cube swapchain; upstream copies subresource 0 only.
+#  4. RuntimeConfiguration.h: the runtime's display name (what apps show as the current OpenXR runtime) reads "VisionALVR (VDXR)"
+#     instead of "VirtualDesktopXR (Standalone)", which confused users; VDXR keeps its credit in the name and in THIRD_PARTY_NOTICES.
 #  3. -DHAS_CUBE_LAYERS (through the CL environment variable): advertise XR_KHR_composition_layer_cube.
 # Everything else in VDXR is untouched. Unpatched sources: tools/remote/stage3_vdxr.ps1.
 param([switch]$Unpatched)
@@ -48,6 +50,8 @@ if (xrSwapchain.ovrDesc.Type == ovrTexture_Cube) { /* OVRShim: copy every face a
                 }
 '@
     $ok = (Patch-File "$src\d3d11_native.cpp" $pat $new.Replace('$', '$$') 'OVRShim: copy every face and mip') -and $ok
+    # 4. display name
+    $ok = (Patch-File "$src\RuntimeConfiguration.h" '#define RUNTIME_PRETTY_NAME "VirtualDesktopXR \(Standalone\)"' '#define RUNTIME_PRETTY_NAME "VisionALVR (VDXR)" /* OVRShim: display name */' 'OVRShim: display name') -and $ok
     $env:CL = '/DHAS_CUBE_LAYERS'
 } else { $env:CL = '' }
 if (-not $ok) { Write-Host "RESULT: FAILED (patch)"; exit 1 }
