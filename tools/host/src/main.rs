@@ -87,6 +87,8 @@ struct Args {
     fg_rate: Option<FgRate>,
     /// uncapped mode: content lag behind the newest tracking sample, ms; 0 = automatic (the game's frame period + half a display period)
     fg_lag_ms: Option<f64>,
+    /// settings `video.frame_gen_hold_age` (None = the pipeline's default: env VISIONALVR_FG_HOLD_AGE, else on)
+    fg_hold_age: Option<bool>,
     /// uncapped mode: fps cap on the game's releases (0 = none), headroom for the host's own GPU work
     fg_cap_fps: Option<f64>,
     fg_flow_scale: f64,
@@ -180,6 +182,7 @@ fn parse_args() -> Result<Args, String> {
         game_motion_vectors: true,
         fg_rate: None,
         fg_lag_ms: None,
+        fg_hold_age: None,
         fg_cap_fps: None,
         fg_flow_scale: 0.5,
         fg_perf: 20,
@@ -511,6 +514,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if let Some(v) = st.frame_gen_flow_scale {
         a.fg_flow_scale = v.clamp(0.1, 1.0);
+    }
+    if a.fg_hold_age.is_none() {
+        a.fg_hold_age = st.frame_gen_hold_age;
     }
     if let Some(v) = st.frame_gen_perf.as_deref().and_then(|v| parse_fg_perf(v).ok()) {
         a.fg_perf = v;
@@ -1915,6 +1921,9 @@ fn main() {
             p.set_frame_gen(fg_active);
         }
         p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half), args.fg_lag_ms.unwrap_or(0.0));
+        if let Some(v) = args.fg_hold_age {
+            p.fg_hold_age.store(v, Ordering::Relaxed);
+        }
         apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
         unsafe { nvh::nvh_ipc_set_game_mv(ipc, if args.game_motion_vectors { 1 } else { 0 }) };
         log_fg_config(origin, &args, fg_active, "start");
@@ -2387,7 +2396,7 @@ fn main() {
     let mut status_at = Instant::now();
     let mut motion_tap_seen = (0u32, 0u32);
     let (mut perf_rel, mut perf_late) = (0u64, 0u64);   // shim release counters at the last fg_perf line
-    let mut perf_fg = [0u64; 7];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand, stale_stamps
+    let mut perf_fg = [0u64; 10];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand, stale_stamps, hold_skips, regime_switches, hold_bypassed
     // (tap state, streams) last reported: the shim's DLSS motion-vector tap (docs/MOTION_VECTORS.md)
     struct BenchState {
         i: usize,
@@ -2604,14 +2613,14 @@ fn main() {
                     // stamps that left one in hand, and the spacing of the headset's samples at the host (the cause of the misses, 2026-10-16)
                     let now_fg = [p.fg_synths.load(Ordering::Relaxed), p.fg_reals.load(Ordering::Relaxed), p.fg_no_sample.load(Ordering::Relaxed),
                         p.fg_sample_waits.load(Ordering::Relaxed), p.fg_sample_wait_us.load(Ordering::Relaxed), p.fg_in_hand.load(Ordering::Relaxed),
-                        p.fg_stale_stamps.load(Ordering::Relaxed)];
+                        p.fg_stale_stamps.load(Ordering::Relaxed), p.fg_hold_skips.load(Ordering::Relaxed), p.fg_regime_switches.load(Ordering::Relaxed), p.fg_hold_bypassed.load(Ordering::Relaxed)];
                     let d: Vec<u64> = now_fg.iter().zip(perf_fg.iter()).map(|(a, b)| a.wrapping_sub(*b)).collect();
                     perf_fg = now_fg;
                     let outputs = d[0] + d[1];
                     let (gap_p95, gap_max, gap_over15, gap_n) = *TRACKING_GAP_LAST.lock();
                     if outputs + d[2] > 0 {
-                        logs::general("INFO", &format!("frame generation samples: {} outputs, {} boundaries skipped for want of a tracking sample ({:.1} %), {} waited for one (mean {:.1} ms), {} stamped with one in hand, {} with a stale one (tracking dark); tracking spacing p95 {gap_p95:.1} ms max {gap_max:.1} ({gap_over15}/{gap_n} gaps over 15 ms)",
-                            outputs, d[2], 100.0 * d[2] as f64 / (outputs + d[2]) as f64, d[3], if d[3] > 0 { d[4] as f64 / 1000.0 / d[3] as f64 } else { 0.0 }, d[5], d[6]));
+                        logs::general("INFO", &format!("frame generation samples: {} outputs, {} boundaries skipped for want of a tracking sample ({:.1} %), {} waited for one (mean {:.1} ms), {} stamped with one in hand, {} with a stale one (tracking dark), {} held (a repeat instead of a stamp regime switch; {} regime switches, hold stepped aside {}); tracking spacing p95 {gap_p95:.1} ms max {gap_max:.1} ({gap_over15}/{gap_n} gaps over 15 ms)",
+                            outputs, d[2], 100.0 * d[2] as f64 / (outputs + d[2]) as f64, d[3], if d[3] > 0 { d[4] as f64 / 1000.0 / d[3] as f64 } else { 0.0 }, d[5], d[6], d[7], d[8], d[9]));
                     }
                     event(origin, "fg_perf", json!({ "app_fps": rendered as f64 / secs, "stream_fps": streamed as f64 / secs, "app_envelope_ms": app_ms,
                         "outputs": outputs, "no_sample": d[2], "sample_waits": d[3], "sample_wait_ms_sum": d[4] as f64 / 1000.0, "in_hand": d[5], "stale_stamps": d[6],

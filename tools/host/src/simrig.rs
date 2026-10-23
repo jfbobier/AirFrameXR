@@ -116,6 +116,9 @@ struct Cfg {
     dump_every: i32,
     dot_deg: f64,
     eye_w: i32,
+    /// every `late_every`-th tracking sample is delivered `late_ms` later (0 = off): a sample late by more than a period loses the one in hand (pipeline.rs `fg_hold_age`)
+    late_every: i64,
+    late_ms: f64,
     uplink: Dist,
     encode: Dist,
     network: Dist,
@@ -216,6 +219,8 @@ pub fn init(out_dir: &str, ipc: usize, nvh_handle: *mut c_void, shared: &Arc<Sha
         dump_every: env_f("DUMP_EVERY", 0.0) as i32,
         dot_deg: env_f("DOT_DEG", 10.0),
         eye_w: env_f("EYE_W", 1760.0) as i32,
+        late_every: env_f("LATE_EVERY", 0.0) as i64,
+        late_ms: env_f("LATE_MS", 25.0),
         uplink: if ideal { Dist::default() } else { Dist::from(&profile["uplink_ms"]) },
         encode: if ideal { Dist { mean: 3.0, ..Default::default() } } else { Dist::from(&profile["encode_ms"]) },
         network: if ideal { Dist { mean: 7.0, ..Default::default() } } else { Dist::from(&profile["network_ms"]) },
@@ -330,7 +335,8 @@ fn head_generator() {
             }
             let qf = [q[0] as f32, q[1] as f32, q[2] as f32, q[3] as f32];
             unsafe { sv_sample(viewer, ts, qf.as_ptr()) };
-            let up = (s.cfg.uplink.draw(&mut rng) - 0.0).max(0.0) * 1e-3 + 0.002;
+            let late = if s.cfg.late_every > 0 && (k as i64) % s.cfg.late_every == s.cfg.late_every - 1 { s.cfg.late_ms * 1e-3 } else { 0.0 };
+            let up = (s.cfg.uplink.draw(&mut rng) - 0.0).max(0.0) * 1e-3 + 0.002 + late;
             let deliver = (tw + up).max(last_deliver);
             last_deliver = deliver;
             pending.push_back((deliver, ts, qf));

@@ -382,6 +382,24 @@ pub struct Pipeline {
     pub fg_no_sample: AtomicU64,
     /// stamps that took the older of two waiting samples and left the newest in hand for the next boundary (see `fg_pick_sample_now`)
     pub fg_in_hand: AtomicU64,
+    /// Hold the stamp regime (VISIONALVR_FG_HOLD_AGE, settings `video.frame_gen_hold_age`, default OFF: an A/B knob). With one sample kept in hand every
+    /// output's stamp advances by exactly one of the headset's samples per boundary. A sample later than a whole period (or lost) left a
+    /// boundary with a single unused sample, which was stamped: the stamp jumped two samples and from then on every output was one period
+    /// younger, until a skipped boundary followed by a bunch rebuilt the one in hand and moved them back. On the Vision Pro that is the total
+    /// latency switching 67 <-> 77 ms in 10-20 s cycles (2026-10-23), each switch a pose-age jump shown as a hitch while the head turns.
+    /// Held: such a boundary waits for the next sample like any other and otherwise repeats once (`fg_hold_skips`), the regime stays.
+    /// Safety: a client whose samples come slower than the display rate would make the hold skip every missing sample, so more than
+    /// 5 hold skips within a second step it aside until they thin out (`fg_hold_bypassed`). Off by default because the rig (uplink tail
+    /// over a period: such late samples several times a second) skipped 3.4 boundaries a second with it and the head path went TREMBLE
+    /// (late_turn_fg, 2026-10-23); whether the Vision Pro's Wi-Fi is like that is what `fg_regime_switches` measures with the hold off.
+    pub fg_hold_age: AtomicBool,
+    pub fg_hold_skips: AtomicU64,
+    pub fg_hold_bypassed: AtomicU64,
+    fg_hold_pending: AtomicBool,
+    fg_hold_recent: Mutex<std::collections::VecDeque<Instant>>,
+    /// regime switches: the number of unused samples left behind the stamped one changed (1 = one in hand, 0 = the newest was stamped)
+    pub fg_regime_switches: AtomicU64,
+    fg_prev_regime: Mutex<Option<u8>>,
     /// rendered frames never shown: still due when the next one was encoded (an encoder overrun; `on_boundary` otherwise keeps the arrival
     /// waiting): the boundary gets the synthetic frame between the two newest instead, so the motion never stalls
     pub fg_dropped: AtomicU64,
@@ -494,6 +512,13 @@ impl Pipeline {
             fg_holds: AtomicU64::new(0),
             fg_no_sample: AtomicU64::new(0),
             fg_in_hand: AtomicU64::new(0),
+            fg_hold_age: AtomicBool::new(std::env::var("VISIONALVR_FG_HOLD_AGE").map(|v| v == "1").unwrap_or(false)),
+            fg_hold_skips: AtomicU64::new(0),
+            fg_hold_bypassed: AtomicU64::new(0),
+            fg_hold_pending: AtomicBool::new(false),
+            fg_hold_recent: Mutex::new(std::collections::VecDeque::new()),
+            fg_regime_switches: AtomicU64::new(0),
+            fg_prev_regime: Mutex::new(None),
             fg_dropped: AtomicU64::new(0),
             fg_pairs_skipped: AtomicU64::new(0),
             fg_real_due: AtomicBool::new(false),
@@ -667,16 +692,51 @@ impl Pipeline {
         let ring = self.shared.recent_samples.lock();
         let n = ring.len();
         let first_unused = ring.iter().position(|(t, _)| *t > last)?;
-        if n - first_unused >= 2 {
-            let (t1, _) = ring[n - 1];
-            let (t2, q2) = ring[n - 2];
-            // two samples at the display cadence (at least half a period apart): a bunch; the newest is kept for the next boundary
-            if t1.saturating_sub(t2) >= self.period() / 2 {
-                self.fg_in_hand.fetch_add(1, Ordering::Relaxed);
-                return Some((t2, q2));
+        let period = self.period();
+        // samples at the display cadence (the two newest at least half a period apart); a faster tracker (Quest, 270 Hz) takes the newest
+        let display_cadence = n >= 2 && ring[n - 1].0.saturating_sub(ring[n - 2].0) >= period / 2;
+        let (pick, regime) = if n - first_unused >= 2 && display_cadence {
+            // a bunch: the older of the two newest is stamped, the newest kept for the next boundary
+            self.fg_in_hand.fetch_add(1, Ordering::Relaxed);
+            (ring[n - 2], 1u8)
+        } else if n - first_unused == 1 && display_cadence && self.fg_hold_age.load(Ordering::Relaxed) && self.fg_hold_allowed() {
+            // one unused sample: stamping it now would jump the stamp two samples ahead (see `fg_hold_age`); the caller waits for the next
+            // sample and otherwise skips this boundary
+            self.fg_hold_pending.store(true, Ordering::Relaxed);
+            return None;
+        } else {
+            (ring[n - 1], 0u8)
+        };
+        drop(ring);
+        self.fg_hold_pending.store(false, Ordering::Relaxed);
+        if display_cadence {
+            let mut prev = self.fg_prev_regime.lock();
+            if prev.map_or(false, |p| p != regime) {
+                self.fg_regime_switches.fetch_add(1, Ordering::Relaxed);
+            }
+            *prev = Some(regime);
+        }
+        Some(pick)
+    }
+
+    /// The hold steps aside after 5 hold skips within a second (a client sending fewer samples than display periods).
+    fn fg_hold_allowed(&self) -> bool {
+        let mut recent = self.fg_hold_recent.lock();
+        while recent.front().map_or(false, |t| t.elapsed() > Duration::from_secs(1)) {
+            recent.pop_front();
+        }
+        recent.len() < 5
+    }
+
+    fn fg_hold_skipped(&self) {
+        if self.fg_hold_pending.swap(false, Ordering::Relaxed) {
+            self.fg_hold_skips.fetch_add(1, Ordering::Relaxed);
+            let mut recent = self.fg_hold_recent.lock();
+            recent.push_back(Instant::now());
+            if recent.len() >= 5 {
+                self.fg_hold_bypassed.fetch_add(1, Ordering::Relaxed);
             }
         }
-        ring.back().copied()
     }
 
     /// Like `fg_pick_sample_now`, waiting up to VISIONALVR_FG_SAMPLE_WAIT_MS (3) for one to arrive: with one sample in hand the wait is
@@ -687,6 +747,7 @@ impl Pipeline {
         }
         let wait = *self.fg_sample_wait.lock();
         if wait <= Duration::ZERO {
+            self.fg_hold_skipped();
             return None;
         }
         let t0 = Instant::now();
@@ -704,6 +765,7 @@ impl Pipeline {
             }
         }
         self.fg_sample_wait_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
+        self.fg_hold_skipped();
         self.fg_stale_sample()
     }
 
@@ -1489,6 +1551,7 @@ impl Pipeline {
                 "uncapped_state": unc_state,
                 "sample_waits": self.fg_sample_waits.load(Ordering::Relaxed), "sample_wait_ms_sum": self.fg_sample_wait_us.load(Ordering::Relaxed) as f64 / 1000.0,
                 "sample_wait_ms": self.fg_sample_wait.lock().as_secs_f64() * 1000.0,
+                "hold_age": self.fg_hold_age.load(Ordering::Relaxed), "hold_skips": self.fg_hold_skips.load(Ordering::Relaxed), "hold_bypassed": self.fg_hold_bypassed.load(Ordering::Relaxed), "regime_switches": self.fg_regime_switches.load(Ordering::Relaxed),
                 "queued": self.fg_queued.load(Ordering::Relaxed), "arrival_waits": self.fg_arrival_waits.load(Ordering::Relaxed),
                 "arrival_hits": self.fg_arrival_hits.load(Ordering::Relaxed), "arrival_wait_ms_sum": self.fg_arrival_wait_us.load(Ordering::Relaxed) as f64 / 1000.0,
                 "arrival_wait_ms": self.fg_arrival_wait.as_secs_f64() * 1000.0,

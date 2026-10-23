@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "0.5";
+pub const VERSION: &str = "0.6-alpha";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
 /// `config/` (session.json, visionalvr.json) and `logs/` inside it.
@@ -61,6 +61,8 @@ pub struct Settings {
     /// frame generation (docs/FRAME_GENERATION.md): half-rate pacing + optical-flow interpolated frames; default off
     pub frame_gen: Option<bool>,
     pub frame_gen_flow_scale: Option<f64>,
+    /// hold the stamp regime (one sample in hand, no two-sample jumps); default on (see pipeline.rs `fg_hold_age`)
+    pub frame_gen_hold_age: Option<bool>,
     /// "fast" (default) | "medium" | "slow": the optical-flow engine's preset
     pub frame_gen_perf: Option<String>,
     /// tap the game's DLSS motion vectors when the OptiScaler-DLSSMotionVectorExtractor provider is loaded (docs/MOTION_VECTORS.md); default on
@@ -122,6 +124,7 @@ pub fn load_settings(path: &Path) -> Settings {
         boundary_offset_ms: video["boundary_offset_ms"].as_f64(),
         frame_gen: video["frame_gen"].as_bool(),
         frame_gen_flow_scale: video["frame_gen_flow_scale"].as_f64(),
+        frame_gen_hold_age: video["frame_gen_hold_age"].as_bool(),
         frame_gen_perf: video["frame_gen_perf"].as_str().map(str::to_string),
         game_motion_vectors: video["game_motion_vectors"].as_bool(),
         frame_gen_rate: video["frame_gen_rate"].as_str().map(str::to_string),

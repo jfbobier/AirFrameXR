@@ -57,7 +57,19 @@ nothing and what it owed stays owed (`fg_no_sample`, the pattern slides one boun
 projection layer (quad-only loading screens) goes out as is; a frame still due when the encoder overran is dropped for the synthetic frame
 between the two newest (`fg_dropped`). With the generator on the newest waiting frame always wins a pick (older ones superseded): the shim's
 half-rate pacing runs open loop and the generator consumes one frame per two boundaries, so a standing queue would never drain otherwise.
-When the GPU/driver has no flow engine the host logs a WARN, streams as without the feature and keeps the game at full rate.
+When the GPU/driver has no flow engine the host logs a WARN, streams as without the feature and keeps the game at full rate. **The regime switch, and the hold (2026-10-23, `video.frame_gen_hold_age`, default off: an A/B knob).** With one sample in hand every output's stamp
+advances by exactly one of the headset's samples per boundary, and a sample late by less than a period costs nothing (the one in hand covers
+its boundary, the late one is stamped at the next). A sample late by more than a period, or lost, left a boundary with a single unused
+sample, which was stamped: the stamp jumped two samples and every later output was one period younger, until a skipped boundary followed by
+a bunch rebuilt the one in hand and moved them back. On the Vision Pro that was the total latency switching between 67 and 77 ms in 10-20 s
+cycles, each switch a pose-age jump shown as a hitch while the head turns. `regime_switches` counts these switches (the number
+of unused samples left behind the stamped one changing between one and none). With the hold on (`VISIONALVR_FG_HOLD_AGE=1` or the setting
+true) such a boundary waits for the next sample like any other and otherwise repeats once (`hold_skips`); more than 5 of those in a second step
+the hold aside until they thin out (`hold_bypassed`). The rig said no to it as a default: its uplink tail (up to 14 ms, over a period) makes such
+late samples frequent, the hold skipped 3.4 boundaries a second and the head path went TREMBLE (`late_turn_fg`, one sample in 150 delivered two
+and a half periods late, hold on: 149-208 hold skips, 22-57 bypassed, 114 regime switches left, head TREMBLE once and CLEAN once, motion JUDDER; hold off: 60-75 skipped boundaries, 1278 regime switches a minute, CLEAN and SMOOTH). Whether the Vision Pro's Wi-Fi
+is like that is what `regime_switches` and `no_sample` say with the hold off; a headset with rare switches (the 10-20 s cycles) is where the hold
+pays.
 
 ## Rates (2026-10-16): 1/3, 1/2, 2/3
 
@@ -126,7 +138,7 @@ Lab for the rates (3080 Ti simrig, 2026-10-16, 40 s each, marker on the wall clo
 
 ## Telemetry
 
-`encoder_stats.pipeline.frame_gen`: `synths`, `reals`, `repeats`, `holds` (boundaries filled by the generator), `no_sample`, `in_hand`, `dropped`,
+`encoder_stats.pipeline.frame_gen`: `synths`, `reals`, `repeats`, `holds` (boundaries filled by the generator), `no_sample`, `in_hand`, `hold_age`, `hold_skips`, `hold_bypassed`, `ts_jumps`, `dropped`,
 `queued`, `arrival_waits` / `arrival_hits` / `arrival_wait_ms_sum`, `sample_waits` / `sample_wait_ms_sum`, `pairs_skipped`, `errors`, `passthrough`, and `gen` = `nvh_fg_stats` (flow/synthesis GPU ms, flow size, engine info).
 General log every 10 s with generation on: `frame generation samples: N outputs, S boundaries skipped for want of a tracking sample (x %), W waited for one (mean m ms), H stamped
 with one in hand; tracking spacing p95 / max (gaps over 15 ms)`; the `game ended` line carries the game's skipped boundaries. Event `frame_gen`
