@@ -65,7 +65,7 @@ analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin
   encode, QP map, reconstructed-frame output) and compiles them with `nvenc/hostlib/` into a static library.
 - The only patch to ALVR's sources is `tools/patches/loopback-client.patch` (test only: lets the mock client bind its own
   loopback address; inactive without its environment variable).
-- VDXR gets three small patches at build time (`tools/remote/stage15_vdxr.ps1`); OVRShim is built from VDXR's OVRNull project
+- VDXR gets a few small text patches at build time (`tools/remote/stage15_vdxr.ps1`, listed in its header: layer visibility, cube faces, display name, running start off so that `xrWaitFrame` waits for the shim's release); OVRShim is built from VDXR's OVRNull project
   with the files of `ovrshim/` (`stage11_ovrshim.ps1`).
 - GUIs: compiled with Visual Studio's Roslyn `csc` against the .NET Framework assemblies (`stage16_gui.ps1`), no .NET SDK.
 - Package: `stage13_package.ps1` assembles `out\dist\VisionALVR` and the zip from an explicit list of files.

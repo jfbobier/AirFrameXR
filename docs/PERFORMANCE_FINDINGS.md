@@ -375,3 +375,40 @@ Rig (3080 Ti, `harness/simrig` scenarios `gpu_fg` / `gpu_fg_spikes`, `SIM_GPU_CO
 Fixed 1/2 is better while the game holds the cap (even steps, no content lag), uncapped clearly better when it cannot: the 2026-10-15
 headset verdict again. A game swinging around the cap (Gears at 100 Hz) sits on the line; next is a headset A/B of uncapped
 (`video.frame_gen_rate: "uncapped"`, optionally `frame_gen_cap_fps`) against 1/2 on the same section.
+
+## 2026-10-23: the game's frame start was never gated (VDXR's own running start)
+
+Every attempt to hold the game at frame start (the shim's GPU throttle, the just-in-time release of 2026-10-16, the lead cap tried in the
+rig) reported the same thing: holds 0, app CPU on its 0.5 ms floor, the layers already waiting when the shim released. The cause is in
+virtualdesktop-openxr, not in the shim. Its async submission thread calls the shim's `ovr_WaitToBeginFrame`, but the game's `xrWaitFrame`
+does not wait for that call to return: `waitForAsyncSubmissionIdle(m_useRunningStart)` wakes the app at the earlier of "the shim released"
+and "one display period minus 2 ms after the previous release" (VDXR's running start, `session.cpp`, on by default). So in every GPU-bound
+game, at every generation rate, the CPU side ran a frame ahead of the release, the frame was submitted before the shim's throttle could look
+at the GPU, and the render queue sat at 2-3 frames. The rig's per-frame trace shows it directly: `xrWaitFrame` returned 10-13 ms before the
+shim's release of the same frame, and `xrWaitFrame` blocked 8.5 ms per frame = the 10 ms period minus VDXR's 2 ms, not the shim's schedule.
+
+VDXR reads `quirk_disable_running_start` (DWORD under `HKLM\SOFTWARE\VirtualDesktop-OpenXR`), so the A/B needed no code: the same host, shim
+and probe build (0.6 branch, 3080 Ti, stream 3520x1600 at 100 Hz, 40 s runs, `SIM_GPU_COPIES` = the GPU load):
+
+| scenario | VDXR running start (stock) | off (xrWaitFrame waits for the shim's release) |
+|---|---|---|
+| gpu_fg, 70 copies (GPU-bound under the 1/2 cap): app fps | 46.2 | 46.5 |
+| frame start -> GPU done p50 / p95 | 55.1 / 66.2 ms | **41.8 / 50.4 ms** |
+| xrWaitFrame returned before the shim's release (p50) | 12.3 ms | 0.0 ms |
+| release -> submit (the app's CPU work after the release) | 0.1 ms | 2.3 ms (the probe's real CPU time) |
+| host repeats / motion | 7.5 % JUDDER frozen 8.1 % | 6.9 % JUDDER frozen 7.4 % |
+| gpu_fg, 60 copies (holds the cap): fps, start -> done p50, motion | 50.0, 22.4 ms, SMOOTH 0.9 % | 49.9, 25.2 ms, SMOOTH 1.3 % |
+| gpu, 70 copies, generation off: fps, start -> done p50 / p95 | 55.1, 46.5 / 56.5 ms | 55.1, **35.9 / 45.3 ms** |
+
+One display period less between the game's frame start and its GPU completion (13 ms at the cap, 11 ms free-running), same frame rate,
+same repeats, same verdicts; the 60-copy pair is within the run-to-run noise (yesterday's 60-copy runs read 34-38 ms with stock VDXR, so the
+22 ms stock run was a lucky phase). The pose a frame is rendered with is read at `xrWaitFrame`, so this period comes straight off the
+pose-to-photon latency. What remains (42 ms for a 21 ms GPU frame) is the shim's own rule, "at most one frame still completing on the GPU
+at the release": double buffering, two GPU frames when the GPU is the bottleneck. The just-in-time hold removed on 2026-10-17 (release when
+the previous frame is predicted done, minus the app's CPU time) was built for exactly this and was inert only because of the early wake; it
+is the next candidate, now that a release is a frame start (docs/PLAN_0.6.md).
+
+Verified with the patched DLL and the registry at stock: gpu_fg 70 copies 42.1 / 51.0 ms, gpu 70 copies 36.6 / 46.0 ms, xrWaitFrame returning
+at the release in both. Shipped as VDXR patch 5 (`tools/remote/stage15_vdxr.ps1`): running start off by default; `ovrshim_vdxr_running_start` = 1 in the same registry
+key restores VDXR's behaviour for an A/B. Metrics script of the A/B: the shim's per-frame CSV (`t_release`, `t_submit`, `t_publish`) joined with
+the probe's `app_timing.csv` on the display time.

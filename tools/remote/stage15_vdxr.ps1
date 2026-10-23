@@ -5,6 +5,13 @@
 #  4. RuntimeConfiguration.h: the runtime's display name (what apps show as the current OpenXR runtime) reads "VisionALVR (VDXR)"
 #     instead of "VirtualDesktopXR (Standalone)", which confused users; VDXR keeps its credit in the name and in THIRD_PARTY_NOTICES.
 #  3. -DHAS_CUBE_LAYERS (through the CL environment variable): advertise XR_KHR_composition_layer_cube.
+#  5. session.cpp: VDXR's own "running start" off by default. With it on, xrWaitFrame returns one display period minus 2 ms after
+#     the previous ovr_WaitToBeginFrame whether or not the shim has released the next frame, so the game's CPU ran a frame ahead of
+#     the shim's release and GPU throttle (the layers were already waiting when the release came: app CPU 0.5 ms in every game,
+#     render queue 2-3 frames). Off, xrWaitFrame blocks until the shim's release, which carries the running start itself (release =
+#     boundary - app envelope - margin). Rig 2026-10-23: frame start -> GPU done 55 -> 42 ms (GPU-bound app at the 1/2 cap), 47 -> 36 ms
+#     with generation off, same fps and repeats. Registry DWORD ovrshim_vdxr_running_start = 1 (HKLM\SOFTWARE\VirtualDesktop-OpenXR)
+#     restores VDXR's behaviour for an A/B.
 # Everything else in VDXR is untouched. Unpatched sources: tools/remote/stage3_vdxr.ps1.
 param([switch]$Unpatched)
 $ErrorActionPreference = 'Continue'
@@ -52,6 +59,8 @@ if (xrSwapchain.ovrDesc.Type == ovrTexture_Cube) { /* OVRShim: copy every face a
     $ok = (Patch-File "$src\d3d11_native.cpp" $pat $new.Replace('$', '$$') 'OVRShim: copy every face and mip') -and $ok
     # 4. display name
     $ok = (Patch-File "$src\RuntimeConfiguration.h" '#define RUNTIME_PRETTY_NAME "VirtualDesktopXR \(Standalone\)"' '#define RUNTIME_PRETTY_NAME "VisionALVR (VDXR)" /* OVRShim: display name */' 'OVRShim: display name') -and $ok
+    # 5. VDXR's running start off by default (the shim's release is the frame start)
+    $ok = (Patch-File "$src\session.cpp" 'm_useRunningStart = !getSetting\("quirk_disable_running_start"\)\.value_or\(false\);' 'm_useRunningStart = getSetting("ovrshim_vdxr_running_start").value_or(false) && !getSetting("quirk_disable_running_start").value_or(false); /* OVRShim: frame-start gate */' 'OVRShim: frame-start gate') -and $ok
     $env:CL = '/DHAS_CUBE_LAYERS'
 } else { $env:CL = '' }
 if (-not $ok) { Write-Host "RESULT: FAILED (patch)"; exit 1 }

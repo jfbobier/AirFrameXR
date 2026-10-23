@@ -40,9 +40,10 @@ the boundaries with no usable tracking sample.
 
 ## Removed on purpose (so nobody re-invents them)
 
-- **Just-in-time game release** (2026-10-16 -> 17): virtualdesktop-openxr calls WaitToBeginFrame right before the submit for every app, so the
-  shim never sees a frame start and the hold never engaged (holds 0 in 8 000+ releases, UE and Unity alike). The one measured gain was
-  unexplained; removed with its IPC field and setting.
+- **Just-in-time game release** (2026-10-16 -> 17): the hold never engaged (holds 0 in 8 000+ releases, UE and Unity alike) and was removed
+  with its IPC field and setting. **Corrected 2026-10-23:** the cause was VDXR's own running start waking the game's `xrWaitFrame` a period
+  minus 2 ms after the previous release, whatever the shim did (docs/PERFORMANCE_FINDINGS.md, 2026-10-23). VDXR patch 5 turns it off, so a
+  release is a frame start again; the just-in-time hold is a candidate once more (docs/PLAN_0.6.md).
 - **The automatic rate controller** (2026-10-16 -> 17): worked where the stream's verdict was clean, but every trial was a hiccup, the
   frame cost it first relied on measures nothing useful (5-10 ms for every game at 1/3: the GPU tail of a frame submitted right after its
   release), its memory keyed by executable let the Vision Pro's verdicts pollute the Quest's, and the "off" level it climbed to lost to 2/3
