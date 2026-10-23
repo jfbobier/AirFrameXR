@@ -2,7 +2,7 @@
 """Runs the simrig (host built with the cargo feature `simrig`, see docs/DEVELOPMENT.md) on the PC and judges the result.
 
     python3 harness/simrig/run_sim.py build                 # builds the simrig host on the PC (python3 harness/live.py build host --simrig does the same)
-    python3 harness/simrig/run_sim.py run <scenario>[,<scenario>...] [--seconds 30] [--show 0] [--real-encode 0] [--seed 7] [--eye-w 1760] [--fg] [--env K=V]
+    python3 harness/simrig/run_sim.py run <scenario>[,<scenario>...] [--seconds 30] [--show 0] [--real-encode 0] [--seed 7] [--eye-w 1760] [--fg] [--env K=V | PROBE:K=V]
     python3 harness/simrig/run_sim.py list
 
 Frame generation (docs/FRAME_GENERATION.md): `run stutter,stutter_fg` compares a 50-70 fps app without and with the generator; the judge's "motion"
@@ -87,6 +87,14 @@ SCENARIOS = {
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "note": "GPU-bound ~50 fps app, uncapped generation"},
     "gpu":         {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "50", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "note": "the GPU-bound app with generation off: the latency reference without generation"},
+    # the Gears of War case (2026-10-22): GPU-bound right at the 1/2 cap (50 fps at 100 Hz), where the headset was good or bad at random and switched
+    # after a hiccup; SIM_GPU_COPIES sets the load (calibrate per PC: the app's fps with generation on should sit at 47-50)
+    "gpu_fg":      {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": os.environ.get("SIM_GPU_COPIES", "50"),
+                    "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall", "ENV:VISIONALVR_FRAME_GEN": "1",
+                    "note": "GPU-bound app at the 1/2 cap, generation on (half): the release phase decides whether its frames make their boundary"},
+    "gpu_fg_spikes": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "spikes:150:4", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": os.environ.get("SIM_GPU_COPIES", "50"),
+                    "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall", "ENV:VISIONALVR_FRAME_GEN": "1",
+                    "note": "gpu_fg with a 4x frame every 150 frames: the hiccups that moved the headset between its good and bad states"},
     "third_slow":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.12", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "the 1/3 rate with the marker at half speed: the planner's test; at full speed the 5 px marker moves 14 px per 30 ms game step, past the flow's 8 px blocks (the thin-mover limit, not the planner)"},
     "third_mv":    {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
@@ -257,7 +265,7 @@ def main(a):
                 extra[key] = a[a.index(flag) + 1]
         for e in [a[i + 1] for i, x in enumerate(a) if x == "--env"]:   # --env VISIONALVR_SPIN_US=1000: any variable for the streamer
             k, v = e.split("=", 1)
-            extra["ENV:" + k] = v
+            extra[k if k.startswith("PROBE:") else "ENV:" + k] = v   # PROBE:K=V: for the app (and the shim inside it), e.g. PROBE:OVRSHIM_FG_LEAD_CAP_MS=1000
         rc = 0
         for n in names:
             rc = max(rc, run_one(n, seconds, extra))
