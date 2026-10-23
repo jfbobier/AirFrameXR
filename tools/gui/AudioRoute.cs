@@ -114,6 +114,23 @@ namespace VisionALVR
             return cable;
         }
 
+        /// The recording side of a virtual cable (CABLE Output, VoiceMeeter Output) ALVR's microphone path ends in, or null (VISIONALVR_FAKE_NO_CABLE=1: the lab pretends there is none).
+        public static string FindMicrophoneCable()
+        {
+            if (Environment.GetEnvironmentVariable("VISIONALVR_FAKE_NO_CABLE") == "1") return null;
+            try
+            {
+                var devices = Endpoints.Capture();
+                foreach (var key in new[] { "cable output", "voicemeeter output" })
+                {
+                    var d = devices.Find(x => x.Name.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (d != null) return d.Name;
+                }
+            }
+            catch { }
+            return null;
+        }
+
         /// The name of the virtual cable the streamer would use, or null (VISIONALVR_FAKE_NO_CABLE=1: the lab pretends there is none).
         public static string FindCable(string wantedPart = "")
         {
@@ -175,8 +192,59 @@ namespace VisionALVR
             }
         }
 
+        // ---- the headset microphone (ALVR's own path: it plays the headset's voice into a virtual cable's playback side, the game reads its recording side) -----------
+        static readonly string MicStateFile = Path.Combine(Paths.Logs, "audio_mic.txt");
+        readonly string[] micOld = new string[3];
+        bool micRunning;
+
+        /// When the microphone is enabled in the audio settings: the virtual cable's recording side (CABLE Output, else VoiceMeeter Output) becomes the default recording device for every
+        /// role while the streamer runs, so a game (VRChat) hears the headset's voice without picking a device; the previous default comes back at close or after a crash.
+        /// Does nothing when the microphone is off.
+        public void StartMicrophone(bool micEnabled)
+        {
+            if (!micEnabled || Environment.GetEnvironmentVariable("VISIONALVR_AUDIO_ROUTE") == "0") return;
+            try
+            {
+                RestoreLeftoverMic();
+                var devices = Endpoints.Capture();
+                Endpoints.Dev mic = null;
+                foreach (var key in new[] { "cable output", "voicemeeter output" })
+                    if (mic == null) mic = devices.Find(d => d.Name.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0);
+                if (mic == null) { Say("WARN", "microphone: no virtual cable recording device (CABLE Output) found: the headset's voice cannot reach games until VB-CABLE is installed"); return; }
+                for (int i = 0; i < 3; i++) micOld[i] = Endpoints.DefaultCapture(i);
+                File.WriteAllText(MicStateFile, string.Join("\n", micOld.Select(x => x ?? "")) + "\n");
+                for (int i = 0; i < 3; i++) if (micOld[i] != mic.Id) Endpoints.SetDefault(mic.Id, i);
+                micRunning = true;
+                Say("INFO", $"microphone: {mic.Name} is the default recording device while streaming (restored when the streamer closes)");
+            }
+            catch (Exception ex) { Say("WARN", "microphone: could not set the default recording device: " + ex.Message); }
+        }
+
+        void StopMicrophone()
+        {
+            if (!micRunning) return;
+            micRunning = false;
+            try { for (int i = 0; i < 3; i++) if (!string.IsNullOrEmpty(micOld[i])) Endpoints.SetDefault(micOld[i], i); Say("INFO", "microphone: default recording device restored"); }
+            catch (Exception ex) { Say("WARN", "restoring the recording device failed: " + ex.Message); }
+            try { File.Delete(MicStateFile); } catch { }
+        }
+
+        static void RestoreLeftoverMic()
+        {
+            if (!File.Exists(MicStateFile)) return;
+            try
+            {
+                var l = File.ReadAllLines(MicStateFile);
+                for (int i = 0; i < 3 && i < l.Length; i++) if (!string.IsNullOrEmpty(l[i])) Endpoints.SetDefault(l[i], i);
+                Log.Write("INFO", "audio: restored the recording device left by a streamer that did not close cleanly");
+            }
+            catch (Exception ex) { Log.Write("WARN", "audio: leftover recording device not restored: " + ex.Message); }
+            try { File.Delete(MicStateFile); } catch { }
+        }
+
         public void Stop()
         {
+            StopMicrophone();
             try { timer?.Dispose(); } catch { }
             lock (gate)
             {
@@ -285,15 +353,18 @@ namespace VisionALVR
                 [PreserveSig] int SetEndpointVisibility(IntPtr a, int b);
             }
 
-            const int FlowRender = 0, DeviceActive = 1, ClsCtxAll = 23;
+            const int FlowRender = 0, FlowCapture = 1, DeviceActive = 1, ClsCtxAll = 23;
             static readonly Guid VolumeIid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
             static void Check(int hr, string what) { if (hr < 0) throw new InvalidOperationException($"{what} failed (0x{hr:X8})"); }
             static IMMDeviceEnumerator Enumerator() => (IMMDeviceEnumerator)new MMDeviceEnumeratorCom();
 
-            public static List<Dev> Render()
+            public static List<Dev> Render() => List(FlowRender);
+            public static List<Dev> Capture() => List(FlowCapture);
+
+            static List<Dev> List(int flow)
             {
                 var res = new List<Dev>();
-                Check(Enumerator().EnumAudioEndpoints(FlowRender, DeviceActive, out var col), "EnumAudioEndpoints");
+                Check(Enumerator().EnumAudioEndpoints(flow, DeviceActive, out var col), "EnumAudioEndpoints");
                 col.GetCount(out int n);
                 for (int i = 0; i < n; i++)
                 {
@@ -376,7 +447,9 @@ namespace VisionALVR
                 finally { Marshal.FreeHGlobal(f); }
             }
 
-            public static string Default(int role) { return Enumerator().GetDefaultAudioEndpoint(FlowRender, role, out var d) < 0 ? null : (d.GetId(out var id) < 0 ? null : id); }
+            public static string Default(int role) => DefaultOf(FlowRender, role);
+            public static string DefaultCapture(int role) => DefaultOf(FlowCapture, role);
+            static string DefaultOf(int flow, int role) { return Enumerator().GetDefaultAudioEndpoint(flow, role, out var d) < 0 ? null : (d.GetId(out var id) < 0 ? null : id); }
 
             public static void SetDefault(string id, int role) => Check(((IPolicyConfig)new PolicyConfigCom()).SetDefaultEndpoint(id, role), "SetDefaultEndpoint " + Roles[role]);
 
@@ -399,18 +472,21 @@ namespace VisionALVR
     {
         public const string DownloadUrl = "https://vb-audio.com/Cable/index.htm";
 
-        public CableForm()
+        public CableForm(bool forMicrophone = false)
         {
             Text = "VisionALVR \u2013 Virtual audio cable";
             Font = Ui.Body; Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen;
             BackColor = Color.White;
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
-            col.Controls.Add(new Label { Text = "No virtual audio cable found", AutoSize = true, Font = Ui.Big });
+            col.Controls.Add(new Label { Text = forMicrophone ? "The microphone needs a virtual audio cable" : "No virtual audio cable found", AutoSize = true, Font = Ui.Big });
             col.Controls.Add(new Label
             {
-                Text = "The game's sound reaches the headset through a virtual audio device: VisionALVR makes it the Windows output while it streams, mutes your speakers, and puts everything back when it closes. " +
-                       "Without one, the headset has no game sound.\n\n" +
+                Text = (forMicrophone
+                       ? "Your voice from the headset's microphone reaches games (VRChat, chat) through a virtual audio device: VisionALVR plays it into the cable and, while it streams, makes the cable's recording side the Windows default microphone (the previous one comes back when it closes). " +
+                         "Without one, games do not hear the headset microphone.\n\n"
+                       : "The game's sound reaches the headset through a virtual audio device: VisionALVR makes it the Windows output while it streams, mutes your speakers, and puts everything back when it closes. " +
+                         "Without one, the headset has no game sound.\n\n") +
                        "VB-CABLE (VB-Audio) is a free virtual cable. Click \"Open the download page\", install it (administrator rights, a restart may be needed), then start the streamer again.\n\n" +
                        "VB-CABLE is a separate product of VB-Audio Software, not part of VisionALVR. VisionALVR does not distribute, control or support it and accepts no responsibility for it: " +
                        "read its licence and install it at your own risk.",
@@ -418,7 +494,7 @@ namespace VisionALVR
             });
             var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
             var open = new Button { Text = "Open the download page", AutoSize = true, Font = Ui.Bold, MinimumSize = new Size(130, 30) };
-            var go = new Button { Text = "Continue without game sound", AutoSize = true, MinimumSize = new Size(130, 30), DialogResult = DialogResult.Cancel };
+            var go = new Button { Text = forMicrophone ? "Continue without the microphone" : "Continue without game sound", AutoSize = true, MinimumSize = new Size(130, 30), DialogResult = DialogResult.Cancel };
             open.Click += (s, e) => { try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(DownloadUrl) { UseShellExecute = true }); } catch { } };
             row.Controls.Add(open); row.Controls.Add(go);
             col.Controls.Add(row);

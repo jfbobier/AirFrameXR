@@ -29,6 +29,7 @@ namespace VisionALVR
         public readonly NumericUpDown Packet = Num(500, 4000, 100);
         public readonly NumericUpDown Haptics = Dec(0m, 5m);
         public readonly CheckBox DebugDefault = new CheckBox { Text = "Debug logging at every start (costs a few ms per frame)", AutoSize = true };
+        public readonly CheckBox Mic = new CheckBox { Text = "Headset microphone for games (VRChat voice; needs VB-CABLE)", AutoSize = true };
         public readonly ComboBox CaptureBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 330 };
         public readonly ComboBox PowerPlanBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
         List<PowerPlan.Plan> plans = new List<PowerPlan.Plan>();
@@ -91,6 +92,8 @@ namespace VisionALVR
             note(Audio);
             CaptureBox.Items.AddRange(new object[] { "Process loopback (no virtual cable needed)", "Virtual cable (VB-CABLE)" });
             row("Game audio capture", CaptureBox);
+            note(Mic);
+            Mic.Click += (s, e) => { if (Mic.Checked && AudioRoute.FindMicrophoneCable() == null && !string.Equals(Environment.GetEnvironmentVariable("VISIONALVR_TEST_NO_DIALOG"), "1")) using (var f = new CableForm(true)) { f.ShowDialog(this); if (AudioRoute.FindMicrophoneCable() == null) Mic.Checked = false; } };
             note(Mute);
 
             section("Network and controllers");
@@ -160,6 +163,7 @@ namespace VisionALVR
             DebugDefault.Checked = settings.Debug;
             RecenterKey.Text = settings.RecenterKey;
             CaptureBox.SelectedIndex = settings.AudioCapture == "device" ? 1 : 0;
+            Mic.Checked = Json.Bool(s, "session_settings.audio.microphone.enabled", false);
             plans = PowerPlan.List();
             PowerPlanBox.Items.Clear(); PowerPlanBox.Items.Add("(leave unchanged)");
             foreach (var p in plans) PowerPlanBox.Items.Add(p.Name);
@@ -216,6 +220,7 @@ namespace VisionALVR
             Json.Set(s, "openvr_config.refresh_rate", (int)rate);
             Json.Set(s, "openvr_config.enable_foveated_encoding", ProfFov.Checked);
             Json.Set(s, "session_settings.audio.game_audio.enabled", Audio.Checked);
+            Json.Set(s, "session_settings.audio.microphone.enabled", Mic.Checked);
             Json.Set(s, "session_settings.connection.stream_protocol.variant", (string)Proto.SelectedItem);
             Json.Set(s, "session_settings.connection.packet_size", (int)Packet.Value);
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)Haptics.Value);
