@@ -31,7 +31,7 @@ CLIENT_FLAGS = {"seconds": "--seconds", "connect_timeout": "--connect-timeout", 
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views"}
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "track_blackout": "--track-blackout", "track_after_frame": "--track-after-frame", "track_frames_needed": "--track-frames-needed", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views", "height": "--height"}
 
 
 class Blocked(Exception):
@@ -94,8 +94,14 @@ def preflight(sc):
 
 
 def kill_stale():
-    for exe in ("alvr_host.exe", "alvr_client_headless.exe"):
+    # the scheduled tasks first: `schtasks /run` does nothing while a task is still running (a feeder or a frozen host left by an aborted run kept the next run's
+    # host from starting), and /end takes the task's whole process tree (cmd, feeder, host)
+    for task in ("openxr_host_tmp", "openxr_app_tmp", "openxr_ballast_tmp", "openxr_dbg"):
+        b_run(f"schtasks /end /tn {task} >nul 2>&1")
+    for exe in ("alvr_host.exe", "alvr_client_headless.exe", "xr_probe.exe", "vram_ballast.exe", "findstr.exe"):
         b_run(f"taskkill /f /im {exe} >nul 2>&1")
+    # helper scripts of an aborted stability run (the sampler loops until its stop file exists, the freezers sleep): end them by their command line
+    b_run('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \'*memsample.ps1*\' -or $_.CommandLine -like \'*suspend.ps1*\' -or $_.CommandLine -like \'*feed.ps1*\' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1')
 
 
 def derive_session(sc, dst: Path, pin=None):
@@ -205,6 +211,89 @@ def start_limited(rid, task, script_name, body, rc_name, env=None):
     return TaskProc(rid, task, rc_name)
 
 
+def _audio_ps(rid, n, args, timeout=120):
+    """audio_route.ps1 <args> in the interactive session; returns its output lines."""
+    body = f"powershell -NoProfile -ExecutionPolicy Bypass -File runs\\{rid}\\audio_route.ps1 {args} > runs\\{rid}\\audio{n}.txt 2>&1\r\n"
+    start_limited(rid, f"va_stab_au{n % 4}", f"au{n}.bat", body, f"au{n}.rc").wait(timeout)
+    dst = CACHE / f"stab_audio_{rid}_{n}.txt"
+    dst.unlink(missing_ok=True)
+    b_get(f"runs/{rid}/audio{n}.txt", dst)
+    return dst.read_text(errors="replace").splitlines() if dst.exists() else []
+
+
+def _audio_parse(lines):
+    d = {"default": {}, "device": {}}
+    for l in lines:
+        m = re.match(r"default (\w+) (.*)", l)
+        if m:
+            d["default"][m.group(1)] = m.group(2).strip()
+        m = re.match(r"device (.*) \| vol=([\d.]+) mute=(\d)", l)
+        if m:
+            d["device"][m.group(1).strip()] = (float(m.group(2)), m.group(3) == "1")
+    return d
+
+
+def _audio_start(events, rid, rd, log):
+    """Takes the audio snapshot and starts the thread that plays `events`. Returns the state `_audio_restore` needs."""
+    b_put(ROOT / "harness" / "audio_route.ps1", f"runs/{rid}/audio_route.ps1")
+    snap = _audio_parse(_audio_ps(rid, 0, "snapshot"))
+    default = snap["default"].get("console")
+    others = [n for n in snap["device"] if n != default and "cable" not in n.lower()] or [n for n in snap["device"] if n != default and "16ch" not in n.lower()]   # no second real output: the stereo cable (a stolen default)
+    st = {"default": default, "orig": snap["device"].get(default), "other": others[0] if others else None, "log": [], "switched": False}
+    log(f"  audio events: default output '{default}' (volume/mute {st['orig']}), alternative '{st['other']}'")
+    if not default:
+        st["log"].append("no default output: audio events skipped")
+        return st
+    t0 = time.time()
+
+    def play():
+        n = 0
+        for e in sorted(events, key=lambda e: e["t"]):
+            w = e["t"] - (time.time() - t0)
+            if w > 0:
+                time.sleep(w)
+            n += 1
+            a, v = e["action"], e.get("value")
+            try:
+                if a in ("mute", "unmute"):
+                    args = f'mute "{default}" {1 if a == "mute" else 0}'
+                elif a == "volume":
+                    args = f'set "{default}" {v}'
+                elif a == "switch" and st["other"]:
+                    args = f'setdefault "{st["other"]}"'
+                    st["switched"] = True
+                elif a == "switch_back":
+                    args = f'setdefault "{default}"'
+                    st["switched"] = False
+                else:
+                    st["log"].append(f"{e['t']:.0f}s {a}: skipped")
+                    continue
+                _audio_ps(rid, 100 + n, args)
+                st["log"].append(f"{e['t']:.0f}s {a} {v if v is not None else ''} done at +{time.time() - t0:.0f}s")
+            except Exception as ex:   # an audio helper failing must not end the run
+                st["log"].append(f"{e['t']:.0f}s {a}: {ex}")
+    st["thread"] = threading.Thread(target=play)
+    st["thread"].start()
+    return st
+
+
+def _audio_restore(st, rid, log):
+    if not st.get("default"):
+        return
+    try:
+        _audio_ps(rid, 900, f'setdefault "{st["default"]}"')
+        _audio_ps(rid, 901, f'mute "{st["default"]}" 0')
+        if st.get("orig"):
+            _audio_ps(rid, 902, f'set "{st["default"]}" {st["orig"][0]}')
+        if st["orig"] and st["orig"][1]:
+            _audio_ps(rid, 903, f'mute "{st["default"]}" 1')
+        st["log"].append("restored the original default output, mute and volume")
+        log("  audio restored")
+    except Exception as ex:
+        st["log"].append(f"RESTORE FAILED: {ex}")
+        log(f"  AUDIO RESTORE FAILED: {ex} (set the default output, unmute and the volume by hand)")
+
+
 def launch_app(app, rid, rd, log):
     """Runs the OpenXR app (xr_probe) against VDXR+OVRShim as a NON-elevated process: the SSH session is elevated and the
     OpenXR loader ignores XR_RUNTIME_JSON for elevated processes, so it goes through a temporary LIMITED scheduled task."""
@@ -275,6 +364,11 @@ def run_scenario(sc, outdir: Path, log=print):
         # sample the NVIDIA GPU on the builder during the run (state, clocks, engine utilization, power, throttle reasons)
         gpu_p = b_popen(f'nvidia-smi --query-gpu=timestamp,pstate,clocks.sm,clocks.video,clocks.mem,utilization.gpu,utilization.encoder,'
                         f'utilization.decoder,power.draw,temperature.gpu,clocks_throttle_reasons.active --format=csv -lms 500 > {rd}\\gpu.csv 2>&1')
+    mem_p = None
+    if sc.get("sample_memory"):
+        # stability harness: per process RAM / handles / dedicated VRAM once a second (harness/stability/memsample.ps1) -> mem.csv
+        b_put(ROOT / "harness" / "stability" / "memsample.ps1", f"runs/{rid}/memsample.ps1")
+        mem_p = b_popen(f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\memsample.ps1 -Out {rd}\\mem.csv -StopFile {rd}\\mem.stop")
     host_exe = HOST_EXE
     if sc.get("install"):
         # the portable folder exactly as a user unzips it (no registry: the app gets XR_RUNTIME_JSON); the host runs from it
@@ -315,7 +409,22 @@ def run_scenario(sc, outdir: Path, log=print):
             src_arg = "" if (h.get("live") or h.get("shim")) else f'--file {sc["source"].replace("/", chr(92))} '
             dump_arg = f"--dump-qpmap {rd}\\qpmap.json " if h.get("dump_qpmap") else ""
             envpre = "".join(f"set {k}={v}&& " for k, v in {"VISIONALVR_PIPELINE_CSV": f"{rd}\\host_pipeline.csv", "VISIONALVR_HEAD_CSV": f"{rd}\\host_head.csv", **(h.get("env") or {})}.items())
-            hostcmd = (envpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
+            feedpre = ""
+            if sc.get("stdin_feed"):
+                # stability harness: host commands at given times (the GUI's stdin lines: frame_gen, recenter, height, gamma, ...), seconds after the host starts. The pipe is held open
+                # until `hold_s` (the host quits on EOF).
+                feed = sorted(sc["stdin_feed"]["events"], key=lambda e: e["t"])
+                ps = ["$ErrorActionPreference = 'SilentlyContinue'", "$t0 = Get-Date",
+                      "function At([double]$t, [string]$l) { $w = $t - ((Get-Date) - $t0).TotalSeconds; if ($w -gt 0) { Start-Sleep -Milliseconds ([int]($w * 1000)) }; [Console]::Out.WriteLine($l); [Console]::Out.Flush() }"]
+                ps += [f"At {e['t']} '{e['line']}'" for e in feed]
+                ps.append(f"Start-Sleep -Seconds {int(sc['stdin_feed'].get('hold_s', 600))}")
+                fl = CACHE / "feed.ps1"
+                CACHE.mkdir(parents=True, exist_ok=True)
+                fl.write_text("\r\n".join(ps) + "\r\n")
+                b_put(fl, f"runs/{rid}/feed.ps1")
+                feedpre = f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\feed.ps1 | "
+                steps["stdin_feed_events"] = len(feed)
+            hostcmd = (envpre + feedpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
                        f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv '
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
                                      "width": "--width", "height": "--height", "height_m": "--height-m", "noise": "--noise", "qp_map": "--qp-map",
@@ -325,7 +434,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "send_pacing": "--send-pacing", "running_start_ms": "--running-start-ms", "boundary_offset_ms": "--boundary-offset-ms",
                                      "gpu_sched_class": "--gpu-sched-class", "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order", "no_follow_rate": "--no-follow-rate",
                                      "frame_gen": "--frame-gen", "frame_gen_flow_scale": "--frame-gen-flow-scale", "frame_gen_perf": "--frame-gen-perf", "frame_gen_t": "--frame-gen-t"})
-                       + f' > {rd}\\host_stdout.txt 2>&1')
+                       + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
                 host_p = start_limited(rid, "openxr_host_tmp", "host.cmd", hostcmd + "\r\n", "host.rc")
@@ -339,24 +448,85 @@ def run_scenario(sc, outdir: Path, log=print):
         env += f"set {k}={v}&& "
     if c.get("replay"):
         b_put(ROOT / c["replay"], f"runs/{rid}/replay.csv")   # a recorded head trace (harness/fixtures/headtraces)
-    def make_client_cmd(sfx=""):
+    def make_client_cmd(sfx="", over=None):
         return (env + f'{CLIENT_EXE} --report {rd}\\client{sfx}_report.json --frames-csv {rd}\\frames{sfx}.csv ' + ('' if c.get('no_stream_dump') else f'--out {rd}\\client{sfx}.hevc ')
-                + argline(c, CLIENT_FLAGS)
+                + argline({**c, **(over or {})}, CLIENT_FLAGS)
                 + (f" --controllers-csv {rd}\\controllers.csv" if c.get("controllers") and not sfx else "")
                 + (f" --display-csv {rd}\\display{sfx}.csv" if c.get("display_sim") else "")
                 + (f" --poses-csv {rd}\\poses.csv" if not sfx else "")
                 + (f" --replay {rd}\\replay.csv" if c.get("replay") and not sfx else "")
                 + f' > {rd}\\client{sfx}_stdout.txt 2>&1')
     clientcmd = make_client_cmd()
-    client_p = b_popen(clientcmd)
+    storm = sc.get("reconnect_storm")
+    client_p = None if storm else b_popen(clientcmd)
+    # stability harness memory limit: {"vram_cap_mb": 6000, "ram_cap_mb": 8000, "at_s": 20, "release_s": 90} makes the machine behave as if the chain (host, app, client)
+    # had only that much VRAM / RAM: the ballast (tools/stability/vram_ballast.cpp) takes what is free now minus the cap, from `at_s` on (and gives it back at `release_s`)
+    ballast_started = False
+    ml = sc.get("memory_limit")
+    if ml:
+        rc, o = b_run("nvidia-smi --query-gpu=memory.total,memory.used --format=csv,noheader,nounits")
+        tot, used = [int(x) for x in o.strip().splitlines()[-1].replace(" ", "").split(",")[:2]]
+        rc, o = b_run('powershell -NoProfile -Command "[int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024)"')
+        free_ram = int(o.strip().splitlines()[-1])
+        vb = max(0, (tot - used) - ml["vram_cap_mb"]) if ml.get("vram_cap_mb") else 0
+        rb = max(0, free_ram - ml["ram_cap_mb"]) if ml.get("ram_cap_mb") else 0
+        at, rel = ml.get("at_s", 0), ml.get("release_s")
+        sched = lambda mb: f"{at}:{mb}" + (f",{rel}:0" if rel else "")
+        steps["memory_limit"] = {"vram_ballast_mb": vb, "ram_ballast_mb": rb, "gpu_total_mb": tot, "gpu_used_mb": used, "ram_free_mb": free_ram}
+        log(f"  memory limit: ballast {vb} MB VRAM, {rb} MB RAM (GPU {tot} MB, {used} used; RAM free {free_ram} MB)")
+        body = (f'build\\stability\\vram_ballast.exe --vram "{sched(vb)}" --ram "{sched(rb)}" --seconds {sc.get("timeout_s", 300)} '
+                f'--stop-file runs\\{rid}\\ballast.stop --log runs\\{rid}\\ballast.log\r\n')
+        start_limited(rid, "openxr_ballast_tmp", "ballast.cmd", body, "ballast.rc")
+        ballast_started = True
+    # stability harness audio disturbances while the chain streams: [{"t": s, "action": "mute"|"unmute"|"volume"|"switch"|"switch_back", "value": 0.3}], seconds from the client start. They go through
+    # harness/audio_route.ps1 in the interactive session (Core Audio is not reachable from the SSH session) on the DEFAULT output; the original default, mute and volume are restored at the end
+    audio_thread = None
+    audio_state = {}
+    if sc.get("audio_events"):
+        audio_state = _audio_start(sc["audio_events"], rid, rd, log)
+        audio_thread = audio_state.get("thread")
+    # stability harness faults on the builder's processes, timed from the client start: {"type": "suspend", "process": "alvr_host", "at_s": 40, "for_s": 30}
+    fault_logs = []
+    for i, f in enumerate(sc.get("faults", [])):
+        if f["type"] == "suspend":
+            b_put(ROOT / "harness" / "stability" / "suspend.ps1", f"runs/{rid}/suspend.ps1")
+            b_popen(f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\suspend.ps1 -Name {f['process']} -After {f['at_s']} -For {f['for_s']} -Log {rd}\\fault{i}.txt")
+            fault_logs.append(f"fault{i}.txt")
     app = sc.get("app")
-    if app:
+    app_thread = None
+    storm_sessions = 0
+    if storm:
+        # stability harness: the headset comes and goes many times while the app runs (sleep, Wi-Fi drop, the user taking it off): `count` client sessions of `on_s` seconds
+        # (min, max) with `gap_s` between them, seeded, against the one daemon host
+        import random
+        rng = random.Random(storm.get("seed", 1))
+        if app:
+            def _app():
+                steps["app"] = launch_app(app, rid, rd, log)
+            app_thread = threading.Thread(target=_app)
+            app_thread.start()
+        for i in range(storm["count"]):
+            on = round(rng.uniform(*storm["on_s"]), 1)
+            log(f"  storm session {i}: {on} s")
+            p = b_popen(make_client_cmd(f"_s{i}", {"seconds": on, "connect_timeout": storm.get("connect_timeout", 40)}))
+            try:
+                p.wait(timeout=on + storm.get("connect_timeout", 40) + 60)
+            except subprocess.TimeoutExpired:
+                steps["storm_timeout"] = i
+                break
+            storm_sessions = i + 1
+            time.sleep(round(rng.uniform(*storm["gap_s"]), 1))
+        steps["storm_sessions"] = storm_sessions
+        if app_thread:
+            app_thread.join(timeout=(app or {}).get("timeout_s", 60) + 60)
+    elif app:
         if app.get("delay_s"):
             time.sleep(app["delay_s"])     # let the stream run green first
         steps["app"] = launch_app(app, rid, rd, log)
     budget = sc.get("timeout_s", 120)
     try:
-        client_p.wait(timeout=budget)
+        if client_p:
+            client_p.wait(timeout=budget)
         if sc.get("reconnect"):
             # the headset went away and comes back (sleep, Wi-Fi drop, app restart): the daemon host must serve it again
             time.sleep(sc["reconnect"].get("gap_s", 3))
@@ -382,6 +552,17 @@ def run_scenario(sc, outdir: Path, log=print):
         shutil.rmtree(wdir, ignore_errors=True)
     if gpu_p:
         b_run("taskkill /f /im nvidia-smi.exe >nul 2>&1")
+    if audio_thread:
+        audio_thread.join(timeout=120)
+    if audio_state:
+        _audio_restore(audio_state, rid, log)
+    if mem_p:
+        b_run(f"echo x > {rd}\\mem.stop")
+        time.sleep(2)
+    if ballast_started:
+        b_run(f"echo x > {rd}\\ballast.stop")
+        time.sleep(2)
+        b_run("schtasks /delete /tn openxr_ballast_tmp /f")
     steps["wall_s"] = round(time.time() - t0, 1)
     log("  fetching artifacts")
     if h is not None and topo["host"] == "builder":
@@ -397,19 +578,33 @@ def run_scenario(sc, outdir: Path, log=print):
             b_get(f"runs/{rid}/qpmap.json", outdir / "qpmap.json")   # what ALVR negotiated (openvr_config)
     if gpu_p:
         b_get(f"runs/{rid}/gpu.csv", outdir / "gpu.csv")
+    if mem_p:
+        b_get(f"runs/{rid}/mem.csv", outdir / "mem.csv")
+    if ballast_started:
+        b_get(f"runs/{rid}/ballast.log", outdir / "ballast.log")
+    for fl in fault_logs:
+        b_get(f"runs/{rid}/{fl}", outdir / fl)
+    if audio_state:
+        (outdir / "audio_events.log").write_text("\n".join(audio_state.get("log", [])) + "\n")
     if app:
         for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log", "mirror_events.csv"):
             b_get(f"runs/{rid}/{f}", outdir / f)
-    for f in ("client_report.json", "client_stdout.txt", "frames.csv") + (() if sc.get("client", {}).get("no_stream_dump") else ("client.hevc",)):
-        b_get(f"runs/{rid}/{f}", outdir / f)
+    if storm:
+        for i in range(storm_sessions):
+            for f in (f"client_s{i}_report.json", f"client_s{i}_stdout.txt", f"frames_s{i}.csv", f"display_s{i}.csv"):
+                b_get(f"runs/{rid}/{f}", outdir / f)
+    else:
+        for f in ("client_report.json", "client_stdout.txt", "frames.csv") + (() if sc.get("client", {}).get("no_stream_dump") else ("client.hevc",)):
+            b_get(f"runs/{rid}/{f}", outdir / f)
     if sc.get("reconnect"):
         for f in ("client2_report.json", "client2_stdout.txt", "frames2.csv", "client2.hevc"):
             b_get(f"runs/{rid}/{f}", outdir / f)
     if sc.get("client", {}).get("controllers"):
         b_get(f"runs/{rid}/controllers.csv", outdir / "controllers.csv")
-    if sc.get("client", {}).get("display_sim"):
+    if sc.get("client", {}).get("display_sim") and not storm:
         b_get(f"runs/{rid}/display.csv", outdir / "display.csv")
-    b_get(f"runs/{rid}/poses.csv", outdir / "poses.csv")
+    if not storm:
+        b_get(f"runs/{rid}/poses.csv", outdir / "poses.csv")
     return steps
 
 
@@ -1028,6 +1223,8 @@ def analyse(sc, outdir: Path):
     hs = (outdir / "host_stdout.txt").read_text(errors="replace") if (outdir / "host_stdout.txt").exists() else ""
     a["host_event_names"] = sorted(set(re.findall(r'"event":"([a-z_]+)"', hs)))
     a["bench_steps"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"bench_step"' in l]
+    a["height_calibrated"] = next((json.loads(l)["data"] for l in hs.splitlines() if '"event":"height_calibrated"' in l), None)
+    a["game_runs"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"game_run"' in l]   # the run summary the streamer shows (net block: latency medians, outliers)
     lg = outdir / "logs"
     if lg.exists():
         dbg = sorted((lg / "debug").glob("*")) if (lg / "debug").exists() else []
@@ -1332,6 +1529,20 @@ def evaluate(sc, a):
             if pc2.get("gpu_sched_class") is not None:
                 g = pp.get("gpu_scheduling") or {}
                 chk("pipeline_gpu_sched_class", g.get("class") == pc2["gpu_sched_class"] and g.get("status") == 0, g, f"class {pc2['gpu_sched_class']} granted")
+    if "height_calibrated" in ck:   # U5b: Auto (host height 0) anchors on the head's own height, Manual on the typed value
+        hc, want = a.get("height_calibrated"), ck["height_calibrated"]
+        chk("height_calibrated_reported", hc is not None, hc is not None, True)
+        if hc:
+            chk("height_calibrated_eye_height", abs(hc.get("eye_height_m", -9) - want["eye_height_m"]) <= want.get("tol", 0.02), hc.get("eye_height_m"), f"{want['eye_height_m']} +- {want.get('tol', 0.02)}")
+            chk("height_calibrated_headset_y", abs(hc.get("headset_y", -9) - want["headset_y"]) <= want.get("tol", 0.02), hc.get("headset_y"), f"{want['headset_y']} +- {want.get('tol', 0.02)}")
+    if "game_run" in ck:   # U7: the run's latency is believable on a clean run (no garbage samples, medians of the windows)
+        g = ck["game_run"]
+        runs = a.get("game_runs") or []
+        net = (runs[-1].get("net") or {}) if runs else {}
+        chk("game_run_reported", bool(runs), len(runs), ">= 1")
+        if runs:
+            chk("game_run_latency_ms", 0 < net.get("latency_ms", 0) < g.get("max_latency_ms", 200), net.get("latency_ms"), f"0 < x < {g.get('max_latency_ms', 200)}")
+            chk("game_run_latency_outliers", net.get("latency_outliers", 99) <= g.get("max_latency_outliers", 0), net.get("latency_outliers"), f"<= {g.get('max_latency_outliers', 0)}")
     if "app_timing" in ck:
         at, ak = ck["app_timing"], a.get("app_timing")
         chk("app_timing_measured", ak is not None, ak is not None, "xr_probe per-frame timing")

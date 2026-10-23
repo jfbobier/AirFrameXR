@@ -624,6 +624,14 @@ namespace VisionALVR
             panel.Load();
             ctx = new TestContext { HS = hs, Check = check, Fps = ctxFps, HeadsetAvailable = hs.FromHeadset };
             ctx.R.TestFps = ctxFps;
+            ctx.AskHeard = () =>
+            {
+                bool? heard = null;
+                if (auto) return null;   // the unattended harness run has nobody to ask
+                try { Invoke((Action)(() => heard = MessageBox.Show(this, "The scene played music (Sakura Breeze) while you were inside it.\n\nDid you hear it in the headset?", "VisionALVR \u2013 audio test", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)); } catch { }
+                return heard;
+            };
+            ctx.AskCable = () => { try { Invoke((Action)(() => { using (var f = new CableForm()) f.ShowDialog(this); })); } catch { } };
             var existing = modeExisting != null && modeExisting.Checked;
             if (existing)
             {

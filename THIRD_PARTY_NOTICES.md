@@ -29,6 +29,9 @@ Versions, sources and checksums: `third_party/README.md`, `deps.lock.json`.
 - `bench\littlest_tokyo.vab`: **"Littlest Tokyo" by Glen Fox** (glenatron, https://sketchfab.com/glenatron), licensed
   **CC-BY-4.0** (https://creativecommons.org/licenses/by/4.0/), from the three.js examples (r169). Changes: converted to
   VisionALVR's format (meshes decompressed, simplified shading), shown inside a room tiled with the scene's own texture.
+- `bench\sakura_breeze.mp3`: the music of that scene. **Sakura Breeze by Roa Music** | https://soundcloud.com/roa_music1031 .
+  Royalty Free Music by https://www.free-stock-music.com . Creative Commons / Attribution 3.0 Unported License (CC BY 3.0),
+  https://creativecommons.org/licenses/by/3.0/deed.en_US . Changes: the first 75 seconds, re-encoded (128 kb/s, 48 kHz) with a fade in and out.
 
 ## Related projects (not in this repository, not in the zip)
 - **OFXR-Bridge** (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge): the frame-generation synthesis recipe and safety rules were studied from its

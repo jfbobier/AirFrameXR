@@ -24,6 +24,7 @@ use pipeline::FgRate;
 mod simrig;
 mod telemetry;
 mod timing;
+mod watchdog;
 mod vision;
 
 use serde_json::json;
@@ -741,8 +742,60 @@ impl StatsWindow {
 pub(crate) fn event(origin: Instant, name: &str, extra: serde_json::Value) {
     let wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
     let line = json!({ "t_ms": origin.elapsed().as_secs_f64() * 1000.0, "unix_s": wall, "event": name, "data": extra }).to_string();
-    println!("{line}");
+    send_event_line(line.clone());
     logs::event_line(&line);
+}
+
+// ---- stdout events never block the host ------------------------------------------------------------------------------------
+// The streamer window reads the host's stdout through a pipe. A println! into a full pipe blocks the calling thread until the reader drains it, and a reader that
+// stops (a modal dialog, a busy UI thread) froze the whole host for as long: lab 2026-10-22 (harness/stability gui_pipe_stall_30s), a 30 s reader stall stopped the
+// stream for 27 s, the main loop, the watchdog and the pipeline all waiting on stdout. Events now go through a bounded queue to one writer thread, which alone waits
+// for the reader; past `EVENT_QUEUE` queued lines an event is dropped (counted, logged when the reader is back) rather than the host blocked.
+const EVENT_QUEUE: usize = 4096;
+static EVENT_TX: std::sync::OnceLock<std::sync::mpsc::SyncSender<String>> = std::sync::OnceLock::new();
+static EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0);
+static EVENTS_QUEUED: AtomicUsize = AtomicUsize::new(0);
+
+fn send_event_line(line: String) {
+    let tx = EVENT_TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<String>(EVENT_QUEUE);
+        std::thread::Builder::new().name("stdout-events".into()).spawn(move || {
+            use std::io::Write;
+            for line in rx {
+                {
+                    let out = std::io::stdout();
+                    let mut out = out.lock();
+                    let _ = writeln!(out, "{line}"); // blocks here, and only here, while the reader is stalled
+                    let _ = out.flush();
+                }
+                EVENTS_QUEUED.fetch_sub(1, Ordering::Relaxed);
+                let dropped = EVENTS_DROPPED.swap(0, Ordering::Relaxed);
+                if dropped > 0 {
+                    logs::general("WARN", &format!("the host's stdout reader stalled: {dropped} events were dropped"));
+                }
+            }
+        }).ok();
+        tx
+    });
+    EVENTS_QUEUED.fetch_add(1, Ordering::Relaxed);
+    if tx.try_send(line).is_err() {
+        EVENTS_QUEUED.fetch_sub(1, Ordering::Relaxed);
+        EVENTS_DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Waits (at most 2 s) until the writer thread has written everything queued: before the host exits and before lines printed directly.
+pub(crate) fn flush_events() {
+    let t0 = Instant::now();
+    while EVENTS_QUEUED.load(Ordering::Relaxed) > 0 && t0.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// `std::process::exit` after the queued events are out.
+fn exit_now(code: i32) -> ! {
+    flush_events();
+    std::process::exit(code)
 }
 
 // ---- HEVC Annex-B access-unit splitter ------------------------------------------------------------------
@@ -892,6 +945,7 @@ mod nvh {
         pub fn nvh_ipc_set_color(ipc: *mut c_void, brightness: f32, contrast: f32, saturation: f32, sharpening: f32);
         pub fn nvh_gpu_info(buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_gpu_sample(buf: *mut c_char, len: i32) -> i32;
+        pub fn nvh_mem_sample(buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_ipc_shim_stats(ipc: *mut c_void, submit_mode: *mut u32, ts_matched: *mut u32, ts_fallback: *mut u32);
         pub fn nvh_ipc_slot_busy(ipc: *mut c_void, slot: u32, busy: i32);
         pub fn nvh_ipc_set_pacing(ipc: *mut c_void, boundary_offset_ms: f32, running_start_ms: f32);
@@ -1084,7 +1138,7 @@ fn setup_fail(origin: Instant, message: &str) -> ! {
     eprintln!("{message}");
     logs::general("ERROR", message);
     event(origin, "setup_error", json!({ "message": message }));
-    std::process::exit(EXIT_SETUP);
+    exit_now(EXIT_SETUP);
 }
 
 /// The session ALVR, the encoder and the benchmarks read: present and valid JSON, else a message that says what to do.
@@ -1399,19 +1453,30 @@ impl RunStats {
         self.mv0 = mv;
         self.mv_now = mv;
     }
-    /// Mean of each latency / rate field over the windows, the 95th percentile of the total latency, and the packets lost.
+    /// Rates: mean over the windows. Latencies: median and 95th percentile of the windows' medians (a window with no sane sample gives none);
+    /// `latency_outliers` / `latency_samples` count the client samples dropped as garbage and all of them (the streamer shows n/a above 10 %).
     fn net_summary(&self) -> serde_json::Value {
-        let mean = |k: &str| -> f64 {
-            let v: Vec<f64> = self.net.iter().filter_map(|w| w[k].as_f64()).collect();
-            if v.is_empty() { 0.0 } else { (v.iter().sum::<f64>() / v.len() as f64 * 100.0).round() / 100.0 }
-        };
-        let mut tot: Vec<f64> = self.net.iter().filter_map(|w| w["total_latency_ms"].as_f64()).collect();
-        tot.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let p95 = if tot.is_empty() { 0.0 } else { tot[(((tot.len() - 1) as f64) * 0.95).round() as usize] };
-        json!({ "windows": self.net.len(), "bitrate_mbps": mean("bitrate_mbps"), "throughput_mbps": mean("throughput_mbps"), "displayed_fps": mean("displayed_fps"),
-            "latency_ms": mean("total_latency_ms"), "latency_p95_ms": p95, "encode_ms": mean("encode_ms"), "network_ms": mean("network_ms"), "decode_ms": mean("decode_ms"),
-            "packets_lost": self.lost })
+        net_summary_of(&self.net, self.lost)
     }
+}
+
+fn net_summary_of(net: &[serde_json::Value], lost: u64) -> serde_json::Value {
+    let mean = |k: &str| -> f64 {
+        let v: Vec<f64> = net.iter().filter_map(|w| w[k].as_f64()).collect();
+        if v.is_empty() { 0.0 } else { (v.iter().sum::<f64>() / v.len() as f64 * 100.0).round() / 100.0 }
+    };
+    let sorted = |k: &str| -> Vec<f64> {
+        let mut v: Vec<f64> = net.iter().filter_map(|w| w[k].as_f64()).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v
+    };
+    let at = |v: &[f64], q: f64| if v.is_empty() { 0.0 } else { v[(((v.len() - 1) as f64) * q).round() as usize] };
+    let (tot, enc, netw, dec) = (sorted("total_latency_ms"), sorted("encode_ms"), sorted("network_ms"), sorted("decode_ms"));
+    let outliers: u64 = net.iter().filter_map(|w| w["latency_outliers"].as_u64()).sum();
+    let samples: u64 = net.iter().filter_map(|w| w["samples"].as_u64()).sum();
+    json!({ "windows": net.len(), "bitrate_mbps": mean("bitrate_mbps"), "throughput_mbps": mean("throughput_mbps"), "displayed_fps": mean("displayed_fps"),
+        "latency_ms": at(&tot, 0.5), "latency_p95_ms": at(&tot, 0.95), "encode_ms": at(&enc, 0.5), "network_ms": at(&netw, 0.5), "decode_ms": at(&dec, 0.5),
+        "latency_outliers": outliers, "latency_samples": samples, "packets_lost": lost })
 }
 
 /// (frames with game vectors, eye passes synthesised from them) so far on the generator (zeros when it is off).
@@ -1430,7 +1495,7 @@ fn fg_mv_counts(p: &Option<Arc<pipeline::Pipeline>>) -> (u64, u64) {
 /// launcher reads the file and proposes. A run shorter than 20 s is not recorded. The headset's repeated-period share is given as the median
 /// 10-second window of the run (what the game is like most of the time) and its 90th percentile (its heavy parts): the proposal is made on the
 /// typical window, hiccups being a fact of life in VR (user, 2026-10-17).
-fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64, f64)], skipped: f64, run: &RunStats, gpu: &serde_json::Value) {
+fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64, f64)], skipped: f64, run: &RunStats, gpu: &serde_json::Value, recorded: bool) {
     let pct = |v: &mut Vec<f64>, q: f64| -> f64 {
         if v.is_empty() { return 0.0; }
         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1455,9 +1520,13 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
         ses["gpu"] = json!({ "name": gpu["name"], "driver": gpu["driver"] });
         ses
     };
-    let runs = games::record(args.config_dir.as_path(), exe, headset, level, rec.clone(), session, run.meta.as_ref());
-    logs::general("INFO", &format!("game run recorded: {exe} on {headset} at {level}, {secs:.0} s, {rendered_fps:.1} fps rendered (slowest tenth {:.1}), {streamed_fps:.1} streamed, headset repeated {:.1} % typical / {:.1} % worst (run {runs})",
-        rec["rendered_fps_low"].as_f64().unwrap_or(0.0), rec["headset_repeated_typ"].as_f64().unwrap_or(0.0) * 100.0, rec["headset_repeated_p90"].as_f64().unwrap_or(0.0) * 100.0));
+    // a run too short to keep still reports its numbers (the streamer's tiles show the last session), flagged recorded:false; the file is not touched
+    if recorded {
+        let runs = games::record(args.config_dir.as_path(), exe, headset, level, rec.clone(), session, run.meta.as_ref());
+        logs::general("INFO", &format!("game run recorded: {exe} on {headset} at {level}, {secs:.0} s, {rendered_fps:.1} fps rendered (slowest tenth {:.1}), {streamed_fps:.1} streamed, headset repeated {:.1} % typical / {:.1} % worst (run {runs})",
+            rec["rendered_fps_low"].as_f64().unwrap_or(0.0), rec["headset_repeated_typ"].as_f64().unwrap_or(0.0) * 100.0, rec["headset_repeated_p90"].as_f64().unwrap_or(0.0) * 100.0));
+    }
+    rec["recorded"] = json!(recorded);
     rec["net"] = run.net_summary();
     rec["mv"] = json!({ "enabled": args.game_motion_vectors, "frames": run.mv_now.0.saturating_sub(run.mv0.0) });
     rec["exe"] = json!(exe);
@@ -1518,7 +1587,7 @@ fn main() {
         Ok(a) => a,
         Err(e) => {
             eprintln!("{e}");
-            std::process::exit(3);
+            exit_now(3);
         }
     };
     let origin = Instant::now();
@@ -1531,7 +1600,7 @@ fn main() {
     if args.system_check {
         let v = vision::system_check(gpu_info);
         println!("{}", json!({ "event": "system_check", "data": v }));
-        std::process::exit(if v["ok"] == true { 0 } else { 6 });
+        exit_now(if v["ok"] == true { 0 } else { 6 });
     }
     let install = args.install_dir.as_deref().map(vision::Install::new);
     let mut seeded = false;
@@ -1599,9 +1668,9 @@ fn main() {
         });
         if let Err(e) = r {
             event(origin, "discovery_error", json!({ "message": e.to_string() }));
-            std::process::exit(6);
+            exit_now(6);
         }
-        std::process::exit(0);
+        exit_now(0);
     }
     vision::spawn_gpu_sampler(|| {
         let mut b = vec![0 as std::ffi::c_char; 256];
@@ -1628,7 +1697,7 @@ fn main() {
             Ok(changed) => event(origin, "nvidia_profile", json!({ "overrides": changed })),
             Err(e) => {
                 eprintln!("cannot apply NVIDIA profile to session.json: {e}");
-                std::process::exit(3);
+                exit_now(3);
             }
         }
         // benchmarks try profiles without changing the user's session (they set the encoder's foveation directly)
@@ -1640,12 +1709,12 @@ fn main() {
             })),
             Err(e) => {
                 eprintln!("cannot apply the encode profile to session.json: {e}");
-                std::process::exit(3);
+                exit_now(3);
             }
         }
     }
     if args.bench_quality {
-        std::process::exit(run_quality_bench(origin, &args, &layout, install.as_ref()));
+        exit_now(run_quality_bench(origin, &args, &layout, install.as_ref()));
     }
     let (aus, idr_count) = if args.live {
         (vec![], 0)
@@ -1656,7 +1725,7 @@ fn main() {
         event(origin, "source", json!({ "file": args.file, "bytes": stream.len(), "access_units": aus.len(), "idr": idr_count }));
         if aus.is_empty() || !aus[0].is_idr {
             eprintln!("source must start with an IDR access unit");
-            std::process::exit(3);
+            exit_now(3);
         }
         (aus, idr_count)
     };
@@ -1675,6 +1744,7 @@ fn main() {
     let (ctx, events) = ServerCoreContext::new();
     let ctx = Arc::new(ctx);
     let shared = Arc::new(Shared::default());
+    watchdog::start(origin, Arc::clone(&shared));
 
     // live NVENC encoder (settings from the session's openvr_config, like ALVR's C++ Settings.cpp)
     let mut live: Option<Box<LiveCtx>> = None;
@@ -1696,34 +1766,7 @@ fn main() {
     ];
     let audio_cfg = game_audio_config(&layout.session());
     event(origin, "game_audio", audio_cfg.clone());
-    // The headset's sound level must not follow the PC's volume: ALVR loop-back captures the default output, and when that is the VB-Audio cable
-    // device its endpoint volume scales what is captured (the PC's volume keys then change the headset's volume). Keep that device at 100 %
-    // while the host runs (checked every 3 s, so a change is undone within seconds). VISIONALVR_FORCE_CABLE_VOLUME=0 disables it.
-    #[cfg(windows)]
-    if audio_cfg["enabled"].as_bool().unwrap_or(true) && std::env::var("VISIONALVR_FORCE_CABLE_VOLUME").map(|v| v != "0").unwrap_or(true) {
-        std::thread::spawn(move || {
-            let mut last_logged = -1.0f32;
-            loop {
-                if let Ok(dev) = alvr_audio::AudioDevice::new_output(None) {
-                    if let Ok(name) = dev.name() {
-                        let lower = name.to_ascii_lowercase();
-                        if lower.contains("cable") || lower.contains("vb-audio") {
-                            if let Ok((vol, _muted)) = alvr_audio::get_volume_windows_device(&dev) {
-                                if vol < 0.999 {
-                                    let ok = alvr_audio::set_volume_windows_device(&dev, 1.0).is_ok();
-                                    if (vol - last_logged).abs() > 0.01 {
-                                        last_logged = vol;
-                                        event(origin, "audio_volume_forced", json!({ "device": name, "was": vol, "set_ok": ok }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                std::thread::sleep(Duration::from_secs(3));
-            }
-        });
-    }
+    // The default output, the virtual cable and its volume are set up by the streamer (tools/gui/AudioRoute.cs); the capture below is ALVR's.
     let mut reconfigs = 0usize;
     if args.live {
         let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, &host_keys);
@@ -1753,7 +1796,7 @@ fn main() {
         if enc_handle.is_null() {
             let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();
             eprintln!("NVENC init failed: {msg}");
-            std::process::exit(4);
+            exit_now(4);
         }
         // network benchmark: no game keeps the GPU clocked, and a lightly loaded GPU downclocks NVENC (~3x slower on the laptop)
         let keepalive = args.gpu_keepalive.or(if args.bench_network.is_some() { Some(90) } else { None });
@@ -1769,7 +1812,7 @@ fn main() {
         ipc = unsafe { nvh::nvh_ipc_open() };
         if ipc.is_null() {
             eprintln!("cannot open the OVRShim IPC objects");
-            std::process::exit(4);
+            exit_now(4);
         }
         event(origin, "ipc", json!({ "shim_alive": unsafe { nvh::nvh_ipc_shim_alive(ipc) } }));
     }
@@ -1787,7 +1830,7 @@ fn main() {
             let ms = unsafe { nvh::nvh_encode(enc_handle, i as u32, i as u64 * 11_000_000, (i == 0) as i32, err.as_mut_ptr(), 256) };
             if ms < 0.0 {
                 println!("{}", json!({ "event": "bench_error", "frame": i, "message": unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy() }));
-                std::process::exit(5);
+                exit_now(5);
             }
             v.push(ms);
             if args.bench_sleep_ms > 0 {
@@ -1810,7 +1853,7 @@ fn main() {
         println!("{}", json!({ "event": "bench", "data": data }));
         logs::general("INFO", &format!("encoder benchmark {:?} {}x{}: p50 {p50:.1} ms, p95 {p95:.1} ms ({} at {} Hz)", args.encode_profile, enc_size.0, enc_size.1,
             if p95 < budget * 0.9 { "fits" } else { "does NOT fit" }, args.fps));
-        std::process::exit(0);
+        exit_now(0);
     }
     // Shim mode: the staged pipeline owns the encoder from here on (intake / clock pick / encoder / sender threads).
     let mut pipeline: Option<Arc<pipeline::Pipeline>> = None;
@@ -2032,8 +2075,15 @@ fn main() {
                                     height_offset = -m.pose.position.y;
                                     height_anchored = true;
                                     unsafe { nvh::nvh_ipc_set_eye_height(ipc, eye_height) };
-                                    logs::general("INFO", &format!("height: headset at {:.2} m -> eye-level origin (published y {:+.2}), eye height {:.2} m for floor-level games",
-                                        m.pose.position.y, m.pose.position.y + height_offset, eye_height));
+                                    // dragging the eye-height slider re-anchors many times a second (429 lines in the gears 2026-10-20 log): one line a second
+                                    static HEIGHT_LOGGED_NS: AtomicU64 = AtomicU64::new(0);
+                                    let now_ns = origin.elapsed().as_nanos() as u64;
+                                    let last_ns = HEIGHT_LOGGED_NS.load(Ordering::Relaxed);
+                                    if last_ns == 0 || now_ns.saturating_sub(last_ns) >= 1_000_000_000 {
+                                        HEIGHT_LOGGED_NS.store(now_ns.max(1), Ordering::Relaxed);
+                                        logs::general("INFO", &format!("height: headset at {:.2} m -> eye-level origin (published y {:+.2}), eye height {:.2} m for floor-level games",
+                                            m.pose.position.y, m.pose.position.y + height_offset, eye_height));
+                                    }
                                     event(origin, "height_calibrated", json!({ "target_m": height_target, "headset_y": m.pose.position.y, "offset_m": height_offset, "eye_height_m": eye_height }));
                                 }
                                 // Head: pose only, zero velocity, exactly like ALVR's SteamVR driver (Hmd::OnPoseUpdated). The
@@ -2321,7 +2371,7 @@ fn main() {
                 let headset = shared.headset.lock().clone().map(|(_, n, _)| n).unwrap_or_default();
                 let hz = pipeline.as_ref().map(|p| 1.0 / p.period().as_secs_f64()).unwrap_or(args.fps);
                 stats.mv_now = fg_mv_counts(pipeline);
-                games_record_run(args, origin, &g.exe, &headset, hz, old_level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, windows, skipped, stats, &gpu_info);
+                games_record_run(args, origin, &g.exe, &headset, hz, old_level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, windows, skipped, stats, &gpu_info, true);
             }
             g.seg_start = Instant::now();
             g.seg_frames0 = shared.frames_sent.load(Ordering::Relaxed);
@@ -2337,7 +2387,7 @@ fn main() {
     let mut status_at = Instant::now();
     let mut motion_tap_seen = (0u32, 0u32);
     let (mut perf_rel, mut perf_late) = (0u64, 0u64);   // shim release counters at the last fg_perf line
-    let mut perf_fg = [0u64; 6];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand
+    let mut perf_fg = [0u64; 7];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand, stale_stamps
     // (tap state, streams) last reported: the shim's DLSS motion-vector tap (docs/MOTION_VECTORS.md)
     struct BenchState {
         i: usize,
@@ -2353,6 +2403,7 @@ fn main() {
     let (mut st_frames, mut st_bytes, mut st_submitted, mut st_lost) = (0usize, 0u64, 0u32, 0usize);
     let mut st_mv = (0u64, 0u64, 0u64);   // (vector frames, eye passes synthesised from vectors, synthetic outputs) at the previous status
     loop {
+        watchdog::main_beat(origin);
         if vision::QUIT.load(Ordering::SeqCst) {
             logs::general("INFO", "stop requested (VisionALVR.exe closed or sent quit)");
             break;
@@ -2455,7 +2506,7 @@ fn main() {
                     g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline)));
                 event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames }));
                 let seg_secs = g.seg_start.elapsed().as_secs_f64();
-                if seg_secs > 20.0 {
+                if seg_secs > 2.0 {
                     let (s0, o0) = fg_counts(&pipeline);
                     let (s, o) = (s0.wrapping_sub(g.seg_skips0), o0.wrapping_sub(g.seg_outputs0));
                     let skipped = if s + o > 0 { s as f64 / (s + o) as f64 } else { 0.0 };
@@ -2465,7 +2516,7 @@ fn main() {
                     run_stats.mv_now = fg_mv_counts(&pipeline);
                     let headset = shared.headset.lock().clone().map(|(_, n, _)| n).unwrap_or_default();
                     let hz = pipeline.as_ref().map(|p| 1.0 / p.period().as_secs_f64()).unwrap_or(args.fps);
-                    games_record_run(&args, origin, &g.exe, &headset, hz, level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, &run_windows, skipped, &run_stats, &gpu_info);
+                    games_record_run(&args, origin, &g.exe, &headset, hz, level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, &run_windows, skipped, &run_stats, &gpu_info, seg_secs > 20.0);
                 }
             }
             if let Some(g) = &game {
@@ -2544,24 +2595,26 @@ fn main() {
                         unsafe { std::ffi::CStr::from_ptr(gb.as_ptr()) }.to_string_lossy().to_string()
                     } else { String::new() };
                     let gen = p.fg_stats_json();
-                    let (d_rel, d_late) = (rel.wrapping_sub(perf_rel), late.wrapping_sub(perf_late));
+                    // the shim's counters restart with every game: a smaller value is a new game's own count, not a negative delta (gears 2026-10-20: 1.8e19 "releases late")
+                    let (d_rel, d_late) = if rel < perf_rel || late < perf_late { (rel, late) } else { (rel - perf_rel, late - perf_late) };
                     (perf_rel, perf_late) = (rel, late);
                     logs::general("INFO", &format!("frame generation perf: app {:.1} fps (envelope {app_ms:.1} ms, {d_late}/{d_rel} releases late), stream {:.1} fps, game period {:.1} ms (p50 {:.1} p95 {:.1} max {:.1}), lag {:.1} ms (slack p5 {:.1} p50 {:.1}), mean t {:.2} mean age {:.2}, behind {} ahead {}, gpu [{gpu}]",
                         rendered as f64 / secs, streamed as f64 / secs, u.game_period_ms, u.interval_p50, u.interval_p95, u.interval_max, u.lag_ms, u.slack_p5, u.slack_p50, u.mean_t, u.mean_age, u.behind, u.ahead));
                     // the tracking samples the outputs are stamped with: skipped boundaries (none newer than the last sent frame), waits for one,
                     // stamps that left one in hand, and the spacing of the headset's samples at the host (the cause of the misses, 2026-10-16)
                     let now_fg = [p.fg_synths.load(Ordering::Relaxed), p.fg_reals.load(Ordering::Relaxed), p.fg_no_sample.load(Ordering::Relaxed),
-                        p.fg_sample_waits.load(Ordering::Relaxed), p.fg_sample_wait_us.load(Ordering::Relaxed), p.fg_in_hand.load(Ordering::Relaxed)];
+                        p.fg_sample_waits.load(Ordering::Relaxed), p.fg_sample_wait_us.load(Ordering::Relaxed), p.fg_in_hand.load(Ordering::Relaxed),
+                        p.fg_stale_stamps.load(Ordering::Relaxed)];
                     let d: Vec<u64> = now_fg.iter().zip(perf_fg.iter()).map(|(a, b)| a.wrapping_sub(*b)).collect();
                     perf_fg = now_fg;
                     let outputs = d[0] + d[1];
                     let (gap_p95, gap_max, gap_over15, gap_n) = *TRACKING_GAP_LAST.lock();
                     if outputs + d[2] > 0 {
-                        logs::general("INFO", &format!("frame generation samples: {} outputs, {} boundaries skipped for want of a tracking sample ({:.1} %), {} waited for one (mean {:.1} ms), {} stamped with one in hand; tracking spacing p95 {gap_p95:.1} ms max {gap_max:.1} ({gap_over15}/{gap_n} gaps over 15 ms)",
-                            outputs, d[2], 100.0 * d[2] as f64 / (outputs + d[2]) as f64, d[3], if d[3] > 0 { d[4] as f64 / 1000.0 / d[3] as f64 } else { 0.0 }, d[5]));
+                        logs::general("INFO", &format!("frame generation samples: {} outputs, {} boundaries skipped for want of a tracking sample ({:.1} %), {} waited for one (mean {:.1} ms), {} stamped with one in hand, {} with a stale one (tracking dark); tracking spacing p95 {gap_p95:.1} ms max {gap_max:.1} ({gap_over15}/{gap_n} gaps over 15 ms)",
+                            outputs, d[2], 100.0 * d[2] as f64 / (outputs + d[2]) as f64, d[3], if d[3] > 0 { d[4] as f64 / 1000.0 / d[3] as f64 } else { 0.0 }, d[5], d[6]));
                     }
                     event(origin, "fg_perf", json!({ "app_fps": rendered as f64 / secs, "stream_fps": streamed as f64 / secs, "app_envelope_ms": app_ms,
-                        "outputs": outputs, "no_sample": d[2], "sample_waits": d[3], "sample_wait_ms_sum": d[4] as f64 / 1000.0, "in_hand": d[5],
+                        "outputs": outputs, "no_sample": d[2], "sample_waits": d[3], "sample_wait_ms_sum": d[4] as f64 / 1000.0, "in_hand": d[5], "stale_stamps": d[6],
                         "tracking_gap_p95_ms": gap_p95, "tracking_gap_max_ms": gap_max, "tracking_gaps_over_15ms": gap_over15, "tracking_gaps": gap_n,
                         "releases": d_rel, "releases_late": d_late, "slot_waits": waits, "game_period_ms": u.game_period_ms, "lag_ms": u.lag_ms, "mean_t": u.mean_t,
                         "unc_synths": u.synths, "mean_age": u.mean_age, "behind": u.behind, "ahead": u.ahead, "arrivals": u.arrivals, "slack_ms_p5": u.slack_p5, "slack_ms_p50": u.slack_p50,
@@ -2618,7 +2671,7 @@ fn main() {
                     g.handle = unsafe { nvh::nvh_create(ew, eh, args.noise, on_packet, on_params, user, err.as_mut_ptr(), 256) };
                     if g.handle.is_null() {
                         eprintln!("NVENC re-init failed: {}", unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy());
-                        std::process::exit(4);
+                        exit_now(4);
                     }
                     if let Some(duty) = args.gpu_keepalive {
                         unsafe { nvh::nvh_keepalive(g.handle, 1, duty) };
@@ -2985,9 +3038,38 @@ fn main() {
             eprintln!("\ncannot write report {}: {e}", p.display());
         }
     }
+    flush_events();
     println!("{}", json!({ "event": "report", "data": report }));
     // dropping ServerCoreContext joins its threads (ALVR un-mutes the PC speakers here); do it explicitly before exit
     drop(ctx);
     logs::general("INFO", &format!("host stop ({} frames streamed{})", frames, if encode_errors > 0 { format!(", {encode_errors} encode errors") } else { String::new() }));
-    std::process::exit(if !connected { 2 } else if pass { 0 } else { 1 });
+    exit_now(if !connected { 2 } else if pass { 0 } else { 1 });
+}
+
+#[cfg(test)]
+mod net_summary_tests {
+    use super::*;
+
+    fn win(total: f64, outliers: u64) -> serde_json::Value {
+        json!({ "samples": 900, "latency_outliers": outliers, "total_latency_ms": total, "encode_ms": 6.0, "network_ms": 9.0, "decode_ms": 14.0, "displayed_fps": 90.0, "bitrate_mbps": 120.0, "throughput_mbps": 118.0 })
+    }
+
+    #[test]
+    fn the_run_reports_medians_of_the_windows() {
+        let net = vec![win(50.0, 0), win(52.0, 0), win(900.0, 3), win(51.0, 0), win(53.0, 0)];
+        let s = net_summary_of(&net, 7);
+        assert_eq!(s["latency_ms"].as_f64().unwrap(), 52.0);
+        assert_eq!(s["latency_outliers"], 3);
+        assert_eq!(s["latency_samples"], 4500);
+        assert_eq!(s["packets_lost"], 7);
+        assert!(s["latency_p95_ms"].as_f64().unwrap() >= 53.0);
+    }
+
+    #[test]
+    fn windows_without_latency_are_skipped() {
+        let mut w = win(0.0, 900);
+        w["total_latency_ms"] = serde_json::Value::Null;
+        let s = net_summary_of(&[w, win(50.0, 0)], 0);
+        assert_eq!(s["latency_ms"].as_f64().unwrap(), 50.0);
+    }
 }

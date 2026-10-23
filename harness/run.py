@@ -88,7 +88,7 @@ def build(what):
               "client": ("tools/mock_client/Cargo.toml", "tools/mock_client/src/main.rs", "_tmp/mock_client", "tools/remote/stage7_mockclient.ps1")}
     if any(w in ("client", "host") for w in (what or ["client", "host"])):
         lib.b_run("if not exist _tmp mkdir _tmp")
-        for pn in ("loopback-client.patch", "client-stats-log.patch", "client-caps-log.patch", "audio-trace.patch", "audio-volume.patch"):
+        for pn in ("loopback-client.patch", "client-stats-log.patch", "client-caps-log.patch", "audio-trace.patch", "audio-process-loopback.patch", "client-audio-device.patch"):
             lib.b_put(lib.ROOT / "tools/patches" / pn, f"_tmp/{pn}")
         r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage9_patch.ps1"], cwd=lib.ROOT, capture_output=True)
         o = r.stdout.decode(errors="replace").replace("\x00", "")
@@ -111,6 +111,16 @@ def build(what):
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage11_ovrshim.ps1"], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")
             print(f"build shim: {'ok' if 'RESULT: OK' in o else 'FAILED'}")
+            if "RESULT: OK" not in o:
+                print(o[-1500:])
+                return 2
+            continue
+        if w == "ballast":   # the stability harness' VRAM / RAM ballast (tools/stability/vram_ballast.cpp)
+            lib.b_run("if not exist _tmp mkdir _tmp")
+            lib.b_put(lib.ROOT / "tools/stability/vram_ballast.cpp", "_tmp/vram_ballast.cpp")
+            r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage21_ballast.ps1"], cwd=lib.ROOT, capture_output=True)
+            o = r.stdout.decode(errors="replace").replace("\x00", "")
+            print(f"build ballast: {'ok' if 'RESULT: OK' in o else 'FAILED'}")
             if "RESULT: OK" not in o:
                 print(o[-1500:])
                 return 2
@@ -233,6 +243,7 @@ def build(what):
             if vab.exists():
                 lib.b_run("if not exist bench mkdir bench")
                 lib.b_put(vab, "bench/littlest_tokyo.vab")
+                lib.b_put(lib.ROOT / "tools/bench_scene/sakura_breeze.mp3", "bench/sakura_breeze.mp3")   # the scene's music (xr_probe plays it)
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage12_probe_build.ps1"], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")
             ok = "RESULT: OK" in o
@@ -264,6 +275,7 @@ def build(what):
             if vab.exists():
                 lib.b_run("if not exist bench mkdir bench")
                 lib.b_put(vab, "bench/littlest_tokyo.vab")
+                lib.b_put(lib.ROOT / "tools/bench_scene/sakura_breeze.mp3", "bench/sakura_breeze.mp3")   # the scene's music (xr_probe plays it)
         r = subprocess.run(["bash", str(lib.BUILDER), "ps", ps], cwd=lib.ROOT, capture_output=True)
         out = r.stdout.decode(errors="replace").replace("\x00", "")
         print(f"build {w}: {'ok' if 'Finished' in out else 'FAILED'}")

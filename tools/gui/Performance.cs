@@ -66,7 +66,7 @@ namespace VisionALVR
         // a record whose game has recorded paths and none of them exists any more: the game was uninstalled
         void Scan()
         {
-            foreach (var f in Games.Files().ToList())
+            foreach (var f in Games.Files().Where(f => !Games.IsHiddenFile(f)).ToList())
             {
                 var g = Json.Load(f);
                 if (g.TryGetValue("paths", out var p) && p is object[] arr && arr.Length > 0 && !arr.Any(o => File.Exists(o as string ?? "")))
@@ -80,7 +80,7 @@ namespace VisionALVR
         {
             games.Items.Clear(); stems.Clear(); data.Clear();
             var rows = new List<(string stem, string label, long when)>();
-            foreach (var f in Games.Files())
+            foreach (var f in Games.Files().Where(f => !Games.IsHiddenFile(f)))
             {
                 var g = Json.Load(f);
                 var stem = Path.GetFileNameWithoutExtension(f);
@@ -120,13 +120,20 @@ namespace VisionALVR
                 var last = sessions[sessions.Count - 1];
                 right.Controls.Add(new Label { Text = $"Last session: {When(last)}, {N(D(last, "seconds") / 60)} min on {S(last, "headset")}, {Mode(S(last, "level"))}", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 0, 3, 4) });
                 right.Controls.Add(Tiles(last));
+                var lmv = O(last, "mv");
+                var vk = VectorsLine.Of(S(last, "level"), lmv != null && lmv.TryGetValue("enabled", out var le) && le is bool lb && lb, lmv == null ? 0 : D(lmv, "frames"), MvDll.Check(MvDll.GameDir(g), stem, out _), false);
+                if (vk == VectorsLine.Kind.Blind)   // the same wording and function as the streamer's Frame generation component
+                    right.Controls.Add(new Label { Text = VectorsLine.Text(vk, 0), AutoSize = true, ForeColor = VectorsLine.ColorOf(vk), Margin = new Padding(3, 0, 3, 4), MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0) });
                 right.Controls.Add(new Label { Text = $"Sessions (the last {sessions.Count}, newest first)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                 right.Controls.Add(SessionList(sessions));
             }
             right.Controls.Add(DllBox(stem, g));
             var tools = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
             var export = new Button { Text = "Export log...", AutoSize = true };
-            export.Click += (s, e) => Export(stem);
+            var exported = new Label { AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0) };
+            var reveal = new LinkLabel { Text = "Open folder", AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0) };
+            reveal.LinkClicked += (s, e) => LogExport.Reveal(reveal.Tag as string);
+            export.Click += (s, e) => LogExport.Run(this, stem, exported, reveal);
             var del = new Button { Text = "Forget this game", AutoSize = true };
             del.Click += (s, e) =>
             {
@@ -137,6 +144,9 @@ namespace VisionALVR
             tools.Controls.Add(export);
             tools.Controls.Add(del);
             right.Controls.Add(tools);
+            var result = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
+            result.Controls.Add(exported); result.Controls.Add(reveal);
+            right.Controls.Add(result);
             foreach (Control c in right.Controls) Ui.LateScale(c, this);   // rebuilt after the window loaded; widths above are design units
             right.ResumeLayout();
             right.AutoScrollPosition = Point.Empty;   // a rebuilt pane starts at its top, whatever the last one was scrolled to
@@ -159,7 +169,12 @@ namespace VisionALVR
             // the four numbers that answer "how did it go"; the rest is one click away
             main.Controls.Add(Ui.MakeTile("Game", N(D(s, "rendered_fps")) + " fps", "slowest tenth " + N(D(s, "rendered_fps_low"))));
             if (net != null) main.Controls.Add(Ui.MakeTile("Headset shows", N(D(net, "displayed_fps")) + " fps", "repeated periods " + N(rep) + " %", rep >= 5 ? Color.Firebrick : (Color?)null));
-            if (net != null) main.Controls.Add(Ui.MakeTile("Latency", N(D(net, "latency_ms"), "0") + " ms", $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}"));
+            if (net != null) {
+                var bad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms"));
+                var lt = Ui.MakeTile("Latency", bad ? "n/a" : N(D(net, "latency_ms"), "0") + " ms", bad ? "not measured" : $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}");
+                if (bad) lt.Set("n/a", "not measured", null, Latency.Why);
+                main.Controls.Add(lt);
+            }
             if (mv != null)
             {
                 var frames = D(mv, "frames");
@@ -176,22 +191,31 @@ namespace VisionALVR
                 more.Controls.Add(Ui.MakeTile("Packets lost", N(lost, "0"), "during the session", lost > 0 ? Color.Firebrick : (Color?)null));
             }
             var all = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
-            all.Controls.Add(main); all.Controls.Add(Ui.Expander("More numbers", more));
+            all.Controls.Add(main);
+            if (net != null)
+            {
+                // ALVR's own stats line, to tell a slow encoder or decoder from a slow network: streamer latency = encoder + transport + decoder
+                double enc = D(net, "encode_ms"), tr = D(net, "network_ms"), dec = D(net, "decode_ms");
+                var st = Latency.Streamer(enc, tr, dec, D(net, "latency_outliers"), D(net, "latency_samples"));
+                all.Controls.Add(new Label { AutoSize = true, Font = Ui.Body, Margin = new Padding(3, 0, 3, 4),
+                    Text = st == null ? "Streamer latency: n/a" : $"Streamer latency {N(st.Value, "0")} ms = encoder {N(enc, "0")} + transport {N(tr, "0")} + decoder {N(dec, "0")}" });
+            } all.Controls.Add(Ui.Expander("More numbers", more));
             return all;
         }
 
         Control SessionList(List<Dictionary<string, object>> sessions)
         {
             var lv = new ListView { View = View.Details, FullRowSelect = true, GridLines = false, Height = 150, Width = Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3) };
-            string[] cols = { "Date", "Headset", "Generation", "Minutes", "Game fps", "Shown fps", "Repeated %", "Latency ms", "Vectors" };
-            int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 70 };
+            string[] cols = { "Date", "Headset", "Generation", "Minutes", "Game fps", "Shown fps", "Repeated %", "Latency ms", "Enc+net+dec ms", "Vectors" };
+            int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 90, 70 };
             for (int i = 0; i < cols.Length; i++) Ui.Col(lv, cols[i], w[i]);
             right.Resize += (s, e) => lv.Width = Math.Max(400, right.ClientSize.Width - 40);
             foreach (var s in Enumerable.Reverse(sessions))
             {
                 var net = O(s, "net"); var mv = O(s, "mv");
                 lv.Items.Add(new ListViewItem(new[] { When(s), S(s, "headset"), Mode(S(s, "level")).Replace("generation ", ""), N(D(s, "seconds") / 60), N(D(s, "rendered_fps")), net != null ? N(D(net, "displayed_fps")) : "-",
-                    N(D(s, "headset_repeated_typ") * 100), net != null ? N(D(net, "latency_ms"), "0") : "-",
+                    N(D(s, "headset_repeated_typ") * 100), net != null ? Latency.Text(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) : "-",
+                    net != null ? (Latency.Streamer(D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) is double sl ? N(sl, "0") : "n/a") : "-",
                     mv != null ? (D(mv, "frames") > 0 ? "working" : "-") : "-" }));
             }
             Ui.FitColumns(lv);
@@ -218,44 +242,6 @@ namespace VisionALVR
             row.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 6, 12, 0) });
             if (action != null) { var b = new Button { Text = action, AutoSize = true, Margin = new Padding(0) }; b.Click += (s, e) => { act(); Render(); }; row.Controls.Add(b); }
             return row;
-        }
-
-        // one zip with what a bug report needs: this game's record, the general log, the newest debug run, the DLL install record
-        void Export(string stem)
-        {
-            using (var dlg = new SaveFileDialog { Filter = "Zip|*.zip", FileName = $"VisionALVR-{stem}-{DateTime.Now:yyyyMMdd-HHmm}.zip" })
-            {
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                try
-                {
-                    if (File.Exists(dlg.FileName)) File.Delete(dlg.FileName);
-                    using (var z = ZipFile.Open(dlg.FileName, ZipArchiveMode.Create))
-                    {
-                        Add(z, Games.FileOf(stem), "game/" + stem + ".json");
-                        Add(z, Path.Combine(Paths.Logs, "VisionALVR.log"), "VisionALVR.log");
-                        Add(z, MvDll.Record, "mv_dll.json");
-                        var dbg = Path.Combine(Paths.Logs, "debug");
-                        if (Directory.Exists(dbg))
-                        {
-                            var newest = new DirectoryInfo(dbg).GetDirectories().OrderByDescending(d => d.LastWriteTime).FirstOrDefault();
-                            if (newest != null) foreach (var f in newest.GetFiles()) Add(z, f.FullName, "debug/" + newest.Name + "/" + f.Name);
-                        }
-                        var info = z.CreateEntry("info.txt");
-                        using (var w = new StreamWriter(info.Open())) w.WriteLine($"VisionALVR {Version.Text}\n{DateTime.Now:s}\n{Environment.OSVersion}");
-                    }
-                    Log.Write("INFO", "logs exported to " + dlg.FileName);
-                    Process.Start("explorer.exe", "/select,\"" + dlg.FileName + "\"");
-                }
-                catch (Exception ex) { MessageBox.Show(this, "Export failed: " + ex.Message, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-            }
-        }
-
-        static void Add(ZipArchive z, string file, string name)
-        {
-            if (!File.Exists(file)) return;
-            // the logs are being written by the streamer: read with sharing
-            using (var src = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (var dst = z.CreateEntry(name).Open()) src.CopyTo(dst);
         }
 
         [STAThread]

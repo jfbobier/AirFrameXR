@@ -22,8 +22,8 @@ namespace VisionALVR
 {
     public static class Version
     {
-        public const string Number = "0.5 alpha";
-        /// "0.5 alpha", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
+        public const string Number = "0.5";
+        /// "0.5", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
         {
@@ -67,6 +67,72 @@ namespace VisionALVR
         public static string FileOf(string exe) => Path.Combine(Dir, Stem(exe) + ".json");
         public static Dictionary<string, object> Load(string exe) => Json.Load(FileOf(exe));
         public static IEnumerable<string> Files() => Directory.Exists(Dir) ? Directory.GetFiles(Dir, "*.json") : new string[0];
+        /// The desktop mirror is a game to the engine (it keeps its record and log) but not to the person: no list, label, advice or clean-up shows it.
+        public static bool IsHidden(string exe) => string.Equals(Path.GetFileName(exe ?? ""), "mirrordesktop.exe", StringComparison.OrdinalIgnoreCase);
+        /// The same for a record file name (config\games\mirrordesktop.json).
+        public static bool IsHiddenFile(string file) => IsHidden(Path.GetFileNameWithoutExtension(file) + ".exe");
+    }
+
+    /// One zip for a bug report: a game's record (when given), the general log, the newest debug run, the DLL install record, info.txt. No dialog of its own and
+    /// nothing is started: the caller shows where the file went.
+    public static class LogExport
+    {
+        public static string DefaultName(string stem) => $"VisionALVR-{(string.IsNullOrEmpty(stem) ? "logs" : stem)}-{DateTime.Now:yyyyMMdd-HHmm}.zip";
+
+        /// Writes the zip to `path` (replacing a file there) and returns the entry names.
+        public static List<string> Write(string path, string stem)
+        {
+            var names = new List<string>();
+            if (File.Exists(path)) File.Delete(path);
+            using (var z = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                void add(string file, string name)
+                {
+                    if (!File.Exists(file)) return;
+                    // the logs are being written by the streamer: read with sharing
+                    using (var src = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var dst = z.CreateEntry(name).Open()) src.CopyTo(dst);
+                    names.Add(name);
+                }
+                if (!string.IsNullOrEmpty(stem)) add(Games.FileOf(stem), "game/" + stem + ".json");
+                add(Path.Combine(Paths.Logs, "VisionALVR.log"), "VisionALVR.log");
+                add(MvDll.Record, "mv_dll.json");
+                var dbg = Path.Combine(Paths.Logs, "debug");
+                if (Directory.Exists(dbg))
+                {
+                    var newest = new DirectoryInfo(dbg).GetDirectories().OrderByDescending(d => d.LastWriteTime).FirstOrDefault();
+                    if (newest != null) foreach (var f in newest.GetFiles()) add(f.FullName, "debug/" + newest.Name + "/" + f.Name);
+                }
+                using (var w = new StreamWriter(z.CreateEntry("info.txt").Open())) w.WriteLine($"VisionALVR {Version.Text}\n{DateTime.Now:s}\n{Environment.OSVersion}");
+                names.Add("info.txt");
+            }
+            Log.Write("INFO", "logs exported to " + path);
+            return names;
+        }
+
+        /// Save dialog (disposed before the work starts), the export, and the inline result in `status`: "Saved to <file>" with an Open folder link. Never starts Explorer itself.
+        public static void Run(IWin32Window owner, string stem, Label status, LinkLabel open)
+        {
+            string path;
+            using (var dlg = new SaveFileDialog { Filter = "Zip|*.zip", FileName = DefaultName(stem) })
+            {
+                if (dlg.ShowDialog(owner) != DialogResult.OK) return;
+                path = dlg.FileName;
+            }
+            try
+            {
+                Write(path, stem);
+                status.ForeColor = Color.SeaGreen; status.Text = "Saved to " + path;
+                open.Tag = path; open.Visible = true;
+            }
+            catch (Exception ex) { status.ForeColor = Color.Firebrick; status.Text = "Export failed: " + ex.Message; open.Visible = false; Log.Write("ERROR", "log export failed: " + ex.Message); }
+            status.Visible = true;
+        }
+
+        public static void Reveal(string path)
+        {
+            try { Process.Start("explorer.exe", "/select,\"" + path + "\""); } catch { }
+        }
     }
 
     /// The DLSS motion-vector extractor (OptiScaler-DLSSMotionVectorExtractor, one DLL) in a game folder. The package's DLSSMotionVectors\dxgi.dll is the
@@ -357,6 +423,13 @@ namespace VisionALVR
         /// arrival margin of the phase lock in ms (host default 7; the host reads it at start) and the GPU keepalive duty in % (0 = off); 0 = not set
         public double PhaseMarginMs { get => Json.Num(Root, "video.phase_margin_ms", 0); set => Json.Set(Root, "video.phase_margin_ms", value); }
         public int GpuKeepalive { get => (int)Json.Num(Root, "video.gpu_keepalive", 0); set => Json.Set(Root, "video.gpu_keepalive", (double)value); }
+        /// the Windows power plan the streamer switches to while it runs (a GUID; "" = leave it alone); the plan that was active comes back when the streamer closes
+        public string PowerPlan { get => Json.Str(Root, "system.power_plan", ""); set => Json.Set(Root, "system.power_plan", value); }
+        /// the PC's own output is muted while the streamer routes the game audio to the virtual cable (on by default)
+        public bool MuteSpeakers { get => Json.Bool(Root, "audio.mute_pc", true); set => Json.Set(Root, "audio.mute_pc", value); }
+        /// how the game audio is captured: "process" = Windows' process loopback (no virtual cable, the default output stays as it is), "device" = the VB-CABLE path
+        /// (the streamer makes the cable the default output, ALVR captures it)
+        public string AudioCapture { get => Json.Str(Root, "audio.capture", "process") == "device" ? "device" : "process"; set => Json.Set(Root, "audio.capture", value == "device" ? "device" : "process"); }
         public bool Debug { get => Json.Bool(Root, "debug", false); set => Json.Set(Root, "debug", value); }
         /// display (live in VisionALVR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral
         public const double DefaultGamma = 1.2;
@@ -366,10 +439,125 @@ namespace VisionALVR
         public double Saturation { get => Json.Num(Root, "display.saturation", 0); set => Json.Set(Root, "display.saturation", value); }
         public double Sharpening { get => Json.Num(Root, "display.sharpening", 0); set => Json.Set(Root, "display.sharpening", value); }
         public bool HasDisplay => Json.Get(Root, "display.gamma") != null;
+        /// resolution scale (supersampling when above 1): what EyeScale last wrote into session.json, with the unscaled eye size it started from and the size it wrote (to tell it from an edit made elsewhere)
+        public double RenderScale { get => Json.Num(Root, "display.render_scale", 1); set => Json.Set(Root, "display.render_scale", value); }
+        public int[] ScaleSizes { get => new[] { (int)Json.Num(Root, "display.scale_base_w", 0), (int)Json.Num(Root, "display.scale_base_h", 0), (int)Json.Num(Root, "display.scale_w", 0), (int)Json.Num(Root, "display.scale_h", 0) }; set { Json.Set(Root, "display.scale_base_w", value[0]); Json.Set(Root, "display.scale_base_h", value[1]); Json.Set(Root, "display.scale_w", value[2]); Json.Set(Root, "display.scale_h", value[3]); } }
         /// headset height above the floor handed to games (m), re-anchored live; 1.3 = a seated adult. 0 = the headset's floor estimate
         public const double DefaultHeight = 1.3;
         public double Height { get => Json.Num(Root, "headset.height_m", DefaultHeight); set => Json.Set(Root, "headset.height_m", value); }
+        /// "auto" = the headset's own floor estimate (height 0 to the engine), "manual" = Height. Someone who already set a height stays on manual; a new user starts on auto.
+        public string HeightMode
+        {
+            get { var m = Json.Str(Root, "display.height_mode", ""); return m == "auto" || m == "manual" ? m : (Json.Get(Root, "headset.height_m") == null || Json.Num(Root, "headset.height_m", 0) <= 0 ? "auto" : "manual"); }
+            set => Json.Set(Root, "display.height_mode", value);
+        }
         public void Save() => Json.Save(Paths.Settings, Root);
+    }
+
+    /// The streamer's resolution scale (supersampling above 1) is passed to the engine the way the setup does: as the per-eye resolution in
+    /// session.json, which the engine negotiates with the headset at connection. The unscaled size is kept in visionalvr.json; when session.json
+    /// holds something else than what was written here (the wizard or the setup panel changed it), that is the new unscaled size and the scale is 1.
+    public static class EyeScale
+    {
+        const string V = "session_settings.video.";
+        public static int[] Size(Dictionary<string, object> s) => new[] { (int)Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552), (int)Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200) };
+
+        /// The unscaled size and the scale in effect, from what is on disk.
+        public static void Current(AppSettings st, Dictionary<string, object> s, out int baseW, out int baseH, out double scale)
+        {
+            var now = Size(s); var k = st.ScaleSizes;
+            if (k[0] > 0 && k[1] > 0 && k[2] == now[0] && k[3] == now[1]) { baseW = k[0]; baseH = k[1]; scale = st.RenderScale; }
+            else { baseW = now[0]; baseH = now[1]; scale = 1; }
+        }
+
+        public static int[] Scaled(int baseW, int baseH, double scale) =>
+            Math.Abs(scale - 1) < 0.005 ? new[] { baseW, baseH } : new[] { (int)Math.Round(baseW * scale / 32) * 32, (int)Math.Round(baseH * scale / 2) * 2 };   // ALVR aligns widths to 32
+
+        /// Writes the unscaled size (the current one when 0) times `scale` into session.json and remembers it. False with the reason when the file cannot be written.
+        public static bool Apply(AppSettings st, double scale, out string error, int baseW = 0, int baseH = 0)
+        {
+            error = null;
+            var s = Session.Load();
+            if (baseW <= 0 || baseH <= 0) Current(st, s, out baseW, out baseH, out _);
+            scale = Math.Max(0.5, Math.Min(2.0, scale));
+            var z = Scaled(baseW, baseH, scale);
+            foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
+            {
+                Json.Set(s, V + k + ".variant", "Absolute");
+                Json.Set(s, V + k + ".Absolute.width", z[0]);
+                Json.Set(s, V + k + ".Absolute.height.set", true);
+                Json.Set(s, V + k + ".Absolute.height.content", z[1]);
+            }
+            Json.Set(s, "openvr_config.eye_resolution_width", z[0]);
+            Json.Set(s, "openvr_config.eye_resolution_height", z[1]);
+            Json.Set(s, "openvr_config.target_eye_resolution_width", z[0]);
+            Json.Set(s, "openvr_config.target_eye_resolution_height", z[1]);
+            try { Json.Save(Paths.Session, s); }
+            catch (Exception e) { error = "Cannot write config\\session.json: " + e.Message; return false; }
+            st.RenderScale = scale;
+            st.ScaleSizes = Math.Abs(scale - 1) < 0.005 ? new[] { 0, 0, 0, 0 } : new[] { baseW, baseH, z[0], z[1] };
+            st.Save();
+            Log.Write("INFO", $"resolution scale {scale:0.00}: {z[0]}x{z[1]} per eye (unscaled {baseW}x{baseH})");
+            return true;
+        }
+    }
+
+    /// Windows power plans through powercfg (what startvisionalvr.bat did): the configured plan is set while the streamer runs and the previous one is put back at the end.
+    /// The plan to restore is written to logs\power_plan.txt first, so a streamer that crashed is undone at the next start.
+    public static class PowerPlan
+    {
+        public sealed class Plan { public string Guid, Name; public bool Active; }
+        static string StateFile => Path.Combine(Paths.Logs, "power_plan.txt");
+        static readonly System.Text.RegularExpressions.Regex Line = new System.Text.RegularExpressions.Regex(@"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\s+\((.*?)\)\s*(\*)?");
+        static string previous;
+
+        static string Powercfg(string args)
+        {
+            try
+            {
+                var p = Process.Start(new ProcessStartInfo("powercfg.exe", args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.Default });
+                var o = p.StandardOutput.ReadToEnd(); p.WaitForExit(5000); return p.ExitCode == 0 ? o : null;
+            }
+            catch { return null; }
+        }
+
+        public static List<Plan> List()
+        {
+            var res = new List<Plan>();
+            foreach (var l in (Powercfg("/list") ?? "").Split('\n'))
+            {
+                var m = Line.Match(l);
+                if (m.Success) res.Add(new Plan { Guid = m.Groups[1].Value.ToLowerInvariant(), Name = m.Groups[2].Value, Active = m.Groups[3].Success });
+            }
+            return res;
+        }
+
+        /// Sets `wanted` (a GUID or a plan name) and remembers the plan that was active; returns the log line.
+        public static string Apply(string wanted)
+        {
+            if (string.IsNullOrWhiteSpace(wanted)) return null;
+            Restore();   // a leftover from a streamer that did not close cleanly
+            var plans = List();
+            var want = plans.FirstOrDefault(x => string.Equals(x.Guid, wanted.Trim(), StringComparison.OrdinalIgnoreCase) || string.Equals(x.Name, wanted.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (want == null) return "power plan \"" + wanted + "\" not found; left as it is";
+            var cur = plans.FirstOrDefault(x => x.Active);
+            if (cur != null && cur.Guid == want.Guid) return $"power plan {want.Name} is already active";
+            if (Powercfg("/setactive " + want.Guid) == null) return $"could not set the power plan {want.Name}";
+            previous = cur?.Guid;
+            if (previous != null) { try { Directory.CreateDirectory(Paths.Logs); File.WriteAllText(StateFile, previous); } catch { } }
+            return $"power plan {want.Name} set (was {cur?.Name ?? "unknown"}, restored when the streamer closes)";
+        }
+
+        /// Puts the remembered plan back (this run's, or the one a crashed run left in the file); returns the log line, null when there was nothing to restore.
+        public static string Restore()
+        {
+            var g = previous;
+            previous = null;
+            try { if (g == null && File.Exists(StateFile)) g = File.ReadAllText(StateFile).Trim(); } catch { }
+            try { File.Delete(StateFile); } catch { }
+            if (string.IsNullOrEmpty(g)) return null;
+            return Powercfg("/setactive " + g) != null ? "power plan restored" : "could not restore the power plan " + g;
+        }
     }
 
     /// The session (ALVR settings, paired headset). Created from session.default.json on first use.
@@ -604,7 +792,8 @@ namespace VisionALVR
 
         int SafeExitCode() { try { return p.ExitCode; } catch { return -1; } }
 
-        public void Send(string line) { try { if (Running) { p.StandardInput.WriteLine(line); p.StandardInput.Flush(); } } catch { } }
+        public event Action<string> OnSend;   // every command, running or not (harness/streamer_events.py)
+        public void Send(string line) { OnSend?.Invoke(line); try { if (Running) { p.StandardInput.WriteLine(line); p.StandardInput.Flush(); } } catch { } }
 
         /// Asks the host to quit (it un-mutes the PC speakers on the way out); kills it after the timeout.
         public void Stop(int timeoutMs = 6000)
@@ -1172,36 +1361,32 @@ namespace VisionALVR
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
     }
 
-    /// "Install the DLSS motion-vector DLL?" after a game that gave no vectors.
-    public class DllOfferForm : DpiForm
+    /// What the last session did with the game's motion vectors, one function for the streamer's Frame generation component and Game history's line
+    /// (docs/PLAN_0.5.md U6): worked (green), ran blind (orange: the DLL is there, nothing arrived), no DLL (plain, with the install offer), or nothing.
+    public static class VectorsLine
     {
-        public bool DontAsk => dont.Checked;
-        readonly CheckBox dont = new CheckBox { Text = "Don't ask again for this game", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
-        public DllOfferForm(string game)
+        public enum Kind { None, Worked, Blind, NoDll }
+        public static Kind Of(string level, bool tickOn, double frames, MvDll.State st, bool dismissed)
         {
-            Text = "VisionALVR \u2013 DLSS motion vectors";
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
-            Font = Ui.Body; Icon = Ui.AppIcon();
-            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
-            BackColor = Color.White;
-            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
-            col.Controls.Add(new Label { Text = game + ": no DLSS motion vectors were available this session.", AutoSize = true, Font = Ui.Bold, MaximumSize = new Size(480, 0) });
-            col.Controls.Add(new Label { Text = "Frame generation is better when the game's own motion vectors are used. A small DLL placed next to the game's exe provides them (games that use DLSS). " +
-                "It can be removed again from the Logs window, which lists what was installed. Install it for this game?", AutoSize = true, MaximumSize = new Size(480, 0), Margin = new Padding(3, 8, 3, 3) });
-            col.Controls.Add(dont);
-            var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
-            var yes = new Button { Text = "Install", AutoSize = true, DialogResult = DialogResult.Yes, Font = Ui.Bold, MinimumSize = new Size(100, 30) };
-            var no = new Button { Text = "Not now", AutoSize = true, DialogResult = DialogResult.No, MinimumSize = new Size(100, 30) };
-            row.Controls.Add(yes); row.Controls.Add(no);
-            col.Controls.Add(row);
-            var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
-            col.Dock = DockStyle.None; col.Location = Point.Empty;
-            scroller.Controls.Add(col);
-            Controls.Add(scroller);
-            Ui.AutoFitWindow(this, null, col);
-            AcceptButton = yes; CancelButton = no;
+            if (string.IsNullOrEmpty(level) || level == "off") return Kind.None;   // no generation, nothing to say
+            if (frames > 0) return Kind.Worked;
+            if (!tickOn) return Kind.None;
+            if (st == MvDll.State.Installed || st == MvDll.State.OlderCopy) return Kind.Blind;
+            if ((st == MvDll.State.NotInstalled || st == MvDll.State.OtherDll) && !dismissed) return Kind.NoDll;
+            return Kind.None;
         }
+        public static string Text(Kind k, double frames)
+        {
+            switch (k)
+            {
+                case Kind.Worked: return $"Game motion vectors worked ({frames.ToString("0", CultureInfo.InvariantCulture)} frames)";
+                case Kind.Blind: return "Generation ran blind (optical flow only): the DLL is installed but no vectors arrived.";
+                case Kind.NoDll: return "No game vectors: install the extractor?";
+                default: return "";
+            }
+        }
+        public const string BlindHint = "Check the DLL version and that the game's upscaler is DLSS.";
+        public static Color ColorOf(Kind k) => k == Kind.Worked ? Color.SeaGreen : k == Kind.Blind ? Color.DarkOrange : Color.DimGray;
     }
 
     /// Vision Pro only: the chroma-key passthrough is a setting of the ALVR app on the headset that the streamer can neither set nor read, so
@@ -1241,6 +1426,21 @@ namespace VisionALVR
         }
     }
 
+    /// A latency the engine could not measure is shown as n/a, not as a number: above one second, or when over 10 % of the run's client samples were dropped
+    /// by the engine's aggregator as garbage (`latency_outliers` of `samples`; docs/PLAN_0.5.md U7).
+    public static class Latency
+    {
+        public const string Why = "n/a: the headset's latency samples were not usable (a duration that wrapped, or too many dropped). The other numbers are fine.";
+        public static bool Absurd(double ms, double outliers = 0, double samples = 0) =>
+            ms < 0 || ms > 1000 || (samples > 0 && !double.IsNaN(outliers) && outliers / samples > 0.10);
+        /// ALVR's own breakdown of the streamer's share of the latency: encoder + transport (network) + decoder, in ms; null when any part is missing or not believable.
+        public static double? Streamer(double enc, double net, double dec, double outliers = 0, double samples = 0) =>
+            double.IsNaN(enc) || double.IsNaN(net) || double.IsNaN(dec) || Absurd(enc, outliers, samples) || Absurd(net, outliers, samples) || Absurd(dec, outliers, samples) ? (double?)null : enc + net + dec;
+        /// "-" when nothing was measured, "n/a" when it was and is not believable, else the number.
+        public static string Text(double ms, double outliers = 0, double samples = 0, string fmt = "0") =>
+            double.IsNaN(ms) ? "-" : Absurd(ms, outliers, samples) ? "n/a" : ms.ToString(fmt, CultureInfo.InvariantCulture);
+    }
+
     public class Tile : TableLayoutPanel
     {
         readonly Label value, note;
@@ -1253,7 +1453,15 @@ namespace VisionALVR
             note = new Label { Text = n, AutoSize = true, ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0) };
             Controls.Add(value); Controls.Add(note);
         }
-        public void Set(string v, string n, Color? color = null) { value.Text = v; note.Text = n; value.ForeColor = color ?? Color.Black; }
+        static readonly ToolTip tip = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
+        public string Value => value.Text;
+        public string Note => note.Text;
+        public Color ValueColor => value.ForeColor;
+        public void Set(string v, string n, Color? color = null, string tooltip = null)
+        {
+            value.Text = v; note.Text = n; value.ForeColor = color ?? Color.Black;
+            foreach (Control c in new Control[] { this, value, note }) tip.SetToolTip(c, tooltip);
+        }
     }
 
     /// Every window of the GUI: the designer pattern WinForms' own scaling needs. Built suspended with AutoScaleMode.Dpi (design values at 96 dpi), laid out once
@@ -1290,11 +1498,16 @@ namespace VisionALVR
         /// design values at 96 dpi (the framework scales them at load).
         public static void FitToWorkArea(Form f)
         {
+            bool placed = false;
             Action fit = () =>
             {
                 var wa = WorkArea(f);
                 f.MinimumSize = new Size(Math.Min(f.MinimumSize.Width, wa.Width), Math.Min(f.MinimumSize.Height, wa.Height));
                 f.Size = new Size(Math.Min(f.Width, wa.Width), Math.Min(f.Height, wa.Height));
+                // the size was set after CenterScreen placed the window: centre it again (once), and keep it inside the work area
+                int x = f.Left, y = f.Top;
+                if (!placed) { placed = true; if (f.StartPosition == FormStartPosition.CenterScreen) { x = wa.Left + (wa.Width - f.Width) / 2; y = wa.Top + (wa.Height - f.Height) / 2; } }
+                f.Location = new Point(Math.Max(wa.Left, Math.Min(x, wa.Right - f.Width)), Math.Max(wa.Top, Math.Min(y, wa.Bottom - f.Height)));
             };
             f.Load += (s, e) => fit();
             refits.Remove(f); refits.Add(f, fit);
@@ -1302,10 +1515,14 @@ namespace VisionALVR
 
         /// A window exactly as big as its content: the header (docked at the top) plus the body, which sits in a scrolling host. When that is more
         /// than the work area allows (1080p at 150 %, a long message) the window stops at the work area and the body scrolls instead of being cut.
-        public static void AutoFitWindow(Form f, Control header, Control body)
+        ///
+        /// refitOnChange false (the streamer): the window is sized at load and by Ui.Refit only, so a notice appearing or a number getting longer never moves or resizes it.
+        /// `measure` (optional) gets the sizing action and runs it with the window's fullest content showing, so the fixed size has room for everything that can appear.
+        public static void AutoFitWindow(Form f, Control header, Control body, bool refitOnChange = true, Action<Action> measure = null)
         {
             if (body is Panel bp) bp.AutoSizeMode = AutoSizeMode.GrowAndShrink;   // the default GrowOnly keeps the size the framework scaled it to: empty space below the content
-            Action fit = () =>
+            bool placed = false;
+            Action size = () =>
             {
                 var wa = WorkArea(f);
                 var chrome = new Size(f.Width - f.ClientSize.Width, f.Height - f.ClientSize.Height);
@@ -1316,9 +1533,19 @@ namespace VisionALVR
                 if (ch > maxH) { ch = maxH; cw += SystemInformation.VerticalScrollBarWidth; }
                 if (cw > maxW) { cw = maxW; ch = Math.Min(maxH, ch + SystemInformation.HorizontalScrollBarHeight); }
                 f.ClientSize = new Size(cw, ch);
+                // CenterScreen centred the window at its design size, before this fit made it bigger: centre it once now, later fits only keep it on screen
+                int x = f.Left, y = f.Top;
+                if (!placed)
+                {
+                    placed = true;
+                    var around = f.StartPosition == FormStartPosition.CenterParent && f.Owner != null ? f.Owner.Bounds : (f.StartPosition == FormStartPosition.CenterScreen ? wa : Rectangle.Empty);
+                    if (around != Rectangle.Empty) { x = around.Left + (around.Width - f.Width) / 2; y = around.Top + (around.Height - f.Height) / 2; }
+                }
+                f.Location = new Point(Math.Max(wa.Left, Math.Min(x, wa.Right - f.Width)), Math.Max(wa.Top, Math.Min(y, wa.Bottom - f.Height)));
             };
+            Action fit = measure == null ? size : () => measure(size);
             f.Load += (s, e) => fit();
-            body.SizeChanged += (s, e) => { if (f.IsHandleCreated) fit(); };
+            if (refitOnChange) body.SizeChanged += (s, e) => { if (f.IsHandleCreated) fit(); };
             refits.Remove(f); refits.Add(f, fit);
         }
         /// A size designed at 96 dpi, in pixels at the control's monitor dpi (for what the framework does not scale itself: list columns). The test
@@ -1430,14 +1657,14 @@ namespace VisionALVR
         }
 
         /// A collapsed section: a flat "> title" button that shows or hides its content. For what most people never need (progressive disclosure).
-        public static Control Expander(string title, Control content, bool open = false)
+        public static Control Expander(string title, Control content, bool open = false, Action onToggle = null)
         {
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
             var b = new Button { FlatStyle = FlatStyle.Flat, AutoSize = true, TextAlign = ContentAlignment.MiddleLeft, Font = Bold, Cursor = Cursors.Hand, Margin = new Padding(0), BackColor = Color.Transparent, TabStop = true, AccessibleName = title };
             b.FlatAppearance.BorderSize = 0; b.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xE6, 0xEA, 0xF2);
             Action paint = () => { b.Text = (content.Visible ? "\u25BE  " : "\u25B8  ") + title; };
             content.Visible = open; paint();
-            b.Click += (s, e) => { content.Visible = !content.Visible; paint(); };
+            b.Click += (s, e) => { content.Visible = !content.Visible; paint(); onToggle?.Invoke(); };
             p.Controls.Add(b); p.Controls.Add(content);
             return p;
         }

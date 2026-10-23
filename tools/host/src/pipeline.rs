@@ -405,6 +405,13 @@ pub struct Pipeline {
     fg_sample_wait: Mutex<Duration>,
     pub fg_sample_waits: AtomicU64,
     pub fg_sample_wait_us: AtomicU64,
+    /// when a boundary last found a tracking sample newer than the last sent frame, and how long without one counts as the tracking being dark
+    /// (VISIONALVR_FG_DARK_MS, default 100, 0 = never): from then on boundaries send their frames stamped with the last known sample
+    /// instead of nothing (`fg_stale_sample`)
+    fg_last_fresh: Mutex<Instant>,
+    fg_dark_after: Duration,
+    fg_dark: AtomicBool,
+    pub fg_stale_stamps: AtomicU64,
 }
 
 /// VISIONALVR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
@@ -503,6 +510,10 @@ impl Pipeline {
                 std::env::var("VISIONALVR_FG_SAMPLE_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(3.0).clamp(0.0, 20.0) / 1000.0)),
             fg_sample_waits: AtomicU64::new(0),
             fg_sample_wait_us: AtomicU64::new(0),
+            fg_last_fresh: Mutex::new(Instant::now()),
+            fg_dark_after: Duration::from_secs_f64(std::env::var("VISIONALVR_FG_DARK_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(100.0).clamp(0.0, 60_000.0) / 1000.0),
+            fg_dark: AtomicBool::new(false),
+            fg_stale_stamps: AtomicU64::new(0),
         })
     }
 
@@ -641,6 +652,17 @@ impl Pipeline {
     /// headset shows as tremble). A tracker faster than the display (Quest, 270 Hz) has several unused samples per boundary spaced well
     /// under a period: there the newest is used, as before. `fg_in_hand` counts the stamps that left a sample behind.
     fn fg_pick_sample_now(&self) -> Option<(Duration, [f32; 4])> {
+        let r = self.fg_pick_fresh();
+        if r.is_some() {
+            *self.fg_last_fresh.lock() = Instant::now();
+            if self.fg_dark.swap(false, Ordering::Relaxed) {
+                logs::general("INFO", "tracking is back: frame generation stamps with fresh samples again");
+            }
+        }
+        r
+    }
+
+    fn fg_pick_fresh(&self) -> Option<(Duration, [f32; 4])> {
         let last = *self.last_sent_ts.lock();
         let ring = self.shared.recent_samples.lock();
         let n = ring.len();
@@ -682,7 +704,28 @@ impl Pipeline {
             }
         }
         self.fg_sample_wait_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
-        None
+        self.fg_stale_sample()
+    }
+
+    /// No fresh tracking sample after the wait. A late sample (Wi-Fi bunching, one boundary in a hundred) sends nothing: the pattern slides one boundary.
+    /// But when none has come for `fg_dark_after` the uplink is dark (the headset is reconnecting, the host froze, a Wi-Fi outage) and waiting longer
+    /// deadlocks the stream: the visionOS client sends tracking only while frames reach it (gears 2026-10-20, a 30 s freeze became minutes without a
+    /// picture, cured by generation off; lab: harness/stability tracking_blackout_frame). Then the boundary sends its frame stamped with the newest
+    /// sample known, like the generation-off path (the shim reuses the last sample): the timestamp is a real one, repeated, never invented.
+    fn fg_stale_sample(&self) -> Option<(Duration, [f32; 4])> {
+        if self.fg_dark_after.is_zero() || self.fg_last_fresh.lock().elapsed() < self.fg_dark_after {
+            return None;
+        }
+        let newest = self.shared.recent_samples.lock().back().copied(); // (one lock at a time: the tracking thread takes them in its own order)
+        let s = newest.unwrap_or_else(|| {
+            let ts = self.shared.latest_sample_ts.lock().unwrap_or_default().max(*self.last_sent_ts.lock());
+            (ts, [0.0, 0.0, 0.0, 1.0])
+        });
+        self.fg_stale_stamps.fetch_add(1, Ordering::Relaxed);
+        if !self.fg_dark.swap(true, Ordering::Relaxed) {
+            logs::general("WARN", &format!("tracking dark for {:.0} ms: frame generation sends frames stamped with the last sample until it returns", self.fg_last_fresh.lock().elapsed().as_secs_f64() * 1000.0));
+        }
+        Some(s)
     }
 
     /// A rendered frame arrived (frame generation on): what this boundary encodes. Releases the slot.

@@ -1,0 +1,731 @@
+{
+ "base_from": "e2e_fg_latency",
+ "base": {
+  "sample_memory": true,
+  "host": {
+   "seconds": 110,
+   "exit_after_frames": 1000000
+  },
+  "client": {
+   "seconds": 100,
+   "views_after_first_frame": true
+  },
+  "app": {
+   "frames": 1000000,
+   "timeout_s": 90,
+   "env": {
+    "XR_PROBE_CPU_MS": "1",
+    "XR_PROBE_GPU_COPIES": "0",
+    "XR_PROBE_LOAD": "fps:50:70"
+   }
+  },
+  "timeout_s": 260,
+  "checks": {}
+ },
+ "scenarios": {
+  "tracking_blackout_frame": {
+   "description": "AVP behaviour: the pose uplink goes silent for 5 s at +30 s and resumes only once a frame arrives. The gears 2026-10-20 stall: generation on must keep sending frames (the last pose) so the client resumes.",
+   "override": {
+    "client": {
+     "track_blackout": "30:5:frame",
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    }
+   },
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 1500,
+    "blackouts_resume": true,
+    "min_fps_during_blackout": 20,
+    "max_recovery_s": 2,
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
+   }
+  },
+  "tracking_blackout_frame_fgoff": {
+   "description": "The same with generation off: the control (the shim repeats the last pose after 3 ms, frames keep flowing), must pass today.",
+   "override": {
+    "host": {
+     "frame_gen": null
+    },
+    "client": {
+     "track_blackout": "30:5:frame",
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    }
+   },
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 1500,
+    "blackouts_resume": true,
+    "min_fps_during_blackout": 20,
+    "max_recovery_s": 2,
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
+   }
+  },
+  "tracking_blackout_timed": {
+   "description": "A 0.5 s, then a 5 s, then a 30 s silence of the uplink that resumes by itself (a Wi-Fi hiccup): the stream must not stall beyond the silence.",
+   "override": {
+    "host": {
+     "seconds": 150
+    },
+    "client": {
+     "seconds": 140,
+     "track_blackout": "25:0.5,40:5,60:30"
+    },
+    "app": {
+     "timeout_s": 130
+    },
+    "timeout_s": 330
+   },
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 1500,
+    "blackouts_resume": true,
+    "min_fps_during_blackout": 20,
+    "max_recovery_s": 2,
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
+   }
+  },
+  "host_freeze_30s": {
+   "description": "The gears 2026-10-20 pattern: the whole host process freezes for 30 s at +55 s (every thread, like a stuck driver call), the client's connection times out and it reconnects, and like the visionOS client it sends tracking only once a frame arrives. Generation on must resume streaming (no boundary may wait for a pose that only a frame can bring).",
+   "override": {
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 150,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "timeout_s": 140
+    },
+    "timeout_s": 340
+   },
+   "faults": [
+    {
+     "type": "suspend",
+     "process": "alvr_host",
+     "at_s": 55,
+     "for_s": 30
+    }
+   ],
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 45000,
+    "alive_at_end_s": 3,
+    "host_stalls_min": 1,
+    "host_memory_events": 2
+   }
+  },
+  "host_freeze_30s_fgoff": {
+   "description": "The same freeze with generation off: the control.",
+   "override": {
+    "host": {
+     "seconds": 170,
+     "frame_gen": null
+    },
+    "client": {
+     "seconds": 150,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "timeout_s": 140
+    },
+    "timeout_s": 340
+   },
+   "faults": [
+    {
+     "type": "suspend",
+     "process": "alvr_host",
+     "at_s": 55,
+     "for_s": 30
+    }
+   ],
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 45000,
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
+   }
+  },
+  "memory_baseline_fullres": {
+   "description": "What the chain holds at the Vision Pro's size (3552x3200 per eye) with generation on for 150 s: the reference for the memory scenarios (host private bytes, handles, dedicated VRAM per process in mem.csv).",
+   "override": {
+    "session_overrides": {
+     "openvr_config.eye_resolution_width": 3552,
+     "openvr_config.eye_resolution_height": 3200,
+     "openvr_config.target_eye_resolution_width": 3552,
+     "openvr_config.target_eye_resolution_height": 3200,
+     "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     },
+     "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     }
+    },
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 160
+    },
+    "app": {
+     "timeout_s": 150
+    },
+    "timeout_s": 330
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 3,
+    "mem": {
+     "min_duration_s": 100,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
+  },
+  "vram_squeeze": {
+   "description": "Resource exhaustion: at +35 s the ballast leaves the chain only 1.8 GB of VRAM (it holds 2.8 GB at the Vision Pro's size), released at +95 s. Pass: no crash or hang, the stream is alive at the end (degraded meanwhile is fine, with a logged reason).",
+   "override": {
+    "session_overrides": {
+     "openvr_config.eye_resolution_width": 3552,
+     "openvr_config.eye_resolution_height": 3200,
+     "openvr_config.target_eye_resolution_width": 3552,
+     "openvr_config.target_eye_resolution_height": 3200,
+     "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     },
+     "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     }
+    },
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 160
+    },
+    "app": {
+     "timeout_s": 150
+    },
+    "timeout_s": 330,
+    "memory_limit": {
+     "vram_cap_mb": 1800,
+     "at_s": 35,
+     "release_s": 95
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "alive_at_end_s": 3,
+    "ballast_effective": true,
+    "host_memory_events": 3
+   }
+  },
+  "ram_squeeze": {
+   "description": "Resource exhaustion: at +35 s the ballast leaves the chain only 2.3 GB of RAM (the host alone holds 1.9 GB), released at +95 s. Pass: no crash or hang, alive at the end.",
+   "override": {
+    "session_overrides": {
+     "openvr_config.eye_resolution_width": 3552,
+     "openvr_config.eye_resolution_height": 3200,
+     "openvr_config.target_eye_resolution_width": 3552,
+     "openvr_config.target_eye_resolution_height": 3200,
+     "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     },
+     "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     }
+    },
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 160
+    },
+    "app": {
+     "timeout_s": 150
+    },
+    "timeout_s": 330,
+    "memory_limit": {
+     "ram_cap_mb": 2300,
+     "at_s": 35,
+     "release_s": 95
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "alive_at_end_s": 3,
+    "ballast_effective": true,
+    "host_memory_events": 3
+   }
+  },
+  "vram_cap_loose": {
+   "description": "A 4 GB VRAM machine (the chain holds 2.8 GB at the Vision Pro's size): must run clean.",
+   "override": {
+    "session_overrides": {
+     "openvr_config.eye_resolution_width": 3552,
+     "openvr_config.eye_resolution_height": 3200,
+     "openvr_config.target_eye_resolution_width": 3552,
+     "openvr_config.target_eye_resolution_height": 3200,
+     "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     },
+     "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     }
+    },
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 160
+    },
+    "app": {
+     "timeout_s": 150
+    },
+    "timeout_s": 330,
+    "memory_limit": {
+     "vram_cap_mb": 4096,
+     "at_s": 5
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "alive_at_end_s": 3,
+    "ballast_effective": true,
+    "host_memory_events": 3,
+    "max_stall_ms": 1500,
+    "host_stalls_max": 0
+   }
+  },
+  "mv_clean": {
+   "description": "Reference for the vector scenarios: the probe's exact vectors, no fault (the host must use them: mv.frames > 0, no flow errors).",
+   "override": {
+    "app": {
+     "env": {
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70",
+      "XR_PROBE_MV": "truth",
+      "XR_PROBE_MOVING": "25:0.25",
+      "XR_PROBE_SCENE": "dots",
+      "XR_PROBE_MV_FAULT": ""
+     }
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 2,
+    "mv_ok": true,
+    "mem": {
+     "min_duration_s": 80,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
+  },
+  "mv_loss": {
+   "description": "Motion vectors lost at random: 10 % of the publications dropped, a 10 s blackout at +40 s and another at +80 s. The generator must fall back to flow and come back, no stall, no growth.",
+   "override": {
+    "app": {
+     "env": {
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70",
+      "XR_PROBE_MV": "truth",
+      "XR_PROBE_MOVING": "25:0.25",
+      "XR_PROBE_SCENE": "dots",
+      "XR_PROBE_MV_FAULT": "drop:0.1,blackout:40:10,blackout:80:10"
+     }
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 2,
+    "mv_ok": true,
+    "mem": {
+     "min_duration_s": 80,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
+  },
+  "mv_churn": {
+   "description": "A game's DLSS feature re-created: new stream ids every 5 s, the render size alternating full/half every 7 s, the vector textures destroyed and created again every 3 s. No stall, no leak (tap copies and ring slots freed).",
+   "override": {
+    "app": {
+     "env": {
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70",
+      "XR_PROBE_MV": "truth",
+      "XR_PROBE_MOVING": "25:0.25",
+      "XR_PROBE_SCENE": "dots",
+      "XR_PROBE_MV_FAULT": "churn:5,resize:7,recreate:3"
+     }
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 2,
+    "mv_ok": true,
+    "mem": {
+     "min_duration_s": 80,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
+  },
+  "mv_garbage": {
+   "description": "A misbehaving provider: 5 % of the publications carry +-9000 px vectors and 5 % a null vector texture. The host must not crash, hang or leak, and must not show garbage for long (stream stays alive, no stall).",
+   "override": {
+    "app": {
+     "env": {
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70",
+      "XR_PROBE_MV": "truth",
+      "XR_PROBE_MOVING": "25:0.25",
+      "XR_PROBE_SCENE": "dots",
+      "XR_PROBE_MV_FAULT": "garbage:0.05,null:0.05"
+     }
+    }
+   },
+   "criteria": {
+    "warmup_s": 20,
+    "max_stall_ms": 1500,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0,
+    "host_memory_events": 2,
+    "mv_ok": true,
+    "mem": {
+     "min_duration_s": 80,
+     "warmup_frac": 0.3,
+     "max_growth_mb_per_h": {
+      "private": 300,
+      "gpu": 300,
+      "handles": 3000
+     }
+    }
+   }
+  },
+  "reconnect_storm": {
+   "description": "The headset comes and goes: 15 client sessions of 8-25 s with 1-6 s between them against one daemon host while the app runs, generation on, and every client behaving like the visionOS one (tracking only after 30 frames have arrived). Each session must stream, the first frame within 6 s of connecting; each new session also restarts the client clock.",
+   "override": {
+    "host": {
+     "daemon": true,
+     "seconds": 400,
+     "exit_after_frames": 10000000
+    },
+    "client": {
+     "no_stream_dump": true,
+     "track_after_frame": true,
+     "track_frames_needed": 30,
+     "seconds": 30
+    },
+    "app": {
+     "frames": 1000000,
+     "timeout_s": 260
+    },
+    "reconnect_storm": {
+     "count": 15,
+     "on_s": [
+      8,
+      25
+     ],
+     "gap_s": [
+      1,
+      6
+     ],
+     "seed": 11
+    },
+    "timeout_s": 480
+   },
+   "criteria": {
+    "storm": {
+     "min_sessions": 15,
+     "min_frames": 100,
+     "max_first_frame_s": 6
+    },
+    "host_stalls_max": 0,
+    "host_memory_events": 1
+   }
+  },
+  "client_freeze_5s": {
+   "description": "The headset stops answering for 5 s (the client process is frozen: Wi-Fi hiccup, headset busy) and then comes back, generation on, visionOS-like tracking (after 30 frames). The stream must be back within 3 s of the client resuming.",
+   "override": {
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 150,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "timeout_s": 140
+    },
+    "timeout_s": 340
+   },
+   "faults": [
+    {
+     "type": "suspend",
+     "process": "alvr_client_headless",
+     "at_s": 55,
+     "for_s": 5
+    }
+   ],
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 8000,
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
+   }
+  },
+  "client_freeze_30s": {
+   "description": "The same for 30 s: the host drops the connection and the client has to reconnect by itself; the stream must be back within 8 s of the client resuming.",
+   "override": {
+    "host": {
+     "seconds": 170
+    },
+    "client": {
+     "seconds": 150,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "timeout_s": 140
+    },
+    "timeout_s": 340
+   },
+   "faults": [
+    {
+     "type": "suspend",
+     "process": "alvr_client_headless",
+     "at_s": 55,
+     "for_s": 30
+    }
+   ],
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 38000,
+    "alive_at_end_s": 3,
+    "host_memory_events": 2
+   }
+  },
+  "soak_tokyo": {
+   "description": "The soak: Little Tokyo (with its music) at the Vision Pro's size, generation and synthetic vectors on, for --seconds (default 900) with a seeded schedule of plausible events (soak.py): re-centre, eye height, gamma, generation off/on and rate, game vectors off/on, debug logging, tracking blackouts, vector faults and re-creation, host and client freezes. Every stall must be explained by an injected freeze; host and probe memory must not grow. Audio events too (the default output muted/unmuted, its volume moved, the default switched and back; the PC's original state is restored; --no-audio leaves them out).",
+   "soak": {
+    "seconds": 900,
+    "seed": 7,
+    "audio": true
+   },
+   "override": {
+    "session_overrides": {
+     "openvr_config.eye_resolution_width": 3552,
+     "openvr_config.eye_resolution_height": 3200,
+     "openvr_config.target_eye_resolution_width": 3552,
+     "openvr_config.target_eye_resolution_height": 3200,
+     "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     },
+     "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+       "width": 3552,
+       "height": {
+        "set": true,
+        "content": 3200
+       }
+      },
+      "variant": "Absolute"
+     }
+    },
+    "host": {
+     "seconds": 915,
+     "exit_after_frames": 100000000
+    },
+    "client": {
+     "seconds": 900,
+     "no_stream_dump": true,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "frames": 100000000,
+     "timeout_s": 895,
+     "env": {
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70",
+      "XR_PROBE_SCENE": "bench\\\\littlest_tokyo.vab",
+      "XR_PROBE_MV": "synthetic"
+     }
+    },
+    "timeout_s": 1100
+   },
+   "criteria": {
+    "warmup_s": 30,
+    "alive_at_end_s": 3,
+    "soak": {
+     "recovery_s": 12,
+     "min_stall_s": 1.5
+    },
+    "host_memory_events": 2,
+    "mem": {
+     "processes": [
+      "alvr_host",
+      "xr_probe"
+     ],
+     "min_duration_s": 300,
+     "warmup_frac": 0.25,
+     "min_growth_mb": 40,
+     "max_growth_mb_per_h": {
+      "private": 120,
+      "gpu": 120,
+      "handles": 600
+     }
+    },
+    "host_audio_events": 2
+   }
+  },
+  "gui_pipe_stall_30s": {
+   "description": "The streamer window stops reading the host's stdout for 30 s (a modal dialog, a busy UI thread): the host's stdout goes through a reader (findstr) that is frozen from +55 s for 30 s. The stream must not notice: no stall over 2 s (a host thread blocked in println! would freeze it).",
+   "override": {
+    "host": {
+     "seconds": 170,
+     "stdout_pipe": true
+    },
+    "client": {
+     "seconds": 150,
+     "track_after_frame": true,
+     "track_frames_needed": 30
+    },
+    "app": {
+     "timeout_s": 140
+    },
+    "timeout_s": 340
+   },
+   "faults": [
+    {
+     "type": "suspend",
+     "process": "findstr",
+     "at_s": 55,
+     "for_s": 30
+    }
+   ],
+   "criteria": {
+    "warmup_s": 15,
+    "max_stall_ms": 2000,
+    "alive_at_end_s": 3,
+    "host_stalls_max": 0
+   }
+  }
+ }
+}

@@ -46,6 +46,52 @@ Results: `harness/results/<UTC>_<scenario>/` (`result.json`, `analysis.json`, ho
 `frames.csv`, logs); `harness/results/latest` points at the newest. A scenario is BLOCKED (not FAIL) when the
 infrastructure is missing (builder unreachable, binary or source absent, impossible topology).
 
+## Audio harnesses (2026-10-21)
+
+The game audio has three layers that fail in different ways (Windows' device state, ALVR's capture, the network to the headset), so it is tested from the
+system's side with WASAPI, not from the host's counters. All run from WSL on the builder (stdlib Python plus small C# probes compiled on the builder, `harness/probes/`);
+each prints `CHECK PASS/FAIL` lines. The Core Audio calls only work in the interactive desktop session, so the helpers run as limited scheduled tasks like the OpenXR app.
+
+| Harness | What it checks | Run | Needs |
+|---|---|---|---|
+| `audio_chain_check.py` | the whole chain driven by the streamer: `streamer.exe --test` starts the host in a fresh portable copy, the mock headset connects (it plays the received audio into the PC speakers; the host excludes its process, a real headset is another machine) and `xr_probe` renders Littlest Tokyo with its music. Default mode = process loopback: the default output is left alone, the cable carries nothing, the host log says process loopback, the headset's own process loopback hears the music. `--device` = the cable path: the cable is the default for all three roles, carries the music, the speakers are muted at the endpoint. Both: the streamer exits when its window closes, defaults and mute are restored. With a microphone in a quiet room: the client's output is silent while muted and about 10 times louder unmuted (skipped when the muted reading is above rms 0.0015) | `python3 harness/audio_chain_check.py [--device]` | `run.py build client probe gui package`; VB-CABLE on the builder |
+| `audio_route_check.py` | the cable path in detail: defaults / mute / 100 % / 2 ch 48 kHz, audio.mute_pc off, a default stolen and the cable muted while running (healed in 7 s), a named device, no cable (`VISIONALVR_FAKE_NO_CABLE=1`), the format fixed from 44.1 kHz, crash recovery | `python3 harness/audio_route_check.py` | `run.py build gui package` |
+| `process_loopback_probe.py` | Windows process loopback from plain .NET (`probes/proc_loopback.cs`): include a process, include another (silent), exclude; at the output muted / 10 % / 100 % and at 44.1 / 96 kHz device formats | `python3 harness/process_loopback_probe.py` | builder only |
+| `elevated_audio_check.py` | an elevated (high integrity) tone player is heard in include and exclude mode by a normal-token process (UEVR and mods run elevated) | `python3 harness/elevated_audio_check.py` | someone accepts the UAC prompt on the builder |
+
+What the lab taught: a muted output's own loopback is not silent (use the microphone or the endpoint state to prove mute); processes started from the SSH session
+live in another logon session and process loopback does not hear them (start the mock headset with `lib.start_limited`); the builder wrapper silently ignores `rmdir` / `del`
+(use `robocopy /MIR` for a clean copy); the VB 16ch cable refuses a second loopback client. The scene music: `tools/bench_scene/sakura_breeze.mp3`
+(credits in `THIRD_PARTY_NOTICES.md`), played by `xr_probe` when it renders a scene (`XR_PROBE_SOUND=0` silences it, `XR_PROBE_SOUND=<file>` picks another).
+
+## Stability harness (2026-10-22, docs/STABILITY_PLAN.md)
+
+`python3 harness/stability/run_stability.py list | run <name>[,<name>|all] [--seconds N] [--host-env K=V ...] | judge <results dir> <scenario>`: fault injection and soak
+scenarios on the real chain (host + shim + probe + mock client on the builder), judged by `harness/stability/judge.py` (`--selftest`). Scenarios are `stability/scenarios.json`
+(a base derived from `e2e_fg_latency`, an override, criteria); results go to `harness/results/stability/<UTC>_<name>/` (frames.csv, client_stdout.txt with the injected
+faults, host_stdout.txt, mem.csv, ballast.log, soak_plan.json, result.json). Run the **debug** flavour (`run.py build nvenc vdxr host shim probe ballast`).
+
+| Scenario | Fault | Pass means |
+|---|---|---|
+| `tracking_blackout_frame` / `_fgoff` | the pose uplink silent for 5 s, resumed only after 30 frames arrive (visionOS-like) | frames keep flowing, recovery under 2 s (the `_fgoff` control passes without the fix too) |
+| `tracking_blackout_timed` | 0.5 / 5 / 30 s silences that end by themselves | no stall beyond the silence |
+| `host_freeze_30s` / `_fgoff` | the whole host process suspended for 30 s (NtSuspendProcess) | back within the freeze + 15 s, the watchdog reports it |
+| `client_freeze_5s` / `_30s` | the mock headset frozen (the host drops the connection at 30 s) | back within a few seconds of resuming |
+| `reconnect_storm` | 15 client sessions of 8-25 s against one daemon host | every session streams, first frame within 6 s |
+| `gui_pipe_stall_30s` | the streamer window stops reading the host's stdout for 30 s (the host's stdout goes through a frozen `findstr`) | no stall over 2 s (a host thread blocked in `println!` froze the stream for 27 s before the event queue) |
+| `memory_baseline_fullres` | none: what the chain holds at the Vision Pro's size | no growth, memory events present |
+| `vram_cap_loose`, `vram_squeeze`, `ram_squeeze` | the ballast leaves the chain 4 GB / 1.8 GB of VRAM, 2.3 GB of RAM (squeezes released at +95 s) | alive at the end |
+| `mv_clean`, `mv_loss`, `mv_churn`, `mv_garbage` | probe vector faults (`XR_PROBE_MV_FAULT`: drop, blackout, churn, resize, recreate, garbage, null) | vectors used, no generator errors, no stall, no growth |
+| `soak_tokyo` | `--seconds N` (default 900) of seeded plausible events: re-centre, eye height, gamma, generation off/on and rate, game vectors, debug logging, blackouts, vector faults, host and client freezes, audio events (default output muted / volume / switched to the cable and back, restored afterwards; `--no-audio` leaves them out) | every stall inside an injected freeze, the host sees the audio changes, host and probe memory flat |
+
+**When to run it:** it is optional on a new build. The suite takes about 90 minutes and a soak hours, so run it after a major change (frame generation, the tracking / timestamp path, the vector tap, audio capture, the host's threading) and before a release that carries one, not on every commit.
+
+Machinery: `memory_limit` in a scenario (`vram_cap_mb`, `ram_cap_mb`, `at_s`, `release_s`) starts `tools/stability/vram_ballast.cpp` (built by `run.py build ballast`) so the machine
+behaves as if the chain had only that much (the dev PCs have far more than many users); `faults` (`suspend` of a process for N s), `stdin_feed` (host commands at given times),
+`reconnect_storm`, `sample_memory` (`memsample.ps1`: RAM, handles, dedicated VRAM per process once a second, `mem.csv`). Mock client flags: `--track-blackout start:dur[:frame]`,
+`--track-after-frame`, `--track-frames-needed N`. `--host-env VISIONALVR_FG_DARK_MS=0` turns the dark-tracking fix off (the freeze scenarios then fail: that is how the harness is
+known to see the bug).
+
 ## Topology
 Note: a client on a loopback address makes `server_core` treat it as *wired* and force the **TCP** stream protocol, so loopback
 scenarios do not exercise ALVR's UDP stream (the real AVP uses UDP).

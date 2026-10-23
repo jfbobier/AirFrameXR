@@ -157,6 +157,11 @@ namespace VisionALVR
         public double CleanMbps, LossPerS;
         public double TotalMs, GameMs, EncoderMs, NetworkMs, DecodeMs, DecoderQueueMs, VsyncQueueMs, ClientFps, DisplayedFps, StreamedMbps;
         public string AudioNote = "";
+        /// what Windows' process loopback heard of the scene's music during the scene test (peak 0..1; negative = not measured), and why it could not be measured
+        public double AudioPeak = -1, AudioRms;
+        public string AudioError;
+        /// the person's answer to "did you hear the scene's music in the headset" (null = not asked)
+        public bool? HeardMusic;
         public double TestFps;   // the refresh rate the tests ran at
         public int SplitMode;    // the encoder test's split_encode_mode and the strips per frame it measured (>= 2 means split encoding engaged)
         public double Slices;

@@ -1,4 +1,4 @@
-# VisionALVR UI specification (0.5-alpha)
+# VisionALVR UI specification (0.5)
 
 What each window is for, what it shows, where the numbers come from, and the rules every window follows. Written 2026-10-20 from what was built in
 0.5 (docs/PLAN_0.5.md) and the directions of the 2026-10-20 review (the "UI round 2" section of the plan). Marked **[target]** where the window is not
@@ -31,7 +31,7 @@ layers that may take the controllers, the Windows Firewall (read in the backgrou
 steps aside while a tool is open and returns when all are closed; starting the streamer from it first offers to close a running one. Single instance.
 
 ### Streamer (`bin\streamer.exe`) **[target layout]**
-Top to bottom; every block is a titled component (group box) except the first two lines.
+Top to bottom. Controls are grouped where they balance the window (Picture and Position side by side), not one box per feature.
 
 ```
 [logo header: Streamer for ALVR headsets · version]
@@ -45,27 +45,32 @@ Game: Lies of P   (none while the mirror runs)    GPU ... · OpenXR runtime ...
 |  after a session that used it: green "Game motion vectors worked (2558 frames)"            |
 |                           or orange "Ran blind: no vectors reached the streamer" (+ cause)  |
 |                           or, DLL missing: "No game vectors"  [Install]  [Not for this game] |
-+- Position -----------------------------------------------------------------------+
-|  Eye height  (o) Auto  ( ) Manual  [ 1.30 ] m                      [Recenter]      |   Auto only on the Vision Pro; "headset reports 1.62 m" shown in Auto
-+- Picture ------------------------------------------------------------------------+
-|  Gamma [----o---]  Sharpening [o-------]            [Defaults]   > Advanced         |   Advanced: brightness, contrast, saturation
-+- Desktop mirror -----------------------------------------------------------------+
-|  [switch]                                                                          |   no text; no "Between games" caption
-+------------------------------------------------------------------------------------+
++- Picture ----------------------+- Position ------------------------------------+
+|  Gamma      [----o---]  1.20   |  Eye height (o) Auto ( ) Manual [1.30] m        |   Auto only on the Vision Pro; "headset reports 1.62 m" under it
+|  Sharpening [o-------]  0.00   |  [Recenter]   Desktop mirror [switch]           |
+|  [Defaults]                    |                                                 |
++--------------------------------+-------------------------------------------------+
+> Advanced   (opens full width: Brightness, Contrast, Saturation, Resolution scale + "Apply (restarts the streamer)")
 Debug logging [ ]    [Export logs...]  [Open logs folder]            <- always visible, on or off
 footer: one inline notice at a time (firewall, setup error, encode error), with its action button
 ```
 
 Rules:
+- **Fixed window**: the streamer is sized once, at load, for its fullest ordinary content (long numbers, the vectors line, the vectors tick, the height report); notices that come and go
+  (vectors line, export result, audio line, the footer) have reserved lines, so nothing resizes or moves the window while you use it. Only *Advanced* changes its size (and back), and a
+  blocking message (the firewall warning at the top, a long error in the footer) makes it grow once to show it. `harness/streamer_events.py` window_size holds this.
 - **Frame generation** is its own component: the switch, the rate (Auto + three segments; Auto = the rate proposed from the game's recorded runs), the
-  DLSS-vectors tick (visible only while the extractor DLL is installed for the running game). The generated-frame state of the *last session* is shown here
+  *Uncapped* tick (2026-10-23: `frame_gen_rate uncapped`, slider and Auto greyed while it is on; tooltip: latency traded for smoothness) and the
+  DLSS-vectors tick (always shown since 2026-10-23: which game comes next is not known; tooltip: needs the DLL in each game's folder and a DLSS game). The generated-frame state of the *last session* is shown here
   (green worked / orange blind / the install offer), never as a pop-up. Frame generation is forced off while `mirrordesktop.exe` runs (command `frame_gen off`
   to the engine; the saved choice returns when it ends).
 - **Position**: *Auto* sends height 0 (the engine uses the headset's own floor estimate: correct when the Vision Pro saw enough of the room, i.e. standing at the
   start of the session); *Manual* sends the number (default 1.30 m, recommended seated). A Quest or other headset reports its floor correctly: the choice is
   shown as Auto and disabled. The number replaces the slider (saves space; typed or stepped with the arrows, 0.5-2.2 m).
-- **Picture**: the two settings people touch; the rest behind *Advanced*. Everything applies live.
-- **Desktop mirror**: a switch only. The streamer starts `bin\mirrordesktop.exe` while a headset is connected and no game runs (docs/DESKTOP_MIRROR.md). The mirror is
+- **Picture**: the two settings people touch; the rest behind *Advanced*. Everything applies live except the **resolution scale** (0.50-2.00, default 1.00 = nothing; above 1 is
+  supersampling): it multiplies the per-eye resolution and reaches the engine through `session.json` (`EyeScale`; the unscaled size is kept in `visionalvr.json`), which is negotiated at
+  connection, so it is applied by a streamer restart (button) and the game restarted. The setup panel shows and saves the unscaled size.
+- **Desktop mirror**: a switch next to Recenter (no box of its own). The streamer starts `bin\mirrordesktop.exe` while a headset is connected and no game runs (docs/DESKTOP_MIRROR.md). The mirror is
   an app like a game to the engine but is **hidden from every game list and label** (Game line, Game history, Diagnose facts).
 - **Debug and feedback** are one row at the bottom, always visible: the checkbox (default off), *Export logs...* (the same zip as Game history: the general log, the
   newest debug run, the game records) and *Open logs folder*. Exporting never leaves a dialog open and ends with an inline "Saved to ..." line with a link.
@@ -82,7 +87,7 @@ mirror scenarios (`e2e_mirror`, `e2e_mirror_desktop`).
 
 ### Game history (`bin\performance.exe`)
 Left: the games with a record (newest first; **the desktop mirror is not listed**). Right, for the selected game: name and path; the last session in one line
-(date, minutes, headset, generation level); four tiles (Game fps, Headset shows, Latency, DLSS vectors) and *More numbers*; the sessions table (the last ones, newest
+(date, minutes, headset, generation level); four tiles (Game fps, Headset shows, Latency, DLSS vectors) and *More numbers*; under them ALVR's own breakdown on one line, `Streamer latency N ms = encoder + transport + decoder` (n/a when not believable); the sessions table (the last ones, newest
 first: date, headset, generation, minutes, game fps, shown fps, repeated %, latency, vectors); the DLL line (one status and one action: Install / Update / Remove /
 Restore); *Export log...*, *Forget this game*; a post-run line under the tiles (orange: vectors did not reach the streamer; the wording is the one of the
 streamer's Frame generation component). *Troubleshooting and settings* (collapsed): debug logging, auto-delete of uninstalled games' logs, *Open logs folder*.

@@ -48,7 +48,15 @@ namespace VisionALVR
             yield return new Case { Name = "launcher-ready", Make = () => new LauncherForm(true) };
             yield return new Case { Name = "streamer", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState() };
             yield return new Case { Name = "streamer-clean", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };
+            yield return new Case { Name = "streamer-advanced", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).UiAction("advanced", "on"); } };
             yield return new Case { Name = "streamer-empty", Make = () => new RuntimeForm(null) };
+            yield return new Case { Name = "streamer-avp-auto", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };   // the fixture config has no height set: a Vision Pro starts on Auto
+            yield return new Case { Name = "streamer-quest", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_connected", new Dictionary<string, object> { { "name", "Meta Quest 3" }, { "ip", "192.168.1.60" } }); } };
+            yield return new Case { Name = "streamer-after-ok", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.Worked); } };
+            yield return new Case { Name = "streamer-after-blind", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.Blind); } };
+            yield return new Case { Name = "streamer-no-dll", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.NoDll); } };
+            yield return new Case { Name = "streamer-audio-bad", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoAudio(true); } };
+            yield return new Case { Name = "streamer-debug-on", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoDebugOn(); } };
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             for (int p = 0; p <= 6; p++)
             {
@@ -57,7 +65,7 @@ namespace VisionALVR
             }
             yield return new Case { Name = "configure-advanced", Make = () => new ConfigureForm(null) };
             yield return new Case { Name = "find-headset", Make = () => new FindHeadsetForm(Tuple.Create("1234.client.alvr", "Apple Vision Pro", "192.168.100.123")) };
-            yield return new Case { Name = "dll-offer", Make = () => new DllOfferForm("Cyberpunk 2077 (C) 2020 by CD Projekt RED - Phantom Liberty Edition") };
+            yield return new Case { Name = "cable-missing", Make = () => new CableForm() };
             yield return new Case { Name = "chroma-step", Make = () => new ChromaStepForm() };
             yield return new Case { Name = "openxr-layers", Make = () => new LayersForm() };
             yield return new Case { Name = "suggestions", Make = () => new AdviceHost() };
@@ -149,11 +157,151 @@ namespace VisionALVR
         static FwReport DemoFirewall()
         {
             var r = new FwReport { State = FirewallState.Allowed, Headline = "Windows Firewall lets this folder's alvr_host.exe in. 3 leftover rule(s) can be removed." };
-            r.Rules.Add(new FwRule { Name = "{1}", DisplayName = "VisionALVR (alvr_host)", Direction = "Inbound", Action = "Allow", Profile = "Any", Protocol = "Any", Enabled = true, InPlace = true, Status = "in place: lets this folder in", Program = @"C:\Users\Someone With A Long Name\Downloads\VisionALVR-0.5-alpha\VisionALVR\bin\alvr_host.exe" });
+            r.Rules.Add(new FwRule { Name = "{1}", DisplayName = "VisionALVR (alvr_host)", Direction = "Inbound", Action = "Allow", Profile = "Any", Protocol = "Any", Enabled = true, InPlace = true, Status = "in place: lets this folder in", Program = @"C:\Users\Someone With A Long Name\Downloads\VisionALVR-0.5\VisionALVR\bin\alvr_host.exe" });
             r.Rules.Add(new FwRule { Name = "{2}", DisplayName = "alvr_host.exe", Direction = "Inbound", Action = "Allow", Profile = "Public", Protocol = "TCP", Enabled = true, Propose = true, Status = "redundant: the rule above already covers all protocols", Program = @"C:\x\alvr_host.exe" });
             r.Rules.Add(new FwRule { Name = "{3}", DisplayName = "alvr_host.exe", Direction = "Inbound", Action = "Allow", Profile = "Public", Protocol = "UDP", Enabled = true, Propose = true, Status = "stale: the file is gone (C:\\Old\\VisionALVR\\bin\\alvr_host.exe)", Program = @"C:\Old\alvr_host.exe" });
             r.Rules.Add(new FwRule { Name = "{4}", DisplayName = "ALVR Streamer (other copy)", Direction = "Inbound", Action = "Allow", Profile = "Private, Public", Protocol = "Any", Enabled = true, Status = "another copy of alvr_host.exe (left alone)", Program = @"D:\ALVR\alvr_host.exe" });
             return r;
+        }
+
+        /// Text of every visible control, one line each, in tree order: what a person would read in the window.
+        static void DumpControls(Control c, StringBuilder o, int depth)
+        {
+            if (!c.Visible) return;
+            var t = (c is Label || c is ButtonBase || c is GroupBox) ? c.Text : "";
+            string kind = c is CheckBox cb ? "check[" + (cb.Checked ? "x" : " ") + "]" : c is RadioButton ? "radio" : c is Button ? "button" : c is LinkLabel ? "link" : c is Label ? "label" : c is GroupBox ? "group" : c.GetType().Name;
+            if (c is ToggleSwitch ts) o.AppendLine(new string(' ', depth) + "switch " + (c.AccessibleName ?? "") + " " + (ts.Checked ? "on" : "off"));
+            else if (t.Length > 0) o.AppendLine(new string(' ', depth) + kind + " " + t.Replace("\r", "").Replace("\n", " / "));
+            if (c is ListBox lb) foreach (var it in lb.Items) o.AppendLine(new string(' ', depth) + "item " + it);
+            if (c is ListView lv) foreach (ListViewItem r in lv.Items) o.AppendLine(new string(' ', depth) + "row " + string.Join("|", r.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(x => x.Text)));
+            foreach (Control k in c.Controls) DumpControls(k, o, depth + 1);
+        }
+
+        /// harness/performance_check.py: the Game history window on the fixture records, as text.
+        static int DumpPerformance(string game, string outDir)
+        {
+            var o = new StringBuilder();
+            using (var f = new PerformanceForm(game))
+            {
+                f.StartPosition = FormStartPosition.Manual; f.Location = new Point(0, 0); f.ShowInTaskbar = false; f.Opacity = 0;
+                f.Show();
+                DumpControls(f, o, 0);
+            }
+            File.WriteAllText(Path.Combine(outDir, "performance.txt"), o.ToString());
+            return 0;
+        }
+
+        /// One JSON object per line: {"event":...,"data":{...}} goes to RuntimeForm.HostEvent (the function the live host drives); {"dump":"label"} writes the window's text
+        /// under that label. The last state is always dumped, and a screenshot written.
+        static int Replay(string file, string outDir)
+        {
+            var o = new StringBuilder();
+            var made = new List<string>();   // files a setup line created: removed at the end
+            Ui.WorkAreaOverride = new Rectangle(0, 0, 3840, 2100);   // a big pretend screen: window sizes are the content's, never the builder's screen
+            using (var f = new RuntimeForm(null))
+            {
+                f.StartPosition = FormStartPosition.Manual; f.Location = new Point(0, 0); f.ShowInTaskbar = false; f.Opacity = 0;
+                f.Show();   // no message loop: Shown (which would start the streamer) never runs
+                void dump(string label) { o.AppendLine("== " + label); o.AppendLine("clientsize " + f.ClientSize.Width + "x" + f.ClientSize.Height + " at " + f.Location.X + "," + f.Location.Y); DumpControls(f, o, 0); }
+                int n = 0;
+                foreach (var line in File.ReadAllLines(file))
+                {
+                    if (line.Trim().Length == 0 || line.TrimStart().StartsWith("#")) continue;
+                    var d = global::VisionALVR.Json.Parse(line);
+                    n++;
+                    if (d.TryGetValue("dump", out var lab)) { dump(Convert.ToString(lab)); foreach (var c in f.Sent) o.AppendLine("sent " + c); continue; }
+                    if (d.TryGetValue("setup", out var su)) { made.AddRange(ReplaySetup(Convert.ToString(su), d)); continue; }
+                    if (d.TryGetValue("ui", out var ui)) { f.Sent.Clear(); f.UiAction(Convert.ToString(ui), d.TryGetValue("value", out var uv) ? Convert.ToString(uv) : ""); continue; }
+                    if (!d.TryGetValue("event", out var ev)) continue;
+                    f.HostEvent(Convert.ToString(ev), d.TryGetValue("data", out var x) ? x as Dictionary<string, object> : null);
+                }
+                dump("end");
+                o.AppendLine("range height " + f.HeightMin.ToString(CultureInfo.InvariantCulture) + " " + f.HeightMax.ToString(CultureInfo.InvariantCulture));
+                try { using (var bmp = new Bitmap(f.Width, f.Height)) { f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height)); bmp.Save(Path.Combine(outDir, "replay.png"), ImageFormat.Png); } } catch { }
+            }
+            foreach (var m in made) try { if (Directory.Exists(m)) Directory.Delete(m, true); else File.Delete(m); } catch { }
+            File.WriteAllText(Path.Combine(outDir, "replay.txt"), o.ToString());
+            return 0;
+        }
+
+        /// {"setup":"game","exe":"X.exe","dll":"installed"|"none"}: a game record whose exe sits in a temporary folder, with the motion-vector DLL next to it or not.
+        /// Returns what was created.
+        static IEnumerable<string> ReplaySetup(string what, Dictionary<string, object> d)
+        {
+            var made = new List<string>();
+            if (what != "game") return made;
+            var exe = Convert.ToString(d["exe"]);
+            var dir = Path.Combine(Path.GetTempPath(), "va_replay_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir); made.Add(dir);
+            File.WriteAllText(Path.Combine(dir, exe), "x");
+            if (Convert.ToString(d["dll"]) == "installed" && File.Exists(MvDll.Master)) File.Copy(MvDll.Master, Path.Combine(dir, "dxgi.dll"));
+            Directory.CreateDirectory(Games.Dir);
+            var rec = Games.FileOf(exe);
+            File.WriteAllText(rec, "{\"exe\": \"" + exe + "\", \"name\": \"" + exe + "\", \"paths\": [" + Newtonsoft(Path.Combine(dir, exe)) + "], \"levels\": {}, \"sessions\": []}");
+            made.Add(rec);
+            return made;
+        }
+        static string Newtonsoft(string s) => "\"" + s.Replace("\\", "\\\\") + "\"";
+
+        /// harness/dll_install_check.py: install / update / remove of the motion-vector DLL in a temporary game folder, a foreign dxgi.dll, the dismissal, and the vectors line's decision table.
+        static int DllInstallSelfTest(string outDir)
+        {
+            var o = new StringBuilder(); int fails = 0;
+            void check(string name, bool ok, string detail = "") { if (!ok) fails++; o.AppendLine($"CHECK {(ok ? "PASS" : "FAIL")} {name}" + (ok ? "" : ": " + detail)); }
+            var dir = Path.Combine(Path.GetTempPath(), "va_dll_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            const string stem = "SelfTestGame";
+            try
+            {
+                check("master present", File.Exists(MvDll.Master), MvDll.Master);
+                check("not installed at first", MvDll.Check(dir, stem, out _) == MvDll.State.NotInstalled);
+                var msg = MvDll.Install(dir, stem, out var f1);
+                check("install as dxgi.dll", f1 == "dxgi.dll" && MvDll.Check(dir, stem, out _) == MvDll.State.Installed, msg);
+                File.WriteAllText(Path.Combine(dir, "dxgi.dll"), "an older copy");
+                check("an older copy is recognised", MvDll.Check(dir, stem, out _) == MvDll.State.OlderCopy);
+                msg = MvDll.Install(dir, stem, out var f2);
+                check("update restores the master", f2 == "dxgi.dll" && MvDll.Check(dir, stem, out _) == MvDll.State.Installed, msg);
+                msg = MvDll.Uninstall(dir, stem);
+                check("remove", !File.Exists(Path.Combine(dir, "dxgi.dll")) && MvDll.Check(dir, stem, out _) == MvDll.State.NotInstalled, msg);
+                File.WriteAllText(Path.Combine(dir, "dxgi.dll"), "someone else's proxy");
+                check("a foreign dxgi.dll is flagged", MvDll.Check(dir, stem, out _) == MvDll.State.OtherDll);
+                msg = MvDll.Install(dir, stem, out var f3);
+                check("install beside a foreign dxgi.dll as version.dll", f3 == "version.dll" && File.ReadAllText(Path.Combine(dir, "dxgi.dll")) == "someone else's proxy" && MvDll.Check(dir, stem, out _) == MvDll.State.Installed, msg);
+                MvDll.Uninstall(dir, stem);
+                check("the foreign file survives the removal", File.Exists(Path.Combine(dir, "dxgi.dll")));
+                check("not dismissed", !MvDll.Dismissed(stem));
+                MvDll.Dismiss(stem);
+                check("dismissed", MvDll.Dismissed(stem));
+                var K = VectorsLine.Kind.None;
+                check("vectors line: generation off says nothing", VectorsLine.Of("off", true, 0, MvDll.State.Installed, false) == K);
+                check("vectors line: worked", VectorsLine.Of("half", true, 10, MvDll.State.Installed, false) == VectorsLine.Kind.Worked);
+                check("vectors line: blind", VectorsLine.Of("half", true, 0, MvDll.State.Installed, false) == VectorsLine.Kind.Blind && VectorsLine.Of("half", true, 0, MvDll.State.OlderCopy, false) == VectorsLine.Kind.Blind);
+                check("vectors line: no DLL offers the install", VectorsLine.Of("half", true, 0, MvDll.State.NotInstalled, false) == VectorsLine.Kind.NoDll);
+                check("vectors line: dismissed offer is silent", VectorsLine.Of("half", true, 0, MvDll.State.NotInstalled, true) == K);
+                check("vectors line: tick off is silent", VectorsLine.Of("half", false, 0, MvDll.State.Installed, false) == K);
+                check("vectors line: no folder is silent", VectorsLine.Of("half", true, 0, MvDll.State.NoFolder, false) == K);
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+            File.WriteAllText(Path.Combine(outDir, "dll_install.txt"), o.ToString());
+            return fails == 0 ? 0 : 1;
+        }
+
+        // harness/center_check.py: a window that starts centred (CenterScreen) is centred on its screen's work area once its content has sized it
+        static int CenterSelfTest(string outDir)
+        {
+            var o = new StringBuilder(); int fails = 0;
+            foreach (var make in new Func<Form>[] { () => new RuntimeForm(null), () => new PerformanceForm("Cyberpunk2077.exe") })
+                using (var f = make())
+                {
+                    f.Opacity = 0; f.ShowInTaskbar = false; f.Show();
+                    var wa = Screen.FromControl(f).WorkingArea;
+                    int dx = (f.Left + f.Width / 2) - (wa.Left + wa.Width / 2), dy = (f.Top + f.Height / 2) - (wa.Top + wa.Height / 2);
+                    bool ok = Math.Abs(dx) <= 2 && (Math.Abs(dy) <= 2 || f.Height >= wa.Height - 2) && f.Left >= wa.Left && f.Top >= wa.Top && f.Right <= wa.Right && f.Bottom <= wa.Bottom;
+                    if (!ok) fails++;
+                    o.AppendLine($"CHECK {(ok ? "PASS" : "FAIL")} {f.GetType().Name}: window {f.Bounds}, work area {wa}, off centre ({dx},{dy})");
+                }
+            File.WriteAllText(Path.Combine(outDir, "center.txt"), o.ToString());
+            return fails == 0 ? 0 : 1;
         }
 
         [STAThread]
@@ -166,6 +314,20 @@ namespace VisionALVR
             Directory.CreateDirectory(outDir);
             var only = Arg("--only");
             if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);
+            if (args.Contains("--center-selftest")) return CenterSelfTest(outDir);
+            var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
+            if (replay != null) return Replay(replay, outDir);
+            if (args.Contains("--dll-install-selftest")) return DllInstallSelfTest(outDir);
+            var perfGame = Arg("--dump-performance");
+            if (perfGame != null) return DumpPerformance(perfGame, outDir);
+            var exportTo = Arg("--export-selftest");   // harness/export_logs.py: the export to a path with no dialog; lists the entries
+            if (exportTo != null)
+            {
+                Log.Write("INFO", "export selftest");   // makes sure a general log exists
+                var names = LogExport.Write(exportTo, Arg("--game"));
+                File.WriteAllLines(Path.Combine(outDir, "export.txt"), names.Concat(new[] { "open_forms=" + Application.OpenForms.Count }));
+                return 0;
+            }
             var fwExe = Arg("--firewall");   // harness/firewall_check.py: print the firewall analysis of this exe and stop
             if (fwExe != null)
             {

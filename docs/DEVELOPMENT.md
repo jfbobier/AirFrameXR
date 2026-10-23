@@ -91,6 +91,12 @@ publish a zip whose DLL was not built from the fork commit the shim's header mir
 4. The zip is named after the host's `VERSION` (`tools/host/src/vision.rs`) and renamed `VisionALVR-<tag>.zip` on upload; the release notes
    live in `docs/releases/<tag>.md` and are pushed to GitHub with `gh release edit --notes-file`.
 
+5. **Optional, only after a major change:** the stability harness (`python3 harness/stability/run_stability.py run all`, about 90 minutes on a laptop,
+   plus `run soak_tokyo --seconds 14400` for a leak verdict) on the debug flavour (`run.py build nvenc vdxr host shim probe ballast`). It is not part of
+   a normal build or a normal release: run it when the frame-generation pipeline, the tracking / timestamp path, the motion-vector tap, the audio capture or
+   the host's threading changed, and before a release that carries such a change. A small fix needs the regular scenarios only. See harness/README.md
+   (Stability harness) and docs/STABILITY_PLAN.md.
+
 ## Automated tests (optional)
 The harness (`harness/`, Python stdlib) runs end-to-end scenarios on the Windows PC with a headless mock ALVR client: real
 NVENC encodes, the OpenXR test app through VDXR + OVRShim, then checks on the received stream (frame counters, timestamps,

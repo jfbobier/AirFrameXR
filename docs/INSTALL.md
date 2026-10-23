@@ -1,4 +1,4 @@
-# VisionALVR: install, use, logs (0.5 alpha)
+# VisionALVR: install, use, logs (0.5)
 
 VisionALVR is **portable**, like ALVR and UEVR: one folder you unzip wherever you want. Nothing goes to Program Files; the only
 system changes are the OpenXR runtime registration and one firewall rule, both undone by the launcher's OpenXR runtime button ("Switch back").

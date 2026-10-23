@@ -1,0 +1,7 @@
+{"dump": "quiet"}
+{"event": "audio_note", "data": {"level": "INFO", "text": "CABLE Input (VB-Audio Virtual Cable) was at 40 %, set back to 100 %"}}
+{"dump": "forced"}
+{"event": "audio_note", "data": {"level": "WARN", "text": "CABLE Input (VB-Audio Virtual Cable) could not be set to 100 % (stays at 70 %)"}}
+{"dump": "failed"}
+{"event": "audio_note", "data": {"level": "WARN", "text": "CABLE In 16ch (VB-Audio Virtual Cable) has 16 channels: ALVR cannot capture more than 8, it is not used"}}
+{"dump": "channels"}

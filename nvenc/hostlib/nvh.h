@@ -124,6 +124,8 @@ int nvh_ipc_app_exe(void* ipc, char* buf, int len);
 // sample row (gpu%,mem%,enc%,dec%,graphics MHz,memory MHz,video MHz,power W,temp C,pstate,vram used MB,clock event reasons).
 int nvh_gpu_info(char* buf, int len);
 int nvh_gpu_sample(char* buf, int len);
+// One CSV row of memory numbers: host private MB, working set MB, handles, free RAM MB, total RAM MB, GPU used MB, GPU total MB, host VRAM MB, VRAM budget MB.
+int nvh_mem_sample(char* buf, int len);
 // ---- Benchmark quality sweep (bench.cpp) -------------------------------------------------------------------------------------
 // The benchmark scene (.vab, tools/bench_scene) rendered in stereo -> ALVR foveation -> NVENC with reconstructed-frame output ->
 // the reconstruction un-foveated with the visionOS client's mapping and compared, in display space, with a reference render.

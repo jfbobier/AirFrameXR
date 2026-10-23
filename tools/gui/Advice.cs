@@ -51,7 +51,7 @@ namespace VisionALVR
             try
             {
                 if (Directory.Exists(gamesDir))
-                    foreach (var file in Directory.GetFiles(gamesDir, "*.json"))
+                    foreach (var file in Directory.GetFiles(gamesDir, "*.json").Where(x => !global::VisionALVR.Games.IsHiddenFile(x)))
                     {
                         var g = Json.Load(file);
                         if (!(g.TryGetValue("sessions", out var so) && so is object[] ss && ss.Length > 0 && ss[ss.Length - 1] is Dictionary<string, object> s)) continue;

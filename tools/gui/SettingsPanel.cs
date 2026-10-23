@@ -29,6 +29,9 @@ namespace VisionALVR
         public readonly NumericUpDown Packet = Num(500, 4000, 100);
         public readonly NumericUpDown Haptics = Dec(0m, 5m);
         public readonly CheckBox DebugDefault = new CheckBox { Text = "Debug logging at every start (costs a few ms per frame)", AutoSize = true };
+        public readonly ComboBox CaptureBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 330 };
+        public readonly ComboBox PowerPlanBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
+        List<PowerPlan.Plan> plans = new List<PowerPlan.Plan>();
         public readonly ComboBox RecenterKey = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 130 };
         const string V = "session_settings.video.";
 
@@ -86,6 +89,8 @@ namespace VisionALVR
 
             section("Audio");
             note(Audio);
+            CaptureBox.Items.AddRange(new object[] { "Process loopback (no virtual cable needed)", "Virtual cable (VB-CABLE)" });
+            row("Game audio capture", CaptureBox);
             note(Mute);
 
             section("Network and controllers");
@@ -98,6 +103,12 @@ namespace VisionALVR
             var keyNote = Ui.Line("Turns the tracking space so you face forward at your current spot, in any game. End is used by no mod we know of (UEVR uses Insert, Luke Pause, Mutar F11). Type another key (F1-F24, a letter, Ctrl+Alt+R) or off.");
             keyNote.ForeColor = Color.DimGray;
             note(keyNote);
+
+            section("System");
+            row("Windows power plan while streaming", PowerPlanBox);
+            var planNote = Ui.Line("The streamer switches to this plan when it starts and puts the previous one back when it closes.");
+            planNote.ForeColor = Color.DimGray;
+            note(planNote);
 
             section("Logging");
             note(DebugDefault);
@@ -124,8 +135,9 @@ namespace VisionALVR
         {
             session = Session.Load();
             var s = session;
-            EyeW.Value = Clamp(EyeW, Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552));
-            EyeH.Value = Clamp(EyeH, Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200));
+            EyeScale.Current(settings, s, out var baseW, out var baseH, out _);   // the unscaled size: the streamer's resolution scale is applied on top of it
+            EyeW.Value = Clamp(EyeW, baseW);
+            EyeH.Value = Clamp(EyeH, baseH);
             var f = ((int)Json.Num(s, V + "preferred_fps", 90)).ToString(CultureInfo.InvariantCulture);
             if (!Fps.Items.Contains(f)) Fps.Items.Add(f);
             Fps.SelectedItem = f;
@@ -141,12 +153,18 @@ namespace VisionALVR
             Fry.Value = Clamp(Fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
             try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
             Audio.Checked = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
-            Mute.Checked = Json.Bool(s, "session_settings.audio.game_audio.content.mute_when_streaming", true);
+            Mute.Checked = settings.MuteSpeakers;
             Proto.SelectedItem = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp") == "Tcp" ? "Tcp" : "Udp";
             Packet.Value = Clamp(Packet, Json.Num(s, "session_settings.connection.packet_size", 1400));
             Haptics.Value = Clamp(Haptics, Json.Num(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", 1));
             DebugDefault.Checked = settings.Debug;
             RecenterKey.Text = settings.RecenterKey;
+            CaptureBox.SelectedIndex = settings.AudioCapture == "device" ? 1 : 0;
+            plans = PowerPlan.List();
+            PowerPlanBox.Items.Clear(); PowerPlanBox.Items.Add("(leave unchanged)");
+            foreach (var p in plans) PowerPlanBox.Items.Add(p.Name);
+            var cur = plans.FindIndex(p => string.Equals(p.Guid, settings.PowerPlan, StringComparison.OrdinalIgnoreCase));
+            PowerPlanBox.SelectedIndex = cur >= 0 ? cur + 1 : 0;
         }
 
         /// Puts a proposal into the controls (nothing is written to disk until Save).
@@ -170,6 +188,7 @@ namespace VisionALVR
             error = null;
             session = Session.Load(); // keep anything edited meanwhile (e.g. pairing)
             var s = session;
+            EyeScale.Current(settings, s, out _, out _, out var scale);
             int w = (int)EyeW.Value / 32 * 32, h = (int)EyeH.Value; // ALVR aligns widths to 32
             var rate = double.Parse((string)Fps.SelectedItem, CultureInfo.InvariantCulture);
             foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
@@ -197,18 +216,21 @@ namespace VisionALVR
             Json.Set(s, "openvr_config.refresh_rate", (int)rate);
             Json.Set(s, "openvr_config.enable_foveated_encoding", ProfFov.Checked);
             Json.Set(s, "session_settings.audio.game_audio.enabled", Audio.Checked);
-            Json.Set(s, "session_settings.audio.game_audio.content.mute_when_streaming", Mute.Checked);
             Json.Set(s, "session_settings.connection.stream_protocol.variant", (string)Proto.SelectedItem);
             Json.Set(s, "session_settings.connection.packet_size", (int)Packet.Value);
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)Haptics.Value);
             try { Json.Save(Paths.Session, s); }
             catch (Exception e) { error = "Cannot write config\\session.json: " + e.Message; return false; }
+            if (Math.Abs(scale - 1) >= 0.005 && !EyeScale.Apply(settings, scale, out error, w, h)) return false;   // the typed size is the unscaled one: put the streamer's scale back on it
             settings.EncodeProfile = ProfFull.Checked ? "full-split" : "foveated";
             settings.SplitEncode = Split.Checked || ProfFull.Checked;   // the full-frame profile forces 3 strips whatever this says
             settings.FrameGen = FrameGen.Checked;
             settings.IdleRgb = $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}";
+            settings.MuteSpeakers = Mute.Checked;
+            settings.AudioCapture = CaptureBox.SelectedIndex == 1 ? "device" : "process";
             settings.Debug = DebugDefault.Checked;
             settings.RecenterKey = RecenterKey.Text.Trim().Length > 0 ? RecenterKey.Text.Trim() : "End";
+            settings.PowerPlan = PowerPlanBox.SelectedIndex > 0 && PowerPlanBox.SelectedIndex <= plans.Count ? plans[PowerPlanBox.SelectedIndex - 1].Guid : (PowerPlanBox.SelectedIndex < 0 ? settings.PowerPlan : "");
             settings.Save();
             Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {rate} Hz, {Bitrate.Value} Mbps, {settings.EncodeProfile}, split {settings.SplitEncode}, frame generation {settings.FrameGen}, idle #{settings.IdleRgb}, audio {Audio.Checked}, {Proto.SelectedItem}, debug {settings.Debug}");
             return true;

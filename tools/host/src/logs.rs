@@ -322,11 +322,44 @@ pub mod client_stats {
         server_fps: f64,
         throughput_bps: f64,
         bitrate_bps: f64,
+        lat_n: u32,          // samples whose latency fields are sane (the others are outliers, see Sample::is_outlier)
+        outliers: u32,
+        totals: Vec<f64>,    // seconds, per sane sample: the window reports their median, a few garbage samples cannot move it
+        encoders: Vec<f64>,
+        networks: Vec<f64>,
+        decoders: Vec<f64>,
     }
+
+    /// One client frame's statistics (seconds, fps, bits per second).
+    #[derive(Clone, Copy, Default, Debug)]
+    pub struct Sample {
+        pub total: f64, pub game: f64, pub compositor: f64, pub encoder: f64, pub network: f64, pub decoder: f64, pub decoder_queue: f64,
+        pub client_compositor: f64, pub vsync_queue: f64, pub client_fps: f64, pub server_fps: f64, pub throughput_bps: f64, pub bitrate_bps: f64,
+    }
+
+    impl Sample {
+        /// A duration that went negative and wrapped (a re-stamped or generated frame whose timestamps do not pair with the client's) reads as years:
+        /// any component outside 0..2 s or a total above 5 s is not a latency, it is garbage (Lies of P showed 4 958 802 102 ms on the streamer).
+        pub fn is_outlier(&self) -> bool {
+            let bad = |x: f64| !(0.0..=2.0).contains(&x);
+            bad(self.game) || bad(self.compositor) || bad(self.encoder) || bad(self.network) || bad(self.decoder) || bad(self.decoder_queue) || bad(self.client_compositor)
+                || !(0.0..=5.0).contains(&self.total)
+        }
+    }
+
+    pub fn median(v: &mut Vec<f64>) -> Option<f64> {
+        if v.is_empty() { return None; }
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        Some(v[v.len() / 2])
+    }
+
+    /// the first outliers of a run are kept raw in the debug folder to find where they come from
+    static OUTLIER_LOGGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
     const ZERO: Agg = Agg {
         n: 0, total: 0.0, game: 0.0, compositor: 0.0, encoder: 0.0, network: 0.0, decoder: 0.0, decoder_queue: 0.0,
         client_compositor: 0.0, vsync_queue: 0.0, client_frame_s: 0.0, client_n: 0, vsync_n: 0, vsync_late: 0, since: None, server_fps: 0.0, throughput_bps: 0.0, bitrate_bps: 0.0,
+        lat_n: 0, outliers: 0, totals: Vec::new(), encoders: Vec::new(), networks: Vec::new(), decoders: Vec::new(),
     };
     /// Windows: 0 = encoder_stats (2 s), 1 = status (10 s), 2 = benchmark step.
     static WINDOWS: std::sync::Mutex<[Agg; 3]> = std::sync::Mutex::new([ZERO, ZERO, ZERO]);
@@ -342,36 +375,60 @@ pub mod client_stats {
     }
     static LAST_SUMMARY: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
 
-    pub fn graph(g: &alvr_events::GraphStatistics) {
-        for a in WINDOWS.lock().unwrap().iter_mut() {
-            a.n += 1;
-            a.total += g.total_pipeline_latency_s as f64;
-            a.game += g.game_time_s as f64;
-            a.compositor += g.server_compositor_s as f64;
-            a.encoder += g.encoder_s as f64;
-            a.network += g.network_s as f64;
-            a.decoder += g.decoder_s as f64;
-            a.decoder_queue += g.decoder_queue_s as f64;
-            a.client_compositor += g.client_compositor_s as f64;
-            a.since.get_or_insert_with(std::time::Instant::now);
-            if (0.0..1.0).contains(&g.vsync_queue_s) {
-                a.vsync_queue += g.vsync_queue_s as f64;
-                a.vsync_n += 1;
+    impl Agg {
+        fn add(&mut self, x: &Sample) {
+            self.n += 1;
+            self.since.get_or_insert_with(std::time::Instant::now);
+            if x.is_outlier() {
+                self.outliers += 1;
             } else {
-                a.vsync_late += 1;
+                self.lat_n += 1;
+                self.total += x.total;
+                self.game += x.game;
+                self.compositor += x.compositor;
+                self.encoder += x.encoder;
+                self.network += x.network;
+                self.decoder += x.decoder;
+                self.decoder_queue += x.decoder_queue;
+                self.client_compositor += x.client_compositor;
+                self.totals.push(x.total);
+                self.encoders.push(x.encoder);
+                self.networks.push(x.network);
+                self.decoders.push(x.decoder);
+            }
+            if (0.0..1.0).contains(&x.vsync_queue) {
+                self.vsync_queue += x.vsync_queue;
+                self.vsync_n += 1;
+            } else {
+                self.vsync_late += 1;
             }
             // client_fps is per frame (1 / gap between two displayed frames): average the gaps, not the rates, which
             // overweighted short gaps; 0 and absurd values (1704 fps seen) are dropped
-            if g.client_fps > 1.0 && g.client_fps < 500.0 {
-                a.client_frame_s += 1.0 / g.client_fps as f64;
-                a.client_n += 1;
+            if x.client_fps > 1.0 && x.client_fps < 500.0 {
+                self.client_frame_s += 1.0 / x.client_fps;
+                self.client_n += 1;
             }
-            a.server_fps += g.server_fps as f64;
-            a.throughput_bps += g.throughput_bps as f64;
-            a.bitrate_bps += g.bitrate_bps as f64;
+            self.server_fps += x.server_fps;
+            self.throughput_bps += x.throughput_bps;
+            self.bitrate_bps += x.bitrate_bps;
         }
+    }
+
+    pub fn graph(g: &alvr_events::GraphStatistics) {
+        let x = Sample {
+            total: g.total_pipeline_latency_s as f64, game: g.game_time_s as f64, compositor: g.server_compositor_s as f64, encoder: g.encoder_s as f64,
+            network: g.network_s as f64, decoder: g.decoder_s as f64, decoder_queue: g.decoder_queue_s as f64, client_compositor: g.client_compositor_s as f64,
+            vsync_queue: g.vsync_queue_s as f64, client_fps: g.client_fps as f64, server_fps: g.server_fps as f64, throughput_bps: g.throughput_bps as f64, bitrate_bps: g.bitrate_bps as f64,
+        };
+        if x.is_outlier() && OUTLIER_LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 10 {
+            debug_file_line("client_stats_outliers.jsonl", &format!("{{\"t\":{:.6},\"sample\":\"{:?}\"}}", qpc_now(), x));
+        }
+        for a in WINDOWS.lock().unwrap().iter_mut() {
+            a.add(&x);
+        }
+        let g = &x;
         if g.client_fps > 1.0 && g.client_fps < 500.0 {
-            let gap_s = 1.0 / g.client_fps as f64;
+            let gap_s = 1.0 / g.client_fps;
             let period_s = crate::phase::period_ns() as f64 / 1e9;
             CLIENT_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if gap_s > 1.5 * period_s {
@@ -396,11 +453,19 @@ pub mod client_stats {
     /// Averages of window `w` since its last take (milliseconds, fps, Mbps), then resets it. None if no client statistics arrived.
     pub fn take(w: usize) -> Option<Value> {
         let a = std::mem::take(&mut WINDOWS.lock().unwrap()[w]);
+        window_json(a)
+    }
+
+    /// The window as JSON. Latency figures are medians of the sane samples (None = null when every sample was an outlier); `latency_outliers` counts the dropped ones.
+    pub(super) fn window_json(mut a: Agg) -> Option<Value> {
         if a.n == 0 {
             return None;
         }
+        let lat_n = a.lat_n.max(1) as f64;
+        let lat = |x: f64| -> Value { if a.lat_n > 0 { json!((x / lat_n * 1000.0 * 100.0).round() / 100.0) } else { Value::Null } };
+        let med = |v: &mut Vec<f64>| -> Value { median(v).map(|m| json!((m * 1000.0 * 100.0).round() / 100.0)).unwrap_or(Value::Null) };
+        let (total_ms, encode_ms, network_ms, decode_ms) = (med(&mut a.totals), med(&mut a.encoders), med(&mut a.networks), med(&mut a.decoders));
         let n = a.n as f64;
-        let ms = |x: f64| (x / n * 1000.0 * 100.0).round() / 100.0;
         let r1 = |x: f64| (x * 10.0).round() / 10.0;
         let client_fps = if a.client_n > 0 { r1(a.client_n as f64 / a.client_frame_s) } else { 0.0 };
         let vsync_queue_ms = if a.vsync_n > 0 { (a.vsync_queue / a.vsync_n as f64 * 1000.0 * 100.0).round() / 100.0 } else { 0.0 };
@@ -409,11 +474,70 @@ pub mod client_stats {
         let displayed_fps = if secs > 0.5 { r1(n / secs) } else { client_fps };
         Some(json!({
             "samples": a.n,
-            "total_latency_ms": ms(a.total), "game_ms": ms(a.game), "server_compositor_ms": ms(a.compositor),
-            "encode_ms": ms(a.encoder), "network_ms": ms(a.network), "decode_ms": ms(a.decoder),
-            "decoder_queue_ms": ms(a.decoder_queue), "client_compositor_ms": ms(a.client_compositor), "vsync_queue_ms": vsync_queue_ms, "vsync_late": a.vsync_late,
+            "latency_outliers": a.outliers,
+            "total_latency_ms": total_ms, "game_ms": lat(a.game), "server_compositor_ms": lat(a.compositor),
+            "encode_ms": encode_ms, "network_ms": network_ms, "decode_ms": decode_ms,
+            "decoder_queue_ms": lat(a.decoder_queue), "client_compositor_ms": lat(a.client_compositor), "vsync_queue_ms": vsync_queue_ms, "vsync_late": a.vsync_late,
             "client_fps": client_fps, "displayed_fps": displayed_fps, "server_fps": (a.server_fps / n * 10.0).round() / 10.0,
             "throughput_mbps": (a.throughput_bps / n / 1e6 * 10.0).round() / 10.0, "bitrate_mbps": (a.bitrate_bps / n / 1e6 * 10.0).round() / 10.0,
         }))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn clean(total_ms: f64) -> Sample {
+            Sample { total: total_ms / 1000.0, game: 0.011, compositor: 0.002, encoder: 0.006, network: 0.009, decoder: 0.014, decoder_queue: 0.003, client_compositor: 0.002,
+                     vsync_queue: 0.004, client_fps: 90.0, server_fps: 90.0, throughput_bps: 1.2e8, bitrate_bps: 1.2e8 }
+        }
+        fn window(samples: &[Sample]) -> Value {
+            let mut a = ZERO;
+            for s in samples { a.add(s); }
+            window_json(a).unwrap()
+        }
+
+        #[test]
+        fn clean_samples_are_unchanged() {
+            let w = window(&[clean(50.0), clean(52.0), clean(54.0)]);
+            assert_eq!(w["latency_outliers"], 0);
+            assert_eq!(w["total_latency_ms"].as_f64().unwrap(), 52.0);
+            assert_eq!(w["encode_ms"].as_f64().unwrap(), 6.0);
+            assert_eq!(w["decode_ms"].as_f64().unwrap(), 14.0);
+        }
+
+        #[test]
+        fn a_wrapped_duration_is_dropped_and_counted() {
+            let mut bad = clean(50.0);
+            bad.total = 4_958_802.102;   // seconds: the streamer showed 4 958 802 102 ms
+            bad.encoder = 137.0;
+            let w = window(&[clean(50.0), bad, clean(52.0), bad, clean(54.0)]);
+            assert_eq!(w["latency_outliers"], 2);
+            assert_eq!(w["samples"], 5);
+            assert_eq!(w["total_latency_ms"].as_f64().unwrap(), 52.0);
+            assert_eq!(w["encode_ms"].as_f64().unwrap(), 6.0);
+            assert!(w["game_ms"].as_f64().unwrap() < 12.0);
+        }
+
+        #[test]
+        fn a_negative_component_is_an_outlier() {
+            let mut bad = clean(50.0);
+            bad.network = -0.001;
+            assert!(bad.is_outlier());
+            let mut slow = clean(50.0);
+            slow.total = 5.5;
+            assert!(slow.is_outlier());
+            assert!(!clean(200.0).is_outlier());
+        }
+
+        #[test]
+        fn a_window_of_outliers_reports_no_latency() {
+            let mut bad = clean(50.0);
+            bad.decoder = 3.0e9;
+            let w = window(&[bad, bad]);
+            assert_eq!(w["latency_outliers"], 2);
+            assert!(w["total_latency_ms"].is_null() && w["game_ms"].is_null() && w["decode_ms"].is_null());
+            assert!(w["displayed_fps"].as_f64().is_some());   // the frame counts still stand
+        }
     }
 }

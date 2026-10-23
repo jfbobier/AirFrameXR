@@ -1,0 +1,7 @@
+{"event": "client_connected", "data": {"name": "Apple Vision Pro", "ip": "192.168.1.50"}}
+{"event": "game_started", "data": {"exe": "Short.exe"}}
+{"event": "status", "data": {"app_fps": 60, "stream_fps": 90, "mbps": 100, "packets_lost": 0, "frames_not_streamed": 0, "client": {"displayed_fps": 90, "total_latency_ms": 50, "encode_ms": 6, "network_ms": 9, "decode_ms": 14}}}
+{"event": "game_ended", "data": {"exe": "Short.exe", "seconds": 12}}
+{"dump": "ended"}
+{"event": "game_run", "data": {"exe": "Short.exe", "headset": "Apple Vision Pro", "level": "half", "seconds": 12, "rendered_fps": 60, "rendered_fps_low": 38.2, "streamed_fps": 89.7, "headset_repeated_typ": 0.01, "host_repeats_typ": 0.0, "skipped": 0.0, "recorded": false, "net": {"displayed_fps": 89.1, "bitrate_mbps": 120, "latency_ms": 50, "latency_p95_ms": 60, "packets_lost": 0}, "mv": {"enabled": true, "frames": 2558}}}
+{"dump": "after_short_run"}
