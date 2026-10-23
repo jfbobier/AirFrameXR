@@ -7,6 +7,10 @@
 {"dump": "rate"}
 {"ui": "mv", "value": "off"}
 {"dump": "mv"}
+{"ui": "uncapped", "value": "on"}
+{"dump": "uncapped_on"}
+{"ui": "uncapped", "value": "off"}
+{"dump": "uncapped_off"}
 {"ui": "recenter", "value": ""}
 {"dump": "recenter"}
 {"ui": "height_mode", "value": "manual"}

@@ -59,7 +59,9 @@ namespace VisionALVR
         readonly Label audioLine = new Label { AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };   // the virtual audio device's volume, only when it matters
         readonly Label exportStatus = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };
         readonly LinkLabel exportLink = new LinkLabel { Text = "Open folder", AutoSize = true, Margin = new Padding(3, 4, 3, 0) };
-        readonly CheckBox fgMv = new CheckBox { Text = "Use the game's DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0), Visible = false };   // shown only where the extractor DLL is installed for the running game
+        readonly CheckBox fgMv = new CheckBox { Text = "Use the game's DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0) };   // always shown: which game comes next is not known
+        // uncapped generation (settings video.frame_gen_rate uncapped, docs/FRAME_GENERATION_UNCAPPED.md): the game runs at its own rate, every output interpolated
+        readonly CheckBox fgUnc = new CheckBox { Text = "Uncapped", AutoSize = true, Margin = new Padding(0, 3, 0, 0) };
         readonly ToggleButton fgRecommend = new ToggleButton { Text = "Auto", Margin = new Padding(0, 0, 8, 0), AccessibleName = "Choose the game rate automatically from this game's recorded runs" };
                 readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(8, 3, 3, 3) };
         bool fgRateFromHost;   // the slider follows the host's rate: no command back
@@ -134,13 +136,14 @@ namespace VisionALVR
             FlowLayoutPanel Col() => new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill };
             FlowLayoutPanel Row() => new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
 
-            // Frame generation: the switch, the game's rate (Auto = proposed from the game's recorded runs, or 1/3, 1/2, 2/3 of the display rate) and the vectors tick
-            // (shown only where the extractor DLL is installed). The explanations are tooltips; the last session's vectors line (U6) sits under the tick.
+            // Frame generation: the switch, the game's rate (Auto = proposed from the game's recorded runs, or 1/3, 1/2, 2/3 of the display rate), the uncapped and
+            // vectors ticks (always shown: the streamer cannot know which game comes next). The explanations are tooltips; the last session's vectors line (U6) sits under them.
             fgRateText.On = t => { foreach (var c in new Control[] { frameGen, fgRecommend }.Concat(fgRate.Controls.Cast<Control>())) tips.SetToolTip(c, t); };
             var fgCol = Col();
             var fgRow = Row();
-            fgMv.Margin = new Padding(14, 8, 0, 0);
-            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate); fgRow.Controls.Add(fgMv);   // the vectors tick shares the line
+            fgUnc.Margin = new Padding(14, 8, 0, 0);
+            fgMv.Margin = new Padding(10, 8, 0, 0);
+            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate); fgRow.Controls.Add(fgUnc); fgRow.Controls.Add(fgMv);   // the ticks share the line
             fgCol.Controls.Add(fgRow);
             vecRow.Controls.Add(vecLine); vecRow.Controls.Add(vecInstall); vecRow.Controls.Add(vecDismiss);
             vecInstall.Click += (s, e) => VectorsInstall();
@@ -190,7 +193,8 @@ namespace VisionALVR
             tips.SetToolTip(mirror, "Between games the headset shows the Windows desktop on a floating screen; your hand is the mouse (pinch = click). Off by default.");
             tips.SetToolTip(fgRecommend, "Auto: the rate is set from this game's recorded runs on this headset, the fastest one that stayed clean. Pick 1/3, 1/2 or 2/3 yourself to leave Auto.");
             tips.SetToolTip(recenter, "Forward becomes forward and your position the origin. Done at every game start; the recenter key (End by default) does the same while playing.");
-            tips.SetToolTip(fgMv, "Generate from the game's DLSS motion vectors when the extractor DLL is in the game folder (else optical flow).");
+            tips.SetToolTip(fgMv, "Generate from the game's own DLSS motion vectors. Needs the motion-vector DLL installed in each game's folder and a game with DLSS; otherwise optical flow is used.");
+            tips.SetToolTip(fgUnc, "Trades latency for visual smoothness: the game runs at its own rate and every frame sent is interpolated, so a game that cannot hold the rate no longer stutters, but movement in the scene shows later (head turns stay immediate).");
             tips.SetToolTip(heightMode, "Auto: the headset's own floor estimate, right when it saw the room (start standing). Manual: the value you type (about 1.30 m seated).");
             tips.SetToolTip(heightBox, "Eye height above the floor, 0.5-2.2 m.");
 
@@ -250,7 +254,7 @@ namespace VisionALVR
                 settings.Save();
                 Log.Write("INFO", "desktop mirror " + (mirror.Checked ? "on" : "off"));
             };
-            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = fgMv.Enabled = frameGen.Checked; ShowMvTick(); };
+            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !fgUnc.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = frameGen.Checked && !fgUnc.Checked; fgMv.Enabled = fgUnc.Enabled = frameGen.Checked; };
             fgEnableAll = fgEnable;
             frameGen.CheckedChanged += (s, e) =>
             {
@@ -260,10 +264,11 @@ namespace VisionALVR
                 fgEnable();
                 Log.Write("INFO", "frame generation " + (frameGen.Checked ? "on" : "off"));
             };
-            // "uncapped" (config only) shows at the 2/3 position and is kept until the slider moves
+            // "uncapped" is the tick; the slider keeps its own position (1/2 when the config holds uncapped) for when the tick goes off
             var savedRate = Array.IndexOf(FgRates, settings.FrameGenRate);
-            fgRate.Value = savedRate >= 0 ? savedRate : (settings.FrameGenRate == "uncapped" ? 2 : 1);
-            fgRateText.Text = settings.FrameGenRate == "uncapped" ? "Uncapped (set in the config file)." : FgRateText[fgRate.Value];
+            fgRate.Value = savedRate >= 0 ? savedRate : 1;
+            fgRateText.Text = FgRateText[fgRate.Value];
+            fgUnc.Checked = settings.FrameGenRate == "uncapped";
             fgMv.Checked = settings.GameMotionVectors;
             fgRecommend.Checked = settings.FrameGenRecommended;
             fgEnable();
@@ -271,7 +276,17 @@ namespace VisionALVR
             {
                 var rate = FgRates[fgRate.Value];
                 fgRateText.Text = FgRateText[fgRate.Value];
-                if (fgRateFromHost || rate == settings.FrameGenRate) return;
+                if (fgRateFromHost || fgUnc.Checked || rate == settings.FrameGenRate) return;   // uncapped: the slider only waits for the tick to go off
+                host.Send("frame_gen_rate " + rate);
+                settings.FrameGenRate = rate;
+                settings.Save();
+                Log.Write("INFO", "frame generation rate " + rate);
+            };
+            fgUnc.CheckedChanged += (s, e) =>
+            {
+                fgEnable();
+                if (fgRateFromHost) return;
+                var rate = fgUnc.Checked ? "uncapped" : FgRates[fgRate.Value];
                 host.Send("frame_gen_rate " + rate);
                 settings.FrameGenRate = rate;
                 settings.Save();
@@ -485,13 +500,6 @@ namespace VisionALVR
         }
 
         // the DLSS motion-vector tick means something only where the extractor DLL sits in the running game's folder
-        void ShowMvTick()
-        {
-            bool installed = false;
-            try { if (currentExe.Length > 0) installed = MvDll.Check(MvDll.GameDir(Games.Load(currentExe)), Games.Stem(currentExe), out _) == MvDll.State.Installed; } catch { }
-            fgMv.Visible = frameGen.Checked && (installed || demoMv);
-        }
-        bool demoMv;
 
         void ApplyRecommendation(bool apply)
         {
@@ -758,9 +766,13 @@ namespace VisionALVR
                     if (d != null && d.TryGetValue("headset", out var ho) && ho is Dictionary<string, object> hd) HeightSource(S(hd, "name"));
                     if (d != null && d.ContainsKey("fg_rate") && S(d, "fg_on") == "True")
                     {
-                        // the rate in force (the slider follows the streamer, e.g. a rate set in the config file)
-                        var pos = Array.IndexOf(FgRates, S(d, "fg_rate"));
-                        if (pos >= 0 && fgRate.Value != pos) { fgRateFromHost = true; fgRate.Value = pos; fgRateFromHost = false; }
+                        // the rate in force (the slider and the uncapped tick follow the streamer, e.g. a rate set in the config file)
+                        var hostRate = S(d, "fg_rate");
+                        var pos = Array.IndexOf(FgRates, hostRate);
+                        fgRateFromHost = true;
+                        if (fgUnc.Checked != (hostRate == "uncapped")) fgUnc.Checked = hostRate == "uncapped";
+                        if (pos >= 0 && fgRate.Value != pos) fgRate.Value = pos;
+                        fgRateFromHost = false;
                     }
                     if (gameRunning)   // only a real game's windows are shown; a mirror or idle window never replaces the last session's numbers
                     {
@@ -801,6 +813,7 @@ namespace VisionALVR
                 case "rate": fgRate.Value = int.Parse(value); break;
                 case "auto": fgRecommend.Checked = on; break;
                 case "mv": fgMv.Checked = on; break;
+                case "uncapped": fgUnc.Checked = on; break;
                 case "recenter": recenter.PerformClick(); break;
                 case "height_mode": heightMode.Value = value == "auto" ? 0 : 1; break;
                 case "height": heightBox.Value = decimal.Parse(value, CultureInfo.InvariantCulture); break;
@@ -833,7 +846,7 @@ namespace VisionALVR
         {
             var tiles = new[] { tGame, tStreamed, tShown, tBitrate, tLatency, tLoss };
             var labels = new Control[] { headset, game, runtime, vecLine, heightReport, stats, statsBox };
-            var shown = new Control[] { find, heightReport, fgMv };
+            var shown = new Control[] { find, heightReport };
             var hidden = new Control[] { audioLine, exportStatus, exportLink };   // their line is reserved by the notices slot
             var hidBack = hidden.Select(c => (c, c.Visible)).ToList();
             var textBack = labels.Select(c => (c, c.Text, c.ForeColor)).ToList();
@@ -870,7 +883,6 @@ namespace VisionALVR
             HostEvent("client_connected", new Dictionary<string, object> { { "name", "Apple Vision Pro" }, { "ip", "192.168.1.50" } });
             HostEvent("height_calibrated", new Dictionary<string, object> { { "headset_y", 1.62 } });
             headset.Text = worstCase ? "Headset: connected - Apple Vision Pro of a person with a long name (192.168.100.123)" : "Headset: connected - Apple Vision Pro (192.168.1.50)"; headset.ForeColor = Color.SeaGreen;
-            demoMv = true; ShowMvTick();
             runtime.Text = "GPU: NVIDIA GeForce RTX 5090 (Blackwell, driver 617.42)   \u00B7   OpenXR runtime: VisionALVR (this folder)";
             if (!worstCase)
             {

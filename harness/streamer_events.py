@@ -30,9 +30,11 @@ EXPECT = {
     ],
     "controls_avp": [
         ("avp_auto", ["headset reports 1.62 m", "Eye height", "Debug logging", "Export logs...", "Open logs folder", "Frame generation", "Position", "Picture", "Desktop mirror"], ["Between games"]),
-        ("frame_gen_on", ["sent frame_gen on"], []),
+        ("frame_gen_on", ["sent frame_gen on", "Use the game's DLSS motion vectors", "Uncapped"], []),   # both ticks shown with no game known
         ("rate", ["sent frame_gen_rate two_thirds"], []),
         ("mv", ["sent game_mv off"], []),
+        ("uncapped_on", ["sent frame_gen_rate uncapped", "check[x] Uncapped"], []),
+        ("uncapped_off", ["sent frame_gen_rate two_thirds", "check[ ] Uncapped"], []),   # back to the slider's position (2/3, set above)
         ("recenter", ["sent recenter"], []),
         ("manual", ["sent height 1.30"], ["headset reports"]),
         ("height", ["sent height 1.55"], []),
