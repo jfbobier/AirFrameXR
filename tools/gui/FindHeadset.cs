@@ -26,6 +26,7 @@ namespace VisionALVR
         readonly Dictionary<string, ListViewItem> rows = new Dictionary<string, ListViewItem>();
         readonly bool autoPick;
         Discovery discovery;
+        LinkLabel usbHint; bool seenOnNetwork;
 
         /// autoPick (test aid, `--find-auto`): after a few seconds take the first headset the network showed, else cancel.
         public FindHeadsetForm(Tuple<string, string, string> paired, bool autoPick = false)
@@ -81,6 +82,13 @@ namespace VisionALVR
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(use);
             buttons.Controls.Add(again);
+            usbHint = QuestUsb.Hint(() =>
+            {
+                if (!QuestUsb.Ask(this)) return;
+                ipBox.Text = QuestUsb.Address;
+                AddByIp();
+            });
+            p.Controls.Add(usbHint);
             p.Controls.Add(buttons);
             Controls.Add(p);
             CancelButton = cancel;
@@ -89,7 +97,7 @@ namespace VisionALVR
             Shown += (s, e) =>
             {
                 Log.Write("INFO", "find headset: dialog open" + (autoPick ? " (auto)" : ""));
-                try { CheckFirewall(); StartDiscovery(); if (autoPick) StartAutoPick(); }
+                try { CheckFirewall(); StartDiscovery(); QuestUsb.Arm(usbHint, () => seenOnNetwork); if (autoPick) StartAutoPick(); }
                 catch (Exception ex) { Log.Write("ERROR", "find headset dialog: " + ex); }
             };
             FormClosing += (s, e) => { discovery?.Dispose(); discovery = null; };
@@ -106,6 +114,7 @@ namespace VisionALVR
             discovery = new Discovery();
             discovery.OnFound += f => BeginInvoke((Action)(() =>
             {
+                seenOnNetwork = true; usbHint.Visible = false;
                 Log.Write("INFO", $"find headset: seen {f.Hostname} at {f.Ip} via {f.Via}{(f.Compatible ? "" : " (incompatible)")}");
                 var moved = paired != null && f.Hostname == paired.Item1 && f.Ip != paired.Item3;
                 var st = !f.Compatible ? $"INCOMPATIBLE (ALVR protocol {f.Protocol}, streamer {f.ServerProtocol}): update the app on the headset"

@@ -19,6 +19,7 @@ namespace VisionALVR
         readonly Dictionary<string, object> check;
         readonly bool demo;
         Discovery discovery;
+        LinkLabel usbHint; bool seenOnNetwork;   // the Quest-over-USB link: shown only when discovery found nothing
         HostProcess handshakeHost;
         CancellationTokenSource testCts;
         readonly Panel content = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(14) };
@@ -252,13 +253,20 @@ namespace VisionALVR
             }
             fwFix.Click += (s, e) => { Firewall.Allow(Paths.Host); fwCheck(); StartDiscovery(); };
             fwCheck();
+            usbHint = QuestUsb.Hint(() =>
+            {
+                if (!QuestUsb.Ask(this)) return;
+                AddRow("", QuestUsb.Address, "Meta Quest (USB)", "address entered for USB (ADBForwarder)", false);
+                foreach (ListViewItem it in found.Items) it.Selected = ((string[])it.Tag)[1] == QuestUsb.Address;
+            });
+            p.Controls.Add(usbHint);
             // the headsets we already know: paired in session.json, saved in visionalvr.json (they must be in the list AND selected)
             var hsPaired = Session.Headset(session);
             if (hsPaired != null) AddRow(hsPaired.Item1, hsPaired.Item3, hsPaired.Item2, "paired before", true);
             if (!string.IsNullOrEmpty(settings.HeadsetIp)) AddRow(settings.HeadsetHost, settings.HeadsetIp, string.IsNullOrEmpty(settings.HeadsetName) ? "Apple Vision Pro" : settings.HeadsetName, "saved address", true);
             if (demo && found.Items.Count == 0) AddRow("1234.client.alvr", "192.168.1.50", "Apple Vision Pro", "paired before - reachable", false);
             if (found.Items.Count > 0) found.Items[0].Selected = true;
-            if (!demo) StartDiscovery();
+            if (!demo) { StartDiscovery(); QuestUsb.Arm(usbHint, () => seenOnNetwork); }
             return p;
         }
 
@@ -306,6 +314,7 @@ namespace VisionALVR
             discovery.OnFound += f => BeginInvoke((Action)(() =>
             {
                 if (step != 1) return;
+                seenOnNetwork = true; usbHint.Visible = false;
                 var name = f.Hostname.EndsWith(".client.alvr") ? "Apple Vision Pro" : f.Hostname.EndsWith(".client") ? "Headset (Quest or other ALVR client)" : f.Hostname;
                 AddRow(f.Hostname, f.Ip, name, f.Compatible ? $"detected on the network (ALVR protocol {f.Protocol})" : $"INCOMPATIBLE ({f.Protocol}, streamer {f.ServerProtocol})", false);
             }));

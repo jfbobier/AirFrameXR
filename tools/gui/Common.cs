@@ -721,6 +721,71 @@ namespace VisionALVR
         }
     }
 
+    /// "Meta Quest over USB": pure UI. A Quest on a USB cable is not on the network; ADBForwarder (ALVR's console app) forwards the ALVR ports to it
+    /// through adb, and the Quest then reaches the PC as 127.0.0.1 (nothing is broadcast, so it has to be entered by address). Nothing here touches adb.
+    public static class QuestUsb
+    {
+        public const string Address = "127.0.0.1";
+        public const string DownloadUrl = "https://github.com/alvr-org/ADBForwarder";
+
+        /// A small dialog with the steps and the download link; true when the user chose to use 127.0.0.1 as the headset address.
+        /// The "Meta Quest on a USB cable?" link for the bottom of a headset page: hidden, shown by `Arm` when nothing was found after a few seconds.
+        public static LinkLabel Hint(Action onClick)
+        {
+            var l = new LinkLabel { Text = "Meta Quest on a USB cable?", AutoSize = true, Font = Ui.Body, Margin = new Padding(3, 8, 3, 3), Visible = false };
+            l.LinkClicked += (s, e) => onClick();
+            return l;
+        }
+
+        /// Shows `hint` after `seconds` unless `seen()` says a headset was found by then.
+        public static void Arm(LinkLabel hint, Func<bool> seen, int seconds = 8)
+        {
+            hint.Visible = false;
+            var t = new System.Windows.Forms.Timer { Interval = seconds * 1000 };
+            t.Tick += (s, e) => { t.Stop(); t.Dispose(); if (!hint.IsDisposed) hint.Visible = !seen(); };
+            t.Start();
+        }
+
+        public static bool Ask(IWin32Window owner)
+        {
+            using (var f = new DpiForm())
+            {
+                f.Text = "VisionALVR \u2013 Meta Quest over USB";
+                f.Icon = Ui.AppIcon();
+                f.AutoScaleDimensions = new SizeF(96F, 96F);
+                f.AutoScaleMode = AutoScaleMode.Dpi;
+                f.Font = Ui.Body;
+                f.BackColor = Color.White;
+                f.FormBorderStyle = FormBorderStyle.FixedDialog;
+                f.MaximizeBox = f.MinimizeBox = false;
+                f.ShowInTaskbar = false;
+                f.StartPosition = FormStartPosition.CenterParent;
+                f.AutoSize = true;
+                f.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+                var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(12) };
+                var title = Ui.Line("Meta Quest over a USB cable", Ui.Big);
+                title.ForeColor = Ui.Accent;
+                p.Controls.Add(title);
+                p.Controls.Add(Ui.Line("A Quest on a USB cable is not on the network, so it is not found by itself. Two ways:"));
+                p.Controls.Add(Ui.Line("1. USB tethering (Quest: Settings, Network). The headset then has a network address like any other: use Search again."));
+                p.Controls.Add(Ui.Line("2. ADBForwarder (a small program from the ALVR project): download it, run it with the Quest plugged in and Developer Mode on, " +
+                                       "open the ALVR app on the headset, then use " + Address + " as the headset address (button below)."));
+                var link = new LinkLabel { Text = DownloadUrl, AutoSize = true, Font = Ui.Body, Margin = new Padding(3) };
+                link.LinkClicked += (s, e) => { try { System.Diagnostics.Process.Start(DownloadUrl); } catch { } };
+                p.Controls.Add(link);
+                var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0) };
+                var cancel = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.Cancel };
+                var use = new Button { Text = "Use " + Address + " as the headset address", AutoSize = true, Font = Ui.Bold, DialogResult = DialogResult.OK };
+                buttons.Controls.Add(cancel);
+                buttons.Controls.Add(use);
+                p.Controls.Add(buttons);
+                f.Controls.Add(p);
+                f.CancelButton = cancel;
+                return f.ShowDialog(owner) == DialogResult.OK;
+            }
+        }
+    }
+
     /// Headset discovery, done by alvr_host.exe (`--discover`, ALVR's own code: mDNS/Bonjour for the Vision Pro, which never
     /// broadcasts on UDP 9943, and the UDP 9943 broadcast of Quest-style clients). The GUI only shows the `headset_seen` events.
     public class Discovery : IDisposable

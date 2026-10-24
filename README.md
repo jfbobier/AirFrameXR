@@ -208,7 +208,7 @@ or newer for the default mode. The same code is checked end to end by the audio 
 ## Requirements
 - Windows 10/11, an **NVIDIA** GPU with a current driver (NVENC API 12.2+); RTX 40 series or newer recommended (several NVENC chips enable split encoding).
 - Apple Vision Pro with the **ALVR** app (20.14.x), PC and headset on the same LAN (Wi-Fi 6 on 5 GHz for the first Vision Pro; 6 GHz is for newer models and Quest 3). Other headsets with an ALVR client: see above.
-- **Wired connection**: for a Meta Quest, only **USB tethering** is supported (the headset then appears to the PC as a network interface, so the normal network path applies). ALVR's own wired mode (ADB port forwarding) is not used and not supported. The Vision Pro Developer Strap works as a network link the same way.
+- **Wired connection**: a Meta Quest on USB works through **USB tethering** (the headset then appears to the PC as a network interface) or through [ADBForwarder](https://github.com/alvr-org/ADBForwarder) (ALVR's small adb helper; run it, open the ALVR app on the Quest, and use `127.0.0.1` as the headset address: the wizard shows a *Meta Quest on a USB cable?* link when nothing is found). VisionALVR itself does not run adb. The Vision Pro Developer Strap works as a network link the same way.
 - SteamVR and ALVR's own launcher closed while streaming (same ports).
 
 ## Recommended network setup
