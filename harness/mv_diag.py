@@ -12,7 +12,10 @@ the flow are the references. The block set: textured blocks (luma spread inside 
 
 Hypotheses: resid (our shader's residual, as used), conv (this script's re-implementation of the shader's conversion: must equal resid),
 scale k (raw vectors times a constant, best k searched), output (vectors read at the output size instead of the render size), norot (no
-head-rotation compensation), flipx / flipy / neg (sign conventions), swap (the other eye's vectors), zero, flow."""
+head-rotation compensation), flipx / flipy / neg (sign conventions), swap (the other eye's vectors), zero, flow.
+Rotation share: the fraction of the pair's head rotation the raw vectors contain (best fit from -1 to 3): 1.0 = the vectors belong to this
+frame pair; anything else, or both eyes' DLSS evaluate counters differing, = vectors from another frame (Valor Mortis 2026-10-25: the shim
+attached the newest evaluate, not the composed frame's, once the game pipelined)."""
 import json
 import math
 import sys
@@ -89,6 +92,16 @@ class Eye:
 
     def to_px(self, u, v):
         return np.stack([(self.e * 0.5 + u * 0.5) * self.W, v * self.H], -1)
+
+
+def frac_rot(M, s):
+    """The rotation M scaled to s times its angle (same axis)."""
+    ang = math.acos(max(-1.0, min(1.0, (np.trace(M) - 1) / 2)))
+    if ang < 1e-9:
+        return np.eye(3)
+    ax = np.array([M[2, 1] - M[1, 2], M[0, 2] - M[2, 0], M[1, 0] - M[0, 1]]) / (2 * math.sin(ang))
+    K = np.array([[0, -ax[2], ax[1]], [ax[2], 0, -ax[0]], [-ax[1], ax[0], 0]])
+    return np.eye(3) + math.sin(s * ang) * K + (1 - math.cos(s * ang)) * K @ K
 
 
 def convert(eye, uvB, mv, rect, rotate=True):
@@ -178,6 +191,15 @@ def analyse(base, args):
             err = float(score(v)[sel].mean()) if n else 0
             if err < best_err:
                 best_k, best_err = float(k), err
+        # the share of this pair's head rotation the vectors contain (1.0 = they belong to this pair)
+        M0, share, share_err = eye.M.copy(), 1.0, None
+        for sh in np.linspace(-1, 3, 41):
+            eye.M = frac_rot(M0, sh)
+            v, _ = convert(eye, uvB, mv, rect)
+            err = float(score(v)[sel].mean()) if n else 0
+            if share_err is None or err < share_err:
+                share, share_err = float(sh), err
+        eye.M = M0
         # least-squares scale between the residual and the flow on the selected blocks (what the flow says about the vectors' size)
         f, r = hyp["flow"][sel], hyp["conv"][sel]
         ls = float((f * r).sum() / max(1e-9, (r * r).sum())) if n else 0
@@ -190,7 +212,8 @@ def analyse(base, args):
             wins = float((sc[k][sel] < sc["flow"][sel] - 0.002).mean() * 100) if n else 0
             print(f"    {k:7s} error {err:.4f}   beats the flow on {wins:5.1f} % of the blocks")
         print(f"    best constant scale on the raw vectors: k = {best_k:.3f} (error {best_err:.4f}); least-squares flow/resid scale {ls:.3f}")
-        out[e] = {"n": n, "rows": rows, "k": best_k, "ls": ls, "rot": eye.rot_deg}
+        print(f"    rotation share {share:+.1f} (error {share_err:.4f}); DLSS evaluate counter {em['frame']} (other eye {meta['eyes'][1 - e]['frame']})")
+        out[e] = {"n": n, "rows": rows, "k": best_k, "ls": ls, "rot": eye.rot_deg, "share": share, "sync": em["frame"] == meta["eyes"][1 - e]["frame"]}
     return out
 
 
@@ -216,6 +239,9 @@ def main():
                 tally[v["rows"][0][1]] = tally.get(v["rows"][0][1], 0) + 1
                 ks.append(v["k"])
     print(f"\nbest reading per snapshot and eye: {tally}; constant scale k median {float(np.median(ks)) if ks else 0:.3f} (range {min(ks) if ks else 0:.3f}..{max(ks) if ks else 0:.3f})")
+    ok = [v for r in res for v in r.values() if v["n"]]
+    matched = sum(1 for v in ok if abs(v["share"] - 1) < 0.15 and v["sync"])
+    print(f"vectors that belong to their frame pair (rotation share 1.0 +- 0.15 and both eyes on the same evaluate): {matched} of {len(ok)}")
     return 0
 
 
