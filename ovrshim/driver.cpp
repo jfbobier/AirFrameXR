@@ -688,6 +688,8 @@ namespace {
             if (m_swapchains.count(swapchain)) {
                 Swapchain* swapchainObject = (Swapchain*)swapchain;
                 swapchainObject->lastCommittedIndex++;
+                // the game's DLSS vectors of this frame: pinned now, on the game's thread, before VDXR's async submission lets it start the next
+                m_ngx.Pin();
                 if (swapchainObject->lastCommittedIndex >=
                     (!swapchainObject->desc.StaticImage ? k_SwapchainLength : 1)) {
                     swapchainObject->lastCommittedIndex = 0;
@@ -1381,6 +1383,11 @@ namespace {
                         m_ngx.TryAttach();   // the provider may load after the session exists; look every two seconds until it is there
                         m_ngxNextTry = m_framesSubmitted + 180;
                     }
+                    if (m_mvHarvestDelayMs > 0) {
+                        // lab only (OVRSHIM_MV_HARVEST_DELAY_MS): a late SubmitFrame, so the probe evaluates the next frame first, as a GPU-bound
+                        // game does under VDXR's async submission and running start (Valor Mortis, 2026-10-25)
+                        Sleep((DWORD)m_mvHarvestDelayMs);
+                    }
                     motion = m_ngx.Harvest(m_submissionContext.Get(), slot, QpcSeconds());
                 } else {
                     m_ngx.SetEnabled(false);
@@ -1459,8 +1466,13 @@ namespace {
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
                             m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds);
                     if (m_ngx.Attached()) {
-                        ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, %llu sources not copied, tap %s", m_ngx.ActiveStreams(),
-                                (unsigned long long)m_ngx.Publications(), (unsigned long long)m_ngx.CopyFailures(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)");
+                        uint64_t pinned = 0, newer = 0, overwritten = 0, unpinned = 0;
+                        m_ngx.PinStats(pinned, newer, overwritten, unpinned);
+                        ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, %llu sources not copied, tap %s; frames given their own vectors %llu "
+                                "(a newer evaluate existed on %llu: the newest-copy rule would have paired them with another frame), eyes left without "
+                                "(copy overwritten) %llu, frames without a pin (newest copy) %llu", m_ngx.ActiveStreams(),
+                                (unsigned long long)m_ngx.Publications(), (unsigned long long)m_ngx.CopyFailures(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)",
+                                (unsigned long long)pinned, (unsigned long long)newer, (unsigned long long)overwritten, (unsigned long long)unpinned);
                     }
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
@@ -2064,6 +2076,10 @@ namespace {
             winrt::check_hresult(m_submissionDevice->CreateQuery(&qd, m_doneQuery.ReleaseAndGetAddressOf()));
             // the DLSS motion-vector tap (ngxtap.h): attach now if the game loaded the provider, otherwise SubmitFrame keeps looking
             m_ngx.Init(m_submissionDevice.Get(), [](const char* line) { ShimLog("%s", line); });
+            {
+                char v[16];
+                m_mvHarvestDelayMs = GetEnvironmentVariableA("OVRSHIM_MV_HARVEST_DELAY_MS", v, sizeof(v)) > 0 ? std::max(0, atoi(v)) : 0;
+            }
             if (m_ipc.state->host.gameMotionVectors) {
                 m_ngx.TryAttach();
             }
@@ -2471,7 +2487,8 @@ namespace {
         LUID m_adapterLuid{};
         ComPtr<ID3D11Device> m_submissionDevice;
         ComPtr<ID3D11DeviceContext> m_submissionContext;
-        ngxtap::NgxTap m_ngx;          // the game's DLSS motion vectors (docs/MOTION_VECTORS.md)
+        mutable ngxtap::NgxTap m_ngx;   // mutable: CommitSwapchainImage (const) pins the frame's vectors
+        int m_mvHarvestDelayMs{0};          // the game's DLSS motion vectors (docs/MOTION_VECTORS.md)
         uint64_t m_ngxNextTry = 0;
         ComPtr<ID3D11VertexShader> m_reprojectVS;
         ComPtr<ID3D11PixelShader> m_reprojectPS;

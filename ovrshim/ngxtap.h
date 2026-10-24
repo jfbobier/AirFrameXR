@@ -1,8 +1,12 @@
 // Consumer of the game's DLSS inputs (docs/MOTION_VECTORS.md). The OptiScaler-DLSSMotionVectorExtractor fork (github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor,
 // a separate GPL-3.0 project loaded by the game as its DLSS proxy) exports a small C ABI; this file is its MIT-side counterpart, declaring the
 // same ABI and consuming the publications: at every DLSS evaluate, inside the call and on the game's own command list / context, the shim copies
-// the motion vectors and depth into shared textures of its own; at SubmitFrame the newest copy of each eye is copied once more into the frame's
-// ring slot companions (ipc.h MotionSlot) so the host reads vectors and picture together, synchronised by the slot's existing GPU-done event.
+// the motion vectors and depth into shared textures of its own; at SubmitFrame the frame's own copy of each eye is copied once more into the
+// frame's ring slot companions (ipc.h MotionSlot) so the host reads vectors and picture together, synchronised by the slot's existing GPU-done event.
+// The frame's own copy: the one each stream had when the game committed the frame's swapchain images (Pin, on the game's thread inside its
+// xrEndFrame). VDXR hands the frame to SubmitFrame later from its own thread (async submission) and wakes the game early (running start), so a
+// game that renders ahead has often evaluated the next frame by then: taking the newest copy there paired half of Valor Mortis' frames with
+// another frame's vectors (harness/mv_diag.py, 2026-10-25).
 //
 // Nothing here changes what the game or DLSS does: no allocation on the game's resources, no state kept past the call besides our copies.
 // D3D12 games: the copies are D3D12 committed resources created on the game's device with D3D12_HEAP_FLAG_SHARED and opened on the shim's D3D11
@@ -101,6 +105,7 @@ public:
         }
         m_off = GetEnvironmentVariableA("OVRSHIM_MV_OFF", v, sizeof(v)) > 0 && atoi(v) != 0;
         m_depth = GetEnvironmentVariableA("OVRSHIM_MV_DEPTH", v, sizeof(v)) > 0 && atoi(v) != 0;   // the generator does not read depth yet: off by default
+        m_pin = !(GetEnvironmentVariableA("OVRSHIM_MV_PIN", v, sizeof(v)) > 0 && atoi(v) == 0);    // 0: the newest copy at SubmitFrame (before 2026-10-25)
     }
 
     /// The eye size the game renders for the headset: a DLSS stream whose output is that size is an eye; the game's flat window (its own DLSS
@@ -158,6 +163,26 @@ public:
     }
 
     bool Attached() const { return m_attached; }
+
+    /// The game committed a swapchain image (on its own thread, inside its xrEndFrame, after the frame's DLSS passes): the copy each stream has
+    /// now is this frame's. The last commit before SubmitFrame wins (a frame commits each of its swapchains).
+    void Pin() {
+        if (!m_attached || !m_pin) {
+            return;
+        }
+        std::lock_guard<std::mutex> g(m_mutex);
+        for (auto& s : m_streams) {
+            s.pinRing = s.ring;
+            s.pinFrame = s.ring >= 0 ? s.infoAt[s.ring].frame : 0;
+        }
+        m_pinned = true;
+    }
+    /// Harvests so far: frames given their pinned copies, of those the frames where a newer copy existed (what the newest-copy rule attached),
+    /// eyes left without vectors because the ring overwrote the pinned copy, frames with no pin (the newest copy, as before).
+    void PinStats(uint64_t& pinned, uint64_t& newerExisted, uint64_t& overwritten, uint64_t& unpinned) const {
+        std::lock_guard<std::mutex> g(m_mutex);
+        pinned = m_statPinned; newerExisted = m_statNewer; overwritten = m_statOverwritten; unpinned = m_statUnpinned;
+    }
     uint32_t State() const { return m_state; }
     uint64_t Publications() const { return m_publications; }
     uint64_t CopyFailures() const { return m_copyFailures; }
@@ -184,6 +209,14 @@ public:
                 i++;
             }
         }
+        const bool usePins = m_pinned;
+        m_pinned = false;
+        if (usePins) {
+            m_statPinned++;
+        } else {
+            m_statUnpinned++;
+        }
+        bool newer = false;
         // retired copies are freed by GpuDone (the GPU completion of the frame after their last use); the age limit is the fallback
         for (size_t i = 0; i < m_retired.size();) {
             if (nowS - m_retired[i].atS > kRetireS) {
@@ -199,7 +232,7 @@ public:
             order.push_back(&s);
         }
         const uint32_t eyeW = m_eyeW, eyeH = m_eyeH;
-        auto isEye = [eyeW, eyeH](const Stream* s) { return eyeW == 0 || (s->info.outputW == eyeW && s->info.outputH == eyeH); };
+        auto isEye = [eyeW, eyeH](const Stream* s) { const auto& i = s->Last(); return eyeW == 0 || (i.outputW == eyeW && i.outputH == eyeH); };
         std::sort(order.begin(), order.end(), [&](const Stream* a, const Stream* b) {
             const bool ea = isEye(a), eb = isEye(b);
             if (ea != eb) {
@@ -210,16 +243,28 @@ public:
         out.streams = (uint32_t)order.size();
         for (int e = 0; e < 2 && e < (int)order.size(); e++) {
             Stream& s = *order[e];
-            if (s.ring < 0) {
+            int r = s.ring;
+            if (usePins) {
+                r = s.pinRing;
+                if (r >= 0 && s.infoAt[r].frame != s.pinFrame) {
+                    m_statOverwritten++;   // the game evaluated kRing more frames since the pin: no vectors rather than another frame's
+                    continue;
+                }
+                newer |= r != s.ring;
+            }
+            if (r < 0) {
                 continue;
             }
-            visionalvr_ipc::MotionEye info = s.info;
-            Copy& mv = s.mv[s.ring];
-            Copy& dp = s.depth[s.ring];
+            visionalvr_ipc::MotionEye info = s.infoAt[r];
+            Copy& mv = s.mv[r];
+            Copy& dp = s.depth[r];
             info.mvHandle = CopyToSlot(ctx, m_slotTex[slot][e][0], mv, info.mvFormat, info.mvWidth, info.mvHeight);
             info.depthHandle = CopyToSlot(ctx, m_slotTex[slot][e][1], dp, info.depthFormat, info.depthWidth, info.depthHeight);
             info.valid = info.mvHandle ? 1u : 0u;
             out.eye[e] = info;
+        }
+        if (newer) {
+            m_statNewer++;
         }
         return out;
     }
@@ -260,7 +305,10 @@ private:
         double lastS = 0;
         int ring = -1;
         Copy mv[kRing], depth[kRing];
-        visionalvr_ipc::MotionEye info{};
+        visionalvr_ipc::MotionEye infoAt[kRing]{};   // what each copy is (its evaluate counter among it)
+        int pinRing = -1;                             // Pin: the copy of the frame being submitted, and its evaluate counter
+        uint64_t pinFrame = 0;
+        const visionalvr_ipc::MotionEye& Last() const { return infoAt[ring < 0 ? 0 : ring]; }
     };
     // a copy taken out of service: its D3D12 resource may still be referenced by a game command list not yet executed, its D3D11 view by a
     // queued copy on the submission context; neither API defers the other's destruction, so retired copies live on for kRetireS (the shim's
@@ -344,7 +392,7 @@ private:
             return;
         }
         s->ring = ring;
-        visionalvr_ipc::MotionEye& i = s->info;
+        visionalvr_ipc::MotionEye& i = s->infoAt[ring];
         i = {};
         i.api = p->api;
         i.stream = p->stream;
@@ -597,6 +645,9 @@ private:
     std::vector<Retired> m_retired;
     uint64_t m_harvestSeq = 0;
     bool m_depth = false;
+    bool m_pin = true;
+    bool m_pinned = false;             // a Pin since the last harvest
+    uint64_t m_statPinned = 0, m_statNewer = 0, m_statOverwritten = 0, m_statUnpinned = 0;
     bool m_removedLogged = false;      // sources whose shared copy could not be made (each logged once)
     D3D12_RESOURCE_STATES m_srcState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;   // what DLSS requires of its inputs
     uint32_t m_eyeW = 0, m_eyeH = 0;   // SetEyeSize: 0 = unknown, every stream counts as an eye

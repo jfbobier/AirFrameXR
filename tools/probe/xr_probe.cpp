@@ -143,6 +143,7 @@ struct SyntheticMv {
     ID3D11VertexShader* vs = nullptr; ID3D11PixelShader* ps = nullptr; ID3D11Buffer* cb = nullptr;
     struct TruthCb { float tanF[4]; float mA[4], mB[4], mC[4]; float marker[4]; float disp[4]; };
     float prevQ[2][4] = {}; bool prevValid[2] = {};
+    float lastTanF[2][4] = {}; UINT lastOut[2][2] = {}; uint64_t decoys = 0;   // XR_PROBE_MV_AHEAD: the decoy evaluates reuse the last real one's view
     float markerC[2][2] = {}; bool markerValid[2] = {}, prevMarkerValid[2] = {}; float prevMarkerC[2][2] = {}; float markerHalf[2][2] = {};
     static void rotRows(const float* q, float m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w): world = R * local
         const float x = q[0], y = q[1], z = q[2], w = q[3];
@@ -179,9 +180,11 @@ float2 PS(VSOut i) : SV_Target {
     void setMarker(int eye, bool visible, float cx, float cy, float hw, float hh) {
         markerValid[eye] = visible; markerC[eye][0] = cx; markerC[eye][1] = cy; markerHalf[eye][0] = hw; markerHalf[eye][1] = hh;
     }
-    void publishTruth(ID3D11DeviceContext* ctx, int eye, UINT outW, UINT outH, const float tanF[4], const float q[4]) {
+    void publishTruth(ID3D11DeviceContext* ctx, int eye, UINT outW, UINT outH, const float tanF[4], const float q[4], bool decoy = false) {
         if (!g_mvConsumer || !mv[eye] || !truth) return;
-        if (!faultGate(eye)) { memcpy(prevQ[eye], q, sizeof prevQ[eye]); prevValid[eye] = true; markerValid[eye] = false; if (eye == 1) frame++; return; }
+        if (decoy) { tanF = lastTanF[eye]; outW = lastOut[eye][0]; outH = lastOut[eye][1]; q = prevQ[eye]; if (!prevValid[eye] || !outW) return; }
+        else { memcpy(lastTanF[eye], tanF, sizeof lastTanF[eye]); lastOut[eye][0] = outW; lastOut[eye][1] = outH; }
+        if (!decoy && !faultGate(eye)) { memcpy(prevQ[eye], q, sizeof prevQ[eye]); prevValid[eye] = true; markerValid[eye] = false; if (eye == 1) frame++; return; }
         TruthCb c{};
         memcpy(c.tanF, tanF, sizeof c.tanF);
         float rc[9], rp[9];
@@ -191,7 +194,7 @@ float2 PS(VSOut i) : SV_Target {
             float v = 0; for (int j = 0; j < 3; j++) v += rp[j * 3 + r] * rc[j * 3 + k];
             (r == 0 ? c.mA : r == 1 ? c.mB : c.mC)[k] = v;
         }
-        if (markerValid[eye] && prevMarkerValid[eye]) {
+        if (!decoy && markerValid[eye] && prevMarkerValid[eye]) {
             c.marker[0] = (markerC[eye][0] - markerHalf[eye][0]) * 0.5f; c.marker[1] = (markerC[eye][1] - markerHalf[eye][1]) * 0.5f;
             c.marker[2] = (markerC[eye][0] + markerHalf[eye][0]) * 0.5f; c.marker[3] = (markerC[eye][1] + markerHalf[eye][1]) * 0.5f;
             c.disp[0] = (prevMarkerC[eye][0] - markerC[eye][0]) * 0.5f; c.disp[1] = (prevMarkerC[eye][1] - markerC[eye][1]) * 0.5f;
@@ -207,12 +210,13 @@ float2 PS(VSOut i) : SV_Target {
         ID3D11RenderTargetView* nullRtv = nullptr; ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
         ctx->ClearDepthStencilView(dsv[eye], D3D11_CLEAR_DEPTH, 0.5f, 0);
         garbageFill(ctx, eye);
-        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye + 10 * epoch; p.frame = frame; p.cmd = ctx;
+        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye + 10 * epoch; p.frame = decoy ? frame + 1000000 : frame; p.cmd = ctx;
         p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = halfSize ? w / 2 : w; p.render_h = halfSize ? h / 2 : h; p.output_w = outW; p.output_h = outH;
         p.mv_scale_x = p.mv_scale_y = 1.f; p.reset = prevValid[eye] ? 0 : 1; p.flags = 0x2 | 0x8;
         if (f.nullP > 0 && rnd() < f.nullP) { p.motion_vectors = nullptr; nulled++; }
         g_mvConsumer(&p, g_mvConsumerUser);
         published++;
+        if (decoy) { decoys++; return; }   // the frame's state (previous pose, marker, counter) belongs to the real evaluates
         memcpy(prevQ[eye], q, sizeof prevQ[eye]); prevValid[eye] = true;
         prevMarkerValid[eye] = markerValid[eye]; prevMarkerC[eye][0] = markerC[eye][0]; prevMarkerC[eye][1] = markerC[eye][1];
         markerValid[eye] = false;
@@ -449,6 +453,10 @@ int main(int argc, char** argv) {
     L("views: %u, recommended %ux%u", n, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight);
     SyntheticMv synMv; const bool synMvOn = getenv("XR_PROBE_MV") && strcmp(getenv("XR_PROBE_MV"), "synthetic") == 0;
     const bool truthMvOn = getenv("XR_PROBE_MV") && strcmp(getenv("XR_PROBE_MV"), "truth") == 0;
+    // XR_PROBE_MV_AHEAD=1 (with truth): a game rendering ahead, as Valor Mortis under VDXR's async submission + running start: right after
+    // xrEndFrame each eye's DLSS evaluates once more before the runtime submitted the frame. The extra evaluate is a decoy without the camera's
+    // rotation, so a consumer that pairs the frame with it (the newest-copy rule) shows the error; the frame's own evaluate is the right one.
+    const bool mvAhead = truthMvOn && getenv("XR_PROBE_MV_AHEAD") && atoi(getenv("XR_PROBE_MV_AHEAD")) != 0;
     if (synMvOn || truthMvOn) {
         std::string merr;
         synMv.dev = dev; synMv.eyeW = vcv[0].recommendedImageRectWidth; synMv.eyeH = vcv[0].recommendedImageRectHeight;
@@ -834,12 +842,15 @@ int main(int argc, char** argv) {
         fe.displayTime = fs.predictedDisplayTime; fe.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE; fe.layerCount = nl; fe.layers = lay.data();
         r = xrEndFrame(sess, &fe);
         if (XR_FAILED(r)) return fail("xrEndFrame", r);
+        if (mvAhead) {
+            for (int e = 0; e < 2; e++) synMv.publishTruth(ctx, e, 0, 0, nullptr, nullptr, true);
+        }
         if (timingF) { fprintf(timingF, "%d,%lld,%.3f,%.3f,%.3f\n", done + 1, (long long)fs.predictedDisplayTime, tWaitRet, qpcMs(), lf); if (done % 30 == 0) fflush(timingF); }
         done++;
     }
     if (soundOn) mciSendStringA("close xrbgm", nullptr, 0, nullptr);
     L("loop done: frames=%d ready=%d synchronized=%d", done, sawReady, sawSync);
-    if (synMvOn || truthMvOn) L("motion vectors: %llu publications, consumer %s", (unsigned long long)synMv.published, g_mvConsumer ? "registered" : "never registered");
+    if (synMvOn || truthMvOn) L("motion vectors: %llu publications (%llu ahead decoys), consumer %s", (unsigned long long)synMv.published, (unsigned long long)synMv.decoys, g_mvConsumer ? "registered" : "never registered");
     if (synMvOn || truthMvOn) L("motion vector faults injected: %llu skipped, %llu stream-id changes, %llu texture re-creations, %llu garbage, %llu null", (unsigned long long)synMv.skipped, (unsigned long long)synMv.churned, (unsigned long long)synMv.recreated, (unsigned long long)synMv.garbaged, (unsigned long long)synMv.nulled);
     if (done > 1) L("app fps %.2f over %d frames", (done - 1) * 1000.0 / (qpcMs() - loopStartMs), done - 1);
     if (rc == 0 && done < frames) rc = 4;

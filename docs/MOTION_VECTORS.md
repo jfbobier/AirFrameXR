@@ -165,8 +165,9 @@ Implemented (IPC version 26):
   depth recorded on the game's own command list (D3D12: committed resources with `D3D12_HEAP_FLAG_SHARED` and simultaneous access, opened on
   the shim's D3D11 submission device through the NT handle; a transition barrier around the copy with the state DLSS requires of its inputs,
   `OVRSHIM_MV_STATE=<int>` overrides it like OptiScaler's `MVResourceBarrier`) or context (D3D11: shared textures on the game's device). Three
-  copies per stream. Depth copies use the typeless twin of the depth format. At SubmitFrame the newest copy of each eye (streams ordered by
-  first appearance: Unreal evaluates the left view first) is copied once more into the frame's slot companions, so the slot's GPU-done event
+  copies per stream. Depth copies use the typeless twin of the depth format. At SubmitFrame the frame's own copy of each eye (pinned when the
+  game committed the frame's swapchain images; before 2026-10-25 the newest copy, see "Vectors paired with the wrong frame" below; streams
+  ordered by first appearance: Unreal evaluates the left view first) is copied once more into the frame's slot companions, so the slot's GPU-done event
   covers vectors and picture together. The attach is retried every two seconds while the host has `gameMotionVectors` set; `OVRSHIM_MV_OFF=1`
   is the kill switch. Streams idle for two seconds are forgotten (level change).
 - **IPC** (`ovrshim/ipc.h`): `HostToShim::gameMotionVectors` (settings `video.game_motion_vectors`, default on), `ShimToHost::motion[slot]`
@@ -249,5 +250,28 @@ Lab debt (user ask, 2026-10-16): both defects passed the lab because the probe's
 recreates streams or destroys resources. Before the next tap change: a D3D12 provider mode in the probe with Unreal-like resource descs,
 stream-id and size churn, resources destroyed right after publication, the D3D12 debug layer on, and a hard lab verdict on `mv.frames`,
 `used_eyes`, `sources not copied` and device loss (`check_mv.py`).
+
+## Vectors paired with the wrong frame (2026-10-25)
+
+Symptom: in Valor Mortis the vectors never looked better than the optical flow; an edge synthesis that let them decide trembled a few
+degrees; the edge candidate counter found them more than half a pixel away from the flow on 97 % of the pixels. `harness/mv_diag.py` on 8
+snapshots (`VISIONALVR_FG_MV_DIAG`): the conversion is exact (best constant scale 1.000, flips / eye swap / no rotation compensation 2-10x
+worse), but only 4 snapshots carried vectors of their own frame pair (they contained exactly the pair's head rotation and matched or beat
+the flow on 25-43 % of the textured blocks); the other 4 contained 0.7-2.1 times it: vectors of another frame.
+
+Cause: VDXR hands a frame to the runtime from its own thread (async submission, on whenever VDXR submits on a device of its own, D3D11
+games included) and wakes the game early (running start). A game that renders ahead (Mortis at 98 % GPU) has often evaluated the next
+frame's DLSS by the time the shim's SubmitFrame runs, and the tap attached the newest copy. Every vector path since step 1 was affected;
+the crossfade synthesis hid it as softness (its colour check falls back to blending).
+
+Fix: `NgxTap::Pin` at `CommitSwapchainImage` (the game's thread, inside its xrEndFrame, after the frame's DLSS passes and before VDXR lets
+it end the next one) records each stream's current copy and evaluate counter; Harvest attaches those, or no vectors for an eye whose pinned
+copy the ring has overwritten since; without a pin, the newest copy as before. `OVRSHIM_MV_PIN=0` restores the old rule. The shim's
+900-frame line counts frames given their own vectors, how many had a newer evaluate (the old rule's mistakes), eyes left without, unpinned
+frames.
+
+Lab: the probe's `XR_PROBE_MV_AHEAD=1` (with `XR_PROBE_MV=truth`) evaluates each eye once more right after xrEndFrame, a decoy without the
+camera rotation, as a game rendering ahead would; `OVRSHIM_MV_HARVEST_DELAY_MS` (probe env) delays the harvest so the decoy always comes
+first.
 
 Next: extrapolation mode and the depth-aware re-stamp.
