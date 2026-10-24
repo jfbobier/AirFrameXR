@@ -26,7 +26,10 @@ Copy-Item "$root\_tmp\install\session.default.json" "$pkg\config\session.default
 New-Item -ItemType Directory -Force "$pkg\docs\licenses" | Out-Null
 Copy-Item "$root\_tmp\install\THIRD_PARTY_NOTICES.md" "$pkg\docs" -Force
 if (Test-Path "$root\_tmp\install\LICENSE.txt") { Copy-Item "$root\_tmp\install\LICENSE.txt" "$pkg\docs" -Force }
-Copy-Item "$root\_tmp\install\licenses\*.txt" "$pkg\docs\licenses" -Force
+# only the licence texts the repo lists (_tmp\install\licenses.txt, written by run.py): the staging folder and the package folder keep files
+# the repo has dropped since, which must not ship
+$licenses = @(Get-Content "$root\_tmp\install\licenses.txt" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+foreach ($l in $licenses) { Copy-Item "$root\_tmp\install\licenses\$l" "$pkg\docs\licenses" -Force }
 # the benchmark scene (tools/bench_scene/build.sh, uploaded by `run.py build host`)
 New-Item -ItemType Directory -Force "$pkg\bench" | Out-Null
 if (Test-Path "$root\bench\littlest_tokyo.vab") { Copy-Item "$root\bench\littlest_tokyo.vab" "$pkg\bench\littlest_tokyo.vab" -Force }
@@ -61,7 +64,7 @@ $ship = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\config
 $ship += $persShip
 $ship += $persFiles
 $ship += Get-ChildItem "$pkg\profiles" -File -Filter *.json | ForEach-Object { "profiles\$($_.Name)" }
-$ship += Get-ChildItem "$pkg\docs\licenses" -File | ForEach-Object { "docs\licenses\$($_.Name)" }
+$ship += $licenses | ForEach-Object { "docs\licenses\$_" }
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $fs = [IO.File]::Open($zip, [IO.FileMode]::Create)
 $za = New-Object IO.Compression.ZipArchive($fs, [IO.Compression.ZipArchiveMode]::Create)

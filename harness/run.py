@@ -196,8 +196,13 @@ def build(what):
             lib.b_put(lib.ROOT / "THIRD_PARTY_NOTICES.md", "_tmp/install/THIRD_PARTY_NOTICES.md")
             if (lib.ROOT / "LICENSE").exists():
                 lib.b_put(lib.ROOT / "LICENSE", "_tmp/install/LICENSE.txt")
-            for f in sorted((lib.ROOT / "third_party/licenses").glob("*.txt")):
+            lic = sorted((lib.ROOT / "third_party/licenses").glob("*.txt"))
+            for f in lic:
                 lib.b_put(f, f"_tmp/install/licenses/{f.name}")
+            # the package ships exactly these: the builder's staging folder keeps files the repo dropped (its guard refuses deletes; the
+            # extractor's GPL text survived its removal that way, 0.6.1)
+            (lib.CACHE / "licenses.txt").write_text("\n".join(f.name for f in lic))
+            lib.b_put(lib.CACHE / "licenses.txt", "_tmp/install/licenses.txt")
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage13_package.ps1"], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")
             print(f"build package: {'ok' if 'RESULT: OK' in o else 'FAILED'}")
