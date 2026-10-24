@@ -57,19 +57,20 @@ nothing and what it owed stays owed (`fg_no_sample`, the pattern slides one boun
 projection layer (quad-only loading screens) goes out as is; a frame still due when the encoder overran is dropped for the synthetic frame
 between the two newest (`fg_dropped`). With the generator on the newest waiting frame always wins a pick (older ones superseded): the shim's
 half-rate pacing runs open loop and the generator consumes one frame per two boundaries, so a standing queue would never drain otherwise.
-When the GPU/driver has no flow engine the host logs a WARN, streams as without the feature and keeps the game at full rate. **The regime switch, and the hold (2026-10-23, `video.frame_gen_hold_age`, default on at the user's request pending the headset verdict; the rig argued for off).** With one sample in hand every output's stamp
+When the GPU/driver has no flow engine the host logs a WARN, streams as without the feature and keeps the game at full rate. **The regime switch, and the hold (2026-10-23, `video.frame_gen_hold_age`, default off after one headset night).** With one sample in hand every output's stamp
 advances by exactly one of the headset's samples per boundary, and a sample late by less than a period costs nothing (the one in hand covers
 its boundary, the late one is stamped at the next). A sample late by more than a period, or lost, left a boundary with a single unused
 sample, which was stamped: the stamp jumped two samples and every later output was one period younger, until a skipped boundary followed by
 a bunch rebuilt the one in hand and moved them back. On the Vision Pro that was the total latency switching between 67 and 77 ms in 10-20 s
 cycles, each switch a pose-age jump shown as a hitch while the head turns. `regime_switches` counts these switches (the number
-of unused samples left behind the stamped one changing between one and none). With the hold on (the default; `VISIONALVR_FG_HOLD_AGE=0` or the setting
-false restores the old rule) such a boundary waits for the next sample like any other and otherwise repeats once (`hold_skips`); more than 5 of those in a second step
+of unused samples left behind the stamped one changing between one and none). With the hold on (`VISIONALVR_FG_HOLD_AGE=1` or the setting true) such a boundary waits for the next sample like any other and otherwise repeats once (`hold_skips`); more than 5 of those in a second step
 the hold aside until they thin out (`hold_bypassed`). The rig argued against it as a default: its uplink tail (up to 14 ms, over a period) makes such
 late samples frequent, the hold skipped 3.4 boundaries a second and the head path went TREMBLE (`late_turn_fg`, one sample in 150 delivered two
-and a half periods late, hold on: 149-208 hold skips, 22-57 bypassed, 114 regime switches left, head TREMBLE once and CLEAN once, motion JUDDER; hold off: 60-75 skipped boundaries, 1278 regime switches a minute, CLEAN and SMOOTH). Whether the Vision Pro's Wi-Fi
-is like that is what `regime_switches` and `no_sample` say with the hold off; a headset with rare switches (the 10-20 s cycles) is where the hold
-pays.
+and a half periods late, hold on: 149-208 hold skips, 22-57 bypassed, 114 regime switches left, head TREMBLE once and CLEAN once, motion JUDDER; hold off: 60-75 skipped boundaries, 1278 regime switches a minute, CLEAN and SMOOTH). The Vision Pro's Wi-Fi is
+like that: the night of 2026-10-23 (Gears, 4 h 39 at 1/2, hold on) counted 5.5 regime switches a second, hold skips 2.4 a second = 97 % of all
+skipped boundaries (2.6 % of boundaries against 0.6-2.4 % with the old rule on earlier nights), the bypass engaging about once a second. So the
+67/77 ms reading is not a slow cycle but a sample late by more than a period about three times a second, a Wi-Fi fact the pipeline can only
+trade between a repeat and a pose-age jump; the old rule (jump) stays the default, the counters stay.
 
 ## Rates (2026-10-16): 1/3, 1/2, 2/3
 

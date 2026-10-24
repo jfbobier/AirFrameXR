@@ -47,9 +47,9 @@ SCENARIOS = {
     # lost). Without the hold the stamp jumps two samples and every later output is one period younger until a skip + bunch moves it back (the
     # Vision Pro's 67 <-> 77 ms latency cycles); with it the boundary repeats once. Read `frame generation samples` / encoder_stats frame_gen
     # regime_switches and hold_skips (harness/simrig/fg_samples.py). Verdict 2026-10-23: the rig's own uplink tail (up to 14 ms, over a period) makes
-    # such samples frequent, the hold skipped 3.4 boundaries/s and the head path went TREMBLE (on by default from the evening at the user's request; `--env VISIONALVR_FG_HOLD_AGE=0` = old rule).
+    # such samples frequent, the hold skipped 3.4 boundaries/s and the head path went TREMBLE; the Vision Pro night agreed (5.5 switches/s): off by default, `--env VISIONALVR_FG_HOLD_AGE=1` turns it on.
     "late_turn_fg": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "LATE_EVERY": 150, "LATE_MS": 25, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1",
-                    "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:VISIONALVR_FRAME_GEN": "1", "note": "stutter_turn_fg with a tracking sample 25 ms late every 150: regime switches with and without the hold (VISIONALVR_FG_HOLD_AGE=0)"},
+                    "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:VISIONALVR_FRAME_GEN": "1", "note": "stutter_turn_fg with a tracking sample 25 ms late every 150: regime switches with and without the hold (VISIONALVR_FG_HOLD_AGE=1)"},
     "steady_fg":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:VISIONALVR_FRAME_GEN": "1",
                     "note": "ideal timing, light app, frame generation on: the generator's null case (expect CLEAN + SMOOTH)"},
     "steady":      {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25",

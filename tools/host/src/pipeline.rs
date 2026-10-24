@@ -382,8 +382,8 @@ pub struct Pipeline {
     pub fg_no_sample: AtomicU64,
     /// stamps that took the older of two waiting samples and left the newest in hand for the next boundary (see `fg_pick_sample_now`)
     pub fg_in_hand: AtomicU64,
-    /// Hold the stamp regime (VISIONALVR_FG_HOLD_AGE, settings `video.frame_gen_hold_age`, default on since 2026-10-23 evening at the user's
-    /// request, pending the headset verdict; the rig argued for off, see below). With one sample kept in hand every
+    /// Hold the stamp regime (VISIONALVR_FG_HOLD_AGE=1, settings `video.frame_gen_hold_age`; default OFF: the Vision Pro night of 2026-10-23
+    /// measured 5-7 regime switches a second, so the hold only converted them into 2.5-3 repeats a second, see below). With one sample kept in hand every
     /// output's stamp advances by exactly one of the headset's samples per boundary. A sample later than a whole period (or lost) left a
     /// boundary with a single unused sample, which was stamped: the stamp jumped two samples and from then on every output was one period
     /// younger, until a skipped boundary followed by a bunch rebuilt the one in hand and moved them back. On the Vision Pro that is the total
@@ -392,7 +392,8 @@ pub struct Pipeline {
     /// Safety: a client whose samples come slower than the display rate would make the hold skip every missing sample, so more than
     /// 5 hold skips within a second step it aside until they thin out (`fg_hold_bypassed`). The rig argued against it (uplink tail
     /// over a period: such late samples several times a second) skipped 3.4 boundaries a second with it and the head path went TREMBLE
-    /// (late_turn_fg, 2026-10-23); whether the Vision Pro's Wi-Fi is like that is what `fg_regime_switches` and `fg_hold_skips` measure.
+    /// (late_turn_fg, 2026-10-23), and the Vision Pro's Wi-Fi turned out the same: Gears, 4 h 39 at 1/2, 5.5 regime switches/s, hold skips
+    /// 2.4/s = 97 % of all skipped boundaries (2.6 % against 0.6-2.4 % with the old rule on earlier nights). The counters stay.
     pub fg_hold_age: AtomicBool,
     pub fg_hold_skips: AtomicU64,
     pub fg_hold_bypassed: AtomicU64,
@@ -513,7 +514,7 @@ impl Pipeline {
             fg_holds: AtomicU64::new(0),
             fg_no_sample: AtomicU64::new(0),
             fg_in_hand: AtomicU64::new(0),
-            fg_hold_age: AtomicBool::new(std::env::var("VISIONALVR_FG_HOLD_AGE").map(|v| v != "0").unwrap_or(true)),
+            fg_hold_age: AtomicBool::new(std::env::var("VISIONALVR_FG_HOLD_AGE").map(|v| v == "1").unwrap_or(false)),
             fg_hold_skips: AtomicU64::new(0),
             fg_hold_bypassed: AtomicU64::new(0),
             fg_hold_pending: AtomicBool::new(false),

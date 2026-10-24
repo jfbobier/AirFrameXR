@@ -61,7 +61,7 @@ pub struct Settings {
     /// frame generation (docs/FRAME_GENERATION.md): half-rate pacing + optical-flow interpolated frames; default off
     pub frame_gen: Option<bool>,
     pub frame_gen_flow_scale: Option<f64>,
-    /// hold the stamp regime (one sample in hand, no two-sample jumps); default on, false = the old rule (see pipeline.rs `fg_hold_age`)
+    /// hold the stamp regime (one sample in hand, no two-sample jumps); default off (see pipeline.rs `fg_hold_age`)
     pub frame_gen_hold_age: Option<bool>,
     /// "fast" (default) | "medium" | "slow": the optical-flow engine's preset
     pub frame_gen_perf: Option<String>,

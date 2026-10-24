@@ -460,6 +460,8 @@ namespace VisionALVR
     public static class EyeScale
     {
         const string V = "session_settings.video.";
+        /// the encoder's limit: HEVC frames at most 8192 pixels across, two eyes side by side
+        public const int MaxEyeWidth = 4096;
         public static int[] Size(Dictionary<string, object> s) => new[] { (int)Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552), (int)Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200) };
 
         /// The unscaled size and the scale in effect, from what is on disk.
@@ -481,6 +483,12 @@ namespace VisionALVR
             if (baseW <= 0 || baseH <= 0) Current(st, s, out baseW, out baseH, out _);
             scale = Math.Max(0.5, Math.Min(2.0, scale));
             var z = Scaled(baseW, baseH, scale);
+            if (z[0] > MaxEyeWidth)   // NVENC encodes at most 8192 pixels across: 4096 per eye side by side (a scale of 1.21 on 3552 made the host exit at start, 2026-10-24)
+            {
+                var most = Math.Floor(100.0 * MaxEyeWidth / baseW) / 100.0;
+                error = $"A resolution scale of {scale:0.00} gives {z[0]} pixels per eye; the encoder takes at most {MaxEyeWidth} per eye ({2 * MaxEyeWidth} side by side). The largest scale for this headset is {most:0.00}.";
+                return false;
+            }
             foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
             {
                 Json.Set(s, V + k + ".variant", "Absolute");

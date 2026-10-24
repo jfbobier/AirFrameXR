@@ -1801,8 +1801,9 @@ fn main() {
         };
         if enc_handle.is_null() {
             let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();
-            eprintln!("NVENC init failed: {msg}");
-            exit_now(4);
+            // a setup problem, not a crash: restarting cannot help (2026-10-24: a resolution scale of 1.21 made an 8576-pixel-wide frame, NVENC
+            // takes 8192 at most, and the streamer window restarted the host in a loop)
+            setup_fail(origin, &format!("NVENC cannot encode a {w}x{h} frame: {msg}. HEVC encodes at most 8192 pixels across (4096 per eye side by side): lower the resolution scale or the per-eye size."));
         }
         // network benchmark: no game keeps the GPU clocked, and a lightly loaded GPU downclocks NVENC (~3x slower on the laptop)
         let keepalive = args.gpu_keepalive.or(if args.bench_network.is_some() { Some(90) } else { None });

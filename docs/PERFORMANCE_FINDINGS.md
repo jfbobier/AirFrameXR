@@ -412,3 +412,27 @@ Verified with the patched DLL and the registry at stock: gpu_fg 70 copies 42.1 /
 at the release in both. Shipped as VDXR patch 5 (`tools/remote/stage15_vdxr.ps1`): running start off by default; `ovrshim_vdxr_running_start` = 1 in the same registry
 key restores VDXR's behaviour for an A/B. Metrics script of the A/B: the shim's per-frame CSV (`t_release`, `t_submit`, `t_publish`) joined with
 the probe's `app_timing.csv` on the display time.
+
+## 2026-10-23/24: first headset night of the 0.6-alpha build (frame-start gate on, stamp-regime hold on)
+
+Vision Pro, 5090, full-frame encode profile, 90 and 100 Hz, debug off (one 68 s End of Abyss session with debug at the end). Gears of War
+E-Day 4 h 39 at 1/2 (plus 30 min), Borderlands 4 at off / 2/3 / 1/2, End of Abyss at off for about 3 h. The user: no bad behaviour.
+
+- **The gate (VDXR patch 5)**: Gears held 49.0 fps median (slowest tenth 44.9, 81 % of releases late, GPU at the power cap) against a 50 fps
+  cap, where the day before read 36-49; headset repeats 2.5 % typical. End of Abyss 89.2 of 90, Borderlands 34 fps GPU-bound. No fps loss
+  anywhere, so the CPU-overlap risk did not show. The latency gain is not isolated: every session had the gate, and the full-frame profile
+  (encode 9 ms, decode 9 ms) makes the 16 October references incomparable (End of Abyss off: 95 ms total now, 87 then, foveated). The End of
+  Abyss debug session: game stage 29.7 ms, encode 9.5, network 9.4, decode 9.1, decoder queue 8.3, vsync queue 22.9, total 94.9 (p95 106);
+  shim envelope 6-10 ms (one frame's work: what a gated frame start looks like), 57 % late releases, 6.9 % missed periods. A game at the
+  display rate with GPU to spare is the wrong place to see the gate; the clean A/B is a GPU-bound game with `ovrshim_vdxr_running_start` = 1
+  for the reference run.
+- **The hold (`frame_gen_hold_age`) answered the regime question, against itself.** With it on, the 10 s samples lines over the Gears
+  sessions read 5.5-7.3 regime switches a second, hold skips 2.4-2.9 a second = 97 % of all skipped boundaries (2.6-3.4 % of boundaries
+  against 0.6-2.4 % with the old rule on earlier nights), the bypass engaging about once a second; tracking spacing p95 13-14 ms, 3-4 % of
+  gaps over 15 ms. So a sample late by more than a period happens about three times a second on this link: the 67/77 ms reading is not a
+  slow cycle but a Wi-Fi fact the pipeline can only trade between a repeat and a pose-age jump. The old rule (jump) is the default again;
+  the counters stay.
+- **A crash loop found**: a resolution scale of 1.21 made an 8576-pixel-wide frame, NVENC (8192 at most) refused it, the host exited with
+  code 4 and the streamer window restarted it three times per attempt. Now a setup error with the limit in words, and the scale button
+  refuses the value.
+- Also: ten `stall detected` warnings, all within seconds of a game start or end (loading screens); six 100 ms tracking blackouts over the day.
