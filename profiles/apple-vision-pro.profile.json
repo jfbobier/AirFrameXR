@@ -97,13 +97,13 @@
         }
       ]
     ],
-    "session_settings.video.passthrough.content.RgbChromaKey.blue": 16,
+    "session_settings.video.passthrough.content.RgbChromaKey.blue": 0,
     "session_settings.video.passthrough.content.RgbChromaKey.distance_threshold": 50,
     "session_settings.video.passthrough.content.RgbChromaKey.feathering": 0.19999999,
-    "session_settings.video.passthrough.content.RgbChromaKey.green": 124,
-    "session_settings.video.passthrough.content.RgbChromaKey.red": 16,
+    "session_settings.video.passthrough.content.RgbChromaKey.green": 255,
+    "session_settings.video.passthrough.content.RgbChromaKey.red": 0,
     "session_settings.video.passthrough.content.variant": "RgbChromaKey",
-    "session_settings.video.passthrough.enabled": true,
+    "session_settings.video.passthrough.enabled": false,
     "session_settings.video.preferred_codec.variant": "Hevc"
   },
   "notes": [
@@ -111,7 +111,7 @@
     "Full frame (encode profile `full-split`) stays available for GPUs with 3 NVENC engines; it needs roughly 3x the bitrate to match the foveated centre quality, which Wi-Fi cannot carry.",
     "The headset displays at 100 Hz while the stream is 90 fps: the host follows the headset's display rate.",
     "Split encoding needs a GPU with several NVENC engines (RTX 4070 Ti and up, RTX 50 series).",
-    "session_overrides are ALVR session settings (dotted paths into config\\\\session.json): QuestPro emulation, NVENC preset P3 without multi-pass, CABAC, 10-bit HEVC, buffering 1.5 frames, no microphone, the Vision Pro's low-latency VideoToolbox option, chroma-key passthrough."
+    "session_overrides are ALVR session settings (dotted paths into config\\\\session.json): QuestPro emulation, NVENC preset P3 without multi-pass, CABAC, 10-bit HEVC, buffering 1.5 frames, no microphone, the Vision Pro's low-latency VideoToolbox option, chroma-key passthrough (optional, off by default; key colour #00FF00)."
   ],
   "verified": [
     {

@@ -29,8 +29,11 @@ namespace VisionALVR
             new Tool { Title = "Game history", Exe = @"bin\performance.exe", What = "How your games ran, and the motion-vector DLL of each." },
             new Tool { Title = "Something feels wrong", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true, What = "Check your setup and get suggestions." },
             new Tool { Title = "Set up a headset", Exe = @"bin\configure.exe", StopsStreamer = true, What = "Pair a headset and choose the settings." },
+            // experimental and tuning switches (docs/EXPERIMENTAL_SWITCHES.md): writes config files, the streamer picks the live ones up, so it can stay open
+            new Tool { Title = "Advanced settings", Exe = @"bin\configure.exe", Args = "--switches", What = "Experimental frame generation, pacing, GPU and encoder switches, each with when it takes effect." },
         };
-        static readonly Tool Advanced = new Tool { Title = "Advanced (full ALVR settings)", Exe = @"bin\configure.exe", Args = "--advanced", StopsStreamer = true };
+        // the old tabs (pairing, benchmark, video settings): they use the streamer's network port
+        static readonly Tool SetupTabs = new Tool { Title = "Setup tabs", Exe = @"bin\configure.exe", Args = "--advanced", StopsStreamer = true };
 
         readonly FlowLayoutPanel sys = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(700, 0) };
         FwReport firewall;           // filled in the background (PowerShell takes a few seconds)
@@ -55,7 +58,7 @@ namespace VisionALVR
             body.Controls.Add(sys);
             // quiet links: the full ALVR settings, and the help
             var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
-            links.Controls.Add(Link("Advanced (full ALVR settings)...", () => Launch(Advanced, Path.Combine(Paths.Dir, Advanced.Exe))));
+            links.Controls.Add(Link("Setup tabs (pairing, benchmark, video)...", () => Launch(SetupTabs, Path.Combine(Paths.Dir, SetupTabs.Exe))));
             links.Controls.Add(Link("Help", () => { var f = Path.Combine(Paths.Docs, "README.txt"); if (File.Exists(f)) Process.Start(f); else MessageBox.Show(this, "docs\\README.txt is missing from this folder.", "VisionALVR"); }));
             body.Controls.Add(links);
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
@@ -195,6 +198,9 @@ namespace VisionALVR
             try { File.AppendAllText(FlowLogPath, $"{DateTime.Now:HH:mm:ss.fff} visible={(Visible ? 1 : 0)} tools={ToolProcesses.Sum(n => Process.GetProcessesByName(n).Length)} {what}\r\n"); } catch { }
         }
 
+        /// A second start (the streamer's "Main menu" button) brings this window back instead of opening another one.
+        public void ShowAgain() { Show(); if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); BringToFront(); }
+
         /// --test-flow "<tool title>": after the window is up, launches that tool as a click would, with --screenshot so the tool closes itself, and samples the state.
         public void StartTestFlowPublic(string title) => StartTestFlow(title);
         bool testFlow;
@@ -221,11 +227,14 @@ namespace VisionALVR
             Log.Component = "launcher";
             bool first;
             var one = new System.Threading.Mutex(true, "VisionALVR_Launcher", out first);
-            if (!first) { Log.Write("INFO", "launcher: already running, this start ends"); return; }   // a second double-click: the launcher (or the tool it stepped aside for) is already there
+            var showEvent = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.AutoReset, "VisionALVR_Launcher_Show");
+            if (!first) { showEvent.Set(); Log.Write("INFO", "launcher: already running, asked it to show itself"); return; }   // a second start (double-click, the streamer's Main menu button): the launcher, or the tool it stepped aside for, is already there
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             var args = Environment.GetCommandLineArgs();
             var f = new LauncherForm();
+            var waiter = new System.Threading.Thread(() => { while (showEvent.WaitOne()) { try { f.BeginInvoke((Action)f.ShowAgain); } catch { return; } } }) { IsBackground = true };
+            waiter.Start();
             var i = Array.IndexOf(args, "--test-flow");
             if (i >= 0 && i + 1 < args.Length) f.Shown += (s, e) => f.StartTestFlowPublic(args[i + 1]);
             try { Application.Run(f); }

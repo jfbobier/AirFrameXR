@@ -57,6 +57,9 @@ namespace VisionALVR
             yield return new Case { Name = "streamer-no-dll", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.NoDll); } };
             yield return new Case { Name = "streamer-audio-bad", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoAudio(true); } };
             yield return new Case { Name = "streamer-debug-on", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoDebugOn(); } };
+            yield return new Case { Name = "streamer-headset-seen", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); ((RuntimeForm)f).HostEvent("headset_seen", new Dictionary<string, object> { { "hostname", "1234.client.alvr" }, { "ip", "192.168.1.50" } }); } };
+            yield return new Case { Name = "streamer-headset-lost", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); } };
+            yield return new Case { Name = "advanced-switches", Make = () => new AdvancedForm() };
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             for (int p = 0; p <= 6; p++)
             {

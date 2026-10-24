@@ -22,8 +22,8 @@ namespace VisionALVR
 {
     public static class Version
     {
-        public const string Number = "0.5";
-        /// "0.5", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
+        public const string Number = "0.6";
+        /// "0.6", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
         {
@@ -356,6 +356,15 @@ namespace VisionALVR
             cur[keys[keys.Length - 1]] = value;
         }
 
+        /// Removes the key (a setting back at its default stays out of the file); true when there was one.
+        public static bool Remove(Dictionary<string, object> root, string path)
+        {
+            var keys = path.Split('.');
+            object cur = root;
+            for (int i = 0; i < keys.Length - 1; i++) if (!(cur is Dictionary<string, object> d && d.TryGetValue(keys[i], out cur))) return false;
+            return cur is Dictionary<string, object> last && last.Remove(keys[keys.Length - 1]);
+        }
+
         public static double Num(Dictionary<string, object> root, string path, double def)
         {
             var v = Get(root, path);
@@ -403,19 +412,22 @@ namespace VisionALVR
         /// NVENC split-frame encoding ("3" = one strip per engine, up to 3; "off"): on by default, the reason the project exists on a multi-engine GPU
         /// the Logs window deletes the records of games whose exe no longer exists (on by default)
         public bool AutoDeleteGameLogs { get => Json.Bool(Root, "logs.auto_delete_uninstalled", true); set => Json.Set(Root, "logs.auto_delete_uninstalled", value); }
-        /// the Vision Pro's chroma-key tick is set in the ALVR app on the headset (no way to read it from here): the wizard asks once and remembers the answer
-        public bool AvpChromaConfirmed { get => Json.Bool(Root, "avp.chroma_confirmed", false); set => Json.Set(Root, "avp.chroma_confirmed", value); }
+        /// the wizard asked the chroma-key question once (headsets other than the Vision Pro): the answer is in session.json, this only stops the repeat
+        public bool ChromaAsked { get => Json.Bool(Root, "chroma.asked", false); set => Json.Set(Root, "chroma.asked", value); }
         /// the key that recentres while playing (the streamer polls it): End by default; "off" disables
         public string RecenterKey { get => Json.Str(Root, "controls.recenter_key", "End"); set => Json.Set(Root, "controls.recenter_key", value); }
-        /// the Windows desktop on a virtual screen between games, the right hand (pinch = click) as the mouse; off by default
-        public bool MirrorDesktop { get => Json.Bool(Root, "display.mirror_desktop", false); set => Json.Set(Root, "display.mirror_desktop", value); }
+        /// the Windows desktop on a virtual screen between games, the right hand (pinch = click) as the mouse; on by default while chroma-key passthrough is off (the idle frame is the room otherwise), until the user chooses
+        public bool MirrorDesktop { get => Json.Get(Root, "display.mirror_desktop") != null ? Json.Bool(Root, "display.mirror_desktop", false) : !Chroma.Enabled(Session.Load()); set => Json.Set(Root, "display.mirror_desktop", value); }
         public bool SplitEncode { get => Json.Str(Root, "video.split_encode", "3") != "off"; set => Json.Set(Root, "video.split_encode", value ? "3" : "off"); }
-        public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", "107c10"); set => Json.Set(Root, "video.idle_rgb", value); }
+        public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", Chroma.DefaultRgb); set => Json.Set(Root, "video.idle_rgb", value); }
         /// frame generation (docs/FRAME_GENERATION.md): the game renders every other frame, the streamer interpolates the one in between (off by default)
         public bool FrameGen { get => Json.Bool(Root, "video.frame_gen", false); set => Json.Set(Root, "video.frame_gen", value); }
         // frame generation rate: "third" | "half" (default) | "two_thirds" (the game's rate as a fraction of the display rate, the streamer generates the
-        // frames in between; docs/FRAME_GENERATION.md), "uncapped" from the config only (docs/FRAME_GENERATION_UNCAPPED.md)
+        // frames in between; docs/FRAME_GENERATION.md), "uncapped" (experimental, from the Advanced settings; docs/FRAME_GENERATION_UNCAPPED.md)
         public string FrameGenRate { get => Json.Str(Root, "video.frame_gen_rate", "half"); set => Json.Set(Root, "video.frame_gen_rate", value); }
+        /// uncapped mode's minimum spacing of the game's releases in fps (0 = none) and its content lag in ms (0 = automatic); the streamer takes a change live
+        public double FrameGenCapFps { get => Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }
+        public double FrameGenLagMs { get => Json.Num(Root, "video.frame_gen_lag_ms", 0); set => Json.Set(Root, "video.frame_gen_lag_ms", value); }
         // the game's DLSS motion vectors drive the synthesis when the OptiScaler-DLSSMotionVectorExtractor provider is loaded in the game (docs/MOTION_VECTORS.md)
         public bool GameMotionVectors { get => Json.Bool(Root, "video.game_motion_vectors", true); set => Json.Set(Root, "video.game_motion_vectors", value); }
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
@@ -439,9 +451,6 @@ namespace VisionALVR
         public double Saturation { get => Json.Num(Root, "display.saturation", 0); set => Json.Set(Root, "display.saturation", value); }
         public double Sharpening { get => Json.Num(Root, "display.sharpening", 0); set => Json.Set(Root, "display.sharpening", value); }
         public bool HasDisplay => Json.Get(Root, "display.gamma") != null;
-        /// resolution scale (supersampling when above 1): what EyeScale last wrote into session.json, with the unscaled eye size it started from and the size it wrote (to tell it from an edit made elsewhere)
-        public double RenderScale { get => Json.Num(Root, "display.render_scale", 1); set => Json.Set(Root, "display.render_scale", value); }
-        public int[] ScaleSizes { get => new[] { (int)Json.Num(Root, "display.scale_base_w", 0), (int)Json.Num(Root, "display.scale_base_h", 0), (int)Json.Num(Root, "display.scale_w", 0), (int)Json.Num(Root, "display.scale_h", 0) }; set { Json.Set(Root, "display.scale_base_w", value[0]); Json.Set(Root, "display.scale_base_h", value[1]); Json.Set(Root, "display.scale_w", value[2]); Json.Set(Root, "display.scale_h", value[3]); } }
         /// headset height above the floor handed to games (m), re-anchored live; 1.3 = a seated adult. 0 = the headset's floor estimate
         public const double DefaultHeight = 1.3;
         public double Height { get => Json.Num(Root, "headset.height_m", DefaultHeight); set => Json.Set(Root, "headset.height_m", value); }
@@ -454,59 +463,39 @@ namespace VisionALVR
         public void Save() => Json.Save(Paths.Settings, Root);
     }
 
-    /// The streamer's resolution scale (supersampling above 1) is passed to the engine the way the setup does: as the per-eye resolution in
-    /// session.json, which the engine negotiates with the headset at connection. The unscaled size is kept in visionalvr.json; when session.json
-    /// holds something else than what was written here (the wizard or the setup panel changed it), that is the new unscaled size and the scale is 1.
-    public static class EyeScale
+    /// What the hardware encoder can take: HEVC frames of at most 8192 pixels across, the two eyes side by side (4096 per eye), and 8192 high. A larger size makes
+    /// the streamer exit at start (2026-10-24: an eye of 4288 pixels), so the settings refuse it with the reason.
+    public static class Nvenc
     {
-        const string V = "session_settings.video.";
-        /// the encoder's limit: HEVC frames at most 8192 pixels across, two eyes side by side
-        public const int MaxEyeWidth = 4096;
-        public static int[] Size(Dictionary<string, object> s) => new[] { (int)Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552), (int)Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200) };
-
-        /// The unscaled size and the scale in effect, from what is on disk.
-        public static void Current(AppSettings st, Dictionary<string, object> s, out int baseW, out int baseH, out double scale)
+        public const int MaxEyeWidth = 4096, MaxEyeHeight = 8192;
+        /// null when the per-eye size fits the encoder, else what to tell the user
+        public static string CheckEye(int eyeW, int eyeH)
         {
-            var now = Size(s); var k = st.ScaleSizes;
-            if (k[0] > 0 && k[1] > 0 && k[2] == now[0] && k[3] == now[1]) { baseW = k[0]; baseH = k[1]; scale = st.RenderScale; }
-            else { baseW = now[0]; baseH = now[1]; scale = 1; }
+            if (eyeW <= MaxEyeWidth && eyeH <= MaxEyeHeight) return null;
+            return $"{eyeW} x {eyeH} per eye is more than the hardware encoder can encode: HEVC takes at most {2 * MaxEyeWidth} pixels across, so {MaxEyeWidth} per eye side by side (and {MaxEyeHeight} high).";
         }
+    }
 
-        public static int[] Scaled(int baseW, int baseH, double scale) =>
-            Math.Abs(scale - 1) < 0.005 ? new[] { baseW, baseH } : new[] { (int)Math.Round(baseW * scale / 32) * 32, (int)Math.Round(baseH * scale / 2) * 2 };   // ALVR aligns widths to 32
-
-        /// Writes the unscaled size (the current one when 0) times `scale` into session.json and remembers it. False with the reason when the file cannot be written.
-        public static bool Apply(AppSettings st, double scale, out string error, int baseW = 0, int baseH = 0)
+    /// Chroma-key passthrough: the headset turns the idle colour into the room. It is optional and off by default; the key colour lives in session.json (what the ALVR
+    /// client keys), the same colour is what the streamer shows between games. Off: the streamer's idle frame is black, and the desktop mirror is on unless chosen otherwise.
+    public static class Chroma
+    {
+        public const string DefaultRgb = "00ff00";
+        const string P = "session_settings.video.passthrough.";
+        public static bool Enabled(Dictionary<string, object> s) => Json.Bool(s, P + "enabled", false);
+        /// the key colour as "rrggbb"
+        public static string Rgb(Dictionary<string, object> s) => $"{(int)Json.Num(s, P + "content.RgbChromaKey.red", 0):x2}{(int)Json.Num(s, P + "content.RgbChromaKey.green", 255):x2}{(int)Json.Num(s, P + "content.RgbChromaKey.blue", 0):x2}";
+        /// Sets passthrough on or off in `s` (not saved) and the idle colour in `st` (not saved): the key colour when on, black when off. `rgb` = "rrggbb".
+        public static void Apply(Dictionary<string, object> s, AppSettings st, bool on, string rgb)
         {
-            error = null;
-            var s = Session.Load();
-            if (baseW <= 0 || baseH <= 0) Current(st, s, out baseW, out baseH, out _);
-            scale = Math.Max(0.5, Math.Min(2.0, scale));
-            var z = Scaled(baseW, baseH, scale);
-            if (z[0] > MaxEyeWidth)   // NVENC encodes at most 8192 pixels across: 4096 per eye side by side (a scale of 1.21 on 3552 made the host exit at start, 2026-10-24)
-            {
-                var most = Math.Floor(100.0 * MaxEyeWidth / baseW) / 100.0;
-                error = $"A resolution scale of {scale:0.00} gives {z[0]} pixels per eye; the encoder takes at most {MaxEyeWidth} per eye ({2 * MaxEyeWidth} side by side). The largest scale for this headset is {most:0.00}.";
-                return false;
-            }
-            foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
-            {
-                Json.Set(s, V + k + ".variant", "Absolute");
-                Json.Set(s, V + k + ".Absolute.width", z[0]);
-                Json.Set(s, V + k + ".Absolute.height.set", true);
-                Json.Set(s, V + k + ".Absolute.height.content", z[1]);
-            }
-            Json.Set(s, "openvr_config.eye_resolution_width", z[0]);
-            Json.Set(s, "openvr_config.eye_resolution_height", z[1]);
-            Json.Set(s, "openvr_config.target_eye_resolution_width", z[0]);
-            Json.Set(s, "openvr_config.target_eye_resolution_height", z[1]);
-            try { Json.Save(Paths.Session, s); }
-            catch (Exception e) { error = "Cannot write config\\session.json: " + e.Message; return false; }
-            st.RenderScale = scale;
-            st.ScaleSizes = Math.Abs(scale - 1) < 0.005 ? new[] { 0, 0, 0, 0 } : new[] { baseW, baseH, z[0], z[1] };
-            st.Save();
-            Log.Write("INFO", $"resolution scale {scale:0.00}: {z[0]}x{z[1]} per eye (unscaled {baseW}x{baseH})");
-            return true;
+            rgb = (rgb ?? DefaultRgb).TrimStart('#').ToLowerInvariant();
+            if (rgb.Length != 6) rgb = DefaultRgb;
+            Json.Set(s, P + "enabled", on);
+            Json.Set(s, P + "content.variant", "RgbChromaKey");
+            Json.Set(s, P + "content.RgbChromaKey.red", Convert.ToInt32(rgb.Substring(0, 2), 16));
+            Json.Set(s, P + "content.RgbChromaKey.green", Convert.ToInt32(rgb.Substring(2, 2), 16));
+            Json.Set(s, P + "content.RgbChromaKey.blue", Convert.ToInt32(rgb.Substring(4, 2), 16));
+            st.IdleRgb = on ? rgb : "000000";
         }
     }
 
@@ -1397,41 +1386,52 @@ namespace VisionALVR
         public static Color ColorOf(Kind k) => k == Kind.Worked ? Color.SeaGreen : k == Kind.Blind ? Color.DarkOrange : Color.DimGray;
     }
 
-    /// Vision Pro only: the chroma-key passthrough is a setting of the ALVR app on the headset that the streamer can neither set nor read, so
-    /// the wizard shows where it is and asks the user to confirm.
+    /// The wizard's chroma-key step, for every headset but the Vision Pro (its App Store app has a fixed key colour and range that the streamer cannot change, so there
+    /// the chroma stays off): transparent background yes or no, with the recommended colour. The answer is applied through Chroma.Apply.
     public class ChromaStepForm : DpiForm
     {
-        public bool Confirmed => done.Checked;
-        readonly CheckBox done = new CheckBox { Text = "I have set it in the ALVR app on the Vision Pro", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
+        public bool Transparent => yes.Checked;
+        public string Rgb => $"{pick.BackColor.R:x2}{pick.BackColor.G:x2}{pick.BackColor.B:x2}";
+        readonly RadioButton yes = new RadioButton { Text = "Yes: show my room where the screen is green (chroma-key passthrough)", AutoSize = true, Checked = true };
+        readonly RadioButton no = new RadioButton { Text = "No: no passthrough (the desktop mirror shows between games instead)", AutoSize = true };
+        readonly Button pick = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
         public ChromaStepForm()
         {
-            Text = "VisionALVR \u2013 Vision Pro passthrough";
+            Text = "VisionALVR \u2013 Passthrough";
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body; Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
-            col.Controls.Add(new Label { Text = "Turn on passthrough in the ALVR app", AutoSize = true, Font = Ui.Big });
-            col.Controls.Add(new Label { Text = "Between games VisionALVR shows a plain dark green screen (#107C10), which the Vision Pro turns into your room when chroma-key passthrough is on; the game appears when it starts. " +
-                "This is a setting of the ALVR app on the headset: VisionALVR cannot change or read it. In the ALVR app, tick \"Enable Chroma Keyed Passthrough\" as in the picture. The App Store app keys #107C10 by itself; if your ALVR app has a Chroma Key Color picker, set it to #107C10 too (or change the streamer's idle colour to match what you set).",
+            col.Controls.Add(new Label { Text = "Transparent background (passthrough)?", AutoSize = true, Font = Ui.Big });
+            col.Controls.Add(new Label { Text = "Between games, and in games that draw it, the streamer's pure green (#00FF00) can become transparent: the headset shows your room there. " +
+                "We recommend #00FF00; it is the colour games and mods avoid least by accident. It is optional: without it the Windows desktop is mirrored on a floating screen between games.",
                 AutoSize = true, MaximumSize = new Size(560, 0), Margin = new Padding(3, 6, 3, 6) });
-            var img = Ui.Resource("chroma_passthrough.png");
-            if (img != null) col.Controls.Add(new PictureBox { Image = img, SizeMode = PictureBoxSizeMode.Zoom, Width = 440, Height = (int)(440.0 * img.Height / img.Width), Margin = new Padding(3) });
-            col.Controls.Add(done);
+            yes.Margin = new Padding(3, 6, 3, 3); no.Margin = new Padding(3);
+            col.Controls.Add(yes);
+            var colour = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(22, 0, 0, 4) };
+            colour.Controls.Add(new Label { Text = "Key colour", AutoSize = true, Margin = new Padding(0, 6, 8, 0) });
+            SetColour(ColorTranslator.FromHtml("#" + Chroma.DefaultRgb));
+            pick.Click += (s, e) => { using (var cd = new ColorDialog { Color = pick.BackColor, FullOpen = true }) if (cd.ShowDialog(this) == DialogResult.OK) SetColour(cd.Color); };
+            var reset = new Button { Text = "Recommended (#00FF00)", AutoSize = true };
+            reset.Click += (s, e) => SetColour(ColorTranslator.FromHtml("#" + Chroma.DefaultRgb));
+            colour.Controls.Add(pick); colour.Controls.Add(reset);
+            col.Controls.Add(colour);
+            col.Controls.Add(no);
+            yes.CheckedChanged += (s, e) => colour.Enabled = yes.Checked;
             var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
-            var go = new Button { Text = "Continue", AutoSize = true, DialogResult = DialogResult.OK, Font = Ui.Bold, MinimumSize = new Size(100, 30), Enabled = false };
-            var skip = new Button { Text = "Skip", AutoSize = true, DialogResult = DialogResult.Cancel, MinimumSize = new Size(100, 30) };
-            done.CheckedChanged += (s, e) => go.Enabled = done.Checked;
-            row.Controls.Add(go); row.Controls.Add(skip);
+            var go = new Button { Text = "Continue", AutoSize = true, DialogResult = DialogResult.OK, Font = Ui.Bold, MinimumSize = new Size(100, 30) };
+            row.Controls.Add(go);
             col.Controls.Add(row);
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             col.Dock = DockStyle.None; col.Location = Point.Empty;
             scroller.Controls.Add(col);
             Controls.Add(scroller);
             Ui.AutoFitWindow(this, null, col);
-            CancelButton = skip;
+            AcceptButton = go;
         }
+        void SetColour(Color c) { pick.BackColor = c; pick.Text = $"#{c.R:X2}{c.G:X2}{c.B:X2}"; pick.ForeColor = c.GetBrightness() > 0.5 ? Color.Black : Color.White; }
     }
 
     /// A latency the engine could not measure is shown as n/a, not as a number: above one second, or when over 10 % of the run's client samples were dropped

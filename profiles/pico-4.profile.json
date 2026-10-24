@@ -41,17 +41,17 @@
     "session_settings.video.foveated_encoding.content.center_size_y": 0.8,
     "session_settings.video.foveated_encoding.content.edge_ratio_x": 8.0,
     "session_settings.video.foveated_encoding.content.edge_ratio_y": 8.0,
-    "session_settings.video.passthrough.content.RgbChromaKey.blue": 16,
+    "session_settings.video.passthrough.content.RgbChromaKey.blue": 0,
     "session_settings.video.passthrough.content.RgbChromaKey.distance_threshold": 50,
     "session_settings.video.passthrough.content.RgbChromaKey.feathering": 0.19999999,
-    "session_settings.video.passthrough.content.RgbChromaKey.green": 124,
-    "session_settings.video.passthrough.content.RgbChromaKey.red": 16,
+    "session_settings.video.passthrough.content.RgbChromaKey.green": 255,
+    "session_settings.video.passthrough.content.RgbChromaKey.red": 0,
     "session_settings.video.passthrough.content.variant": "RgbChromaKey",
-    "session_settings.video.passthrough.enabled": true
+    "session_settings.video.passthrough.enabled": false
   },
   "notes": [
     "Starting point compiled from public guidance, NOT verified by the VisionALVR project on this headset (no `verified` entry). VisionALVR's support for headsets other than the Apple Vision Pro is best effort.",
-    "Same reasoning as the Quest profiles: Pico's ALVR client is the same Android client as the Quest's and the Pico 4 / 4 Ultra use a Qualcomm Snapdragon XR2 Gen 2 like the Quest 3 (Pico's specification). 90 Hz, HEVC 10-bit (the default session forces it; ALVR's client advertises 10-bit for the platforms it recognises, Pico included), full colour range, ALVR's 'Light' foveation preset (centre 0.80 x 0.80, edge ratio 8 x 8: nearly the whole view at full resolution), chroma-key passthrough on pure green. Panel 2160 x 2160 per eye.",
+    "Same reasoning as the Quest profiles: Pico's ALVR client is the same Android client as the Quest's and the Pico 4 / 4 Ultra use a Qualcomm Snapdragon XR2 Gen 2 like the Quest 3 (Pico's specification). 90 Hz, HEVC 10-bit (the default session forces it; ALVR's client advertises 10-bit for the platforms it recognises, Pico included), full colour range, ALVR's 'Light' foveation preset (centre 0.80 x 0.80, edge ratio 8 x 8: nearly the whole view at full resolution); chroma-key passthrough is off by default (the setup offers it, key colour pure green #00FF00). Panel 2160 x 2160 per eye.",
     "90 Hz has to be enabled in the Pico's own display settings first; if the headset only offers 72 Hz the wizard uses the closest rate it reports.",
     "ALVR's wiki (Settings tutorial, v20): HEVC at a constant 100-150 Mbps on a good wireless router; this profile uses 150 Mbps (100 on an average network).",
     "ALVR 20.14 added Pico 4 Ultra support (controller profile fix). Pico Neo 3 (XR2 Gen 1, 1832 x 1920) has no profile of its own: use this one and set the resolution in the wizard. Starting point, NOT verified by the VisionALVR project on this headset."

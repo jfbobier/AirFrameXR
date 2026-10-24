@@ -86,7 +86,7 @@
  "session_settings": {
   "video": {
    "passthrough": {
-    "enabled": true,
+    "enabled": false,
     "content": {
      "Blend": {
       "premultiplied_alpha": true,

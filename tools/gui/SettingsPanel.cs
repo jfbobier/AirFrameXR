@@ -15,7 +15,7 @@ namespace VisionALVR
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
         readonly Dictionary<Control, Label> reasons = new Dictionary<Control, Label>();
 
-        public readonly NumericUpDown EyeW = Num(256, 8192, 32), EyeH = Num(256, 8192, 32), Bitrate = Num(10, 1000, 10);
+        public readonly NumericUpDown EyeW = Num(256, Nvenc.MaxEyeWidth, 32), EyeH = Num(256, Nvenc.MaxEyeHeight, 32), Bitrate = Num(10, 1000, 10);
         public readonly ComboBox Fps = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         public readonly RadioButton ProfFov = new RadioButton { Text = "Foveated (ALVR foveated encoding; recommended)", AutoSize = true };
         public readonly RadioButton ProfFull = new RadioButton { Text = "Full frame + split encode (needs a strong link)", AutoSize = true };
@@ -23,6 +23,7 @@ namespace VisionALVR
         public readonly CheckBox FrameGen = new CheckBox { Text = "Frame generation (also in the streamer window)", AutoSize = true };
         public readonly NumericUpDown Fcx = Dec(0.1m, 1m), Fcy = Dec(0.1m, 1m), Fsx = Dec(-1m, 1m), Fsy = Dec(-1m, 1m), Frx = Dec(1m, 10m), Fry = Dec(1m, 10m);
         readonly Button idle = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
+        public readonly CheckBox ChromaOn = new CheckBox { Text = "Show my room where the screen is this colour", AutoSize = true };
         public readonly CheckBox Audio = new CheckBox { Text = "Stream game audio (Windows default output)", AutoSize = true };
         public readonly CheckBox Mute = new CheckBox { Text = "Mute the PC speakers while streaming", AutoSize = true };
         public readonly ComboBox Proto = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
@@ -64,6 +65,8 @@ namespace VisionALVR
             section("Video");
             var res = flow(EyeW, Ui.Line("x"), EyeH);
             row("Resolution per eye", res, EyeW);
+            var eyeNote = Ui.Line($"At most {Nvenc.MaxEyeWidth} pixels per eye across: the hardware encoder takes {2 * Nvenc.MaxEyeWidth} for both eyes side by side.");
+            eyeNote.ForeColor = Color.DimGray; note(eyeNote);
             Fps.Items.AddRange(new object[] { "60", "72", "80", "90", "96", "100", "120" });
             row("Refresh rate (Hz)", Fps);
             row("Bitrate (Mbps)", Bitrate);
@@ -81,10 +84,12 @@ namespace VisionALVR
                 using (var cd = new ColorDialog { Color = idle.BackColor, FullOpen = true })
                     if (cd.ShowDialog(this) == DialogResult.OK) SetIdle(cd.Color);
             };
-            var idleReset = new Button { Text = "Default (#107C10)", AutoSize = true };
-            idleReset.Click += (s, e) => SetIdle(Color.FromArgb(16, 124, 16));
-            row("Colour when no game runs", flow(idle, idleReset), idle);
-            var remind = Ui.Line("Turn on Enable Chroma Keyed Passthrough in the ALVR app on the headset. The default #107C10 is the key colour the App Store app uses; if your ALVR app has a Chroma Key Color picker, set the same colour there.");
+            var idleReset = new Button { Text = "Recommended (#00FF00)", AutoSize = true };
+            idleReset.Click += (s, e) => SetIdle(ColorTranslator.FromHtml("#" + Chroma.DefaultRgb));
+            ChromaOn.CheckedChanged += (s, e) => { idle.Enabled = idleReset.Enabled = ChromaOn.Checked; };
+            row("Chroma-key passthrough", ChromaOn, ChromaOn);
+            row("Key colour (also the idle screen)", flow(idle, idleReset), idle);
+            var remind = Ui.Line("Optional, off by default (the desktop mirror shows between games instead). #00FF00 is recommended. The headset's ALVR app takes the colour from the streamer, except the Vision Pro App Store app, whose key is fixed: keep it off there unless you set the same colour in an ALVR app that has the picker.");
             remind.ForeColor = Color.DimGray;
             note(remind);
 
@@ -138,9 +143,8 @@ namespace VisionALVR
         {
             session = Session.Load();
             var s = session;
-            EyeScale.Current(settings, s, out var baseW, out var baseH, out _);   // the unscaled size: the streamer's resolution scale is applied on top of it
-            EyeW.Value = Clamp(EyeW, baseW);
-            EyeH.Value = Clamp(EyeH, baseH);
+            EyeW.Value = Clamp(EyeW, Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552));
+            EyeH.Value = Clamp(EyeH, Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200));
             var f = ((int)Json.Num(s, V + "preferred_fps", 90)).ToString(CultureInfo.InvariantCulture);
             if (!Fps.Items.Contains(f)) Fps.Items.Add(f);
             Fps.SelectedItem = f;
@@ -154,7 +158,9 @@ namespace VisionALVR
             Fsy.Value = Clamp(Fsy, Json.Num(s, V + "foveated_encoding.content.center_shift_y", 0.1));
             Frx.Value = Clamp(Frx, Json.Num(s, V + "foveated_encoding.content.edge_ratio_x", 4));
             Fry.Value = Clamp(Fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
-            try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(16, 124, 16)); }
+            ChromaOn.Checked = Chroma.Enabled(s);
+            try { SetIdle(ColorTranslator.FromHtml("#" + Chroma.Rgb(s))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
+            idle.Enabled = ChromaOn.Checked;
             Audio.Checked = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             Mute.Checked = settings.MuteSpeakers;
             Proto.SelectedItem = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp") == "Tcp" ? "Tcp" : "Udp";
@@ -192,8 +198,9 @@ namespace VisionALVR
             error = null;
             session = Session.Load(); // keep anything edited meanwhile (e.g. pairing)
             var s = session;
-            EyeScale.Current(settings, s, out _, out _, out var scale);
             int w = (int)EyeW.Value / 32 * 32, h = (int)EyeH.Value; // ALVR aligns widths to 32
+            error = Nvenc.CheckEye(w, h);
+            if (error != null) return false;
             var rate = double.Parse((string)Fps.SelectedItem, CultureInfo.InvariantCulture);
             foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
             {
@@ -224,13 +231,12 @@ namespace VisionALVR
             Json.Set(s, "session_settings.connection.stream_protocol.variant", (string)Proto.SelectedItem);
             Json.Set(s, "session_settings.connection.packet_size", (int)Packet.Value);
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)Haptics.Value);
+            Chroma.Apply(s, settings, ChromaOn.Checked, $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}");
             try { Json.Save(Paths.Session, s); }
             catch (Exception e) { error = "Cannot write config\\session.json: " + e.Message; return false; }
-            if (Math.Abs(scale - 1) >= 0.005 && !EyeScale.Apply(settings, scale, out error, w, h)) return false;   // the typed size is the unscaled one: put the streamer's scale back on it
             settings.EncodeProfile = ProfFull.Checked ? "full-split" : "foveated";
             settings.SplitEncode = Split.Checked || ProfFull.Checked;   // the full-frame profile forces 3 strips whatever this says
             settings.FrameGen = FrameGen.Checked;
-            settings.IdleRgb = $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}";
             settings.MuteSpeakers = Mute.Checked;
             settings.AudioCapture = CaptureBox.SelectedIndex == 1 ? "device" : "process";
             settings.Debug = DebugDefault.Checked;

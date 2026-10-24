@@ -1177,7 +1177,7 @@ const AVP_DEFAULT_IPD: f32 = 0.0623;
 /// bitrate (`--bench-mbps`, else the session's constant bitrate). Results: `bq_*` events, `--bq-out` JSON, a general log line.
 fn run_quality_bench(origin: Instant, args: &Args, layout: &alvr_filesystem::Layout, install: Option<&vision::Install>) -> i32 {
     let session = layout.session();
-    let host_keys = [(c"idle_rgb", 0x107C10i64), (c"gpu_thread_priority", 0)];
+    let host_keys = [(c"idle_rgb", 0x00FF00i64), (c"gpu_thread_priority", 0)];
     let qp_on = args.qp_map.unwrap_or(nvidia_profile::QP_MAP_ENABLED);
     configure_encoder(&session, args.split_encode, qp_on, &host_keys);
     let s: serde_json::Value = fs::read_to_string(&session).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
@@ -1765,7 +1765,7 @@ fn main() {
     let mut nvenc_cfg = json!(null);
     let mut cur_cfg = read_stream_cfg(&layout.session());
     let host_keys = [
-        (c"idle_rgb", args.idle_rgb.unwrap_or(0x107C10) as i64),
+        (c"idle_rgb", args.idle_rgb.unwrap_or(0x00FF00) as i64),
         (c"gpu_thread_priority", args.gpu_priority.unwrap_or(0)),
         (c"noise_block", args.noise_block),
         (c"noise_amp", args.noise_amp),

@@ -41,6 +41,7 @@ namespace VisionALVR
         string variantId = "";       // the network variant chosen for it
         ComboBox variantBox;
         SettingsPanel settingsPanel;
+        Tuple<bool, string> chromaChoice;   // the chroma-key answer (on, rrggbb), written once the profile or the proposal is, so that neither overwrites it
         bool autoconfig;
         // headset page
         ListView found = new ListView { View = View.Details, FullRowSelect = true, Height = 200, Width = 780, HideSelection = false, MultiSelect = false };
@@ -335,10 +336,16 @@ namespace VisionALVR
             hsGo = new Button { Text = "Yes, this is my headset: continue >", AutoSize = true, Font = Ui.Big, Padding = new Padding(10), Visible = false, Margin = new Padding(0, 12, 0, 0) };
             hsGo.Click += (s, e) =>
             {
-                // Vision Pro: the passthrough tick lives in the ALVR app on the headset (asked once, the answer is remembered)
-                if (hs.IsVisionPro && !settings.AvpChromaConfirmed && !demo && !auto)
+                // Chroma-key passthrough is optional and off by default. ALVR has no way to ask a client whether it accepts the key colour the streamer sends (the client never reports its
+                // settings back), and the Vision Pro's App Store app has a fixed key colour and range: so every headset but the Vision Pro is offered it, the Vision Pro keeps it off.
+                if (!hs.IsVisionPro && !demo && !auto && !settings.ChromaAsked)
                     using (var dlg = new ChromaStepForm())
-                        if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Confirmed) { settings.AvpChromaConfirmed = true; settings.Save(); Log.Write("INFO", "wizard: Vision Pro chroma passthrough confirmed by the user"); }
+                        if (dlg.ShowDialog(this) == DialogResult.OK)
+                        {
+                            chromaChoice = Tuple.Create(dlg.Transparent, dlg.Rgb);
+                            settings.ChromaAsked = true; settings.Save();
+                            Log.Write("INFO", $"wizard: chroma-key passthrough {(dlg.Transparent ? "on, key #" + dlg.Rgb : "off")}");
+                        }
                 GoTo(3);
             };
             p.Controls.Add(hsGo);
@@ -617,6 +624,14 @@ namespace VisionALVR
             }
         }
 
+        void ApplyChromaChoice()
+        {
+            if (chromaChoice == null) return;
+            var s = Session.Load();
+            Chroma.Apply(s, settings, chromaChoice.Item1, chromaChoice.Item2);
+            try { Json.Save(Paths.Session, s); settings.Save(); session = s; } catch (Exception e) { Log.Write("WARN", "chroma choice not saved: " + e.Message); }
+        }
+
         void StartTests()
         {
             // the candidate configuration (the headset's panel, the chosen rate) goes to disk first: the encoder tests read it
@@ -656,6 +671,7 @@ namespace VisionALVR
                 panel.Prefill(cand);
                 if (!panel.Save(out var err) && err != null) { testStatus.Text = err; testStatus.ForeColor = Color.Firebrick; }
                 else HmdProfiles.ApplySessionOverrides(profile);
+                ApplyChromaChoice();
             }
             steps = demo ? DemoSteps() : Tests.Build(ctx);
             foreach (var st in steps) testList.Items.Add(new ListViewItem(new[] { Glyph(st.State) + "  " + st.Name, "" }));

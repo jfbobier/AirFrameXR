@@ -61,7 +61,9 @@ namespace VisionALVR
         readonly LinkLabel exportLink = new LinkLabel { Text = "Open folder", AutoSize = true, Margin = new Padding(3, 4, 3, 0) };
         readonly CheckBox fgMv = new CheckBox { Text = "Use the game's DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0) };   // always shown: which game comes next is not known
         // uncapped generation (settings video.frame_gen_rate uncapped, docs/FRAME_GENERATION_UNCAPPED.md): the game runs at its own rate, every output interpolated
-        readonly CheckBox fgUnc = new CheckBox { Text = "Uncapped", AutoSize = true, Margin = new Padding(0, 3, 0, 0) };
+        // experimental, set in the Advanced settings window: here only the state, with a note under the slider while it is on
+        readonly CheckBox fgUnc = new CheckBox { Text = "Uncapped", AutoSize = true, Visible = false };
+        readonly Label fgUncNote = new Label { Text = "Uncapped (experimental) is on: set in Advanced settings", AutoSize = true, ForeColor = Color.DarkGoldenrod, Visible = false, Margin = new Padding(3, 0, 0, 2) };
         readonly ToggleButton fgRecommend = new ToggleButton { Text = "Auto", Margin = new Padding(0, 0, 8, 0), AccessibleName = "Choose the game rate automatically from this game's recorded runs" };
                 readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(8, 3, 3, 3) };
         bool fgRateFromHost;   // the slider follows the host's rate: no command back
@@ -143,8 +145,9 @@ namespace VisionALVR
             var fgRow = Row();
             fgUnc.Margin = new Padding(14, 8, 0, 0);
             fgMv.Margin = new Padding(10, 8, 0, 0);
-            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate); fgRow.Controls.Add(fgUnc); fgRow.Controls.Add(fgMv);   // the ticks share the line
+            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate); fgRow.Controls.Add(fgMv);   // the ticks share the line
             fgCol.Controls.Add(fgRow);
+            fgCol.Controls.Add(fgUncNote);
             vecRow.Controls.Add(vecLine); vecRow.Controls.Add(vecInstall); vecRow.Controls.Add(vecDismiss);
             vecInstall.Click += (s, e) => VectorsInstall();
             vecDismiss.Click += (s, e) => VectorsDismiss();
@@ -152,7 +155,7 @@ namespace VisionALVR
             body.Controls.Add(Group("Frame generation", fgCol));
 
             // Position and Picture side by side, each a short stack (the window stays narrow); the desktop mirror switch sits with Recenter, the Advanced picture
-            // settings (and the resolution scale) open full width below. Not one titled box per feature: the space goes where the controls are.
+            // settings open full width below. Not one titled box per feature: the space goes where the controls are.
             var posCol = Col();
             var heightRow = Row();
             heightRow.Controls.Add(new Label { Text = "Eye height", AutoSize = true, Margin = new Padding(3, 7, 6, 0) });
@@ -178,10 +181,9 @@ namespace VisionALVR
             AddKnob(adv, "Brightness", -30, 30, 0, () => settings.Brightness, v => settings.Brightness = v);
             AddKnob(adv, "Contrast", -30, 30, 0, () => settings.Contrast, v => settings.Contrast = v);
             AddKnob(adv, "Saturation", -50, 50, 0, () => settings.Saturation, v => settings.Saturation = v, "Below 0: less vivid.");
-            AddScaleRow(adv);
             var reset = new Button { Text = "Defaults", AutoSize = true, Margin = new Padding(3, 4, 3, 3) };
             reset.Click += (s, e) => { foreach (var k in knobs) k.Bar.Value = (int)Math.Round(k.Def * 100); };
-            tips.SetToolTip(reset, "Gamma 1.2, the rest neutral (the resolution scale is applied with its own button).");
+            tips.SetToolTip(reset, "Gamma 1.2, the rest neutral.");
             var picCol = Col();
             picCol.Controls.Add(pic);
             picCol.Controls.Add(reset);
@@ -194,7 +196,6 @@ namespace VisionALVR
             tips.SetToolTip(fgRecommend, "Auto: the rate is set from this game's recorded runs on this headset, the fastest one that stayed clean. Pick 1/3, 1/2 or 2/3 yourself to leave Auto.");
             tips.SetToolTip(recenter, "Forward becomes forward and your position the origin. Done at every game start; the recenter key (End by default) does the same while playing.");
             tips.SetToolTip(fgMv, "Generate from the game's own DLSS motion vectors. Needs the motion-vector DLL installed in each game's folder and a game with DLSS; otherwise optical flow is used.");
-            tips.SetToolTip(fgUnc, "Trades latency for visual smoothness: the game runs at its own rate and every frame sent is interpolated, so a game that cannot hold the rate no longer stutters, but movement in the scene shows later (head turns stay immediate).");
             tips.SetToolTip(heightMode, "Auto: the headset's own floor estimate, right when it saw the room (start standing). Manual: the value you type (about 1.30 m seated).");
             tips.SetToolTip(heightBox, "Eye height above the floor, 0.5-2.2 m.");
 
@@ -209,7 +210,16 @@ namespace VisionALVR
             openLogs.Click += (s, e) => { Directory.CreateDirectory(Paths.Logs); Process.Start("explorer.exe", Paths.Logs); };
             debug.Margin = new Padding(3, 6, 12, 0);
             tips.SetToolTip(debug, "Writes files to logs\\debug\\ (costs about 4.6 ms per frame): turn it on to report a problem, off after.");
-            dbgRow.Controls.Add(debug); dbgRow.Controls.Add(exportBtn); dbgRow.Controls.Add(openLogs);
+            // the main window (settings, game history, headset setup): starts the launcher, or brings the one that stepped aside for this window back
+            var mainMenu = new Button { Text = "Main menu", AutoSize = true };
+            mainMenu.Click += (s, e) =>
+            {
+                var exe = Path.Combine(Paths.Bin, "launcher.exe");
+                try { if (File.Exists(exe)) Process.Start(exe); else MessageBox.Show(this, "bin\\launcher.exe is missing from this folder.", "VisionALVR"); }
+                catch (Exception ex) { footer.Text = "Cannot open the main menu: " + ex.Message; footer.ForeColor = Color.Firebrick; }
+            };
+            tips.SetToolTip(mainMenu, "Open the main window (settings, game history, set up a headset). The streamer keeps running.");
+            dbgRow.Controls.Add(debug); dbgRow.Controls.Add(exportBtn); dbgRow.Controls.Add(openLogs); dbgRow.Controls.Add(mainMenu);
             body.Controls.Add(dbgRow);
             var exportRow = Row();
             exportRow.Controls.Add(exportStatus); exportRow.Controls.Add(exportLink);
@@ -285,13 +295,10 @@ namespace VisionALVR
             fgUnc.CheckedChanged += (s, e) =>
             {
                 fgEnable();
-                if (fgRateFromHost) return;
-                var rate = fgUnc.Checked ? "uncapped" : FgRates[fgRate.Value];
-                host.Send("frame_gen_rate " + rate);
-                settings.FrameGenRate = rate;
-                settings.Save();
-                Log.Write("INFO", "frame generation rate " + rate);
+                if (fgUncNote.Visible != fgUnc.Checked) { fgUncNote.Visible = fgUnc.Checked; if (IsHandleCreated) BeginInvoke((Action)(() => Ui.Refit(this))); }
             };
+            fgUncNote.Visible = fgUnc.Checked;
+            ConfigWatchStart();
             fgMv.CheckedChanged += (s, e) =>
             {
                 host.Send("game_mv " + (fgMv.Checked ? "on" : "off"));
@@ -323,6 +330,37 @@ namespace VisionALVR
             };
             Ui.ScreenshotWhenShown(this, 12000);
             FormClosing += (s, e) => { closing = true; MirrorSync(); footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); audio.Stop(); { var m = PowerPlan.Restore(); if (m != null) Log.Write("INFO", m); } Log.Write("INFO", "streamer.exe closed"); };
+        }
+
+        // The Advanced settings window is a separate process: it writes config\visionalvr.json, and this timer hands the switches that act live to the running streamer
+        // (the rate, the uncapped mode's cap and lag) and reloads the file, so that this window's own saves never put old values back over its edits.
+        readonly Timer configWatch = new Timer { Interval = 1500 };
+        DateTime configSeen; string watchRate; double watchCap, watchLag;
+        void ConfigWatchStart()
+        {
+            watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchLag = settings.FrameGenLagMs;
+            try { configSeen = File.GetLastWriteTimeUtc(Paths.Settings); } catch { }
+            configWatch.Tick += (s, e) =>
+            {
+                DateTime w; try { w = File.GetLastWriteTimeUtc(Paths.Settings); } catch { return; }
+                if (w == configSeen) return;
+                configSeen = w;
+                settings.Root = Json.Load(Paths.Settings);
+                if (settings.FrameGenRate != watchRate)
+                {
+                    watchRate = settings.FrameGenRate;
+                    host.Send("frame_gen_rate " + watchRate);
+                    fgRateFromHost = true;
+                    fgUnc.Checked = watchRate == "uncapped";
+                    var pos = Array.IndexOf(FgRates, watchRate);
+                    if (pos >= 0 && fgRate.Value != pos) fgRate.Value = pos;
+                    fgRateFromHost = false;
+                    Log.Write("INFO", "frame generation rate " + watchRate + " (Advanced settings)");
+                }
+                if (settings.FrameGenCapFps != watchCap) { watchCap = settings.FrameGenCapFps; host.Send("frame_gen_cap " + watchCap.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation cap " + watchCap + " fps (Advanced settings)"); }
+                if (settings.FrameGenLagMs != watchLag) { watchLag = settings.FrameGenLagMs; host.Send("frame_gen_lag " + watchLag.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation lag " + watchLag + " ms (Advanced settings)"); }
+            };
+            configWatch.Start();
         }
 
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 400 };
@@ -411,49 +449,6 @@ namespace VisionALVR
             t.Controls.Add(k.Value);
             if (tip != null) { tips.SetToolTip(label, tip); tips.SetToolTip(k.Bar, tip); }
             knobs.Add(k);
-        }
-
-        // Resolution scale: the game renders (and the stream is encoded) at this multiple of the configured eye resolution; above 1 is supersampling. It reaches the
-        // engine as the per-eye resolution in session.json (EyeScale), which is negotiated at connection: so it is applied by a streamer restart, not live.
-        void AddScaleRow(TableLayoutPanel t)
-        {
-            EyeScale.Current(settings, Session.Load(), out scaleBaseW, out scaleBaseH, out var cur);
-            scaleBar = new TrackBar { Minimum = 50, Maximum = 200, TickStyle = TickStyle.None, SmallChange = 5, LargeChange = 10, Width = 170, AutoSize = false, Height = 26, AccessibleName = "Resolution scale", Value = (int)Math.Max(50, Math.Min(200, Math.Round(cur * 100))) };
-            scaleValue = Ui.Line("");
-            scaleApply = new Button { Text = "Apply (restarts the streamer)", AutoSize = true, Visible = false, Margin = new Padding(3, 0, 3, 3) };
-            scaleApplied = scaleBar.Value;
-            scaleBar.ValueChanged += (s, e) => ScaleShow();
-            scaleApply.Click += (s, e) => ScaleApply();
-            var label = Ui.Line("Resolution scale:");
-            t.Controls.Add(label); t.Controls.Add(scaleBar); t.Controls.Add(scaleValue);
-            var tip = "Multiplies the eye resolution: 1.00 changes nothing, above 1 is supersampling (sharper, costs GPU), below 1 is lighter. Applied when the streamer restarts and the headset reconnects; the game has to be restarted too.";
-            tips.SetToolTip(label, tip); tips.SetToolTip(scaleBar, tip); tips.SetToolTip(scaleApply, tip);
-            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-            row.Controls.Add(scaleApply);
-            t.Controls.Add(row);
-            t.SetColumnSpan(row, 6);
-            ScaleShow();
-        }
-        TrackBar scaleBar; Label scaleValue; Button scaleApply; int scaleApplied, scaleBaseW, scaleBaseH;
-        void ScaleShow()
-        {
-            var z = EyeScale.Scaled(scaleBaseW, scaleBaseH, scaleBar.Value / 100.0);
-            scaleValue.Text = (scaleBar.Value / 100.0).ToString("0.00", CultureInfo.InvariantCulture) + $"   {z[0]} x {z[1]}";
-            var changed = scaleBar.Value != scaleApplied;
-            if (scaleApply.Visible != changed) { scaleApply.Visible = changed; if (IsHandleCreated) BeginInvoke((Action)(() => Ui.Refit(this))); }
-        }
-        void ScaleApply()
-        {
-            if (gameRunning && MessageBox.Show(this, "A game is running. Applying restarts the streamer: the game loses the headset. Continue?", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            if (!EyeScale.Apply(settings, scaleBar.Value / 100.0, out var err)) { footer.Text = err; footer.ForeColor = Color.Firebrick; return; }
-            scaleApplied = scaleBar.Value;
-            ScaleShow();
-            closing = true;
-            host.Stop();
-            closing = false;
-            restarts = 0;
-            StartHost();
-            footer.Text = "Resolution scale applied: the streamer restarted. Restart the game too.";
         }
 
         // The eye-height override exists for the Vision Pro, whose floor estimate is unreliable. A Quest (or any other headset) reports its
@@ -605,8 +600,8 @@ namespace VisionALVR
             var hs = Session.Headset(Session.Load());
             pairedName = hs?.Item2 ?? "";
             pairedIp = hs?.Item3 ?? "";
-            headset.Text = hs == null ? "Headset: none paired - click Find headset" : $"Headset: searching for {pairedName} ({pairedIp}) ...";
-            headset.ForeColor = Color.DarkOrange;
+            headset.Text = hs == null ? "Headset: none paired - click Find headset" : $"Headset: not found - searching for {pairedName} ({pairedIp}) ...";
+            headset.ForeColor = Color.Firebrick;
             NeedFind(true);
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
             StartAudioRoute();
@@ -632,7 +627,7 @@ namespace VisionALVR
             find.Enabled = false;
             closing = true;
             headset.Text = "Headset: searching the network...";
-            headset.ForeColor = Color.DarkOrange;
+            headset.ForeColor = Color.Firebrick;
             host.Stop();
             Log.Write("INFO", "find headset: streamer stopped, searching");
             try
@@ -704,8 +699,8 @@ namespace VisionALVR
                 case "client_disconnected":
                     headsetConnected = false; MirrorSync();
                     NeedFind(true);
-                    headset.Text = $"Headset: searching for {pairedName} ({pairedIp}) ...";
-                    headset.ForeColor = Color.DarkOrange;
+                    headset.Text = $"Headset: disconnected - searching for {pairedName} ({pairedIp}) ...";
+                    headset.ForeColor = Color.Firebrick;
                     break;
                 case "headset_seen":
                     // the streamer's discovery (mDNS) saw a headset: show it while nothing is connected; a paired headset whose
@@ -714,7 +709,8 @@ namespace VisionALVR
                     {
                         var seenName = S(d, "hostname"); var seenIp = S(d, "ip");
                         var paired = pairedName.Length > 0 && (seenName == settings.HeadsetHost || seenIp == pairedIp);
-                        headset.Text = paired ? $"Headset: {pairedName} seen at {seenIp}, connecting..." : $"Headset: {seenName} seen at {seenIp} - not paired (click Find headset)";
+                        headset.Text = paired ? $"Headset: available - {pairedName} seen at {seenIp}, connecting..." : $"Headset: available - {seenName} seen at {seenIp}, not paired (click Find headset)";
+                        headset.ForeColor = Color.DarkGoldenrod;   // orange-yellow: on the network, not connected
                         if (paired && seenIp.Length > 0 && seenIp != settings.HeadsetIp) { settings.HeadsetIp = seenIp; settings.Save(); pairedIp = seenIp; }
                     }
                     break;

@@ -1,4 +1,6 @@
-# Experimental switches (for an advanced-settings panel)
+# Experimental switches (the Advanced settings window)
+
+Built in 0.6 as `bin\configure.exe --switches` (launcher card **Advanced settings**, `tools/gui/Advanced.cs`): every key below except the removed ones, grouped, applied when changed, a switch at its default removed from `visionalvr.json`. The streamer window forwards the live ones (`frame_gen_rate`, `frame_gen_cap_fps`, `frame_gen_lag_ms`) by watching the file. The uncapped tick moved from the streamer window into this window.
 
 Written 2026-10-24 on branch `0.6`. Every knob below exists in the engine today and is **not** in the launcher's windows (the ones that are
 have a note). For each: where it lives, its values and default, when a change takes effect, what it does, how to read it back, and what we

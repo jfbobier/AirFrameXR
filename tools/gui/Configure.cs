@@ -22,12 +22,13 @@ namespace VisionALVR
         readonly Label discStatus = Ui.Line("");
         readonly Dictionary<string, Discovery.Found> seen = new Dictionary<string, Discovery.Found>();
         // settings controls
-        readonly NumericUpDown eyeW = Num(1024, 4096, 32), eyeH = Num(1024, 4096, 32), bitrate = Num(10, 1000, 10);
+        readonly NumericUpDown eyeW = Num(1024, Nvenc.MaxEyeWidth, 32), eyeH = Num(1024, Nvenc.MaxEyeHeight, 32), bitrate = Num(10, 1000, 10);
         readonly ComboBox fps = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         readonly RadioButton profFov = new RadioButton { Text = "Foveated (ALVR foveated encoding; recommended)", AutoSize = true };
         readonly RadioButton profFull = new RadioButton { Text = "Full frame + split encode (3x the pixels, needs a strong Wi-Fi link)", AutoSize = true };
         readonly NumericUpDown fcx = Dec(0.1m, 1m), fcy = Dec(0.1m, 1m), fsx = Dec(-1m, 1m), fsy = Dec(-1m, 1m), frx = Dec(1m, 10m), fry = Dec(1m, 10m);
         readonly Button idle = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
+        readonly CheckBox chromaOn = new CheckBox { Text = "Show my room where the screen is this colour", AutoSize = true };
         readonly CheckBox audio = new CheckBox { Text = "Stream game audio (Windows default output)", AutoSize = true };
         readonly CheckBox mute = new CheckBox { Text = "Mute the PC speakers while streaming", AutoSize = true };
         readonly ComboBox captureBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 330 };
@@ -164,7 +165,7 @@ namespace VisionALVR
             Control flow(params Control[] cs) { var f = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) }; f.Controls.AddRange(cs); return f; }
 
             section("Video");
-            row("Resolution per eye", flow(eyeW, Ui.Line("x"), eyeH, Ui.Line("(Vision Pro default 3552 x 3200)")));
+            row("Resolution per eye", flow(eyeW, Ui.Line("x"), eyeH, Ui.Line($"(Vision Pro default 3552 x 3200; at most {Nvenc.MaxEyeWidth} wide: the encoder's limit)")));
             fps.Items.AddRange(new object[] { "90", "96", "100" });
             row("Refresh rate (Hz)", fps);
             row("Bitrate (Mbps)", flow(bitrate, Ui.Line("constant; the Benchmark tab can find yours")));
@@ -180,10 +181,12 @@ namespace VisionALVR
                 using (var cd = new ColorDialog { Color = idle.BackColor, FullOpen = true })
                     if (cd.ShowDialog(this) == DialogResult.OK) SetIdle(cd.Color);
             };
-            var idleReset = new Button { Text = "Default (#107C10)", AutoSize = true };
-            idleReset.Click += (s, e) => SetIdle(Color.FromArgb(16, 124, 16));
-            row("Colour when no game runs", flow(idle, idleReset));
-            var remind = Ui.Line("Turn on Enable Chroma Keyed Passthrough in the ALVR app on the Vision Pro. The default #107C10 is the key colour the App Store app uses; if your ALVR app has a Chroma Key Color picker, set the same colour there.");
+            var idleReset = new Button { Text = "Recommended (#00FF00)", AutoSize = true };
+            idleReset.Click += (s, e) => SetIdle(ColorTranslator.FromHtml("#" + Chroma.DefaultRgb));
+            chromaOn.CheckedChanged += (s, e) => { idle.Enabled = idleReset.Enabled = chromaOn.Checked; };
+            row("Chroma-key passthrough", chromaOn);
+            row("Key colour (also the idle screen)", flow(idle, idleReset));
+            var remind = Ui.Line("Optional, off by default (the desktop mirror shows between games instead). #00FF00 is recommended. The headset's ALVR app takes the colour from the streamer, except the Vision Pro App Store app, whose key is fixed: keep it off there unless you set the same colour in an ALVR app that has the picker.");
             remind.MaximumSize = new Size(560, 0);   // wraps inside its column
             remind.ForeColor = Color.DimGray;
             g.Controls.Add(new Label()); g.Controls.Add(remind);
@@ -237,7 +240,9 @@ namespace VisionALVR
             fsy.Value = Clamp(fsy, Json.Num(s, V + "foveated_encoding.content.center_shift_y", 0.1));
             frx.Value = Clamp(frx, Json.Num(s, V + "foveated_encoding.content.edge_ratio_x", 4));
             fry.Value = Clamp(fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
-            try { SetIdle(ColorTranslator.FromHtml("#" + settings.IdleRgb.TrimStart('#'))); } catch { SetIdle(Color.FromArgb(16, 124, 16)); }
+            chromaOn.Checked = Chroma.Enabled(s);
+            try { SetIdle(ColorTranslator.FromHtml("#" + Chroma.Rgb(s))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
+            idle.Enabled = chromaOn.Checked;
             audio.Checked = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             mute.Checked = settings.MuteSpeakers;
             captureBox.SelectedIndex = settings.AudioCapture == "device" ? 1 : 0;
@@ -260,6 +265,8 @@ namespace VisionALVR
             session = Session.Load(); // keep anything edited meanwhile (e.g. pairing)
             var s = session;
             int w = (int)eyeW.Value / 32 * 32, h = (int)eyeH.Value; // ALVR aligns widths to 32
+            var tooBig = Nvenc.CheckEye(w, h);
+            if (tooBig != null) { MessageBox.Show(this, tooBig, Text); return false; }
             foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
             {
                 Json.Set(s, V + k + ".variant", "Absolute");
@@ -285,10 +292,10 @@ namespace VisionALVR
             Json.Set(s, "session_settings.connection.stream_protocol.variant", (string)proto.SelectedItem);
             Json.Set(s, "session_settings.connection.packet_size", (int)packet.Value);
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)haptics.Value);
+            Chroma.Apply(s, settings, chromaOn.Checked, $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}");
             try { Json.Save(Paths.Session, s); }
             catch (Exception e) { MessageBox.Show(this, "Cannot write config\\session.json: " + e.Message, Text); return false; }
             settings.EncodeProfile = profFull.Checked ? "full-split" : "foveated";
-            settings.IdleRgb = $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}";
             settings.Debug = debugDefault.Checked;
             settings.Save();
             Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {fps.SelectedItem} Hz, {bitrate.Value} Mbps, {settings.EncodeProfile}, idle #{settings.IdleRgb}, audio {audio.Checked}, {proto.SelectedItem}, debug {settings.Debug}");
@@ -484,6 +491,7 @@ namespace VisionALVR
             Application.SetCompatibleTextRenderingDefault(false);
             var args = Environment.GetCommandLineArgs();
             Log.Write("INFO", $"configure.exe {Version.Text} start ({Paths.Dir})");
+            if (args.Contains("--switches")) { Application.Run(new AdvancedForm()); return; }   // the Advanced settings window: no system check, no streamer port
             var check = File.Exists(Paths.Host) ? SystemCheck.Run() : null;
             if (args.Contains("--advanced")) { Application.Run(new ConfigureForm(check)); return; }
             Application.Run(new WizardForm(check, args.Contains("--demo")));
