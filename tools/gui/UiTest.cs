@@ -180,7 +180,7 @@ namespace VisionALVR
             foreach (Control k in c.Controls) DumpControls(k, o, depth + 1);
         }
 
-        /// harness/performance_check.py: the Game history window on the fixture records, as text.
+        /// harness/performance_check.py: the Game statistics window on the fixture records, as text.
         static int DumpPerformance(string game, string outDir)
         {
             var o = new StringBuilder();

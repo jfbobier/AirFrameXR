@@ -1358,7 +1358,7 @@ namespace VisionALVR
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
     }
 
-    /// What the last session did with the game's motion vectors, one function for the streamer's Frame generation component and Game history's line
+    /// What the last session did with the game's motion vectors, one function for the streamer's Frame generation component and Game statistics' line
     /// (docs/PLAN_0.5.md U6): worked (green), ran blind (orange: the DLL is there, nothing arrived), no DLL (plain, with the install offer), or nothing.
     public static class VectorsLine
     {

@@ -403,7 +403,7 @@ namespace VisionALVR
                         {
                             ctx.R.AudioNote = "Windows' process loopback could not start: " + ctx.R.AudioError;
                             st.Warn();
-                            return ctx.R.AudioNote + ". This needs Windows 10 version 2004 or newer; in the Advanced settings choose \"Virtual cable (VB-CABLE)\" for the game audio instead.";
+                            return ctx.R.AudioNote + ". This needs Windows 10 version 2004 or newer; in Settings choose \"Virtual cable (VB-CABLE)\" for the game audio instead.";
                         }
                         if (ctx.R.AudioPeak < 0)
                         {
@@ -421,7 +421,7 @@ namespace VisionALVR
                         {
                             ctx.R.AudioNote += "; you did not hear it in the headset";
                             st.Warn();
-                            return ctx.R.AudioNote + ". The PC side works, so check the headset side: the volume in the headset, the ALVR app's sound settings, and that \"Stream game audio\" is ticked in the Advanced settings.";
+                            return ctx.R.AudioNote + ". The PC side works, so check the headset side: the volume in the headset, the ALVR app's sound settings, and that \"Stream game audio\" is ticked in Settings.";
                         }
                         return ctx.R.AudioNote + (ctx.R.HeardMusic == true ? "; you heard it in the headset" : "") + ": the headset gets the PC's sound, no virtual cable needed (games started as administrator are captured too)";
                     }

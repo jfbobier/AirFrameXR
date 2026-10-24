@@ -26,14 +26,13 @@ namespace VisionALVR
         class Tool { public string Title, What, Exe, Args = ""; public bool StopsStreamer, Primary; }
         static readonly Tool[] Tools = {
             new Tool { Title = "Streamer", Exe = @"bin\streamer.exe", Primary = true, What = "Start streaming to your headset." },
-            new Tool { Title = "Game history", Exe = @"bin\performance.exe", What = "How your games ran, and the motion-vector DLL of each." },
-            new Tool { Title = "Something feels wrong", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true, What = "Check your setup and get suggestions." },
-            new Tool { Title = "Set up a headset", Exe = @"bin\configure.exe", StopsStreamer = true, What = "Pair a headset and choose the settings." },
+            new Tool { Title = "Game statistics", Exe = @"bin\performance.exe", What = "How your games ran, and the motion-vector DLL of each." },
+            new Tool { Title = "Settings", Exe = @"bin\configure.exe", Args = "--settings", StopsStreamer = true, What = "Headset pairing, benchmarks, video, audio and network settings." },
             // experimental and tuning switches (docs/EXPERIMENTAL_SWITCHES.md): writes config files, the streamer picks the live ones up, so it can stay open
             new Tool { Title = "Advanced settings", Exe = @"bin\configure.exe", Args = "--switches", What = "Experimental frame generation, pacing, GPU and encoder switches, each with when it takes effect." },
+            new Tool { Title = "Diagnostics (experimental)", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true, What = "Check your setup and get suggestions." },
+            new Tool { Title = "Restart headset setup", Exe = @"bin\configure.exe", StopsStreamer = true, What = "Run the setup wizard again: pair a headset and let the tests propose the settings." },
         };
-        // the old tabs (pairing, benchmark, video settings): they use the streamer's network port
-        static readonly Tool SetupTabs = new Tool { Title = "Setup tabs", Exe = @"bin\configure.exe", Args = "--advanced", StopsStreamer = true };
 
         readonly FlowLayoutPanel sys = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(700, 0) };
         FwReport firewall;           // filled in the background (PowerShell takes a few seconds)
@@ -58,7 +57,6 @@ namespace VisionALVR
             body.Controls.Add(sys);
             // quiet links: the full ALVR settings, and the help
             var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
-            links.Controls.Add(Link("Setup tabs (pairing, benchmark, video)...", () => Launch(SetupTabs, Path.Combine(Paths.Dir, SetupTabs.Exe))));
             links.Controls.Add(Link("Help", () => { var f = Path.Combine(Paths.Docs, "README.txt"); if (File.Exists(f)) Process.Start(f); else MessageBox.Show(this, "docs\\README.txt is missing from this folder.", "VisionALVR"); }));
             body.Controls.Add(links);
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
@@ -102,7 +100,7 @@ namespace VisionALVR
         }
 
         // What needs attention, and only that. The OpenXR runtime games use (VisionALVR, or the one that was active before: the same button goes back), OpenXR
-        // layers that may take the controllers, and the firewall (read in the background). Everything else lives in Something feels wrong.
+        // layers that may take the controllers, and the firewall (read in the background). Everything else lives in Diagnostics.
         void RefreshSystem()
         {
             sys.SuspendLayout();

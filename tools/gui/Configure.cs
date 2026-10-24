@@ -54,7 +54,7 @@ namespace VisionALVR
         public ConfigureForm(Dictionary<string, object> check)
         {
             this.check = check;
-            Text = "VisionALVR \u2013 Advanced settings";
+            Text = "VisionALVR \u2013 Settings";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
@@ -493,7 +493,7 @@ namespace VisionALVR
             Log.Write("INFO", $"configure.exe {Version.Text} start ({Paths.Dir})");
             if (args.Contains("--switches")) { Application.Run(new AdvancedForm()); return; }   // the Advanced settings window: no system check, no streamer port
             var check = File.Exists(Paths.Host) ? SystemCheck.Run() : null;
-            if (args.Contains("--advanced")) { Application.Run(new ConfigureForm(check)); return; }
+            if (args.Contains("--settings") || args.Contains("--advanced")) { Application.Run(new ConfigureForm(check)); return; }
             Application.Run(new WizardForm(check, args.Contains("--demo")));
         }
     }

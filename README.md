@@ -196,14 +196,14 @@ The desktop mirror (the Windows desktop floating in front of you between games, 
 The game's sound reaches the headset without installing anything: the host captures it with **Windows' process loopback** (everything the PC plays,
 taken before the output's volume, mute and format, converted to 48 kHz stereo PCM), so the Windows default output is left alone, games that play to
 another role or another device are still heard, and games started as administrator (UEVR, mods) are captured too. While the streamer runs it can
-mute your PC speakers (a checkbox in the Advanced settings, on by default) and puts the mute back when it closes, even after a crash.
-**Advanced settings > Game audio capture** has the older route as a fallback: *Virtual cable (VB-CABLE)*. The streamer then makes the cable the default
+mute your PC speakers (a checkbox in Settings, on by default) and puts the mute back when it closes, even after a crash.
+**Settings > Game audio capture** has the older route as a fallback: *Virtual cable (VB-CABLE)*. The streamer then makes the cable the default
 output for every role, mutes the speakers, holds the cable at 100 %, sets its format to plain 2-channel 48 kHz PCM and restores everything on exit; if no
 cable is installed it opens a dialog with the download page of VB-Audio (a separate product that VisionALVR neither distributes nor supports). The wizard's
 *Audio output* test plays the Littlest Tokyo music (see the credits) and listens to it with the same API the host uses. Requires Windows 10 version 2004
 or newer for the default mode. The same code is checked end to end by the audio harnesses (below).
 
-**Headset microphone** (VRChat voice, chat): ALVR's own path, which needs a virtual cable (a recording device cannot be created without a driver): tick *Headset microphone for games* in the Advanced settings or on the wizard's configuration page; if VB-CABLE is missing a dialog links to its download page (VB-Audio's own product, at your own risk). While the streamer runs, the cable's recording side (CABLE Output) is the default microphone, and your previous one comes back when it closes; the game audio then uses process loopback, whatever the capture setting says. Off by default, and nothing changes when it is off. Not covered by the lab: it was never tested with a real voice.
+**Headset microphone** (VRChat voice, chat): ALVR's own path, which needs a virtual cable (a recording device cannot be created without a driver): tick *Headset microphone for games* in Settings or on the wizard's configuration page; if VB-CABLE is missing a dialog links to its download page (VB-Audio's own product, at your own risk). While the streamer runs, the cable's recording side (CABLE Output) is the default microphone, and your previous one comes back when it closes; the game audio then uses process loopback, whatever the capture setting says. Off by default, and nothing changes when it is off. Not covered by the lab: it was never tested with a real voice.
 
 ## Requirements
 - Windows 10/11, an **NVIDIA** GPU with a current driver (NVENC API 12.2+); RTX 40 series or newer recommended (several NVENC chips enable split encoding).

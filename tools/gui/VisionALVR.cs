@@ -210,7 +210,7 @@ namespace VisionALVR
             openLogs.Click += (s, e) => { Directory.CreateDirectory(Paths.Logs); Process.Start("explorer.exe", Paths.Logs); };
             debug.Margin = new Padding(3, 6, 12, 0);
             tips.SetToolTip(debug, "Writes files to logs\\debug\\ (costs about 4.6 ms per frame): turn it on to report a problem, off after.");
-            // the main window (settings, game history, headset setup): starts the launcher, or brings the one that stepped aside for this window back
+            // the main window (settings, game statistics, headset setup): starts the launcher, or brings the one that stepped aside for this window back
             var mainMenu = new Button { Text = "Main menu", AutoSize = true };
             mainMenu.Click += (s, e) =>
             {
@@ -218,7 +218,7 @@ namespace VisionALVR
                 try { if (File.Exists(exe)) Process.Start(exe); else MessageBox.Show(this, "bin\\launcher.exe is missing from this folder.", "VisionALVR"); }
                 catch (Exception ex) { footer.Text = "Cannot open the main menu: " + ex.Message; footer.ForeColor = Color.Firebrick; }
             };
-            tips.SetToolTip(mainMenu, "Open the main window (settings, game history, set up a headset). The streamer keeps running.");
+            tips.SetToolTip(mainMenu, "Open the main window (settings, game statistics, restart headset setup). The streamer keeps running.");
             dbgRow.Controls.Add(debug); dbgRow.Controls.Add(exportBtn); dbgRow.Controls.Add(openLogs); dbgRow.Controls.Add(mainMenu);
             body.Controls.Add(dbgRow);
             var exportRow = Row();
@@ -335,6 +335,32 @@ namespace VisionALVR
         // The Advanced settings window is a separate process: it writes config\visionalvr.json, and this timer hands the switches that act live to the running streamer
         // (the rate, the uncapped mode's cap and lag) and reloads the file, so that this window's own saves never put old values back over its edits.
         readonly Timer configWatch = new Timer { Interval = 1500 };
+
+        // The headset line: red = not found, orange-yellow = available (ALVR is connecting to it, or the streamer saw its app on the network in the last 30 s: the mDNS
+        // sighting repeats every ~11 s, but ALVR often dials a paired headset's address before any sighting, so its own connection_state in session.json counts too),
+        // green = connected (the engine's client_connected: the stream is up, after the headset's stream-ready).
+        enum Link { Red, Orange, Green }
+        Link link = Link.Red;
+        DateTime lastSeen = DateTime.MinValue;
+        readonly Timer linkTimer = new Timer { Interval = 1000 };
+        static bool AlvrConnecting()
+        {
+            try { if (Json.Get(Session.Load(), "client_connections") is Dictionary<string, object> cc) foreach (var v in cc.Values) if (v is Dictionary<string, object> c && c.TryGetValue("connection_state", out var st) && st as string == "Connecting") return true; } catch { }
+            return false;
+        }
+        void SetLink(Link l, string text)
+        {
+            link = l;
+            headset.Text = text;
+            headset.ForeColor = l == Link.Green ? Color.SeaGreen : l == Link.Orange ? Color.DarkGoldenrod : Color.Firebrick;
+        }
+        void LinkTick()
+        {
+            if (link == Link.Green || closing || finding) return;
+            var name = pairedName.Length > 0 ? $"{pairedName} ({pairedIp})" : "headset";
+            if (AlvrConnecting()) { if (link != Link.Orange || !headset.Text.Contains("connecting")) SetLink(Link.Orange, $"Headset: detected - {name}, connecting..."); }
+            else if (link == Link.Orange && (DateTime.UtcNow - lastSeen).TotalSeconds > 30) SetLink(Link.Red, $"Headset: not found - searching for {name} ...");
+        }
         DateTime configSeen; string watchRate; double watchCap, watchLag;
         void ConfigWatchStart()
         {
@@ -600,8 +626,8 @@ namespace VisionALVR
             var hs = Session.Headset(Session.Load());
             pairedName = hs?.Item2 ?? "";
             pairedIp = hs?.Item3 ?? "";
-            headset.Text = hs == null ? "Headset: none paired - click Find headset" : $"Headset: not found - searching for {pairedName} ({pairedIp}) ...";
-            headset.ForeColor = Color.Firebrick;
+            SetLink(Link.Red, hs == null ? "Headset: none paired - click Find headset" : $"Headset: not found - searching for {pairedName} ({pairedIp}) ...");
+            if (!linkTimer.Enabled) { linkTimer.Tick += (s, e) => LinkTick(); linkTimer.Start(); }
             NeedFind(true);
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
             StartAudioRoute();
@@ -626,8 +652,7 @@ namespace VisionALVR
             finding = true;
             find.Enabled = false;
             closing = true;
-            headset.Text = "Headset: searching the network...";
-            headset.ForeColor = Color.Firebrick;
+            SetLink(Link.Red, "Headset: searching the network...");
             host.Stop();
             Log.Write("INFO", "find headset: streamer stopped, searching");
             try
@@ -690,8 +715,7 @@ namespace VisionALVR
                     HeightSource(S(d, "name"));
                     var n = S(d, "name");
                     var ip = S(d, "ip");
-                    headset.Text = $"Headset: connected - {(n.Length > 0 ? n : pairedName)} ({(ip.Length > 0 ? ip : pairedIp)})";
-                    headset.ForeColor = Color.SeaGreen;
+                    SetLink(Link.Green, $"Headset: connected - {(n.Length > 0 ? n : pairedName)} ({(ip.Length > 0 ? ip : pairedIp)})");
                     NeedFind(false);
                     headsetConnected = true; MirrorSync();
                     if (ip.Length > 0 && ip != settings.HeadsetIp) { settings.HeadsetIp = ip; settings.Save(); }
@@ -699,18 +723,18 @@ namespace VisionALVR
                 case "client_disconnected":
                     headsetConnected = false; MirrorSync();
                     NeedFind(true);
-                    headset.Text = $"Headset: disconnected - searching for {pairedName} ({pairedIp}) ...";
-                    headset.ForeColor = Color.Firebrick;
+                    lastSeen = DateTime.MinValue;
+                    SetLink(Link.Red, $"Headset: disconnected - searching for {pairedName} ({pairedIp}) ...");
                     break;
                 case "headset_seen":
                     // the streamer's discovery (mDNS) saw a headset: show it while nothing is connected; a paired headset whose
                     // address changed is dialled by the streamer itself, keep our note of its address in step
-                    if (headset.ForeColor != Color.SeaGreen)
+                    if (link != Link.Green)
                     {
+                        lastSeen = DateTime.UtcNow;
                         var seenName = S(d, "hostname"); var seenIp = S(d, "ip");
                         var paired = pairedName.Length > 0 && (seenName == settings.HeadsetHost || seenIp == pairedIp);
-                        headset.Text = paired ? $"Headset: available - {pairedName} seen at {seenIp}, connecting..." : $"Headset: available - {seenName} seen at {seenIp}, not paired (click Find headset)";
-                        headset.ForeColor = Color.DarkGoldenrod;   // orange-yellow: on the network, not connected
+                        SetLink(Link.Orange, paired ? $"Headset: detected - {pairedName} seen at {seenIp}, waiting for it to connect..." : $"Headset: detected - {seenName} seen at {seenIp}, not paired (click Find headset)");
                         if (paired && seenIp.Length > 0 && seenIp != settings.HeadsetIp) { settings.HeadsetIp = seenIp; settings.Save(); pairedIp = seenIp; }
                     }
                     break;

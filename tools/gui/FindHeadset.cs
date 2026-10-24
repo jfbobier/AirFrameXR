@@ -109,9 +109,9 @@ namespace VisionALVR
                 Log.Write("INFO", $"find headset: seen {f.Hostname} at {f.Ip} via {f.Via}{(f.Compatible ? "" : " (incompatible)")}");
                 var moved = paired != null && f.Hostname == paired.Item1 && f.Ip != paired.Item3;
                 var st = !f.Compatible ? $"INCOMPATIBLE (ALVR protocol {f.Protocol}, streamer {f.ServerProtocol}): update the app on the headset"
-                       : moved ? $"found at a NEW address (saved: {paired.Item3})"
-                       : f.Hostname == paired?.Item1 ? "paired - found on the network"
-                       : "found on the network";
+                       : moved ? $"detected at a NEW address (saved: {paired.Item3})"
+                       : f.Hostname == paired?.Item1 ? "paired - detected on the network"
+                       : "detected on the network";
                 AddRow(f.Hostname, f.Ip, NameFor(f.Hostname), st, false, f.Compatible, moved);
             }));
             discovery.OnError += m => BeginInvoke((Action)(() => { status.Text = "Discovery failed: " + m; status.ForeColor = Color.Firebrick; }));

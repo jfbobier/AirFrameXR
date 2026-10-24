@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import lib
 
-TOOLS = ["Game history", "Something feels wrong", "Set up a headset", "Streamer"]
+TOOLS = ["Game statistics", "Diagnostics (experimental)", "Restart headset setup", "Streamer"]
 only = sys.argv[1:] or TOOLS
 fails = 0
 stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -54,13 +54,13 @@ for i, tool in enumerate(TOOLS):
         print(f"CHECK {'PASS' if ok else 'FAIL'} {tool}: {name}: {detail}")
         fails += 0 if ok else 1
 # the stub in the root: VisionALVR.exe starts bin\launcher.exe, passes the arguments on and exits at once; the whole flow then runs from it
-if not only or "Game history" in only:
+if not only or "Game statistics" in only:
     rid = f"flow_{stamp}_stub"
     lib.b_run(f"if not exist runs\\{rid} mkdir runs\\{rid}")
     lib.b_run(f"robocopy out\\dist\\VisionALVR runs\\{rid}\\VisionALVR /E /NFL /NDL /NJH /NJS /NP")
     log = f"{base}\\runs\\{rid}\\flow.log"
     root_files = lib.b_run(f"dir /b runs\\{rid}\\VisionALVR")[1].split()
-    proc = lib.start_limited(rid, "va_flowstub", "flow.bat", f"runs\\{rid}\\VisionALVR\\VisionALVR.exe --test-flow \"Game history\"\r\n", "rc.txt", env={"VISIONALVR_TEST_FLOW_LOG": log})
+    proc = lib.start_limited(rid, "va_flowstub", "flow.bat", f"runs\\{rid}\\VisionALVR\\VisionALVR.exe --test-flow \"Game statistics\"\r\n", "rc.txt", env={"VISIONALVR_TEST_FLOW_LOG": log})
     proc.wait(30)   # the stub returns at once
     ok = False
     for _ in range(25):

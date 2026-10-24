@@ -307,7 +307,7 @@ namespace VisionALVR
             {
                 if (step != 1) return;
                 var name = f.Hostname.EndsWith(".client.alvr") ? "Apple Vision Pro" : f.Hostname.EndsWith(".client") ? "Headset (Quest or other ALVR client)" : f.Hostname;
-                AddRow(f.Hostname, f.Ip, name, f.Compatible ? $"found on the network (ALVR protocol {f.Protocol})" : $"INCOMPATIBLE ({f.Protocol}, streamer {f.ServerProtocol})", false);
+                AddRow(f.Hostname, f.Ip, name, f.Compatible ? $"detected on the network (ALVR protocol {f.Protocol})" : $"INCOMPATIBLE ({f.Protocol}, streamer {f.ServerProtocol})", false);
             }));
             discovery.OnError += m => BeginInvoke((Action)(() => { discStatus.Text = "Discovery failed: " + m; discStatus.ForeColor = Color.Firebrick; }));
             var err = discovery.Start();
@@ -320,7 +320,7 @@ namespace VisionALVR
         {
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
             p.Controls.Add(H("What we learned from your headset"));
-            hsStatus = Ui.Line($"Connecting to {chosenName} at {chosenIp}... open the ALVR app on the headset and leave it on its start screen.");
+            hsStatus = Ui.Line($"{chosenName} is detected at {chosenIp}; connecting... open the ALVR app on the headset and leave it on its start screen.");
             p.Controls.Add(hsStatus);
             hsBar = new ProgressBar { Style = ProgressBarStyle.Marquee, Width = 500, Height = 14 };
             p.Controls.Add(hsBar);
@@ -356,7 +356,7 @@ namespace VisionALVR
         void BeginHandshake()
         {
             hsRetry.Visible = false; hsSkip.Visible = false; hsBar.Visible = true;
-            hsStatus.Text = $"Connecting to {chosenName} at {chosenIp}... open the ALVR app on the headset and leave it on its start screen.";
+            hsStatus.Text = $"{chosenName} is detected at {chosenIp}; connecting... open the ALVR app on the headset and leave it on its start screen.";
             hsStatus.ForeColor = Color.Black;
             handshakeHost?.Stop(1000);
             handshakeHost = new HostProcess();

@@ -25,7 +25,7 @@ screenshot each; 0 FAIL required), `harness/launcher_flow.py`.
 ## Windows
 
 ### Launcher (`bin\launcher.exe`, started by the root stub `VisionALVR.exe`)
-Four cards, each one objective: **Streamer** (primary), **Game history**, **Something feels wrong** (Diagnose), **Set up a headset**. A status card says
+Six cards, in this order (0.6): **Streamer** (primary), **Game statistics**, **Settings** (`configure.exe --settings`: pairing, benchmarks, video, audio, network), **Advanced settings** (`configure.exe --switches`: docs/EXPERIMENTAL_SWITCHES.md), **Diagnostics (experimental)**, **Restart headset setup** (the wizard). A status card says
 "Ready" (green) or "Needs attention" (red) with one row per problem and its button: the OpenXR runtime (shows the active one, the same button goes back), OpenXR
 layers that may take the controllers, the Windows Firewall (read in the background). Quiet links: *Advanced (full ALVR settings)...*, *Help*. The launcher
 steps aside while a tool is open and returns when all are closed; starting the streamer from it first offers to close a running one. Single instance.
@@ -103,7 +103,7 @@ Auto / lower rate, debug off); the rest under *More suggestions*; every measurem
 *Experimental* badges instead of suffixes.
 Harness: `ui_matrix` wizard pages 0-6, `harness/advice_check.py`, `harness/wizard_e2e.py`.
 
-### Advanced (`configure.exe --advanced`, launcher link "Advanced (full ALVR settings)")
+### Settings (`configure.exe --settings`, launcher card "Settings"; 0.5: Advanced)
 Tabs: headset (pair), benchmark (network sweep, recommended bitrate), settings (all of ALVR's we expose), and *Import ALVR settings...*.
 
 ### Dialogs

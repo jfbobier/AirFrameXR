@@ -22,7 +22,7 @@ namespace VisionALVR
 
         public PerformanceForm(string select)
         {
-            Text = "VisionALVR \u2013 Game history";
+            Text = "VisionALVR \u2013 Game statistics";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
