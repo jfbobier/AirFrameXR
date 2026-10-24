@@ -94,7 +94,8 @@ struct Args {
     fg_flow_scale: f64,
     fg_perf: i32,
     fg_grid: i32,
-    /// 1 = edge-aware synthesis (default), 0 = the crossfade recipe (`video.frame_gen_synthesis`, `--frame-gen-synthesis`, env VISIONALVR_FG_SYNTH)
+    /// 1 = edge-aware synthesis (default), 2 = edge-aware without the photometric gate, 0 = the crossfade recipe (`video.frame_gen_synthesis`,
+    /// `--frame-gen-synthesis`, env VISIONALVR_FG_SYNTH)
     fg_synth: i32,
     /// scripted controller input for unattended runs (harness): (seconds after game start, hand, click mask, trigger)
     auto_input: Vec<(f64, usize, u32, f32)>,
@@ -444,8 +445,9 @@ fn parse_fg_perf(v: &str) -> Result<i32, String> {
 fn parse_fg_synth(v: &str) -> Result<i32, String> {
     match v.to_ascii_lowercase().as_str() {
         "edge" | "1" => Ok(1),
+        "edge-blend" | "2" => Ok(2),
         "crossfade" | "0" => Ok(0),
-        o => Err(format!("--frame-gen-synthesis edge|crossfade, got {o}")),
+        o => Err(format!("--frame-gen-synthesis edge|edge-blend|crossfade, got {o}")),
     }
 }
 
@@ -1595,7 +1597,7 @@ fn enable_frame_gen(origin: Instant, handle: *mut std::ffi::c_void, args: &Args)
     let stats = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
     if ok {
         logs::general("INFO", &format!("frame generation ON: rate {}, flow scale {:.2}, perf {}, grid {}, synthesis {}; {}", args.fg_rate.unwrap_or(FgRate::Half).name(), args.fg_flow_scale, args.fg_perf, args.fg_grid,
-            if args.fg_synth != 0 { "edge" } else { "crossfade" },
+            match args.fg_synth { 0 => "crossfade", 2 => "edge-blend", _ => "edge" },
             serde_json::from_str::<serde_json::Value>(&stats).ok().and_then(|v| v["info"].as_str().map(str::to_string)).unwrap_or_default()));
     } else {
         let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();

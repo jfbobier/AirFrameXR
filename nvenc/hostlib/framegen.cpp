@@ -194,7 +194,7 @@ bool samplePrev(float2 uvCur, out float3 c) {
 R"(// ---- edge-aware synthesis (ideas from VectorXR, MPL-2.0, github.com/DienerTech/vectorxr; re-implemented, no VectorXR code) -------------
 // PSUnpack (per flow block, blocksW x blocksH): the engine's vector in full-res px (xy) and our own match cost (z): the mean luma difference of
 // the block's flow-input texels against the aligned previous frame at the vector, plus a small motion penalty. The engine's cost byte has no
-// fixed scale; a luma cost lets one threshold hold. t0 = the aligned previous frame (flow input), t1 = the current one, t2 = the engine's flow.
+// fixed scale; a luma cost lets one threshold hold. t0 = the current frame (flow input), t1 = the aligned previous one, t2 = the engine's flow.
 // blocks: x first block of eye 1, y blocksW, z blocksH, w grid; mvRect: x flow-input width of one eye, y flow-input height, z max flow (full-res px).
 float lumaOf(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 float4 PSUnpack(VSOut i) : SV_Target {
@@ -203,22 +203,29 @@ float4 PSUnpack(VSOut i) : SV_Target {
     int eyeW = int(mvRect.x), eyeH = int(mvRect.y);
     int x0 = c.x >= blocks.x ? eyeW : 0;
     float2 d = float2(flow.Load(int3(c, 0))) * (1.0 / 32.0);   // backward, flow-input px: content at q in the current frame is at q + d in the previous
-    int2 o = int2(round(d));
-    float sum = 0, n = 0;
+    float sum = 0, zero = 0, n = 0;
     for (int y = 0; y < grid; y++) {
         for (int x = 0; x < grid; x++) {
             int2 q = c * grid + int2(x, y);
             if (q.x - x0 >= eyeW || q.y >= eyeH) continue;
-            int2 s = q + o;
+            // the previous frame at the exact sub-texel vector: a whole-texel offset alone costs ~0.1 at a hard edge moving a fraction of a
+            // texel, which zeroed the confidence of correct vectors (rig marker drawn at the real frame's position: judder, 2026-10-24)
+            float2 sp = float2(q) + 0.5 + d;
             float lc = lumaOf(cur.Load(int3(q, 0)).rgb);
-            sum += (s.x < x0 || s.x >= x0 + eyeW || s.y < 0 || s.y >= eyeH) ? 0.25 : abs(lc - lumaOf(prev.Load(int3(s, 0)).rgb));
+            bool outside = sp.x < x0 || sp.x > x0 + eyeW || sp.y < 0 || sp.y > eyeH;
+            sum += outside ? 0.25 : abs(lc - lumaOf(prev.SampleLevel(smp, clamp(sp, float2(x0 + 0.5, 0.5), float2(x0 + eyeW - 0.5, eyeH - 0.5)) / float2(2 * eyeW, eyeH), 0).rgb));
+            zero += abs(lc - lumaOf(prev.Load(int3(q, 0)).rgb));
             n += 1;
         }
     }
+    float cst = sum / max(n, 1.0) + 0.05 * length(d) / float(eyeW);
+    zero /= max(n, 1.0);
+    // a vector must beat no motion: on flat content (sky, a black background) the engine returns noise vectors that match as well as
+    // standing still, and they carry thin detail nearby to the wrong place (the rig's dots, 2026-10-24)
+    if (zero <= cst + 0.004) return float4(0, 0, zero, 1);
     float2 f = d / flowP.xy;
     float m = length(f);
     if (m > mvRect.z) f *= mvRect.z / m;
-    float cst = sum / max(n, 1.0) + 0.05 * length(d) / float(eyeW);
     return float4(f, cst, 1);
 }
 // PSFilter: cost-weighted vector median over the 3x3 blocks around (within the eye): an isolated wrong vector loses to its neighbours without
@@ -287,13 +294,19 @@ float3 edgeSynth(float2 pO, float t) {
         }
     }
     float shift = length(chosen.xy * s);
+    // no agreement term on the confidence (VectorXR has none when interpolating): every pixel along a moving hard edge is a motion boundary
+    // whose bilinear samples always disagree a little, and shrinking those vectors held the edges back (rig marker position error x2,
+    // 2026-10-24). Noise vectors on flat content are zeroed in PSUnpack instead.
     float conf = saturate((synth.y - shift) / (0.25 * synth.y)) * saturate(1 - max(chosen.z - 0.02, 0) * synth.z);
     float2 f = chosen.xy * conf;
     float2 uvC = pxToUv(pO - f * s);
     float3 cc = fetchCR(cur, sbs(clamp(uvC, 0, 1)));
     float3 pc;
     if (!samplePrev(pxToUv(pO - f * s + f), pc)) return cc;
-    float photo = saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w);
+    // A is blended in by the time weight; the photometric gate applies only as far as the vector is doubted: a trusted vector's two ends,
+    // blended, cancel its small error (each end is off the other way), and gating them at hard edges (they always differ a little there)
+    // left the error in (rig marker position error x2, 2026-10-24); a doubted, shrunk vector blends only where the frames agree (no double image)
+    float photo = lerp(saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w), 1, conf);
     return lerp(cc, pc, s * photo);
 }
 float4 PSOut(VSOut i) : SV_Target {
@@ -572,7 +585,7 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     stats.flowW = I.flowW; stats.flowH = I.flowH; stats.blocksW = I.blocksW; stats.blocksH = I.blocksH;
     stats.nvofReady = true;
     snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s",
-             NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, cfg.synth ? "edge" : "crossfade");
+             NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "crossfade" : cfg.photoScale > 0 ? "edge" : "edge-blend");
     return true;
 }
 
@@ -665,7 +678,7 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
         m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c, 0, 0);
         D3D11_VIEWPORT vp{}; vp.Width = (float)I.blocksW; vp.Height = (float)I.blocksH; vp.MaxDepth = 1.f;
         m_ctx->RSSetViewports(1, &vp);
-        ID3D11ShaderResourceView* in3[3] = { I.flowInSrv[0], I.flowInSrv[1], I.flowOutSrv };
+        ID3D11ShaderResourceView* in3[3] = { I.flowInSrv[1], I.flowInSrv[0], I.flowOutSrv };   // t0 cur = the current frame, t1 prev = the aligned previous
         m_ctx->OMSetRenderTargets(1, &I.unpackRtv, nullptr);
         m_ctx->PSSetShader(I.psUnpack, nullptr, 0);
         m_ctx->PSSetShaderResources(0, 3, in3);

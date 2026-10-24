@@ -24,7 +24,7 @@ struct FrameGenConfig {
     int synth = 1;
     float motionLimit = 0.10f;   // edge: content shift beyond this share of the eye width falls back to the still frame (soft over the last quarter)
     float costScale = 17.f;      // edge: confidence = 1 - (luma cost - 0.02) * this
-    float photoScale = 13.5f;    // edge: the previous frame is blended in by 1 - (max |dRGB| - 0.03) * this
+    float photoScale = 13.5f;    // edge: where a vector is doubted, the previous frame is blended in by 1 - (max |dRGB| - 0.03) * this (0 = always: "edge-blend")
 };
 
 // The game's DLSS motion vectors of one eye, as published with a rendered frame (ipc.h MotionEye, docs/MOTION_VECTORS.md). NGX conventions:

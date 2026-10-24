@@ -65,7 +65,7 @@ pub struct Settings {
     pub frame_gen_hold_age: Option<bool>,
     /// "fast" (default) | "medium" | "slow": the optical-flow engine's preset
     pub frame_gen_perf: Option<String>,
-    /// "edge" (default) | "crossfade": the synthesis of generated frames (nvenc/hostlib/framegen.cpp)
+    /// "edge" (default) | "edge-blend" | "crossfade": the synthesis of generated frames (nvenc/hostlib/framegen.cpp)
     pub frame_gen_synthesis: Option<String>,
     /// tap the game's DLSS motion vectors when the OptiScaler-DLSSMotionVectorExtractor provider is loaded (docs/MOTION_VECTORS.md); default on
     pub game_motion_vectors: Option<bool>,
