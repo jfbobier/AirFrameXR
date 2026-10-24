@@ -45,6 +45,7 @@ Already in the launcher: `frame_gen` (tick), `frame_gen_rate` third | half | two
 | env only `VISIONALVR_FG_SAMPLE_WAIT_MS` | 0-20, **3** | streamer restart | how long a boundary waits for a tracking sample newer than the last sent frame. Lab knob; no json key |
 | env only `VISIONALVR_FG_ARRIVAL_WAIT_MS` | **4** | streamer restart | how long a boundary with nothing due waits for the frame the game is about to publish |
 | env only `VISIONALVR_FG_DARK_MS` | **100**, 0 = never | streamer restart | after this long without a fresh sample, outputs are stamped with the last known one (cures the tracking-blackout deadlock, 2026-10-22) |
+| env only `VISIONALVR_FG_MV_DIAG=<dir>` | | streamer restart | with `frame_gen_vector_candidate` on: up to 8 snapshots per session (flow inputs, filtered flow, raw + converted game vectors, poses) for `python3 harness/mv_diag.py <dir>`, which scores every reading of the vectors (as is, constant scale, flips, eye swap, no rotation compensation, output size) against the images. ~50-120 MB per snapshot |
 | env only `VISIONALVR_FG_USE_MV=0` | | streamer restart | forces optical flow even when game vectors arrive (A/B of the vectors) |
 
 ## 3. The arrival family (docs/PERFORMANCE_KNOBS.md)

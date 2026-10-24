@@ -96,4 +96,5 @@ private:
     int m_w = 0, m_h = 0, m_have = 0;
     ID3D11Texture2D* m_out = nullptr;
     bool ensureFrames(ID3D11Texture2D* like, char* err, int errlen);
+    void diagDump(int n, int prev, const bool* vecEye, float t);
 };

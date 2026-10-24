@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace {
@@ -431,6 +432,8 @@ struct FrameGen::Impl {
     // game vector candidate (cfg.mvCandidate): the output pass's sampled counters (4 x 16 stripes), copied out and cleared every few renders
     ID3D11Buffer* cntBuf = nullptr; ID3D11UnorderedAccessView* cntUav = nullptr; ID3D11Buffer* cntStage[2] = {}; bool cntPending[2] = {};
     int cntNext = 0, cntRenders = 0; uint32_t mvSeed = 0;
+    // VISIONALVR_FG_MV_DIAG=<dir>: snapshots for harness/mv_diag.py (game vectors against the flow, docs/EXPERIMENTAL_SWITCHES.md)
+    const char* diagDir = nullptr; int diagDumps = 0;
     bool mvValid[H][2] = {};
     // the pair's flow is computed at render time, only when an eye has no game vectors (item 2 of docs/PERFORMANCE_FINDINGS.md, 2026-10-16)
     bool pairFlowValid[H] = {};
@@ -486,6 +489,7 @@ FrameGen::~FrameGen() {
 bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errlen) {
     Impl& I = *m_i;
     if (const char* u = getenv("VISIONALVR_FG_USE_MV")) I.useVectors = atoi(u) != 0;
+    if (const char* d = getenv("VISIONALVR_FG_MV_DIAG")) I.diagDir = _strdup(d);
     I.cfg = cfg;
     m_w = w; m_h = h;
     // shaders
@@ -865,6 +869,61 @@ int FrameGen::IngestVectors(int eye, ID3D11Texture2D* mv, ID3D11Texture2D* depth
     return 1;
 }
 
+// One snapshot for harness/mv_diag.py: the flow inputs (the previous frame aligned into the current camera, the current frame, both at the flow
+// size), the pair's filtered flow, and per eye the game's raw vectors and their residual (PSVec), with what the conversion used. Blocking GPU
+// reads (a few per session, diagnostic only). <dir>/mvdiag_<k>.json + .bin (the textures' rows, tightly packed, in the order listed).
+void FrameGen::diagDump(int n, int prev, const bool* vecEye, float t) {
+    Impl& I = *m_i;
+    char path[600];
+    snprintf(path, sizeof path, "%s/mvdiag_%d.bin", I.diagDir, I.diagDumps);
+    FILE* bin = fopen(path, "wb");
+    if (!bin) return;
+    std::string meta = "{\"textures\":[";
+    long long off = 0;
+    auto dump = [&](const char* name, ID3D11Texture2D* tex) {
+        if (!tex) return;
+        D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
+        D3D11_TEXTURE2D_DESC sd = d; sd.Usage = D3D11_USAGE_STAGING; sd.BindFlags = 0; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; sd.MiscFlags = 0; sd.MipLevels = 1; sd.ArraySize = 1;
+        ID3D11Texture2D* st = nullptr;
+        if (FAILED(m_dev->CreateTexture2D(&sd, nullptr, &st))) return;
+        m_ctx->CopyResource(st, tex);
+        D3D11_MAPPED_SUBRESOURCE m{};
+        if (SUCCEEDED(m_ctx->Map(st, 0, D3D11_MAP_READ, 0, &m))) {
+            const UINT bpp = d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT || d.Format == DXGI_FORMAT_R32G32_FLOAT ? 8 : 4;
+            for (UINT y = 0; y < d.Height; y++) fwrite((const char*)m.pData + (size_t)y * m.RowPitch, 1, (size_t)d.Width * bpp, bin);
+            m_ctx->Unmap(st, 0);
+            char b[200]; snprintf(b, sizeof b, "%s{\"name\":\"%s\",\"w\":%u,\"h\":%u,\"format\":%u,\"bpp\":%u,\"offset\":%lld}", off ? "," : "", name, d.Width, d.Height, (unsigned)d.Format, bpp, off);
+            meta += b; off += (long long)d.Width * d.Height * bpp;
+        }
+        st->Release();
+    };
+    dump("prev_aligned", I.flowIn[0]); dump("cur", I.flowIn[1]); dump("flow", I.pairFilt[n]);
+    for (int e = 0; e < 2; e++) {
+        if (!vecEye[e]) continue;
+        char nm[32];
+        snprintf(nm, sizeof nm, "mv_raw%d", e); dump(nm, I.mvTex[n][e]);
+        snprintf(nm, sizeof nm, "mv_resid%d", e); dump(nm, I.resTex[e][0]);
+    }
+    fclose(bin);
+    auto q8 = [](const float* q) { char b[200]; snprintf(b, sizeof b, "[%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f]", q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]); return std::string(b); };
+    char b[1400];
+    snprintf(b, sizeof b, "],\"frame\":[%d,%d],\"flow_in\":[%d,%d],\"grid\":%d,\"blocks\":[%d,%d],\"t\":%.4f,\"max_flow_px\":%.1f,\"q_cur\":%s,\"q_prev\":%s,"
+             "\"fov8\":[%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f],\"eyes\":[",
+             m_w, m_h, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, t, I.cfg.maxFlowPx, q8(I.realQ[n]).c_str(), q8(I.realQ[prev]).c_str(),
+             I.fov8[0], I.fov8[1], I.fov8[2], I.fov8[3], I.fov8[4], I.fov8[5], I.fov8[6], I.fov8[7]);
+    meta += b;
+    for (int e = 0; e < 2; e++) {
+        const FrameGenVectors& v = I.mvInfo[n][e];
+        snprintf(b, sizeof b, "%s{\"vectors\":%d,\"api\":%u,\"flags\":%u,\"frame\":%llu,\"render\":[%u,%u],\"output\":[%u,%u],\"mv_base\":[%u,%u],\"jitter\":[%.5f,%.5f],\"scale\":[%.6f,%.6f],\"reset\":%d}",
+                 e ? "," : "", vecEye[e] ? 1 : 0, v.api, v.flags, (unsigned long long)v.frame, v.renderW, v.renderH, v.outputW, v.outputH, v.mvX, v.mvY, v.jitterX, v.jitterY, v.mvScaleX, v.mvScaleY, v.reset);
+        meta += b;
+    }
+    meta += "]}";
+    snprintf(path, sizeof path, "%s/mvdiag_%d.json", I.diagDir, I.diagDumps);
+    if (FILE* f = fopen(path, "w")) { fputs(meta.c_str(), f); fclose(f); }
+    I.diagDumps++;
+}
+
 ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4, const float* fov8, char* err, int errlen) {
     Impl& I = *m_i;
     if (m_have < 1 || !m_out) { seterr(err, errlen, "frame generation: no rendered frame yet"); return nullptr; }
@@ -1007,6 +1066,8 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     m_ctx->End(I.qDisjointR);
     I.synthTimed = true;
     if (mode == 1) stats.synths++; else stats.reals++;
+    if (mode == 1 && havePair && I.diagDir && *I.diagDir && I.diagDumps < 8 && stats.synths % 100 == 50 && (vecEye[0] || vecEye[1]) && I.pairFlowValid[n])
+        diagDump(n, prev, vecEye, t);
     return m_out;
 }
 
