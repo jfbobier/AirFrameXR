@@ -20,7 +20,8 @@ struct FrameGenConfig {
     float confGain = 6.f;     // confidence = saturate(1 - gain * max |A - B|) at the matched points
     float copyDeg = 0.02f;    // a rendered frame whose stamp orientation is within this angle of its render orientation is copied, not resampled
     // synthesis: 1 = edge-aware (vector median, source-solved flow, per-pixel candidates at motion boundaries, doubtful motion shrinks toward
-    // the still frame: ideas from VectorXR, MPL-2.0, re-implemented); 0 = the crossfade recipe (OFXR-Bridge's ideas). Eyes with game vectors keep the latter.
+    // the still frame: ideas from VectorXR, MPL-2.0, re-implemented; with game vectors: both ends blended, the photometric gate where the frames
+    // disagree); 0 = the crossfade recipe (OFXR-Bridge's ideas), for flow and game vectors alike.
     int synth = 1;
     float motionLimit = 0.10f;   // edge: content shift beyond this share of the eye width falls back to the still frame (soft over the last quarter)
     float costScale = 17.f;      // edge: confidence = 1 - (luma cost - 0.02) * this

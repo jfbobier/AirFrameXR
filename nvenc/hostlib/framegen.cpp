@@ -309,10 +309,28 @@ float3 edgeSynth(float2 pO, float t) {
     float photo = lerp(saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w), 1, conf);
     return lerp(cc, pc, s * photo);
 }
+// The game's vector found a source b (vecSource): exact, so both ends are blended by the time weight; where the frames disagree there
+// (content revealed or covered, which a vector cannot carry) the photometric gate shows B's side alone instead of a double image.
+float3 vecSynth(float2 b, float2 f, float t) {
+    float3 cc = fetchCR(cur, sbs(pxToUv(b)));
+    float3 pc;
+    if (!samplePrev(pxToUv(b + f), pc)) return cc;
+    float photo = saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w);
+    return lerp(cc, pc, (1 - t) * photo);
+}
 float4 PSOut(VSOut i) : SV_Target {
     float2 uvB;
     if (!projectTo(rot(oA, oB, oC, dirOf(i.uv)), uvB)) return float4(0, 0, 0, 1);
-    [branch] if (mode.x > 0.5 && synth.x > 0.5 && mode.w < 0.5) return float4(edgeSynth(uvToPx(uvB), flowP.w), 1);
+    [branch] if (mode.x > 0.5 && synth.x > 0.5) {
+        // edge synthesis: the game's vectors where they have a source inside the frame, the filtered optical flow elsewhere (or, when the flow
+        // was skipped because both eyes had vectors, the zero field at full cost: B's own pixel, A blended in only where it agrees)
+        float2 pO = uvToPx(uvB), b, f;
+        if (mode.w > 0.5 && vecSource(pO, flowP.w, b, f)) {
+            float2 ub = pxToUv(b);
+            if (all(ub >= 0) && all(ub <= 1)) return float4(vecSynth(b, f, flowP.w), 1);
+        }
+        return float4(edgeSynth(pO, flowP.w), 1);
+    }
     float3 curHere = fetchCR(cur, sbs(uvB));
     if (mode.x < 0.5) return float4(curHere, 1);
     float t = flowP.w;
