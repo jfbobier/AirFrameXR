@@ -4,9 +4,10 @@
 // flow between the previous rendered frame A (rotated into B's camera first, so the flow is in-scene motion only, never head rotation) and B
 // with the GPU's optical-flow engine (NVIDIA Optical Flow API, driver nvofapi64.dll, Turing and later), and renders either B itself or the
 // midpoint between A and B, rotated to the head sample the frame is stamped with. The output texture has the frame's size and format and
-// feeds the usual foveation pass + NVENC like a shim slot. The synthesis re-implements the recipe studied in OFXR-Bridge (rotation-compensated
-// residual flow, confidence from colour disagreement and the engine's cost, crossfade fallback) as our own D3D11 pass per eye; no OFXR-Bridge
-// code is used (the flow comes from the NVIDIA Optical Flow SDK directly).
+// feeds the usual foveation pass + NVENC like a shim slot. Two syntheses, our own D3D11 passes (no third-party code; the flow comes from the
+// NVIDIA Optical Flow SDK directly): the edge-aware one (default) re-implements ideas studied in VectorXR (vector median, source-solved flow,
+// per-pixel candidate choice at motion boundaries, doubtful motion shrinks toward the still frame); the crossfade one the recipe studied in
+// OFXR-Bridge (rotation-compensated residual flow, confidence from colour disagreement and the engine's cost, crossfade fallback).
 #pragma once
 #include <d3d11.h>
 #include <cstdint>
@@ -18,6 +19,12 @@ struct FrameGenConfig {
     float maxFlowPx = 512.f;  // clamp on a flow vector, full-resolution pixels
     float confGain = 6.f;     // confidence = saturate(1 - gain * max |A - B|) at the matched points
     float copyDeg = 0.02f;    // a rendered frame whose stamp orientation is within this angle of its render orientation is copied, not resampled
+    // synthesis: 1 = edge-aware (vector median, source-solved flow, per-pixel candidates at motion boundaries, doubtful motion shrinks toward
+    // the still frame: ideas from VectorXR, MPL-2.0, re-implemented); 0 = the crossfade recipe (OFXR-Bridge's ideas). Eyes with game vectors keep the latter.
+    int synth = 1;
+    float motionLimit = 0.10f;   // edge: content shift beyond this share of the eye width falls back to the still frame (soft over the last quarter)
+    float costScale = 17.f;      // edge: confidence = 1 - (luma cost - 0.02) * this
+    float photoScale = 13.5f;    // edge: the previous frame is blended in by 1 - (max |dRGB| - 0.03) * this
 };
 
 // The game's DLSS motion vectors of one eye, as published with a rendered frame (ipc.h MotionEye, docs/MOTION_VECTORS.md). NGX conventions:

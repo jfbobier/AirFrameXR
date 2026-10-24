@@ -29,6 +29,7 @@ cbuffer CB : register(b0) {
     float4 mode;            // x: pass mode, y: max flow (full-res px), z: confidence gain, w: 1 = the game's vectors are bound (t4) for this eye
     float4 mvRect;          // game vectors: x, y: first texel of the used rectangle, z, w: its size (texels; the vectors are in these pixels)
     float4 mvInfo;          // x, y: vector texture size (texels), z, w: NGX MV scale
+    float4 synth;           // output pass: x 1 = edge-aware synthesis (else the crossfade recipe), y motion limit (full-res px), z cost scale, w photometric scale
 };
 Texture2D cur : register(t0);
 Texture2D prev : register(t1);
@@ -37,6 +38,7 @@ Texture2D<uint> cost : register(t3);
 Texture2D<float4> mvec : register(t4);
 Texture2D<float4> resid : register(t5);   // per vector texel: residual flow (full-res px) in xy, z = valid
 Texture2D<float4> dil : register(t6);     // the strongest valid residual within the dilation radius
+Texture2D<float4> filt : register(t7);    // the pair's filtered flow (PSFilter): xy backward flow (full-res px), z match cost; PSFilter reads PSUnpack's output here
 SamplerState smp : register(s0);
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 VSOut VS(uint id : SV_VertexID) {
@@ -187,9 +189,117 @@ bool samplePrev(float2 uvCur, out float3 c) {
     c = fetchCR(prev, sbs(uvP));
     return true;
 }
+)"
+// MSVC caps one string literal at 16 KB: the shader continues in a second literal
+R"(// ---- edge-aware synthesis (ideas from VectorXR, MPL-2.0, github.com/DienerTech/vectorxr; re-implemented, no VectorXR code) -------------
+// PSUnpack (per flow block, blocksW x blocksH): the engine's vector in full-res px (xy) and our own match cost (z): the mean luma difference of
+// the block's flow-input texels against the aligned previous frame at the vector, plus a small motion penalty. The engine's cost byte has no
+// fixed scale; a luma cost lets one threshold hold. t0 = the aligned previous frame (flow input), t1 = the current one, t2 = the engine's flow.
+// blocks: x first block of eye 1, y blocksW, z blocksH, w grid; mvRect: x flow-input width of one eye, y flow-input height, z max flow (full-res px).
+float lumaOf(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+float4 PSUnpack(VSOut i) : SV_Target {
+    int2 c = int2(i.pos.xy);
+    int grid = blocks.w;
+    int eyeW = int(mvRect.x), eyeH = int(mvRect.y);
+    int x0 = c.x >= blocks.x ? eyeW : 0;
+    float2 d = float2(flow.Load(int3(c, 0))) * (1.0 / 32.0);   // backward, flow-input px: content at q in the current frame is at q + d in the previous
+    int2 o = int2(round(d));
+    float sum = 0, n = 0;
+    for (int y = 0; y < grid; y++) {
+        for (int x = 0; x < grid; x++) {
+            int2 q = c * grid + int2(x, y);
+            if (q.x - x0 >= eyeW || q.y >= eyeH) continue;
+            int2 s = q + o;
+            float lc = lumaOf(cur.Load(int3(q, 0)).rgb);
+            sum += (s.x < x0 || s.x >= x0 + eyeW || s.y < 0 || s.y >= eyeH) ? 0.25 : abs(lc - lumaOf(prev.Load(int3(s, 0)).rgb));
+            n += 1;
+        }
+    }
+    float2 f = d / flowP.xy;
+    float m = length(f);
+    if (m > mvRect.z) f *= mvRect.z / m;
+    float cst = sum / max(n, 1.0) + 0.05 * length(d) / float(eyeW);
+    return float4(f, cst, 1);
+}
+// PSFilter: cost-weighted vector median over the 3x3 blocks around (within the eye): an isolated wrong vector loses to its neighbours without
+// the averaging that would blur a motion boundary. t7 = PSUnpack's output.
+float4 PSFilter(VSOut i) : SV_Target {
+    int2 c = int2(i.pos.xy);
+    int lo = c.x >= blocks.x ? blocks.x : 0, hi = c.x >= blocks.x ? blocks.y - 1 : blocks.x - 1;
+    float4 s[9];
+    [unroll] for (int k = 0; k < 9; k++) {
+        int2 q = c + int2(k % 3 - 1, k / 3 - 1);
+        q = int2(clamp(q.x, lo, hi), clamp(q.y, 0, blocks.z - 1));
+        s[k] = filt.Load(int3(q, 0));
+    }
+    int best = 4;
+    float bestScore = 1e30;
+    [unroll] for (int a = 0; a < 9; a++) {
+        float score = 0;
+        [unroll] for (int b = 0; b < 9; b++) score += length(s[a].xy - s[b].xy) / (s[b].z + 0.01);
+        if (score < bestScore) { bestScore = score; best = a; }
+    }
+    return float4(s[best].xy, min(s[best].z, s[4].z), 1);
+}
+// the filtered flow at a full-res SBS pixel, bilinear over the block grid (within this eye's blocks)
+float4 filtAt(float2 px) {
+    float2 fc = (px * flowP.xy + 0.5) / flowP.z - 0.5;
+    fc = clamp(fc, float2(blocks.xy), float2(blocks.zw));
+    int2 tl = int2(floor(fc));
+    int2 br = min(tl + int2(1, 1), blocks.zw);
+    float2 fr = fc - float2(tl);
+    return lerp(lerp(filt.Load(int3(tl, 0)), filt.Load(int3(br.x, tl.y, 0)), fr.x), lerp(filt.Load(int3(tl.x, br.y, 0)), filt.Load(int3(br, 0)), fr.x), fr.y);
+}
+float maxDiff(float3 a, float3 b) { float3 d = abs(a - b); return max(d.r, max(d.g, d.b)); }
+// how differently the two frames see the content candidate f brings to pO at time t (s = 1 - t): B at pO - f s, A at pO - f s + f
+float candidateError(float2 pO, float2 f, float s) {
+    float2 uvC = pxToUv(pO - f * s);
+    float2 uvA = pxToUv(pO - f * s + f);
+    if (any(uvC < 0) || any(uvC > 1)) return 1;
+    float2 uvP;
+    if (!projectTo(rot(pA, pB, pC, dirOf(uvA)), uvP)) return 1;
+    return maxDiff(cur.SampleLevel(smp, sbs(uvC), 0).rgb, prev.SampleLevel(smp, sbs(uvP), 0).rgb);
+}
+// One output pixel at pO (B's camera): the vector is solved where the content comes from (two fixed-point steps: the flow at the output pixel
+// belongs to whatever B shows there, not to what moves onto it); at a motion boundary (the block vectors around disagree by more than half a
+// pixel) the candidate both frames agree on wins, which gives pixel-sharp edges instead of a smear of the block vectors; doubtful motion
+// shrinks toward the still image of B (local judder) instead of crossfading two positions (a double image); A is blended in only where it
+// agrees with B at the matched points.
+float3 edgeSynth(float2 pO, float t) {
+    float s = 1 - t;
+    float4 here = filtAt(pO);
+    float4 sol = filtAt(pO - here.xy * s);
+    sol = filtAt(pO - sol.xy * s);
+    float4 cand[7];
+    cand[0] = sol; cand[1] = here;
+    float2 fc = clamp((pO * flowP.xy + 0.5) / flowP.z - 0.5, float2(blocks.xy), float2(blocks.zw));
+    int2 base = int2(floor(fc));
+    [unroll] for (int k = 0; k < 4; k++) cand[2 + k] = filt.Load(int3(min(base + int2(k & 1, k >> 1), blocks.zw), 0));
+    cand[6] = float4(0, 0, here.z, 1);
+    float4 chosen = cand[0];
+    float spread = 0;
+    [unroll] for (int j = 1; j < 6; j++) spread = max(spread, length(cand[j].xy - chosen.xy));
+    [branch] if (spread > 0.5) {
+        float best = candidateError(pO, chosen.xy, s);
+        [unroll] for (int k = 1; k < 7; k++) {
+            float e = candidateError(pO, cand[k].xy, s) + (k == 6 ? 0.03 : 0.01);
+            if (e < best) { best = e; chosen = cand[k]; }
+        }
+    }
+    float shift = length(chosen.xy * s);
+    float conf = saturate((synth.y - shift) / (0.25 * synth.y)) * saturate(1 - max(chosen.z - 0.02, 0) * synth.z);
+    float2 f = chosen.xy * conf;
+    float2 uvC = pxToUv(pO - f * s);
+    float3 cc = fetchCR(cur, sbs(clamp(uvC, 0, 1)));
+    float3 pc;
+    if (!samplePrev(pxToUv(pO - f * s + f), pc)) return cc;
+    float photo = saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w);
+    return lerp(cc, pc, s * photo);
+}
 float4 PSOut(VSOut i) : SV_Target {
     float2 uvB;
     if (!projectTo(rot(oA, oB, oC, dirOf(i.uv)), uvB)) return float4(0, 0, 0, 1);
+    [branch] if (mode.x > 0.5 && synth.x > 0.5 && mode.w < 0.5) return float4(edgeSynth(uvToPx(uvB), flowP.w), 1);
     float3 curHere = fetchCR(cur, sbs(uvB));
     if (mode.x < 0.5) return float4(curHere, 1);
     float t = flowP.w;
@@ -226,6 +336,7 @@ struct Cb {
     float mode[4];
     float mvRect[4];
     float mvInfo[4];
+    float synth[4];
 };
 
 void qmatRow(const float* q, double m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w)
@@ -268,6 +379,11 @@ struct FrameGen::Impl {
     // per eye: the residual-flow texture and the dilation ping-pong (the size of the eye's vector texture)
     ID3D11Texture2D* resTex[2][3] = {}; ID3D11ShaderResourceView* resSrv[2][3] = {}; ID3D11RenderTargetView* resRtv[2][3] = {};
     ID3D11PixelShader* psVec = nullptr; ID3D11PixelShader* psDilate = nullptr;
+    // edge-aware synthesis (cfg.synth 1): the engine's vectors with our luma cost (unpack), then the 3x3 median (filter) per history pair
+    ID3D11PixelShader* psUnpack = nullptr; ID3D11PixelShader* psFilter = nullptr;
+    ID3D11Texture2D* unpackTex = nullptr; ID3D11ShaderResourceView* unpackSrv = nullptr; ID3D11RenderTargetView* unpackRtv = nullptr;
+    ID3D11Texture2D* pairFilt[H] = {}; ID3D11ShaderResourceView* pairFiltSrv[H] = {}; ID3D11RenderTargetView* pairFiltRtv[H] = {};
+    ID3D11Texture2D* zeroFilt = nullptr; ID3D11ShaderResourceView* zeroFiltSrv = nullptr;   // no flow: zero motion at the maximum cost
     bool mvValid[H][2] = {};
     // the pair's flow is computed at render time, only when an eye has no game vectors (item 2 of docs/PERFORMANCE_FINDINGS.md, 2026-10-16)
     bool pairFlowValid[H] = {};
@@ -284,7 +400,7 @@ struct FrameGen::Impl {
     NV_OF_D3D11_API_FUNCTION_LIST api{};
     NvOFHandle of = nullptr;
     int flowW = 0, flowH = 0, blocksW = 0, blocksH = 0, grid = 4;
-    ID3D11Texture2D* flowIn[2] = {}; ID3D11RenderTargetView* flowInRtv[2] = {};
+    ID3D11Texture2D* flowIn[2] = {}; ID3D11RenderTargetView* flowInRtv[2] = {}; ID3D11ShaderResourceView* flowInSrv[2] = {};
     ID3D11Texture2D* flowOut = nullptr; ID3D11ShaderResourceView* flowOutSrv = nullptr;
     ID3D11Texture2D* costTex = nullptr; ID3D11ShaderResourceView* costSrv = nullptr;
     NvOFGPUBufferHandle hIn[2] = {}, hFlow = nullptr, hCost = nullptr;
@@ -305,7 +421,9 @@ FrameGen::~FrameGen() {
         I.api.nvOFDestroy(I.of);
     }
     if (I.dll) FreeLibrary(I.dll);
-    for (int k = 0; k < 2; k++) { rel(I.flowInRtv[k]); rel(I.flowIn[k]); }
+    for (int k = 0; k < 2; k++) { rel(I.flowInRtv[k]); rel(I.flowInSrv[k]); rel(I.flowIn[k]); }
+    for (int k = 0; k < Impl::H; k++) { rel(I.pairFiltSrv[k]); rel(I.pairFiltRtv[k]); rel(I.pairFilt[k]); }
+    rel(I.unpackSrv); rel(I.unpackRtv); rel(I.unpackTex); rel(I.zeroFiltSrv); rel(I.zeroFilt); rel(I.psUnpack); rel(I.psFilter);
     for (int k = 0; k < Impl::H; k++) { rel(I.realSrv[k]); rel(I.real[k]); rel(I.pairFlowSrv[k]); rel(I.pairFlow[k]); rel(I.pairCostSrv[k]); rel(I.pairCost[k]); }
     for (int k = 0; k < Impl::H; k++) for (int e = 0; e < 2; e++) { rel(I.mvSrv[k][e]); rel(I.mvTex[k][e]); rel(I.depthTex[k][e]); }
     for (int e = 0; e < 2; e++) for (int k = 0; k < 3; k++) { rel(I.resSrv[e][k]); rel(I.resRtv[e][k]); rel(I.resTex[e][k]); }
@@ -323,12 +441,14 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     I.cfg = cfg;
     m_w = w; m_h = h;
     // shaders
-    ID3DBlob *vb = nullptr, *p1 = nullptr, *p2 = nullptr, *p3 = nullptr, *p4 = nullptr, *e = nullptr;
+    ID3DBlob *vb = nullptr, *p1 = nullptr, *p2 = nullptr, *p3 = nullptr, *p4 = nullptr, *p5 = nullptr, *p6 = nullptr, *e = nullptr;
     if (FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vb, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSPrep", "ps_5_0", 0, 0, &p1, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSOut", "ps_5_0", 0, 0, &p2, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSVec", "ps_5_0", 0, 0, &p3, &e)) ||
-        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSDilate", "ps_5_0", 0, 0, &p4, &e))) {
+        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSDilate", "ps_5_0", 0, 0, &p4, &e)) ||
+        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSUnpack", "ps_5_0", 0, 0, &p5, &e)) ||
+        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSFilter", "ps_5_0", 0, 0, &p6, &e))) {
         seterr(err, errlen, e ? (const char*)e->GetBufferPointer() : "frame generation shader compile failed");
         if (e) e->Release();
         return false;
@@ -338,12 +458,14 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     m_dev->CreatePixelShader(p2->GetBufferPointer(), p2->GetBufferSize(), nullptr, &I.psOut);
     m_dev->CreatePixelShader(p3->GetBufferPointer(), p3->GetBufferSize(), nullptr, &I.psVec);
     m_dev->CreatePixelShader(p4->GetBufferPointer(), p4->GetBufferSize(), nullptr, &I.psDilate);
-    vb->Release(); p1->Release(); p2->Release(); p3->Release(); p4->Release();
+    m_dev->CreatePixelShader(p5->GetBufferPointer(), p5->GetBufferSize(), nullptr, &I.psUnpack);
+    m_dev->CreatePixelShader(p6->GetBufferPointer(), p6->GetBufferSize(), nullptr, &I.psFilter);
+    vb->Release(); p1->Release(); p2->Release(); p3->Release(); p4->Release(); p5->Release(); p6->Release();
     D3D11_BUFFER_DESC bd{}; bd.ByteWidth = sizeof(Cb); bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     m_dev->CreateBuffer(&bd, nullptr, &I.cb);
     D3D11_SAMPLER_DESC sd{}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sd.MaxLOD = D3D11_FLOAT32_MAX;
     m_dev->CreateSamplerState(&sd, &I.smp);
-    if (!I.vs || !I.psPrep || !I.psOut || !I.cb || !I.smp) { seterr(err, errlen, "frame generation pipeline objects"); return false; }
+    if (!I.vs || !I.psPrep || !I.psOut || !I.psUnpack || !I.psFilter || !I.cb || !I.smp) { seterr(err, errlen, "frame generation pipeline objects"); return false; }
     D3D11_QUERY_DESC qd{ D3D11_QUERY_TIMESTAMP_DISJOINT, 0 }, qt{ D3D11_QUERY_TIMESTAMP, 0 };
     m_dev->CreateQuery(&qd, &I.qDisjoint);
     m_dev->CreateQuery(&qd, &I.qDisjointR);
@@ -403,7 +525,8 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     };
     for (int k = 0; k < 2; k++) {
         if (!tex(I.flowW, I.flowH, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, &I.flowIn[k]) ||
-            FAILED(m_dev->CreateRenderTargetView(I.flowIn[k], nullptr, &I.flowInRtv[k]))) { seterr(err, errlen, "flow input texture"); return false; }
+            FAILED(m_dev->CreateRenderTargetView(I.flowIn[k], nullptr, &I.flowInRtv[k])) ||
+            FAILED(m_dev->CreateShaderResourceView(I.flowIn[k], nullptr, &I.flowInSrv[k]))) { seterr(err, errlen, "flow input texture"); return false; }
         if (I.api.nvOFRegisterResourceD3D11(I.of, I.flowIn[k], &I.hIn[k]) != NV_OF_SUCCESS) { seterr(err, errlen, "nvOFRegisterResourceD3D11 (input)"); return false; }
     }
     if (!tex(I.blocksW, I.blocksH, DXGI_FORMAT_R16G16_SINT, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET | D3D11_BIND_UNORDERED_ACCESS, &I.flowOut) ||
@@ -430,10 +553,26 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
             seterr(err, errlen, "pair flow textures"); return false;
         }
     }
+    {
+        auto filtTex = [&](ID3D11Texture2D** t, ID3D11ShaderResourceView** sv, ID3D11RenderTargetView** rt) {
+            return tex(I.blocksW, I.blocksH, DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET, t) &&
+                   SUCCEEDED(m_dev->CreateShaderResourceView(*t, nullptr, sv)) && SUCCEEDED(m_dev->CreateRenderTargetView(*t, nullptr, rt));
+        };
+        bool ok = filtTex(&I.unpackTex, &I.unpackSrv, &I.unpackRtv);
+        for (int k = 0; k < Impl::H && ok; k++) ok = filtTex(&I.pairFilt[k], &I.pairFiltSrv[k], &I.pairFiltRtv[k]);
+        // half floats (0, 0, 1, 1): zero motion, cost 1
+        std::vector<uint16_t> zf((size_t)I.blocksW * I.blocksH * 4, 0);
+        for (size_t k = 0; k < zf.size(); k += 4) { zf[k + 2] = 0x3C00; zf[k + 3] = 0x3C00; }
+        D3D11_TEXTURE2D_DESC zd{}; zd.Width = I.blocksW; zd.Height = I.blocksH; zd.MipLevels = 1; zd.ArraySize = 1; zd.SampleDesc.Count = 1;
+        zd.Usage = D3D11_USAGE_IMMUTABLE; zd.BindFlags = D3D11_BIND_SHADER_RESOURCE; zd.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        D3D11_SUBRESOURCE_DATA zi{ zf.data(), (UINT)(I.blocksW * 8), 0 };
+        ok = ok && SUCCEEDED(m_dev->CreateTexture2D(&zd, &zi, &I.zeroFilt)) && SUCCEEDED(m_dev->CreateShaderResourceView(I.zeroFilt, nullptr, &I.zeroFiltSrv));
+        if (!ok) { seterr(err, errlen, "filtered flow textures"); return false; }
+    }
     stats.flowW = I.flowW; stats.flowH = I.flowH; stats.blocksW = I.blocksW; stats.blocksH = I.blocksH;
     stats.nvofReady = true;
-    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d",
-             NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h);
+    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s",
+             NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, cfg.synth ? "edge" : "crossfade");
     return true;
 }
 
@@ -517,6 +656,28 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     out.outputBuffer = I.hFlow; out.outputCostBuffer = I.hCost;
     const NV_OF_STATUS st = I.api.nvOFExecute(I.of, &in, &out);
     if (st == NV_OF_SUCCESS) { m_ctx->CopyResource(I.pairFlow[n], I.flowOut); m_ctx->CopyResource(I.pairCost[n], I.costTex); I.pairFlowValid[n] = true; }
+    if (st == NV_OF_SUCCESS && I.cfg.synth) {
+        // edge-aware synthesis: the vectors with our luma cost, then the 3x3 median, into this pair's filtered flow
+        Cb c{};
+        c.flowP[0] = (float)I.flowW / (float)m_w; c.flowP[1] = (float)I.flowH / (float)m_h;
+        c.blocks[0] = I.blocksW / 2; c.blocks[1] = I.blocksW; c.blocks[2] = I.blocksH; c.blocks[3] = I.grid;
+        c.mvRect[0] = (float)(I.flowW / 2); c.mvRect[1] = (float)I.flowH; c.mvRect[2] = I.cfg.maxFlowPx;
+        m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c, 0, 0);
+        D3D11_VIEWPORT vp{}; vp.Width = (float)I.blocksW; vp.Height = (float)I.blocksH; vp.MaxDepth = 1.f;
+        m_ctx->RSSetViewports(1, &vp);
+        ID3D11ShaderResourceView* in3[3] = { I.flowInSrv[0], I.flowInSrv[1], I.flowOutSrv };
+        m_ctx->OMSetRenderTargets(1, &I.unpackRtv, nullptr);
+        m_ctx->PSSetShader(I.psUnpack, nullptr, 0);
+        m_ctx->PSSetShaderResources(0, 3, in3);
+        m_ctx->Draw(3, 0);
+        m_ctx->PSSetShaderResources(0, 3, nulls);
+        m_ctx->OMSetRenderTargets(1, &I.pairFiltRtv[n], nullptr);
+        m_ctx->PSSetShader(I.psFilter, nullptr, 0);
+        m_ctx->PSSetShaderResources(7, 1, &I.unpackSrv);
+        m_ctx->Draw(3, 0);
+        m_ctx->PSSetShaderResources(7, 1, nulls);
+        m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
+    }
     m_ctx->End(I.qT[1]);
     m_ctx->End(I.qDisjoint);
     I.flowTimed = true;
@@ -733,8 +894,11 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     const bool flowOk = havePair && I.pairFlowValid[n];
     ID3D11ShaderResourceView* srvs[4] = { I.realSrv[n], havePair ? I.realSrv[prev] : I.realSrv[n], flowOk ? I.pairFlowSrv[n] : I.zeroFlowSrv, flowOk ? I.pairCostSrv[n] : I.maxCostSrv };
     m_ctx->PSSetShaderResources(0, 4, srvs);
+    m_ctx->PSSetShaderResources(7, 1, flowOk && I.cfg.synth ? &I.pairFiltSrv[n] : &I.zeroFiltSrv);
     for (int e = 0; e < 2; e++) {
         Cb c{};
+        c.synth[0] = I.cfg.synth ? 1.f : 0.f; c.synth[1] = std::max(1.f, I.cfg.motionLimit * m_w * 0.5f);
+        c.synth[2] = I.cfg.costScale; c.synth[3] = I.cfg.photoScale;
         // the game's vectors of the current frame for this eye (docs/MOTION_VECTORS.md), when the shim published them
         ID3D11ShaderResourceView* vsrv[3] = { vecEye[e] ? I.mvSrv[n][e] : nullptr, vecEye[e] ? I.resSrv[e][0] : nullptr, vecEye[e] ? I.resSrv[e][2] : nullptr };
         m_ctx->PSSetShaderResources(4, 3, vsrv);
@@ -764,7 +928,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         m_ctx->RSSetViewports(1, &vp);
         m_ctx->Draw(3, 0);
     }
-    ID3D11ShaderResourceView* nulls[7] = {}; m_ctx->PSSetShaderResources(0, 7, nulls);
+    ID3D11ShaderResourceView* nulls[8] = {}; m_ctx->PSSetShaderResources(0, 8, nulls);
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     m_ctx->End(I.qT[3]);
     m_ctx->End(I.qDisjointR);

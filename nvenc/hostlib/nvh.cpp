@@ -600,13 +600,17 @@ double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, ui
 }
 
 // ---- frame generation (framegen.cpp) -------------------------------------------------------------------------------------------
-int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid, char* err, int errlen) {
+int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid, int synth, char* err, int errlen) {
     auto* n = (Nvh*)hh; if (!n) return 0;
     n->fgFfr.reset(); n->fgFfrTex = nullptr; n->fg.reset(); n->fgLast = false;
     if (!on) return 1;
     auto fg = std::make_unique<FrameGen>(n->render->GetDevice(), n->render->GetContext());
     FrameGenConfig c;
-    c.flowScale = (float)flow_scale; c.perfLevel = perf_level; c.grid = grid;
+    c.flowScale = (float)flow_scale; c.perfLevel = perf_level; c.grid = grid; c.synth = synth ? 1 : 0;
+    // edge synthesis tuning (lab knobs, env only)
+    if (const char* v = getenv("VISIONALVR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
+    if (const char* v = getenv("VISIONALVR_FG_COST_SCALE")) c.costScale = (float)atof(v);
+    if (const char* v = getenv("VISIONALVR_FG_PHOTO_SCALE")) c.photoScale = (float)atof(v);
     // the frame the shim composes: 2 x eye width by eye height (the encoder's own size may be the foveated one)
     const auto& S = Settings::Instance();
     if (!fg->Init((int)S.m_renderWidth, (int)S.m_renderHeight, c, err, errlen)) return 0;

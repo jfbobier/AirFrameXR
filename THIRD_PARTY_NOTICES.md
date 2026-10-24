@@ -37,10 +37,13 @@ Versions, sources and checksums: `third_party/README.md`, `deps.lock.json`.
 - **OFXR-Bridge** (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge): the frame-generation synthesis recipe and safety rules were studied from its
   code and re-implemented in `nvenc/hostlib/framegen.cpp`; no code copied. Its DLSS provider ABI is the model for VisionALVR's motion-vector
   interface.
+- **VectorXR** (MPL-2.0, github.com/DienerTech/vectorxr, by DienerTech LLC): the edge-aware synthesis (vector median, source-solved flow,
+  per-pixel candidate choice at motion boundaries, doubtful motion shrinking toward the real frame, its default tuning) was studied from its
+  code and re-implemented in `nvenc/hostlib/framegen.cpp`; no code copied.
 - **OptiScaler** (GPL-3.0, github.com/optiscaler/OptiScaler): the DLSS motion-vector extractor is a separate fork,
   github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor, under GPL-3.0 with its own source and releases. For convenience the zip carries a
   build of it as `DLSSMotionVectors\dxgi.dll` (an unmodified copy of the fork's release DLL; its source is the fork's tagged commit, its
   licence `licenses\OptiScaler-DLSSMotionVectorExtractor-GPL-3.0.txt`). It is loaded by the game, not by VisionALVR, and the two communicate
   only through shared textures and the documented C interface (`DLSSVEC_*`); nothing of it is linked into VisionALVR, whose own code stays MIT.
 
-VisionALVR is not affiliated with or endorsed by the ALVR project, Apple, NVIDIA, Virtual Desktop or Glen Fox. OFXR-Bridge and OptiScaler are independent projects; VisionALVR is not affiliated with them either.
+VisionALVR is not affiliated with or endorsed by the ALVR project, Apple, NVIDIA, Virtual Desktop or Glen Fox. OFXR-Bridge, VectorXR and OptiScaler are independent projects; VisionALVR is not affiliated with them either.
