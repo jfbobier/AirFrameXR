@@ -600,7 +600,7 @@ double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, ui
 }
 
 // ---- frame generation (framegen.cpp) -------------------------------------------------------------------------------------------
-int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid, int synth, char* err, int errlen) {
+int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid, int synth, int mv_candidate, char* err, int errlen) {
     auto* n = (Nvh*)hh; if (!n) return 0;
     n->fgFfr.reset(); n->fgFfrTex = nullptr; n->fg.reset(); n->fgLast = false;
     if (!on) return 1;
@@ -612,6 +612,9 @@ int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid,
     if (const char* v = getenv("VISIONALVR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
     if (const char* v = getenv("VISIONALVR_FG_COST_SCALE")) c.costScale = (float)atof(v);
     if (const char* v = getenv("VISIONALVR_FG_PHOTO_SCALE")) c.photoScale = (float)atof(v);
+    c.mvCandidate = mv_candidate ? 1 : 0;
+    if (const char* v = getenv("VISIONALVR_FG_MV_BIAS")) c.mvBias = (float)atof(v);
+    if (const char* v = getenv("VISIONALVR_FG_MV_NOISE")) c.mvNoisePx = (float)atof(v);
     // the frame the shim composes: 2 x eye width by eye height (the encoder's own size may be the foveated one)
     const auto& S = Settings::Instance();
     if (!fg->Init((int)S.m_renderWidth, (int)S.m_renderHeight, c, err, errlen)) return 0;
@@ -687,12 +690,12 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
     info[k] = 0;
     return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"flow_skipped\":%llu,\"synths\":%llu,\"reals\":%llu,\"copies\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
                     "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d],"
-                    "\"mv\":{\"frames\":%llu,\"eyes\":%llu,\"used_eyes\":%llu,\"depth\":%llu,\"errors\":%llu,\"size\":[%d,%d],\"format\":%u,\"flags\":%u,\"api\":%u,\"scale\":[%.3f,%.3f]}}",
+                    "\"mv\":{\"frames\":%llu,\"eyes\":%llu,\"used_eyes\":%llu,\"depth\":%llu,\"errors\":%llu,\"size\":[%d,%d],\"format\":%u,\"flags\":%u,\"api\":%u,\"scale\":[%.3f,%.3f]},\"mvc\":{\"sampled\":%llu,\"boundary\":%llu,\"avail\":%llu,\"wins\":%llu}}",
                     s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.flowSkipped, (unsigned long long)s.synths, (unsigned long long)s.reals, (unsigned long long)s.copies,
                     (unsigned long long)s.flowErrors, (unsigned long long)s.renderErrors, s.lastFlowMs, s.flowN ? s.flowMsSum / s.flowN : 0.0, s.lastSynthMs,
                     s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH,
                     (unsigned long long)s.mvFrames, (unsigned long long)s.mvEyes, (unsigned long long)s.mvUsedEyes, (unsigned long long)s.mvDepth, (unsigned long long)s.mvErrors, s.mvW, s.mvH, s.mvFormat, s.mvFlags, s.mvApi,
-                    s.mvScale[0], s.mvScale[1]);
+                    s.mvScale[0], s.mvScale[1], (unsigned long long)s.mvcSampled, (unsigned long long)s.mvcBoundary, (unsigned long long)s.mvcAvail, (unsigned long long)s.mvcWins);
 }
 
 void nvh_ipc_set_game_mv(void* i, uint32_t on) { ((Ipc*)i)->state->host.gameMotionVectors = on ? 1u : 0u; }

@@ -1383,8 +1383,8 @@ impl Pipeline {
                 fate(counter, match kind { FgKind::Synth => "G", FgKind::Real => "R", FgKind::Repeat => "Q" }, t0, *mode as u64, ts.as_nanos() as u64);
                 fg_encodes += 1;
                 if fg_encodes % 10 == 1 {
-                    let mut buf = [0 as std::ffi::c_char; 768];
-                    unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 768) };
+                    let mut buf = [0 as std::ffi::c_char; 1536];
+                    unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 1536) };
                     *self.fg_stats.lock() = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
                 }
             }

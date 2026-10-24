@@ -30,6 +30,7 @@ cbuffer CB : register(b0) {
     float4 mvRect;          // game vectors: x, y: first texel of the used rectangle, z, w: its size (texels; the vectors are in these pixels)
     float4 mvInfo;          // x, y: vector texture size (texels), z, w: NGX MV scale
     float4 synth;           // output pass: x 1 = edge-aware synthesis (else the crossfade recipe), y motion limit (full-res px), z cost scale, w photometric scale
+    float4 mvc;             // game vector as an edge candidate: x 1 = on, y its bias (colour error added), z lab noise (px, PSVec), w frame seed
 };
 Texture2D cur : register(t0);
 Texture2D prev : register(t1);
@@ -38,7 +39,8 @@ Texture2D<uint> cost : register(t3);
 Texture2D<float4> mvec : register(t4);
 Texture2D<float4> resid : register(t5);   // per vector texel: residual flow (full-res px) in xy, z = valid
 Texture2D<float4> dil : register(t6);     // the strongest valid residual within the dilation radius
-Texture2D<float4> filt : register(t7);    // the pair's filtered flow (PSFilter): xy backward flow (full-res px), z match cost; PSFilter reads PSUnpack's output here
+Texture2D<float4> filt : register(t7);
+RWByteAddressBuffer cnt : register(u1);   // PSOut with mvc.x: sampled counts (sampled pixels, boundaries, a game vector there, the vector won), 16 stripes each    // the pair's filtered flow (PSFilter): xy backward flow (full-res px), z match cost; PSFilter reads PSUnpack's output here
 SamplerState smp : register(s0);
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 VSOut VS(uint id : SV_VertexID) {
@@ -145,6 +147,10 @@ float4 PSVec(VSOut i) : SV_Target {
     if (any(uvB < 0) || any(uvB >= 1)) return float4(0, 0, 0, 0);
     float2 f;
     bool ok = vecFlowAt(uvB, f);
+    if (mvc.z > 0) {   // lab: imprecise vectors (VISIONALVR_FG_MV_NOISE px), a new random offset per vector texel and frame
+        float2 h = frac(sin(float2(dot(texel, float2(12.9898, 78.233)), dot(texel, float2(39.3468, 11.135))) + mvc.w) * 43758.5453);
+        f += (h * 2 - 1) * mvc.z;
+    }
     return float4(f, ok ? 1 : 0, 0);
 }
 float4 PSDilate(VSOut i) : SV_Target {
@@ -272,7 +278,11 @@ float candidateError(float2 pO, float2 f, float s) {
 // pixel) the candidate both frames agree on wins, which gives pixel-sharp edges instead of a smear of the block vectors; doubtful motion
 // shrinks toward the still image of B (local judder) instead of crossfading two positions (a double image); A is blended in only where it
 // agrees with B at the matched points.
-float3 edgeSynth(float2 pO, float t) {
+// useMv: the game's vector at pO (vecSource) is one more candidate, tried where the flow's candidates disagree or where it differs from the
+// flow, and kept only when it beats every flow candidate by mvc.y on the two-frame colour test: additional information, never in charge
+// (in charge, the game's low-resolution vectors made Valor Mortis tremble, 2026-10-24). info: 1 boundary, 2 a vector there, 4 it won.
+float3 edgeSynth(float2 pO, float t, bool useMv, out uint info) {
+    info = 0;
     float s = 1 - t;
     float4 here = filtAt(pO);
     float4 sol = filtAt(pO - here.xy * s);
@@ -286,11 +296,18 @@ float3 edgeSynth(float2 pO, float t) {
     float4 chosen = cand[0];
     float spread = 0;
     [unroll] for (int j = 1; j < 6; j++) spread = max(spread, length(cand[j].xy - chosen.xy));
-    [branch] if (spread > 0.5) {
+    float2 mvB = float2(0, 0), mvF = float2(0, 0);
+    bool mvOk = useMv && vecSource(pO, t, mvB, mvF);
+    [branch] if (spread > 0.5 || (mvOk && length(mvF - chosen.xy) > 0.5)) {
+        info = mvOk ? 3u : 1u;
         float best = candidateError(pO, chosen.xy, s);
         [unroll] for (int k = 1; k < 7; k++) {
             float e = candidateError(pO, cand[k].xy, s) + (k == 6 ? 0.03 : 0.01);
             if (e < best) { best = e; chosen = cand[k]; }
+        }
+        if (mvOk) {
+            float e = candidateError(pO, mvF, s) + mvc.y;
+            if (e < best) { best = e; chosen = float4(mvF, 0.02, 1); info |= 4u; }   // won the colour test: trusted like a clear match
         }
     }
     float shift = length(chosen.xy * s);
@@ -312,7 +329,20 @@ float3 edgeSynth(float2 pO, float t) {
 float4 PSOut(VSOut i) : SV_Target {
     float2 uvB;
     if (!projectTo(rot(oA, oB, oC, dirOf(i.uv)), uvB)) return float4(0, 0, 0, 1);
-    [branch] if (mode.x > 0.5 && synth.x > 0.5 && mode.w < 0.5) return float4(edgeSynth(uvToPx(uvB), flowP.w), 1);
+    [branch] if (mode.x > 0.5 && synth.x > 0.5 && (mode.w < 0.5 || mvc.x > 0.5)) {
+        float2 pO = uvToPx(uvB);
+        uint info;
+        float3 c = edgeSynth(pO, flowP.w, mode.w > 0.5 && mvc.x > 0.5, info);
+        int2 ip = int2(pO);
+        if (mvc.x > 0.5 && ((ip.x | ip.y) & 7) == 0) {   // one pixel in 64 is counted, over 16 stripes per counter
+            uint stripe = ((uint(ip.x) >> 3) + (uint(ip.y) >> 3)) & 15u;
+            cnt.InterlockedAdd((0 * 16 + stripe) * 4, 1);
+            if (info & 1u) cnt.InterlockedAdd((1 * 16 + stripe) * 4, 1);
+            if (info & 2u) cnt.InterlockedAdd((2 * 16 + stripe) * 4, 1);
+            if (info & 4u) cnt.InterlockedAdd((3 * 16 + stripe) * 4, 1);
+        }
+        return float4(c, 1);
+    }
     float3 curHere = fetchCR(cur, sbs(uvB));
     if (mode.x < 0.5) return float4(curHere, 1);
     float t = flowP.w;
@@ -350,6 +380,7 @@ struct Cb {
     float mvRect[4];
     float mvInfo[4];
     float synth[4];
+    float mvc[4];
 };
 
 void qmatRow(const float* q, double m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w)
@@ -397,6 +428,9 @@ struct FrameGen::Impl {
     ID3D11Texture2D* unpackTex = nullptr; ID3D11ShaderResourceView* unpackSrv = nullptr; ID3D11RenderTargetView* unpackRtv = nullptr;
     ID3D11Texture2D* pairFilt[H] = {}; ID3D11ShaderResourceView* pairFiltSrv[H] = {}; ID3D11RenderTargetView* pairFiltRtv[H] = {};
     ID3D11Texture2D* zeroFilt = nullptr; ID3D11ShaderResourceView* zeroFiltSrv = nullptr;   // no flow: zero motion at the maximum cost
+    // game vector candidate (cfg.mvCandidate): the output pass's sampled counters (4 x 16 stripes), copied out and cleared every few renders
+    ID3D11Buffer* cntBuf = nullptr; ID3D11UnorderedAccessView* cntUav = nullptr; ID3D11Buffer* cntStage[2] = {}; bool cntPending[2] = {};
+    int cntNext = 0, cntRenders = 0; uint32_t mvSeed = 0;
     bool mvValid[H][2] = {};
     // the pair's flow is computed at render time, only when an eye has no game vectors (item 2 of docs/PERFORMANCE_FINDINGS.md, 2026-10-16)
     bool pairFlowValid[H] = {};
@@ -437,6 +471,7 @@ FrameGen::~FrameGen() {
     for (int k = 0; k < 2; k++) { rel(I.flowInRtv[k]); rel(I.flowInSrv[k]); rel(I.flowIn[k]); }
     for (int k = 0; k < Impl::H; k++) { rel(I.pairFiltSrv[k]); rel(I.pairFiltRtv[k]); rel(I.pairFilt[k]); }
     rel(I.unpackSrv); rel(I.unpackRtv); rel(I.unpackTex); rel(I.zeroFiltSrv); rel(I.zeroFilt); rel(I.psUnpack); rel(I.psFilter);
+    rel(I.cntUav); rel(I.cntBuf); rel(I.cntStage[0]); rel(I.cntStage[1]);
     for (int k = 0; k < Impl::H; k++) { rel(I.realSrv[k]); rel(I.real[k]); rel(I.pairFlowSrv[k]); rel(I.pairFlow[k]); rel(I.pairCostSrv[k]); rel(I.pairCost[k]); }
     for (int k = 0; k < Impl::H; k++) for (int e = 0; e < 2; e++) { rel(I.mvSrv[k][e]); rel(I.mvTex[k][e]); rel(I.depthTex[k][e]); }
     for (int e = 0; e < 2; e++) for (int k = 0; k < 3; k++) { rel(I.resSrv[e][k]); rel(I.resRtv[e][k]); rel(I.resTex[e][k]); }
@@ -582,10 +617,22 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
         ok = ok && SUCCEEDED(m_dev->CreateTexture2D(&zd, &zi, &I.zeroFilt)) && SUCCEEDED(m_dev->CreateShaderResourceView(I.zeroFilt, nullptr, &I.zeroFiltSrv));
         if (!ok) { seterr(err, errlen, "filtered flow textures"); return false; }
     }
+    if (cfg.synth && cfg.mvCandidate) {
+        D3D11_BUFFER_DESC b{}; b.ByteWidth = 64 * 4; b.Usage = D3D11_USAGE_DEFAULT; b.BindFlags = D3D11_BIND_UNORDERED_ACCESS; b.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+        D3D11_UNORDERED_ACCESS_VIEW_DESC u{}; u.Format = DXGI_FORMAT_R32_TYPELESS; u.ViewDimension = D3D11_UAV_DIMENSION_BUFFER; u.Buffer.NumElements = 64; u.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
+        D3D11_BUFFER_DESC st{}; st.ByteWidth = 64 * 4; st.Usage = D3D11_USAGE_STAGING; st.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        if (FAILED(m_dev->CreateBuffer(&b, nullptr, &I.cntBuf)) || FAILED(m_dev->CreateUnorderedAccessView(I.cntBuf, &u, &I.cntUav)) ||
+            FAILED(m_dev->CreateBuffer(&st, nullptr, &I.cntStage[0])) || FAILED(m_dev->CreateBuffer(&st, nullptr, &I.cntStage[1]))) { seterr(err, errlen, "candidate counters"); return false; }
+        const UINT zero[4] = {}; m_ctx->ClearUnorderedAccessViewUint(I.cntUav, zero);
+    }
     stats.flowW = I.flowW; stats.flowH = I.flowH; stats.blocksW = I.blocksW; stats.blocksH = I.blocksH;
     stats.nvofReady = true;
     snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s",
              NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "crossfade" : cfg.photoScale > 0 ? "edge" : "edge-blend");
+    if (cfg.synth && cfg.mvCandidate) {
+        const size_t l = strlen(stats.nvofInfo);
+        snprintf(stats.nvofInfo + l, sizeof stats.nvofInfo - l, ", game vector candidate (bias %.3f%s)", cfg.mvBias, cfg.mvNoisePx > 0 ? ", lab noise" : "");
+    }
     return true;
 }
 
@@ -844,7 +891,9 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     // the pair's optical flow only when an eye has no game vectors to synthesise from: with vectors for both eyes the flow engine and its
     // two preparation passes are skipped (2.2-3.3 ms of GPU timeline per rendered frame on the 5090, on the critical path of the first output)
     if (mode == 1 && havePair) {
-        const bool bothVectors = I.useVectors && I.mvValid[n][0] && I.mvValid[n][1] && I.mvSrv[n][0] && I.mvSrv[n][1] && I.resTex[0][0] && I.resTex[1][0];
+        // the game vector candidate needs the flow too: the vectors only add a candidate to it
+        const bool bothVectors = I.useVectors && I.mvValid[n][0] && I.mvValid[n][1] && I.mvSrv[n][0] && I.mvSrv[n][1] && I.resTex[0][0] && I.resTex[1][0] &&
+                                 !(I.cfg.synth && I.cfg.mvCandidate);
         if (bothVectors) {
             stats.flowSkipped++;
         } else if (!I.pairFlowValid[n]) {
@@ -875,6 +924,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
             c.mvInfo[0] = (float)md.Width; c.mvInfo[1] = (float)md.Height; c.mvInfo[2] = v.mvScaleX; c.mvInfo[3] = v.mvScaleY;
             c.mode[1] = I.cfg.maxFlowPx;
             c.blocks[0] = std::max(2, (int)(c.mvRect[3] * 0.01f + 0.5f));   // dilation radius: 1 % of the vectors' height (8 texels at 800)
+            c.mvc[2] = I.cfg.mvNoisePx; c.mvc[3] = (float)(I.mvSeed % 997);
             D3D11_VIEWPORT vp{}; vp.Width = (float)md.Width; vp.Height = (float)md.Height; vp.MaxDepth = 1.f;
             m_ctx->RSSetViewports(1, &vp);
             ID3D11ShaderResourceView* nul = nullptr;
@@ -900,7 +950,10 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         }
         ID3D11RenderTargetView* nullRtv0 = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv0, nullptr);
     }
-    m_ctx->OMSetRenderTargets(1, &I.outRtv, nullptr);
+    I.mvSeed++;
+    const bool counting = mode == 1 && I.cntUav;
+    if (counting) m_ctx->OMSetRenderTargetsAndUnorderedAccessViews(1, &I.outRtv, nullptr, 1, 1, &I.cntUav, nullptr);
+    else m_ctx->OMSetRenderTargets(1, &I.outRtv, nullptr);
     m_ctx->IASetInputLayout(nullptr); m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_ctx->VSSetShader(I.vs, nullptr, 0); m_ctx->PSSetShader(I.psOut, nullptr, 0);
     m_ctx->PSSetSamplers(0, 1, &I.smp); m_ctx->PSSetConstantBuffers(0, 1, &I.cb);
@@ -912,6 +965,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         Cb c{};
         c.synth[0] = I.cfg.synth ? 1.f : 0.f; c.synth[1] = std::max(1.f, I.cfg.motionLimit * m_w * 0.5f);
         c.synth[2] = I.cfg.costScale; c.synth[3] = I.cfg.photoScale;
+        c.mvc[0] = I.cfg.synth && I.cfg.mvCandidate ? 1.f : 0.f; c.mvc[1] = I.cfg.mvBias;
         // the game's vectors of the current frame for this eye (docs/MOTION_VECTORS.md), when the shim published them
         ID3D11ShaderResourceView* vsrv[3] = { vecEye[e] ? I.mvSrv[n][e] : nullptr, vecEye[e] ? I.resSrv[e][0] : nullptr, vecEye[e] ? I.resSrv[e][2] : nullptr };
         m_ctx->PSSetShaderResources(4, 3, vsrv);
@@ -943,6 +997,12 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     }
     ID3D11ShaderResourceView* nulls[8] = {}; m_ctx->PSSetShaderResources(0, 8, nulls);
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
+    if (counting && ++I.cntRenders % 10 == 0 && !I.cntPending[I.cntNext]) {
+        // the counts so far into a staging copy (read by CollectTimings when the GPU is done with it), then from zero again
+        m_ctx->CopyResource(I.cntStage[I.cntNext], I.cntBuf);
+        const UINT zero[4] = {}; m_ctx->ClearUnorderedAccessViewUint(I.cntUav, zero);
+        I.cntPending[I.cntNext] = true; I.cntNext ^= 1;
+    }
     m_ctx->End(I.qT[3]);
     m_ctx->End(I.qDisjointR);
     I.synthTimed = true;
@@ -962,6 +1022,17 @@ void FrameGen::CollectTimings() {
     };
     if (I.flowTimed && pair(I.qDisjoint, I.qT[0], I.qT[1], &stats.lastFlowMs, &stats.flowMsSum, &stats.flowN)) I.flowTimed = false;
     if (I.synthTimed && pair(I.qDisjointR, I.qT[2], I.qT[3], &stats.lastSynthMs, &stats.synthMsSum, &stats.synthN)) I.synthTimed = false;
+    for (int k = 0; k < 2; k++) {
+        if (!I.cntPending[k]) continue;
+        D3D11_MAPPED_SUBRESOURCE m{};
+        if (m_ctx->Map(I.cntStage[k], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m) != S_OK) continue;
+        const uint32_t* v = (const uint32_t*)m.pData;
+        uint64_t sum[4] = {};
+        for (int c = 0; c < 4; c++) for (int j = 0; j < 16; j++) sum[c] += v[c * 16 + j];
+        m_ctx->Unmap(I.cntStage[k], 0);
+        stats.mvcSampled += sum[0]; stats.mvcBoundary += sum[1]; stats.mvcAvail += sum[2]; stats.mvcWins += sum[3];
+        I.cntPending[k] = false;
+    }
 }
 
 void FrameGen::SetUseVectors(bool on) { m_i->useVectors = on; }

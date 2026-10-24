@@ -24,6 +24,9 @@ struct FrameGenConfig {
     int synth = 1;
     float motionLimit = 0.10f;   // edge: content shift beyond this share of the eye width falls back to the still frame (soft over the last quarter)
     float costScale = 17.f;      // edge: confidence = 1 - (luma cost - 0.02) * this
+    int mvCandidate = 0;         // edge: the game's vector is one more candidate (the flow keeps running in DLSS games); 0 = vectors take the crossfade path
+    float mvBias = 0.02f;        // edge: colour error added to the game vector's (it must beat the flow's candidates by this)
+    float mvNoisePx = 0.f;       // lab only (VISIONALVR_FG_MV_NOISE): random offset per vector texel and frame, full-res px
     float photoScale = 13.5f;    // edge: where a vector is doubted, the previous frame is blended in by 1 - (max |dRGB| - 0.03) * this (0 = always: "edge-blend")
 };
 
@@ -43,7 +46,8 @@ struct FrameGenStats {
     uint64_t ingests = 0, pairs = 0, synths = 0, reals = 0, copies = 0, flowErrors = 0, renderErrors = 0;
     uint64_t flowSkipped = 0;                                        // synthetic outputs rendered without running the flow engine (both eyes had game vectors)
     uint64_t mvFrames = 0, mvEyes = 0, mvDepth = 0, mvErrors = 0;   // game motion vectors: frames with vectors for at least one eye, eye ingests, with depth, failures
-    uint64_t mvUsedEyes = 0;                                         // eye passes synthesised from the game's vectors (the flow fills what they do not cover)
+    uint64_t mvUsedEyes = 0;
+    uint64_t mvcSampled = 0, mvcBoundary = 0, mvcAvail = 0, mvcWins = 0;   // game vector candidate, 1 output pixel in 64: sampled, at a boundary, a vector there, it won                                         // eye passes synthesised from the game's vectors (the flow fills what they do not cover)
     int mvW = 0, mvH = 0; uint32_t mvFormat = 0, mvFlags = 0, mvApi = 0; float mvScale[2] = {1.f, 1.f};   // the last vectors seen
     float lastFlowMs = 0, lastSynthMs = 0, lastIngestMs = 0;   // GPU time of the last flow pass (prep + engine), the last output pass, the last ingest copy
     double flowMsSum = 0, synthMsSum = 0; uint64_t flowN = 0, synthN = 0;

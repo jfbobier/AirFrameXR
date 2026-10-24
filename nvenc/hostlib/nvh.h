@@ -69,7 +69,7 @@ void nvh_release_shared(void* nvh);
 // Creates the optical-flow session for the stream's composed frame (2 x eye width by eye height). flow_scale: the flow input is the frame
 // downscaled by this (0.25..1); perf_level: 5 slow / 10 medium / 20 fast; grid: 1, 2 or 4. Returns 1, or 0 with the reason in err (no
 // optical-flow engine on this GPU/driver: the feature must stay off). on = 0 releases everything.
-int nvh_fg_enable(void* nvh, int on, double flow_scale, int perf_level, int grid, int synth, char* err, int errlen);
+int nvh_fg_enable(void* nvh, int on, double flow_scale, int perf_level, int grid, int synth, int mv_candidate, char* err, int errlen);
 // Takes the shim slot into the frame history (previous <- current <- slot) and computes the flow between the two; q_render8 = the per-eye
 // orientations the frame was rendered with (ipc frameRenderQuat). Returns 1 when two frames exist (interpolation possible), 0 after the
 // first frame, -1 on error. The slot may be released as soon as this returns.

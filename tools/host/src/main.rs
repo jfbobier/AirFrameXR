@@ -97,6 +97,9 @@ struct Args {
     /// 1 = edge-aware synthesis (default), 2 = edge-aware without the photometric gate, 0 = the crossfade recipe (`video.frame_gen_synthesis`,
     /// `--frame-gen-synthesis`, env VISIONALVR_FG_SYNTH)
     fg_synth: i32,
+    /// edge synthesis: the game's vector as one more candidate (`video.frame_gen_vector_candidate`, `--frame-gen-vector-candidate on|off`,
+    /// env VISIONALVR_FG_MV_CANDIDATE); off = frames with game vectors take the crossfade path
+    fg_mv_candidate: bool,
     /// scripted controller input for unattended runs (harness): (seconds after game start, hand, click mask, trigger)
     auto_input: Vec<(f64, usize, u32, f32)>,
     qp_map: Option<bool>,
@@ -191,6 +194,7 @@ fn parse_args() -> Result<Args, String> {
         fg_perf: 20,
         fg_grid: 4,
         fg_synth: 1,
+        fg_mv_candidate: false,
         auto_input: vec![],
         send_pacing_explicit: false,
         qp_map: None,
@@ -330,6 +334,7 @@ fn parse_args() -> Result<Args, String> {
             "--frame-gen-perf" => a.fg_perf = parse_fg_perf(&v()?)?,
             "--frame-gen-grid" => a.fg_grid = v()?.parse::<i32>().map_err(|e| format!("{e}"))?,
             "--frame-gen-synthesis" => a.fg_synth = parse_fg_synth(&v()?)?,
+            "--frame-gen-vector-candidate" => a.fg_mv_candidate = parse_on_off("--frame-gen-vector-candidate", &v()?)?,
             "--auto-input" => {
                 // "20:rA,26:rA,40:lT": at 20 s and 26 s after the game starts press A on the right controller, at 40 s the left
                 // trigger. Buttons: A/X primary, B/Y secondary, S thumbstick, M menu, H system, T trigger.
@@ -407,6 +412,9 @@ fn parse_args() -> Result<Args, String> {
     }
     if let Some(v) = std::env::var("VISIONALVR_FG_SYNTH").ok().and_then(|v| parse_fg_synth(&v).ok()) {
         a.fg_synth = v;
+    }
+    if let Ok(v) = std::env::var("VISIONALVR_FG_MV_CANDIDATE") {
+        a.fg_mv_candidate = v == "1" || v.eq_ignore_ascii_case("on");
     }
     if !a.live && a.file.as_os_str().is_empty() && !a.system_check && !a.bench_quality && a.discover.is_none() {
         return Err("--file <annexb.hevc> is required unless --live".into());
@@ -540,6 +548,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if let Some(v) = st.frame_gen_synthesis.as_deref().and_then(|v| parse_fg_synth(v).ok()) {
         a.fg_synth = v;
+    }
+    if let Some(v) = st.frame_gen_vector_candidate {
+        a.fg_mv_candidate = v;
     }
     if let Some(v) = st.gpu_sched_class {
         a.gpu_sched_class = v as i32;
@@ -950,7 +961,7 @@ mod nvh {
         pub fn nvh_ipc_publish_input(ipc: *mut c_void, side: i32, clicks: u32, touches: u32, trigger: f32, squeeze: f32, sx: f32, sy: f32);
         pub fn nvh_ipc_poll_haptic(ipc: *mut c_void, side: i32, seq: *mut u32, freq: *mut f32, amp: *mut f32);
         pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64, render_q8: *mut f32, has_projection: *mut i32, display_s: *mut f64, release_s: *mut f64) -> i32;
-        pub fn nvh_fg_enable(nvh: *mut c_void, on: i32, flow_scale: f64, perf_level: i32, grid: i32, synth: i32, err: *mut c_char, errlen: i32) -> i32;
+        pub fn nvh_fg_enable(nvh: *mut c_void, on: i32, flow_scale: f64, perf_level: i32, grid: i32, synth: i32, mv_candidate: i32, err: *mut c_char, errlen: i32) -> i32;
         pub fn nvh_fg_ingest(nvh: *mut c_void, ipc: *mut c_void, slot: u32, q_render8: *const f32, err: *mut c_char, errlen: i32) -> i32;
         pub fn nvh_fg_reset(nvh: *mut c_void);
         pub fn nvh_fg_encode(nvh: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, age: i32, q_out4: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
@@ -1458,7 +1469,7 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
         if fg_active { "ON" } else { "off" }, if args.game_motion_vectors { "on" } else { "off" }, if cap > 0.0 { format!("{cap:.0}") } else { "none".into() },
         if lag > 0.0 { format!("{lag:.1}") } else { "auto".into() }));
     event(origin, "frame_gen_config", json!({ "why": why, "on": fg_active, "rate": rate, "game_motion_vectors": args.game_motion_vectors,
-        "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf, "synthesis": args.fg_synth }));
+        "cap_fps": cap, "lag_ms": lag, "flow_scale": args.fg_flow_scale, "perf": args.fg_perf, "synthesis": args.fg_synth, "vector_candidate": args.fg_mv_candidate }));
 }
 
 /// What a run collects besides the display periods: the headset's 10-second client windows (network, latency), packets lost, the generator's
@@ -1509,8 +1520,8 @@ fn net_summary_of(net: &[serde_json::Value], lost: u64) -> serde_json::Value {
 fn fg_mv_counts(p: &Option<Arc<pipeline::Pipeline>>) -> (u64, u64) {
     let Some(p) = p.as_ref() else { return (0, 0) };
     let g = p.enc.lock();
-    let mut buf = [0 as std::ffi::c_char; 768];
-    unsafe { nvh::nvh_fg_stats(g.handle, buf.as_mut_ptr(), 768) };
+    let mut buf = [0 as std::ffi::c_char; 1536];
+    unsafe { nvh::nvh_fg_stats(g.handle, buf.as_mut_ptr(), 1536) };
     let t = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
     let v: serde_json::Value = serde_json::from_str(&t).unwrap_or(serde_json::Value::Null);
     (v["mv"]["frames"].as_u64().unwrap_or(0), v["mv"]["used_eyes"].as_u64().unwrap_or(0))
@@ -1575,7 +1586,7 @@ fn set_frame_gen_live(origin: Instant, p: &pipeline::Pipeline, args: &Args, want
         *fg_active = enable_frame_gen(origin, g.handle, args);
     } else {
         let mut err = [0 as std::ffi::c_char; 256];
-        unsafe { nvh::nvh_fg_enable(g.handle, 0, args.fg_flow_scale, args.fg_perf, args.fg_grid, args.fg_synth, err.as_mut_ptr(), 256) };
+        unsafe { nvh::nvh_fg_enable(g.handle, 0, args.fg_flow_scale, args.fg_perf, args.fg_grid, args.fg_synth, args.fg_mv_candidate as i32, err.as_mut_ptr(), 256) };
         *fg_active = false;
         logs::general("INFO", &format!("frame generation OFF ({why}): full-rate pacing"));
         event(origin, "frame_gen", json!({ "requested": false, "on": false, "why": why }));
@@ -1590,10 +1601,10 @@ fn set_frame_gen_live(origin: Instant, p: &pipeline::Pipeline, args: &Args, want
 /// GPU or driver has no optical-flow engine, in which case the stream runs as without the feature.
 fn enable_frame_gen(origin: Instant, handle: *mut std::ffi::c_void, args: &Args) -> bool {
     let mut err = [0 as std::ffi::c_char; 256];
-    let ok = unsafe { nvh::nvh_fg_enable(handle, 1, args.fg_flow_scale, args.fg_perf, args.fg_grid, args.fg_synth, err.as_mut_ptr(), 256) } != 0;
+    let ok = unsafe { nvh::nvh_fg_enable(handle, 1, args.fg_flow_scale, args.fg_perf, args.fg_grid, args.fg_synth, args.fg_mv_candidate as i32, err.as_mut_ptr(), 256) } != 0;
     unsafe { nvh::nvh_fg_use_mv(handle, args.game_motion_vectors as i32) };
-    let mut buf = [0 as std::ffi::c_char; 768];
-    unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 768) };
+    let mut buf = [0 as std::ffi::c_char; 1536];
+    unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 1536) };
     let stats = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
     if ok {
         logs::general("INFO", &format!("frame generation ON: rate {}, flow scale {:.2}, perf {}, grid {}, synthesis {}; {}", args.fg_rate.unwrap_or(FgRate::Half).name(), args.fg_flow_scale, args.fg_perf, args.fg_grid,
@@ -2419,6 +2430,7 @@ fn main() {
     let mut motion_tap_seen = (0u32, 0u32);
     let (mut perf_rel, mut perf_late) = (0u64, 0u64);   // shim release counters at the last fg_perf line
     let mut perf_fg = [0u64; 10];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand, stale_stamps, hold_skips, regime_switches, hold_bypassed
+    let mut perf_mvc = [0u64; 4];   // game vector candidate counters at the last line: sampled, boundary, avail, wins
     // (tap state, streams) last reported: the shim's DLSS motion-vector tap (docs/MOTION_VECTORS.md)
     struct BenchState {
         i: usize,
@@ -2626,6 +2638,18 @@ fn main() {
                         unsafe { std::ffi::CStr::from_ptr(gb.as_ptr()) }.to_string_lossy().to_string()
                     } else { String::new() };
                     let gen = p.fg_stats_json();
+                    // the game vector candidate (edge synthesis): how often a vector was there at a motion boundary and how often it won
+                    if let Ok(g) = serde_json::from_str::<serde_json::Value>(&gen) {
+                        let m = &g["mvc"];
+                        let now = [m["sampled"].as_u64().unwrap_or(0), m["boundary"].as_u64().unwrap_or(0), m["avail"].as_u64().unwrap_or(0), m["wins"].as_u64().unwrap_or(0)];
+                        if args.fg_mv_candidate && now[0] > perf_mvc[0] {
+                            let d: Vec<u64> = now.iter().zip(perf_mvc.iter()).map(|(a, b)| a.saturating_sub(*b)).collect();
+                            let pct = |a: u64, b: u64| if b > 0 { a as f64 * 100.0 / b as f64 } else { 0.0 };
+                            logs::general("INFO", &format!("game vector candidate: {:.1} % of the generated pixels at a motion boundary, a game vector at {:.1} % of those, it won {:.1} % of them ({:.2} % of all pixels; 1 pixel in 64 sampled)",
+                                pct(d[1], d[0]), pct(d[2], d[1]), pct(d[3], d[2]), pct(d[3], d[0])));
+                        }
+                        perf_mvc = now;
+                    }
                     // the shim's counters restart with every game: a smaller value is a new game's own count, not a negative delta (gears 2026-10-20: 1.8e19 "releases late")
                     let (d_rel, d_late) = if rel < perf_rel || late < perf_late { (rel, late) } else { (rel - perf_rel, late - perf_late) };
                     (perf_rel, perf_late) = (rel, late);

@@ -67,6 +67,8 @@ pub struct Settings {
     pub frame_gen_perf: Option<String>,
     /// "edge" (default) | "edge-blend" | "crossfade": the synthesis of generated frames (nvenc/hostlib/framegen.cpp)
     pub frame_gen_synthesis: Option<String>,
+    /// edge synthesis: the game's motion vector as one more candidate (default off)
+    pub frame_gen_vector_candidate: Option<bool>,
     /// tap the game's DLSS motion vectors when the OptiScaler-DLSSMotionVectorExtractor provider is loaded (docs/MOTION_VECTORS.md); default on
     pub game_motion_vectors: Option<bool>,
     /// "half" (default) | "uncapped": the game paced at half the display rate with strict alternation, or at the display rate with every
@@ -129,6 +131,7 @@ pub fn load_settings(path: &Path) -> Settings {
         frame_gen_hold_age: video["frame_gen_hold_age"].as_bool(),
         frame_gen_perf: video["frame_gen_perf"].as_str().map(str::to_string),
         frame_gen_synthesis: video["frame_gen_synthesis"].as_str().map(str::to_string),
+        frame_gen_vector_candidate: video["frame_gen_vector_candidate"].as_bool(),
         game_motion_vectors: video["game_motion_vectors"].as_bool(),
         frame_gen_rate: video["frame_gen_rate"].as_str().map(str::to_string),
         frame_gen_lag_ms: video["frame_gen_lag_ms"].as_f64(),
