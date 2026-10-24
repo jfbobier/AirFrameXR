@@ -16,7 +16,7 @@ FIX = ROOT / "harness/fixtures/streamer_events"
 
 # fixture -> [(snapshot label, [text that must be shown], [text that must not be shown])]
 EXPECT = {
-    "game90_vectors": [
+    "game90": [
         ("idle", [], ["Game: LiesOfP.exe"]),
         ("live", ["Game: LiesOfP.exe", "44.8 fps", "Streaming (live"], ["Streaming: last session"]),
         ("ended", ["Game: none (last: LiesOfP.exe, 1.5 min)"], []),
@@ -30,9 +30,8 @@ EXPECT = {
     ],
     "controls_avp": [
         ("avp_auto", ["headset reports 1.62 m", "Eye height", "Debug logging", "Export logs...", "Open logs folder", "Frame generation", "Position", "Picture", "Desktop mirror"], ["Between games"]),
-        ("frame_gen_on", ["sent frame_gen on", "Use the game's DLSS motion vectors", "Uncapped"], []),   # both ticks shown with no game known
+        ("frame_gen_on", ["sent frame_gen on"], []),
         ("rate", ["sent frame_gen_rate two_thirds"], []),
-        ("mv", ["sent game_mv off"], []),
         ("uncapped_on", ["sent frame_gen_rate uncapped", "check[x] Uncapped"], []),
         ("uncapped_off", ["sent frame_gen_rate two_thirds", "check[ ] Uncapped"], []),   # back to the slider's position (2/3, set above)
         ("recenter", ["sent recenter"], []),
@@ -49,26 +48,6 @@ EXPECT = {
     "controls_quest": [
         ("quest", ["Meta Quest 3"], ["headset reports"]),
         ("quest_manual", ["sent height 0.00"], []),   # a Quest's floor is right: whatever the choice, the engine is told 0
-    ],
-    "vectors_worked": [
-        ("worked", ["Game motion vectors worked (2558 frames)"], ["ran blind", "No game vectors"]),
-        ("next_game", [], ["worked", "ran blind"]),   # the line stays until the next real game starts
-    ],
-    "vectors_blind": [
-        ("blind", ["Generation ran blind (optical flow only)", "no vectors arrived"], ["worked", "button Install"]),
-        ("next_game", [], ["ran blind"]),
-    ],
-    "vectors_nodll": [
-        ("offer", ["No game vectors", "button Install", "button Not for this game"], ["ran blind"]),
-        ("installed", ["Installed (dxgi.dll): takes effect next session"], ["button Install", "button Not for this game"]),
-        ("offer2", ["No game vectors", "button Not for this game"], []),
-        ("dismissed", [], ["No game vectors", "button Not for this game"]),
-        ("not_again", [], ["No game vectors"]),   # not for this game means never again
-    ],
-    "vectors_none": [
-        ("generation_off", [], ["worked", "ran blind", "No game vectors"]),
-        ("tick_off", [], ["worked", "ran blind", "No game vectors"]),
-        ("mirror", [], ["worked", "ran blind", "No game vectors"]),
     ],
     "audio_line": [
         ("quiet", [], ["Audio:"]),   # nothing reported, nothing said

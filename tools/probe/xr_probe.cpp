@@ -59,211 +59,6 @@ static const char* stateName(XrSessionState s) {
     default: return "?"; }
 }
 
-// XR_PROBE_MV=synthetic|truth: the probe stands in for the game's DLSS proxy (docs/MOTION_VECTORS.md). It exports the provider ABI of
-// OptiScaler-DLSSMotionVectorExtractor (VaProvider.h v1, mirrored in ovrshim/ngxtap.h) so the shim finds and registers with it, and once per eye and frame
-// publishes a motion-vector texture (R16G16_FLOAT at half the eye size: the DLSS render size) and a depth texture (D32_FLOAT, a depth-stencil
-// target like a game's) on the app's immediate context.
-// `synthetic` (plumbing check): vx = 8 sin(2 pi y / h), vy = 4 cos(2 pi x / w), the right eye negated, the 16 x 16 block at the origin holds
-// vx = frame % 32; the depth is cleared to 0.25 (even frames) or 0.75 (odd). The host's VISIONALVR_FG_MV_DUMP images can be checked against these.
-// `truth` (ground truth for the synthesis): the exact NGX-convention vectors of the dots scene, rendered by a pixel shader per eye: the camera
-// motion of the world-fixed background (where each pixel's direction projected in the previous frame's view, minus its position) and, inside
-// the moving marker, the marker's own displacement; both in render-size pixels, previous minus current.
-extern "C" {
-struct DLSSVEC_PublicationV1 {
-    uint32_t struct_size, version, api, stream; uint64_t frame;
-    void* cmd; void* color; void* motion_vectors; void* depth; void* output; void* exposure;
-    uint32_t render_w, render_h, output_w, output_h, color_x, color_y, mv_x, mv_y, depth_x, depth_y;
-    float jitter_x, jitter_y, mv_scale_x, mv_scale_y; int32_t reset; uint32_t flags; void* params;
-};
-typedef void (*DLSSVEC_ConsumerV1)(const DLSSVEC_PublicationV1*, void*);
-static DLSSVEC_ConsumerV1 g_mvConsumer = nullptr; static void* g_mvConsumerUser = nullptr;
-__declspec(dllexport) uint32_t DLSSVEC_ProviderVersion() { return 1; }
-__declspec(dllexport) int DLSSVEC_SetConsumerV1(DLSSVEC_ConsumerV1 c, void* u) { g_mvConsumer = c; g_mvConsumerUser = u; return 1; }
-}
-struct SyntheticMv {
-    ID3D11Texture2D* mv[2] = {}; ID3D11Texture2D* depth[2] = {}; ID3D11DepthStencilView* dsv[2] = {}; ID3D11RenderTargetView* rtv[2] = {};
-    UINT w = 0, h = 0; uint64_t frame = 0; uint64_t published = 0;
-    bool truth = false;
-    // XR_PROBE_MV_FAULT (stability harness, docs/STABILITY_PLAN.md): comma separated  drop:<p> (skip a publication with probability p), blackout:<start_s>:<dur_s> (none in the
-    // window, repeatable), churn:<s> (new stream ids every s seconds: a game's DLSS feature re-created at a level change), resize:<s> (the render size alternates between full
-    // and half every s seconds), recreate:<s> (the vector and depth textures are destroyed and created again right after a publication), garbage:<p> (the vectors hold
-    // +-9000 px for a publication), null:<p> (a publication whose vector texture is null: a provider bug)
-    struct Fault { double dropP = 0, churnS = 0, resizeS = 0, recreateS = 0, garbageP = 0, nullP = 0; std::vector<std::pair<double, double>> blackouts; } f;
-    uint32_t epoch = 0; bool halfSize = false; double lastChurn = 0, lastResize = 0, lastRecreate = 0;
-    uint64_t skipped = 0, churned = 0, recreated = 0, garbaged = 0, nulled = 0;
-    ID3D11Device* dev = nullptr; UINT eyeW = 0, eyeH = 0; uint64_t rng = 0x9E3779B97F4A7C15ull;
-    double rnd() { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return (double)(rng >> 11) / 9007199254740992.0; }
-    static double nowS() {
-        static LARGE_INTEGER fq = [] { LARGE_INTEGER x; QueryPerformanceFrequency(&x); return x; }();
-        static LARGE_INTEGER t0 = [] { LARGE_INTEGER x; QueryPerformanceCounter(&x); return x; }();
-        LARGE_INTEGER n; QueryPerformanceCounter(&n); return (double)(n.QuadPart - t0.QuadPart) / (double)fq.QuadPart;
-    }
-    void parseFault(const char* spec) {
-        std::string t(spec ? spec : ""); size_t pos = 0;
-        while (pos < t.size()) {
-            size_t e = t.find(',', pos); if (e == std::string::npos) e = t.size();
-            std::string it = t.substr(pos, e - pos); pos = e + 1;
-            std::vector<std::string> a; size_t q = 0;
-            while (q <= it.size()) { size_t c = it.find(':', q); if (c == std::string::npos) c = it.size(); a.push_back(it.substr(q, c - q)); q = c + 1; }
-            const double v1 = a.size() > 1 ? atof(a[1].c_str()) : 0, v2 = a.size() > 2 ? atof(a[2].c_str()) : 0;
-            if (a[0] == "drop") f.dropP = v1; else if (a[0] == "blackout") f.blackouts.push_back({v1, v1 + v2}); else if (a[0] == "churn") f.churnS = v1;
-            else if (a[0] == "resize") f.resizeS = v1; else if (a[0] == "recreate") f.recreateS = v1; else if (a[0] == "garbage") f.garbageP = v1; else if (a[0] == "null") f.nullP = v1;
-        }
-    }
-    // false: do not publish this eye now (a drop or a blackout). Also advances the timed faults (churn, resize) once per frame (eye 0).
-    bool faultGate(int eye) {
-        const double t = nowS();
-        if (eye == 0) {
-            if (f.churnS > 0 && t - lastChurn >= f.churnS) { lastChurn = t; epoch++; churned++; }
-            if (f.resizeS > 0 && t - lastResize >= f.resizeS) { lastResize = t; halfSize = !halfSize; }
-        }
-        for (auto& b : f.blackouts) if (t >= b.first && t < b.second) { skipped++; return false; }
-        if (f.dropP > 0 && rnd() < f.dropP) { skipped++; return false; }
-        return true;
-    }
-    void garbageFill(ID3D11DeviceContext* ctx, int eye) {
-        if (f.garbageP <= 0 || rnd() >= f.garbageP) return;
-        std::vector<uint16_t> g((size_t)w * h * 2, half(9000.f)); ctx->UpdateSubresource(mv[eye], 0, nullptr, g.data(), w * 4, 0); garbaged++;
-    }
-    void releaseTextures() {
-        for (int e = 0; e < 2; e++) {
-            if (rtv[e]) { rtv[e]->Release(); rtv[e] = nullptr; } if (dsv[e]) { dsv[e]->Release(); dsv[e] = nullptr; }
-            if (mv[e]) { mv[e]->Release(); mv[e] = nullptr; } if (depth[e]) { depth[e]->Release(); depth[e] = nullptr; }
-        }
-    }
-    // after the last eye of a frame: the textures just published are destroyed and created again (the consumer must have its own copies by now)
-    void maybeRecreate(int eye) {
-        if (eye != 1 || f.recreateS <= 0 || !dev) return;
-        const double t = nowS(); if (t - lastRecreate < f.recreateS) return; lastRecreate = t;
-        releaseTextures();
-        if (init(dev, eyeW, eyeH) && truth) for (int e = 0; e < 2; e++) dev->CreateRenderTargetView(mv[e], nullptr, &rtv[e]);
-        recreated++;
-    }
-    // truth mode: the shader and the per-eye state of the previous frame
-    ID3D11VertexShader* vs = nullptr; ID3D11PixelShader* ps = nullptr; ID3D11Buffer* cb = nullptr;
-    struct TruthCb { float tanF[4]; float mA[4], mB[4], mC[4]; float marker[4]; float disp[4]; };
-    float prevQ[2][4] = {}; bool prevValid[2] = {};
-    float lastTanF[2][4] = {}; UINT lastOut[2][2] = {}; uint64_t decoys = 0;   // XR_PROBE_MV_AHEAD: the decoy evaluates reuse the last real one's view
-    float markerC[2][2] = {}; bool markerValid[2] = {}, prevMarkerValid[2] = {}; float prevMarkerC[2][2] = {}; float markerHalf[2][2] = {};
-    static void rotRows(const float* q, float m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w): world = R * local
-        const float x = q[0], y = q[1], z = q[2], w = q[3];
-        m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y - z * w);     m[2] = 2 * (x * z + y * w);
-        m[3] = 2 * (x * y + z * w);     m[4] = 1 - 2 * (x * x + z * z); m[5] = 2 * (y * z - x * w);
-        m[6] = 2 * (x * z - y * w);     m[7] = 2 * (y * z + x * w);     m[8] = 1 - 2 * (x * x + y * y);
-    }
-    bool initTruth(ID3D11Device* dev, std::string& err) {
-        static const char* src = R"(
-cbuffer CB : register(b0) { float4 tanF; float4 mA, mB, mC; float4 marker; float4 disp; };
-struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
-VSOut VS(uint id : SV_VertexID) { VSOut o; float2 p = float2((id << 1) & 2, id & 2); o.pos = float4(p * float2(2, -2) + float2(-1, 1), 0, 1); o.uv = p; return o; }
-float2 PS(VSOut i) : SV_Target {
-    float2 px = i.uv * disp.zw;
-    if (all(px >= marker.xy) && all(px < marker.zw)) return disp.xy;
-    float3 d = float3(lerp(-tanF.x, tanF.y, i.uv.x), lerp(tanF.z, -tanF.w, i.uv.y), -1);
-    float3 dp = float3(dot(mA.xyz, d), dot(mB.xyz, d), dot(mC.xyz, d));   // the same direction in the previous frame's view
-    if (dp.z > -1e-4) return float2(0, 0);
-    float2 tt = dp.xy / -dp.z;
-    float2 uvP = float2((tt.x + tanF.x) / (tanF.x + tanF.y), 1 - (tt.y + tanF.w) / (tanF.z + tanF.w));
-    return (uvP - i.uv) * disp.zw;
-})";
-        ComPtr<ID3DBlob> bvs, bps;
-        if (!compile(src, "VS", "vs_5_0", bvs, err) || !compile(src, "PS", "ps_5_0", bps, err)) return false;
-        if (FAILED(dev->CreateVertexShader(bvs->GetBufferPointer(), bvs->GetBufferSize(), nullptr, &vs)) ||
-            FAILED(dev->CreatePixelShader(bps->GetBufferPointer(), bps->GetBufferSize(), nullptr, &ps))) { err = "truth shaders"; return false; }
-        D3D11_BUFFER_DESC bd{}; bd.ByteWidth = sizeof(TruthCb); bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        if (FAILED(dev->CreateBuffer(&bd, nullptr, &cb))) { err = "truth cb"; return false; }
-        for (int e = 0; e < 2; e++) if (FAILED(dev->CreateRenderTargetView(mv[e], nullptr, &rtv[e]))) { err = "truth rtv"; return false; }
-        truth = true;
-        return true;
-    }
-    // The marker of this frame for one eye (full eye pixels: centre and half sizes), recorded by the dots renderer before publishTruth.
-    void setMarker(int eye, bool visible, float cx, float cy, float hw, float hh) {
-        markerValid[eye] = visible; markerC[eye][0] = cx; markerC[eye][1] = cy; markerHalf[eye][0] = hw; markerHalf[eye][1] = hh;
-    }
-    void publishTruth(ID3D11DeviceContext* ctx, int eye, UINT outW, UINT outH, const float tanF[4], const float q[4], bool decoy = false) {
-        if (!g_mvConsumer || !mv[eye] || !truth) return;
-        if (decoy) { tanF = lastTanF[eye]; outW = lastOut[eye][0]; outH = lastOut[eye][1]; q = prevQ[eye]; if (!prevValid[eye] || !outW) return; }
-        else { memcpy(lastTanF[eye], tanF, sizeof lastTanF[eye]); lastOut[eye][0] = outW; lastOut[eye][1] = outH; }
-        if (!decoy && !faultGate(eye)) { memcpy(prevQ[eye], q, sizeof prevQ[eye]); prevValid[eye] = true; markerValid[eye] = false; if (eye == 1) frame++; return; }
-        TruthCb c{};
-        memcpy(c.tanF, tanF, sizeof c.tanF);
-        float rc[9], rp[9];
-        rotRows(q, rc); rotRows(prevValid[eye] ? prevQ[eye] : q, rp);
-        // direction in the current view -> world (R_cur) -> previous view (R_prev^T): M = R_prev^T R_cur
-        for (int r = 0; r < 3; r++) for (int k = 0; k < 3; k++) {
-            float v = 0; for (int j = 0; j < 3; j++) v += rp[j * 3 + r] * rc[j * 3 + k];
-            (r == 0 ? c.mA : r == 1 ? c.mB : c.mC)[k] = v;
-        }
-        if (!decoy && markerValid[eye] && prevMarkerValid[eye]) {
-            c.marker[0] = (markerC[eye][0] - markerHalf[eye][0]) * 0.5f; c.marker[1] = (markerC[eye][1] - markerHalf[eye][1]) * 0.5f;
-            c.marker[2] = (markerC[eye][0] + markerHalf[eye][0]) * 0.5f; c.marker[3] = (markerC[eye][1] + markerHalf[eye][1]) * 0.5f;
-            c.disp[0] = (prevMarkerC[eye][0] - markerC[eye][0]) * 0.5f; c.disp[1] = (prevMarkerC[eye][1] - markerC[eye][1]) * 0.5f;
-        } else { c.marker[0] = c.marker[1] = -1.f; c.marker[2] = c.marker[3] = -2.f; }
-        c.disp[2] = (float)w; c.disp[3] = (float)h;
-        ctx->UpdateSubresource(cb, 0, nullptr, &c, 0, 0);
-        ctx->OMSetRenderTargets(1, &rtv[eye], nullptr);
-        ctx->OMSetBlendState(nullptr, nullptr, 0xffffffff); ctx->OMSetDepthStencilState(nullptr, 0); ctx->RSSetState(nullptr);
-        D3D11_VIEWPORT vp{}; vp.Width = (float)w; vp.Height = (float)h; vp.MaxDepth = 1.f; ctx->RSSetViewports(1, &vp);
-        ctx->IASetInputLayout(nullptr); ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        ctx->VSSetShader(vs, nullptr, 0); ctx->PSSetShader(ps, nullptr, 0); ctx->PSSetConstantBuffers(0, 1, &cb);
-        ctx->Draw(3, 0);
-        ID3D11RenderTargetView* nullRtv = nullptr; ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
-        ctx->ClearDepthStencilView(dsv[eye], D3D11_CLEAR_DEPTH, 0.5f, 0);
-        garbageFill(ctx, eye);
-        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye + 10 * epoch; p.frame = decoy ? frame + 1000000 : frame; p.cmd = ctx;
-        p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = halfSize ? w / 2 : w; p.render_h = halfSize ? h / 2 : h; p.output_w = outW; p.output_h = outH;
-        p.mv_scale_x = p.mv_scale_y = 1.f; p.reset = prevValid[eye] ? 0 : 1; p.flags = 0x2 | 0x8;
-        if (f.nullP > 0 && rnd() < f.nullP) { p.motion_vectors = nullptr; nulled++; }
-        g_mvConsumer(&p, g_mvConsumerUser);
-        published++;
-        if (decoy) { decoys++; return; }   // the frame's state (previous pose, marker, counter) belongs to the real evaluates
-        memcpy(prevQ[eye], q, sizeof prevQ[eye]); prevValid[eye] = true;
-        prevMarkerValid[eye] = markerValid[eye]; prevMarkerC[eye][0] = markerC[eye][0]; prevMarkerC[eye][1] = markerC[eye][1];
-        markerValid[eye] = false;
-        if (eye == 1) frame++;
-        maybeRecreate(eye);
-    }
-    static uint16_t half(float f) {   // float -> IEEE half (round to nearest, values here are small)
-        uint32_t x; memcpy(&x, &f, 4); const uint32_t sign = (x >> 16) & 0x8000; int e = (int)((x >> 23) & 0xff) - 127 + 15; uint32_t m = x & 0x7fffff;
-        if (e <= 0) return (uint16_t)sign; if (e >= 31) return (uint16_t)(sign | 0x7c00);
-        return (uint16_t)(sign | (e << 10) | ((m + 0x1000) >> 13));
-    }
-    bool init(ID3D11Device* dev, UINT eyeW, UINT eyeH) {
-        w = eyeW / 2; h = eyeH / 2;
-        std::vector<uint16_t> px(w * h * 2);
-        for (int eye = 0; eye < 2; eye++) {
-            for (UINT y = 0; y < h; y++) for (UINT x = 0; x < w; x++) {
-                const float sgn = eye ? -1.f : 1.f;
-                px[(y * w + x) * 2] = half(sgn * 8.f * sinf(6.2831853f * y / h)); px[(y * w + x) * 2 + 1] = half(sgn * 4.f * cosf(6.2831853f * x / w));
-            }
-            D3D11_TEXTURE2D_DESC d{}; d.Width = w; d.Height = h; d.MipLevels = 1; d.ArraySize = 1; d.Format = DXGI_FORMAT_R16G16_FLOAT; d.SampleDesc.Count = 1;
-            d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-            D3D11_SUBRESOURCE_DATA sd{ px.data(), w * 4, 0 };
-            if (FAILED(dev->CreateTexture2D(&d, &sd, &mv[eye]))) return false;
-            D3D11_TEXTURE2D_DESC dd = d; dd.Format = DXGI_FORMAT_D32_FLOAT; dd.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-            if (FAILED(dev->CreateTexture2D(&dd, nullptr, &depth[eye])) || FAILED(dev->CreateDepthStencilView(depth[eye], nullptr, &dsv[eye]))) return false;
-        }
-        return true;
-    }
-    void publish(ID3D11DeviceContext* ctx, int eye, UINT outW, UINT outH) {
-        if (!g_mvConsumer || !mv[eye]) return;
-        if (!faultGate(eye)) return;
-        garbageFill(ctx, eye);
-        uint16_t block[16 * 16 * 2];
-        for (int i = 0; i < 256; i++) { block[i * 2] = half((float)(frame % 32)); block[i * 2 + 1] = half(0.f); }
-        D3D11_BOX box{ 0, 0, 0, 16, 16, 1 };
-        ctx->UpdateSubresource(mv[eye], 0, &box, block, 16 * 4, 0);
-        ctx->ClearDepthStencilView(dsv[eye], D3D11_CLEAR_DEPTH, frame % 2 ? 0.75f : 0.25f, 0);
-        DLSSVEC_PublicationV1 p{}; p.struct_size = sizeof p; p.version = 1; p.api = 11; p.stream = 1000 + eye + 10 * epoch; p.frame = frame; p.cmd = ctx;
-        p.motion_vectors = mv[eye]; p.depth = depth[eye]; p.render_w = halfSize ? w / 2 : w; p.render_h = halfSize ? h / 2 : h; p.output_w = outW; p.output_h = outH;
-        p.mv_scale_x = p.mv_scale_y = 1.f; p.reset = frame == 0 ? 1 : 0; p.flags = 0x2 | 0x8;   // MVLowRes, DepthInverted
-        if (f.nullP > 0 && rnd() < f.nullP) { p.motion_vectors = nullptr; nulled++; }
-        g_mvConsumer(&p, g_mvConsumerUser);
-        published++;
-        maybeRecreate(eye);
-    }
-};
-
 int main(int argc, char** argv) {
     const char* logPath = argc > 1 ? argv[1] : "xr_probe.log";
     int frames = argc > 2 ? atoi(argv[2]) : 60;
@@ -451,20 +246,6 @@ int main(int argc, char** argv) {
     std::vector<XrViewConfigurationView> vcv(n, { XR_TYPE_VIEW_CONFIGURATION_VIEW });
     CK(xrEnumerateViewConfigurationViews(inst, sys, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, n, &n, vcv.data()));
     L("views: %u, recommended %ux%u", n, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight);
-    SyntheticMv synMv; const bool synMvOn = getenv("XR_PROBE_MV") && strcmp(getenv("XR_PROBE_MV"), "synthetic") == 0;
-    const bool truthMvOn = getenv("XR_PROBE_MV") && strcmp(getenv("XR_PROBE_MV"), "truth") == 0;
-    // XR_PROBE_MV_AHEAD=1 (with truth): a game rendering ahead, as Valor Mortis under VDXR's async submission + running start: right after
-    // xrEndFrame each eye's DLSS evaluates once more before the runtime submitted the frame. The extra evaluate is a decoy without the camera's
-    // rotation, so a consumer that pairs the frame with it (the newest-copy rule) shows the error; the frame's own evaluate is the right one.
-    const bool mvAhead = truthMvOn && getenv("XR_PROBE_MV_AHEAD") && atoi(getenv("XR_PROBE_MV_AHEAD")) != 0;
-    if (synMvOn || truthMvOn) {
-        std::string merr;
-        synMv.dev = dev; synMv.eyeW = vcv[0].recommendedImageRectWidth; synMv.eyeH = vcv[0].recommendedImageRectHeight;
-        if (getenv("XR_PROBE_MV_FAULT")) { synMv.parseFault(getenv("XR_PROBE_MV_FAULT")); L("motion vector faults: %s", getenv("XR_PROBE_MV_FAULT")); }
-        if (!synMv.init(dev, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight)) L("FAIL motion vectors: textures");
-        else if (truthMvOn && !synMv.initTruth(dev, merr)) L("FAIL motion vectors (truth): %s", merr.c_str());
-        else L("ok   %s motion vectors %ux%u per eye (provider ABI exported)", truthMvOn ? "ground-truth" : "synthetic", synMv.w, synMv.h);
-    }
 
     CK(xrEnumerateSwapchainFormats(sess, 0, &n, nullptr));
     std::vector<int64_t> fmts(n);
@@ -622,10 +403,6 @@ int main(int argc, char** argv) {
             }
             SceneFrame sceneFrame;
             if (sceneOn) BeginSceneFrame(scene, ctx, (qpcMs() - loopStartMs) / 1000.0, sceneFrame, scenePlace);
-            if (synMvOn) {   // the "DLSS evaluate" of each eye, left first, before the frame is submitted (as a game's render pass would)
-                for (int e = 0; e < 2 && e < (int)vcv.size(); e++) synMv.publish(ctx, e, vcv[e].recommendedImageRectWidth, vcv[e].recommendedImageRectHeight);
-                synMv.frame++;
-            }
             for (size_t i = 0; i < vcv.size(); i++) {
                 XrSwapchainImageAcquireInfo ai{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO }; uint32_t idx;
                 r = xrAcquireSwapchainImage(sc[i], &ai, &idx); if (XR_FAILED(r)) return fail("xrAcquireSwapchainImage", r);
@@ -749,17 +526,9 @@ int main(int argc, char** argv) {
                                     dr.left = std::max<LONG>(dr.left, 0); dr.top = std::max<LONG>(dr.top, 0);
                                     dr.right = std::min<LONG>(dr.right, (LONG)dt.Width); dr.bottom = std::min<LONG>(dr.bottom, (LONG)dt.Height);
                                     if (dr.right > dr.left && dr.bottom > dr.top) dc->ClearView(rtv, white, &dr, 1);
-                                    synMv.setMarker((int)i, true, cx, cy, hw, hh);
                                 }
                             dc->Release();
                         }
-                    }
-                    if (truthMvOn && i < 2) {   // the eye's "DLSS evaluate": exact vectors of this view against the previous frame's
-                        const XrFovf& tf = views[i].fov;
-                        const float tanF[4] = { -tanf(tf.angleLeft), tanf(tf.angleRight), tanf(tf.angleUp), -tanf(tf.angleDown) };
-                        const float q[4] = { views[i].pose.orientation.x, views[i].pose.orientation.y, views[i].pose.orientation.z, views[i].pose.orientation.w };
-                        D3D11_TEXTURE2D_DESC ot{}; imgs[i][idx].texture->GetDesc(&ot);
-                        synMv.publishTruth(ctx, (int)i, ot.Width, ot.Height, tanF, q);
                     }
                     ID3D11DeviceContext1* c1 = nullptr;
                     if (i == 0 && SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
@@ -842,16 +611,11 @@ int main(int argc, char** argv) {
         fe.displayTime = fs.predictedDisplayTime; fe.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE; fe.layerCount = nl; fe.layers = lay.data();
         r = xrEndFrame(sess, &fe);
         if (XR_FAILED(r)) return fail("xrEndFrame", r);
-        if (mvAhead) {
-            for (int e = 0; e < 2; e++) synMv.publishTruth(ctx, e, 0, 0, nullptr, nullptr, true);
-        }
         if (timingF) { fprintf(timingF, "%d,%lld,%.3f,%.3f,%.3f\n", done + 1, (long long)fs.predictedDisplayTime, tWaitRet, qpcMs(), lf); if (done % 30 == 0) fflush(timingF); }
         done++;
     }
     if (soundOn) mciSendStringA("close xrbgm", nullptr, 0, nullptr);
     L("loop done: frames=%d ready=%d synchronized=%d", done, sawReady, sawSync);
-    if (synMvOn || truthMvOn) L("motion vectors: %llu publications (%llu ahead decoys), consumer %s", (unsigned long long)synMv.published, (unsigned long long)synMv.decoys, g_mvConsumer ? "registered" : "never registered");
-    if (synMvOn || truthMvOn) L("motion vector faults injected: %llu skipped, %llu stream-id changes, %llu texture re-creations, %llu garbage, %llu null", (unsigned long long)synMv.skipped, (unsigned long long)synMv.churned, (unsigned long long)synMv.recreated, (unsigned long long)synMv.garbaged, (unsigned long long)synMv.nulled);
     if (done > 1) L("app fps %.2f over %d frames", (done - 1) * 1000.0 / (qpcMs() - loopStartMs), done - 1);
     if (rc == 0 && done < frames) rc = 4;
     if (running) { xrRequestExitSession(sess); }

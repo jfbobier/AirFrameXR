@@ -161,13 +161,30 @@ rendered and encoded for real in the rig (the viewer shows the encoder's input).
 
 Live harness: variant setting `{"frame_gen": true}`; scenario key `frame_gen` in `harness/scenarios/*.json`.
 
-## Borrowed from OFXR-Bridge (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge)
+## Synthesis: edge (default) and classic (0.6.1)
+
+Two syntheses draw a generated frame from the same optical flow (`video.frame_gen_synthesis`, Advanced settings):
+
+- **edge** (default since 0.6.1), ideas from VectorXR (MPL-2.0, github.com/DienerTech/vectorxr), re-implemented: per flow block our own luma
+  match cost (sampled at the sub-texel vector; a vector must beat no motion, which zeroes the engine's noise vectors on flat content) and a
+  3x3 cost-weighted vector median; per output pixel the vector solved where the content comes from (two fixed-point steps), at motion
+  boundaries the neighbouring vector both frames agree on, doubtful motion shrunk toward the real frame (a little local judder instead of a
+  double image), the previous frame blended in by the time weight, gated by its colour agreement only as far as the vector is doubted.
+  `edge-blend` is the same without that gate. Lab (5090, steady_fg / stutter_fg, marker position error): classic 0.024-0.031 deg, edge
+  0.030-0.036, edge-blend 0.017-0.022, all CLEAN + SMOOTH; headset (Valor Mortis, 2026-10-24): edge "looked great". Cost (5090, 7104x3200,
+  stutter_fg, all outputs): synthesis 0.24 ms average against 0.33 for classic, flow 2.17 ms either way (the two extra passes after the
+  flow are within its noise), no added latency.
+- **classic**: the 0.4-0.6 recipe below, kept as the predictable fallback.
+
+The game's DLSS motion vectors were an alternative motion source from 0.4 to 0.6; they were removed in 0.6.1 (docs/MOTION_VECTORS.md).
+
+## Borrowed from OFXR-Bridge (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge): the classic synthesis
 
 The synthesis: rotation-compensated flow (there analytically subtracted, here by aligning A into B's camera before the engine),
 midpoint sampling at ±flow/2, confidence = saturate(1 - 6 max|dRGB|) x (1 - cost/255), crossfade fallback, no hole filling; the
 never-block rule (the generator runs in the encoder thread off the game's path; errors fall back to the plain frame). Not taken: its
 D3D12 synthesis path and D3D11 interop (our frames are already composed side by side on the encoder's device), the FidelityFX backend
-(NVIDIA only), the DLSS motion-vector provider (a later option: game motion vectors would replace the flow where DLSS runs).
+(NVIDIA only), the DLSS motion-vector provider.
 
 ## Known limits and open questions (2026-10-14)
 
@@ -194,8 +211,6 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
   taps) and a rendered frame whose stamp orientation is within 0.02 deg of its render orientation is copied as is (`gen.copies`). If it still
   reads softer than the game, the next steps are a sharpening term in the output pass or sending rendered frames unwarped once the client can
   take their own stamp.
-- **Game motion vectors** (DLSS inputs) would replace the flow where they exist, allow extrapolation (no added period) and depth-aware
-  reprojection: design note docs/MOTION_VECTORS.md (in-process NGX tap at session creation, not an OptiScaler fork).
 
 Why both repeat counts (2026-10-17, Valor Mortis on the Vision Pro at 100 Hz): at 1/2 the game rendered 39 fps against a 50 fps cap, the host
 re-sent its last frame on 14 % of the outputs (`host_repeats_typ`) while the headset itself repeated only 0.4 % of its periods (it was shown

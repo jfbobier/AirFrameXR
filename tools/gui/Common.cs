@@ -96,7 +96,6 @@ namespace VisionALVR
                 }
                 if (!string.IsNullOrEmpty(stem)) add(Games.FileOf(stem), "game/" + stem + ".json");
                 add(Path.Combine(Paths.Logs, "VisionALVR.log"), "VisionALVR.log");
-                add(MvDll.Record, "mv_dll.json");
                 var dbg = Path.Combine(Paths.Logs, "debug");
                 if (Directory.Exists(dbg))
                 {
@@ -135,120 +134,52 @@ namespace VisionALVR
         }
     }
 
-    /// The DLSS motion-vector extractor (OptiScaler-DLSSMotionVectorExtractor, one DLL) in a game folder. The package's DLSSMotionVectors\dxgi.dll is the
-    /// master copy and is never touched: install = copy it next to the game's exe (as dxgi.dll, or version.dll when dxgi.dll is already someone
-    /// else's), uninstall = delete that copy. config\mv_dll.json (the launcher's own file) keeps what was installed where (file, MD5, time) so an
-    /// uninstall is one click and an old copy from an earlier release is recognised by its MD5.
+    /// The DLSS motion-vector extractor (one DLL) that releases up to 0.6 copied next to a game's exe on request. Releases no longer ship or install it; what
+    /// is left is the removal of the copies VisionALVR made. config\mv_dll.json recorded each install (file, folder, MD5), and only a file that still has the
+    /// recorded MD5 is deleted: anything else in the game folder (someone else's proxy DLL, a copy replaced since) is left alone.
     public static class MvDll
     {
-        public static string Master => Path.Combine(Paths.Dir, "DLSSMotionVectors", "dxgi.dll");
-        public static string Record => Path.Combine(Paths.Config, "mv_dll.json");
-        public static readonly string[] Names = { "dxgi.dll", "version.dll" };
+        static string Record => Path.Combine(Paths.Config, "mv_dll.json");
 
-        public enum State { NoMaster, NoFolder, NotInstalled, Installed, OlderCopy, OtherDll }
-
-        public static string Md5(string path)
+        static string Md5(string path)
         {
             try { using (var m = System.Security.Cryptography.MD5.Create()) using (var f = File.OpenRead(path)) return BitConverter.ToString(m.ComputeHash(f)).Replace("-", "").ToLowerInvariant(); }
             catch { return ""; }
         }
 
-        /// The game's folder: where its exe is (the first recorded path that still exists).
-        public static string GameDir(Dictionary<string, object> game)
-        {
-            if (game != null && game.TryGetValue("paths", out var p) && p is object[] arr)
-                foreach (var o in arr) { var s = o as string; if (!string.IsNullOrEmpty(s) && File.Exists(s)) return Path.GetDirectoryName(s); }
-            return null;
-        }
-
-        /// What is next to the exe: our copy (MD5 equals the master), an older copy we installed, someone else's proxy DLL, or nothing.
-        public static State Check(string gameDir, string stem, out string file)
-        {
-            file = null;
-            if (!File.Exists(Master)) return State.NoMaster;
-            if (gameDir == null) return State.NoFolder;
-            var master = Md5(Master);
-            var mine = Installed(stem);
-            State best = State.NotInstalled;
-            foreach (var n in Names)
-            {
-                var f = Path.Combine(gameDir, n);
-                if (!File.Exists(f)) continue;
-                var md5 = Md5(f);
-                if (md5 == master) { file = f; return State.Installed; }
-                if (mine != null && string.Equals(mine, n, StringComparison.OrdinalIgnoreCase)) { file = f; best = State.OlderCopy; }
-                else if (best == State.NotInstalled && n == "dxgi.dll") { file = f; best = State.OtherDll; }
-            }
-            return best;
-        }
-
-        static Dictionary<string, object> Load() => Json.Load(Record);
         static Dictionary<string, object> Installs(Dictionary<string, object> r)
         {
             if (!(r.TryGetValue("installs", out var o) && o is Dictionary<string, object> d)) { d = new Dictionary<string, object>(); r["installs"] = d; }
             return d;
         }
+        static string Str(Dictionary<string, object> d, string k) => d.TryGetValue(k, out var v) ? v as string ?? "" : "";
+
+        /// The file name of the copy recorded for this game, or null when VisionALVR installed nothing there.
         public static string Installed(string stem)
         {
-            var r = Load();
-            return Installs(r).TryGetValue(stem, out var o) && o is Dictionary<string, object> e && e.TryGetValue("file", out var f) ? f as string : null;
-        }
-        static void Save(Dictionary<string, object> r) { Directory.CreateDirectory(Paths.Config); Json.Save(Record, r); }
-
-        public static bool Dismissed(string stem)
-        {
-            var r = Load();
-            return r.TryGetValue("dismissed", out var o) && o is object[] a && a.Any(x => (x as string) == stem);
-        }
-        public static void Dismiss(string stem)
-        {
-            var r = Load();
-            var l = (r.TryGetValue("dismissed", out var o) && o is object[] a ? a.Select(x => x as string).ToList() : new List<string>());
-            if (!l.Contains(stem)) l.Add(stem);
-            r["dismissed"] = l.Cast<object>().ToArray();
-            Save(r);
+            var e = Installs(Json.Load(Record)).TryGetValue(stem, out var o) ? o as Dictionary<string, object> : null;
+            return e != null && Str(e, "file").Length > 0 ? Str(e, "file") : null;
         }
 
-        /// Copies the master next to the game's exe. dxgi.dll unless a different one is there (then version.dll). Elevated copy when the folder is
-        /// not writable. Returns a message for the user, and the file name through `installed` (null on failure).
-        public static string Install(string gameDir, string stem, out string installed)
+        /// Deletes the recorded copy when it is still the file VisionALVR put there, and forgets the record either way. Returns a message for the user.
+        public static string Uninstall(string stem)
         {
-            installed = null;
-            if (!File.Exists(Master)) return "The DLL is not in this release (DLSSMotionVectors\\dxgi.dll is missing).";
-            var master = Md5(Master);
-            string name = "dxgi.dll";
-            var d = Path.Combine(gameDir, "dxgi.dll");
-            if (File.Exists(d) && Md5(d) != master && Installed(stem) != "dxgi.dll") name = "version.dll";
-            var target = Path.Combine(gameDir, name);
-            if (File.Exists(target) && Md5(target) != master && Installed(stem) != name) return $"{name} and dxgi.dll in the game folder belong to something else; nothing was changed.";
-            if (!CopyMaybeElevated(Master, target)) return "The copy did not happen (administrator permission refused?).";
-            if (Md5(target) != master) return "The copy is not identical to the release's DLL; check the game folder.";
-            var r = Load();
-            Installs(r)[stem] = new Dictionary<string, object> { { "file", name }, { "dir", gameDir }, { "md5", master }, { "time", DateTime.Now.ToString("s") } };
-            Save(r);
-            Log.Write("INFO", $"motion-vector DLL installed for {stem}: {target}");
-            installed = name;
-            return $"Installed as {name} in {gameDir}. Uninstall from the Logs window removes exactly this file.";
+            var r = Json.Load(Record);
+            var all = Installs(r);
+            if (!(all.TryGetValue(stem, out var o) && o is Dictionary<string, object> e)) return "Nothing recorded as installed for this game by VisionALVR.";
+            string name = Str(e, "file"), dir = Str(e, "dir");
+            var target = name.Length > 0 && dir.Length > 0 ? Path.Combine(dir, name) : null;
+            string msg;
+            if (target == null || !File.Exists(target)) msg = "The file is no longer in the game folder.";
+            else if (Md5(target) != Str(e, "md5")) msg = $"{name} in {dir} has changed since VisionALVR installed it; it was left in place.";
+            else if (!DeleteMaybeElevated(target)) return "The file was not removed (administrator permission refused?).";
+            else msg = $"Removed {name} from {dir}.";
+            all.Remove(stem);
+            Json.Save(Record, r);
+            Log.Write("INFO", $"motion-vector DLL record removed for {stem}: {msg}");
+            return msg;
         }
 
-        public static string Uninstall(string gameDir, string stem)
-        {
-            var name = Installed(stem);
-            if (name == null) return "Nothing recorded as installed for this game by VisionALVR; remove the DLL by hand if you put it there.";
-            var target = Path.Combine(gameDir, name);
-            if (File.Exists(target) && !DeleteMaybeElevated(target)) return "The file was not removed (administrator permission refused?).";
-            var r = Load();
-            Installs(r).Remove(stem);
-            Save(r);
-            Log.Write("INFO", $"motion-vector DLL removed for {stem}: {target}");
-            return $"Removed {name} from {gameDir}.";
-        }
-
-        static bool CopyMaybeElevated(string from, string to)
-        {
-            try { File.Copy(from, to, true); return true; } catch (UnauthorizedAccessException) { } catch (IOException) { }
-            return Elevated($"/c copy /y \"{from}\" \"{to}\"") && File.Exists(to);
-        }
         static bool DeleteMaybeElevated(string path)
         {
             try { File.Delete(path); return true; } catch (UnauthorizedAccessException) { } catch (IOException) { }
@@ -428,8 +359,6 @@ namespace VisionALVR
         /// uncapped mode's minimum spacing of the game's releases in fps (0 = none) and its content lag in ms (0 = automatic); the streamer takes a change live
         public double FrameGenCapFps { get => Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }
         public double FrameGenLagMs { get => Json.Num(Root, "video.frame_gen_lag_ms", 0); set => Json.Set(Root, "video.frame_gen_lag_ms", value); }
-        // the game's DLSS motion vectors drive the synthesis when the OptiScaler-DLSSMotionVectorExtractor provider is loaded in the game (docs/MOTION_VECTORS.md)
-        public bool GameMotionVectors { get => Json.Bool(Root, "video.game_motion_vectors", true); set => Json.Set(Root, "video.game_motion_vectors", value); }
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
         public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", true); set => Json.Set(Root, "video.frame_gen_recommended", value); }
         /// arrival margin of the phase lock in ms (host default 7; the host reads it at start) and the GPU keepalive duty in % (0 = off); 0 = not set
@@ -1421,34 +1350,6 @@ namespace VisionALVR
         }
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
-    }
-
-    /// What the last session did with the game's motion vectors, one function for the streamer's Frame generation component and Game statistics' line
-    /// (docs/PLAN_0.5.md U6): worked (green), ran blind (orange: the DLL is there, nothing arrived), no DLL (plain, with the install offer), or nothing.
-    public static class VectorsLine
-    {
-        public enum Kind { None, Worked, Blind, NoDll }
-        public static Kind Of(string level, bool tickOn, double frames, MvDll.State st, bool dismissed)
-        {
-            if (string.IsNullOrEmpty(level) || level == "off") return Kind.None;   // no generation, nothing to say
-            if (frames > 0) return Kind.Worked;
-            if (!tickOn) return Kind.None;
-            if (st == MvDll.State.Installed || st == MvDll.State.OlderCopy) return Kind.Blind;
-            if ((st == MvDll.State.NotInstalled || st == MvDll.State.OtherDll) && !dismissed) return Kind.NoDll;
-            return Kind.None;
-        }
-        public static string Text(Kind k, double frames)
-        {
-            switch (k)
-            {
-                case Kind.Worked: return $"Game motion vectors worked ({frames.ToString("0", CultureInfo.InvariantCulture)} frames)";
-                case Kind.Blind: return "Generation ran blind (optical flow only): the DLL is installed but no vectors arrived.";
-                case Kind.NoDll: return "No game vectors: install the extractor?";
-                default: return "";
-            }
-        }
-        public const string BlindHint = "Check the DLL version and that the game's upscaler is DLSS.";
-        public static Color ColorOf(Kind k) => k == Kind.Worked ? Color.SeaGreen : k == Kind.Blind ? Color.DarkOrange : Color.DimGray;
     }
 
     /// The wizard's chroma-key step, for every headset but the Vision Pro (its App Store app has a fixed key colour and range that the streamer cannot change, so there

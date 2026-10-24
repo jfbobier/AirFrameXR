@@ -1,12 +1,12 @@
 """Soak schedule generator (docs/STABILITY_PLAN.md, scenario `soak_tokyo`): a seeded, replayable list of plausible events for a long run in Little Tokyo with
-frame generation and motion vectors on.
+frame generation on.
 
-    soak.plan(seconds, seed) -> {"stdin": [{"t", "line"}], "client_blackouts": "start:dur[:frame],...", "mv_fault": "...", "faults": [{"type": "suspend", ...}], "windows": [...]}
+    soak.plan(seconds, seed) -> {"stdin": [{"t", "line"}], "client_blackouts": "start:dur[:frame],...", "faults": [{"type": "suspend", ...}], "windows": [...]}
 
-What a player does: re-centres, changes the eye height, nudges gamma, toggles frame generation and changes its rate, turns the game's vectors off and on, flips debug
-logging; what the network and the machine do: the headset's tracking goes quiet for a moment, a vector provider drops frames or re-creates its feature, the host or the
-headset freezes for seconds. Rates are per hour, with a floor so that a 10-minute run sees every kind at least once. `windows` lists the injected disturbances
-(client clock seconds, approximate) so the judge can tell an explained stall from an unexplained one."""
+What a player does: re-centres, changes the eye height, nudges gamma, toggles frame generation and changes its rate, flips debug logging; what the network and
+the machine do: the headset's tracking goes quiet for a moment, the host or the headset freezes for seconds. Rates are per hour, with a floor so that a 10-minute
+run sees every kind at least once. `windows` lists the injected disturbances (client clock seconds, approximate) so the judge can tell an explained stall from an
+unexplained one."""
 import random
 
 
@@ -30,8 +30,6 @@ def plan(seconds, seed=7):
         stdin += [{"t": t, "line": "frame_gen off"}, {"t": back, "line": "frame_gen on"}]
     for t in _times(rng, seconds, 5):
         stdin.append({"t": t, "line": f"frame_gen_rate {rng.choice(['half', 'two_thirds', 'third', 'uncapped'])}"})
-    for t in _times(rng, seconds, 5):   # the game's vectors off, then on again
-        stdin += [{"t": t, "line": "game_mv off"}, {"t": round(t + rng.uniform(5, 30), 1), "line": "game_mv on"}]
     for t in _times(rng, seconds, 3):
         stdin += [{"t": t, "line": "debug on"}, {"t": round(t + rng.uniform(10, 60), 1), "line": "debug off"}]
     stdin.sort(key=lambda e: e["t"])
@@ -51,10 +49,6 @@ def plan(seconds, seed=7):
         dur = round(rng.choice([0.5, 1, 2, 5, 8]), 1)
         bo.append(f"{t}:{dur}" + (":frame" if rng.random() < 0.6 else ""))
         windows.append({"kind": "tracking_blackout", "t": t, "dur": dur})
-    # the vector provider: a little loss all the time, blackouts, feature re-creation, texture re-creation
-    mvf = ["drop:0.02", "churn:97", "recreate:41", "resize:53"]
-    for t in _times(rng, seconds, 8, first=60):
-        mvf.append(f"blackout:{t}:{round(rng.choice([3, 6, 12]), 1)}")
     faults = []
     for t in _times(rng, seconds, 2, first=120, floor=1):
         dur = round(rng.choice([5, 10, 20]), 1)
@@ -64,4 +58,4 @@ def plan(seconds, seed=7):
         dur = round(rng.choice([3, 6, 12]), 1)
         faults.append({"type": "suspend", "process": "alvr_client_headless", "at_s": t, "for_s": dur})
         windows.append({"kind": "client_freeze", "t": t, "dur": dur})
-    return {"stdin": stdin, "audio": audio, "client_blackouts": ",".join(bo), "mv_fault": ",".join(mvf), "faults": faults, "windows": windows}
+    return {"stdin": stdin, "audio": audio, "client_blackouts": ",".join(bo), "faults": faults, "windows": windows}

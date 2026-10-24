@@ -67,9 +67,9 @@ double nvh_encode_shared(void* nvh, void* ipc, uint32_t slot, uint32_t frame_no,
 void nvh_release_shared(void* nvh);
 // ---- Frame generation (nvenc/hostlib/framegen.cpp, docs/FRAME_GENERATION.md) -------------------------------------------------
 // Creates the optical-flow session for the stream's composed frame (2 x eye width by eye height). flow_scale: the flow input is the frame
-// downscaled by this (0.25..1); perf_level: 5 slow / 10 medium / 20 fast; grid: 1, 2 or 4. Returns 1, or 0 with the reason in err (no
+// downscaled by this (0.25..1); perf_level: 5 slow / 10 medium / 20 fast; grid: 1, 2 or 4; synth: 1 edge, 2 edge-blend, 0 classic. Returns 1, or 0 with the reason in err (no
 // optical-flow engine on this GPU/driver: the feature must stay off). on = 0 releases everything.
-int nvh_fg_enable(void* nvh, int on, double flow_scale, int perf_level, int grid, int synth, int mv_candidate, char* err, int errlen);
+int nvh_fg_enable(void* nvh, int on, double flow_scale, int perf_level, int grid, int synth, char* err, int errlen);
 // Takes the shim slot into the frame history (previous <- current <- slot) and computes the flow between the two; q_render8 = the per-eye
 // orientations the frame was rendered with (ipc frameRenderQuat). Returns 1 when two frames exist (interpolation possible), 0 after the
 // first frame, -1 on error. The slot may be released as soon as this returns.
@@ -101,14 +101,8 @@ void nvh_ipc_set_intake(void* ipc, uint32_t waiting);
 void nvh_ipc_set_intake_gate(void* ipc, uint32_t on);
 // Frame generation pacing (ipc.h appPeriodMul): 2 = the game is released every other compositor boundary; 1 = every boundary.
 void nvh_ipc_set_app_period_mul(void* ipc, uint32_t mul);
-// Game motion vectors (docs/MOTION_VECTORS.md): on = the shim taps the game's DLSS inputs when the provider is loaded and publishes them with the frames.
-void nvh_ipc_set_game_mv(void* ipc, uint32_t on);
 // Uncapped frame generation: the minimum spacing of the game's releases (us, 0 = none): an fps cap that leaves the host GPU headroom.
 void nvh_ipc_set_app_min_period(void* ipc, uint32_t min_period_us);
-// The generator synthesises from the game's vectors when present (1) or from the flow alone (0): the GUI tick, live.
-void nvh_fg_use_mv(void* nvh, int on);
-// The tap's state as the shim reports it: tap 0 none / 1 attached / 2 ABI mismatch / 3 refused, DLSS streams seen lately, evaluates seen.
-void nvh_ipc_motion_tap(void* ipc, uint32_t* tap, uint32_t* streams, uint64_t* publications);
 // Process-wide GPU scheduling class (D3DKMT): 0 idle .. 4 high, 5 realtime (needs the increase-base-priority privilege, i.e. an
 // elevated host). SteamVR's compositor runs realtime, so its copy/encode never queues behind the game's GPU work. Returns the
 // NTSTATUS (0 = success).

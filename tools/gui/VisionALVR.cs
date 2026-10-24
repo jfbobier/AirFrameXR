@@ -52,14 +52,9 @@ namespace VisionALVR
         readonly Segmented heightMode = new Segmented("Auto", "Manual") { AccessibleName = "Eye height mode" };
         readonly NumericUpDown heightBox = new NumericUpDown { DecimalPlaces = 2, Increment = 0.05m, Minimum = 0.5m, Maximum = 2.2m, Width = 64, AccessibleName = "Eye height in metres" };
         readonly Label heightReport = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(8, 7, 0, 0), Visible = false };
-        readonly Label vecLine = new Label { AutoSize = true, Margin = new Padding(3, 7, 8, 0), MaximumSize = new Size(740, 0) };
-        readonly Button vecInstall = new Button { Text = "Install", AutoSize = true, Visible = false };
-        readonly Button vecDismiss = new Button { Text = "Not for this game", AutoSize = true, Visible = false };
-        readonly FlowLayoutPanel vecRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 4, 0, 0), MinimumSize = new Size(0, 26), MaximumSize = new Size(740, 0) };   // always present: its line is reserved, so a result appearing never moves the window
         readonly Label audioLine = new Label { AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };   // the virtual audio device's volume, only when it matters
         readonly Label exportStatus = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };
         readonly LinkLabel exportLink = new LinkLabel { Text = "Open folder", AutoSize = true, Margin = new Padding(3, 4, 3, 0) };
-        readonly CheckBox fgMv = new CheckBox { Text = "Use the game's DLSS motion vectors", AutoSize = true, Margin = new Padding(0, 3, 0, 0) };   // always shown: which game comes next is not known
         // uncapped generation (settings video.frame_gen_rate uncapped, docs/FRAME_GENERATION_UNCAPPED.md): the game runs at its own rate, every output interpolated
         // experimental, set in the Advanced settings window: here only the state, with a note under the slider while it is on
         readonly CheckBox fgUnc = new CheckBox { Text = "Uncapped", AutoSize = true, Visible = false };
@@ -138,20 +133,15 @@ namespace VisionALVR
             FlowLayoutPanel Col() => new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill };
             FlowLayoutPanel Row() => new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
 
-            // Frame generation: the switch, the game's rate (Auto = proposed from the game's recorded runs, or 1/3, 1/2, 2/3 of the display rate), the uncapped and
-            // vectors ticks (always shown: the streamer cannot know which game comes next). The explanations are tooltips; the last session's vectors line (U6) sits under them.
+            // Frame generation: the switch and the game's rate (Auto = proposed from the game's recorded runs, or 1/3, 1/2, 2/3 of the display rate). The explanations
+            // are tooltips.
             fgRateText.On = t => { foreach (var c in new Control[] { frameGen, fgRecommend }.Concat(fgRate.Controls.Cast<Control>())) tips.SetToolTip(c, t); };
             var fgCol = Col();
             var fgRow = Row();
             fgUnc.Margin = new Padding(14, 8, 0, 0);
-            fgMv.Margin = new Padding(10, 8, 0, 0);
-            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate); fgRow.Controls.Add(fgMv);   // the ticks share the line
+            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate);
             fgCol.Controls.Add(fgRow);
             fgCol.Controls.Add(fgUncNote);
-            vecRow.Controls.Add(vecLine); vecRow.Controls.Add(vecInstall); vecRow.Controls.Add(vecDismiss);
-            vecInstall.Click += (s, e) => VectorsInstall();
-            vecDismiss.Click += (s, e) => VectorsDismiss();
-            fgCol.Controls.Add(vecRow);
             body.Controls.Add(Group("Frame generation", fgCol));
 
             // Position and Picture side by side, each a short stack (the window stays narrow); the desktop mirror switch sits with Recenter, the Advanced picture
@@ -195,7 +185,6 @@ namespace VisionALVR
             tips.SetToolTip(mirror, "Between games the headset shows the Windows desktop on a floating screen; your hand is the mouse (pinch = click). Off by default.");
             tips.SetToolTip(fgRecommend, "Auto: the rate is set from this game's recorded runs on this headset, the fastest one that stayed clean. Pick 1/3, 1/2 or 2/3 yourself to leave Auto.");
             tips.SetToolTip(recenter, "Forward becomes forward and your position the origin. Done at every game start; the recenter key (End by default) does the same while playing.");
-            tips.SetToolTip(fgMv, "Generate from the game's own DLSS motion vectors. Needs the motion-vector DLL installed in each game's folder and a game with DLSS; otherwise optical flow is used.");
             tips.SetToolTip(heightMode, "Auto: the headset's own floor estimate, right when it saw the room (start standing). Manual: the value you type (about 1.30 m seated).");
             tips.SetToolTip(heightBox, "Eye height above the floor, 0.5-2.2 m.");
 
@@ -264,7 +253,7 @@ namespace VisionALVR
                 settings.Save();
                 Log.Write("INFO", "desktop mirror " + (mirror.Checked ? "on" : "off"));
             };
-            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !fgUnc.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = frameGen.Checked && !fgUnc.Checked; fgMv.Enabled = fgUnc.Enabled = frameGen.Checked; };
+            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !fgUnc.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = frameGen.Checked && !fgUnc.Checked; fgUnc.Enabled = frameGen.Checked; };
             fgEnableAll = fgEnable;
             frameGen.CheckedChanged += (s, e) =>
             {
@@ -279,7 +268,6 @@ namespace VisionALVR
             fgRate.Value = savedRate >= 0 ? savedRate : 1;
             fgRateText.Text = FgRateText[fgRate.Value];
             fgUnc.Checked = settings.FrameGenRate == "uncapped";
-            fgMv.Checked = settings.GameMotionVectors;
             fgRecommend.Checked = settings.FrameGenRecommended;
             fgEnable();
             fgRate.ValueChanged += (s, e) =>
@@ -299,13 +287,6 @@ namespace VisionALVR
             };
             fgUncNote.Visible = fgUnc.Checked;
             ConfigWatchStart();
-            fgMv.CheckedChanged += (s, e) =>
-            {
-                host.Send("game_mv " + (fgMv.Checked ? "on" : "off"));
-                settings.GameMotionVectors = fgMv.Checked;
-                settings.Save();
-                Log.Write("INFO", "game motion vectors " + (fgMv.Checked ? "on" : "off"));
-            };
             fgRecommend.CheckedChanged += (s, e) =>
             {
                 settings.FrameGenRecommended = fgRecommend.Checked;
@@ -519,8 +500,6 @@ namespace VisionALVR
             }
             catch { return null; }
         }
-
-        // the DLSS motion-vector tick means something only where the extractor DLL sits in the running game's folder
 
         void ApplyRecommendation(bool apply)
         {
@@ -751,7 +730,6 @@ namespace VisionALVR
                     gameRunning = true; MirrorSync();
                     currentExe = S(d, "exe");
                     lastSession = false;
-                    SetVectorsLine(VectorsLine.Kind.None, "", false);   // the last session's vectors line goes when the next real game starts
                     statsBox.Text = "Streaming (live, updated every 10 s)";
                     ApplyRecommendation(fgRecommend.Checked);
                     break;
@@ -787,7 +765,6 @@ namespace VisionALVR
                         tLatency.Set(latBad ? "n/a" : F(D(net, "latency_ms"), "0") + " ms", latBad ? "not measured" : $"p95 {F(D(net, "latency_p95_ms"), "0")}", null, latBad ? Latency.Why : null);
                         tLoss.Set(F(D(net, "packets_lost"), "0"), "packets lost", D(net, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
                         stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} %, skipped {F(D(d, "skipped") * 100, "0.0")} %." + (rec == null ? "" : $"  Next time: {(ri >= 0 ? names[ri] : rec.Value.level)}.");
-                        ShowVectors(d);
                     }
                     break;
                 case "status":
@@ -831,7 +808,7 @@ namespace VisionALVR
         /// Commands sent to the engine, in order (the test harness reads them; the live window ignores them).
         public readonly List<string> Sent = new List<string>();
 
-        /// Operates a control the way a person would (harness/streamer_events.py): name = frame_gen | rate | auto | mv | recenter | height_mode | height | gamma | sharpening | brightness | contrast | saturation | debug | mirror.
+        /// Operates a control the way a person would (harness/streamer_events.py): name = frame_gen | rate | auto | recenter | height_mode | height | gamma | sharpening | brightness | contrast | saturation | debug | mirror.
         public void UiAction(string name, string value)
         {
             bool on = value == "on";
@@ -841,7 +818,6 @@ namespace VisionALVR
                 case "frame_gen": frameGen.Checked = on; break;
                 case "rate": fgRate.Value = int.Parse(value); break;
                 case "auto": fgRecommend.Checked = on; break;
-                case "mv": fgMv.Checked = on; break;
                 case "uncapped": fgUnc.Checked = on; break;
                 case "recenter": recenter.PerformClick(); break;
                 case "height_mode": heightMode.Value = value == "auto" ? 0 : 1; break;
@@ -860,8 +836,6 @@ namespace VisionALVR
                         b?.PerformClick();
                         break;
                     }
-                case "vec_install": vecInstall.PerformClick(); break;
-                case "vec_dismiss": vecDismiss.PerformClick(); break;
             }
         }
         public decimal HeightMin => heightBox.Minimum;
@@ -869,12 +843,12 @@ namespace VisionALVR
 
         void SetAudioLine(string text, Color c) { audioLine.Text = text; audioLine.ForeColor = c; audioLine.Visible = text.Length > 0; }
         public void DemoAudio(bool bad) => SetAudioLine(bad ? "Audio: cannot set CABLE Input (VB-Audio Virtual Cable) to 100 %. The headset's volume follows the PC's." : "Audio: CABLE Input (VB-Audio Virtual Cable) held at 100 % (was 40 %)", bad ? Color.DarkOrange : Color.DimGray);
-        /// Runs `doFit` with everything that can appear showing at its longest (the firewall warning, Find headset, the vectors, audio and export lines, the
-        /// vectors tick, the height report, the long footer, the widest tiles), then puts the window's real state back: the window is sized for the fullest case once.
+        /// Runs `doFit` with everything that can appear showing at its longest (the firewall warning, Find headset, the audio and export lines, the height
+        /// report, the long footer, the widest tiles), then puts the window's real state back: the window is sized for the fullest case once.
         void WithWorstCase(Action doFit)
         {
             var tiles = new[] { tGame, tStreamed, tShown, tBitrate, tLatency, tLoss };
-            var labels = new Control[] { headset, game, runtime, vecLine, heightReport, stats, statsBox };
+            var labels = new Control[] { headset, game, runtime, heightReport, stats, statsBox };
             var shown = new Control[] { find, heightReport };
             var hidden = new Control[] { audioLine, exportStatus, exportLink };   // their line is reserved by the notices slot
             var hidBack = hidden.Select(c => (c, c.Visible)).ToList();
@@ -885,7 +859,6 @@ namespace VisionALVR
             {
                 headset.Text = "Headset: connected - Apple Vision Pro (192.168.100.123)";
                 game.Text = "Game: Cyberpunk2077.exe (last: Cyberpunk2077.exe, 123.4 min)";
-                vecLine.Text = VectorsLine.Text(VectorsLine.Kind.Blind, 0);
                 heightReport.Text = "headset reports 1.62 m";
                 stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: 1/2.";
                 statsBox.Text = "Streaming: last session, Cyberpunk2077.exe, 123.4 min, Apple Vision Pro";
@@ -904,7 +877,6 @@ namespace VisionALVR
             }
         }
 
-        public void DemoVectors(VectorsLine.Kind k) => SetVectorsLine(k, VectorsLine.Text(k, 2558), k == VectorsLine.Kind.NoDll);
         public void DemoDebugOn() { debug.Checked = true; settings.Debug = false; settings.Save(); exportStatus.Text = "Saved to C:\\Users\\someone\\Documents\\VisionALVR-logs-20261020-1200.zip"; exportStatus.ForeColor = Color.SeaGreen; exportStatus.Visible = exportLink.Visible = true; }
 
         public void ApplyDemoState(bool worstCase = true)
@@ -931,52 +903,6 @@ namespace VisionALVR
             fgRateText.Text = FgRateText[2];
             footer.Text = "config\\session.json is missing: this folder is incomplete. Unzip the release again (keep your config\\ folder).";
             footer.ForeColor = Color.Firebrick;
-        }
-
-        // The Frame generation component's line about the last session's motion vectors (VectorsLine): worked, ran blind, or the install offer. It stays until the
-        // next real game. Install runs here, inline: every step is logged, the line says what happened.
-        string vecExe = "";
-        void ShowVectors(Dictionary<string, object> d)
-        {
-            try
-            {
-                vecExe = S(d, "exe");
-                var stem = Games.Stem(vecExe);
-                var mv = d != null && d.TryGetValue("mv", out var mo) ? mo as Dictionary<string, object> : null;
-                var dir = MvDll.GameDir(Games.Load(vecExe));
-                var st = MvDll.Check(dir, stem, out _);
-                var tick = mv != null && mv.TryGetValue("enabled", out var eo) && eo is bool en && en;
-                var kind = VectorsLine.Of(S(d, "level"), tick, mv == null ? 0 : D(mv, "frames"), st, MvDll.Dismissed(stem));
-                Log.Write("INFO", $"vectors line for {vecExe}: {kind} (dll {st}, tick {tick})");
-                SetVectorsLine(kind, VectorsLine.Text(kind, mv == null ? 0 : D(mv, "frames")), kind == VectorsLine.Kind.NoDll);
-            }
-            catch (Exception e) { Log.Write("WARN", "vectors line failed: " + e.Message); }
-        }
-
-        void SetVectorsLine(VectorsLine.Kind kind, string text, bool offer)
-        {
-            vecLine.Text = text; vecLine.ForeColor = VectorsLine.ColorOf(kind);
-            tips.SetToolTip(vecLine, kind == VectorsLine.Kind.Blind ? VectorsLine.BlindHint : null);
-            vecInstall.Visible = vecDismiss.Visible = offer;
-        }
-
-        void VectorsInstall()
-        {
-            var stem = Games.Stem(vecExe);
-            var dir = MvDll.GameDir(Games.Load(vecExe));
-            Log.Write("INFO", $"vectors install clicked for {vecExe} (folder {dir})");
-            if (dir == null) { SetVectorsLine(VectorsLine.Kind.Blind, "The game's folder is not known: run it once more with the streamer.", false); return; }
-            var msg = MvDll.Install(dir, stem, out var file);
-            Log.Write("INFO", "vectors install result: " + msg);
-            if (file != null) SetVectorsLine(VectorsLine.Kind.Worked, $"Installed ({file}): takes effect next session.", false);
-            else SetVectorsLine(VectorsLine.Kind.Blind, msg, true);
-        }
-
-        void VectorsDismiss()
-        {
-            MvDll.Dismiss(Games.Stem(vecExe));
-            Log.Write("INFO", "vectors offer dismissed for " + vecExe);
-            SetVectorsLine(VectorsLine.Kind.None, "", false);
         }
 
         [STAThread]

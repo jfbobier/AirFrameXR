@@ -50,14 +50,13 @@ def build(name, seconds=None, host_env=None):
         sc["faults"] = spec["faults"]
     soak_plan = None
     if spec.get("soak"):
-        # a seeded schedule of plausible events (soak.py): host commands through the stdin feed, tracking blackouts, vector faults, process freezes
+        # a seeded schedule of plausible events (soak.py): host commands through the stdin feed, tracking blackouts, process freezes
         import soak
         total = seconds or spec["soak"].get("seconds", 900)
         soak_plan = soak.plan(total, spec["soak"].get("seed", 7))
         soak_plan["seconds"] = total
         sc["stdin_feed"] = {"events": soak_plan["stdin"], "hold_s": total + 20}
         sc["client"]["track_blackout"] = soak_plan["client_blackouts"]
-        sc["app"].setdefault("env", {})["XR_PROBE_MV_FAULT"] = soak_plan["mv_fault"]
         sc["faults"] = soak_plan["faults"]
         if spec["soak"].get("audio") and "--no-audio" not in sys.argv:
             sc["audio_events"] = soak_plan["audio"]

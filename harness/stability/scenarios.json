@@ -375,138 +375,6 @@
     "host_stalls_max": 0
    }
   },
-  "mv_clean": {
-   "description": "Reference for the vector scenarios: the probe's exact vectors, no fault (the host must use them: mv.frames > 0, no flow errors).",
-   "override": {
-    "app": {
-     "env": {
-      "XR_PROBE_CPU_MS": "1",
-      "XR_PROBE_GPU_COPIES": "0",
-      "XR_PROBE_LOAD": "fps:50:70",
-      "XR_PROBE_MV": "truth",
-      "XR_PROBE_MOVING": "25:0.25",
-      "XR_PROBE_SCENE": "dots",
-      "XR_PROBE_MV_FAULT": ""
-     }
-    }
-   },
-   "criteria": {
-    "warmup_s": 20,
-    "max_stall_ms": 1500,
-    "alive_at_end_s": 3,
-    "host_stalls_max": 0,
-    "host_memory_events": 2,
-    "mv_ok": true,
-    "mem": {
-     "min_duration_s": 80,
-     "warmup_frac": 0.3,
-     "max_growth_mb_per_h": {
-      "private": 300,
-      "gpu": 300,
-      "handles": 3000
-     }
-    }
-   }
-  },
-  "mv_loss": {
-   "description": "Motion vectors lost at random: 10 % of the publications dropped, a 10 s blackout at +40 s and another at +80 s. The generator must fall back to flow and come back, no stall, no growth.",
-   "override": {
-    "app": {
-     "env": {
-      "XR_PROBE_CPU_MS": "1",
-      "XR_PROBE_GPU_COPIES": "0",
-      "XR_PROBE_LOAD": "fps:50:70",
-      "XR_PROBE_MV": "truth",
-      "XR_PROBE_MOVING": "25:0.25",
-      "XR_PROBE_SCENE": "dots",
-      "XR_PROBE_MV_FAULT": "drop:0.1,blackout:40:10,blackout:80:10"
-     }
-    }
-   },
-   "criteria": {
-    "warmup_s": 20,
-    "max_stall_ms": 1500,
-    "alive_at_end_s": 3,
-    "host_stalls_max": 0,
-    "host_memory_events": 2,
-    "mv_ok": true,
-    "mem": {
-     "min_duration_s": 80,
-     "warmup_frac": 0.3,
-     "max_growth_mb_per_h": {
-      "private": 300,
-      "gpu": 300,
-      "handles": 3000
-     }
-    }
-   }
-  },
-  "mv_churn": {
-   "description": "A game's DLSS feature re-created: new stream ids every 5 s, the render size alternating full/half every 7 s, the vector textures destroyed and created again every 3 s. No stall, no leak (tap copies and ring slots freed).",
-   "override": {
-    "app": {
-     "env": {
-      "XR_PROBE_CPU_MS": "1",
-      "XR_PROBE_GPU_COPIES": "0",
-      "XR_PROBE_LOAD": "fps:50:70",
-      "XR_PROBE_MV": "truth",
-      "XR_PROBE_MOVING": "25:0.25",
-      "XR_PROBE_SCENE": "dots",
-      "XR_PROBE_MV_FAULT": "churn:5,resize:7,recreate:3"
-     }
-    }
-   },
-   "criteria": {
-    "warmup_s": 20,
-    "max_stall_ms": 1500,
-    "alive_at_end_s": 3,
-    "host_stalls_max": 0,
-    "host_memory_events": 2,
-    "mv_ok": true,
-    "mem": {
-     "min_duration_s": 80,
-     "warmup_frac": 0.3,
-     "max_growth_mb_per_h": {
-      "private": 300,
-      "gpu": 300,
-      "handles": 3000
-     }
-    }
-   }
-  },
-  "mv_garbage": {
-   "description": "A misbehaving provider: 5 % of the publications carry +-9000 px vectors and 5 % a null vector texture. The host must not crash, hang or leak, and must not show garbage for long (stream stays alive, no stall).",
-   "override": {
-    "app": {
-     "env": {
-      "XR_PROBE_CPU_MS": "1",
-      "XR_PROBE_GPU_COPIES": "0",
-      "XR_PROBE_LOAD": "fps:50:70",
-      "XR_PROBE_MV": "truth",
-      "XR_PROBE_MOVING": "25:0.25",
-      "XR_PROBE_SCENE": "dots",
-      "XR_PROBE_MV_FAULT": "garbage:0.05,null:0.05"
-     }
-    }
-   },
-   "criteria": {
-    "warmup_s": 20,
-    "max_stall_ms": 1500,
-    "alive_at_end_s": 3,
-    "host_stalls_max": 0,
-    "host_memory_events": 2,
-    "mv_ok": true,
-    "mem": {
-     "min_duration_s": 80,
-     "warmup_frac": 0.3,
-     "max_growth_mb_per_h": {
-      "private": 300,
-      "gpu": 300,
-      "handles": 3000
-     }
-    }
-   }
-  },
   "reconnect_storm": {
    "description": "The headset comes and goes: 15 client sessions of 8-25 s with 1-6 s between them against one daemon host while the app runs, generation on, and every client behaving like the visionOS one (tracking only after 30 frames have arrived). Each session must stream, the first frame within 6 s of connecting; each new session also restarts the client clock.",
    "override": {
@@ -612,7 +480,7 @@
    }
   },
   "soak_tokyo": {
-   "description": "The soak: Little Tokyo (with its music) at the Vision Pro's size, generation and synthetic vectors on, for --seconds (default 900) with a seeded schedule of plausible events (soak.py): re-centre, eye height, gamma, generation off/on and rate, game vectors off/on, debug logging, tracking blackouts, vector faults and re-creation, host and client freezes. Every stall must be explained by an injected freeze; host and probe memory must not grow. Audio events too (the default output muted/unmuted, its volume moved, the default switched and back; the PC's original state is restored; --no-audio leaves them out).",
+   "description": "The soak: Little Tokyo (with its music) at the Vision Pro's size, generation on, for --seconds (default 900) with a seeded schedule of plausible events (soak.py): re-centre, eye height, gamma, generation off/on and rate, debug logging, tracking blackouts, host and client freezes. Every stall must be explained by an injected freeze; host and probe memory must not grow. Audio events too (the default output muted/unmuted, its volume moved, the default switched and back; the PC's original state is restored; --no-audio leaves them out).",
    "soak": {
     "seconds": 900,
     "seed": 7,
@@ -664,8 +532,7 @@
       "XR_PROBE_CPU_MS": "1",
       "XR_PROBE_GPU_COPIES": "0",
       "XR_PROBE_LOAD": "fps:50:70",
-      "XR_PROBE_SCENE": "bench\\\\littlest_tokyo.vab",
-      "XR_PROBE_MV": "synthetic"
+      "XR_PROBE_SCENE": "bench\\\\littlest_tokyo.vab"
      }
     },
     "timeout_s": 1100

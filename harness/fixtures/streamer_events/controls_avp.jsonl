@@ -5,8 +5,6 @@
 {"dump": "frame_gen_on"}
 {"ui": "rate", "value": "2"}
 {"dump": "rate"}
-{"ui": "mv", "value": "off"}
-{"dump": "mv"}
 {"ui": "uncapped", "value": "on"}
 {"dump": "uncapped_on"}
 {"ui": "uncapped", "value": "off"}

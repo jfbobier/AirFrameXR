@@ -13,11 +13,10 @@ Requirements: Windows 10/11, an NVIDIA GPU with a current driver (RTX 40 series 
 | `bin\*.exe.config` | one per GUI exe: WinForms' own per-monitor DPI mode (a window follows its monitor's scale) |
 | `bin\streamer.exe` | the streamer window: keep it open while you play (starts the streamer, shows status, display / frame generation / mirror switches) |
 | `bin\configure.exe` | the setup wizard (pair the headset, tests, settings); `--diagnose` runs the same checks on your settings as they are |
-| `bin\performance.exe` | the games you played: per-session numbers, the DLSS motion-vector DLL of each game, export of the logs |
+| `bin\performance.exe` | the games you played: per-session numbers, export of the logs |
 | `bin\alvr_host.exe` | the streamer proper (ALVR server_core + NVENC); started by streamer.exe, no window |
 | `bin\virtualdesktop-openxr.dll`, `.json`, `LibOVRRT64_1.dll` | the OpenXR runtime games load (VDXR + VisionALVR's OVR shim; VDXR loads the shim from its own folder) |
 | `bin\register_openxr_runtime.ps1` | what the launcher's runtime switch runs (UAC prompt): make this folder the Windows OpenXR runtime / put the previous one back |
-| `DLSSMotionVectors\dxgi.dll` | the DLSS motion-vector extractor (GPL-3.0); copied next to a game's exe from the Logs window, never loaded from here |
 | `bench\`, `profiles\` | the benchmark scene ("Littlest Tokyo" by Glen Fox, CC-BY-4.0) and the scene app; community headset profiles |
 | `docs\` | `README.txt`, `THIRD_PARTY_NOTICES.md`, `licenses\` (ALVR, VirtualDesktop-OpenXR, the Rust crates, the scene) |
 | `config\session.default.json` | shipped ALVR settings; `config\session.json` (yours), `config\visionalvr.json` and `config\games\<exe>.json` are created on first use |

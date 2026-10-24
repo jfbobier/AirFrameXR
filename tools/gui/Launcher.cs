@@ -26,7 +26,7 @@ namespace VisionALVR
         class Tool { public string Title, What, Exe, Args = ""; public bool StopsStreamer, Primary; }
         static readonly Tool[] Tools = {
             new Tool { Title = "Streamer", Exe = @"bin\streamer.exe", Primary = true, What = "Start streaming to your headset." },
-            new Tool { Title = "Game statistics", Exe = @"bin\performance.exe", What = "How your games ran, and the motion-vector DLL of each." },
+            new Tool { Title = "Game statistics", Exe = @"bin\performance.exe", What = "How your games ran." },
             new Tool { Title = "Settings", Exe = @"bin\configure.exe", Args = "--settings", StopsStreamer = true, What = "Headset pairing, benchmarks, video, audio and network settings." },
             // experimental and tuning switches (docs/EXPERIMENTAL_SWITCHES.md): writes config files, the streamer picks the live ones up, so it can stay open
             new Tool { Title = "Advanced settings", Exe = @"bin\configure.exe", Args = "--switches", What = "Experimental frame generation, pacing, GPU and encoder switches, each with when it takes effect." },

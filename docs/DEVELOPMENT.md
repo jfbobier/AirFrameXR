@@ -74,26 +74,18 @@ analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin
 
 ## Release package recipe
 
-A release zip is built in the release flavour and **always carries the DLSS motion-vector extractor DLL that matches it**, as
-`DLSSMotionVectors\dxgi.dll`. The shim finds the extractor by its exports (`DLSSVEC_*`, mirrored in `ovrshim/ngxtap.h`) and the two move
-together; shipping them from different builds is how a user ends up with "motion vectors: no provider in the game" and no idea why. Never
-publish a zip whose DLL was not built from the fork commit the shim's header mirrors.
+A release zip is built in the release flavour.
 
-1. Build the extractor on the builder (first time: the script clones `jfbobier/OptiScaler-DLSSMotionVectorExtractor`, branch `visionalvr`,
-   recursively into `%USERPROFILE%\recon\OptiScaler`; later runs pull and rebuild): `powershell -File C:\Users\<you>\build_fork.ps1`
-   (MSBuild 2022, Release x64; the DLL is `x64\Release\a\OptiScaler.dll`). Fetch it to `private/dist/dlssvec/dxgi.dll` (or point
-   `VISIONALVR_DLSSVEC_DLL` at it) and publish the same file on the fork's release as `OptiScaler-DLSSMotionVectorExtractor-<commit>.dll`.
-2. `python3 harness/run.py build nvenc client host shim probe gui package --release` (`build` alone is client + host only), then
-   `VISIONALVR_PERSONAL=1 python3 harness/run.py build package --release` for the personal zip. The package stage prints
-   `package: DLSSMotionVectors\dxgi.dll from ...`; if it prints `no extractor DLL`, stop and do step 1.
-3. Check the zip before publishing: `DLSSMotionVectors/dxgi.dll` present and exporting `DLSSVEC_SetConsumerV1`, the shim in the same zip
-   looking for that symbol, `licenses/OptiScaler-DLSSMotionVectorExtractor-GPL-3.0.txt` present, the personal zip carrying its extra files.
-4. The zip is named after the host's `VERSION` (`tools/host/src/vision.rs`) and renamed `VisionALVR-<tag>.zip` on upload; the release notes
+1. `python3 harness/run.py build nvenc client host shim probe gui package --release` (`build` alone is client + host only), then
+   `VISIONALVR_PERSONAL=1 python3 harness/run.py build package --release` for the personal zip.
+2. Check the zip before publishing: `bin\flavour.txt` says release, no personal settings in the generic zip (no headset address in
+   `config\visionalvr.json`), the personal zip carrying its extra files.
+3. The zip is named after the host's `VERSION` (`tools/host/src/vision.rs`) and renamed `VisionALVR-<tag>.zip` on upload; the release notes
    live in `docs/releases/<tag>.md` and are pushed to GitHub with `gh release edit --notes-file`.
 
-5. **Optional, only after a major change:** the stability harness (`python3 harness/stability/run_stability.py run all`, about 90 minutes on a laptop,
+4. **Optional, only after a major change:** the stability harness (`python3 harness/stability/run_stability.py run all`, about 90 minutes on a laptop,
    plus `run soak_tokyo --seconds 14400` for a leak verdict) on the debug flavour (`run.py build nvenc vdxr host shim probe ballast`). It is not part of
-   a normal build or a normal release: run it when the frame-generation pipeline, the tracking / timestamp path, the motion-vector tap, the audio capture or
+   a normal build or a normal release: run it when the frame-generation pipeline, the tracking / timestamp path, the audio capture or
    the host's threading changed, and before a release that carries such a change. A small fix needs the regular scenarios only. See harness/README.md
    (Stability harness) and docs/STABILITY_PLAN.md.
 

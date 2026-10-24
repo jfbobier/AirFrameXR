@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "0.6-alpha";
+pub const VERSION: &str = "0.6.1-alpha";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
 /// `config/` (session.json, visionalvr.json) and `logs/` inside it.
@@ -65,12 +65,9 @@ pub struct Settings {
     pub frame_gen_hold_age: Option<bool>,
     /// "fast" (default) | "medium" | "slow": the optical-flow engine's preset
     pub frame_gen_perf: Option<String>,
-    /// "edge" (default) | "edge-blend" | "crossfade": the synthesis of generated frames (nvenc/hostlib/framegen.cpp)
+    /// "edge" (default) | "edge-blend" | "classic" (the crossfade recipe, the predictable fallback): the synthesis of generated frames
+    /// (nvenc/hostlib/framegen.cpp)
     pub frame_gen_synthesis: Option<String>,
-    /// edge synthesis: the game's motion vector as one more candidate (default off)
-    pub frame_gen_vector_candidate: Option<bool>,
-    /// tap the game's DLSS motion vectors when the OptiScaler-DLSSMotionVectorExtractor provider is loaded (docs/MOTION_VECTORS.md); default on
-    pub game_motion_vectors: Option<bool>,
     /// "half" (default) | "uncapped": the game paced at half the display rate with strict alternation, or at the display rate with every
     /// output interpolated (docs/FRAME_GENERATION_UNCAPPED.md)
     pub frame_gen_rate: Option<String>,
@@ -131,8 +128,6 @@ pub fn load_settings(path: &Path) -> Settings {
         frame_gen_hold_age: video["frame_gen_hold_age"].as_bool(),
         frame_gen_perf: video["frame_gen_perf"].as_str().map(str::to_string),
         frame_gen_synthesis: video["frame_gen_synthesis"].as_str().map(str::to_string),
-        frame_gen_vector_candidate: video["frame_gen_vector_candidate"].as_bool(),
-        game_motion_vectors: video["game_motion_vectors"].as_bool(),
         frame_gen_rate: video["frame_gen_rate"].as_str().map(str::to_string),
         frame_gen_lag_ms: video["frame_gen_lag_ms"].as_f64(),
         frame_gen_cap_fps: video["frame_gen_cap_fps"].as_f64(),
@@ -223,8 +218,6 @@ pub static DEBUG_REQ: AtomicI32 = AtomicI32::new(-1);
 pub static FRAME_GEN_REQ: AtomicI32 = AtomicI32::new(-1);
 /// frame generation rate from VisionALVR.exe (-1 none, else `pipeline::FgRate::index`: 0 third, 1 half, 2 two_thirds, 3 uncapped)
 pub static FG_RATE_REQ: AtomicI32 = AtomicI32::new(-1);
-/// the game's DLSS motion vectors on/off (-1 none)
-pub static GAME_MV_REQ: AtomicI32 = AtomicI32::new(-1);
 /// fps cap of the game's releases (uncapped mode), -1 none, 0 = no cap
 pub static FG_CAP_REQ: AtomicI32 = AtomicI32::new(-1);
 /// uncapped mode content lag in tenths of ms (-1 none, 0 = automatic)
@@ -235,7 +228,7 @@ pub static RECENTER_REQ: AtomicBool = AtomicBool::new(false);
 pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 
-/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`, `game_mv on|off`,
+/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
 /// `frame_gen_cap <fps>` (0 = none), `frame_gen_lag <ms>` (0 = automatic), `recenter`,
 /// `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
@@ -313,7 +306,6 @@ pub fn spawn_stdin_control() {
                         FG_RATE_REQ.store(r.index(), Ordering::SeqCst);
                     }
                 }
-                (Some("game_mv"), Some(v)) => GAME_MV_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("recenter"), _) => RECENTER_REQ.store(true, Ordering::SeqCst),
                 (Some("frame_gen_cap"), Some(v)) => {
                     if let Ok(f) = v.parse::<f64>() {

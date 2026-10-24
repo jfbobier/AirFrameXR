@@ -54,30 +54,16 @@ SCENARIOS = {
                     "note": "ideal timing, light app, frame generation on: the generator's null case (expect CLEAN + SMOOTH)"},
     "steady":      {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25",
                     "note": "ideal timing, light app, generator off: the motion metric's reference (the rig's own empty boundaries, ~6 %, read as frozen periods)"},
-    # game motion vectors (docs/MOTION_VECTORS.md): the probe stands in for the DLSS provider (XR_PROBE_MV=synthetic, known vector pattern), the shim's
-    # tap copies them with every frame, the host attaches them to the generator's history and dumps the first ones (mv_*.ppm / .txt in the results)
-    "steady_mv":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MV": "synthetic", "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_MV_DUMP": "{rd}", "ENV:VISIONALVR_FG_USE_MV": "0",
-                    "note": "steady_fg + synthetic DLSS vectors from the probe: the tap's plumbing (check mv_*.ppm against the probe's formula, fg stats mv.frames)"},
-    "stutter_mv":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "PROBE:XR_PROBE_MV": "truth", "note": "stutter_fg with the probe's exact vectors (XR_PROBE_MV=truth): synthesis from the game's vectors (compare with stutter_fg)"},
-    "stutter_turn_mv": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "PROBE:XR_PROBE_MV": "truth", "note": "stutter_turn_fg with exact vectors: camera motion in the vectors must cancel against the rotation compensation"},
     # uncapped frame generation (docs/FRAME_GENERATION_UNCAPPED.md): the game paced at the display rate, every output interpolated at the fraction its
-    # content time falls at between the two newest rendered frames; _unc = flow, _unc_mv = the probe's exact vectors
+    # content time falls at between the two newest rendered frames
     "stutter_unc": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "note": "stutter with uncapped generation (flow): compare with stutter_fg (half rate)"},
-    "stutter_unc_mv": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "PROBE:XR_PROBE_MV": "truth", "note": "uncapped generation from the probe's exact vectors"},
-    "stutter_turn_unc_mv": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "PROBE:XR_PROBE_MV": "truth", "note": "uncapped generation, head turning, exact vectors"},
     "steady_unc":  {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall", "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped",
                     "note": "ideal timing, light app (at the display rate), uncapped generation: the mode's null case (t near 0/1 most of the time)"},
     # jittery input -> smooth output: a game around 75 fps whose frame time swings +-30 % from frame to frame (XR_PROBE_LOAD=jitter), uncapped generation;
     # the judge's step_cv (uniformity of the marker's steps per period) and hf are the smoothness, fg_perf's slack/behind the lag's adequacy
     "jitter_unc":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:30", "PROBE:XR_PROBE_CPU_MS": "13.3", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "note": "~75 fps app with +-30 % frame-time jitter, uncapped generation (flow)"},
-    "jitter_unc_mv": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:30", "PROBE:XR_PROBE_CPU_MS": "13.3", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "PROBE:XR_PROBE_MV": "truth", "note": "the same with the probe's exact vectors"},
     "stutter_fg_wall": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "note": "stutter_fg with the marker on the wall clock (an engine's delta-time animation): the half-rate reference for the _unc scenarios"},
     "jitter":      {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:30", "PROBE:XR_PROBE_CPU_MS": "13.3", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
@@ -104,8 +90,6 @@ SCENARIOS = {
                     "note": "gpu_fg with a 4x frame every 150 frames: the hiccups that moved the headset between its good and bad states"},
     "third_slow":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.12", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "the 1/3 rate with the marker at half speed: the planner's test; at full speed the 5 px marker moves 14 px per 30 ms game step, past the flow's 8 px blocks (the thin-mover limit, not the planner)"},
-    "third_mv":    {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "PROBE:XR_PROBE_MV": "truth", "note": "the 1/3 rate from the probe's exact vectors"},
     "two_thirds":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:80:100", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "two_thirds", "note": "an 80-100 fps app held to 2/3 of the display rate (67 fps at 100 Hz), every output interpolated"},
     "jitter_two_thirds": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:30", "PROBE:XR_PROBE_CPU_MS": "13.3", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",

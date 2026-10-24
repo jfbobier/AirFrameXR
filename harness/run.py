@@ -106,7 +106,7 @@ def build(what):
             continue
         if w == "shim":      # OVRShim: fork of VDXR's OVRNull (ovrshim/), built next to it in the builder's VDXR checkout
             lib.b_run("if not exist _tmp\\ovrshim mkdir _tmp\\ovrshim")
-            for f in ("driver.cpp", "ipc.h", "ipc_win.h", "ngxtap.h", "constantsbuffer.h", "layerconstants.h", "ReprojectVS.hlsl", "ReprojectPS.hlsl", "LayerVS.hlsl", "LayerPS.hlsl", "LayerCubePS.hlsl"):
+            for f in ("driver.cpp", "ipc.h", "ipc_win.h", "constantsbuffer.h", "layerconstants.h", "ReprojectVS.hlsl", "ReprojectPS.hlsl", "LayerVS.hlsl", "LayerPS.hlsl", "LayerCubePS.hlsl"):
                 lib.b_put(lib.ROOT / "ovrshim" / f, f"_tmp/ovrshim/{f}")
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage11_ovrshim.ps1"], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")
@@ -192,21 +192,6 @@ def build(what):
                 lib.b_put(pf, f"_tmp/install/profiles/{pf.name}")
             lib.b_put(out_dir / "version.txt", "_tmp/install/version.txt")   # the zip is named after the host's VERSION (vision.rs)
             # licences shipped with the binaries: the notices, the project licence (once chosen) and the upstream texts
-            # the DLSS motion-vector extractor (OptiScaler fork, GPL-3.0), shipped as DLSSMotionVectors\dxgi.dll: private/dist/dlssvec/dxgi.dll,
-            # fetched from the fork's build (tools/remote build_fork.ps1 on the builder, or the 5090's recon clone); without it the zip ships none
-            # (a marker file says whether to ship it: tools/builder.sh refuses delete commands, so a stale upload is never removed, only unmarked)
-            dll = Path(os.environ.get("VISIONALVR_DLSSVEC_DLL", str(lib.ROOT / "private/dist/dlssvec/dxgi.dll")))
-            lib.b_run("if not exist _tmp\\install\\DLSSMotionVectors mkdir _tmp\\install\\DLSSMotionVectors")
-            marker = lib.ROOT / "build/dlssvec_present.txt"
-            marker.parent.mkdir(parents=True, exist_ok=True)
-            if dll.exists():
-                lib.b_put(dll, "_tmp/install/DLSSMotionVectors/dxgi.dll")
-                marker.write_text("1")
-                print(f"package: DLSSMotionVectors\\dxgi.dll from {dll} ({dll.stat().st_size // 1024} KB)")
-            else:
-                marker.write_text("0")
-                print(f"package: no extractor DLL at {dll}: the zip ships without DLSSMotionVectors\\dxgi.dll")
-            lib.b_put(marker, "_tmp/install/DLSSMotionVectors/present.txt")
             lib.b_run("if not exist _tmp\\install\\licenses mkdir _tmp\\install\\licenses")
             lib.b_put(lib.ROOT / "THIRD_PARTY_NOTICES.md", "_tmp/install/THIRD_PARTY_NOTICES.md")
             if (lib.ROOT / "LICENSE").exists():

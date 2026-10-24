@@ -2,7 +2,7 @@
 # Layout: the root holds ONE file, VisionALVR.exe (a stub that starts bin\launcher.exe); everything else is in a subfolder:
 #   bin\   everything the launcher starts or loads: launcher.exe, streamer.exe, configure.exe (setup wizard and --diagnose), performance.exe (each with its .exe.config), alvr_host.exe,
 #          register_openxr_runtime.ps1 and the OpenXR runtime (LibOVRRT64_1.dll, virtualdesktop-openxr.dll + .json: VDXR loads the shim from its own folder)
-#   DLSSMotionVectors\dxgi.dll (the extractor a user copies next to a game; never loaded from here), bench\, profiles\, config\, docs\, logs\ (created on use)
+#   bench\, profiles\, config\, docs\, logs\ (created on use)
 $ErrorActionPreference = 'Continue'
 $root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
 $version = if ($env:VISIONALVR_VERSION) { $env:VISIONALVR_VERSION } else { '0.2-alpha' }
@@ -33,10 +33,6 @@ if (Test-Path "$root\bench\littlest_tokyo.vab") { Copy-Item "$root\bench\littles
 if (Test-Path "$root\bench\sakura_breeze.mp3") { Copy-Item "$root\bench\sakura_breeze.mp3" "$pkg\bench\sakura_breeze.mp3" -Force }   # the scene's music (credits in THIRD_PARTY_NOTICES.md)
 # the OpenXR scene app of the wizard's scene test (renders that scene through the real shim path with the headset's head pose)
 if (Test-Path "$root\build\probe\xr_probe.exe") { Copy-Item "$root\build\probe\xr_probe.exe" "$pkg\bench\xr_probe.exe" -Force }
-# the DLSS motion-vector extractor (OptiScaler fork, GPL-3.0; source and licence named in THIRD_PARTY_NOTICES.md): a user copies it next to a game's exe
-$dlssvecMarker = "$root\_tmp\install\DLSSMotionVectors\present.txt"
-$shipDlssvec = (Test-Path $dlssvecMarker) -and ((Get-Content $dlssvecMarker -Raw).Trim() -eq '1') -and (Test-Path "$root\_tmp\install\DLSSMotionVectors\dxgi.dll")
-if ($shipDlssvec) { New-Item -ItemType Directory -Force "$pkg\DLSSMotionVectors" | Out-Null; Copy-Item "$root\_tmp\install\DLSSMotionVectors\dxgi.dll" "$pkg\DLSSMotionVectors\dxgi.dll" -Force }
 # the wizard's community headset profiles
 New-Item -ItemType Directory -Force "$pkg\profiles" | Out-Null
 if (Test-Path "$root\_tmp\install\profiles") { Copy-Item "$root\_tmp\install\profiles\*.json" "$pkg\profiles" -Force }
@@ -64,7 +60,6 @@ $ship = @('VisionALVR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\config
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\sakura_breeze.mp3', 'bench\xr_probe.exe', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
 $ship += $persShip
 $ship += $persFiles
-if ($shipDlssvec) { $ship += 'DLSSMotionVectors\dxgi.dll' }
 $ship += Get-ChildItem "$pkg\profiles" -File -Filter *.json | ForEach-Object { "profiles\$($_.Name)" }
 $ship += Get-ChildItem "$pkg\docs\licenses" -File | ForEach-Object { "docs\licenses\$($_.Name)" }
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem

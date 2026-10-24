@@ -16,10 +16,7 @@ Wi-Fi packet, every stage is tuned against the next one instead of stacked mods 
 
 - **No SteamVR.** The game talks OpenXR to a small runtime; no SteamVR compositor, no extra frame copies between processes, no dashboard.
 - **NVIDIA all the way.** NVENC HEVC 10-bit with split-frame encoding across the GPU's encoders, ALVR's foveated encoding when you want it,
-  NVIDIA Optical Flow for the generated frames, and the game's own **DLSS motion vectors** when the
-  [OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor) DLL sits in the game folder
-  (shipped in the zip as `DLSSMotionVectors\dxgi.dll`). Shared GPU memory between the
-  game, the shim and the encoder; nothing crosses the CPU.
+  NVIDIA Optical Flow for the generated frames. Shared GPU memory between the game, the shim and the encoder; nothing crosses the CPU.
 - **Frame generation that is part of the pipeline, not a mod on top of a mod.** The game is paced to 1/3, 1/2 or 2/3 of the display rate and
   the streamer interpolates the rest, every output rotated to the newest head pose. On an RTX 5090 and a Vision Pro: a 40 fps Unreal game
   streams at the panel's 90-100 Hz with 0.5-2 % of the headset's periods repeated and 67 ms of total latency, against 40-50 % repeated and
@@ -71,10 +68,9 @@ flowchart LR
     subgraph PC["Windows PC, one process chain, NVIDIA GPU"]
         direction LR
         G["OpenXR game<br/>(UEVR, native VR)"]
-        D["DLSS in the game<br/>+ OptiScaler-DLSSMotionVectorExtractor DLL<br/>(motion vectors, depth)"]
         V["VirtualDesktop-OpenXR<br/>OpenXR runtime, small patches"]
         S["OVRShim (LibOVRRT64_1.dll)<br/>composes layers, paces the game<br/>to 1/3, 1/2, 2/3 of the display rate,<br/>10-bit frame ring in shared GPU memory"]
-        H["alvr_host.exe<br/>frame generation (NVIDIA Optical Flow<br/>or the game's vectors), head-pose stamping,<br/>foveated encoding, NVENC HEVC 10-bit split encode,<br/>ALVR 20.14 server core"]
+        H["alvr_host.exe<br/>frame generation (NVIDIA Optical Flow,<br/>edge-aware synthesis), head-pose stamping,<br/>foveated encoding, NVENC HEVC 10-bit split encode,<br/>ALVR 20.14 server core"]
         L["VisionALVR.exe launcher<br/>settings, game records,<br/>proposals, recenter"]
         G --> V --> S --> H
         G -.-> D -.->|same process,<br/>no copy| S
@@ -106,13 +102,13 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, Logs and performance, Diagnose, Setup wizard, and the OpenXR runtime row"></p>
 
-**The streamer.** Live numbers as tiles (the game's fps, what is streamed, what the headset shows, bitrate, latency split, loss), display settings, frame generation with its rate and DLSS motion vectors, Recenter, and the optional desktop mirror.
+**The streamer.** Live numbers as tiles (the game's fps, what is streamed, what the headset shows, bitrate, latency split, loss), display settings, frame generation with its rate, Recenter, and the optional desktop mirror.
 
 <p align="center"><img src="docs/images/ui_streamer.png" width="640" alt="The streamer window with live statistics tiles and the frame generation controls"></p>
 
-**What happened in each game.** One record per game: the last sessions with fps, latency, network, GPU and whether the game's motion vectors reached the streamer; install or remove the motion-vector DLL per game; export a log zip.
+**What happened in each game.** One record per game: the last sessions with fps, latency, network and GPU; export a log zip.
 
-<p align="center"><img src="docs/images/ui_performance.png" width="720" alt="Logs and performance: the games played, a session's statistics as tiles, the session history and the DLSS motion-vector DLL manager"></p>
+<p align="center"><img src="docs/images/ui_performance.png" width="720" alt="Logs and performance: the games played, a session's statistics as tiles, the session history"></p>
 
 **Diagnose, with suggestions.** The wizard's checks on your settings as they are, and a list of suggestions taken from [docs/PERFORMANCE_KNOBS.md](docs/PERFORMANCE_KNOBS.md): each says what it measured (this run's tests, or your logs and game records) and which knob it is about. Nothing changes unless you press a button.
 
@@ -159,16 +155,14 @@ The desktop mirror (the Windows desktop floating in front of you between games, 
 - **New in 0.4: frame generation** (toggle in the streamer window and in Settings, `video.frame_gen`, off by default): for games that cannot
   hold the display rate. A slider sets the game's rate as a fraction of the display rate, **1/3, 1/2 (default) or 2/3**, and the streamer
   generates the frames in between: at 1/2 and 1/3 the game is locked to the display cadence (one or two generated frames per rendered one),
-  at 2/3 it is held to two thirds of the rate and every frame sent is interpolated. In-scene motion comes from the game's own **DLSS motion
-  vectors** when the [OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor) DLL sits next to the game's executable
-  (copy `DLSSMotionVectors\dxgi.dll` from the zip next to the game's real executable, tick *DLSS motion vectors*), else from the GPU's optical-flow
+  at 2/3 it is held to two thirds of the rate and every frame sent is interpolated. In-scene motion comes from the GPU's optical-flow
   engine (NVIDIA Optical Flow, Turing or later). Every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz
   with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3. Costs latency by construction (interpolation:
-  one game period); small fast objects may ghost without vectors. The rate is fixed for a run; a **Recommended** tick sets it from the
+  one game period). The rate is fixed for a run; a **Recommended** tick sets it from the
   game's recorded runs on the connected headset (`config/games/<exe>.json`, written by the streamer at every game end: fps, the headset's repeated
   periods, the streamer's repeats), and the streamer window shows the last run's record when a game ends. A **Recenter** button (also sent
   at every game start) turns the tracking space to your current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md),
-  [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md) and [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md). Not automatic
+  [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md). Not automatic
   by design: a game that holds a steady 70-75 fps is often better left alone.
 - **New in 0.5: the windows.** Double-click **`VisionALVR.exe`** (the only file in the folder's root; a stub that opens the launcher) and pick a tool;
   the launcher steps aside while a tool is open and comes back when you close it. Everything else sits in `bin\`.
@@ -179,13 +173,19 @@ The desktop mirror (the Windows desktop floating in front of you between games, 
   - **Streamer** (`bin\streamer.exe`): live numbers as tiles (game, streamed and shown fps, bitrate, latency split, loss), display settings,
     frame generation, **Recenter** (and a recenter key, **End** by default, set in the wizard), and an optional **Mirror Windows desktop between
     sessions** toggle: the desktop floats in front of you (SDR or HDR, converted to SDR), your right hand is the mouse (pinch = click, grip = right click);
-    for games you start from the headset, off by default. After a game, if the DLSS motion vectors were missing it offers to install the DLL.
+    for games you start from the headset, off by default.
   - **Logs and performance** (`bin\performance.exe`): the games you played, one file per game (`config/games/<exe>.json`) with the last sessions (fps,
-    latency, network, GPU, whether the motion vectors worked); install or remove the motion-vector DLL for a game (checked against the packaged copy,
-    the master copy is never touched); export a log zip; records of uninstalled games are cleaned.
+    latency, network, GPU); export a log zip; records of uninstalled games are cleaned.
   - **Diagnose** (`bin\configure.exe --diagnose`): the wizard's checks and verdict on your settings as they are, now also covering the OpenXR layers
     and the firewall. The **Setup wizard** asks Vision Pro users once to turn on passthrough in the ALVR app (the streamer cannot set it).
   - The windows follow the display: 1080p laptops to 4K, 100-200 % scale (WinForms' own per-monitor DPI mode), checked by the UI harness below.
+- **New in 0.6.1: sharper generated frames, and no more DLSS motion vectors.** Generated frames now use an **edge-aware synthesis**
+  (default): motion edges stay sharp, and where the motion is uncertain the real frame is shown instead of a double image (ideas from
+  [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented). The previous algorithm stays as **classic** in Advanced settings, the
+  predictable fallback if a game misbehaves. The DLSS motion-vector support is **removed**: measured against the images, correct vectors
+  were barely better than the optical flow, and in real games they often arrived paired with the wrong frame (see
+  [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md)). The zip no longer ships the extractor DLL; a game folder where an earlier release
+  installed it shows a **Remove** button in Logs and performance.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
@@ -341,18 +341,17 @@ VisionALVR stands on the shoulders of giants: the projects below made it possibl
   Thanks also for the many other OpenXR tools from the same author that the PC VR community relies on.
 - **[OFXR-Bridge](https://github.com/tig3rmast3r/OFXR-Bridge)** (LGPL-3.0) by tig3rmast3r: the frame-generation synthesis recipe
   (rotation-compensated residual flow, midpoint sampling, confidence and crossfade fallback) and its never-block safety rules were
-  studied from its code and re-implemented here; its DLSS provider interface is the model for ours.
-- **[OptiScaler](https://github.com/optiscaler/OptiScaler)** (GPL-3.0) and its contributors: the DLSS motion-vector tap for frame
-  generation is a separate fork, [OptiScaler-DLSSMotionVectorExtractor](https://github.com/jfbobier/OptiScaler-DLSSMotionVectorExtractor), kept under GPL-3.0 and
-  shipped as its own DLL; VisionALVR talks to it only through shared textures and a small documented interface. Years of
-  game-compatibility work live in that project.
+  studied from its code and re-implemented here; it is the "classic" synthesis.
+- **[VectorXR](https://github.com/DienerTech/vectorxr)** (MPL-2.0) by DienerTech: the edge-aware synthesis (vector median, source-solved
+  flow, per-pixel candidate choice at motion boundaries, doubtful motion shrinking toward the real frame) was studied from its code and
+  re-implemented here.
 - NVIDIA Video Codec SDK and Optical Flow SDK headers (MIT). cgltf (MIT), stb_image (public domain / MIT), Draco (Apache-2.0, offline converter only).
 - Benchmark scene: "Littlest Tokyo" by Glen Fox ([glenatron](https://sketchfab.com/glenatron)), CC-BY-4.0, converted and placed
   in a textured room. Its music: "Sakura Breeze" by [Roa Music](https://soundcloud.com/roa_music1031), royalty-free music from
   [free-stock-music.com](https://www.free-stock-music.com), CC BY 3.0 ([licence](https://creativecommons.org/licenses/by/3.0/deed.en_US)), shortened and re-encoded.
 
 Details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). VisionALVR is not affiliated with or endorsed by the ALVR project,
-Apple, NVIDIA, Virtual Desktop, OFXR-Bridge or OptiScaler. Apple Vision Pro and visionOS are trademarks of Apple Inc.
+Apple, NVIDIA, Virtual Desktop, OFXR-Bridge or VectorXR. Apple Vision Pro and visionOS are trademarks of Apple Inc.
 
 ## License
 MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
@@ -360,4 +359,4 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers (v0.2, extended in 0.3)
-- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation (0.4): half-rate pacing + interpolated frames; [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md): the uncapped mode, cap and lag, headset-night verdicts; [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md): the DLSS motion-vector tap (OptiScaler fork) and synthesis from vectors
+- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation (0.4): half-rate pacing + interpolated frames; [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md): the uncapped mode, cap and lag, headset-night verdicts; [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md): the DLSS motion-vector experiment (0.4-0.6) and why it was removed in 0.6.1

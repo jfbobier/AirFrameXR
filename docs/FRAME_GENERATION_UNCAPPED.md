@@ -49,11 +49,10 @@ t = 0 repeats, frozen 12 %, verdict JUDDER on the stutter scenario against 2 % f
 |---|---|---|---|
 | `video.frame_gen` | toggle "Frame generation" | `frame_gen on\|off` | the generator on the encoder, as before |
 | `video.frame_gen_rate` = `third` \| `half` (default) \| `two_thirds` \| `uncapped` | slider "Game rate 1/3 - 1/2 - 2/3" (2026-10-16) and the "Uncapped" tick beside it (2026-10-23) | `frame_gen_rate third\|half\|two_thirds\|uncapped` | `third`/`half`: fixed patterns, the shim paces at `appPeriodMul` 3 / 2; `two_thirds`: this note's planner with the game held to 2/3 of the display rate (the host sets `appMinPeriodUs` from the display period and follows rate changes); `uncapped`: this note's planner, free-running |
-| `video.game_motion_vectors` (default on) | tick "DLSS motion vectors" | `game_mv on\|off` | the shim taps the game's vectors when the OptiScaler-DLSSMotionVectorExtractor DLL is in the game folder and the generator synthesises from them; off = optical flow only (the tap is idle) |
 | `video.frame_gen_cap_fps` (0 = none) | config only (2026-10-16) | `frame_gen_cap <fps>` | uncapped mode: the shim never releases the game sooner than 1/cap after the previous release (IPC v27 `appMinPeriodUs`); the headroom knob below |
 | `video.frame_gen_lag_ms` (0 = auto) | config only | `frame_gen_lag <ms>` | two-thirds and uncapped modes: the content lag; 0 = automatic as above |
 
-CLI `--frame-gen-rate`, `--frame-gen-cap`, `--frame-gen-lag-ms`, `--game-motion-vectors`; env `VISIONALVR_FG_RATE`, `VISIONALVR_FG_CAP_FPS`,
+CLI `--frame-gen-rate`, `--frame-gen-cap`, `--frame-gen-lag-ms`; env `VISIONALVR_FG_RATE`, `VISIONALVR_FG_CAP_FPS`,
 `VISIONALVR_FG_LAG_MS`. The cap acts in uncapped mode only, the lag in the two free-running modes. Nothing engages by itself. After the
 two headset nights (below) the launcher shows three locked rates, 1/3, 1/2, 2/3 (`docs/FRAME_GENERATION.md`, "Rates"); 2/3 is this
 planner with the cap implied by the display rate, uncapped itself is a config-only experiment.
@@ -65,18 +64,15 @@ planner with the cap implied by the display rate, uncapped itself is a config-on
 - Every 10 s while generation is on, `frame generation perf` INFO line and `fg_perf` event: app fps and the shim's frame-time envelope, late
   releases (the game free-running against the display), stream fps, measured game period with its p50 / p95 / max interval, the lag in
   force with the slack it left at arrivals (p5 / p50; negative = a repeat happened), the mean `t` and mean `age` of the synthetic
-  outputs, `behind` (repeats: the game later than the lag) and `ahead` counts, the generator's stats (flow and synthesis GPU ms,
-  `mv.used_eyes` = eye passes synthesised from the game's vectors, `mv.frames` = frames that carried vectors), and NVML's sample
+  outputs, `behind` (repeats: the game later than the lag) and `ahead` counts, the generator's stats (flow and synthesis GPU ms), and NVML's sample
   (`gpu %, mem %, enc %, dec %, graphics MHz, memory MHz, video MHz, power W, temp C, pstate, vram MB, clock-event reasons`).
-- `motion_tap` event when the shim's tap state changes (attached / no provider / ABI mismatch), see `docs/MOTION_VECTORS.md`.
-- The shim's own log (debug on): `pacing: ... period mul N, fps cap F (holds H)` every 900 frames, and the tap's streams and evaluates.
+- The shim's own log (debug on): `pacing: ... period mul N, fps cap F (holds H)` every 900 frames.
 - With debug on, `logs/debug/<session>/fg_uncapped.csv` has one row per output (kind G/R/Q, t, age, lag, how far the content trailed the
   newest frame, the history's oldest and newest timestamps, history depth), `gpu.csv` the NVML sample every second, `host_frames.csv` the per-frame fates
   (`G` synthetic, `R` real, `Q` repeat), `pipeline` CSVs the arrival-to-send times.
 
 A good uncapped session reads: `behind` near zero (the lag covers the game's jitter), mean `t` around 0.5 spread evenly, late releases
-close to all releases (the game runs free), `gpu %` below 95 and the graphics clock not dropping, app fps steady, `mv.used_eyes` rising when
-the DLL is in the game folder. A bad one: `behind` climbing (raise the lag, or cap the game), `gpu %` pinned at 100 with the app fps sagging
+close to all releases (the game runs free), `gpu %` below 95 and the graphics clock not dropping, app fps steady. A bad one: `behind` climbing (raise the lag, or cap the game), `gpu %` pinned at 100 with the app fps sagging
 (cap the game: see below), or app fps above the headset rate with nothing gained (half rate or generation off is cheaper).
 
 ## The bottleneck concern, and the simple answer first

@@ -148,14 +148,12 @@ def judge(outdir, crit):
     if "host_stalls_min" in crit:
         kinds = sorted({e["data"].get("kind") for e in stalls})
         chk("host_noticed_the_stall", len(stalls) >= crit["host_stalls_min"], f"{len(stalls)} ({', '.join(map(str, kinds))})", f">= {crit['host_stalls_min']} stall_detected events")
-    if crit.get("mv_ok"):
-        gens = [e["data"].get("gen") for e in hev if e.get("event") == "fg_perf" and isinstance(e["data"].get("gen"), dict)]
-        g = next((x for x in reversed(gens) if x.get("on")), gens[-1] if gens else {})
-        mv = g.get("mv") or {}
-        chk("vectors_used", mv.get("frames", 0) > 0 and mv.get("used_eyes", 0) > 0, f"{mv.get('frames', 0)} frames, {mv.get('used_eyes', 0)} eye passes", "the generator took the game's vectors (> 0)")
+    # whenever the generator ran: it must not have failed (flow engine or output pass), whatever the scenario injects
+    gens = [e["data"].get("gen") for e in hev if e.get("event") == "fg_perf" and isinstance(e["data"].get("gen"), dict)]
+    g = next((x for x in reversed(gens) if x.get("on")), None)
+    if g:
         errs = {k: g.get(k, 0) for k in ("flow_errors", "render_errors")}
-        errs["mv_errors"] = mv.get("errors", 0)
-        chk("generator_errors", not any(errs.values()), errs, "no flow, render or vector errors")
+        chk("generator_errors", not any(errs.values()), errs, "no flow or render errors")
     if crit.get("host_audio_events"):
         n = sum(1 for e in hev if e.get("event") == "audio_device" and (e.get("data") or {}).get("n", 0) > 0)
         chk("host_saw_audio_changes", n >= crit["host_audio_events"], n, f">= {crit['host_audio_events']} audio_device events after the start (the injected mute / volume / default changes)")

@@ -28,7 +28,7 @@ namespace VisionALVR
         public double EncodeP95, TrackGapP95, TrackOver15Share, SpreadMed, SpreadP90, PeriodMs;
         public int PhaseSamples;
         public double VideoMhz, GpuPct; public string Pstate = ""; public int GpuSamples;
-        public class Game { public string Name = "", Exe = "", Headset = "", Level = ""; public DateTime When; public double Fps, Hz, RepTyp, RepP90, HostRep, LatencyMs, MvFrames, MvUsed; public bool MvEnabled; }
+        public class Game { public string Name = "", Exe = "", Headset = "", Level = ""; public DateTime When; public double Fps, Hz, RepTyp, RepP90, HostRep, LatencyMs; }
         public List<Game> Games = new List<Game>();
 
         static double Num(Dictionary<string, object> d, string k, double def = double.NaN) { try { return d != null && d.TryGetValue(k, out var v) && v != null ? Convert.ToDouble(v, CultureInfo.InvariantCulture) : def; } catch { return def; } }
@@ -55,13 +55,13 @@ namespace VisionALVR
                     {
                         var g = Json.Load(file);
                         if (!(g.TryGetValue("sessions", out var so) && so is object[] ss && ss.Length > 0 && ss[ss.Length - 1] is Dictionary<string, object> s)) continue;
-                        var net = Obj(s, "net"); var mv = Obj(s, "mv");
+                        var net = Obj(s, "net");
                         var name = g.TryGetValue("name", out var n) && n is string ns && ns.Length > 0 ? ns : (g.TryGetValue("exe", out var e) ? Convert.ToString(e) : Path.GetFileNameWithoutExtension(file));
                         f.Games.Add(new Game
                         {
                             Name = name, Exe = g.TryGetValue("exe", out var ex) ? Convert.ToString(ex) : "", Headset = s.TryGetValue("headset", out var h) ? Convert.ToString(h) : "", Level = s.TryGetValue("level", out var l) ? Convert.ToString(l) : "",
                             When = DateTimeOffset.FromUnixTimeSeconds((long)Num(s, "start", 0)).LocalDateTime, Fps = Num(s, "rendered_fps"), Hz = Num(s, "display_hz"), RepTyp = Num(s, "headset_repeated_typ") * 100, RepP90 = Num(s, "headset_repeated_p90") * 100,
-                            HostRep = Num(s, "host_repeats_typ") * 100, LatencyMs = Num(net, "latency_ms"), MvEnabled = mv != null && mv.TryGetValue("enabled", out var me) && me is bool mb && mb, MvFrames = Num(mv, "frames", 0), MvUsed = Num(mv, "used_eyes", 0),
+                            HostRep = Num(s, "host_repeats_typ") * 100, LatencyMs = Num(net, "latency_ms"),
                         });
                     }
                 f.Games = f.Games.OrderByDescending(x => x.When).Take(4).ToList();
@@ -209,13 +209,6 @@ namespace VisionALVR
                     s.Add(new Suggestion { Sev = Sev.Hint, Knob = "Arrival / Wi-Fi", Source = src, Title = $"{g.Name}: the headset still repeated {F(g.RepTyp)} % of its refreshes at {lvl}",
                         Measured = $"typical window {F(g.RepTyp)} %, heavy parts {F(g.RepP90)} %, host repeats {F(g.HostRep)} %",
                         Do = "the game is keeping up, so look at the link and the arrival margin above" });
-                if (gen && g.MvEnabled && g.MvFrames <= 0)
-                    s.Add(new Suggestion { Sev = Sev.Hint, Knob = "DLSS motion vectors", Source = src, Title = $"{g.Name}: no DLSS motion vectors reached the streamer",
-                        Measured = "the tick was on and generation was on, but the game gave none; generated frames used optical flow instead",
-                        Do = "if the game uses DLSS, install the DLL from the Logs window (it says whether it is there); a game without DLSS has none to give" });
-                else if (gen && g.MvEnabled && g.MvUsed > 0)
-                    s.Add(new Suggestion { Sev = Sev.Info, Knob = "DLSS motion vectors", Source = src, Title = $"{g.Name}: the game's motion vectors are flowing",
-                        Measured = $"{F(g.MvUsed, "0")} eye passes were synthesised from them", Do = "nothing to do: exact motion, less ghosting of small fast objects" });
             }
             return s.OrderByDescending(x => (int)x.Sev).ToList();
         }

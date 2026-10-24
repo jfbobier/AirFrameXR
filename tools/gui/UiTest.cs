@@ -52,9 +52,6 @@ namespace VisionALVR
             yield return new Case { Name = "streamer-empty", Make = () => new RuntimeForm(null) };
             yield return new Case { Name = "streamer-avp-auto", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };   // the fixture config has no height set: a Vision Pro starts on Auto
             yield return new Case { Name = "streamer-quest", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_connected", new Dictionary<string, object> { { "name", "Meta Quest 3" }, { "ip", "192.168.1.60" } }); } };
-            yield return new Case { Name = "streamer-after-ok", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.Worked); } };
-            yield return new Case { Name = "streamer-after-blind", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.Blind); } };
-            yield return new Case { Name = "streamer-no-dll", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).DemoVectors(VectorsLine.Kind.NoDll); } };
             yield return new Case { Name = "streamer-audio-bad", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoAudio(true); } };
             yield return new Case { Name = "streamer-debug-on", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoDebugOn(); } };
             yield return new Case { Name = "streamer-headset-seen", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); ((RuntimeForm)f).HostEvent("headset_seen", new Dictionary<string, object> { { "hostname", "1234.client.alvr" }, { "ip", "192.168.1.50" } }); } };
@@ -106,10 +103,10 @@ namespace VisionALVR
                 for (int i = 0; i < games.Length; i++) File.WriteAllText(Path.Combine(d, "g" + i + ".json"), games[i]);
                 return d;
             }
-            string Game(string exe, string name, string level, double fps, double rep, double hostRep, bool mv, double mvFrames, double mvUsed, long start) =>
+            string Game(string exe, string name, string level, double fps, double rep, double hostRep, long start) =>
                 "{\"exe\":\"" + exe + "\",\"name\":\"" + name + "\",\"sessions\":[{\"start\":" + start + ",\"headset\":\"Apple Vision Pro\",\"level\":\"" + level + "\",\"display_hz\":90,\"rendered_fps\":" + fps.ToString(CultureInfo.InvariantCulture) +
                 ",\"headset_repeated_typ\":" + (rep / 100).ToString(CultureInfo.InvariantCulture) + ",\"headset_repeated_p90\":" + (rep / 50).ToString(CultureInfo.InvariantCulture) + ",\"host_repeats_typ\":" + (hostRep / 100).ToString(CultureInfo.InvariantCulture) +
-                ",\"net\":{\"latency_ms\":60},\"mv\":{\"enabled\":" + (mv ? "true" : "false") + ",\"frames\":" + mvFrames + ",\"used_eyes\":" + mvUsed + "}}]}";
+                ",\"net\":{\"latency_ms\":60}}]}";
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
             var clean = Advice.From(new Results { EncodeP95 = 4, SceneRan = true, HeadSamplesPerS = 270, HeadGapP95Ms = 5, SameTsPct = 0.5 }, hs, 90, false, new LogFacts());
@@ -127,10 +124,10 @@ namespace VisionALVR
             // logs: noisy link, long spread, laptop GPU, debug on, games
             var logs = MakeLogs("noisy", 9.5, 21, 40, 11.0, "P8", 555, 10);
             var games = MakeGames("noisy",
-                Game("a.exe", "Game A", "off", 55, 12, 0, true, 0, 0, now - 400),
-                Game("b.exe", "Game B", "half", 44, 0.4, 20, true, 100, 100, now - 300),
-                Game("c.exe", "Game C", "half", 44, 0.5, 0.2, true, 0, 0, now - 200),
-                Game("d.exe", "Game D", "third", 30, 7, 0.2, true, 500, 900, now - 100));
+                Game("a.exe", "Game A", "off", 55, 12, 0, now - 400),
+                Game("b.exe", "Game B", "half", 44, 0.4, 20, now - 300),
+                Game("c.exe", "Game C", "half", 44, 0.5, 0.2, now - 200),
+                Game("d.exe", "Game D", "third", 30, 7, 0.2, now - 100));
             var f = LogFacts.Read(logs, games);
             check("the newest debug session with a game streaming is read", f.Windows == 6 && Math.Abs(f.EncodeP95 - 9.5) < 0.01 && Math.Abs(f.SpreadMed - 11.0) < 0.01 && f.GpuSamples == 8, $"windows {f.Windows} enc {f.EncodeP95} spread {f.SpreadMed} gpu samples {f.GpuSamples}");
             check("the four newest games are read, newest first", f.Games.Count == 4 && f.Games[0].Name == "Game D", string.Join(",", f.Games.Select(g => g.Name)));
@@ -144,8 +141,6 @@ namespace VisionALVR
             check("debug logging: a button that turns it off", dbg != null && off, Titles(all));
             check("game A (55 fps raw, headset repeats 12 %): frame generation suggested", all.Any(x => x.Title.Contains("Game A") && x.Title.Contains("frame generation")), Titles(all));
             check("game B (host repeats 20 % at 1/2): a lower rate", all.Any(x => x.Title.Contains("Game B") && x.Do.Contains("lower rate")), Titles(all));
-            check("game C (vectors on, none came): the DLL", all.Any(x => x.Title.Contains("Game C") && x.Title.Contains("motion vectors")), Titles(all));
-            check("game D (vectors flowing): good news", all.Any(x => x.Title.Contains("Game D") && x.Sev == Sev.Info), Titles(all));
             check("every suggestion says what it measured and where from", all.All(x => x.Measured.Length > 0 && x.Source.Length > 0 && x.Title.Length > 0), "");
             check("warnings come first", all.Count > 1 && (int)all[0].Sev >= (int)all[all.Count - 1].Sev, Titles(all).Substring(0, Math.Min(120, Titles(all).Length)));
 
@@ -199,7 +194,6 @@ namespace VisionALVR
         static int Replay(string file, string outDir)
         {
             var o = new StringBuilder();
-            var made = new List<string>();   // files a setup line created: removed at the end
             Ui.WorkAreaOverride = new Rectangle(0, 0, 3840, 2100);   // a big pretend screen: window sizes are the content's, never the builder's screen
             using (var f = new RuntimeForm(null))
             {
@@ -213,7 +207,6 @@ namespace VisionALVR
                     var d = global::VisionALVR.Json.Parse(line);
                     n++;
                     if (d.TryGetValue("dump", out var lab)) { dump(Convert.ToString(lab)); foreach (var c in f.Sent) o.AppendLine("sent " + c); continue; }
-                    if (d.TryGetValue("setup", out var su)) { made.AddRange(ReplaySetup(Convert.ToString(su), d)); continue; }
                     if (d.TryGetValue("ui", out var ui)) { f.Sent.Clear(); f.UiAction(Convert.ToString(ui), d.TryGetValue("value", out var uv) ? Convert.ToString(uv) : ""); continue; }
                     if (!d.TryGetValue("event", out var ev)) continue;
                     f.HostEvent(Convert.ToString(ev), d.TryGetValue("data", out var x) ? x as Dictionary<string, object> : null);
@@ -222,71 +215,8 @@ namespace VisionALVR
                 o.AppendLine("range height " + f.HeightMin.ToString(CultureInfo.InvariantCulture) + " " + f.HeightMax.ToString(CultureInfo.InvariantCulture));
                 try { using (var bmp = new Bitmap(f.Width, f.Height)) { f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height)); bmp.Save(Path.Combine(outDir, "replay.png"), ImageFormat.Png); } } catch { }
             }
-            foreach (var m in made) try { if (Directory.Exists(m)) Directory.Delete(m, true); else File.Delete(m); } catch { }
             File.WriteAllText(Path.Combine(outDir, "replay.txt"), o.ToString());
             return 0;
-        }
-
-        /// {"setup":"game","exe":"X.exe","dll":"installed"|"none"}: a game record whose exe sits in a temporary folder, with the motion-vector DLL next to it or not.
-        /// Returns what was created.
-        static IEnumerable<string> ReplaySetup(string what, Dictionary<string, object> d)
-        {
-            var made = new List<string>();
-            if (what != "game") return made;
-            var exe = Convert.ToString(d["exe"]);
-            var dir = Path.Combine(Path.GetTempPath(), "va_replay_" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(dir); made.Add(dir);
-            File.WriteAllText(Path.Combine(dir, exe), "x");
-            if (Convert.ToString(d["dll"]) == "installed" && File.Exists(MvDll.Master)) File.Copy(MvDll.Master, Path.Combine(dir, "dxgi.dll"));
-            Directory.CreateDirectory(Games.Dir);
-            var rec = Games.FileOf(exe);
-            File.WriteAllText(rec, "{\"exe\": \"" + exe + "\", \"name\": \"" + exe + "\", \"paths\": [" + Newtonsoft(Path.Combine(dir, exe)) + "], \"levels\": {}, \"sessions\": []}");
-            made.Add(rec);
-            return made;
-        }
-        static string Newtonsoft(string s) => "\"" + s.Replace("\\", "\\\\") + "\"";
-
-        /// harness/dll_install_check.py: install / update / remove of the motion-vector DLL in a temporary game folder, a foreign dxgi.dll, the dismissal, and the vectors line's decision table.
-        static int DllInstallSelfTest(string outDir)
-        {
-            var o = new StringBuilder(); int fails = 0;
-            void check(string name, bool ok, string detail = "") { if (!ok) fails++; o.AppendLine($"CHECK {(ok ? "PASS" : "FAIL")} {name}" + (ok ? "" : ": " + detail)); }
-            var dir = Path.Combine(Path.GetTempPath(), "va_dll_" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(dir);
-            const string stem = "SelfTestGame";
-            try
-            {
-                check("master present", File.Exists(MvDll.Master), MvDll.Master);
-                check("not installed at first", MvDll.Check(dir, stem, out _) == MvDll.State.NotInstalled);
-                var msg = MvDll.Install(dir, stem, out var f1);
-                check("install as dxgi.dll", f1 == "dxgi.dll" && MvDll.Check(dir, stem, out _) == MvDll.State.Installed, msg);
-                File.WriteAllText(Path.Combine(dir, "dxgi.dll"), "an older copy");
-                check("an older copy is recognised", MvDll.Check(dir, stem, out _) == MvDll.State.OlderCopy);
-                msg = MvDll.Install(dir, stem, out var f2);
-                check("update restores the master", f2 == "dxgi.dll" && MvDll.Check(dir, stem, out _) == MvDll.State.Installed, msg);
-                msg = MvDll.Uninstall(dir, stem);
-                check("remove", !File.Exists(Path.Combine(dir, "dxgi.dll")) && MvDll.Check(dir, stem, out _) == MvDll.State.NotInstalled, msg);
-                File.WriteAllText(Path.Combine(dir, "dxgi.dll"), "someone else's proxy");
-                check("a foreign dxgi.dll is flagged", MvDll.Check(dir, stem, out _) == MvDll.State.OtherDll);
-                msg = MvDll.Install(dir, stem, out var f3);
-                check("install beside a foreign dxgi.dll as version.dll", f3 == "version.dll" && File.ReadAllText(Path.Combine(dir, "dxgi.dll")) == "someone else's proxy" && MvDll.Check(dir, stem, out _) == MvDll.State.Installed, msg);
-                MvDll.Uninstall(dir, stem);
-                check("the foreign file survives the removal", File.Exists(Path.Combine(dir, "dxgi.dll")));
-                check("not dismissed", !MvDll.Dismissed(stem));
-                MvDll.Dismiss(stem);
-                check("dismissed", MvDll.Dismissed(stem));
-                var K = VectorsLine.Kind.None;
-                check("vectors line: generation off says nothing", VectorsLine.Of("off", true, 0, MvDll.State.Installed, false) == K);
-                check("vectors line: worked", VectorsLine.Of("half", true, 10, MvDll.State.Installed, false) == VectorsLine.Kind.Worked);
-                check("vectors line: blind", VectorsLine.Of("half", true, 0, MvDll.State.Installed, false) == VectorsLine.Kind.Blind && VectorsLine.Of("half", true, 0, MvDll.State.OlderCopy, false) == VectorsLine.Kind.Blind);
-                check("vectors line: no DLL offers the install", VectorsLine.Of("half", true, 0, MvDll.State.NotInstalled, false) == VectorsLine.Kind.NoDll);
-                check("vectors line: dismissed offer is silent", VectorsLine.Of("half", true, 0, MvDll.State.NotInstalled, true) == K);
-                check("vectors line: tick off is silent", VectorsLine.Of("half", false, 0, MvDll.State.Installed, false) == K);
-                check("vectors line: no folder is silent", VectorsLine.Of("half", true, 0, MvDll.State.NoFolder, false) == K);
-            }
-            finally { try { Directory.Delete(dir, true); } catch { } }
-            File.WriteAllText(Path.Combine(outDir, "dll_install.txt"), o.ToString());
-            return fails == 0 ? 0 : 1;
         }
 
         // harness/center_check.py: a window that starts centred (CenterScreen) is centred on its screen's work area once its content has sized it
@@ -320,7 +250,6 @@ namespace VisionALVR
             if (args.Contains("--center-selftest")) return CenterSelfTest(outDir);
             var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
             if (replay != null) return Replay(replay, outDir);
-            if (args.Contains("--dll-install-selftest")) return DllInstallSelfTest(outDir);
             var perfGame = Arg("--dump-performance");
             if (perfGame != null) return DumpPerformance(perfGame, outDir);
             var exportTo = Arg("--export-selftest");   // harness/export_logs.py: the export to a path with no dialog; lists the entries

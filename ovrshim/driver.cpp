@@ -34,7 +34,6 @@
 #include "LayerCubePS.h"
 #include "layerconstants.h"
 #include "ipc_win.h"
-#include "ngxtap.h"
 
 #include <algorithm>
 #include <array>
@@ -328,7 +327,6 @@ namespace {
         ~HostDriver() override {
             TraceLocalActivity(local);
             TraceLoggingWriteStart(local, "HostDriver_Dtor");
-            m_ngx.Detach();
 
             if (m_serverThread.joinable()) {
                 m_terminateServerThread = true;
@@ -688,8 +686,6 @@ namespace {
             if (m_swapchains.count(swapchain)) {
                 Swapchain* swapchainObject = (Swapchain*)swapchain;
                 swapchainObject->lastCommittedIndex++;
-                // the game's DLSS vectors of this frame: pinned now, on the game's thread, before VDXR's async submission lets it start the next
-                m_ngx.Pin();
                 if (swapchainObject->lastCommittedIndex >=
                     (!swapchainObject->desc.StaticImage ? k_SwapchainLength : 1)) {
                     swapchainObject->lastCommittedIndex = 0;
@@ -1374,25 +1370,6 @@ namespace {
                     ok &= ComposeLayers(layers, m_sbsRTV[slot].Get(), m_sbsWidth, m_sbsHeight, TargetMode::DirectEncode);
                 }
 
-                // Game motion vectors (ngxtap.h): the newest DLSS vectors of each eye ride along in the slot's companion textures, copied on
-                // the same context as the picture so the slot's GPU-done event covers them too.
-                visionalvr_ipc::MotionSlot motion{};
-                if (m_ipc.state->host.gameMotionVectors) {
-                    m_ngx.SetEnabled(true);
-                    if (!m_ngx.Attached() && m_framesSubmitted >= m_ngxNextTry) {
-                        m_ngx.TryAttach();   // the provider may load after the session exists; look every two seconds until it is there
-                        m_ngxNextTry = m_framesSubmitted + 180;
-                    }
-                    if (m_mvHarvestDelayMs > 0) {
-                        // lab only (OVRSHIM_MV_HARVEST_DELAY_MS): a late SubmitFrame, so the probe evaluates the next frame first, as a GPU-bound
-                        // game does under VDXR's async submission and running start (Valor Mortis, 2026-10-25)
-                        Sleep((DWORD)m_mvHarvestDelayMs);
-                    }
-                    motion = m_ngx.Harvest(m_submissionContext.Get(), slot, QpcSeconds());
-                } else {
-                    m_ngx.SetEnabled(false);
-                }
-
                 // the display time the app rendered this frame for (its content time: what its animation and camera were computed for), shim clock
                 double displayS = 0.0;
                 for (const ovrLayerHeader* lh : layers) {
@@ -1465,15 +1442,6 @@ namespace {
                             (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
                             m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds);
-                    if (m_ngx.Attached()) {
-                        uint64_t pinned = 0, newer = 0, overwritten = 0, unpinned = 0;
-                        m_ngx.PinStats(pinned, newer, overwritten, unpinned);
-                        ShimLog("motion vectors: %u DLSS stream(s), %llu evaluates seen, %llu sources not copied, tap %s; frames given their own vectors %llu "
-                                "(a newer evaluate existed on %llu: the newest-copy rule would have paired them with another frame), eyes left without "
-                                "(copy overwritten) %llu, frames without a pin (newest copy) %llu", m_ngx.ActiveStreams(),
-                                (unsigned long long)m_ngx.Publications(), (unsigned long long)m_ngx.CopyFailures(), m_ipc.state->host.gameMotionVectors ? "on" : "off (host)",
-                                (unsigned long long)pinned, (unsigned long long)newer, (unsigned long long)overwritten, (unsigned long long)unpinned);
-                    }
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
                             return 0.0f;
@@ -1514,9 +1482,7 @@ namespace {
                     const double releaseS = TakeFrameRelease();
                     PendingFrame pf{slot, clientTs, composeStart, releaseS, trace};
                     FrameRenderOrientation(layers, pf.renderQ, pf.hasProjection);
-                    pf.motion = motion;
                     pf.displayS = displayS;
-                    pf.tapSeq = m_ngx.HarvestSeq();
                     m_publishQueue.push_back(pf);
                     lock.unlock();
                     m_publishCv.notify_all();
@@ -1526,7 +1492,7 @@ namespace {
                     float renderQ[2][4];
                     bool hasProjection = false;
                     FrameRenderOrientation(layers, renderQ, hasProjection);
-                    PublishFrame(slot, clientTs, composeStart, TakeFrameRelease(), trace, renderQ, hasProjection, motion, displayS);
+                    PublishFrame(slot, clientTs, composeStart, TakeFrameRelease(), trace, renderQ, hasProjection, displayS);
                 }
             }
 
@@ -1587,7 +1553,7 @@ namespace {
         // Hands a composed (GPU-complete) slot to the host. Called by exactly one thread at a time: the publisher thread, or the
         // app thread when there is no publisher.
         void PublishFrame(uint32_t slot, uint64_t clientTs, double composeStart, double releaseS, const FrameTraceRow& tr,
-                          const float renderQ[2][4], bool hasProjection, const visionalvr_ipc::MotionSlot& motion, double displayS) {
+                          const float renderQ[2][4], bool hasProjection, double displayS) {
             auto& s = m_ipc.state->shim;
             const double nowS = QpcSeconds();
             s.lastComposeMs = (float)((nowS - composeStart) * 1000.0);
@@ -1615,10 +1581,6 @@ namespace {
             s.frameReleaseTimeS = releaseS;
             memcpy(s.frameRenderQuat, renderQ, sizeof(s.frameRenderQuat));
             s.frameHasProjection = hasProjection ? 1u : 0u;
-            s.motion[slot] = motion;
-            s.motionTap = m_ngx.State();
-            s.motionStreams = motion.streams;
-            s.motionPublications = m_ngx.Publications();
             s.frameCounter = ++m_framesPublished;
             MemoryBarrier();
             s.frameSeq++; // even: stable
@@ -1694,8 +1656,7 @@ namespace {
                         }
                         // same 50 ms cap as the spin wait: a hung GPU must not stall the stream forever
                         WaitForSingleObject(m_gpuDone[f.slot], 50);
-                        m_ngx.GpuDone(f.tapSeq);   // the GPU finished this frame: the tap may free copies retired before its harvest
-                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr, f.renderQ, f.hasProjection, f.motion, f.displayS);
+                        PublishFrame(f.slot, f.clientTs, f.composeStart, f.releaseS, f.tr, f.renderQ, f.hasProjection, f.displayS);
                         {
                             std::unique_lock lock(m_publishMutex);
                             m_publishQueue.pop_front();
@@ -2034,7 +1995,6 @@ namespace {
             }
             m_sbsWidth = (uint32_t)h.eyeWidth * 2;
             m_sbsHeight = (uint32_t)h.eyeHeight;
-            m_ngx.SetEyeSize((uint32_t)h.eyeWidth, (uint32_t)h.eyeHeight);   // the tap tells an eye's DLSS stream from the flat window's
             const DXGI_FORMAT fmt = h.encodeBits == 10 ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
 
             D3D11_TEXTURE2D_DESC desc{};
@@ -2074,15 +2034,6 @@ namespace {
             }
             D3D11_QUERY_DESC qd{D3D11_QUERY_EVENT, 0};
             winrt::check_hresult(m_submissionDevice->CreateQuery(&qd, m_doneQuery.ReleaseAndGetAddressOf()));
-            // the DLSS motion-vector tap (ngxtap.h): attach now if the game loaded the provider, otherwise SubmitFrame keeps looking
-            m_ngx.Init(m_submissionDevice.Get(), [](const char* line) { ShimLog("%s", line); });
-            {
-                char v[16];
-                m_mvHarvestDelayMs = GetEnvironmentVariableA("OVRSHIM_MV_HARVEST_DELAY_MS", v, sizeof(v)) > 0 ? std::max(0, atoi(v)) : 0;
-            }
-            if (m_ipc.state->host.gameMotionVectors) {
-                m_ngx.TryAttach();
-            }
             m_ipc.state->shim.sbsWidth = (int32_t)m_sbsWidth;
             m_ipc.state->shim.sbsHeight = (int32_t)m_sbsHeight;
             m_ipc.state->shim.sbsFormat = (uint32_t)fmt;
@@ -2487,9 +2438,6 @@ namespace {
         LUID m_adapterLuid{};
         ComPtr<ID3D11Device> m_submissionDevice;
         ComPtr<ID3D11DeviceContext> m_submissionContext;
-        mutable ngxtap::NgxTap m_ngx;   // mutable: CommitSwapchainImage (const) pins the frame's vectors
-        int m_mvHarvestDelayMs{0};          // the game's DLSS motion vectors (docs/MOTION_VECTORS.md)
-        uint64_t m_ngxNextTry = 0;
         ComPtr<ID3D11VertexShader> m_reprojectVS;
         ComPtr<ID3D11PixelShader> m_reprojectPS;
         ComPtr<ID3D11VertexShader> m_layerVS;
@@ -2623,9 +2571,7 @@ namespace {
             FrameTraceRow tr;
             float renderQ[2][4]; // per-eye render orientation (ipc frameRenderQuat), identity when there is no projection layer
             bool hasProjection;
-            visionalvr_ipc::MotionSlot motion; // the game's DLSS vectors for this frame (ngxtap.h), zero when there are none
             double displayS;                   // the display time the app rendered for (shim clock), 0 when there is no projection layer
-            uint64_t tapSeq;                   // the tap's harvest number of this frame: its GPU completion frees the tap's retired copies (ngxtap.h GpuDone)
         };
         ComPtr<IDXGIDevice2> m_dxgiDevice2;
         HANDLE m_gpuDone[visionalvr_ipc::kSlots]{};

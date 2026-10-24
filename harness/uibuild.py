@@ -17,7 +17,6 @@ def build(rid):
     for f in ("visionalvr.ico", "logo_640.png", "chroma_passthrough.png"):
         lib.b_put(ROOT / "tools/gui/res" / f, f"_tmp/uitest/src/res/{f}")
     lib.b_put(ROOT / "harness/fixtures/ui_matrix/config", "_tmp/uitest/run/")
-    lib.b_put(ROOT / "harness/fixtures/ui_matrix/DLSSMotionVectors", "_tmp/uitest/run/")   # the packaged DLL (a placeholder): the Logs window then offers Install
     lib.b_put(ROOT / "harness/fixtures/ui_matrix/logs", "_tmp/uitest/run/")   # a debug session of a noisy laptop: the results page then shows a full list of suggestions
     lib.b_put(ROOT / "tools/gui/app.exe.config", "_tmp/uitest/run/uitest.exe.config")   # native per-monitor DPI mode, like the shipped exes
     rc, home = lib.b_run("echo %USERPROFILE%")

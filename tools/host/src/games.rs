@@ -5,7 +5,7 @@
 //!   "levels": { "<headset>": { "<off|third|half|two_thirds>": <last run at that level> } },   // what the launcher's "Recommended" reads
 //!   "sessions": [ <the last SESSIONS_KEPT sessions, newest last> ] }
 //! ```
-//! The host only records; the launcher proposes. The launcher's own choices (DLL installs, dismissed popups) live in config/mv_dll.json, not here.
+//! The host only records; the launcher proposes. The launcher's own choices (dismissed popups, the DLLs an earlier release installed in game folders) live in config/mv_dll.json, not here.
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -47,7 +47,7 @@ pub struct Meta {
 }
 
 /// Records one run: the per-level summary (`level_rec`, what Recommended reads) and a session entry (`session`, level_rec's fields plus
-/// network, motion-vector and GPU facts), trimming the sessions to SESSIONS_KEPT.
+/// network and GPU facts), trimming the sessions to SESSIONS_KEPT.
 pub fn record(config_dir: &Path, exe: &str, headset: &str, level: &str, level_rec: Value, session: Value, meta: Option<&Meta>) -> u64 {
     let mut g = load(config_dir, exe);
     g["exe"] = json!(exe);

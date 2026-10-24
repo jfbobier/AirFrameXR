@@ -1,5 +1,5 @@
 // performance.exe: the games that have run (left) and what was stored for the selected one (right): the last session as tiles, the recent
-// sessions, the motion-vector DLL (install / uninstall) and an export of the logs. Data: config\games\<exe>.json written by the streamer.
+// sessions, the removal of a motion-vector DLL an earlier release installed, and an export of the logs. Data: config\games\<exe>.json written by the streamer.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -120,14 +120,10 @@ namespace VisionALVR
                 var last = sessions[sessions.Count - 1];
                 right.Controls.Add(new Label { Text = $"Last session: {When(last)}, {N(D(last, "seconds") / 60)} min on {S(last, "headset")}, {Mode(S(last, "level"))}", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 0, 3, 4) });
                 right.Controls.Add(Tiles(last));
-                var lmv = O(last, "mv");
-                var vk = VectorsLine.Of(S(last, "level"), lmv != null && lmv.TryGetValue("enabled", out var le) && le is bool lb && lb, lmv == null ? 0 : D(lmv, "frames"), MvDll.Check(MvDll.GameDir(g), stem, out _), false);
-                if (vk == VectorsLine.Kind.Blind)   // the same wording and function as the streamer's Frame generation component
-                    right.Controls.Add(new Label { Text = VectorsLine.Text(vk, 0), AutoSize = true, ForeColor = VectorsLine.ColorOf(vk), Margin = new Padding(3, 0, 3, 4), MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0) });
                 right.Controls.Add(new Label { Text = $"Sessions (the last {sessions.Count}, newest first)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                 right.Controls.Add(SessionList(sessions));
             }
-            right.Controls.Add(DllBox(stem, g));
+            if (MvDll.Installed(stem) != null) right.Controls.Add(DllBox(stem));
             var tools = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
             var export = new Button { Text = "Export log...", AutoSize = true };
             var exported = new Label { AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0) };
@@ -161,7 +157,7 @@ namespace VisionALVR
 
         Control Tiles(Dictionary<string, object> s)
         {
-            var net = O(s, "net"); var mv = O(s, "mv");
+            var net = O(s, "net");
             int maxW = Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40));
             var main = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(maxW, 0), Margin = new Padding(0) };
             var more = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(maxW, 0), Margin = new Padding(0) };
@@ -174,13 +170,6 @@ namespace VisionALVR
                 var lt = Ui.MakeTile("Latency", bad ? "n/a" : N(D(net, "latency_ms"), "0") + " ms", bad ? "not measured" : $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}");
                 if (bad) lt.Set("n/a", "not measured", null, Latency.Why);
                 main.Controls.Add(lt);
-            }
-            if (mv != null)
-            {
-                var frames = D(mv, "frames");
-                var on = mv.TryGetValue("enabled", out var eo) && eo is bool b && b;
-                var gen = S(s, "level") != "off";
-                main.Controls.Add(Ui.MakeTile("DLSS vectors", !gen ? "not used" : frames > 0 ? "working" : (on ? "not seen" : "off"), !gen ? "generation was off" : frames > 0 ? N(frames, "0") + " frames" : (on ? "no vectors from the game" : "ticked off")));
             }
             more.Controls.Add(Ui.MakeTile("Streamed", N(D(s, "streamed_fps")) + " fps", "display " + N(D(s, "display_hz"), "0") + " Hz"));
             more.Controls.Add(Ui.MakeTile("Host repeats", N(hostRep) + " %", "of its outputs"));
@@ -206,41 +195,30 @@ namespace VisionALVR
         Control SessionList(List<Dictionary<string, object>> sessions)
         {
             var lv = new ListView { View = View.Details, FullRowSelect = true, GridLines = false, Height = 150, Width = Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3) };
-            string[] cols = { "Date", "Headset", "Generation", "Minutes", "Game fps", "Shown fps", "Repeated %", "Latency ms", "Enc+net+dec ms", "Vectors" };
-            int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 90, 70 };
+            string[] cols = { "Date", "Headset", "Generation", "Minutes", "Game fps", "Shown fps", "Repeated %", "Latency ms", "Enc+net+dec ms" };
+            int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 90 };
             for (int i = 0; i < cols.Length; i++) Ui.Col(lv, cols[i], w[i]);
             right.Resize += (s, e) => lv.Width = Math.Max(400, right.ClientSize.Width - 40);
             foreach (var s in Enumerable.Reverse(sessions))
             {
-                var net = O(s, "net"); var mv = O(s, "mv");
+                var net = O(s, "net");
                 lv.Items.Add(new ListViewItem(new[] { When(s), S(s, "headset"), Mode(S(s, "level")).Replace("generation ", ""), N(D(s, "seconds") / 60), N(D(s, "rendered_fps")), net != null ? N(D(net, "displayed_fps")) : "-",
                     N(D(s, "headset_repeated_typ") * 100), net != null ? Latency.Text(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) : "-",
-                    net != null ? (Latency.Streamer(D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) is double sl ? N(sl, "0") : "n/a") : "-",
-                    mv != null ? (D(mv, "frames") > 0 ? "working" : "-") : "-" }));
+                    net != null ? (Latency.Streamer(D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) is double sl ? N(sl, "0") : "n/a") : "-" }));
             }
             Ui.FitColumns(lv);
             return lv;
         }
 
-        // one line and at most one button: the state of the motion-vector DLL for this game and the action that fits it
-        Control DllBox(string stem, Dictionary<string, object> g)
+        // only for a game where an earlier release installed the motion-vector DLL: one line and the button that removes VisionALVR's copy
+        Control DllBox(string stem)
         {
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(3, 10, 3, 0), MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0) };
-            var dir = MvDll.GameDir(g);
-            var st = MvDll.Check(dir, stem, out var file);
-            string text; string action = null; Action act = null;
-            switch (st)
-            {
-                case MvDll.State.NoMaster: text = "not available in this release"; break;
-                case MvDll.State.NoFolder: text = "the game's folder is not known yet: run the game once with the streamer"; break;
-                case MvDll.State.Installed: text = "installed"; action = "Remove"; act = () => MessageBox.Show(this, MvDll.Uninstall(dir, stem), "VisionALVR"); break;
-                case MvDll.State.OlderCopy: text = "installed, but an older copy than this release's"; action = "Update"; act = () => MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR"); break;
-                case MvDll.State.OtherDll: text = "another dxgi.dll is in the game folder (it is left alone)"; action = "Install as version.dll"; act = () => MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR"); break;
-                default: text = "not installed"; action = "Install"; act = () => MessageBox.Show(this, MvDll.Install(dir, stem, out _), "VisionALVR"); break;
-            }
-            row.Controls.Add(new Label { Text = "DLSS motion vectors:", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 6, 4, 0) });
-            row.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 6, 12, 0) });
-            if (action != null) { var b = new Button { Text = action, AutoSize = true, Margin = new Padding(0) }; b.Click += (s, e) => { act(); Render(); }; row.Controls.Add(b); }
+            row.Controls.Add(new Label { Text = "DLSS motion-vector DLL:", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 6, 4, 0) });
+            row.Controls.Add(new Label { Text = MvDll.Installed(stem) + " installed by an earlier release, no longer used", AutoSize = true, Margin = new Padding(0, 6, 12, 0) });
+            var b = new Button { Text = "Remove", AutoSize = true, Margin = new Padding(0) };
+            b.Click += (s, e) => { MessageBox.Show(this, MvDll.Uninstall(stem), "VisionALVR"); Render(); };
+            row.Controls.Add(b);
             return row;
         }
 
