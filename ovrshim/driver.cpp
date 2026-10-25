@@ -343,7 +343,9 @@ namespace {
             }
 
             if (m_ipc.state) {
-                m_ipc.state->shim.shimAlive = 0;
+                // the flag is shared by every app of the session: an app that was told to leave (the desktop mirror, when a game starts) must not clear it
+                // for the app that took over (that one wrote its own name into appExe)
+                if (_wcsicmp(m_ipc.state->shim.appExe, shimlog::ExeName().c_str()) == 0) m_ipc.state->shim.shimAlive = 0;
                 shimlog::General("INFO", "game exit: %llu frames", (unsigned long long)m_framesSubmitted);
             }
             visionalvr_ipc::CloseIpc(m_ipc);
@@ -1930,7 +1932,8 @@ namespace {
                 wcsncpy_s(m_ipc.state->shim.appExe, name.c_str(), _TRUNCATE);
                 // the desktop mirror (mirrordesktop.exe, an app like any other) holds the headset between games: any other app starting tells it to leave
                 if (_wcsicmp(name.c_str(), L"mirrordesktop.exe") != 0) {
-                    if (HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\VisionALVR_GameStarting")) { SetEvent(ev); CloseHandle(ev); }
+                    if (HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\VisionALVR_GameStarting")) { SetEvent(ev); CloseHandle(ev); ShimLog("start: told the desktop mirror to leave"); }
+                    else if (GetLastError() == ERROR_ACCESS_DENIED) ShimLog("start: the desktop mirror's event refused access (error 5): it may stay on screen over this app");
                 }
             }
             UpdateDebugDir();

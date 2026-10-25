@@ -14,6 +14,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <sddl.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <cmath>
@@ -104,7 +105,12 @@ int main(int argc, char** argv) {
     if (inLog) fprintf(inLog, "wall_ns,event,detail\n");
     auto wallNs = [] { FILETIME ft; GetSystemTimePreciseAsFileTime(&ft); return (long long)((((unsigned long long)ft.dwHighDateTime << 32) | ft.dwLowDateTime) - 116444736000000000ull) * 100ll; };
     auto event = [&](const char* name, const char* detail) { L("%s %s", name, detail); if (inLog) { fprintf(inLog, "%lld,%s,%s\n", wallNs(), name, detail); fflush(inLog); } };
-    HANDLE gameEvent = CreateEventW(nullptr, TRUE, FALSE, L"Local\\VisionALVR_GameStarting");   // the shim of a game that starts sets it
+    // the shim of a game that starts sets it. Explicit security: the default one lets only this process's own integrity level and account in, so a game that
+    // runs at another level (the streamer elevated and the game not, or the reverse) could not open the event and the mirror stayed over the game
+    SECURITY_ATTRIBUTES evSa{ sizeof(evSa), nullptr, FALSE };
+    ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:(A;;0x1F0003;;;WD)S:(ML;;NW;;;LW)", SDDL_REVISION_1, &evSa.lpSecurityDescriptor, nullptr);
+    HANDLE gameEvent = CreateEventW(evSa.lpSecurityDescriptor ? &evSa : nullptr, TRUE, FALSE, L"Local\\VisionALVR_GameStarting");
+    if (evSa.lpSecurityDescriptor) LocalFree(evSa.lpSecurityDescriptor);
 
     std::vector<const char*> ext = { XR_KHR_D3D11_ENABLE_EXTENSION_NAME };
     XrInstanceCreateInfo ici{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -193,10 +199,13 @@ int main(int argc, char** argv) {
     double perfT0 = qpcMs(), frameStart = 0, frameMaxMs = 0, renderSumMs = 0; int perfFrames = 0;
     bool seenHand = false, seenHit = false; bool left = false, right = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
     ULONGLONG t0 = GetTickCount64(); bool running = false, exiting = false, endKey = false; uint64_t frames = 0;
-    int rc = 0;
+    int rc = 0; bool leaving = false; ULONGLONG leaveT0 = 0;
     while (!exiting) {
         if (seconds > 0 && GetTickCount64() - t0 > (ULONGLONG)seconds * 1000) { L("done after %d s", seconds); break; }
-        if (WaitForSingleObject(gameEvent, 0) == WAIT_OBJECT_0) { L("a game is starting: giving the headset back"); if (running) xrRequestExitSession(sess); else break; }
+        if (WaitForSingleObject(gameEvent, 0) == WAIT_OBJECT_0) {
+            if (!leaving) { leaving = true; leaveT0 = GetTickCount64(); L("a game is starting: giving the headset back"); if (running) xrRequestExitSession(sess); else break; }
+            else if (GetTickCount64() - leaveT0 > 1500) { L("the session did not end within 1.5 s of the game's signal: leaving anyway"); break; }   // the runtime is busy with the game: do not hold the headset
+        }
         XrEventDataBuffer ev{ XR_TYPE_EVENT_DATA_BUFFER };
         if (xrPollEvent(inst, &ev) == XR_SUCCESS) {
             if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {

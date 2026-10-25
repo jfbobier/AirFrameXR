@@ -530,8 +530,20 @@ namespace VisionALVR
                 void row(string k, string v, Control edit) { g.Controls.Add(Ui.Line(k, Ui.Bold)); g.Controls.Add(edit); g.Controls.Add(Ui.Line(v)); }
                 rateBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
                 foreach (var r in hs.Rates) rateBox.Items.Add(r.ToString("0.#", CultureInfo.InvariantCulture));
+                // a headset does not always list every rate it can run (a Quest 3 may leave 120 out of what it reports): the usual ones stay selectable, with a warning
+                foreach (var r in new double[] { 60, 72, 80, 90, 96, 100, 120, 144 })
+                    if (!hs.Rates.Any(x => Math.Abs(x - r) < 0.6)) rateBox.Items.Add(r.ToString("0.#", CultureInfo.InvariantCulture));
                 rateBox.SelectedIndex = Math.Max(0, hs.Rates.Count - 1);
-                row("Refresh rate", "the headset supports " + string.Join(", ", hs.Rates.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture))) + " Hz", rateBox);
+                var listed = "the headset supports " + string.Join(", ", hs.Rates.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture))) + " Hz";
+                var rateInfo = Ui.Line(listed);
+                rateBox.SelectedIndexChanged += (s, e) =>
+                {
+                    var chosen = double.Parse((string)rateBox.SelectedItem, CultureInfo.InvariantCulture);
+                    var isListed = hs.Rates.Any(x => Math.Abs(x - chosen) < 0.6);
+                    rateInfo.Text = isListed ? listed : listed + ". " + (string)rateBox.SelectedItem + " Hz is not among them: the headset may refuse it, then pick a listed one";
+                    rateInfo.ForeColor = isListed ? SystemColors.ControlText : Color.DarkOrange;
+                };
+                g.Controls.Add(Ui.Line("Refresh rate", Ui.Bold)); g.Controls.Add(rateBox); g.Controls.Add(rateInfo);
                 scaleBox = new NumericUpDown { Minimum = 40, Maximum = 100, Increment = 5, Value = 100, Width = 70 };
                 row("Resolution scale (%)", "100% = the panel's own resolution; lower renders and streams less", scaleBox);
                 foveationBox = new CheckBox { Text = "use it", Checked = hs.Foveation, Enabled = hs.Foveation, AutoSize = true };

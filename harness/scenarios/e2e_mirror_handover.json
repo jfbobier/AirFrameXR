@@ -1,0 +1,88 @@
+{
+  "description": "The desktop mirror holds the headset, then a game (xr_probe) starts while it runs: the shim's signal reaches the mirror (explicit event security, both apps at limited integrity here), the mirror leaves within 2 s, the engine ends the mirror's run and starts the game's, and the game keeps the headset. Regression for the flicker of the mirror alternating with a game.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90
+  },
+  "client": {
+    "seconds": 55,
+    "connect_timeout": 45,
+    "yaw_amp": 0,
+    "controllers": true
+  },
+  "client_env": {
+    "RUST_LOG": "warn",
+    "MOCK_HAND_YAW_DEG": "0",
+    "MOCK_HAND_PITCH_DEG": "45"
+  },
+  "app": {
+    "exe": "mirrordesktop",
+    "seconds": 60,
+    "timeout_s": 90,
+    "synthetic": true,
+    "then": {
+      "after_s": 12,
+      "frames": 600,
+      "timeout_s": 60
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 240,
+  "checks": {
+    "max_duplicate_timestamps": 10000,
+    "min_delivery_ratio": 0.3,
+    "codec": "Hevc",
+    "decode": false,
+    "timestamps_monotonic": false,
+    "handover": {
+      "max_leave_s": 2.0
+    }
+  }
+}

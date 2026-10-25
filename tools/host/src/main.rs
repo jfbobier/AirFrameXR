@@ -2467,11 +2467,15 @@ fn main() {
             }
             // game start / end, for the general log and the GUI
             let alive = app_alive();
+            let mut b = [0 as std::ffi::c_char; 256];
+            unsafe { nvh::nvh_ipc_app_exe(ipc, b.as_mut_ptr(), b.len() as i32) };
+            let exe = unsafe { std::ffi::CStr::from_ptr(b.as_ptr()) }.to_string_lossy().to_string();
+            let exe = if exe.is_empty() { "(unknown app)".to_string() } else { exe };
+            // the desktop mirror holds the headset between games; a game that starts takes over while the session stays alive (the mirror leaves a moment later):
+            // that ends the mirror's run and starts the game's, instead of the game being counted as the mirror
+            let is_mirror = |e: &str| e.eq_ignore_ascii_case("mirrordesktop.exe");
+            let displaced = alive && game.as_ref().map_or(false, |g| is_mirror(&g.exe)) && !is_mirror(&exe);
             if alive && game.is_none() {
-                let mut b = [0 as std::ffi::c_char; 256];
-                unsafe { nvh::nvh_ipc_app_exe(ipc, b.as_mut_ptr(), b.len() as i32) };
-                let exe = unsafe { std::ffi::CStr::from_ptr(b.as_ptr()) }.to_string_lossy().to_string();
-                let exe = if exe.is_empty() { "(unknown app)".to_string() } else { exe };
                 logs::general("INFO", &format!("game started: {exe}"));
                 event(origin, "game_started", json!({ "exe": exe }));
                 vision::RECENTER_REQ.store(true, Ordering::SeqCst);   // the player's forward and position at game start are the game's forward and origin, on every headset, with or without the launcher
@@ -2482,7 +2486,7 @@ fn main() {
                 let (skips0, outputs0) = fg_counts(&pipeline);
                 let (frames0, submitted0, now) = (shared.frames_sent.load(Ordering::Relaxed), shim_submitted(ipc), Instant::now());
                 game = Some(GameRun { exe, start: now, frames0, submitted0, skips0, outputs0, seg_start: now, seg_frames0: frames0, seg_submitted0: submitted0, seg_skips0: skips0, seg_outputs0: outputs0 });
-            } else if !alive && game.is_some() {
+            } else if (!alive || displaced) && game.is_some() {
                 let g = game.take().unwrap();
                 let secs = g.start.elapsed().as_secs_f64();
                 let frames = shared.frames_sent.load(Ordering::Relaxed) - g.frames0;

@@ -316,14 +316,36 @@ def launch_app(app, rid, rd, log):
     b_run(f"schtasks /run /tn {task}")
     log("  started OpenXR app (limited integrity)")
     t0 = time.time()
+    second = app.get("then")
+    if second:
+        # a second app starts while the first runs (the desktop mirror, then a game): the first must leave at once and the second takes the headset
+        time.sleep(second.get("after_s", 10))
+        cmd2 = ("@echo off\r\n"
+                f"set XR_RUNTIME_JSON={home}\\{ROOTNAME}\\{rt}\\virtualdesktop-openxr.json\r\n"
+                f"set OVRSHIM_LOG={home}\\{ROOTNAME}\\{rd}\\ovrshim2.log\r\n"
+                f"cd /d {home}\\{ROOTNAME}\r\n"
+                f"build\\probe\\xr_probe.exe {rd}\\app2.log {second.get('frames', 300)} {second.get('timeout_s', 60)} - - > {rd}\\app2_stdout.txt 2>&1\r\n"
+                f"echo %ERRORLEVEL% > {rd}\\app2.rc\r\n")
+        local2 = CACHE / "app2.cmd"
+        local2.write_text(cmd2)
+        b_put(local2, f"runs/{rid}/app2.cmd")
+        b_run(f'schtasks /create /tn {task}2 /tr "cmd /c {home}\\{ROOTNAME}\\runs\\{rid}\\app2.cmd" /sc once /st 00:00 /rl LIMITED /it /f')
+        b_run(f"schtasks /run /tn {task}2")
+        log("  started the second OpenXR app (limited integrity)")
     done = False
-    while time.time() - t0 < app.get("timeout_s", 60) + 40:
-        rc, out = b_run(f"if exist runs\\{rid}\\app.rc (type runs\\{rid}\\app.rc)")
-        if out.strip() and out.strip().isdigit():
+    rcs = ["app.rc"] + (["app2.rc"] if second else [])
+    while time.time() - t0 < app.get("timeout_s", 60) + 40 + (second.get("after_s", 10) + second.get("timeout_s", 60) if second else 0):
+        got = []
+        for f in rcs:
+            rc, out = b_run(f"if exist runs\\{rid}\\{f} (type runs\\{rid}\\{f})")
+            got.append(bool(out.strip()) and out.strip().isdigit())
+        if all(got):
             done = True
             break
         time.sleep(2)
     b_run(f"schtasks /delete /tn {task} /f")
+    if second:
+        b_run(f"schtasks /delete /tn {task}2 /f")
     return {"app_finished": done, "app_wall_s": round(time.time() - t0, 1)}
 
 
@@ -587,7 +609,7 @@ def run_scenario(sc, outdir: Path, log=print):
     if audio_state:
         (outdir / "audio_events.log").write_text("\n".join(audio_state.get("log", [])) + "\n")
     if app:
-        for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log", "mirror_events.csv"):
+        for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log", "mirror_events.csv", "app2.log", "app2_stdout.txt", "app2.rc", "ovrshim2.log"):
             b_get(f"runs/{rid}/{f}", outdir / f)
     if storm:
         for i in range(storm_sessions):
@@ -937,6 +959,40 @@ def analyse_mirror(sc, outdir):
         res["tracked_logged"] = "is tracked" in log; res["pointer_logged"] = "the pointer is on the screen" in log
         res["perf"] = [(float(m.group(1)), float(m.group(2)), float(m.group(3))) for m in re.finditer(r"perf: ([0-9.]+) fps over \d+ frames, the slowest frame's work ([0-9.]+) ms, picture \(capture \+ draw\) ([0-9.]+) ms", log)]
         res["clicks"] = analyse_mirror_clicks(outdir)
+    return res
+
+
+def analyse_handover(sc, outdir):
+    """The desktop mirror holding the headset when a game starts (checks.handover): the mirror must see the shim's signal and leave within a couple of seconds, the engine must
+    end the mirror's run and start the game's (not count the game as the mirror), and the game must keep the headset after the mirror is gone."""
+    import datetime
+    def stamp(line):
+        m = re.match(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+)", line)
+        return datetime.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S.%f").timestamp() if m else None
+    res = {}
+    mlog = (outdir / "app.log").read_text(errors="replace").splitlines() if (outdir / "app.log").exists() else []
+    sig = next((stamp(l) for l in mlog if "a game is starting" in l), None)
+    end = next((stamp(l) for l in mlog if "ending after" in l), None)
+    res["signal_seen"] = sig is not None
+    res["forced_out"] = any("leaving anyway" in l for l in mlog)
+    res["leave_s"] = round(end - sig, 2) if sig is not None and end is not None else None
+    res["mirror_rc"] = (outdir / "app.rc").read_text().strip() if (outdir / "app.rc").exists() else None
+    res["game_rc"] = (outdir / "app2.rc").read_text().strip() if (outdir / "app2.rc").exists() else None
+    sl = (outdir / "ovrshim2.log").read_text(errors="replace") if (outdir / "ovrshim2.log").exists() else ""
+    res["shim_told_mirror"] = "told the desktop mirror to leave" in sl
+    res["shim_access_denied"] = "refused access" in sl
+    order = []
+    for line in open(outdir / "host_stdout.txt", errors="replace"):
+        for ev in ("game_started", "game_ended"):
+            if f'"{ev}"' in line:
+                m = re.search(r'"exe":\s*"([^"]+)"', line)
+                if m: order.append((ev, m.group(1).lower()))
+    res["events"] = order
+    mi = [i for i, (e, x) in enumerate(order) if x.startswith("mirrordesktop") and e == "game_ended"]
+    gi = [i for i, (e, x) in enumerate(order) if x.startswith("xr_probe") and e == "game_started"]
+    res["mirror_run_ended_before_game_started"] = bool(mi and gi and mi[0] < gi[0])
+    gl = (outdir / "app2.log").read_text(errors="replace") if (outdir / "app2.log").exists() else ""
+    res["game_ran"] = "PASS" in gl or res["game_rc"] == "0"
     return res
 
 
@@ -1299,6 +1355,8 @@ def analyse(sc, outdir: Path):
         a["layers"] = analyse_layers(sc, outdir)
     if sc.get("checks", {}).get("mirror") and cl.exists() and cl.stat().st_size > 0:
         a["mirror"] = analyse_mirror(sc, outdir)
+    if sc.get("checks", {}).get("handover"):
+        a["handover"] = analyse_handover(sc, outdir)
     if sc.get("checks", {}).get("qpmap"):
         a["qpmap"] = analyse_qpmap(sc, outdir, a.get("host") or {})
     if sc.get("checks", {}).get("pacing") and sc.get("app"):
@@ -1490,6 +1548,12 @@ def evaluate(sc, a):
                 "the controller's orange beam is in the left eye (>= 6 beam-coloured pixels at 160x144) in >= 90 % of the frames")
             chk("mirror_controller_seen", M_.get("tracked_logged") and M_.get("pointer_logged"), {"tracked": M_.get("tracked_logged"), "pointer_on_screen": M_.get("pointer_logged")}, "the app tracked the controller through OpenXR and its ray met the screen")
         chk("mirror_is_a_game_to_the_engine", M_["recorded_as_game"], M_["recorded_as_game"], "the engine saw mirrordesktop.exe as an app like any game (game_started in its events): nothing special in the engine")
+    if "handover" in a:
+        H_ = a["handover"]; hk = ck["handover"]
+        chk("handover_signal", H_["signal_seen"] and H_["shim_told_mirror"] and not H_["shim_access_denied"], {k: H_[k] for k in ("signal_seen", "shim_told_mirror", "shim_access_denied")}, "the game's shim opened the mirror's event and the mirror saw it (no access denied)")
+        chk("handover_mirror_leaves", H_["leave_s"] is not None and H_["leave_s"] <= hk.get("max_leave_s", 2.0) and not H_["forced_out"] and H_["mirror_rc"] == "0", {"leave_s": H_["leave_s"], "forced_out": H_["forced_out"], "rc": H_["mirror_rc"]}, f"the mirror ends by itself within {hk.get('max_leave_s', 2.0)} s of the signal, without the 1.5 s fallback")
+        chk("handover_engine_switches", H_["mirror_run_ended_before_game_started"], H_["events"], "the engine ends the mirror's run, then starts the game's (the game is not recorded as the mirror)")
+        chk("handover_game_ran", H_["game_ran"], H_["game_rc"], "the game ran to its end after the mirror left")
     if "qpmap" in ck:
         qk, qa = ck["qpmap"], a.get("qpmap") or {}
         chk("qpmap_enabled_in_nvenc", qa.get("nvenc_qp_map_mode") == (2 if qk.get("on", True) else 0), qa.get("nvenc_qp_map_mode"), "NVENC reports qpMapMode 2 (delta) when the map is on, 0 when off")

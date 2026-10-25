@@ -217,6 +217,8 @@ impl log::Log for AlvrLogger {
             if let (Ok(v), Some(o)) = (serde_json::from_str::<Value>(inner), crate::phase::origin()) {
                 write_alvr("CAPS", inner);
                 *CLIENT_REFRESH_RATES.lock().unwrap() = v["supported_refresh_rates"].as_array().map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default();
+                let rates = CLIENT_REFRESH_RATES.lock().unwrap().iter().map(|r| format!("{r:.0}")).collect::<Vec<_>>().join(" / ");
+                general("INFO", &format!("headset refresh rates: {}", if rates.is_empty() { "none declared".to_string() } else { rates + " Hz" }));
                 crate::event(o, "client_capabilities", v);
             }
             return;

@@ -96,6 +96,7 @@ namespace VisionALVR
                 }
                 if (!string.IsNullOrEmpty(stem)) add(Games.FileOf(stem), "game/" + stem + ".json");
                 add(Path.Combine(Paths.Logs, "VisionALVR.log"), "VisionALVR.log");
+                add(Path.Combine(Paths.Logs, "mirrordesktop.log"), "mirrordesktop.log");   // the desktop mirror's own log (what it saw of the controllers and of a game starting)
                 var dbg = Path.Combine(Paths.Logs, "debug");
                 if (Directory.Exists(dbg))
                 {
