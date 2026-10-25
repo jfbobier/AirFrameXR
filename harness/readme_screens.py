@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SHOTS = {   # harness case -> README image
     "launcher-ready": "ui_launcher", "streamer-clean": "ui_streamer", "performance": "ui_performance", "wizard-page3": "ui_wizard",
-    "suggestions": "ui_suggestions", "firewall-rules": "ui_firewall", "chroma-step": "ui_visionpro_passthrough",
+    "suggestions": "ui_suggestions", "firewall-rules": "ui_firewall",
 }
 p = subprocess.run([sys.executable, str(ROOT / "harness/ui_matrix.py"), "--matrix", "1920x1080@125"], capture_output=True, text=True)
 m = re.search(r"PNGs in (\S+)", p.stdout)

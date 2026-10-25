@@ -120,12 +120,9 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <p align="center"><img src="docs/images/ui_wizard.png" width="640" alt="The setup wizard: choose a setup"></p>
 
-<table>
-<tr>
-<td width="50%" valign="top"><b>Firewall rules.</b> Finds the rule for this folder's exact <code>alvr_host.exe</code>, offers one only if none is in place, and lists the leftovers Windows keeps (stale, duplicate, blocking) with one click to remove them.<br><br><img src="docs/images/ui_firewall.png" width="100%" alt="The firewall review"></td>
-<td width="50%" valign="top"><b>Vision Pro passthrough.</b> The one setting that lives in the ALVR app on the headset (the streamer cannot set or read it): the wizard shows where it is, once.<br><br><img src="docs/images/ui_visionpro_passthrough.png" width="100%" alt="The wizard's passthrough step for the Vision Pro"></td>
-</tr>
-</table>
+**Firewall rules.** Finds the rule for this folder's exact `alvr_host.exe`, offers one only if none is in place, and lists the leftovers Windows keeps (stale, duplicate, blocking) with one click to remove them.
+
+<p align="center"><img src="docs/images/ui_firewall.png" width="640" alt="The firewall review"></p>
 
 The desktop mirror (the Windows desktop floating in front of you between games, your right hand as the mouse) is only visible in a headset; its picture is tested on the GPU for 7 desktop shapes in SDR and HDR (see the harness below).
 
