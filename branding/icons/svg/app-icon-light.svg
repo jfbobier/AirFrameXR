@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<defs>
+ <linearGradient id="core" x1="10%" y1="0%" x2="90%" y2="100%">
+  <stop offset="0%" stop-color="#7FFCF9"/><stop offset="25%" stop-color="#00E7F4"/><stop offset="66%" stop-color="#0799F9"/><stop offset="100%" stop-color="#1456F1"/>
+ </linearGradient>
+ <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="100%">
+  <stop offset="0%" stop-color="#074BCF"/><stop offset="42%" stop-color="#26CAFF"/><stop offset="70%" stop-color="#047FFF"/><stop offset="100%" stop-color="#0953D7"/>
+ </linearGradient>
+ <linearGradient id="sweep" x1="10%" y1="0%" x2="95%" y2="100%">
+  <stop offset="0%" stop-color="#76FEF7"/><stop offset="40%" stop-color="#18D6FB"/><stop offset="100%" stop-color="#245AF7"/>
+ </linearGradient>
+ <linearGradient id="surface" x1="0%" y1="0%" x2="100%" y2="100%">
+  <stop offset="0%" stop-color="#0B2445"/><stop offset="48%" stop-color="#061426"/><stop offset="100%" stop-color="#030B17"/>
+ </linearGradient>
+ <linearGradient id="silver" x1="0%" y1="0%" x2="0%" y2="100%">
+  <stop offset="0%" stop-color="#FFFFFF"/><stop offset="100%" stop-color="#DCEAF5"/>
+ </linearGradient>
+ <linearGradient id="electric" x1="0%" y1="100%" x2="100%" y2="0%">
+  <stop offset="0%" stop-color="#1469FF"/><stop offset="100%" stop-color="#00E9F4"/>
+ </linearGradient>
+</defs>
+
+ <rect width="512" height="512" rx="112" fill="#F4FAFF"/>
+ <rect x="5" y="5" width="502" height="502" rx="108" fill="none" stroke="#90CDE8" stroke-opacity=".48" stroke-width="3"/>
+ 
+ <path d="M161 139 C114 157 83 202 82 254 C80 295 97 330 129 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M176 190 C146 209 137 237 138 257 C139 281 149 298 166 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+ <path d="M351 139 C398 157 429 202 430 254 C432 295 415 330 383 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M336 190 C366 209 375 237 374 257 C373 281 363 298 346 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+
+ <path d="M159 356 L223 161 C233 125 243 91 257 91 C272 91 280 120 292 155 L357 356 L301 356 L265 244 C259 222 253 224 248 243 L213 356 Z" fill="url(#core)"/>
+ <path d="M238 161 C246 134 252 114 257 113 C264 116 269 138 277 163" fill="none" stroke="#AAFFFA" stroke-width="5" stroke-linecap="round" opacity=".45"/>
+
+ <path d="M105 401 C152 394 198 338 253 332 C303 326 349 386 408 402 C375 408 344 399 300 376 C260 356 244 357 207 379 C161 407 135 408 105 401 Z" fill="url(#sweep)"/>
+ <path d="M143 394 C199 366 222 342 261 343 C297 343 338 381 374 394" fill="none" stroke="#94FFFD" stroke-width="5" opacity=".28"/>
+ <path d="M238 388 L256 357 L274 388 Z" fill="url(#electric)"/>
+
+</svg>

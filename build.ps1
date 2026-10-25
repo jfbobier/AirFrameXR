@@ -1,18 +1,18 @@
 <#
-Builds VisionALVR on Windows from this checkout (see docs/DEVELOPMENT.md for the prerequisites):
+Builds AirFrameXR on Windows from this checkout (see docs/DEVELOPMENT.md for the prerequisites):
 
     powershell -ExecutionPolicy Bypass -File build.ps1                 # everything for the release zip
     powershell -ExecutionPolicy Bypass -File build.ps1 host gui        # only some parts (setup runs first if needed)
 
 Add `debug` to keep the debug traces (default flavour: release). Targets, in build order: vdxr host shim mirrordesktop gui package (default: all five), plus client probe (test tools for the harness).
 The first run clones ALVR v20.14.1 and VirtualDesktop-OpenXR at the commits in deps.lock.json into src\ and builds their
-prerequisites (tools\remote\setup_builder.ps1, idempotent). Output: out\dist\VisionALVR\ and out\dist\VisionALVR-<version>.zip.
+prerequisites (tools\remote\setup_builder.ps1, idempotent). Output: out\dist\AirFrameXR\ and out\dist\AirFrameXR-<version>.zip.
 Logs: logs\build_<step>.txt. Nothing outside this folder is changed (no registry, no OpenXR runtime registration).
 #>
 param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Targets)
 $ErrorActionPreference = 'Continue'
 $repo = $PSScriptRoot
-$env:VISIONALVR_ROOT = $repo          # the build scripts work in <root>\src, <root>\out, <root>\_tmp, <root>\logs
+$env:AIRFRAMEXR_ROOT = $repo          # the build scripts work in <root>\src, <root>\out, <root>\_tmp, <root>\logs
 $all = @('vdxr', 'host', 'shim', 'mirrordesktop', 'gui', 'package')
 # flavour: the release build (default) compiles the per-frame debug traces out; `debug` as a target keeps them (harness / developers)
 $flavour = if ($Targets -contains 'debug') { 'debug' } else { 'release' }
@@ -54,7 +54,7 @@ Put "$repo\tools\mock_client\src\main.rs" "$repo\_tmp\mock_client\src\main.rs"
 Get-ChildItem "$repo\ovrshim" -File | ForEach-Object { Put $_.FullName "$repo\_tmp\ovrshim\$($_.Name)" }
 Get-ChildItem "$repo\tools\gui\*.cs", "$repo\tools\gui\app.manifest", "$repo\tools\gui\app.stub.manifest", "$repo\tools\gui\app.exe.config" | ForEach-Object { Put $_.FullName "$repo\_tmp\gui\$($_.Name)" }
 Get-ChildItem "$repo\profiles\*.json" | ForEach-Object { Put $_.FullName "$repo\_tmp\install\profiles\$($_.Name)" }
-foreach ($f in 'visionalvr.ico', 'logo_640.png', 'chroma_passthrough.png') { Put "$repo\tools\gui\res\$f" "$repo\_tmp\gui\res\$f" }
+foreach ($f in 'airframexr.ico', 'logo_640.png', 'chroma_passthrough.png') { Put "$repo\tools\gui\res\$f" "$repo\_tmp\gui\res\$f" }
 foreach ($f in 'register_openxr_runtime.ps1', 'session.default.json', 'README.txt') {
     Put "$repo\tools\install\$f" "$repo\_tmp\install\$f"
 }
@@ -70,10 +70,10 @@ if (Test-Path "$repo\build\bench\littlest_tokyo.vab") { Copy-Item "$repo\build\b
 if (-not (Test-Path $vab) -or (Get-FileHash $vab -Algorithm SHA256).Hash.ToLower() -ne $vabSha) {
     Write-Host "== bench scene (from the v0.1.0-alpha release)"
     $zip = "$repo\_tmp\release.zip"
-    Invoke-WebRequest -UseBasicParsing 'https://github.com/jfbobier/vision-alvr/releases/download/v0.1.0-alpha/VisionALVR-0.1-alpha.zip' -OutFile $zip
+    Invoke-WebRequest -UseBasicParsing 'https://github.com/jfbobier/AirFrameXR/releases/download/v0.1.0-alpha/VisionALVR-0.1-alpha.zip' -OutFile $zip
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $z = [IO.Compression.ZipFile]::OpenRead($zip)
-    $e = $z.Entries | Where-Object { $_.FullName -eq 'VisionALVR/bench/littlest_tokyo.vab' }
+    $e = $z.Entries | Where-Object { $_.FullName -eq 'AirFrameXR/bench/littlest_tokyo.vab' }
     if ($e) { [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $vab, $true) }
     $z.Dispose()
     if (-not (Test-Path $vab) -or (Get-FileHash $vab -Algorithm SHA256).Hash.ToLower() -ne $vabSha) {
@@ -98,4 +98,4 @@ if ($Targets -contains 'probe')   { Stage 'probe'   'stage12_probe_build.ps1' 'R
 if ($Targets -contains 'gui')     { Stage 'gui'     'stage16_gui.ps1'        'RESULT: OK' }
 if ($Targets -contains 'package') { Stage 'package' 'stage13_package.ps1'    'RESULT: OK' }
 Write-Host "RESULT: OK ($($Targets -join ' '))"
-if ($Targets -contains 'package') { Write-Host "package: $repo\out\dist\VisionALVR (+ zip)" }
+if ($Targets -contains 'package') { Write-Host "package: $repo\out\dist\AirFrameXR (+ zip)" }

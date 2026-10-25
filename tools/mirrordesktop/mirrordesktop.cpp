@@ -6,11 +6,11 @@
 // Everything that is not the screen is the idle colour (107C10 by default), which the headset shows as passthrough.
 //
 //   mirrordesktop.exe [--log <file>] [--seconds N] [--no-mouse] [--clear RRGGBB] [--synthetic] [--input-log <csv>]
-//   (the background colour is the streamer's idle colour, config\visionalvr.json video.idle_rgb, 107C10 by default; --synthetic: a known test picture instead of the
+//   (the background colour is the streamer's idle colour, config\airframexr.json video.idle_rgb, 107C10 by default; --synthetic: a known test picture instead of the
 //    desktop, for the harness; --input-log: every button event with its wall-clock time, for the harness's timing checks)
 //
 // The picture (desktop capture, HDR -> SDR, the quad, the beam) is desktop.cpp, tested on the GPU by harness/mirror_check.py.
-// A game starting from the headset takes the headset over: the shim signals Local\VisionALVR_GameStarting and this app ends its session at once.
+// A game starting from the headset takes the headset over: the shim signals Local\AirFrameXR_GameStarting and this app ends its session at once.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -66,7 +66,7 @@ static void mouseTo(float u, float v) {
 }
 static void wheel(int ticks) { INPUT i{}; i.type = INPUT_MOUSE; i.mi.dwFlags = MOUSEEVENTF_WHEEL; i.mi.mouseData = (DWORD)(ticks * WHEEL_DELTA); SendInput(1, &i, sizeof i); }
 
-// The streamer's idle colour (what the headset takes as alpha) from config\visionalvr.json: video.idle_rgb, "RRGGBB" (or "#RRGGBB"); 107C10 when absent.
+// The streamer's idle colour (what the headset takes as alpha) from config\airframexr.json: video.idle_rgb, "RRGGBB" (or "#RRGGBB"); 107C10 when absent.
 static uint32_t idleColour(const std::string& path) {
     FILE* f = fopen(path.c_str(), "rb"); if (!f) return 0x107C10;
     std::string t; char buf[4096]; size_t n; while ((n = fread(buf, 1, sizeof buf, f)) > 0) t.append(buf, n); fclose(f);
@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
         logPath = d + "\\logs\\mirrordesktop.log";
     }
     std::string pkgDir; { char exe[MAX_PATH]; GetModuleFileNameA(nullptr, exe, MAX_PATH); pkgDir = exe; pkgDir = pkgDir.substr(0, pkgDir.find_last_of("\\/")); pkgDir = pkgDir.substr(0, pkgDir.find_last_of("\\/")); }
-    if (!clearGiven) clear = idleColour(pkgDir + "\\config\\visionalvr.json");
+    if (!clearGiven) clear = idleColour(pkgDir + "\\config\\airframexr.json");
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     findPrimaryMonitor();
     g_log = fopen(logPath.c_str(), "a");
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
     // runs at another level (the streamer elevated and the game not, or the reverse) could not open the event and the mirror stayed over the game
     SECURITY_ATTRIBUTES evSa{ sizeof(evSa), nullptr, FALSE };
     ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:(A;;0x1F0003;;;WD)S:(ML;;NW;;;LW)", SDDL_REVISION_1, &evSa.lpSecurityDescriptor, nullptr);
-    HANDLE gameEvent = CreateEventW(evSa.lpSecurityDescriptor ? &evSa : nullptr, TRUE, FALSE, L"Local\\VisionALVR_GameStarting");
+    HANDLE gameEvent = CreateEventW(evSa.lpSecurityDescriptor ? &evSa : nullptr, TRUE, FALSE, L"Local\\AirFrameXR_GameStarting");
     if (evSa.lpSecurityDescriptor) LocalFree(evSa.lpSecurityDescriptor);
 
     std::vector<const char*> ext = { XR_KHR_D3D11_ENABLE_EXTENSION_NAME };

@@ -1,5 +1,5 @@
 {
-  "description": "PORTABLE FOLDER: the package exactly as a user unzips it (out\\dist\\VisionALVR); the host runs from it with --install-dir and debug logging, the OpenXR app runs against only its manifest. Also checks the logging framework: general log key lines from host and shim, and the debug session folder (host events, ALVR log, GPU samples, the game's shim log)",
+  "description": "PORTABLE FOLDER: the package exactly as a user unzips it (out\\dist\\AirFrameXR); the host runs from it with --install-dir and debug logging, the OpenXR app runs against only its manifest. Also checks the logging framework: general log key lines from host and shim, and the debug session folder (host events, ALVR log, GPU samples, the game's shim log)",
   "topology": {
     "host": "builder",
     "client": "builder",

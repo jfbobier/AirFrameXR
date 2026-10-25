@@ -9,7 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public enum Sev { Info, Hint, Warn }
 
@@ -51,7 +51,7 @@ namespace VisionALVR
             try
             {
                 if (Directory.Exists(gamesDir))
-                    foreach (var file in Directory.GetFiles(gamesDir, "*.json").Where(x => !global::VisionALVR.Games.IsHiddenFile(x)))
+                    foreach (var file in Directory.GetFiles(gamesDir, "*.json").Where(x => !global::AirFrameXR.Games.IsHiddenFile(x)))
                     {
                         var g = Json.Load(file);
                         if (!(g.TryGetValue("sessions", out var so) && so is object[] ss && ss.Length > 0 && ss[ss.Length - 1] is Dictionary<string, object> s)) continue;
@@ -157,7 +157,7 @@ namespace VisionALVR
             {
                 int proposal = (int)Math.Max(4, Math.Min(10, Math.Round(0.85 * facts.SpreadMed)));
                 bool differs = Math.Abs(proposal - 7) >= 2;
-                s.Add(new Suggestion { Sev = differs ? Sev.Hint : Sev.Info, Knob = "VISIONALVR_PHASE_MARGIN_MS", Source = logSrc,
+                s.Add(new Suggestion { Sev = differs ? Sev.Hint : Sev.Info, Knob = "AIRFRAMEXR_PHASE_MARGIN_MS", Source = logSrc,
                     Title = differs ? $"Arrival margin: try {proposal} ms instead of the default 7" : "Arrival margin: the default 7 ms fits your link",
                     Measured = $"frames arrive over a spread of {F(facts.SpreadMed)} ms (p90 {F(facts.SpreadP90)}) of a {F(facts.PeriodMs > 0 ? facts.PeriodMs : period)} ms period",
                     Do = differs ? $"the margin steers the earliest arrivals that far before the headset's tick; it should cover the spread so the p90 arrival lands before it. The button sets it for the next streamer start (video.phase_margin_ms); it costs at most one period of latency, invisible until it crosses a tick"

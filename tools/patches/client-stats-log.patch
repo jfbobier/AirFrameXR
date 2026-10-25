@@ -4,7 +4,7 @@
          self.motion_to_photon_latency_average
              .submit_sample(client_stats.total_pipeline_latency);
  
-+        // VisionALVR (tools/patches/client-stats-log.patch): the headset's per-frame report, raw, keyed by the frame's
++        // AirFrameXR (tools/patches/client-stats-log.patch): the headset's per-frame report, raw, keyed by the frame's
 +        // timestamp; the host turns it into one CSV row per displayed frame (client_frames.csv).
 +        alvr_common::log::info!(
 +            "{{\"va_client_stats\":{{\"ts\":{},\"frame_interval_us\":{},\"decode_us\":{},\"decoder_queue_us\":{},\"rendering_us\":{},\"vsync_queue_us\":{},\"total_us\":{}}}}}",

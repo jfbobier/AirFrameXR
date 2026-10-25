@@ -1,5 +1,5 @@
 {
-  "_comment": "TEMPLATE for a VisionALVR headset profile. Copy it, rename it <your-headset>.profile.json, fill it with values YOU have run, and share the file (for example on the VisionALVR Discord). To use one: drop the file into the config\\\\profiles folder next to VisionALVR.exe (create it if it does not exist); the setup wizard matches it to your headset at the handshake. Delete every key you do not need; only `id`, `stream` and `network` are required. A profile only changes this PC's configuration files (session.json) and is never downloaded automatically.",
+  "_comment": "TEMPLATE for a AirFrameXR headset profile. Copy it, rename it <your-headset>.profile.json, fill it with values YOU have run, and share the file (for example on the AirFrameXR Discord). To use one: drop the file into the config\\\\profiles folder next to AirFrameXR.exe (create it if it does not exist); the setup wizard matches it to your headset at the handshake. Delete every key you do not need; only `id`, `stream` and `network` are required. A profile only changes this PC's configuration files (session.json) and is never downloaded automatically.",
   "schema": 1,
   "id": "my-headset-example",
   "display_name": "My headset (client app)",

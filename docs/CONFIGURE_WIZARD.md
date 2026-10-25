@@ -9,7 +9,7 @@ It started as a benchmark that informs a configuration; it should become a wizar
 |---|---|---|
 | GPU check | `alvr_host --system-check` -> `ok`, `reason`, `nvenc_api` (NVIDIA GPU + NVENC API >= 12.2) | step 0 |
 | Discovery | `alvr_host --discover <s>` (mDNS for the Vision Pro, UDP 9943 for Quest-style), `Discovery` class in Common.cs | step 1 |
-| Pairing | `Session.Pair` writes `client_connections` (+ `manual_ips`) in session.json, `headset.*` in visionalvr.json | step 1 |
+| Pairing | `Session.Pair` writes `client_connections` (+ `manual_ips`) in session.json, `headset.*` in airframexr.json | step 1 |
 | Encoder test | `alvr_host --live --bench 300 --encode-profile X` -> `bench` event (p50/p95, fits at 90 % of the frame time) | step 3 |
 | Quality benchmark | `alvr_host --benchmark-quality` -> `bq_result` / `bq_summary` (three proposals) | step 3 |
 | Scene test | host `--shim --daemon --gui` + `bench\xr_probe.exe` (XR_PROBE_SCENE = Littlest Tokyo, runtime from this folder): the real pipeline with the headset's head pose; head samples/s, pose range seen by the app (pose csv), repeated samples, strips per packet, ALVR client stats | step 3 |
@@ -19,10 +19,10 @@ It started as a benchmark that informs a configuration; it should become a wizar
 
 ## The flow
 0. **Gate.** `configure.exe` runs the system check first. Not NVIDIA, or older than the 40 series: a full-page "not supported" with the reason and the
-   detected GPU, and only Exit. Override: `--allow-any-gpu` (configure.exe, VisionALVR.exe and alvr_host all accept it; same effect as the existing
+   detected GPU, and only Exit. Override: `--allow-any-gpu` (configure.exe, AirFrameXR.exe and alvr_host all accept it; same effect as the existing
    environment variable) for our 3080 Ti tests. Also show which adapter will be used (laptops with an iGPU + dGPU).
 1. **Headset.** List of what mDNS/UDP finds plus the known ones, merged by hostname: the paired headset from session.json (`client_connections`,
-   `manual_ips`) and `headset.ip` from visionalvr.json always appear in the list, marked "known" and, when mDNS has not seen it, with a reachability
+   `manual_ips`) and `headset.ip` from airframexr.json always appear in the list, marked "known" and, when mDNS has not seen it, with a reachability
    check (ping, then the ALVR handshake). The current bug is that the list only holds what discovery reported, so a headset with a fixed IP
    shows as paired but not in the list. Fix: seed the list from the known entries at start, de-duplicate with discovery results, preselect the known
    one, and show it in both places (selected + list).
@@ -31,7 +31,7 @@ It started as a benchmark that informs a configuration; it should become a wizar
    Back from step 3 shows them again without reconnecting.
 3. **Choose a setup.** Exactly three options, all leading to the tests (step 4), stacked top to bottom with the profile's notes wrapped below: **Community profile (recommended)** (the matching or an
    imported profile, plus the network it is for), **Manual configuration** (values pre-filled from the stats: rate, scale, foveation) or **I have an
-   existing ALVR configuration** (config\session.json + visionalvr.json used as they are and only verified; step 6 then shows them unchanged). Capabilities come from `VideoStreamingCapabilities` + `display_name` (server_core/src/connection.rs ~575). The
+   existing ALVR configuration** (config\session.json + airframexr.json used as they are and only verified; step 6 then shows them unchanged). Capabilities come from `VideoStreamingCapabilities` + `display_name` (server_core/src/connection.rs ~575). The
    current host never exposes them (only the negotiated result lands in `openvr_config`), so: a small server_core patch like
    `client-stats-log.patch` (`client-caps-log.patch`: one log line with the JSON), parsed in logs.rs into a `client_capabilities` event, and a new
    `alvr_host --handshake <s>` mode that connects, emits it and disconnects (no game, no SteamVR needed).
@@ -74,7 +74,7 @@ It started as a benchmark that informs a configuration; it should become a wizar
    second column): per-eye resolution (<= panel, <= what the encoder sustains), refresh rate (highest supported that the encoder fits), bitrate (the
    network test's recommendation), foveation (supported + recommended), codec / 10 bit / gamma / range (from the capabilities), and phase
    lock (defaults from the lab), audio, idle colour. For "update existing" show what differs from the user's current values. Save writes session.json and
-   visionalvr.json (unknown keys preserved) and offers "Save and start VisionALVR".
+   airframexr.json (unknown keys preserved) and offers "Save and start AirFrameXR".
 
 ## Build order
 | Phase | Content | Size |
@@ -102,7 +102,7 @@ our own lab, and say whether a setup is likely fine:
 | Item | Rule | Source |
 |---|---|---|
 | bitrate | about 0.13 bits per encoded pixel per frame as the minimum, 0.18 comfortable (HEVC). Foveated encoding is measured on the encoded size. Forum guidance of ~200 Mbps for 2 x 4K at 90 Hz and ALVR's 100-150 Mbps HEVC for a Quest-class stream both come to ~0.13 | user's forum notes, [ALVR settings tutorial](https://github.com/alvr-org/ALVR/wiki/Settings-tutorial) |
-| codec | HEVC 10-bit; H.264 needs 3-4x the bitrate (400-500 Mbps vs 100-150) and is never recommended; AV1 only on newest GPUs and on Quest 3 (and newer Vision Pro chips); VisionALVR encodes HEVC today | ALVR docs, Meta developer media guidance |
+| codec | HEVC 10-bit; H.264 needs 3-4x the bitrate (400-500 Mbps vs 100-150) and is never recommended; AV1 only on newest GPUs and on Quest 3 (and newer Vision Pro chips); AirFrameXR encodes HEVC today | ALVR docs, Meta developer media guidance |
 | encoder | 5-10 ms per frame, and under 90 % of the frame time | forum guidance |
 | network / decode | about 10 ms / 5-8 ms at high bitrates | forum guidance, Virtual Desktop developer comments on decode time |
 | Wi-Fi | first Vision Pro (M2): Wi-Fi 6 on 5 GHz only (no 6 GHz), 160 MHz channel; Quest 3: 6 GHz; Quest 2: Wi-Fi 6 / 5 GHz; PC on Ethernet | Apple specs / FCC filing, ALVR docs |

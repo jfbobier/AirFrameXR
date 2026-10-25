@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The headset's address is not fixed: the streamer (bin\\streamer.exe) against the mock headset (alvr_client_headless at the PC's own LAN address).
     python3 harness/find_headset_e2e.py [auto] [button] [unpaired] [--seconds 90]
-Scenarios (each from a fresh copy of the package folder out\\dist\\VisionALVR on the PC, default VISIONALVR_PROFILE = tools/pc.local):
+Scenarios (each from a fresh copy of the package folder out\\dist\\AirFrameXR on the PC, default AIRFRAMEXR_PROFILE = tools/pc.local):
   auto      session pairs the mock headset at a WRONG address: the streamer must still connect (ALVR re-finds it by name from its announcements)
   button    same wrong address, streamer.exe --find-auto: the 'Find headset' dialog lists the headset at its new address, pairs it, restarts the streamer
   unpaired  nothing paired: the dialog finds the headset, pairs it, the streamer connects
@@ -14,7 +14,7 @@ import live, lib
 U = live.PC_USER
 wd = rf"C:\Users\{U}\find_e2e"
 wdf = wd.replace("\\", "/")
-src = rf"{live.CLONE}\out\dist\VisionALVR"
+src = rf"{live.CLONE}\out\dist\AirFrameXR"
 limit = int(sys.argv[sys.argv.index("--seconds") + 1]) if "--seconds" in sys.argv else 90
 names = [a for a in sys.argv[1:] if a in ("auto", "button", "unpaired")] or ["auto", "button", "unpaired"]
 host = lib.builder_client_hostname()
@@ -24,7 +24,7 @@ host = lib.builder_client_hostname()
 HMD_IP = "127.0.0.2"
 WRONG_IP = "10.254.254.9"
 live.log(f"mock headset hostname {host}")
-PROTO = json.loads([l for l in live.ps(rf"& '{live.CLONE}\\out\\dist\\VisionALVR\\bin\\alvr_host.exe' --system-check").splitlines() if l.startswith("{")][0])["data"]["alvr_protocol_id"]
+PROTO = json.loads([l for l in live.ps(rf"& '{live.CLONE}\\out\\dist\\AirFrameXR\\bin\\alvr_host.exe' --system-check").splitlines() if l.startswith("{")][0])["data"]["alvr_protocol_id"]
 default_session = json.loads((live.ROOT / "tools/install/session.default.json").read_text())
 
 
@@ -59,7 +59,7 @@ def task(name, lines):
 
 def stop():
     live.ps("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'announce.ps1' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; "
-            "Stop-Process -Name VisionALVR,streamer,configure,alvr_host,alvr_client_headless -Force -ErrorAction SilentlyContinue; "
+            "Stop-Process -Name AirFrameXR,streamer,configure,alvr_host,alvr_client_headless -Force -ErrorAction SilentlyContinue; "
             "schtasks /delete /tn va_mock /f 2>$null | Out-Null; schtasks /delete /tn va_gui /f 2>$null | Out-Null; Stop-Process -Name cmd -Force -ErrorAction SilentlyContinue")
     time.sleep(2)
 
@@ -70,7 +70,7 @@ def run(name):
     live.ps(f"""
 if (Test-Path '{wd}') {{ Remove-Item '{wd}' -Recurse -Force }}
 robocopy '{src}' '{wd}' /E /NFL /NDL /NJH /NJS | Out-Null
-Remove-Item '{wd}\\logs','{wd}\\config\\session.json','{wd}\\config\\visionalvr.json' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item '{wd}\\logs','{wd}\\config\\session.json','{wd}\\config\\airframexr.json' -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force '{wd}\\config' | Out-Null
 """)
     sess = live.SCRATCH / "find_session.json"
@@ -101,7 +101,7 @@ New-Item -ItemType Directory -Force '{wd}\\config' | Out-Null
     time.sleep(3)
     res = live.ROOT / "harness" / "results" / f"find_headset_{time.strftime('%Y%m%dT%H%M%S')}_{name}"
     res.mkdir(parents=True, exist_ok=True)
-    for f in ("config/session.json", "logs/VisionALVR.log", "mock_stdout.txt"):
+    for f in ("config/session.json", "logs/AirFrameXR.log", "mock_stdout.txt"):
         (res / Path(f).parent).mkdir(parents=True, exist_ok=True)
         live._retry(["scp", "-o", "BatchMode=yes", *live.MUX, "-q", f"{live.PC}:{wdf}/{f}", str(res / f)])
     stop()
@@ -116,10 +116,10 @@ New-Item -ItemType Directory -Force '{wd}\\config' | Out-Null
     except Exception as e:
         detail.append(f"session unreadable: {e}")
     try:
-        lg = (res / "logs/VisionALVR.log").read_text(errors="replace")
+        lg = (res / "logs/AirFrameXR.log").read_text(errors="replace")
         detail += [l for l in lg.splitlines() if "find headset" in l]
     except Exception:
-        detail.append("no VisionALVR.log")
+        detail.append("no AirFrameXR.log")
     print(f"[{'PASS' if ok else 'FAIL'}] {name}: streaming after {took:.0f} s" if ok else f"[FAIL] {name}: no streaming within {limit} s")
     for d in detail:
         print("   ", d)

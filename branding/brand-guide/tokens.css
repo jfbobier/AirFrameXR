@@ -1,0 +1,12 @@
+:root {
+  --airframexr-night: #020B17;
+  --airframexr-midnight: #061426;
+  --airframexr-navy: #091D33;
+  --airframexr-electric: #1475FF;
+  --airframexr-cyan: #00E6F5;
+  --airframexr-ice: #74F7FF;
+  --airframexr-white: #F4FAFF;
+  --airframexr-muted: #9DB4CB;
+  --airframexr-font: 'Inter', 'Segoe UI', Arial, sans-serif;
+  --airframexr-accent-gradient: linear-gradient(120deg,#74F7FF 0%,#00E6F5 35%,#1475FF 100%);
+}

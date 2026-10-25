@@ -4,7 +4,7 @@
 param([int]$Frames = 40, [Parameter(ValueFromRemainingArguments = $true)][string[]]$Sizes = @())
 $ErrorActionPreference = 'Continue'
 $start = Get-Date
-$root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
+$root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
 $sdk  = Get-ChildItem 'C:\Nvidia' -Directory -Filter 'Optical_Flow_SDK_*' | Sort-Object Name -Descending | Select-Object -First 1
 if (-not $sdk) { Write-Host "RESULT: FAILED (no C:\Nvidia\Optical_Flow_SDK_* folder)"; exit 1 }
 $inc  = "$($sdk.FullName)\NvOFFRUC\Interface"

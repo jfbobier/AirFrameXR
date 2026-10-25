@@ -1,4 +1,4 @@
-// bin\launcher.exe: the front door, started by the stub VisionALVR.exe (the only file in the package root). One card per tool (what it does, a Launch button); every tool is its own exe so experts can run only what they
+// bin\launcher.exe: the front door, started by the stub AirFrameXR.exe (the only file in the package root). One card per tool (what it does, a Launch button); every tool is its own exe so experts can run only what they
 // need. Experts can skip this window and start the exes directly.
 using System;
 using System.Diagnostics;
@@ -7,7 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     /// A whole-card button: a title, one line of text, a chevron. Click, Enter or Space.
     public class Card : Panel
@@ -42,7 +42,7 @@ namespace VisionALVR
         public LauncherForm(bool demoReady = false)
         {
             this.demoReady = demoReady;
-            Text = "VisionALVR \u2013 Launcher";
+            Text = "AirFrameXR \u2013 Launcher";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -57,7 +57,7 @@ namespace VisionALVR
             body.Controls.Add(sys);
             // quiet links: the full ALVR settings, and the help
             var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
-            links.Controls.Add(Link("Help", () => { var f = Path.Combine(Paths.Docs, "README.txt"); if (File.Exists(f)) Process.Start(f); else MessageBox.Show(this, "docs\\README.txt is missing from this folder.", "VisionALVR"); }));
+            links.Controls.Add(Link("Help", () => { var f = Path.Combine(Paths.Docs, "README.txt"); if (File.Exists(f)) Process.Start(f); else MessageBox.Show(this, "docs\\README.txt is missing from this folder.", "AirFrameXR"); }));
             body.Controls.Add(links);
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             scroller.Controls.Add(body);
@@ -99,7 +99,7 @@ namespace VisionALVR
             return card;
         }
 
-        // What needs attention, and only that. The OpenXR runtime games use (VisionALVR, or the one that was active before: the same button goes back), OpenXR
+        // What needs attention, and only that. The OpenXR runtime games use (AirFrameXR, or the one that was active before: the same button goes back), OpenXR
         // layers that may take the controllers, and the firewall (read in the background). Everything else lives in Diagnostics.
         void RefreshSystem()
         {
@@ -110,10 +110,10 @@ namespace VisionALVR
             if (ours)
             {
                 var prev = demoReady ? "" : OpenXr.Previous();
-                lines.Add(Row("\u2713", "Your VR games use VisionALVR.", Color.SeaGreen, prev.Length > 0 ? new[] { ("Switch back to " + OpenXr.Name(prev), (Action)SwitchBack) } : new (string, Action)[0]));
+                lines.Add(Row("\u2713", "Your VR games use AirFrameXR.", Color.SeaGreen, prev.Length > 0 ? new[] { ("Switch back to " + OpenXr.Name(prev), (Action)SwitchBack) } : new (string, Action)[0]));
             }
             else
-                lines.Add(Row("\u26A0", "Your VR games are set to use " + OpenXr.Name(OpenXr.ActiveRuntime()) + ", not VisionALVR.", Color.Firebrick, File.Exists(Paths.Manifest) ? new[] { ("Use VisionALVR", (Action)UseVisionAlvr) } : new (string, Action)[0]));
+                lines.Add(Row("\u26A0", "Your VR games are set to use " + OpenXr.Name(OpenXr.ActiveRuntime()) + ", not AirFrameXR.", Color.Firebrick, File.Exists(Paths.Manifest) ? new[] { ("Use AirFrameXR", (Action)UseAirFrameXR) } : new (string, Action)[0]));
             var risky = demoReady ? new System.Collections.Generic.List<XrLayer>() : XrLayers.ActiveImplicit().Where(l => l.MayCaptureInput).ToList();
             if (risky.Count > 0)
                 lines.Add(Row("\u26A0", risky.Count == 1 ? "An OpenXR layer may take your controllers before the game sees them." : risky.Count + " OpenXR layers may take your controllers before the game sees them.", Color.Firebrick, new[] { ("Review", (Action)(() => { using (var f = new LayersForm()) f.ShowDialog(this); RefreshSystem(); })) }));
@@ -136,9 +136,9 @@ namespace VisionALVR
             return row;
         }
 
-        void UseVisionAlvr()
+        void UseAirFrameXR()
         {
-            if (!OpenXr.Register(this)) MessageBox.Show(this, "The switch did not take effect (administrator permission declined?).", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (!OpenXr.Register(this)) MessageBox.Show(this, "The switch did not take effect (administrator permission declined?).", "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             RefreshSystem();
         }
 
@@ -146,7 +146,7 @@ namespace VisionALVR
         {
             var back = XrLayers.DisabledByUs();
             OpenXr.Unregister();
-            if (back.Count > 0 && MessageBox.Show(this, "Also switch back on the OpenXR layers VisionALVR turned off (" + string.Join(", ", back.Select(l => l.Name)) + ")?", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            if (back.Count > 0 && MessageBox.Show(this, "Also switch back on the OpenXR layers AirFrameXR turned off (" + string.Join(", ", back.Select(l => l.Name)) + ")?", "AirFrameXR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 XrLayers.Set(back, true);
             RefreshSystem();
         }
@@ -163,16 +163,16 @@ namespace VisionALVR
             if (t.StopsStreamer && Process.GetProcessesByName("streamer").Length > 0)
             {
                 // the tool needs the streamer's network port: offer to close it rather than send the user away
-                if (MessageBox.Show(this, "The streamer is open and uses the same network port. Close it and continue?", "VisionALVR", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                if (MessageBox.Show(this, "The streamer is open and uses the same network port. Close it and continue?", "AirFrameXR", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
                 foreach (var p in Process.GetProcessesByName("streamer")) { try { p.CloseMainWindow(); p.WaitForExit(10000); } catch { } }
-                if (Process.GetProcessesByName("streamer").Length > 0) { MessageBox.Show(this, "The streamer did not close. Close its window and try again.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+                if (Process.GetProcessesByName("streamer").Length > 0) { MessageBox.Show(this, "The streamer did not close. Close its window and try again.", "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             }
             try
             {
                 launched = Process.Start(exe, (t.Args + " " + extraArgs).Trim());
                 Log.Write("INFO", "launcher: started " + t.Exe);
             }
-            catch (Exception ex) { MessageBox.Show(this, "Could not start " + Path.GetFileName(t.Exe) + ": " + ex.Message, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            catch (Exception ex) { MessageBox.Show(this, "Could not start " + Path.GetFileName(t.Exe) + ": " + ex.Message, "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             FlowLog("hide: launched " + t.Title);
             Hide();
             watch.Tick -= WatchTick; watch.Tick += WatchTick; watch.Start();
@@ -188,8 +188,8 @@ namespace VisionALVR
             if (testFlow) { var c = new Timer { Interval = 2500 }; c.Tick += (s2, e2) => { FlowLog("sample"); Close(); }; c.Start(); }   // the test ends once the launcher is back
         }
 
-        // test harness (harness/launcher_flow.py): VISIONALVR_TEST_FLOW_LOG = a file that gets one line per state change and sample
-        static readonly string FlowLogPath = Environment.GetEnvironmentVariable("VISIONALVR_TEST_FLOW_LOG");
+        // test harness (harness/launcher_flow.py): AIRFRAMEXR_TEST_FLOW_LOG = a file that gets one line per state change and sample
+        static readonly string FlowLogPath = Environment.GetEnvironmentVariable("AIRFRAMEXR_TEST_FLOW_LOG");
         void FlowLog(string what)
         {
             if (string.IsNullOrEmpty(FlowLogPath)) return;
@@ -212,7 +212,7 @@ namespace VisionALVR
             {
                 go.Stop();
                 FlowLog("before launch");
-                var shot = Path.Combine(Path.GetTempPath(), "visionalvr_flow_" + title.Replace(' ', '_') + ".png");
+                var shot = Path.Combine(Path.GetTempPath(), "airframexr_flow_" + title.Replace(' ', '_') + ".png");
                 Launch(t, Path.Combine(Paths.Dir, t.Exe), "--screenshot \"" + shot + "\"");
             };
             go.Start();
@@ -224,8 +224,8 @@ namespace VisionALVR
         {
             Log.Component = "launcher";
             bool first;
-            var one = new System.Threading.Mutex(true, "VisionALVR_Launcher", out first);
-            var showEvent = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.AutoReset, "VisionALVR_Launcher_Show");
+            var one = new System.Threading.Mutex(true, "AirFrameXR_Launcher", out first);
+            var showEvent = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.AutoReset, "AirFrameXR_Launcher_Show");
             if (!first) { showEvent.Set(); Log.Write("INFO", "launcher: already running, asked it to show itself"); return; }   // a second start (double-click, the streamer's Main menu button): the launcher, or the tool it stepped aside for, is already there
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);

@@ -1,4 +1,4 @@
-// VisionALVR.exe in the package root: the one file a user ever double-clicks. It starts bin\launcher.exe and exits at once (no window of its own), so the
+// AirFrameXR.exe in the package root: the one file a user ever double-clicks. It starts bin\launcher.exe and exits at once (no window of its own), so the
 // root holds a single file and the launcher can have its own bin\launcher.exe.config. Arguments are passed on. Not a launcher itself: nothing to configure.
 using System;
 using System.Diagnostics;
@@ -17,12 +17,12 @@ static class Stub
         if (!File.Exists(exe))
         {
             var inZip = dir.IndexOf(".zip", StringComparison.OrdinalIgnoreCase) >= 0 || dir.IndexOf("\\Temp1_", StringComparison.OrdinalIgnoreCase) >= 0;
-            MessageBox.Show(inZip ? "Extract the whole zip first (right-click it, Extract All), then start VisionALVR.exe from the extracted folder."
-                                  : "VisionALVR cannot start: bin\\launcher.exe is missing. Unzip the whole VisionALVR folder, keeping its folders, and start VisionALVR.exe from it.",
-                "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(inZip ? "Extract the whole zip first (right-click it, Extract All), then start AirFrameXR.exe from the extracted folder."
+                                  : "AirFrameXR cannot start: bin\\launcher.exe is missing. Unzip the whole AirFrameXR folder, keeping its folders, and start AirFrameXR.exe from it.",
+                "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 1;
         }
         try { Process.Start(new ProcessStartInfo(exe, string.Join(" ", args.Select(a => a.Contains(" ") ? "\"" + a + "\"" : a))) { WorkingDirectory = Path.GetDirectoryName(exe), UseShellExecute = false }); return 0; }
-        catch (Exception e) { MessageBox.Show("VisionALVR cannot start: " + e.Message, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
+        catch (Exception e) { MessageBox.Show("AirFrameXR cannot start: " + e.Message, "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
     }
 }

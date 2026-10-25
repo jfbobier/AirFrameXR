@@ -40,13 +40,13 @@ generation itself (3080 Ti at 2048x1024: flow 3.3 ms, synthesis 0.2 ms; the RTX 
 | Host glue | `nvenc/hostlib/nvh.cpp` `nvh_fg_*` | own foveation pass on the output, encode tail shared with the slot path, stats JSON |
 | Decision per boundary | `tools/host/src/pipeline.rs` `FgState`, `fg_plan_app`, `fg_plan_hold` | synth / real / repeat, sample stamping, counters |
 | Sample ring | `tools/host/src/main.rs` `Shared::recent_samples`, `push_recent_sample` | the last 48 tracking samples with their head orientation |
-| Settings | `config/visionalvr.json` `video.frame_gen` (+ `frame_gen_flow_scale`, `frame_gen_perf`), `--frame-gen on|off`, `VISIONALVR_FRAME_GEN=1/0`; live: GUI command `frame_gen on|off` | CLI > env > settings; checkbox "Frame generation" in the streamer window (applies at once: generator created or dropped under the encoder lock, shim pacing follows) and in Settings |
+| Settings | `config/airframexr.json` `video.frame_gen` (+ `frame_gen_flow_scale`, `frame_gen_perf`), `--frame-gen on|off`, `AIRFRAMEXR_FRAME_GEN=1/0`; live: GUI command `frame_gen on|off` | CLI > env > settings; checkbox "Frame generation" in the streamer window (applies at once: generator created or dropped under the encoder lock, shim pacing follows) and in Settings |
 | Headers | `third_party/nvof/` | `nvOpticalFlowCommon.h`, `nvOpticalFlowD3D11.h` (MIT notice; nothing of NVIDIA's is redistributed) |
 
 Rules of the per-boundary decision (`FgState`): the output schedule is a fixed pattern per game period, the m - 1 synthetic frames at
 t = 1/m ... (m-1)/m then the rendered frame (`due`); at 1/2 that is the strict alternation synthetic, rendered. A rendered frame
 that arrives while the previous one is still due waits in the intake for one boundary (`fg_queued`); a boundary with nothing due waits up to
-`VISIONALVR_FG_ARRIVAL_WAIT_MS` (4) past the boundary for the frame the app is about to publish (`fg_arrival_waits` / `fg_arrival_hits`) and
+`AIRFRAMEXR_FG_ARRIVAL_WAIT_MS` (4) past the boundary for the frame the app is about to publish (`fg_arrival_waits` / `fg_arrival_hits`) and
 only then repeats the rendered frame. Both rules exist because an app released at a boundary publishes its frame near a boundary: without
 them the schedule flipped between "just before" and "just after" (a frame dropped, then one frozen) at 6 % of the boundaries in the rig's
 ideal-timing case. Every output is stamped with a tracking sample newer than the last sent frame, and when two are waiting the older of
@@ -63,7 +63,7 @@ its boundary, the late one is stamped at the next). A sample late by more than a
 sample, which was stamped: the stamp jumped two samples and every later output was one period younger, until a skipped boundary followed by
 a bunch rebuilt the one in hand and moved them back. On the Vision Pro that was the total latency switching between 67 and 77 ms in 10-20 s
 cycles, each switch a pose-age jump shown as a hitch while the head turns. `regime_switches` counts these switches (the number
-of unused samples left behind the stamped one changing between one and none). With the hold on (`VISIONALVR_FG_HOLD_AGE=1` or the setting true) such a boundary waits for the next sample like any other and otherwise repeats once (`hold_skips`); more than 5 of those in a second step
+of unused samples left behind the stamped one changing between one and none). With the hold on (`AIRFRAMEXR_FG_HOLD_AGE=1` or the setting true) such a boundary waits for the next sample like any other and otherwise repeats once (`hold_skips`); more than 5 of those in a second step
 the hold aside until they thin out (`hold_bypassed`). The rig argued against it as a default: its uplink tail (up to 14 ms, over a period) makes such
 late samples frequent, the hold skipped 3.4 boundaries a second and the head path went TREMBLE (`late_turn_fg`, one sample in 150 delivered two
 and a half periods late, hold on: 149-208 hold skips, 22-57 bypassed, 114 regime switches left, head TREMBLE once and CLEAN once, motion JUDDER; hold off: 60-75 skipped boundaries, 1278 regime switches a minute, CLEAN and SMOOTH). The Vision Pro's Wi-Fi is

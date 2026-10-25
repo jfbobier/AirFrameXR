@@ -45,16 +45,16 @@ static double EnvDouble(const char* n, double def) { char* v = nullptr; size_t l
 static bool EnvSet(const char* n) { char* v = nullptr; size_t len = 0; const bool set = _dupenv_s(&v, &len, n) == 0 && v; free(v); return set; }
 
 
-using namespace visionalvr_ipc;
+using namespace airframexr_ipc;
 
-// Logging. General log: <package root>\logs\VisionALVR.log (the DLL sits in <root>\bin), appended by every VisionALVR component (one WriteFile per
+// Logging. General log: <package root>\logs\AirFrameXR.log (the DLL sits in <root>\bin), appended by every AirFrameXR component (one WriteFile per
 // line, so the host and several games can share it): game start/exit and errors only. Debug log (verbose): OVRSHIM_LOG = path
 // (harness), else shim_<exe>_<pid>.log in the host's debug session folder, which the shim learns through the IPC block; lines
 // logged before that are kept in memory and written once the folder is known.
 // Compile-time telemetry flag: the per-frame trace (shim_frames.csv), the pose-match diagnostics and the bookkeeping behind them cost CPU
-// on every frame. Release builds define VISIONALVR_RELEASE (tools/remote/stage11_ovrshim.ps1 via CL, run.py build --release) and drop them.
-#ifndef VISIONALVR_RELEASE
-#define VISIONALVR_TELEMETRY 1
+// on every frame. Release builds define AIRFRAMEXR_RELEASE (tools/remote/stage11_ovrshim.ps1 via CL, run.py build --release) and drop them.
+#ifndef AIRFRAMEXR_RELEASE
+#define AIRFRAMEXR_TELEMETRY 1
 #endif
 
 namespace shimlog {
@@ -118,7 +118,7 @@ namespace shimlog {
             if (root.size() >= 4 && _wcsicmp(root.c_str() + root.size() - 4, L"\\bin") == 0) root.resize(root.size() - 4);
             const std::wstring logs = root + L"\\logs";
             CreateDirectoryW(logs.c_str(), nullptr);
-            return logs + L"\\VisionALVR.log";
+            return logs + L"\\AirFrameXR.log";
         }();
         static const std::string who = "[shim:" + Utf8(ExeName()) + "]";
         std::string lv = level;
@@ -204,7 +204,7 @@ namespace shimlog {
     // Per-frame trace (follow-the-frames harness): one CSV line per published frame, in the debug session folder
     // (shim_frames_<exe>_<pid>.csv) or at OVRSHIM_FRAME_CSV. Times are shim clock seconds.
     static void FrameCsv(const char* line) {
-#ifdef VISIONALVR_TELEMETRY
+#ifdef AIRFRAMEXR_TELEMETRY
         static FILE* f = nullptr;
         static bool tried = false;
         static int pending = 0;
@@ -348,7 +348,7 @@ namespace {
                 if (_wcsicmp(m_ipc.state->shim.appExe, shimlog::ExeName().c_str()) == 0) m_ipc.state->shim.shimAlive = 0;
                 shimlog::General("INFO", "game exit: %llu frames", (unsigned long long)m_framesSubmitted);
             }
-            visionalvr_ipc::CloseIpc(m_ipc);
+            airframexr_ipc::CloseIpc(m_ipc);
 
             TraceLoggingWriteStop(local, "HostDriver_Dtor");
         }
@@ -969,7 +969,7 @@ namespace {
             m_outputGamma = 1.f / (m_encodingGamma * user);
         }
 
-        // The user's colour correction (VisionALVR.exe sliders, read from the IPC block every frame), for the draw that writes the
+        // The user's colour correction (AirFrameXR.exe sliders, read from the IPC block every frame), for the draw that writes the
         // encoded value only.
         void FillColor(bool final, float& brightness, float& contrast, float& saturation, float& sharpening, int& finalPass) const {
             brightness = contrast = saturation = sharpening = 0.f;
@@ -1386,7 +1386,7 @@ namespace {
                     }
                 }
                 FrameTraceRow trace;
-#ifdef VISIONALVR_TELEMETRY
+#ifdef AIRFRAMEXR_TELEMETRY
                 trace.tSubmit = tSubmitStart;
                 for (const ovrLayerHeader* lh : layers) {
                     if (lh && (lh->Type == ovrLayerType_EyeFov || lh->Type == ovrLayerType_EyeFovDepth)) {
@@ -1587,7 +1587,7 @@ namespace {
             MemoryBarrier();
             s.frameSeq++; // even: stable
             SetEvent(m_ipc.frame);
-#ifdef VISIONALVR_TELEMETRY
+#ifdef AIRFRAMEXR_TELEMETRY
             {
                 char line[640];
                 snprintf(line, sizeof(line), "%llu,%u,%llu,%.6f,%.6f,%.6f,%.6f,%d,%d,%.6f,%.6f,%.6f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f\n",
@@ -1607,8 +1607,8 @@ namespace {
             for (int attempt = 0; attempt < 26; attempt++) {
                 const uint32_t busy = m_ipc.state ? *(volatile uint32_t*)&m_ipc.state->host.slotBusyMask : 0;
                 const uint32_t lastPublished = m_lastPublishedSlot.load();
-                for (int i = 0; i < visionalvr_ipc::kSlots; i++) {
-                    const uint32_t s = (m_nextSlot + i) % visionalvr_ipc::kSlots;
+                for (int i = 0; i < airframexr_ipc::kSlots; i++) {
+                    const uint32_t s = (m_nextSlot + i) % airframexr_ipc::kSlots;
                     if ((busy & (1u << s)) || s == lastPublished) {
                         continue;
                     }
@@ -1619,7 +1619,7 @@ namespace {
                     if (inFlight) {
                         continue;
                     }
-                    m_nextSlot = (s + 1) % visionalvr_ipc::kSlots;
+                    m_nextSlot = (s + 1) % airframexr_ipc::kSlots;
                     return s;
                 }
                 if (attempt == 0) {
@@ -1628,7 +1628,7 @@ namespace {
                 m_publishCv.wait_for(lock, std::chrono::milliseconds(2));
             }
             const uint32_t s = m_nextSlot;
-            m_nextSlot = (s + 1) % visionalvr_ipc::kSlots;
+            m_nextSlot = (s + 1) % airframexr_ipc::kSlots;
             return s;
         }
 
@@ -1766,7 +1766,7 @@ namespace {
                     if (pick < kPoseRing) {
                         ts = sample(pick).clientTsNs;
                         matched = true;
-#ifdef VISIONALVR_TELEMETRY // pose-match diagnostics (the 900-frame log line): angle evaluations per recorded pose, every frame
+#ifdef AIRFRAMEXR_TELEMETRY // pose-match diagnostics (the 900-frame log line): angle evaluations per recorded pose, every frame
                         uint32_t ties = 0;
                         for (size_t k = 0; k < m_poseRingCount; k++) {
                             if (sample(k).clientTsNs >= m_lastFrameTsNs && angle(sample(k)) <= best + kTie) {
@@ -1924,7 +1924,7 @@ namespace {
             if (!OpenIpc(m_ipc)) {
                 m_ipc = {}; // run standalone (keyboard-driven, like OVRNull)
                 ShimLog("start: %s: host IPC not available (alvr_host not running, or a different IPC version): standalone", exe);
-                shimlog::General("WARN", "VisionALVR host not reachable (not running, or a different version): this game will not reach the headset");
+                shimlog::General("WARN", "AirFrameXR host not reachable (not running, or a different version): this game will not reach the headset");
                 return;
             }
             {
@@ -1932,7 +1932,7 @@ namespace {
                 wcsncpy_s(m_ipc.state->shim.appExe, name.c_str(), _TRUNCATE);
                 // the desktop mirror (mirrordesktop.exe, an app like any other) holds the headset between games: any other app starting tells it to leave
                 if (_wcsicmp(name.c_str(), L"mirrordesktop.exe") != 0) {
-                    if (HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\VisionALVR_GameStarting")) { SetEvent(ev); CloseHandle(ev); ShimLog("start: told the desktop mirror to leave"); }
+                    if (HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\AirFrameXR_GameStarting")) { SetEvent(ev); CloseHandle(ev); ShimLog("start: told the desktop mirror to leave"); }
                     else if (GetLastError() == ERROR_ACCESS_DENIED) ShimLog("start: the desktop mirror's event refused access (error 5): it may stay on screen over this app");
                 }
             }
@@ -2010,7 +2010,7 @@ namespace {
             desc.Usage = D3D11_USAGE_DEFAULT;
             desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
             desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
-            for (int i = 0; i < visionalvr_ipc::kSlots; i++) {
+            for (int i = 0; i < airframexr_ipc::kSlots; i++) {
                 winrt::check_hresult(m_submissionDevice->CreateTexture2D(&desc, nullptr, m_sbsTex[i].ReleaseAndGetAddressOf()));
                 winrt::check_hresult(m_submissionDevice->CreateRenderTargetView(
                     m_sbsTex[i].Get(), nullptr, m_sbsRTV[i].ReleaseAndGetAddressOf()));
@@ -2113,7 +2113,7 @@ namespace {
                     continue;
                 }
                 MemoryBarrier();
-                const visionalvr_ipc::Pose p = h.head;
+                const airframexr_ipc::Pose p = h.head;
                 const double t = h.headHostTimeS;
                 const uint64_t ts = h.headClientTsNs;
                 float lv[3], av[3];
@@ -2146,7 +2146,7 @@ namespace {
             if (!m_ipc.state) {
                 return false;
             }
-            using namespace visionalvr_ipc;
+            using namespace airframexr_ipc;
             const auto& h = m_ipc.state->host;
             // one sample per frame, keyed by the display time the app asks the pose for (an app or VDXR reads the head pose several
             // times per frame, and pipelined engines read frame N+1's pose before submitting N): the same time gets the same sample
@@ -2283,7 +2283,7 @@ namespace {
                 }
                 MemoryBarrier();
                 const uint32_t valid = h.handValid[side];
-                const visionalvr_ipc::Pose p = h.hand[side];
+                const airframexr_ipc::Pose p = h.hand[side];
                 float lv[3], av[3];
                 memcpy(lv, h.handLinVel[side], sizeof(lv));
                 memcpy(av, h.handAngVel[side], sizeof(av));
@@ -2337,7 +2337,7 @@ namespace {
             const ovrPoseStatef result = PropagatePose(latched, absTime);
             {
                 std::lock_guard lock(m_lastHeadMutex);
-#ifdef VISIONALVR_TELEMETRY
+#ifdef AIRFRAMEXR_TELEMETRY
                 if (clientTs) {
                     m_readRing[m_readNext] = {clientTs, absTime, QpcSeconds(), latched.TimeInSeconds, legacyPose ? 0 : m_selPredicted, legacyPose ? 0 : m_selRepeated,
                         {latched.ThePose.Orientation.x, latched.ThePose.Orientation.y, latched.ThePose.Orientation.z, latched.ThePose.Orientation.w},
@@ -2390,7 +2390,7 @@ namespace {
         ovrInputState GetControllerButtons() const override {
             ovrInputState inputState = m_controllerButtons;
             if (m_ipc.state) {
-                using namespace visionalvr_ipc;
+                using namespace airframexr_ipc;
                 const auto& h = m_ipc.state->host;
                 unsigned int buttons = 0, touches = 0;
                 for (uint32_t side = 0; side < ovrHand_Count; side++) {
@@ -2516,7 +2516,7 @@ namespace {
         std::condition_variable m_frameVsync;
 
         // Host IPC and the composed side-by-side frame ring.
-        visionalvr_ipc::Ipc m_ipc{};
+        airframexr_ipc::Ipc m_ipc{};
         mutable std::atomic<uint64_t> m_lastPoseClientTsNs{0};
         uint64_t m_framesPublished{0}; // frames handed to the host (frameCounter)
         uint64_t m_framesSubmitted{0}; // frames composed (picks the ring slot)
@@ -2577,7 +2577,7 @@ namespace {
             double displayS;                   // the display time the app rendered for (shim clock), 0 when there is no projection layer
         };
         ComPtr<IDXGIDevice2> m_dxgiDevice2;
-        HANDLE m_gpuDone[visionalvr_ipc::kSlots]{};
+        HANDLE m_gpuDone[airframexr_ipc::kSlots]{};
         std::thread m_publishThread;
         std::mutex m_publishMutex;
         std::condition_variable m_publishCv;
@@ -2585,8 +2585,8 @@ namespace {
         bool m_stopPublisher{false};
         uint32_t m_sbsWidth{0};
         uint32_t m_sbsHeight{0};
-        ComPtr<ID3D11Texture2D> m_sbsTex[visionalvr_ipc::kSlots];
-        ComPtr<ID3D11RenderTargetView> m_sbsRTV[visionalvr_ipc::kSlots];
+        ComPtr<ID3D11Texture2D> m_sbsTex[airframexr_ipc::kSlots];
+        ComPtr<ID3D11RenderTargetView> m_sbsRTV[airframexr_ipc::kSlots];
         ComPtr<ID3D11Query> m_doneQuery;
     };
 

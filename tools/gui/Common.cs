@@ -1,4 +1,4 @@
-// Shared by VisionALVR.exe (runtime) and configure.exe: install layout, JSON, the general log, headset discovery, the host
+// Shared by AirFrameXR.exe (runtime) and configure.exe: install layout, JSON, the general log, headset discovery, the host
 // process, the system check, OpenXR registration and the common window header. .NET Framework 4.8 (part of Windows 10/11).
 using System;
 using System.Collections.Generic;
@@ -18,12 +18,12 @@ using Microsoft.Win32;
 // What Visual Studio adds to every project: WinForms' per-monitor DPI support (app.config, bin\*.config) only applies to an assembly that says it targets 4.7 or newer.
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8", FrameworkDisplayName=".NET Framework 4.8")]
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public static class Version
     {
-        public const string Number = "0.6.1";
-        /// "0.6.1", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
+        public const string Number = "1.0.0";
+        /// "1.0.0", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
         {
@@ -35,7 +35,7 @@ namespace VisionALVR
     /// The portable folder: everything next to the exe, config/ and logs/ inside it.
     public static class Paths
     {
-        /// The package root. Everything but the launcher lives in bin\ (VisionALVR.exe, the launcher, is the only file in the root): their folder's parent is the root.
+        /// The package root. Everything but the launcher lives in bin\ (AirFrameXR.exe, the launcher, is the only file in the root): their folder's parent is the root.
         public static readonly string Dir = RootOf(AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\'));
         static string RootOf(string d) => string.Equals(Path.GetFileName(d), "bin", StringComparison.OrdinalIgnoreCase) ? (Path.GetDirectoryName(d) ?? d) : d;
         public static string Bin => Path.Combine(Dir, "bin");
@@ -44,7 +44,9 @@ namespace VisionALVR
         public static string Docs => Path.Combine(Dir, "docs");
         public static string Session => Path.Combine(Config, "session.json");
         public static string SessionDefault => Path.Combine(Config, "session.default.json");
-        public static string Settings => Path.Combine(Config, "visionalvr.json");
+        public static string Settings => Path.Combine(Config, "airframexr.json");
+        // before 1.0 the project was called VisionALVR (config\visionalvr.json): a folder carried over keeps its settings, the old file stays as a backup
+        static Paths() { try { var old = Path.Combine(Config, "visionalvr.json"); if (!File.Exists(Settings) && File.Exists(old)) File.Copy(old, Settings); } catch { } }
         public static string Host => Path.Combine(Bin, "alvr_host.exe");
         public static string MirrorDesktop => Path.Combine(Bin, "mirrordesktop.exe");
         public static string Manifest => Path.Combine(Bin, "virtualdesktop-openxr.json");
@@ -77,7 +79,7 @@ namespace VisionALVR
     /// nothing is started: the caller shows where the file went.
     public static class LogExport
     {
-        public static string DefaultName(string stem) => $"VisionALVR-{(string.IsNullOrEmpty(stem) ? "logs" : stem)}-{DateTime.Now:yyyyMMdd-HHmm}.zip";
+        public static string DefaultName(string stem) => $"AirFrameXR-{(string.IsNullOrEmpty(stem) ? "logs" : stem)}-{DateTime.Now:yyyyMMdd-HHmm}.zip";
 
         /// Writes the zip to `path` (replacing a file there) and returns the entry names.
         public static List<string> Write(string path, string stem)
@@ -95,7 +97,7 @@ namespace VisionALVR
                     names.Add(name);
                 }
                 if (!string.IsNullOrEmpty(stem)) add(Games.FileOf(stem), "game/" + stem + ".json");
-                add(Path.Combine(Paths.Logs, "VisionALVR.log"), "VisionALVR.log");
+                add(Path.Combine(Paths.Logs, "AirFrameXR.log"), "AirFrameXR.log");
                 add(Path.Combine(Paths.Logs, "mirrordesktop.log"), "mirrordesktop.log");   // the desktop mirror's own log (what it saw of the controllers and of a game starting)
                 var dbg = Path.Combine(Paths.Logs, "debug");
                 if (Directory.Exists(dbg))
@@ -103,7 +105,7 @@ namespace VisionALVR
                     var newest = new DirectoryInfo(dbg).GetDirectories().OrderByDescending(d => d.LastWriteTime).FirstOrDefault();
                     if (newest != null) foreach (var f in newest.GetFiles()) add(f.FullName, "debug/" + newest.Name + "/" + f.Name);
                 }
-                using (var w = new StreamWriter(z.CreateEntry("info.txt").Open())) w.WriteLine($"VisionALVR {Version.Text}\n{DateTime.Now:s}\n{Environment.OSVersion}");
+                using (var w = new StreamWriter(z.CreateEntry("info.txt").Open())) w.WriteLine($"AirFrameXR {Version.Text}\n{DateTime.Now:s}\n{Environment.OSVersion}");
                 names.Add("info.txt");
             }
             Log.Write("INFO", "logs exported to " + path);
@@ -136,7 +138,7 @@ namespace VisionALVR
     }
 
     /// The DLSS motion-vector extractor (one DLL) that releases up to 0.6 copied next to a game's exe on request. Releases no longer ship or install it; what
-    /// is left is the removal of the copies VisionALVR made. config\mv_dll.json recorded each install (file, folder, MD5), and only a file that still has the
+    /// is left is the removal of the copies AirFrameXR made. config\mv_dll.json recorded each install (file, folder, MD5), and only a file that still has the
     /// recorded MD5 is deleted: anything else in the game folder (someone else's proxy DLL, a copy replaced since) is left alone.
     public static class MvDll
     {
@@ -155,24 +157,24 @@ namespace VisionALVR
         }
         static string Str(Dictionary<string, object> d, string k) => d.TryGetValue(k, out var v) ? v as string ?? "" : "";
 
-        /// The file name of the copy recorded for this game, or null when VisionALVR installed nothing there.
+        /// The file name of the copy recorded for this game, or null when AirFrameXR installed nothing there.
         public static string Installed(string stem)
         {
             var e = Installs(Json.Load(Record)).TryGetValue(stem, out var o) ? o as Dictionary<string, object> : null;
             return e != null && Str(e, "file").Length > 0 ? Str(e, "file") : null;
         }
 
-        /// Deletes the recorded copy when it is still the file VisionALVR put there, and forgets the record either way. Returns a message for the user.
+        /// Deletes the recorded copy when it is still the file AirFrameXR put there, and forgets the record either way. Returns a message for the user.
         public static string Uninstall(string stem)
         {
             var r = Json.Load(Record);
             var all = Installs(r);
-            if (!(all.TryGetValue(stem, out var o) && o is Dictionary<string, object> e)) return "Nothing recorded as installed for this game by VisionALVR.";
+            if (!(all.TryGetValue(stem, out var o) && o is Dictionary<string, object> e)) return "Nothing recorded as installed for this game by AirFrameXR.";
             string name = Str(e, "file"), dir = Str(e, "dir");
             var target = name.Length > 0 && dir.Length > 0 ? Path.Combine(dir, name) : null;
             string msg;
             if (target == null || !File.Exists(target)) msg = "The file is no longer in the game folder.";
-            else if (Md5(target) != Str(e, "md5")) msg = $"{name} in {dir} has changed since VisionALVR installed it; it was left in place.";
+            else if (Md5(target) != Str(e, "md5")) msg = $"{name} in {dir} has changed since AirFrameXR installed it; it was left in place.";
             else if (!DeleteMaybeElevated(target)) return "The file was not removed (administrator permission refused?).";
             else msg = $"Removed {name} from {dir}.";
             all.Remove(stem);
@@ -308,7 +310,7 @@ namespace VisionALVR
         public static string Serialize(object o) => Ser.Serialize(o);
     }
 
-    /// The general log logs\VisionALVR.log, shared with the host and the shim (one appended write per line).
+    /// The general log logs\AirFrameXR.log, shared with the host and the shim (one appended write per line).
     public static class Log
     {
         public static string Component = "gui";
@@ -322,7 +324,7 @@ namespace VisionALVR
                 {
                     Directory.CreateDirectory(Paths.Logs);
                     var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{Component}] {level,-5} {msg}\r\n";
-                    using (var fs = new FileStream(Path.Combine(Paths.Logs, "VisionALVR.log"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+                    using (var fs = new FileStream(Path.Combine(Paths.Logs, "AirFrameXR.log"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
                     {
                         var b = Encoding.UTF8.GetBytes(line);
                         fs.Write(b, 0, b.Length);
@@ -333,7 +335,7 @@ namespace VisionALVR
         }
     }
 
-    /// config\visionalvr.json: VisionALVR's own settings (the ALVR ones stay in session.json).
+    /// config\airframexr.json: AirFrameXR's own settings (the ALVR ones stay in session.json).
     public class AppSettings
     {
         public Dictionary<string, object> Root = Json.Load(Paths.Settings);
@@ -373,7 +375,7 @@ namespace VisionALVR
         /// (the streamer makes the cable the default output, ALVR captures it)
         public string AudioCapture { get => Json.Str(Root, "audio.capture", "process") == "device" ? "device" : "process"; set => Json.Set(Root, "audio.capture", value == "device" ? "device" : "process"); }
         public bool Debug { get => Json.Bool(Root, "debug", false); set => Json.Set(Root, "debug", value); }
-        /// display (live in VisionALVR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral
+        /// display (live in AirFrameXR.exe): gamma 1.2 prefilled (users' AVP experience with ALVR), the rest neutral
         public const double DefaultGamma = 1.2;
         public double Gamma { get => Json.Num(Root, "display.gamma", DefaultGamma); set => Json.Set(Root, "display.gamma", value); }
         public double Brightness { get => Json.Num(Root, "display.brightness", 0); set => Json.Set(Root, "display.brightness", value); }
@@ -429,7 +431,7 @@ namespace VisionALVR
         }
     }
 
-    /// Windows power plans through powercfg (what startvisionalvr.bat did): the configured plan is set while the streamer runs and the previous one is put back at the end.
+    /// Windows power plans through powercfg (what startairframexr.bat did): the configured plan is set while the streamer runs and the previous one is put back at the end.
     /// The plan to restore is written to logs\power_plan.txt first, so a streamer that crashed is undone at the next start.
     public static class PowerPlan
     {
@@ -680,7 +682,7 @@ namespace VisionALVR
         {
             using (var f = new DpiForm())
             {
-                f.Text = "VisionALVR \u2013 Meta Quest over USB";
+                f.Text = "AirFrameXR \u2013 Meta Quest over USB";
                 f.Icon = Ui.AppIcon();
                 f.AutoScaleDimensions = new SizeF(96F, 96F);
                 f.AutoScaleMode = AutoScaleMode.Dpi;
@@ -827,7 +829,7 @@ namespace VisionALVR
     /// some (hand-tracking and input tools) capture or remap the controllers before any runtime sees them. Reading the lists follows the loader's own
     /// format (see also FredEmmott/openxr-api-layers-gui, MIT, which shows the same lists): ...\Khronos\OpenXR\1\ApiLayers\Implicit|Explicit under HKLM and
     /// HKCU, in the 64-bit and the 32-bit view; a value's name is the layer manifest's path, its DWORD 0 = enabled, anything else = disabled.
-    /// Disabling sets the DWORD to 1 (reversible; what VisionALVR disabled is kept in config\layers_disabled.json so it can be put back).
+    /// Disabling sets the DWORD to 1 (reversible; what AirFrameXR disabled is kept in config\layers_disabled.json so it can be put back).
     public class XrLayer
     {
         public string Hive, Section, Path, Name = "", Description = "", Library = "";
@@ -910,7 +912,7 @@ namespace VisionALVR
             return ok;
         }
 
-        // what VisionALVR disabled, so the runtime toggle (and the layers dialog) can put it back
+        // what AirFrameXR disabled, so the runtime toggle (and the layers dialog) can put it back
         static void Remember(List<XrLayer> layers, bool enabled)
         {
             var root = Json.Load(DisabledFile);
@@ -925,7 +927,7 @@ namespace VisionALVR
             Json.Save(DisabledFile, root);
         }
 
-        /// The layers VisionALVR disabled earlier and that are still disabled.
+        /// The layers AirFrameXR disabled earlier and that are still disabled.
         public static List<XrLayer> DisabledByUs()
         {
             var root = Json.Load(DisabledFile);
@@ -949,7 +951,7 @@ namespace VisionALVR
         readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(820, 0), Margin = new Padding(3, 6, 3, 6) };
         public LayersForm()
         {
-            Text = "VisionALVR \u2013 OpenXR layers";
+            Text = "AirFrameXR \u2013 OpenXR layers";
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body; Icon = Ui.AppIcon();
@@ -1026,7 +1028,7 @@ namespace VisionALVR
         {
             try
             {
-                using (var k = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64).OpenSubKey(@"SOFTWARE\VisionALVR"))
+                using (var k = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64).OpenSubKey(@"SOFTWARE\AirFrameXR"))
                     return k?.GetValue("PreviousActiveRuntime") as string ?? "";
             }
             catch { return ""; }
@@ -1036,7 +1038,7 @@ namespace VisionALVR
         public static string Name(string manifest)
         {
             if (string.IsNullOrEmpty(manifest)) return "none";
-            if (string.Equals(manifest, Paths.Manifest, StringComparison.OrdinalIgnoreCase)) return "VisionALVR";
+            if (string.Equals(manifest, Paths.Manifest, StringComparison.OrdinalIgnoreCase)) return "AirFrameXR";
             try
             {
                 var j = Json.Load(manifest);
@@ -1194,7 +1196,7 @@ namespace VisionALVR
         {
             try
             {
-                var args = $"/c netsh advfirewall firewall delete rule name=all program=\"{program}\" & netsh advfirewall firewall add rule name=\"VisionALVR (alvr_host)\" dir=in action=allow program=\"{program}\" enable=yes profile=any";
+                var args = $"/c netsh advfirewall firewall delete rule name=all program=\"{program}\" & netsh advfirewall firewall add rule name=\"AirFrameXR (alvr_host)\" dir=in action=allow program=\"{program}\" enable=yes profile=any";
                 var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", args) { UseShellExecute = true, Verb = "runas", WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden };
                 using (var p = System.Diagnostics.Process.Start(psi)) { p.WaitForExit(30000); }
                 Log.Write("INFO", $"firewall: allow rule for {program} requested");
@@ -1232,7 +1234,7 @@ namespace VisionALVR
         public FirewallForm(FwReport demo = null)
         {
             exe = Paths.Host;
-            Text = "VisionALVR \u2013 Firewall rules";
+            Text = "AirFrameXR \u2013 Firewall rules";
             Font = Ui.Body; Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterParent;
             BackColor = Color.White;
@@ -1364,7 +1366,7 @@ namespace VisionALVR
         readonly Button pick = new Button { Width = 90, Height = 24, FlatStyle = FlatStyle.Flat };
         public ChromaStepForm()
         {
-            Text = "VisionALVR \u2013 Passthrough";
+            Text = "AirFrameXR \u2013 Passthrough";
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = Ui.Body; Icon = Ui.AppIcon();

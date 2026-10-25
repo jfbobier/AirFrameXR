@@ -79,7 +79,7 @@ pub const NVH_KEYS: &[(&str, i64)] = &[
 ];
 
 /// QP delta map (HEVC per-CTB QP offsets): lower QP in the foveal region, higher in the periphery; rate control keeps the bitrate,
-/// so the center gains quality at the periphery's expense. Overridable at run time: `--qp-map on|off` or env `VISIONALVR_QP_MAP=0|1`.
+/// so the center gains quality at the periphery's expense. Overridable at run time: `--qp-map on|off` or env `AIRFRAMEXR_QP_MAP=0|1`.
 pub const QP_MAP_ENABLED: bool = true;
 pub const QP_MAP_CENTER_DELTA: i64 = -3;
 pub const QP_MAP_EDGE_DELTA: i64 = 6;

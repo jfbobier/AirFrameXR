@@ -78,14 +78,14 @@ struct Args {
     gpu_sched_class: i32,
     /// frame generation (docs/FRAME_GENERATION.md): the game is paced at half the display rate and the host interpolates the frame in
     /// between from the optical flow of the last two rendered frames. None = settings file (`video.frame_gen`, default off); env
-    /// VISIONALVR_FRAME_GEN=1/0 and `--frame-gen on|off` win over it.
+    /// AIRFRAMEXR_FRAME_GEN=1/0 and `--frame-gen on|off` win over it.
     frame_gen: Option<bool>,
     /// frame generation rate (pipeline::FgRate: third | half | two_thirds | uncapped; docs/FRAME_GENERATION.md, docs/FRAME_GENERATION_UNCAPPED.md);
-    /// None = settings `video.frame_gen_rate` ("half" default). `--frame-gen-rate`, env VISIONALVR_FG_RATE.
+    /// None = settings `video.frame_gen_rate` ("half" default). `--frame-gen-rate`, env AIRFRAMEXR_FG_RATE.
     fg_rate: Option<FgRate>,
     /// uncapped mode: content lag behind the newest tracking sample, ms; 0 = automatic (the game's frame period + half a display period)
     fg_lag_ms: Option<f64>,
-    /// settings `video.frame_gen_hold_age` (None = the pipeline's default: env VISIONALVR_FG_HOLD_AGE, else on)
+    /// settings `video.frame_gen_hold_age` (None = the pipeline's default: env AIRFRAMEXR_FG_HOLD_AGE, else on)
     fg_hold_age: Option<bool>,
     /// uncapped mode: fps cap on the game's releases (0 = none), headroom for the host's own GPU work
     fg_cap_fps: Option<f64>,
@@ -93,7 +93,7 @@ struct Args {
     fg_perf: i32,
     fg_grid: i32,
     /// 1 = edge-aware synthesis (default), 2 = edge-aware without the photometric gate, 0 = classic, the crossfade recipe (the predictable
-    /// fallback) (`video.frame_gen_synthesis`, `--frame-gen-synthesis`, env VISIONALVR_FG_SYNTH)
+    /// fallback) (`video.frame_gen_synthesis`, `--frame-gen-synthesis`, env AIRFRAMEXR_FG_SYNTH)
     fg_synth: i32,
     /// scripted controller input for unattended runs (harness): (seconds after game start, hand, click mask, trigger)
     auto_input: Vec<(f64, usize, u32, f32)>,
@@ -247,11 +247,11 @@ fn parse_args() -> Result<Args, String> {
             "--height" => a.height = Some(v()?.parse().map_err(|e| format!("{e}"))?),
             "--noise" => a.noise = 1,
             "--noise-temporal" => a.noise = 2,
-            // VisionALVR portable install: config/ and logs/ inside this folder, settings from config/visionalvr.json
+            // AirFrameXR portable install: config/ and logs/ inside this folder, settings from config/airframexr.json
             "--install-dir" => a.install_dir = Some(v()?.into()),
             "--logs-dir" => a.logs_dir = Some(v()?.into()),
             "--debug" => a.debug = Some(true),
-            "--gui" => a.gui = true, // started by VisionALVR.exe: control commands on stdin, end of stdin = quit
+            "--gui" => a.gui = true, // started by AirFrameXR.exe: control commands on stdin, end of stdin = quit
             "--system-check" => a.system_check = true,
             "--discover" => a.discover = Some(v()?.parse().map_err(|e| format!("{e}"))?),
             "--gamma" => a.gamma = Some(v()?.parse().map_err(|e| format!("{e}"))?),
@@ -364,44 +364,44 @@ fn parse_args() -> Result<Args, String> {
     }
     // environment equivalents (the installed logon task has a fixed command line)
     if a.idle_rgb.is_none() {
-        if let Ok(v) = std::env::var("VISIONALVR_IDLE_RGB") {
+        if let Ok(v) = std::env::var("AIRFRAMEXR_IDLE_RGB") {
             a.idle_rgb = Some(parse_rgb(&v)?);
         }
     }
     if a.gpu_priority.is_none() {
-        if let Ok(v) = std::env::var("VISIONALVR_GPU_PRIORITY") {
-            a.gpu_priority = Some(v.parse().map_err(|e| format!("VISIONALVR_GPU_PRIORITY: {e}"))?);
+        if let Ok(v) = std::env::var("AIRFRAMEXR_GPU_PRIORITY") {
+            a.gpu_priority = Some(v.parse().map_err(|e| format!("AIRFRAMEXR_GPU_PRIORITY: {e}"))?);
         }
     }
     if !a.profile_explicit {
-        if let Ok(v) = std::env::var("VISIONALVR_ENCODE_PROFILE") {
+        if let Ok(v) = std::env::var("AIRFRAMEXR_ENCODE_PROFILE") {
             a.encode_profile = nvidia_profile::EncodeProfile::parse(&v)?;
             a.profile_explicit = true;
         }
     }
     if a.frame_gen.is_none() {
-        if let Ok(v) = std::env::var("VISIONALVR_FRAME_GEN") {
+        if let Ok(v) = std::env::var("AIRFRAMEXR_FRAME_GEN") {
             a.frame_gen = Some(v != "0" && !v.eq_ignore_ascii_case("off") && !v.eq_ignore_ascii_case("false"));
         }
     }
     if a.fg_rate.is_none() {
-        if let Ok(v) = std::env::var("VISIONALVR_FG_RATE") {
+        if let Ok(v) = std::env::var("AIRFRAMEXR_FG_RATE") {
             a.fg_rate = FgRate::parse(&v);
         }
     }
     if a.fg_lag_ms.is_none() {
-        a.fg_lag_ms = std::env::var("VISIONALVR_FG_LAG_MS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 100.0));
+        a.fg_lag_ms = std::env::var("AIRFRAMEXR_FG_LAG_MS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 100.0));
     }
     if a.fg_cap_fps.is_none() {
-        a.fg_cap_fps = std::env::var("VISIONALVR_FG_CAP_FPS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 240.0));
+        a.fg_cap_fps = std::env::var("AIRFRAMEXR_FG_CAP_FPS").ok().and_then(|v| v.parse::<f64>().ok()).map(|v| v.clamp(0.0, 240.0));
     }
-    if let Some(v) = std::env::var("VISIONALVR_FG_FLOW_SCALE").ok().and_then(|v| v.parse::<f64>().ok()) {
+    if let Some(v) = std::env::var("AIRFRAMEXR_FG_FLOW_SCALE").ok().and_then(|v| v.parse::<f64>().ok()) {
         a.fg_flow_scale = v.clamp(0.1, 1.0);
     }
-    if let Some(v) = std::env::var("VISIONALVR_FG_PERF").ok().and_then(|v| parse_fg_perf(&v).ok()) {
+    if let Some(v) = std::env::var("AIRFRAMEXR_FG_PERF").ok().and_then(|v| parse_fg_perf(&v).ok()) {
         a.fg_perf = v;
     }
-    if let Some(v) = std::env::var("VISIONALVR_FG_SYNTH").ok().and_then(|v| parse_fg_synth(&v).ok()) {
+    if let Some(v) = std::env::var("AIRFRAMEXR_FG_SYNTH").ok().and_then(|v| parse_fg_synth(&v).ok()) {
         a.fg_synth = v;
     }
     if !a.live && a.file.as_os_str().is_empty() && !a.system_check && !a.bench_quality && a.discover.is_none() {
@@ -458,7 +458,7 @@ fn parse_split(v: &str) -> Result<i64, String> {
     })
 }
 
-/// Fills what the command line left open from `config/visionalvr.json`, then applies the encode profile's implications.
+/// Fills what the command line left open from `config/airframexr.json`, then applies the encode profile's implications.
 fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if !a.send_pacing_explicit {
         if let Some(p) = st.send_pacing.as_deref().and_then(|p| pipeline::SendPacing::parse(p).ok()) {
@@ -479,28 +479,28 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     // frame-queue policy, read by the pipeline (an explicit environment variable wins)
     if let Some(v) = st.intake_depth {
-        if std::env::var_os("VISIONALVR_INTAKE_DEPTH").is_none() {
-            std::env::set_var("VISIONALVR_INTAKE_DEPTH", v.to_string());
+        if std::env::var_os("AIRFRAMEXR_INTAKE_DEPTH").is_none() {
+            std::env::set_var("AIRFRAMEXR_INTAKE_DEPTH", v.to_string());
         }
     }
     if let Some(v) = st.pick_policy.as_deref() {
-        if std::env::var_os("VISIONALVR_PICK").is_none() {
-            std::env::set_var("VISIONALVR_PICK", v);
+        if std::env::var_os("AIRFRAMEXR_PICK").is_none() {
+            std::env::set_var("AIRFRAMEXR_PICK", v);
         }
     }
     if let Some(v) = st.client_queue_drain {
-        if std::env::var_os("VISIONALVR_CLIENT_DRAIN").is_none() {
-            std::env::set_var("VISIONALVR_CLIENT_DRAIN", if v { "1" } else { "0" });
+        if std::env::var_os("AIRFRAMEXR_CLIENT_DRAIN").is_none() {
+            std::env::set_var("AIRFRAMEXR_CLIENT_DRAIN", if v { "1" } else { "0" });
         }
     }
     if let Some(v) = st.intake_gate {
-        if std::env::var_os("VISIONALVR_INTAKE_GATE").is_none() {
-            std::env::set_var("VISIONALVR_INTAKE_GATE", if v { "1" } else { "0" });
+        if std::env::var_os("AIRFRAMEXR_INTAKE_GATE").is_none() {
+            std::env::set_var("AIRFRAMEXR_INTAKE_GATE", if v { "1" } else { "0" });
         }
     }
     if let Some(v) = st.phase_margin_ms {
-        if std::env::var_os("VISIONALVR_PHASE_MARGIN_MS").is_none() {
-            std::env::set_var("VISIONALVR_PHASE_MARGIN_MS", v.to_string());
+        if std::env::var_os("AIRFRAMEXR_PHASE_MARGIN_MS").is_none() {
+            std::env::set_var("AIRFRAMEXR_PHASE_MARGIN_MS", v.to_string());
         }
     }
     if a.gpu_keepalive.is_none() {
@@ -1163,10 +1163,10 @@ fn check_session(path: &std::path::Path, installed: bool) -> Result<(), String> 
         Ok(t) => t,
         Err(_) if installed => {
             return Err("config\\session.json is missing and there is no config\\session.default.json to create it from: this \
-                        VisionALVR folder is incomplete. Unzip the release again (you can keep your config\\ folder)."
+                        AirFrameXR folder is incomplete. Unzip the release again (you can keep your config\\ folder)."
                 .into())
         }
-        Err(e) => return Err(format!("cannot read the session {}: {e} (pass --session <file> or --install-dir <VisionALVR folder>)", path.display())),
+        Err(e) => return Err(format!("cannot read the session {}: {e} (pass --session <file> or --install-dir <AirFrameXR folder>)", path.display())),
     };
     match serde_json::from_str::<serde_json::Value>(&text) {
         Ok(v) if v.is_object() => Ok(()),
@@ -1179,7 +1179,7 @@ fn check_session(path: &std::path::Path, installed: bool) -> Result<(), String> 
     }
 }
 
-/// Vision Pro views measured in the pilot (visionalvr_views.json): used until the headset has sent its own.
+/// Vision Pro views measured in the pilot (airframexr_views.json): used until the headset has sent its own.
 const AVP_DEFAULT_FOV: [f32; 8] = [1.7823, 1.0186, 1.2169, 1.0186, 1.0249, 1.7995, 1.2253, 1.0249];
 const AVP_DEFAULT_IPD: f32 = 0.0623;
 
@@ -1194,7 +1194,7 @@ fn run_quality_bench(origin: Instant, args: &Args, layout: &alvr_filesystem::Lay
     let c = &s["openvr_config"];
     let fset = &s["session_settings"]["video"]["foveated_encoding"];
     let g = |k: &str, sk: &str, d: f64| c[k].as_f64().filter(|v| *v > 0.0).or_else(|| fset["content"][sk].as_f64().filter(|v| *v > 0.0)).unwrap_or(d) as f32;
-    let (fov, ipd) = match load_views(&args.config_dir.join("visionalvr_views.json")) {
+    let (fov, ipd) = match load_views(&args.config_dir.join("airframexr_views.json")) {
         Some((f, o)) if f.iter().all(|x| x.is_finite() && *x > 0.0) => (f, (o[3] - o[0]).abs().max(0.04)),
         _ => (AVP_DEFAULT_FOV, AVP_DEFAULT_IPD),
     };
@@ -1607,7 +1607,7 @@ fn main() {
         fs::create_dir_all(&i.config).ok();
         // an explicit --session (seeded below) wins over the shipped default
         seeded = args.session.is_none() && vision::seed_session(&i.config);
-        let st = vision::load_settings(&i.config.join("visionalvr.json"));
+        let st = vision::load_settings(&i.config.join("airframexr.json"));
         for (k, v) in st.color.iter().enumerate() {
             vision::COLOR_REQ[k].store(v.to_bits(), Ordering::SeqCst);
         }
@@ -1631,7 +1631,7 @@ fn main() {
     event(origin, "host_start", json!({ "version": vision::VERSION, "alvr": env!("CARGO_PKG_VERSION"), "args": std::env::args().skip(1).collect::<Vec<_>>(),
         "install_dir": args.install_dir, "debug_dir": logs::debug_dir(), "gpu": gpu_info }));
     logs::general("INFO", &format!(
-        "VisionALVR {} host start ({}) | GPU {} ({}, driver {}) | profile {:?} | debug {}{}",
+        "AirFrameXR {} host start ({}) | GPU {} ({}, driver {}) | profile {:?} | debug {}{}",
         vision::VERSION, args.install_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| args.config_dir.display().to_string()),
         gpu_info["name"].as_str().unwrap_or("?"), gpu_info["arch_name"].as_str().unwrap_or("?"), gpu_info["driver"].as_str().unwrap_or("?"),
         args.encode_profile, if debug_on { "on: " } else { "off" },
@@ -1749,7 +1749,7 @@ fn main() {
     let mut eye_size = (0i32, 0i32); // per-eye render size the app uses (the shim composes this; the encoder may see less)
     let mut enc_handle: *mut std::ffi::c_void = std::ptr::null_mut();
     let mut enc_size = (0, 0);
-    let qp_on = args.qp_map.unwrap_or_else(|| match std::env::var("VISIONALVR_QP_MAP").as_deref() {
+    let qp_on = args.qp_map.unwrap_or_else(|| match std::env::var("AIRFRAMEXR_QP_MAP").as_deref() {
         Ok("0") | Ok("off") => false,
         Ok("1") | Ok("on") => true,
         _ => nvidia_profile::QP_MAP_ENABLED,
@@ -2312,7 +2312,7 @@ fn main() {
     let mut last_idr_restart = Instant::now() - min_idr_interval;
     let mut idr_restarts_honoured = 0usize;
     let mut sent_ts: Vec<u64> = vec![];
-    let views_path = args.config_dir.join("visionalvr_views.json");
+    let views_path = args.config_dir.join("airframexr_views.json");
     let mut last_views = load_views(&views_path);
     let mut views_published = false;
     let mut deferred_reconfig = false;
@@ -2402,11 +2402,11 @@ fn main() {
     loop {
         watchdog::main_beat(origin);
         if vision::QUIT.load(Ordering::SeqCst) {
-            logs::general("INFO", "stop requested (VisionALVR.exe closed or sent quit)");
+            logs::general("INFO", "stop requested (AirFrameXR.exe closed or sent quit)");
             break;
         }
         if !ipc.is_null() {
-            // live settings from VisionALVR.exe
+            // live settings from AirFrameXR.exe
             if vision::COLOR_PENDING.swap(false, Ordering::SeqCst) {
                 let c = [0, 1, 2, 3].map(|k| f32::from_bits(vision::COLOR_REQ[k].load(Ordering::SeqCst)));
                 unsafe { nvh::nvh_ipc_set_color(ipc, c[0], c[1], c[2], c[3]) };
@@ -2426,7 +2426,7 @@ fn main() {
                 push_user(ipc, user_gamma, debug_on);
                 event(origin, "user_settings", json!({ "gamma": user_gamma, "debug": debug_on, "debug_dir": logs::debug_dir() }));
             }
-            // frame generation on/off from VisionALVR.exe: the generator is created or dropped on the running encoder (under the encoder lock, so
+            // frame generation on/off from AirFrameXR.exe: the generator is created or dropped on the running encoder (under the encoder lock, so
             // never while a frame is being encoded) and the shim's pacing follows at the next boundary; the setting is also what the next start reads
             let fgr = vision::FRAME_GEN_REQ.swap(-1, Ordering::SeqCst);
             if fgr >= 0 {
@@ -2438,7 +2438,7 @@ fn main() {
                 }
                 restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args, &mut run_stats);
             }
-            // frame generation rate, the fps cap and the content lag from VisionALVR.exe (live; the settings are read at start too)
+            // frame generation rate, the fps cap and the content lag from AirFrameXR.exe (live; the settings are read at start too)
             let rate = vision::FG_RATE_REQ.swap(-1, Ordering::SeqCst);
             if rate >= 0 {
                 let r = FgRate::from_index(rate);
@@ -2525,7 +2525,7 @@ fn main() {
             }
         }
         if status_at.elapsed() >= Duration::from_secs(10) {
-            // every 10 s for VisionALVR.exe's status lines (the logs have the 2 s detail)
+            // every 10 s for AirFrameXR.exe's status lines (the logs have the 2 s detail)
             let secs = status_at.elapsed().as_secs_f64();
             let (frames, bytes, submitted, lost) = (shared.frames_sent.load(Ordering::Relaxed), shared.bytes_sent.load(Ordering::Relaxed),
                 shim_submitted(ipc), logs::client_stats::packets_lost_total());
@@ -2893,7 +2893,7 @@ fn main() {
     }
 
     if let Some(g) = game.take() {
-        // the host stops while a game still runs (VisionALVR.exe closed mid-game): its summary still belongs in the log
+        // the host stops while a game still runs (AirFrameXR.exe closed mid-game): its summary still belongs in the log
         let secs = g.start.elapsed().as_secs_f64();
         let frames = shared.frames_sent.load(Ordering::Relaxed) - g.frames0;
         let submitted = shim_submitted(ipc).wrapping_sub(g.submitted0);

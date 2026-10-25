@@ -1,7 +1,7 @@
 # Headset profiles
 
-VisionALVR cannot test every headset, and it does not try to know them all. A **profile** is one small JSON file that says how a given headset
-(and its client app) should be configured. Profiles are **shared among users, peer to peer** (the VisionALVR Discord, like UEVR profiles): the
+AirFrameXR cannot test every headset, and it does not try to know them all. A **profile** is one small JSON file that says how a given headset
+(and its client app) should be configured. Profiles are **shared among users, peer to peer** (the AirFrameXR Discord, like UEVR profiles): the
 program never downloads anything, there is no central database. The repository only holds a **template** and the **Apple Vision Pro** profile (the
 project's first target), which ships in the package as an example.
 
@@ -25,7 +25,7 @@ against every profile it finds (`profiles\` shipped with the package, then `conf
    **scene test** (Littlest Tokyo streamed through the real pipeline with your head pose: tracking arrives, frames, latency, decode and headset queues),
    audio, and **whether split encoding really engaged** (its own row: engines and strips per frame from the encoder test and the live stream; a GPU that
    cannot split is flagged).
-4. **Save.** The values go into `config\session.json` and `config\visionalvr.json`, then the profile's `session_overrides` are written into
+4. **Save.** The values go into `config\session.json` and `config\airframexr.json`, then the profile's `session_overrides` are written into
    `session.json`.
 
 ## Exporting yours

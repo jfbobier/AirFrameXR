@@ -7,14 +7,14 @@ using System.Threading;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
-    /// What startvisionalvr.bat did with svcl.exe, done in-process with the Core Audio API while the streamer runs: the virtual cable (VB-CABLE / the device named
+    /// What startairframexr.bat did with svcl.exe, done in-process with the Core Audio API while the streamer runs: the virtual cable (VB-CABLE / the device named
     /// in the audio settings) becomes the default output for every role (games that play to another role would bypass ALVR's capture), the PC's own output is muted,
     /// the cable is unmuted and held at 100 % (its endpoint volume scales what ALVR captures, so the PC's volume keys would change the headset's volume).
     /// Every 3 s the default and the cable's volume and mute are put back if anything moved them (Windows when a device appears, a game, ALVR's own mute_when_streaming).
     /// A virtual device with more than 8 channels is never chosen: ALVR's capture refuses it (alvr_audio lib.rs). Stop() puts everything back. The state to restore is written to logs\audio_route.txt first, so a streamer that crashed is undone at the next start.
-    /// VISIONALVR_AUDIO_ROUTE=0 disables it.
+    /// AIRFRAMEXR_AUDIO_ROUTE=0 disables it.
     public sealed class AudioRoute
     {
         static readonly string StateFile = Path.Combine(Paths.Logs, "audio_route.txt");
@@ -35,9 +35,9 @@ namespace VisionALVR
         /// True when the cable is the default output and held (the caller then switches ALVR's own mute off). Call it before the host starts: it takes a few milliseconds.
         public bool Start(string wantedPart, bool enabled, bool mutePc)
         {
-            if (!enabled || Environment.GetEnvironmentVariable("VISIONALVR_AUDIO_ROUTE") == "0") return false;
+            if (!enabled || Environment.GetEnvironmentVariable("AIRFRAMEXR_AUDIO_ROUTE") == "0") return false;
             CableMissing = false;
-            if (Environment.GetEnvironmentVariable("VISIONALVR_FAKE_NO_CABLE") == "1") { CableMissing = true; Say("WARN", "no usable virtual audio cable found (VB-CABLE, at most 8 channels); the game audio follows the Windows default output"); return false; }
+            if (Environment.GetEnvironmentVariable("AIRFRAMEXR_FAKE_NO_CABLE") == "1") { CableMissing = true; Say("WARN", "no usable virtual audio cable found (VB-CABLE, at most 8 channels); the game audio follows the Windows default output"); return false; }
             try
             {
                 RestoreLeftover();
@@ -114,10 +114,10 @@ namespace VisionALVR
             return cable;
         }
 
-        /// The recording side of a virtual cable (CABLE Output, VoiceMeeter Output) ALVR's microphone path ends in, or null (VISIONALVR_FAKE_NO_CABLE=1: the lab pretends there is none).
+        /// The recording side of a virtual cable (CABLE Output, VoiceMeeter Output) ALVR's microphone path ends in, or null (AIRFRAMEXR_FAKE_NO_CABLE=1: the lab pretends there is none).
         public static string FindMicrophoneCable()
         {
-            if (Environment.GetEnvironmentVariable("VISIONALVR_FAKE_NO_CABLE") == "1") return null;
+            if (Environment.GetEnvironmentVariable("AIRFRAMEXR_FAKE_NO_CABLE") == "1") return null;
             try
             {
                 var devices = Endpoints.Capture();
@@ -131,10 +131,10 @@ namespace VisionALVR
             return null;
         }
 
-        /// The name of the virtual cable the streamer would use, or null (VISIONALVR_FAKE_NO_CABLE=1: the lab pretends there is none).
+        /// The name of the virtual cable the streamer would use, or null (AIRFRAMEXR_FAKE_NO_CABLE=1: the lab pretends there is none).
         public static string FindCable(string wantedPart = "")
         {
-            if (Environment.GetEnvironmentVariable("VISIONALVR_FAKE_NO_CABLE") == "1") return null;
+            if (Environment.GetEnvironmentVariable("AIRFRAMEXR_FAKE_NO_CABLE") == "1") return null;
             try { return Pick(Endpoints.Render(), wantedPart)?.Name; } catch { return null; }
         }
 
@@ -142,7 +142,7 @@ namespace VisionALVR
         /// needed; the only thing left to do is to mute the PC's own output while streaming (when asked), restored at close or after a crash.
         public void StartMuteOnly(bool enabled, bool mutePc)
         {
-            if (!enabled || !mutePc || Environment.GetEnvironmentVariable("VISIONALVR_AUDIO_ROUTE") == "0") return;
+            if (!enabled || !mutePc || Environment.GetEnvironmentVariable("AIRFRAMEXR_AUDIO_ROUTE") == "0") return;
             try
             {
                 RestoreLeftover();
@@ -202,7 +202,7 @@ namespace VisionALVR
         /// Does nothing when the microphone is off.
         public void StartMicrophone(bool micEnabled)
         {
-            if (!micEnabled || Environment.GetEnvironmentVariable("VISIONALVR_AUDIO_ROUTE") == "0") return;
+            if (!micEnabled || Environment.GetEnvironmentVariable("AIRFRAMEXR_AUDIO_ROUTE") == "0") return;
             try
             {
                 RestoreLeftoverMic();
@@ -474,7 +474,7 @@ namespace VisionALVR
 
         public CableForm(bool forMicrophone = false)
         {
-            Text = "VisionALVR \u2013 Virtual audio cable";
+            Text = "AirFrameXR \u2013 Virtual audio cable";
             Font = Ui.Body; Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen;
             BackColor = Color.White;
@@ -483,12 +483,12 @@ namespace VisionALVR
             col.Controls.Add(new Label
             {
                 Text = (forMicrophone
-                       ? "Your voice from the headset's microphone reaches games (VRChat, chat) through a virtual audio device: VisionALVR plays it into the cable and, while it streams, makes the cable's recording side the Windows default microphone (the previous one comes back when it closes). " +
+                       ? "Your voice from the headset's microphone reaches games (VRChat, chat) through a virtual audio device: AirFrameXR plays it into the cable and, while it streams, makes the cable's recording side the Windows default microphone (the previous one comes back when it closes). " +
                          "Without one, games do not hear the headset microphone.\n\n"
-                       : "The game's sound reaches the headset through a virtual audio device: VisionALVR makes it the Windows output while it streams, mutes your speakers, and puts everything back when it closes. " +
+                       : "The game's sound reaches the headset through a virtual audio device: AirFrameXR makes it the Windows output while it streams, mutes your speakers, and puts everything back when it closes. " +
                          "Without one, the headset has no game sound.\n\n") +
                        "VB-CABLE (VB-Audio) is a free virtual cable. Click \"Open the download page\", install it (administrator rights, a restart may be needed), then start the streamer again.\n\n" +
-                       "VB-CABLE is a separate product of VB-Audio Software, not part of VisionALVR. VisionALVR does not distribute, control or support it and accepts no responsibility for it: " +
+                       "VB-CABLE is a separate product of VB-Audio Software, not part of AirFrameXR. AirFrameXR does not distribute, control or support it and accepts no responsibility for it: " +
                        "read its licence and install it at your own risk.",
                 AutoSize = true, MaximumSize = new Size(560, 0), Margin = new Padding(3, 8, 3, 8)
             });

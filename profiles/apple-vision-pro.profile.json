@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "apple-vision-pro-alvr-visionos",
   "display_name": "Apple Vision Pro (ALVR visionOS client)",
-  "author": "VisionALVR project (first profile; the knobs are the author's, tuned by A/B testing on stock ALVR + SteamVR)",
+  "author": "AirFrameXR project (first profile; the knobs are the author's, tuned by A/B testing on stock ALVR + SteamVR)",
   "match": {
     "name_contains": [
       "Apple Headset",

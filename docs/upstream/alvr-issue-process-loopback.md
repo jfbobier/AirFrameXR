@@ -18,7 +18,7 @@ What we measured (a Windows test PC, a mock headset on the same PC and a microph
 
 We implemented it against v20.14.1 in our fork's host: one new file in `alvr_audio` (about 250 lines with the `windows` crate, no new dependency except `windows-core`) and two small hunks in `server_core/src/connection.rs` (the sample rate becomes 48000 and the capture thread calls the new function instead of `record_audio_blocking`). The existing device capture stays as the fallback:
 
-https://github.com/jfbobier/vision-alvr/blob/main/tools/patches/audio-process-loopback.patch
+https://github.com/jfbobier/AirFrameXR/blob/main/tools/patches/audio-process-loopback.patch
 
 Not covered yet: the minimum Windows build was not checked, it was tested with tone and music players and a mock headset (and on a real headset only through the older device path), and it is selected by an environment variable, not a session setting.
 

@@ -5,9 +5,9 @@
  
      let game_audio_thread = if let Switch::Enabled(config) = settings.audio.game_audio {
 -        let device = AudioDevice::new_output(None).to_con()?;
-+        // VisionALVR (tools/patches/client-audio-device.patch): the lab's mock client plays the game audio to the output named in
-+        // VISIONALVR_CLIENT_AUDIO_DEVICE (a name part) instead of the Windows default, which the host captures on the same PC.
-+        let device = match std::env::var("VISIONALVR_CLIENT_AUDIO_DEVICE") {
++        // AirFrameXR (tools/patches/client-audio-device.patch): the lab's mock client plays the game audio to the output named in
++        // AIRFRAMEXR_CLIENT_AUDIO_DEVICE (a name part) instead of the Windows default, which the host captures on the same PC.
++        let device = match std::env::var("AIRFRAMEXR_CLIENT_AUDIO_DEVICE") {
 +            Ok(part) if !part.is_empty() => AudioDevice::new_output(Some(&alvr_session::CustomAudioDeviceConfig::NameSubstring(part))).to_con()?,
 +            _ => AudioDevice::new_output(None).to_con()?,
 +        };

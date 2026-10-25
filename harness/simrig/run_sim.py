@@ -22,9 +22,9 @@ import live
 
 ROOT = live.ROOT
 PROFILES = ROOT / "harness" / "simrig" / "profiles"
-SIMEXE = os.environ.get("VISIONALVR_SIMEXE", "alvr_host_simrig.exe")   # which build to run (A/B: copies next to it)
+SIMEXE = os.environ.get("AIRFRAMEXR_SIMEXE", "alvr_host_simrig.exe")   # which build to run (A/B: copies next to it)
 
-# knobs are VISIONALVR_SIM_* variables (tools/host/src/simrig.rs); a scenario is a set of them
+# knobs are AIRFRAMEXR_SIM_* variables (tools/host/src/simrig.rs); a scenario is a set of them
 SCENARIOS = {
     "ideal":       {"note": "no timing imperfection at all, no prediction noise: the null case (must be clean, or the rig itself is wrong)"},
     "games":       {"PROFILE": "real_games_pred0.json", "note": "90 deg/s, timing of the real game sessions (prediction 0)"},
@@ -34,71 +34,71 @@ SCENARIOS = {
     "noreproject": {"PROFILE": "real_games_pred0.json", "REPROJECT": 0, "note": "the frames as they come: what the stream alone does"},
     "inject":      {"PROFILE": "real_games_pred0.json", "STAMP_ERROR": 0.2, "note": "20% of the frames shown with a neighbouring sample's pose: the judge must say TREMBLE"},
     # frame generation (docs/FRAME_GENERATION.md): a game stuck between 50 and 70 fps (frame time drawn per frame) on the 100 Hz display, the moving marker
-    # (XR_PROBE_MOVING) measured by the judge's "motion" verdict; _fg = the same with the generator on (VISIONALVR_FRAME_GEN=1: half-rate pacing + interpolation)
+    # (XR_PROBE_MOVING) measured by the judge's "motion" verdict; _fg = the same with the generator on (AIRFRAMEXR_FRAME_GEN=1: half-rate pacing + interpolation)
     "stutter":     {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
                     "note": "head still, app at 50-70 fps (jittery), moving marker: today's stream (expect motion JUDDER: repeated frames)"},
     "stutter_fg":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "note": "the same with frame generation (expect motion SMOOTH, head CLEAN)"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "note": "the same with frame generation (expect motion SMOOTH, head CLEAN)"},
     "stutter_turn": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
                     "note": "head turning 45 deg/s, app at 50-70 fps: the head-rotation path (dots) with a stuttering app"},
     "stutter_turn_fg": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "note": "the same with frame generation (the generated frames must not make the head rotation tremble)"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "note": "the same with frame generation (the generated frames must not make the head rotation tremble)"},
     # the stamp regime (pipeline.rs fg_hold_age, 2026-10-23): every 150th tracking sample arrives 25 ms late (over two periods: the one in hand is
     # lost). Without the hold the stamp jumps two samples and every later output is one period younger until a skip + bunch moves it back (the
     # Vision Pro's 67 <-> 77 ms latency cycles); with it the boundary repeats once. Read `frame generation samples` / encoder_stats frame_gen
     # regime_switches and hold_skips (harness/simrig/fg_samples.py). Verdict 2026-10-23: the rig's own uplink tail (up to 14 ms, over a period) makes
-    # such samples frequent, the hold skipped 3.4 boundaries/s and the head path went TREMBLE; the Vision Pro night agreed (5.5 switches/s): off by default, `--env VISIONALVR_FG_HOLD_AGE=1` turns it on.
+    # such samples frequent, the hold skipped 3.4 boundaries/s and the head path went TREMBLE; the Vision Pro night agreed (5.5 switches/s): off by default, `--env AIRFRAMEXR_FG_HOLD_AGE=1` turns it on.
     "late_turn_fg": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "LATE_EVERY": 150, "LATE_MS": 25, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1",
-                    "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:VISIONALVR_FRAME_GEN": "1", "note": "stutter_turn_fg with a tracking sample 25 ms late every 150: regime switches with and without the hold (VISIONALVR_FG_HOLD_AGE=1)"},
-    "steady_fg":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:VISIONALVR_FRAME_GEN": "1",
+                    "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:AIRFRAMEXR_FRAME_GEN": "1", "note": "stutter_turn_fg with a tracking sample 25 ms late every 150: regime switches with and without the hold (AIRFRAMEXR_FG_HOLD_AGE=1)"},
+    "steady_fg":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:AIRFRAMEXR_FRAME_GEN": "1",
                     "note": "ideal timing, light app, frame generation on: the generator's null case (expect CLEAN + SMOOTH)"},
     "steady":      {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25",
                     "note": "ideal timing, light app, generator off: the motion metric's reference (the rig's own empty boundaries, ~6 %, read as frozen periods)"},
     # uncapped frame generation (docs/FRAME_GENERATION_UNCAPPED.md): the game paced at the display rate, every output interpolated at the fraction its
     # content time falls at between the two newest rendered frames
     "stutter_unc": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "note": "stutter with uncapped generation (flow): compare with stutter_fg (half rate)"},
-    "steady_unc":  {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall", "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped",
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "ENV:AIRFRAMEXR_FG_RATE": "uncapped", "note": "stutter with uncapped generation (flow): compare with stutter_fg (half rate)"},
+    "steady_unc":  {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall", "ENV:AIRFRAMEXR_FRAME_GEN": "1", "ENV:AIRFRAMEXR_FG_RATE": "uncapped",
                     "note": "ideal timing, light app (at the display rate), uncapped generation: the mode's null case (t near 0/1 most of the time)"},
     # jittery input -> smooth output: a game around 75 fps whose frame time swings +-30 % from frame to frame (XR_PROBE_LOAD=jitter), uncapped generation;
     # the judge's step_cv (uniformity of the marker's steps per period) and hf are the smoothness, fg_perf's slack/behind the lag's adequacy
     "jitter_unc":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:30", "PROBE:XR_PROBE_CPU_MS": "13.3", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "note": "~75 fps app with +-30 % frame-time jitter, uncapped generation (flow)"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "ENV:AIRFRAMEXR_FG_RATE": "uncapped", "note": "~75 fps app with +-30 % frame-time jitter, uncapped generation (flow)"},
     "stutter_fg_wall": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "note": "stutter_fg with the marker on the wall clock (an engine's delta-time animation): the half-rate reference for the _unc scenarios"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "note": "stutter_fg with the marker on the wall clock (an engine's delta-time animation): the half-rate reference for the _unc scenarios"},
     "jitter":      {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:30", "PROBE:XR_PROBE_CPU_MS": "13.3", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "note": "the same jittery app, generation off: the reference (expect frozen periods and uneven steps)"},
     # the 1/3 rate (game paced at a third of the display rate, two generated frames at t = 1/3 and 2/3 per rendered frame) and the 2/3 rate (the
     # game held to two thirds of the display rate by the shim's minimum release spacing, the content-clock planner interpolates every output)
     "third":       {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "a 40-50 fps app at the 1/3 rate (33 fps budget it always meets): expect SMOOTH, few repeats"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "ENV:AIRFRAMEXR_FG_RATE": "third", "note": "a 40-50 fps app at the 1/3 rate (33 fps budget it always meets): expect SMOOTH, few repeats"},
     "stutter_third": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:30:45", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "a 30-45 fps app at the 1/3 rate: the budget is missed at times (repeats), compare with stutter_fg"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "ENV:AIRFRAMEXR_FG_RATE": "third", "note": "a 30-45 fps app at the 1/3 rate: the budget is missed at times (repeats), compare with stutter_fg"},
     # GPU-bound app (the shape of a UE game: 2 ms of CPU, the GPU the bottleneck through XR_PROBE_GPU_COPIES = 128 MB copies per frame).
     # In flight = t_publish - t_release per frame in the shim CSV (and now - newest in fg_uncapped.csv).
     "gpu_unc":     {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "50", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "uncapped", "note": "GPU-bound ~50 fps app, uncapped generation"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "ENV:AIRFRAMEXR_FG_RATE": "uncapped", "note": "GPU-bound ~50 fps app, uncapped generation"},
     "gpu":         {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": "50", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
                     "note": "the GPU-bound app with generation off: the latency reference without generation"},
     # the Gears of War case (2026-10-22): GPU-bound right at the 1/2 cap (50 fps at 100 Hz), where the headset was good or bad at random and switched
     # after a hiccup; SIM_GPU_COPIES sets the load (calibrate per PC: the app's fps with generation on should sit at 47-50)
     "gpu_fg":      {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:20", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": os.environ.get("SIM_GPU_COPIES", "50"),
-                    "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall", "ENV:VISIONALVR_FRAME_GEN": "1",
+                    "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall", "ENV:AIRFRAMEXR_FRAME_GEN": "1",
                     "note": "GPU-bound app at the 1/2 cap, generation on (half): the release phase decides whether its frames make their boundary"},
     "gpu_fg_spikes": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "spikes:150:4", "PROBE:XR_PROBE_CPU_MS": "2", "PROBE:XR_PROBE_GPU_COPIES": os.environ.get("SIM_GPU_COPIES", "50"),
-                    "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall", "ENV:VISIONALVR_FRAME_GEN": "1",
+                    "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall", "ENV:AIRFRAMEXR_FRAME_GEN": "1",
                     "note": "gpu_fg with a 4x frame every 150 frames: the hiccups that moved the headset between its good and bad states"},
     "third_slow":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:40:50", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.12", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "third", "note": "the 1/3 rate with the marker at half speed: the planner's test; at full speed the 5 px marker moves 14 px per 30 ms game step, past the flow's 8 px blocks (the thin-mover limit, not the planner)"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "ENV:AIRFRAMEXR_FG_RATE": "third", "note": "the 1/3 rate with the marker at half speed: the planner's test; at full speed the 5 px marker moves 14 px per 30 ms game step, past the flow's 8 px blocks (the thin-mover limit, not the planner)"},
     "two_thirds":  {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "fps:80:100", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "two_thirds", "note": "an 80-100 fps app held to 2/3 of the display rate (67 fps at 100 Hz), every output interpolated"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "ENV:AIRFRAMEXR_FG_RATE": "two_thirds", "note": "an 80-100 fps app held to 2/3 of the display rate (67 fps at 100 Hz), every output interpolated"},
     "jitter_two_thirds": {"PROFILE": "real_games_pred0.json", "MODE": "still", "PROBE:XR_PROBE_LOAD": "jitter:30", "PROBE:XR_PROBE_CPU_MS": "13.3", "PROBE:XR_PROBE_MOVING": "25:0.25", "PROBE:XR_PROBE_MOVING_CLOCK": "wall",
-                    "ENV:VISIONALVR_FRAME_GEN": "1", "ENV:VISIONALVR_FG_RATE": "two_thirds", "note": "the ~75 fps jittery app at the 2/3 rate: compare with jitter_unc"},
+                    "ENV:AIRFRAMEXR_FRAME_GEN": "1", "ENV:AIRFRAMEXR_FG_RATE": "two_thirds", "note": "the ~75 fps jittery app at the 2/3 rate: compare with jitter_unc"},
 }
 
 
 def host_cmd(rd, env, seconds):
-    lines = ["@echo off"] + [f"set VISIONALVR_SIM_{k}={v}" for k, v in env.items() if not (k.startswith("ENV:") or k.startswith("PROBE:"))] \
+    lines = ["@echo off"] + [f"set AIRFRAMEXR_SIM_{k}={v}" for k, v in env.items() if not (k.startswith("ENV:") or k.startswith("PROBE:"))] \
         + [f"set {k[4:]}={str(v).replace('{rd}', rd)}" for k, v in env.items() if k.startswith("ENV:")] + [
         f'"{live.INSTALL}\\bin\\{SIMEXE}" --install-dir "{live.INSTALL}" --shim --simrig {rd}\\out --seconds {seconds + 90} --debug --connect-timeout 30 --report {rd}\\host_report.json > {rd}\\host_stdout.txt 2>&1']
     return lines
@@ -139,7 +139,7 @@ $t = [IO.File]::ReadAllText($p)
 
 
 def kill():
-    live.ps(f"Stop-Process -Name xr_probe,{Path(SIMEXE).stem},alvr_host,VisionALVR -Force -ErrorAction SilentlyContinue; "
+    live.ps(f"Stop-Process -Name xr_probe,{Path(SIMEXE).stem},alvr_host,AirFrameXR -Force -ErrorAction SilentlyContinue; "
             "schtasks /delete /tn simrig_host /f 2>$null | Out-Null; schtasks /delete /tn simrig_probe /f 2>$null | Out-Null")
     time.sleep(2)
 
@@ -249,12 +249,12 @@ def main(a):
             extra["PERIOD_MS"] = f"{1000.0 / float(fps):.4f}"
         seconds = int(a[a.index("--seconds") + 1]) if "--seconds" in a else 30
         if "--fg" in a:   # frame generation on for every named scenario (the _fg scenarios carry it themselves)
-            extra["ENV:VISIONALVR_FRAME_GEN"] = "1"
+            extra["ENV:AIRFRAMEXR_FRAME_GEN"] = "1"
         for flag, key in (("--show", "SHOW"), ("--real-encode", "REAL_ENCODE"), ("--seed", "SEED"), ("--eye-w", "EYE_W"), ("--omega", "OMEGA_DPS"),
                           ("--predict-ms", "PREDICT_MS"), ("--dump-every", "DUMP_EVERY"), ("--capture", "CAPTURE")):
             if flag in a:
                 extra[key] = a[a.index(flag) + 1]
-        for e in [a[i + 1] for i, x in enumerate(a) if x == "--env"]:   # --env VISIONALVR_SPIN_US=1000: any variable for the streamer
+        for e in [a[i + 1] for i, x in enumerate(a) if x == "--env"]:   # --env AIRFRAMEXR_SPIN_US=1000: any variable for the streamer
             k, v = e.split("=", 1)
             extra[k if k.startswith("PROBE:") else "ENV:" + k] = v   # PROBE:K=V: for the app (and the shim inside it), e.g. PROBE:OVRSHIM_FG_LEAD_CAP_MS=1000
         rc = 0

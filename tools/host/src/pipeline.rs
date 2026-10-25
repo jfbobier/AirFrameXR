@@ -89,7 +89,7 @@ struct Arrived {
     release_s: f64,
 }
 
-/// Frame-level CSV mirrors for the harness (VISIONALVR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
+/// Frame-level CSV mirrors for the harness (AIRFRAMEXR_PIPELINE_CSV = path of the sent-frames file; the fates file sits beside it):
 /// `fate` writes one line per event of a frame's life on the host: A arrival (slot, ts), S superseded in the intake, D deferred to the next boundary (no newer sample to stamp with), P picked at a
 /// boundary (index), O dropped by the encoder queue; frame generation: I ingested (1 = a pair exists), G synthetic frame sent, R the rendered frame sent
 /// (rotated to its stamp sample), Q the rendered frame sent again (a boundary with nothing new); for G/R/Q the counter is the newest rendered frame's.
@@ -99,7 +99,7 @@ static MIRRORS: std::sync::Mutex<Option<(std::io::BufWriter<std::fs::File>, std:
 fn mirror_open() -> bool {
     let mut g = match MIRRORS.lock() { Ok(g) => g, Err(_) => return false };
     if g.is_none() {
-        let p = match std::env::var("VISIONALVR_PIPELINE_CSV") {
+        let p = match std::env::var("AIRFRAMEXR_PIPELINE_CSV") {
             Ok(p) => p,
             // headset sessions: beside the other debug logs
             Err(_) => match logs::debug_dir() { Some(d) => d.join("host_pipeline.csv").to_string_lossy().into_owned(), None => return false },
@@ -310,18 +310,18 @@ pub struct Pipeline {
     left_behind: AtomicBool,
     pub queue_picks: AtomicU64,
     /// which frame a boundary takes when two wait: drain (default: in order, plus one dropped frame to resynchronise a queue that has stood
-    /// VISIONALVR_DRAIN_AFTER (30) boundaries, at most once per VISIONALVR_DRAIN_EVERY_MS; a fallback: the intake gate normally drains the queue first,
+    /// AIRFRAMEXR_DRAIN_AFTER (30) boundaries, at most once per AIRFRAMEXR_DRAIN_EVERY_MS; a fallback: the intake gate normally drains the queue first,
     /// see `intake_gate`) | oldest (no drops, a standing queue stays a period late) | newest (lab only: drops the older of every pair, loses frames
     /// when the app's frame times jitter) | adaptive (newest right after an empty boundary, else oldest) | aged
     pick_policy: String,
     /// the shim holds the game's next release while a frame a boundary passed over still waits here (ipc intakeWaiting, written at every
-    /// boundary): the queue drains at the next boundary without dropping a rendered frame. VISIONALVR_INTAKE_GATE=0 disables it.
+    /// boundary): the queue drains at the next boundary without dropping a rendered frame. AIRFRAMEXR_INTAKE_GATE=0 disables it.
     intake_gate: bool,
-    /// consecutive boundaries with a frame left behind before the gate acts (VISIONALVR_GATE_AFTER, default 3)
+    /// consecutive boundaries with a frame left behind before the gate acts (AIRFRAMEXR_GATE_AFTER, default 3)
     gate_after: u64,
     /// boundaries that left a frame behind (since start): how long queues stood, whatever drained them
     pub standing_total: AtomicU64,
-    /// the last boundary that found no frame (the app is not keeping up): the gate and the drain stay out for VISIONALVR_KEEPUP_BOUNDARIES (30)
+    /// the last boundary that found no frame (the app is not keeping up): the gate and the drain stay out for AIRFRAMEXR_KEEPUP_BOUNDARIES (30)
     /// boundaries after it. A GPU-bound game delivers in bunches (two frames at half the boundaries, none at a tenth: Cyberpunk at 88 fps on a 100 Hz
     /// display, 2026-10-13 evening); that is not a standing queue, and skipping its releases only lowered its frame rate (258 skips in 82 s, hold unchanged).
     last_empty_idx: AtomicU64,
@@ -382,7 +382,7 @@ pub struct Pipeline {
     pub fg_no_sample: AtomicU64,
     /// stamps that took the older of two waiting samples and left the newest in hand for the next boundary (see `fg_pick_sample_now`)
     pub fg_in_hand: AtomicU64,
-    /// Hold the stamp regime (VISIONALVR_FG_HOLD_AGE=1, settings `video.frame_gen_hold_age`; default OFF: the Vision Pro night of 2026-10-23
+    /// Hold the stamp regime (AIRFRAMEXR_FG_HOLD_AGE=1, settings `video.frame_gen_hold_age`; default OFF: the Vision Pro night of 2026-10-23
     /// measured 5-7 regime switches a second, so the hold only converted them into 2.5-3 repeats a second, see below). With one sample kept in hand every
     /// output's stamp advances by exactly one of the headset's samples per boundary. A sample later than a whole period (or lost) left a
     /// boundary with a single unused sample, which was stamped: the stamp jumped two samples and from then on every output was one period
@@ -413,7 +413,7 @@ pub struct Pipeline {
     fg_cap_us: AtomicU32,
     /// boundaries at which an arrived frame was left waiting because the previous rendered frame was still due
     pub fg_queued: AtomicU64,
-    /// how long a boundary with nothing due waits for the expected rendered frame (VISIONALVR_FG_ARRIVAL_WAIT_MS, default 4)
+    /// how long a boundary with nothing due waits for the expected rendered frame (AIRFRAMEXR_FG_ARRIVAL_WAIT_MS, default 4)
     fg_arrival_wait: Duration,
     pub fg_arrival_waits: AtomicU64,
     pub fg_arrival_hits: AtomicU64,
@@ -426,7 +426,7 @@ pub struct Pipeline {
     pub fg_sample_waits: AtomicU64,
     pub fg_sample_wait_us: AtomicU64,
     /// when a boundary last found a tracking sample newer than the last sent frame, and how long without one counts as the tracking being dark
-    /// (VISIONALVR_FG_DARK_MS, default 100, 0 = never): from then on boundaries send their frames stamped with the last known sample
+    /// (AIRFRAMEXR_FG_DARK_MS, default 100, 0 = never): from then on boundaries send their frames stamped with the last known sample
     /// instead of nothing (`fg_stale_sample`)
     fg_last_fresh: Mutex<Instant>,
     fg_dark_after: Duration,
@@ -434,9 +434,9 @@ pub struct Pipeline {
     pub fg_stale_stamps: AtomicU64,
 }
 
-/// VISIONALVR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
+/// AIRFRAMEXR_INTAKE_GATE (default on): see `Pipeline::intake_gate`
 pub fn intake_gate_enabled() -> bool {
-    std::env::var("VISIONALVR_INTAKE_GATE").map(|v| v != "0").unwrap_or(true)
+    std::env::var("AIRFRAMEXR_INTAKE_GATE").map(|v| v != "0").unwrap_or(true)
 }
 
 fn set_thread_priority(_p: i32) {
@@ -457,23 +457,23 @@ impl Pipeline {
             intake: Mutex::new(VecDeque::new()),
             // Depth 2: a GPU-bound game completes frames in bunches (two within one period, then none). Newest-wins threw the
             // older of each pair away and left the next boundary empty (Cyberpunk: 90 submitted, ~65 streamed). With depth 2
-            // the older one goes out at the boundary and the newer at the next. VISIONALVR_INTAKE_DEPTH=1: the old behaviour.
+            // the older one goes out at the boundary and the newer at the next. AIRFRAMEXR_INTAKE_DEPTH=1: the old behaviour.
             // Depth 3 since 2026-10-13: at 2 the third frame of a GPU-bound game's burst was thrown away (Cyberpunk 1.7-2.0 % of frames,
             // Dead Space 0.7 %); at 3 none is, for +1.5 ms of queue hold in those games. Frame rate before latency.
-            intake_depth: std::env::var("VISIONALVR_INTAKE_DEPTH").ok().and_then(|v| v.parse().ok()).unwrap_or(3usize).clamp(1, 3),
+            intake_depth: std::env::var("AIRFRAMEXR_INTAKE_DEPTH").ok().and_then(|v| v.parse().ok()).unwrap_or(3usize).clamp(1, 3),
             left_behind: AtomicBool::new(false),
             queue_picks: AtomicU64::new(0),
-            pick_policy: std::env::var("VISIONALVR_PICK").unwrap_or_else(|_| "drain".into()),
+            pick_policy: std::env::var("AIRFRAMEXR_PICK").unwrap_or_else(|_| "drain".into()),
             intake_gate: intake_gate_enabled(),
-            gate_after: std::env::var("VISIONALVR_GATE_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).max(1),
+            gate_after: std::env::var("AIRFRAMEXR_GATE_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).max(1),
             last_empty_idx: AtomicU64::new(0),
-            keepup_boundaries: std::env::var("VISIONALVR_KEEPUP_BOUNDARIES").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30),
+            keepup_boundaries: std::env::var("AIRFRAMEXR_KEEPUP_BOUNDARIES").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30),
             standing_total: AtomicU64::new(0),
             last_empty: AtomicBool::new(false),
             standing: AtomicU64::new(0),
             drain_last: Mutex::new(None),
             intake_drains: AtomicU64::new(0),
-            client_drain: std::env::var("VISIONALVR_CLIENT_DRAIN").map(|v| v == "1").unwrap_or(false),
+            client_drain: std::env::var("AIRFRAMEXR_CLIENT_DRAIN").map(|v| v == "1").unwrap_or(false),
             drains: AtomicU64::new(0),
             last_arrival: Mutex::new(None),
             picked: Mutex::new(None),
@@ -514,7 +514,7 @@ impl Pipeline {
             fg_holds: AtomicU64::new(0),
             fg_no_sample: AtomicU64::new(0),
             fg_in_hand: AtomicU64::new(0),
-            fg_hold_age: AtomicBool::new(std::env::var("VISIONALVR_FG_HOLD_AGE").map(|v| v == "1").unwrap_or(false)),
+            fg_hold_age: AtomicBool::new(std::env::var("AIRFRAMEXR_FG_HOLD_AGE").map(|v| v == "1").unwrap_or(false)),
             fg_hold_skips: AtomicU64::new(0),
             fg_hold_bypassed: AtomicU64::new(0),
             fg_hold_pending: AtomicBool::new(false),
@@ -527,18 +527,18 @@ impl Pipeline {
             fg_cap_us: AtomicU32::new(0),
             fg_queued: AtomicU64::new(0),
             fg_arrival_wait: Duration::from_secs_f64(
-                std::env::var("VISIONALVR_FG_ARRIVAL_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(4.0).clamp(0.0, 10.0) / 1000.0),
+                std::env::var("AIRFRAMEXR_FG_ARRIVAL_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(4.0).clamp(0.0, 10.0) / 1000.0),
             fg_arrival_waits: AtomicU64::new(0),
             fg_arrival_hits: AtomicU64::new(0),
             fg_arrival_wait_us: AtomicU64::new(0),
             fg_errors: AtomicU64::new(0),
             fg_stats: Mutex::new(String::from("{\"on\":0}")),
             fg_sample_wait: Mutex::new(Duration::from_secs_f64(
-                std::env::var("VISIONALVR_FG_SAMPLE_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(3.0).clamp(0.0, 20.0) / 1000.0)),
+                std::env::var("AIRFRAMEXR_FG_SAMPLE_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(3.0).clamp(0.0, 20.0) / 1000.0)),
             fg_sample_waits: AtomicU64::new(0),
             fg_sample_wait_us: AtomicU64::new(0),
             fg_last_fresh: Mutex::new(Instant::now()),
-            fg_dark_after: Duration::from_secs_f64(std::env::var("VISIONALVR_FG_DARK_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(100.0).clamp(0.0, 60_000.0) / 1000.0),
+            fg_dark_after: Duration::from_secs_f64(std::env::var("AIRFRAMEXR_FG_DARK_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(100.0).clamp(0.0, 60_000.0) / 1000.0),
             fg_dark: AtomicBool::new(false),
             fg_stale_stamps: AtomicU64::new(0),
         })
@@ -741,7 +741,7 @@ impl Pipeline {
         }
     }
 
-    /// Like `fg_pick_sample_now`, waiting up to VISIONALVR_FG_SAMPLE_WAIT_MS (3) for one to arrive: with one sample in hand the wait is
+    /// Like `fg_pick_sample_now`, waiting up to AIRFRAMEXR_FG_SAMPLE_WAIT_MS (3) for one to arrive: with one sample in hand the wait is
     /// rare (a sample later than a whole period); a boundary that finds none sends nothing (a repeat on the headset).
     fn fg_pick_sample(&self) -> Option<(Duration, [f32; 4])> {
         if let Some(s) = self.fg_pick_sample_now() {
@@ -905,7 +905,7 @@ impl Pipeline {
 
     /// A boundary with nothing due (frame generation on; the next output would repeat the rendered frame): the next rendered frame is expected
     /// about now (the app publishes every other period and, released at a boundary, lands near one), so wait for it until
-    /// VISIONALVR_FG_ARRIVAL_WAIT_MS (4) past the boundary and take it as this boundary's arrival. Without the wait the schedule flipped
+    /// AIRFRAMEXR_FG_ARRIVAL_WAIT_MS (4) past the boundary and take it as this boundary's arrival. Without the wait the schedule flipped
     /// between "arrived just before" and "just after" the boundary: a frame dropped, then one repeated, 6 % of the boundaries in the rig's
     /// ideal-timing case (2026-10-14).
     fn fg_wait_arrival(&self, boundary: Instant) -> Option<Arrived> {
@@ -970,9 +970,9 @@ impl Pipeline {
         self.ipc as *mut std::ffi::c_void
     }
 
-    /// `aged` pick: how long the older of two waiting frames may have waited (VISIONALVR_PICK_AGE_MS, default 0.7 of a display period)
+    /// `aged` pick: how long the older of two waiting frames may have waited (AIRFRAMEXR_PICK_AGE_MS, default 0.7 of a display period)
     fn pick_age(&self) -> Duration {
-        match std::env::var("VISIONALVR_PICK_AGE_MS").ok().and_then(|v| v.parse::<f64>().ok()) {
+        match std::env::var("AIRFRAMEXR_PICK_AGE_MS").ok().and_then(|v| v.parse::<f64>().ok()) {
             Some(ms) => Duration::from_secs_f64(ms / 1000.0),
             None => self.period().mul_f64(0.7),
         }
@@ -1118,16 +1118,16 @@ impl Pipeline {
                 && match self.pick_policy.as_str() {
                     "newest" => false,
                     "adaptive" => !self.last_empty.load(Ordering::Relaxed),
-                    // in order like `oldest`, but a queue that has stood VISIONALVR_DRAIN_AFTER (8) boundaries without ever emptying drops its older frame
-                    // once (one rendered frame never shown, one period of latency back), at most once per VISIONALVR_DRAIN_EVERY_MS (1000). The earlier
+                    // in order like `oldest`, but a queue that has stood AIRFRAMEXR_DRAIN_AFTER (8) boundaries without ever emptying drops its older frame
+                    // once (one rendered frame never shown, one period of latency back), at most once per AIRFRAMEXR_DRAIN_EVERY_MS (1000). The earlier
                     // backoff doubled to 60 s whenever the queue came back, which in a GPU-bound game (a bunch every few seconds) left it standing most
                     // of the time (Cyberpunk 2026-10-13: 3-4 drains in 100 s, hold 9.9 ms). With the intake gate on, the gate drains the queue first and
                     // this fires only when it could not (shim without the gate, or the app ignoring its release).
                     "drain" => {
                         // 30 boundaries (0.3 s): the gate normally clears a standing queue within a few boundaries; the drain is the last resort and must
                         // not fire on the arrival jitter the duplicate-timestamp re-stamp adds (77 frames dropped in 206 s of End of Abyss at 8)
-                        let after = std::env::var("VISIONALVR_DRAIN_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30).max(1);
-                        let every = std::env::var("VISIONALVR_DRAIN_EVERY_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1000.0).max(0.0) / 1000.0;
+                        let after = std::env::var("AIRFRAMEXR_DRAIN_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30).max(1);
+                        let every = std::env::var("AIRFRAMEXR_DRAIN_EVERY_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1000.0).max(0.0) / 1000.0;
                         let mut last = self.drain_last.lock();
                         let due = keeps_up && self.standing.load(Ordering::Relaxed) >= after
                             && last.map(|t| boundary.saturating_duration_since(t).as_secs_f64() >= every).unwrap_or(true);
@@ -1164,7 +1164,7 @@ impl Pipeline {
             if self.intake_gate {
                 // A frame left behind at ONE boundary is usually a late frame paired with an on-time one (arrival jitter: the lab's "steady"
                 // probe showed depth 2 at every third boundary and never twice in a row); in order, both are shown and nothing is lost. A queue
-                // that stands VISIONALVR_GATE_AFTER (3) boundaries in a row is the app running a frame ahead of the stream (Cyberpunk: 95 % of
+                // that stands AIRFRAMEXR_GATE_AFTER (3) boundaries in a row is the app running a frame ahead of the stream (Cyberpunk: 95 % of
                 // boundaries): only then does the shim skip one release (see `intake_gate`). Gating on a single boundary skipped 16 % of releases.
                 let waiting = if keeps_up && standing >= self.gate_after { q.len() as u32 } else { 0 };
                 unsafe { nvh::nvh_ipc_set_intake(ipc, waiting) };

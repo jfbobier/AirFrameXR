@@ -1,4 +1,4 @@
-// The simrig's viewer: a stand-in for the headset (see docs/DEVELOPMENT.md, "simrig"). Compiled only with VISIONALVR_SIMRIG (cargo feature `simrig`).
+// The simrig's viewer: a stand-in for the headset (see docs/DEVELOPMENT.md, "simrig"). Compiled only with AIRFRAMEXR_SIMRIG (cargo feature `simrig`).
 //
 // It receives the shim's composed side-by-side frames (an uncompressed copy of a ring slot, taken where the encoder would read it), "decoded" at a time the
 // host's simulated transport chooses, and displays them like the Vision Pro client does: a display tick every `period` (with jitter), a queue of decoded
@@ -7,7 +7,7 @@
 // the head pose at the display tick (the truth trajectory, plus a gaussian time error), by a rotation-only reprojection pass; `reproject = 0` shows the
 // frames as they come. The result is rendered offscreen, shown in a window (optional), and the dots of the probe's "dots" scene on the equator row are
 // measured every tick and written to dots.csv for harness/simrig/judge.py.
-#ifdef VISIONALVR_SIMRIG
+#ifdef AIRFRAMEXR_SIMRIG
 #define NOMINMAX
 #include <windows.h>
 #include <d3d11_4.h>
@@ -199,11 +199,11 @@ struct Viewer {
     static LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM w, LPARAM l) { return DefWindowProcW(h, msg, w, l); }
 
     void makeWindow() {
-        WNDCLASSW wc{}; wc.lpfnWndProc = wndProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"visionalvr_simviewer"; wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        WNDCLASSW wc{}; wc.lpfnWndProc = wndProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"airframexr_simviewer"; wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
         RegisterClassW(&wc);
         winW = 1920; winH = (UINT)(1920.0 * cfg.out_eye_h / (2.0 * cfg.out_eye_w));
         RECT r{ 0, 0, (LONG)winW, (LONG)winH }; AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-        hwnd = CreateWindowW(wc.lpszClassName, L"VisionALVR simrig viewer (SBS, what the headset would show)", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
+        hwnd = CreateWindowW(wc.lpszClassName, L"AirFrameXR simrig viewer (SBS, what the headset would show)", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
         IDXGIDevice* dd = nullptr; IDXGIAdapter* ad = nullptr; IDXGIFactory2* fac = nullptr;
         dev->QueryInterface(__uuidof(IDXGIDevice), (void**)&dd); dd->GetAdapter(&ad); ad->GetParent(__uuidof(IDXGIFactory2), (void**)&fac);
         DXGI_SWAP_CHAIN_DESC1 sdsc{}; sdsc.Width = winW; sdsc.Height = winH; sdsc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; sdsc.SampleDesc.Count = 1; sdsc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
@@ -495,4 +495,4 @@ void sv_stop(void* h) {
     delete v;
 }
 }
-#endif // VISIONALVR_SIMRIG
+#endif // AIRFRAMEXR_SIMRIG

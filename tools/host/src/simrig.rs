@@ -4,7 +4,7 @@
 //! the real NVENC, bitstream discarded), and the viewer (nvenc/hostlib/simviewer.cpp) shows the frames like the headset would and measures
 //! the dots of the probe's "dots" scene for harness/simrig/judge.py. Nothing here exists in a build without the feature.
 //!
-//! Knobs (environment, all optional): VISIONALVR_SIM_PROFILE (profile JSON; none = ideal timing), _SEED, _MODE (rotate|still), _OMEGA_DPS (90),
+//! Knobs (environment, all optional): AIRFRAMEXR_SIM_PROFILE (profile JSON; none = ideal timing), _SEED, _MODE (rotate|still), _OMEGA_DPS (90),
 //! _PREDICT_MS (client prediction horizon, 0), _POSE_NOISE_DEG (override of the profile-derived pose noise), _REAL_ENCODE (0|1), _SHOW (1),
 //! _REPROJECT (1), _SECONDS (30, viewer run), _SETTLE_S (2, after the first frame), _PHOTON_ERR_MS (0), _STAMP_ERROR (0), _QUEUE_MAX (2),
 //! _POLL_MS (5), _DUMP_EVERY (0), _DOT_DEG (10), _PERIOD_MS (10), _EYE_W (1760, the viewer's eye image).
@@ -136,7 +136,7 @@ struct Sim {
     rng: Mutex<Rng>,
     last_ready: Mutex<f64>,
     stop: AtomicBool,
-    /// VISIONALVR_SIM_CAPTURE=intake: the viewer's copy of a frame is taken when it arrives from the shim (diagnosis: is the slot still the frame at encode time?)
+    /// AIRFRAMEXR_SIM_CAPTURE=intake: the viewer's copy of a frame is taken when it arrives from the shim (diagnosis: is the slot still the frame at encode time?)
     capture_intake: bool,
     early: Mutex<std::collections::HashMap<u32, i32>>,
 }
@@ -149,7 +149,7 @@ pub fn active() -> bool {
 }
 
 fn env_f(k: &str, d: f64) -> f64 {
-    std::env::var(format!("VISIONALVR_SIM_{k}")).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
+    std::env::var(format!("AIRFRAMEXR_SIM_{k}")).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
 }
 
 fn qpc() -> f64 {
@@ -192,7 +192,7 @@ fn truth_yaw_deg(c: &Cfg, since_base_s: f64) -> f64 {
 /// Starts the simrig: the synthetic client (head generator + uplink) and the viewer. Called once the pipeline exists.
 /// `eye_size` is the shim's per-eye size (from the session), `gamma` the stream's encoding gamma.
 pub fn init(out_dir: &str, ipc: usize, nvh_handle: *mut c_void, shared: &Arc<Shared>, vsync_period_ns: &Arc<std::sync::atomic::AtomicU64>, gamma: f32) {
-    let profile: Value = std::env::var("VISIONALVR_SIM_PROFILE").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let profile: Value = std::env::var("AIRFRAMEXR_SIM_PROFILE").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     let ideal = profile.is_null();
     let period_ns = env_f("PERIOD_MS", 10.0) * 1e6;
     let predict_ms = env_f("PREDICT_MS", 0.0);
@@ -203,7 +203,7 @@ pub fn init(out_dir: &str, ipc: usize, nvh_handle: *mut c_void, shared: &Arc<Sha
         settle_s: env_f("SETTLE_S", 2.0),
         period_ns,
         omega_dps: env_f("OMEGA_DPS", 90.0),
-        rotate: std::env::var("VISIONALVR_SIM_MODE").map(|m| m != "still").unwrap_or(true),
+        rotate: std::env::var("AIRFRAMEXR_SIM_MODE").map(|m| m != "still").unwrap_or(true),
         predict_ms,
         // the pose the client reports is predicted `predict_ms` ahead from a noisy velocity: angle error ~ velocity noise x horizon
         // (a floor of half a period stands for the sensor noise at no prediction)
@@ -267,7 +267,7 @@ pub fn init(out_dir: &str, ipc: usize, nvh_handle: *mut c_void, shared: &Arc<Sha
     // the table starts at ts_base - 1 s so that early samples (before t0) resolve too; row 0 is at (ts_base - 1 s)
     unsafe { sv_truth(viewer, ts_base as f64 - 1e9, 1e6, tq.as_ptr(), n as i32) };
     let log_cfg = serde_json::json!({
-        "profile": std::env::var("VISIONALVR_SIM_PROFILE").ok(), "seed": cfg.seed, "mode": if cfg.rotate { "rotate" } else { "still" }, "omega_dps": cfg.omega_dps,
+        "profile": std::env::var("AIRFRAMEXR_SIM_PROFILE").ok(), "seed": cfg.seed, "mode": if cfg.rotate { "rotate" } else { "still" }, "omega_dps": cfg.omega_dps,
         "predict_ms": cfg.predict_ms, "pose_noise_deg": cfg.pose_noise_deg, "real_encode": cfg.real_encode, "reproject": cfg.reproject, "tick_jitter_ns": cfg.tick_jitter_ns,
         "photon_err_ms": cfg.photon_err_ms, "stamp_error": cfg.stamp_error, "queue_max": cfg.queue_max, "poll_ms": cfg.poll_ms, "period_ms": cfg.period_ns / 1e6, "eye_w": cfg.eye_w,
     });
@@ -284,7 +284,7 @@ pub fn init(out_dir: &str, ipc: usize, nvh_handle: *mut c_void, shared: &Arc<Sha
         rng: Mutex::new(Rng(seed.wrapping_mul(0x9E3779B97F4A7C15) | 1)),
         last_ready: Mutex::new(0.0),
         stop: AtomicBool::new(false),
-        capture_intake: std::env::var("VISIONALVR_SIM_CAPTURE").map(|v| v == "intake").unwrap_or(false),
+        capture_intake: std::env::var("AIRFRAMEXR_SIM_CAPTURE").map(|v| v == "intake").unwrap_or(false),
         early: Mutex::new(Default::default()),
     };
     NVH.store(nvh_handle as usize, Ordering::Relaxed);
@@ -448,7 +448,7 @@ pub fn stop() {
     }
 }
 
-/// Called by the intake thread the moment a frame arrives (VISIONALVR_SIM_CAPTURE=intake).
+/// Called by the intake thread the moment a frame arrives (AIRFRAMEXR_SIM_CAPTURE=intake).
 pub fn on_arrival(ipc: *mut c_void, slot: u32, counter: u32) {
     let s = SIM.get().unwrap();
     if s.capture_intake && s.started.load(Ordering::Relaxed) {

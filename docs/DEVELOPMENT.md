@@ -1,6 +1,6 @@
-# Developing VisionALVR
+# Developing AirFrameXR
 
-VisionALVR is built **on Windows**, with Microsoft's and NVIDIA's toolchains. Cross-compiling from Linux is not supported.
+AirFrameXR is built **on Windows**, with Microsoft's and NVIDIA's toolchains. Cross-compiling from Linux is not supported.
 It is a personal project focused on what I run: NVIDIA GPUs (NVENC) and the Apple Vision Pro. AMD/Intel GPUs and other
 headsets are out of scope; forks that adapt it are welcome.
 
@@ -18,13 +18,13 @@ headsets are out of scope; forks that adapt it are welcome.
 
 Open a new terminal after installing so `PATH` is updated. The build scripts expect Visual Studio **Community** at its default
 path. Known-good versions (`deps.lock.json`, `toolchain_builder`): Rust 1.99, CMake 4.4, clang 23.1, NuGet 7.9, MSVC 14.44,
-Windows SDK 26100, NVIDIA driver 617.14 (NVENC SDK 12.2). Any NVENC GPU can build and run the tests; `VisionALVR.exe`
+Windows SDK 26100, NVIDIA driver 617.14 (NVENC SDK 12.2). Any NVENC GPU can build and run the tests; `AirFrameXR.exe`
 only checks for an NVIDIA GPU and NVENC API >= 12.2.
 
 ## Build
 ```powershell
-git clone https://github.com/jfbobier/vision-alvr.git
-cd vision-alvr
+git clone https://github.com/jfbobier/AirFrameXR.git
+cd AirFrameXR
 powershell -ExecutionPolicy Bypass -File build.ps1              # everything: vdxr host shim gui package
 powershell -ExecutionPolicy Bypass -File build.ps1 host gui     # only some parts afterwards
 ```
@@ -32,7 +32,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1 host gui     # only some part
   in `deps.lock.json` into `src\` and verifies them, then builds VDXR, the OpenXR loader and ALVR's server_core once
   (`tools/remote/setup_builder.ps1`). Measured on an RTX 3080 Ti laptop: 10 minutes with Rust crates already cached, longer
   on a first-ever Rust build or a slow connection; about 6 GB on disk. Later builds take minutes.
-- Output: `out\dist\VisionALVR\` (the portable folder) and `out\dist\VisionALVR-<version>.zip`. Logs: `logs\build_<step>.txt`.
+- Output: `out\dist\AirFrameXR\` (the portable folder) and `out\dist\AirFrameXR-<version>.zip`. Logs: `logs\build_<step>.txt`.
 - Nothing outside the checkout is changed: no registry, no OpenXR runtime registration (that is the launcher's runtime switch (`register_openxr_runtime.ps1`),
   run by hand from the built folder).
 - The benchmark scene (`bench\littlest_tokyo.vab`) is generated, not committed. `build.ps1` takes it from the published release
@@ -47,14 +47,14 @@ judder) keep it, release builds drop it:
 | | debug (default) | release |
 |---|---|---|
 | Rust host | cargo feature `telemetry` (default on) | `--no-default-features` |
-| shim (C++) | `VISIONALVR_TELEMETRY` defined | `VISIONALVR_RELEASE` defined (undefines it) |
+| shim (C++) | `AIRFRAMEXR_TELEMETRY` defined | `AIRFRAMEXR_RELEASE` defined (undefines it) |
 | harness | `python3 harness/run.py build host shim` | `python3 harness/run.py build host shim --release` (then `package`) |
 
 What the flag covers today: the shim's per-frame trace `shim_frames.csv` (pose read, head-sample arrival, release, submit, publish) and
 the pose-match diagnostics behind the 900-frame log line; the host's frame fates and sent-frame CSVs (`host_pipeline*.csv`,
-`host_frames.csv`). New per-frame telemetry must sit behind it (`#ifdef VISIONALVR_TELEMETRY` / `#[cfg(feature = "telemetry")]`);
+`host_frames.csv`). New per-frame telemetry must sit behind it (`#ifdef AIRFRAMEXR_TELEMETRY` / `#[cfg(feature = "telemetry")]`);
 counters that are a single add per frame and the periodic stats lines stay in both. `tools/wsl/check_cpp.sh` and `check_host.sh
---no-default-features` compile the release flavour (`EXTRA_DEFS="/D VISIONALVR_RELEASE" bash tools/wsl/check_cpp.sh`). The follow-the-frames
+--no-default-features` compile the release flavour (`EXTRA_DEFS="/D AIRFRAMEXR_RELEASE" bash tools/wsl/check_cpp.sh`). The follow-the-frames
 analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin\flavour.txt`, its zip name ends in `-debug` and the windows show "(debug build)" after the version.
 
 ## How the build fits together
@@ -68,8 +68,8 @@ analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin
 - VDXR gets a few small text patches at build time (`tools/remote/stage15_vdxr.ps1`, listed in its header: layer visibility, cube faces, display name, running start off so that `xrWaitFrame` waits for the shim's release); OVRShim is built from VDXR's OVRNull project
   with the files of `ovrshim/` (`stage11_ovrshim.ps1`).
 - GUIs: compiled with Visual Studio's Roslyn `csc` against the .NET Framework assemblies (`stage16_gui.ps1`), no .NET SDK.
-- Package: `stage13_package.ps1` assembles `out\dist\VisionALVR` and the zip from an explicit list of files.
-- The `tools/remote/stage*.ps1` scripts work in `%VISIONALVR_ROOT%` (set by `build.ps1` to the checkout; the harness uses
+- Package: `stage13_package.ps1` assembles `out\dist\AirFrameXR` and the zip from an explicit list of files.
+- The `tools/remote/stage*.ps1` scripts work in `%AIRFRAMEXR_ROOT%` (set by `build.ps1` to the checkout; the harness uses
   `%USERPROFILE%\openxr`).
 
 ## Release package recipe
@@ -77,10 +77,10 @@ analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin
 A release zip is built in the release flavour.
 
 1. `python3 harness/run.py build nvenc client host shim probe gui package --release` (`build` alone is client + host only), then
-   `VISIONALVR_PERSONAL=1 python3 harness/run.py build package --release` for the personal zip.
+   `AIRFRAMEXR_PERSONAL=1 python3 harness/run.py build package --release` for the personal zip.
 2. Check the zip before publishing: `bin\flavour.txt` says release, no personal settings in the generic zip (no headset address in
-   `config\visionalvr.json`), the personal zip carrying its extra files.
-3. The zip is named after the host's `VERSION` (`tools/host/src/vision.rs`) and renamed `VisionALVR-<tag>.zip` on upload; the release notes
+   `config\airframexr.json`), the personal zip carrying its extra files.
+3. The zip is named after the host's `VERSION` (`tools/host/src/vision.rs`) and renamed `AirFrameXR-<tag>.zip` on upload; the release notes
    live in `docs/releases/<tag>.md` and are pushed to GitHub with `gh release edit --notes-file`.
 
 4. **Optional, only after a major change:** the stability harness (`python3 harness/stability/run_stability.py run all`, about 90 minutes on a laptop,
@@ -96,7 +96,7 @@ pacing, layers, gamma, ...). It is how this project is tested, but it is not nee
 shell over SSH (WSL on the same PC works: enable Windows' OpenSSH Server with key authentication) and keeps its own working
 copy in `%USERPROFILE%\openxr` on the Windows side. Driver side: `bash`, `ssh`/`scp`, `python3`, `ffmpeg`, `ffprobe`.
 ```bash
-echo 'VISIONALVR_BUILDER=you@windows-host' > tools/builder.local    # not committed; or export VISIONALVR_BUILDER
+echo 'AIRFRAMEXR_BUILDER=you@windows-host' > tools/builder.local    # not committed; or export AIRFRAMEXR_BUILDER
 python3 harness/run.py setup                                        # pinned sources, prerequisites, every build
 python3 harness/run.py run e2e_baseline                             # one scenario; `all` for the suite, `list` to see them
 python3 harness/run.py bench-quality quick | test-install | test-zip
@@ -113,13 +113,13 @@ Details: `harness/README.md`.
 
 ## The simrig (headset-less rig, debug only)
 
-`cargo build -p alvr_host --features simrig` (C++ define `VISIONALVR_SIMRIG`, `nvenc/hostlib/simviewer.cpp`) builds a host that runs the real pipeline
+`cargo build -p alvr_host --features simrig` (C++ define `AIRFRAMEXR_SIMRIG`, `nvenc/hostlib/simviewer.cpp`) builds a host that runs the real pipeline
 (shim IPC, intake, clock + boundary pick, encoder and sender threads) against a synthetic client instead of ALVR and a headset: a head with constant
 rotation (or still) and the timing of a recorded profile (`harness/simrig/make_profile.py`), encode / network / decode as sampled timers (the encode
-optionally the real NVENC, `VISIONALVR_SIM_REAL_ENCODE=1`; bitstream discarded), and a viewer that queues, corrects (rotation reprojection) and
+optionally the real NVENC, `AIRFRAMEXR_SIM_REAL_ENCODE=1`; bitstream discarded), and a viewer that queues, corrects (rotation reprojection) and
 shows the frames like the headset client, measuring the dots of the probe's `XR_PROBE_SCENE=dots` scene. `harness/simrig/judge.py` turns the
 measurements into a verdict (TREMBLE / CLEAN). Run it with `python3 harness/simrig/run_sim.py build` then `run ideal,games,probe100,still100,inject`.
-The feature is off in normal and release builds; the knobs are the `VISIONALVR_SIM_*` variables documented at the top of `tools/host/src/simrig.rs`.
+The feature is off in normal and release builds; the knobs are the `AIRFRAMEXR_SIM_*` variables documented at the top of `tools/host/src/simrig.rs`.
 Scenario `ideal` is the null test (must be CLEAN) and `inject` validates the judge (must be TREMBLE).
 
 `build.ps1` builds the **release** flavour by default (per-frame debug traces compiled out); add the target `debug` (`build.ps1 host shim debug`) to keep them.

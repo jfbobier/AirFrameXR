@@ -132,7 +132,7 @@ typedef struct NvhBenchConfig {
     int preset;                   // NVENC P1..P7
     int aq;                       // 0 off, 1 spatial, 2 temporal
     int split;                    // NV_ENC_SPLIT_ENCODE_MODE (0 auto, 1 auto forced, 2 two, 3 three, 15 disabled)
-    int qp_map;                   // VisionALVR's foveal QP delta map
+    int qp_map;                   // AirFrameXR's foveal QP delta map
     float bitrate_mbps, fps;
     int warmup, frames;           // frames encoded before measuring, frames measured
     int metric_every;             // quality measured on every n-th measured frame

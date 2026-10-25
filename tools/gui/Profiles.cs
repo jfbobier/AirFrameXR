@@ -7,7 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public class NetworkVariant { public string Id = "", Label = ""; public double Mbps; }
 
@@ -160,7 +160,7 @@ namespace VisionALVR
             try
             {
                 var list = Parse(File.ReadAllText(path), Path.GetFileName(path));
-                if (list.Count == 0) { error = "this file is not a VisionALVR headset profile (it needs an id, a stream section and at least one network variant; see profiles\\template.profile.json)"; return null; }
+                if (list.Count == 0) { error = "this file is not a AirFrameXR headset profile (it needs an id, a stream section and at least one network variant; see profiles\\template.profile.json)"; return null; }
                 warnings = Compatibility(list[0], hs);
                 return list[0];
             }
@@ -205,7 +205,7 @@ namespace VisionALVR
             return res;
         }
 
-        /// A shareable profile from what is configured now (the saved session.json / visionalvr.json), what ALVR declared about the headset at the handshake and the
+        /// A shareable profile from what is configured now (the saved session.json / airframexr.json), what ALVR declared about the headset at the handshake and the
         /// numbers of the tests that ran. `author` and `networkLabel` are the user's words.
         public static Dictionary<string, object> BuildExport(Handshake hs, Results r, AppSettings settings, string author, string networkLabel)
         {
@@ -233,7 +233,7 @@ namespace VisionALVR
             }
             var export = new Dictionary<string, object>
             {
-                ["_comment"] = "VisionALVR headset profile exported by the setup wizard. Share this file; to use it, Import profile... in the wizard or drop it into config\\profiles. See docs/HMD_PROFILES.md.",
+                ["_comment"] = "AirFrameXR headset profile exported by the setup wizard. Share this file; to use it, Import profile... in the wizard or drop it into config\\profiles. See docs/HMD_PROFILES.md.",
                 ["schema"] = 1,
                 ["id"] = slug + (author.Length > 0 ? "-" + new string(author.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-') : ""),
                 ["display_name"] = hs.DisplayName,
@@ -247,7 +247,7 @@ namespace VisionALVR
                 ["notes"] = new List<object>(),
                 ["verified"] = verified,
                 ["exported_by"] = new Dictionary<string, object> {
-                    ["visionalvr"] = Version.Number, ["date"] = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    ["airframexr"] = Version.Number, ["date"] = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     ["alvr_declared"] = new Dictionary<string, object> {
                         ["display_name"] = hs.DisplayName, ["hostname"] = hs.Hostname, ["panel"] = new List<object> { hs.PanelW, hs.PanelH }, ["refresh_rates"] = rates,
                         ["foveated_encoding"] = hs.Foveation, ["encoder_10_bits"] = hs.Enc10, ["encoder_high_profile"] = hs.EncHigh, ["encoder_av1"] = hs.EncAv1,

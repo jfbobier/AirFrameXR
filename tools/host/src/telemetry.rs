@@ -40,7 +40,7 @@ pub fn start() {
 pub fn start() {}
 
 /// One head sample as the host received it (debug flavour): lets the analysis compare the pose a frame was rendered with against the pose
-/// the client has for the frame's timestamp (harness/frames.py). Written to the debug session folder, and to VISIONALVR_HEAD_CSV when set
+/// the client has for the frame's timestamp (harness/frames.py). Written to the debug session folder, and to AIRFRAMEXR_HEAD_CSV when set
 /// (the lab, which has no debug session).
 #[cfg(feature = "telemetry")]
 pub fn head_sample(ts_ns: u64, q: [f32; 4], p: [f32; 3]) {
@@ -50,7 +50,7 @@ pub fn head_sample(ts_ns: u64, q: [f32; 4], p: [f32; 3]) {
     let t = logs::qpc_at(std::time::Instant::now());
     let row = format!("{:.6},{},{:.7},{:.7},{:.7},{:.7},{:.5},{:.5},{:.5}", t, ts_ns, q[0], q[1], q[2], q[3], p[0], p[1], p[2]);
     logs::csv("head_samples.csv", "t,ts_ns,qx,qy,qz,qw,px,py,pz", &row);
-    if let Ok(path) = std::env::var("VISIONALVR_HEAD_CSV") {
+    if let Ok(path) = std::env::var("AIRFRAMEXR_HEAD_CSV") {
         if let Ok(mut g) = LAB.lock() {
             if g.is_none() {
                 if let Ok(f) = std::fs::File::create(&path) {

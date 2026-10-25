@@ -7,7 +7,7 @@
 #include <sddl.h>
 #include <string>
 
-namespace visionalvr_ipc {
+namespace airframexr_ipc {
 
 struct Ipc {
     HANDLE map = nullptr;
@@ -20,7 +20,7 @@ struct Ipc {
 inline std::wstring SessionPrefix() {
     wchar_t buf[128];
     DWORD n = GetEnvironmentVariableW(L"OVRSHIM_SESSION", buf, 128);
-    return (n > 0 && n < 128) ? std::wstring(buf) : std::wstring(L"VisionALVR");
+    return (n > 0 && n < 128) ? std::wstring(buf) : std::wstring(L"AirFrameXR");
 }
 
 inline void CloseIpc(Ipc& ipc) {
@@ -95,4 +95,4 @@ inline double QpcSeconds() {
     return (double)t.QuadPart * inv; // identical to ovrnull::utils::QpcToOvrTime
 }
 
-} // namespace visionalvr_ipc
+} // namespace airframexr_ipc

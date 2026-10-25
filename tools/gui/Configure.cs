@@ -1,6 +1,6 @@
 // configure.exe: one-time setup. 1) find the Vision Pro on the LAN (ALVR's discovery broadcast) and pair it, 2) optional
 // benchmarks (encoder alone, then the network with the headset) that recommend a bitrate and show where the latency goes,
-// 3) the settings VisionALVR actually uses (everything else stays in config\session.json for hand editing).
+// 3) the settings AirFrameXR actually uses (everything else stays in config\session.json for hand editing).
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -9,7 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public class ConfigureForm : DpiForm
     {
@@ -54,7 +54,7 @@ namespace VisionALVR
         public ConfigureForm(Dictionary<string, object> check)
         {
             this.check = check;
-            Text = "VisionALVR \u2013 Settings";
+            Text = "AirFrameXR \u2013 Settings";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
@@ -71,7 +71,7 @@ namespace VisionALVR
             var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
             var save = new Button { Text = "Save settings", AutoSize = true, Font = Ui.Bold };
             save.Click += (s, e) => SaveSettings(true);
-            var launch = new Button { Text = "Save and start VisionALVR", AutoSize = true };
+            var launch = new Button { Text = "Save and start AirFrameXR", AutoSize = true };
             launch.Click += (s, e) => { if (SaveSettings(false)) { System.Diagnostics.Process.Start(Paths.Runtime); Close(); } };
             var import = new Button { Text = "Import ALVR settings...", AutoSize = true };
             import.Click += (s, e) => { if (AlvrImport.Run(this)) { session = Session.Load(); LoadSettings(); ShowPaired(); MessageBox.Show(this, "Imported. The settings tab shows what was read from it.", Text); } };
@@ -105,7 +105,7 @@ namespace VisionALVR
             p.Controls.Add(pair);
             p.Controls.Add(discStatus);
             p.Controls.Add(paired);
-            p.Controls.Add(Ui.Line("When its address changes (DHCP), VisionALVR re-finds the paired headset by name on its own."));
+            p.Controls.Add(Ui.Line("When its address changes (DHCP), AirFrameXR re-finds the paired headset by name on its own."));
             t.Controls.Add(p);
             ShowPaired();
             return t;
@@ -299,7 +299,7 @@ namespace VisionALVR
             settings.Debug = debugDefault.Checked;
             settings.Save();
             Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {fps.SelectedItem} Hz, {bitrate.Value} Mbps, {settings.EncodeProfile}, idle #{settings.IdleRgb}, audio {audio.Checked}, {proto.SelectedItem}, debug {settings.Debug}");
-            if (confirm) MessageBox.Show(this, "Saved. The changes apply the next time VisionALVR starts.", Text);
+            if (confirm) MessageBox.Show(this, "Saved. The changes apply the next time AirFrameXR starts.", Text);
             return true;
         }
 

@@ -1,7 +1,7 @@
 param([string]$Sub = 'all')
 # Builds nvenc/ (unmodified ALVR NVENC files + shims) on the builder and runs the standalone encode tests.
 $ErrorActionPreference = 'Continue'
-$root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
+$root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
 $n = "$root\nvenc"
 $bd = "$root\build\nvenc"
 New-Item -ItemType Directory -Force $bd, "$root\logs", "$root\out\nvenc" | Out-Null

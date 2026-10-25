@@ -8,7 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public enum TestState { Pending, Running, Passed, Warning, Failed, Skipped }
 
@@ -41,7 +41,7 @@ namespace VisionALVR
         /// the community profile in use (null: the generic path with its searches) and the bitrate it asks for; the tests then verify that configuration
         public HmdProfile Profile;
         public double ConfigMbps;
-        /// the user's own ALVR / VisionALVR settings are used as they are (third option of the wizard): the tests verify them like a profile, nothing is searched or changed
+        /// the user's own ALVR / AirFrameXR settings are used as they are (third option of the wizard): the tests verify them like a profile, nothing is searched or changed
         public bool Existing;
         public string ExistingEncodeProfile = "foveated";
         /// a fixed configuration to verify (a profile or the existing settings), as opposed to the generic path with its searches
@@ -128,7 +128,7 @@ namespace VisionALVR
                         result = $"{r.EncW}x{r.EncH} encoded: p50 {r.EncodeP50:0.0} ms, p95 {r.EncodeP95:0.0} ms of {r.BudgetMs:0.0} ms per frame; {r.Engines} NVENC engine(s)";
                     }, 120000);
                     if (error != null) throw new TestFailed(error);
-                    if (result == null) throw new TestFailed("the encoder test produced no result (see logs\\VisionALVR.log)");
+                    if (result == null) throw new TestFailed("the encoder test produced no result (see logs\\AirFrameXR.log)");
                     if (!ctx.R.EncodeFits)
                     {
                         st.Warn();
@@ -249,7 +249,7 @@ namespace VisionALVR
                     var scene = System.IO.Path.Combine(Paths.Dir, "bench", "littlest_tokyo.vab");
                     var runtime = Paths.Manifest;
                     if (!System.IO.File.Exists(probe) || !System.IO.File.Exists(scene) || !System.IO.File.Exists(runtime)) throw new TestSkipped("bench\\xr_probe.exe, bench\\littlest_tokyo.vab or bin\\virtualdesktop-openxr.json is missing from this folder");
-                    var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "visionalvr_scene_test");
+                    var tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "airframexr_scene_test");
                     System.IO.Directory.CreateDirectory(tmp);
                     var poseCsv = System.IO.Path.Combine(tmp, "pose.csv");
                     try { System.IO.File.Delete(poseCsv); } catch { }
@@ -258,7 +258,7 @@ namespace VisionALVR
                     double frames = 0, fpsW = 0, sameTs = 0, trkN = 0, gapP95 = 0, slices = 0, encMs = 0;
                     double w = 0, total = 0, game = 0, enc = 0, net = 0, dec = 0, dq = 0, vq = 0, cf = 0, df = 0, mbps = 0;
                     var host = new HostProcess();
-                    Environment.SetEnvironmentVariable("VISIONALVR_AUDIO_CAPTURE", new AppSettings().AudioCapture == "process" ? "process" : null);   // the host captures like the streamer does
+                    Environment.SetEnvironmentVariable("AIRFRAMEXR_AUDIO_CAPTURE", new AppSettings().AudioCapture == "process" ? "process" : null);   // the host captures like the streamer does
                     host.OnEvent += (n, d) =>
                     {
                         try
@@ -379,7 +379,7 @@ namespace VisionALVR
                     await Task.Yield();
                     var r = ctx.R;
                     // split encoding matters for the foveated frame too (forced 3 strips: 6.9 -> 2.5 ms at 4224x1664 on an RTX 5090), so every configuration is judged
-                    if (r.SplitMode == 15 && r.Engines >= 2) { st.Warn(); return $"OFF: split encoding is turned off (video.split_encode is \"off\" in config\\visionalvr.json, or the Split encoding box in step 6), so every frame is encoded in one piece although this GPU has {r.Engines} NVENC engines. Tick the box in the last step to use them."; }
+                    if (r.SplitMode == 15 && r.Engines >= 2) { st.Warn(); return $"OFF: split encoding is turned off (video.split_encode is \"off\" in config\\airframexr.json, or the Split encoding box in step 6), so every frame is encoded in one piece although this GPU has {r.Engines} NVENC engines. Tick the box in the last step to use them."; }
                     var benchOn = r.Engines >= 2 && r.Slices >= 1.5;
                     var live = r.SceneRan ? $"; the live stream carried {r.SliceLive:0.#} strips per frame" : "";
                     if (benchOn && (!r.SceneRan || r.SliceLive >= 1.5)) return $"engaged: {r.Slices:0.#} strips per frame on {r.Engines} NVENC engines (encoder test){live}";

@@ -14,8 +14,8 @@ extra = " ".join(sys.argv[3:])
 wt = rf"C:\Users\{live.PC_USER}\wizard_test"
 live.ps(f"""
 New-Item -ItemType Directory -Force '{wt}\\bin' | Out-Null
-Stop-Process -Name VisionALVR,streamer,configure,alvr_host -Force -ErrorAction SilentlyContinue
-if (-not (Test-Path '{wt}\\bin\\alvr_host.exe')) {{ Copy-Item '{live.CLONE}\\out\\dist\\VisionALVR\\*' '{wt}' -Recurse -Force -ErrorAction SilentlyContinue }}
+Stop-Process -Name AirFrameXR,streamer,configure,alvr_host -Force -ErrorAction SilentlyContinue
+if (-not (Test-Path '{wt}\\bin\\alvr_host.exe')) {{ Copy-Item '{live.CLONE}\\out\\dist\\AirFrameXR\\*' '{wt}' -Recurse -Force -ErrorAction SilentlyContinue }}
 Copy-Item '{live.CLONE}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wt}\\bin\\alvr_host.exe' -Force
 Copy-Item '{live.CLONE}\\out\\gui\\{exe}' '{wt}\\bin\\{exe}' -Force
 Remove-Item '{wt}\\shot_{page}.png' -ErrorAction SilentlyContinue

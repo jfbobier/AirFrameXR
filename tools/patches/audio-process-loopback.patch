@@ -23,7 +23,7 @@
  #[cfg(windows)]
  pub use crate::windows::*;
  
-+// VisionALVR: game audio from Windows' process loopback instead of a device loopback (tools/patches/audio-process-loopback.patch)
++// AirFrameXR: game audio from Windows' process loopback instead of a device loopback (tools/patches/audio-process-loopback.patch)
 +#[cfg(windows)]
 +mod process_loopback;
 +#[cfg(windows)]
@@ -45,7 +45,7 @@
              }
  
 -            game_audio_device.input_sample_rate().to_con()?
-+            // VisionALVR: the process-loopback capture is always 48 kHz (tools/patches/audio-process-loopback.patch)
++            // AirFrameXR: the process-loopback capture is always 48 kHz (tools/patches/audio-process-loopback.patch)
 +            if alvr_audio::process_loopback_enabled() {
 +                alvr_audio::PROCESS_LOOPBACK_SAMPLE_RATE
 +            } else {
@@ -58,7 +58,7 @@
  
                  #[cfg(not(target_os = "linux"))]
                  {
-+                    // VisionALVR: capture the PC's audio with Windows' process loopback, no device involved (tools/patches/audio-process-loopback.patch)
++                    // AirFrameXR: capture the PC's audio with Windows' process loopback, no device involved (tools/patches/audio-process-loopback.patch)
 +                    if alvr_audio::process_loopback_enabled() {
 +                        #[cfg(windows)]
 +                        if let Err(e) = alvr_audio::record_process_loopback_blocking(
@@ -81,10 +81,10 @@
 --- /dev/null
 +++ b/alvr/audio/src/process_loopback.rs
 @@ -0,0 +1,206 @@
-+//! VisionALVR (tools/patches/audio-process-loopback.patch): game audio captured with Windows' process loopback (ActivateAudioInterfaceAsync on
++//! AirFrameXR (tools/patches/audio-process-loopback.patch): game audio captured with Windows' process loopback (ActivateAudioInterfaceAsync on
 +//! "VAD\Process_Loopback"): everything the PC plays except this process tree, taken before the output device's volume, mute and format, as plain
-+//! 48 kHz stereo 16-bit PCM. No virtual audio cable and no change of the Windows default output are needed. Selected with VISIONALVR_AUDIO_CAPTURE=process;
-+//! VISIONALVR_AUDIO_PROCESS=<pid> captures only that process tree instead; VISIONALVR_AUDIO_EXCLUDE_PROCESS=<exe name> excludes that process tree (the lab's mock
++//! 48 kHz stereo 16-bit PCM. No virtual audio cable and no change of the Windows default output are needed. Selected with AIRFRAMEXR_AUDIO_CAPTURE=process;
++//! AIRFRAMEXR_AUDIO_PROCESS=<pid> captures only that process tree instead; AIRFRAMEXR_AUDIO_EXCLUDE_PROCESS=<exe name> excludes that process tree (the lab's mock
 +//! headset plays on the same PC, a real headset is another machine).
 +use alvr_common::{
 +    anyhow::{anyhow, bail, Result},
@@ -121,7 +121,7 @@
 +pub const PROCESS_LOOPBACK_SAMPLE_RATE: u32 = 48000;
 +
 +pub fn process_loopback_enabled() -> bool {
-+    std::env::var("VISIONALVR_AUDIO_CAPTURE").map(|v| v == "process").unwrap_or(false)
++    std::env::var("AIRFRAMEXR_AUDIO_CAPTURE").map(|v| v == "process").unwrap_or(false)
 +}
 +
 +/// The pid of the first running process with this exe name (case-insensitive).
@@ -212,9 +212,9 @@
 +        bail!("process loopback capture is stereo only");
 +    }
 +    unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok().ok() };   // already initialised on this thread (S_FALSE) is fine
-+    let (pid, include) = match std::env::var("VISIONALVR_AUDIO_PROCESS").ok().and_then(|v| v.parse::<u32>().ok()) {
++    let (pid, include) = match std::env::var("AIRFRAMEXR_AUDIO_PROCESS").ok().and_then(|v| v.parse::<u32>().ok()) {
 +        Some(p) => (p, true),
-+        None => match std::env::var("VISIONALVR_AUDIO_EXCLUDE_PROCESS").ok().and_then(|n| pid_of(&n)) {
++        None => match std::env::var("AIRFRAMEXR_AUDIO_EXCLUDE_PROCESS").ok().and_then(|n| pid_of(&n)) {
 +            Some(p) => (p, false),
 +            None => (std::process::id(), false),
 +        },

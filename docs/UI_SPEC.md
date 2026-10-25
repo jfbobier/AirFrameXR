@@ -1,4 +1,4 @@
-# VisionALVR UI specification (0.5)
+# AirFrameXR UI specification (0.5)
 
 What each window is for, what it shows, where the numbers come from, and the rules every window follows. Written 2026-10-20 from what was built in
 0.5 (docs/PLAN_0.5.md) and the directions of the 2026-10-20 review (the "UI round 2" section of the plan). Marked **[target]** where the window is not
@@ -24,7 +24,7 @@ screenshot each; 0 FAIL required), `harness/launcher_flow.py`.
 
 ## Windows
 
-### Launcher (`bin\launcher.exe`, started by the root stub `VisionALVR.exe`)
+### Launcher (`bin\launcher.exe`, started by the root stub `AirFrameXR.exe`)
 Six cards, in this order (0.6): **Streamer** (primary), **Game statistics**, **Settings** (`configure.exe --settings`: pairing, benchmarks, video, audio, network), **Advanced settings** (`configure.exe --switches`: docs/EXPERIMENTAL_SWITCHES.md), **Diagnostics (experimental)**, **Restart headset setup** (the wizard). A status card says
 "Ready" (green) or "Needs attention" (red) with one row per problem and its button: the OpenXR runtime (shows the active one, the same button goes back), OpenXR
 layers that may take the controllers, the Windows Firewall (read in the background). Quiet links: *Advanced (full ALVR settings)...*, *Help*. The launcher
@@ -68,7 +68,7 @@ Rules:
   start of the session); *Manual* sends the number (default 1.30 m, recommended seated). A Quest or other headset reports its floor correctly: the choice is
   shown as Auto and disabled. The number replaces the slider (saves space; typed or stepped with the arrows, 0.5-2.2 m).
 - **Picture**: the two settings people touch; the rest behind *Advanced*. Everything applies live except the **resolution scale** (0.50-2.00, default 1.00 = nothing; above 1 is
-  supersampling): it multiplies the per-eye resolution and reaches the engine through `session.json` (`EyeScale`; the unscaled size is kept in `visionalvr.json`), which is negotiated at
+  supersampling): it multiplies the per-eye resolution and reaches the engine through `session.json` (`EyeScale`; the unscaled size is kept in `airframexr.json`), which is negotiated at
   connection, so it is applied by a streamer restart (button) and the game restarted. The setup panel shows and saves the unscaled size.
 - **Desktop mirror**: a switch next to Recenter (no box of its own). The streamer starts `bin\mirrordesktop.exe` while a headset is connected and no game runs (docs/DESKTOP_MIRROR.md). The mirror is
   an app like a game to the engine but is **hidden from every game list and label** (Game line, Game history, Diagnose facts).
@@ -115,7 +115,7 @@ exists only after a click.
 - Colours: accent blue for the primary action and the active step; green = works, orange = works with a limitation, red = does not work; dim grey for provenance.
 - Fonts: the system message-box family; body 9.5 pt, big 11 pt.
 - Every number has a unit and, where it is measured, a window ("typical 10 s window", "slowest tenth").
-- Logs: `logs\VisionALVR.log` (one general log for the streamer and the tools), `logs\debug\<time>\` per debug run, `logs\mirrordesktop.log`, `config\games\<exe>.json`.
+- Logs: `logs\AirFrameXR.log` (one general log for the streamer and the tools), `logs\debug\<time>\` per debug run, `logs\mirrordesktop.log`, `config\games\<exe>.json`.
 
 ## Test matrix the UI must keep passing
 `ui_matrix` (0 FAIL), `launcher_flow`, `advice_check`, `firewall_check`, `mirror_check`, `e2e_mirror`, and (planned) `streamer_events` (event replay with text assertions),

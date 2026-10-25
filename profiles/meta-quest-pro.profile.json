@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "meta-quest-pro",
   "display_name": "Meta Quest Pro",
-  "author": "VisionALVR project (compiled from public guidance, not tested on this headset)",
+  "author": "AirFrameXR project (compiled from public guidance, not tested on this headset)",
   "match": {
     "name_contains": [
       "Quest Pro",
@@ -50,7 +50,7 @@
     "session_settings.video.passthrough.enabled": false
   },
   "notes": [
-    "Starting point compiled from public guidance, NOT verified by the VisionALVR project on this headset (no `verified` entry). VisionALVR's support for headsets other than the Apple Vision Pro is best effort.",
+    "Starting point compiled from public guidance, NOT verified by the AirFrameXR project on this headset (no `verified` entry). AirFrameXR's support for headsets other than the Apple Vision Pro is best effort.",
     "Quest 2, 3, 3S and Pro share this profile except for the panel size (1800 x 1920 per eye here): they all stream HEVC with ALVR's Android client and a Qualcomm Snapdragon XR2 decoder (Quest 3 and 3S: XR2 Gen 2; Quest 2: XR2 Gen 1; Quest Pro: XR2+ Gen 1, a faster Quest 2). Against the Apple Vision Pro profile (3552 x 3200, 300 Mbps, split encoding) the stream has 2-2.4x fewer pixels and needs about half the bitrate. Same as on the Vision Pro: 90 Hz, HEVC 10-bit (the default session forces it; ALVR's Quest client advertises 10-bit support), full colour range; chroma-key passthrough is off by default (the setup offers it, key colour pure green #00FF00). Foveation is ALVR's 'Light' preset (centre 0.80 x 0.80, edge ratio 8 x 8): nearly the whole view stays at full resolution, the saving is small on purpose.",
     "ALVR's wiki (Settings tutorial, v20): on a good wireless router use the medium resolution preset (the default) with sharpening 1.0 and HEVC at a constant 100-150 Mbps; HEVC is usually the best codec when bitrate is limited; turn foveated encoding on and tune it from the statistics graph.",
     "Resolution, gamma and the encoder details are left out on purpose: the headset's own default (what ALVR reports at the handshake) is used. Change them in the wizard if you know better.",

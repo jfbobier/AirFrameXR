@@ -332,7 +332,7 @@ void DrawSceneEye(Scene& s, ID3D11DeviceContext* ctx, const SceneFrame& f, const
 
         auto draw = [&](const Prim& p, const Material* mat, const XMMATRIX& w) {
             DrawCB cb{};
-            static const float dbgMode = [] { const char* v = getenv("VISIONALVR_BENCH_DEBUG"); return v ? (float)atof(v) : 0.f; }();
+            static const float dbgMode = [] { const char* v = getenv("AIRFRAMEXR_BENCH_DEBUG"); return v ? (float)atof(v) : 0.f; }();
             cb.dbg[0] = dbgMode;
             XMStoreFloat4x4(&cb.world, XMMatrixTranspose(w));
             XMStoreFloat4x4(&cb.viewProj, XMMatrixTranspose(vp));

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One command for a machine's baseline: ours vs stock ALVR + SteamVR on the comparison scenarios, repeated, summarised in one file.
 
-    VISIONALVR_PROFILE=5090 python3 harness/baseline.py [--update] [--repeat 3] [--scenarios cmp_tokyo_4k100,cmp_tokyo_4k100_gpu]
+    AIRFRAMEXR_PROFILE=5090 python3 harness/baseline.py [--update] [--repeat 3] [--scenarios cmp_tokyo_4k100,cmp_tokyo_4k100_gpu]
 
 The machine comes from tools/pc.<profile>.local and tools/builder.<profile>.local (no profile: tools/pc.local, tools/builder.local).
 --update: fetch the 0.3 branch into the machine's clone and rebuild the lab binaries first (host, client, shim, probe; debug flavour).
@@ -15,7 +15,7 @@ import live, lib, metrics, run, compare
 a = sys.argv[1:]
 repeat = int(a[a.index("--repeat") + 1]) if "--repeat" in a else 3
 scen = (a[a.index("--scenarios") + 1] if "--scenarios" in a else "cmp_tokyo_4k100,cmp_tokyo_4k100_gpu").split(",")
-prof = os.environ.get("VISIONALVR_PROFILE", "default")
+prof = os.environ.get("AIRFRAMEXR_PROFILE", "default")
 live.log(f"baseline on {live.PC} (profile {prof}), clone {live.CLONE}")
 if "--update" in a:
     live.log("updating the clone to the 0.3 branch")

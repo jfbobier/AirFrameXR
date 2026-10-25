@@ -75,7 +75,7 @@ def run_one(name):
 
 
 def build(what):
-    # flavour: `--release` drops the per-frame telemetry (cargo feature `telemetry`, C++ VISIONALVR_TELEMETRY); the default build keeps it
+    # flavour: `--release` drops the per-frame telemetry (cargo feature `telemetry`, C++ AIRFRAMEXR_TELEMETRY); the default build keeps it
     release = "--release" in (what or [])
     what = [w for w in (what or []) if w != "--release"]
     lib.b_run("if not exist _tmp mkdir _tmp")
@@ -125,11 +125,11 @@ def build(what):
                 print(o[-1500:])
                 return 2
             continue
-        if w == "gui":       # VisionALVR.exe + configure.exe (C# WinForms, .NET Framework 4.8)
+        if w == "gui":       # AirFrameXR.exe + configure.exe (C# WinForms, .NET Framework 4.8)
             lib.b_run("if not exist _tmp\\gui\\res mkdir _tmp\\gui\\res")
             for src in sorted((lib.ROOT / "tools/gui").glob("*.cs")) + [lib.ROOT / "tools/gui/app.manifest", lib.ROOT / "tools/gui/app.stub.manifest", lib.ROOT / "tools/gui/app.exe.config"]:
                 lib.b_put(src, f"_tmp/gui/{src.name}")
-            for f in ("visionalvr.ico", "logo_640.png", "chroma_passthrough.png"):
+            for f in ("airframexr.ico", "logo_640.png", "chroma_passthrough.png"):
                 lib.b_put(lib.ROOT / "tools/gui/res" / f, f"_tmp/gui/res/{f}")
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage16_gui.ps1"], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")
@@ -138,19 +138,19 @@ def build(what):
                 print(o[-3000:])
                 return 2
             continue
-        if w == "package":   # out\\VisionALVR: the portable folder a user unzips (+ out\\VisionALVR-<version>.zip)
+        if w == "package":   # out\\AirFrameXR: the portable folder a user unzips (+ out\\AirFrameXR-<version>.zip)
             lib.b_run("if not exist _tmp\\install mkdir _tmp\\install")
             for f in ("register_openxr_runtime.ps1", "session.default.json", "README.txt"):
                 lib.b_put(lib.ROOT / "tools/install" / f, f"_tmp/install/{f}")
-            # personal build (VISIONALVR_PERSONAL=1, values from private/personal_config.json, never published): other session defaults, a ready
-            # config\visionalvr.json and a zip suffix. A generic build overwrites these with empty ones so a stale personal file cannot leak.
+            # personal build (AIRFRAMEXR_PERSONAL=1, values from private/personal_config.json, never published): other session defaults, a ready
+            # config\airframexr.json and a zip suffix. A generic build overwrites these with empty ones so a stale personal file cannot leak.
             pers = lib.ROOT / "private/personal_config.json"
             out_dir = lib.ROOT / "build/personal"
             out_dir.mkdir(parents=True, exist_ok=True)
             vis, ver = "{}", ""
-            if os.environ.get("VISIONALVR_PERSONAL") == "1":
+            if os.environ.get("AIRFRAMEXR_PERSONAL") == "1":
                 if not pers.exists():
-                    print("package: VISIONALVR_PERSONAL=1 but private/personal_config.json is missing (copy tools/install/personal_config.example.json)")
+                    print("package: AIRFRAMEXR_PERSONAL=1 but private/personal_config.json is missing (copy tools/install/personal_config.example.json)")
                     return 2
                 pc = json.loads(pers.read_text())
                 sess = json.loads((lib.ROOT / "tools/install/session.default.json").read_text())
@@ -172,17 +172,17 @@ def build(what):
                 merge(sess, pc.get("session_merge", {}))   # e.g. the paired headset (client_connections)
                 (out_dir / "session.default.json").write_text(json.dumps(sess, indent=2))
                 lib.b_put(out_dir / "session.default.json", "_tmp/install/session.default.json")
-                vis = json.dumps(pc.get("visionalvr", {}), indent=2)
+                vis = json.dumps(pc.get("airframexr", {}), indent=2)
                 ver = pc.get("version_suffix", "-personal")
                 print(f"package: personal build ({ver}) from {pers.name}")
             extra = []
-            if os.environ.get("VISIONALVR_PERSONAL") == "1":
-                extra = json.loads(pers.read_text()).get("extra_files", [])   # build-PC paths copied next to VisionALVR.exe (personal builds only)
+            if os.environ.get("AIRFRAMEXR_PERSONAL") == "1":
+                extra = json.loads(pers.read_text()).get("extra_files", [])   # build-PC paths copied next to AirFrameXR.exe (personal builds only)
             (out_dir / "personal_files.txt").write_text("\n".join(extra))
             lib.b_put(out_dir / "personal_files.txt", "_tmp/install/personal_files.txt")
-            (out_dir / "visionalvr.personal.json").write_text(vis)
+            (out_dir / "airframexr.personal.json").write_text(vis)
             (out_dir / "version_suffix.txt").write_text(ver)
-            lib.b_put(out_dir / "visionalvr.personal.json", "_tmp/install/visionalvr.personal.json")
+            lib.b_put(out_dir / "airframexr.personal.json", "_tmp/install/airframexr.personal.json")
             lib.b_put(out_dir / "version_suffix.txt", "_tmp/install/version_suffix.txt")
             import re
             m = re.search(r'pub const VERSION: &str = "([^"]+)"', (lib.ROOT / "tools/host/src/vision.rs").read_text())

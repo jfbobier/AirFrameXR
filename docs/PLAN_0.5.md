@@ -7,7 +7,7 @@ any pixel constant is a 96-dpi design value (`AutoScaleDimensions = 96,96`).
 ## Decisions taken
 - Statistics are shown as **tiles** (not a chart), plus a small history strip.
 - **Separate EXEs**, one per tool, so experts run only what they need. `launcher.exe` is the front door for everyone else: a card per tool
-  (what it does, a Launch button). Tools: Streamer (`VisionALVR.exe`), Logs and performance, Diagnose, Setup wizard (`configure.exe`).
+  (what it does, a Launch button). Tools: Streamer (`AirFrameXR.exe`), Logs and performance, Diagnose, Setup wizard (`configure.exe`).
 - Desktop mirror: **hand tracking + pinch** drives the mouse, the pointer is the hand's ray (not gaze). Optional, **off by default**.
 
 ## Phase 0: groundwork
@@ -31,7 +31,7 @@ any pixel constant is a 96-dpi design value (`AutoScaleDimensions = 96,96`).
 
 ## Phase 2: Logs and performance window + per-game data
 Data model: `config\games\<exe name>.json`, one file per game (UEVR style), replacing `config\games.json` (no migration: old records are not carried over;
-the launcher's "Recommended" reads the new files). The streamer's own log, `logs\VisionALVR.log`, stays one file, independent of the games.
+the launcher's "Recommended" reads the new files). The streamer's own log, `logs\AirFrameXR.log`, stays one file, independent of the games.
 - Display name = the game's main window title (fallback: exe name). Paths seen. Preferences (don't-ask flags).
 - Per session: start/end, headset, generation level, game / streamed / shown fps (mean, p1), repeated and missed period shares, bitrate,
   latency split, packet loss and network stats (as ALVR's summary), DLSS-vectors DLL present and **actually used** (flow skipped counters),
@@ -41,7 +41,7 @@ the launcher's "Recommended" reads the new files). The streamer's own log, `logs
   - **Install / Uninstall DLSS motion-vector DLL**: copy the packaged DLL as `dxgi.dll` (if `dxgi.dll` exists: `version.dll`); log what was done so
     uninstall is one click; the packaged master copy is never touched; MD5 check against the master detects stray old installs;
     admin elevation only when the game folder is not writable.
-  - **Export log**: one zip (the game's JSON, VisionALVR.log, the relevant debug folder).
+  - **Export log**: one zip (the game's JSON, AirFrameXR.log, the relevant debug folder).
   - **Auto-delete logs of uninstalled games**: on open, delete a game's file when its exe no longer exists (setting, default on).
 
 ## Phase 3: Diagnose window + wizard refactor
@@ -51,7 +51,7 @@ the launcher's "Recommended" reads the new files). The streamer's own log, `logs
 
 ## Phase 4: in-VR keys
 - Not planned: the INSERT dialog in VR (user: VDXR captures the key). Checked on the built binaries (2026-10-19): not VDXR, not our shim, not our host; most likely UEVR's own overlay. Left alone.
-- [x] Global hotkey for a full recenter while playing: host polls the key (`controls.recenter_key` in visionalvr.json, default **End** (used by no mod known: UEVR is Insert, Luke Pause, Mutar F11), `off` disables); chosen in the wizard's configuration page.
+- [x] Global hotkey for a full recenter while playing: host polls the key (`controls.recenter_key` in airframexr.json, default **End** (used by no mod known: UEVR is Insert, Luke Pause, Mutar F11), `off` disables); chosen in the wizard's configuration page.
 - [x] (code read; lab test still to do) Head pose at session start: forward + horizontal position (X, Z) are re-anchored by `recenter` at game start, height by Eye height;
   verify with a test that X/Z really are zero at start (lab: simrig with an off-centre start pose) instead of assuming.
 
@@ -80,19 +80,19 @@ Minimal code:
    The harness prints the checklist and records the observed numbers from the run log.
 
 ## Added during the build
-- [x] Launcher: **OpenXR runtime** row: shows the active runtime and switches to the other one (VisionALVR <-> the one active before, saved by the register script), reversed after each click; going back also offers to re-enable the OpenXR layers VisionALVR switched off.
+- [x] Launcher: **OpenXR runtime** row: shows the active runtime and switches to the other one (AirFrameXR <-> the one active before, saved by the register script), reversed after each click; going back also offers to re-enable the OpenXR layers AirFrameXR switched off.
 - [x] **OpenXR API layers** (registry lists of the Khronos loader, HKLM/HKCU, 64/32-bit, implicit/explicit): the verdict (Diagnose and the wizard) flags enabled implicit layers, rated Poor when one may capture input (hand/controller/input tools); a dialog lists them and disables/enables the ticked ones (reversible: a registry DWORD, recorded in config\layers_disabled.json). Reference: FredEmmott/openxr-api-layers-gui (MIT), same lists; no code taken.
 - [x] Per-game records verified end to end on the builder (a 26 s run wrote config/games/<exe>.json with the session, network, GPU and vectors); idle/green scenarios still pass with the mirror off.
 
 ## Package layout (2026-10-19, built and tested)
-The root holds one file, `VisionALVR.exe` (the launcher). `bin\` has every exe and DLL the launcher starts or loads (including the OpenXR runtime), plus `register_openxr_runtime.ps1`. Other folders: `DLSSMotionVectors\`, `bench\`, `profiles\`, `config\`, `docs\`, `logs\` (on use), `extras\` (personal builds only). No `.bat` files. `python3 harness/run.py build package` moves an older-layout `out\dist\VisionALVR` aside (renamed `.old-<time>`, never deleted); `test-install` and `test-zip` check the root and the absence of `.bat`.
+The root holds one file, `AirFrameXR.exe` (the launcher). `bin\` has every exe and DLL the launcher starts or loads (including the OpenXR runtime), plus `register_openxr_runtime.ps1`. Other folders: `DLSSMotionVectors\`, `bench\`, `profiles\`, `config\`, `docs\`, `logs\` (on use), `extras\` (personal builds only). No `.bat` files. `python3 harness/run.py build package` moves an older-layout `out\dist\AirFrameXR` aside (renamed `.old-<time>`, never deleted); `test-install` and `test-zip` check the root and the absence of `.bat`.
 
 ## Desktop and DPI coverage (2026-10-19)
 `harness/ui_matrix.py` (every window and wizard page at 1080p/1440p/4K x 100-200 % scale), `harness/launcher_flow.py` (the launcher hides while a tool is open, returns when all are closed), `harness/mirror_check.py` (7 desktop shapes x SDR/HDR). They found and fixed: sizes set in code were raw pixels (windows and docked panels did not scale), late-built wizard pages were not scaled, fixed list-column widths broke with fonts (columns are now sized from their content), windows could be taller than a 1080p work area (now capped, the body scrolls), tall desktops made a screen taller than the view (capped at 40 degrees), and the cursor dot was tiny on a 4K desktop (now scales with the desktop's height).
 
 ## Native DPI, stub, firewall (2026-10-19)
 - GUIs run in WinForms' own per-monitor mode: `bin\<exe>.config` (`DpiAwareness=PerMonitorV2`, copied from `tools/gui/app.exe.config`), the `TargetFramework` assembly attribute (Common.cs; csc does not add it), a manifest without DPI entries, and `DpiForm` (designer pattern: built suspended, scaled at load) under every window. Controls created after load: `Ui.LateScale`; pixel constants: `Ui.Px` / `LogicalToDeviceUnits`. Measured: manifest-only = legacy mode (`DeviceDpi` 96).
-- The root `VisionALVR.exe` is a stub (tools/gui/Stub.cs) that starts `bin\launcher.exe` and exits (also tells a user who runs it from inside the zip to extract first); the launcher is single-instance. The streamer is run directly by the owner (`bin\streamer.exe`).
+- The root `AirFrameXR.exe` is a stub (tools/gui/Stub.cs) that starts `bin\launcher.exe` and exits (also tells a user who runs it from inside the zip to extract first); the launcher is single-instance. The streamer is run directly by the owner (`bin\streamer.exe`).
 - Firewall: `Firewall.Analyze` (PowerShell NetSecurity cmdlets: locale independent, protocol and network aware) finds the rule for this folder's exact exe, blocking rules, redundant / duplicate / stale rules and other copies; the streamer, wizard and Find headset only offer to add a rule when none is in place; `FirewallForm` (launcher button, verdict row) lists everything with the leftovers ticked; `tools/check_firewall_rules.bat` does the same from a prompt (for the 5090).
 
 ## Post-run flags and the debug box (2026-10-19 night, after the Valor Mortis black screens)
@@ -104,7 +104,7 @@ attached and copied cleanly, and the run that worked had the same chain with vec
 signal; it would hide the real cause and change nothing on the headset. What the UI should do instead:
 
 - [x] **Debug logging stays a checkbox in the streamer**, on and off, as in 0.4. The 0.5 notice-only variant leaves the user unable to turn (Done in UI round 2.)
-  debug back on without editing `config\visionalvr.json` by hand (the user hit this on 2026-10-19). Default off is fine; the control must
+  debug back on without editing `config\airframexr.json` by hand (the user hit this on 2026-10-19). Default off is fine; the control must
   be reversible in the window.
 - [x] **Orange flag after a run: "motion vectors did not reach the streamer".** Conditions: the DLL is installed in the game's folder (Done in UI round 2.)
   (MvDll.State.Installed / OlderCopy), the tick was on, generation was on, and the record's `mv.frames` is 0 (or the per-window
@@ -184,7 +184,7 @@ item is not done until that test exists and passes. Items marked (host) change t
   motion-vector scenarios (`harness/simrig/check_mv.py`) asserting `game_run.mv.frames` on both sides of the line, `dll_install_selftest`.
 - [x] **U10. The virtual audio device's volume is held at 100 % while the streamer is up.** The engine already does it (a thread in `main.rs` sets the endpoint volume of the
   default output to 1.0 every 3 s when its name contains "cable" or "vb-audio", event `audio_volume_forced`). Check on the 5090's logs whether it fired; extend it so it
-  also covers the device named in the audio settings (not only the default one) and the moment the streamer switches the default (the user's `startvisionalvr.bat` does it
+  also covers the device named in the audio settings (not only the default one) and the moment the streamer switches the default (the user's `startairframexr.bat` does it
   after the host started), log the result on every change, and show it in the streamer as one line under the debug row only when it matters ("Audio: VB-Audio Cable held at
   100 %"; orange when the device is missing or the call fails). Test: an e2e on the builder that sets the default device's volume to 40 % through the Core Audio API before
   and after the host starts and asserts `audio_volume_forced` and the volume back at 100 % within 6 s (the device selected by a test variable, restored at the end).
@@ -198,7 +198,7 @@ U3 / U5 / U5b done 2026-10-20 (the README screenshots are regenerated at the end
 
 U6 / U2 done 2026-10-20: `VectorsLine` (Common.cs) decides worked / blind / no-DLL once for the streamer's Frame generation component and Game history's orange line; the pop-up (`DllOfferForm`) is gone, the offer is inline (Install, Not for this game; every step logged; "Installed (dxgi.dll): takes effect next session"). Tests: `streamer_events` vectors_worked / blind / nodll / none (the install really runs in a temporary folder), `harness/dll_install_check.py` (install / update / remove / foreign dxgi.dll / dismissal / decision table), `ui_matrix` streamer-after-ok / -after-blind / -no-dll. Not covered: the elevated-copy fallback (needs a person at the UAC prompt) and the old "Install does nothing" root cause, which the inline version replaces rather than explains; the log lines will show it if it recurs. `harness/simrig/check_mv.py` was not touched. Known: the worst-case streamer states at 1440p@125 show a scroll bar warning (taller than the work area; the body scrolls).
 
-U10 done 2026-10-20: the host's audio thread now covers the default output and the device named in the audio settings (cable / vb-audio names; `VISIONALVR_FORCE_VOLUME_DEVICE=<part or *>` adds lab devices), logs and sends every correction (`audio_volume_forced`) and the states `held` / `missing` (`audio_volume_state`); the streamer shows one line under the debug row only after a correction (orange when it failed or the named device is missing). Tests: `harness/audio_volume_check.py` on the builder (40 % before the host starts: back to 100 % with the event; a second drop while it runs: undone within 6 s; the volume restored afterwards; the Core Audio helper must run in the interactive session), `streamer_events` audio_line. **Not done:** checking the 5090's logs for whether it fired in the field (that PC was not touched).
+U10 done 2026-10-20: the host's audio thread now covers the default output and the device named in the audio settings (cable / vb-audio names; `AIRFRAMEXR_FORCE_VOLUME_DEVICE=<part or *>` adds lab devices), logs and sends every correction (`audio_volume_forced`) and the states `held` / `missing` (`audio_volume_state`); the streamer shows one line under the debug row only after a correction (orange when it failed or the named device is missing). Tests: `harness/audio_volume_check.py` on the builder (40 % before the host starts: back to 100 % with the event; a second drop while it runs: undone within 6 s; the volume restored afterwards; the Core Audio helper must run in the interactive session), `streamer_events` audio_line. **Not done:** checking the 5090's logs for whether it fired in the field (that PC was not touched).
 
 ### Fixed streamer window (2026-10-20)
 The window used to follow its content (958 to 1117 px wide, 901 to 985 tall over one session); it is now sized once for the fullest ordinary content and refits only for Advanced and for blocking messages (`Ui.AutoFitWindow(refitOnChange:false, measure)`, `RuntimeForm.WithWorstCase`). Reserved lines: the vectors line, the stats line, a two-line notices slot; the find-headset hint became a tooltip and the vectors tick moved onto the Frame generation switch row; gamma and sharpening share a line. Size at 125 %: 1199x1005 (was 964x998 empty, up to 1117x985 wide in play): it still fits a 1080p work area. Test: `streamer_events` window_size (one size across connect, play, notices, disconnect; Advanced open and closed). Known: the stacked worst case (audio failure + long footer + firewall) scrolls.
@@ -211,4 +211,4 @@ Each step: tests first for the state it changes, `ui_matrix` at 0 FAIL, README s
 0 → 1 → 2 → 3 → 4 → 5. Phase 2 before the DLL popup (shared install code). Phase 5 last.
 
 
-Audio setup moved to .NET 2026-10-21: `tools/gui/AudioRoute.cs` (Core Audio + IPolicyConfig) sets the cable as default for all roles, mutes the PC output (`audio.mute_pc` in visionalvr.json), holds the cable unmuted at 100 % and the default every 3 s, sets its Default format to PCM 2 ch / 48 kHz, skips devices over 8 channels, switches ALVR's `mute_when_streaming` off in session.json, restores everything on close or after a crash (`logs\audio_route.txt`); Windows power plan in `PowerPlan` (Common.cs, `system.power_plan`). The Rust volume thread and its `audio_volume_*` events are gone. Test: `harness/audio_route_check.py` (24 checks on the builder: plain, nomute, disturb, named device, format, crash recovery), `streamer_events` audio_line. Not covered: more-than-8-channel refusal (the lab driver mixes 2 ch), spatial sound (Windows Sonic) is only reported from the registry, never switched, untested; no headset connected during the run.
+Audio setup moved to .NET 2026-10-21: `tools/gui/AudioRoute.cs` (Core Audio + IPolicyConfig) sets the cable as default for all roles, mutes the PC output (`audio.mute_pc` in airframexr.json), holds the cable unmuted at 100 % and the default every 3 s, sets its Default format to PCM 2 ch / 48 kHz, skips devices over 8 channels, switches ALVR's `mute_when_streaming` off in session.json, restores everything on close or after a crash (`logs\audio_route.txt`); Windows power plan in `PowerPlan` (Common.cs, `system.power_plan`). The Rust volume thread and its `audio_volume_*` events are gone. Test: `harness/audio_route_check.py` (24 checks on the builder: plain, nomute, disturb, named device, format, crash recovery), `streamer_events` audio_line. Not covered: more-than-8-channel refusal (the lab driver mixes 2 ch), spatial sound (Windows Sonic) is only reported from the registry, never switched, untested; no headset connected during the run.

@@ -55,8 +55,8 @@
   "running_start_ms": 2.0,
   "gpu_sched_class": 5,
   "env": {
-   "VISIONALVR_INTAKE_DEPTH": "2",
-   "VISIONALVR_PICK": "adaptive"
+   "AIRFRAMEXR_INTAKE_DEPTH": "2",
+   "AIRFRAMEXR_PICK": "adaptive"
   }
  },
  "client": {

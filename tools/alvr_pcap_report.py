@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Frame delivery report from a packet capture of the ALVR stream (UDP, default port 9944), for ANY ALVR server:
-SteamVR + ALVR and VisionALVR alike, so the two can be compared on the same footing.
+SteamVR + ALVR and AirFrameXR alike, so the two can be compared on the same footing.
 
     python3 tools/alvr_pcap_report.py capture.pcapng --pc <streamer ip> --hmd <headset ip>
 

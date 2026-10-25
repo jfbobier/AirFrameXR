@@ -3,12 +3,12 @@
 Between games the headset shows the Windows desktop as a monitor-sized screen in front of you; the controllers are laser pointers that move the mouse.
 It is **an OpenXR app like any game**, not part of the streamer engine: `bin\mirrordesktop.exe` connects through the runtime and the shim, renders a projection
 layer with the views the runtime gives it, and reads the controllers through OpenXR actions. The engine treats it as a game like any other (it is recorded in the game history); the streamer turns frame generation off while it runs
-(`frame_gen off`, the user's setting is restored when it ends). The shim signals `Local\VisionALVR_GameStarting` when another app starts so the mirror leaves the headset at once. The event has an explicit security descriptor (any integrity level and account of the session may signal it; a game running elevated or not no longer matters), the mirror leaves anyway 1.5 s after the signal if the runtime keeps its session open, and the engine ends the mirror's run and starts the game's when another app takes over (the app that was told to leave does not clear the shared "alive" flag).
+(`frame_gen off`, the user's setting is restored when it ends). The shim signals `Local\AirFrameXR_GameStarting` when another app starts so the mirror leaves the headset at once. The event has an explicit security descriptor (any integrity level and account of the session may signal it; a game running elevated or not no longer matters), the mirror leaves anyway 1.5 s after the signal if the runtime keeps its session open, and the engine ends the mirror's run and starts the game's when another app takes over (the app that was told to leave does not clear the shared "alive" flag).
 
 - **Switch it on** in the streamer window ("Between games"). The streamer starts the app while a headset is connected and no game runs, and starts it again
   after a game ends. Or run `bin\mirrordesktop.exe` by hand (`--seconds N`, `--no-mouse`, `--clear RRGGBB`, `--log file`).
 - **The picture:** DXGI desktop duplication of the primary monitor (SDR, or HDR converted to SDR with Windows' SDR white level), the screen 56.5 degrees wide
-  (1.6 m) at 1.5 m, a perspective-correct quad, everything else the streamer's idle colour (`video.idle_rgb` in `config\visionalvr.json`, `107C10` by default: the
+  (1.6 m) at 1.5 m, a perspective-correct quad, everything else the streamer's idle colour (`video.idle_rgb` in `config\airframexr.json`, `107C10` by default: the
   headset's alpha / passthrough). The screen has four positions a quarter turn apart (where you looked when it started, to its left, behind, to its right):
   it stays in one until your head is 55 degrees from it, then glides to the nearest. It follows you when you walk (more than 15 cm away from where it would
   be in front of you); End starts the four positions again from where you look now. The capture is copied on the GPU when the screen's adapter is the

@@ -2,7 +2,7 @@
 // Both sides open the same named objects (create-or-open); the host fills the "host -> shim" part, the shim the
 // "shim -> host" part. Everything is plain old data so both C++ sides can include this header.
 //
-// Objects (names are prefixed with the session id from env OVRSHIM_SESSION, default "VisionALVR"):
+// Objects (names are prefixed with the session id from env OVRSHIM_SESSION, default "AirFrameXR"):
 //   <p>_State   file mapping of IpcState
 //   <p>_Vsync   auto-reset event, signaled by the host once per display period
 //   <p>_Frame   auto-reset event, signaled by the shim after it published a composed frame
@@ -11,7 +11,7 @@
 #pragma once
 #include <stdint.h>
 
-namespace visionalvr_ipc {
+namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
 constexpr uint32_t kVersion = 32;
@@ -77,7 +77,7 @@ struct HostToShim {
     HandInput handInput[2];        // left, right
     double vsyncIntervalS;         // time from the latest tick to the next one, as scheduled by ALVR's pacing clock
     float encodingGamma;           // negotiated ALVR encoding gamma: the client decodes with pow(v, gamma), so frames are sent as pow(v, 1/gamma)
-    float userGamma;               // the user's display gamma (VisionALVR.exe slider): > 1 brighter; 0 or 1 = none. Read every frame
+    float userGamma;               // the user's display gamma (AirFrameXR.exe slider): > 1 brighter; 0 or 1 = none. Read every frame
     float colorBrightness, colorContrast, colorSaturation, colorSharpening; // user colour correction (0 = neutral), on the final output
     uint32_t debugOn;              // 1: write the verbose shim log into debugDir
     wchar_t debugDir[260];         // the host's debug session folder (logs/debug/<time>), empty when debug is off
@@ -153,4 +153,4 @@ struct IpcState {
     ShimToHost shim;
 };
 
-} // namespace visionalvr_ipc
+} // namespace airframexr_ipc

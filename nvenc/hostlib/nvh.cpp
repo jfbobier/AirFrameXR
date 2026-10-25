@@ -66,7 +66,7 @@ struct KeepAlive {
 };
 
 bool nvml_chosen_ids(unsigned* dev, unsigned* sub);   // defined with the NVML code below
-// The NVIDIA adapter the encoder runs on: the one NVML chose (matched by PCI device and subsystem id), else VISIONALVR_GPU, else the one with
+// The NVIDIA adapter the encoder runs on: the one NVML chose (matched by PCI device and subsystem id), else AIRFRAMEXR_GPU, else the one with
 // the most dedicated memory. (The first NVIDIA adapter DXGI lists is not necessarily the right one on a PC with two.)
 static int pickNvidiaAdapter(IDXGIFactory1* fac, struct Nvh* n);
 struct Nvh {
@@ -83,10 +83,10 @@ struct Nvh {
     float lastFfrMs = 0;
     float lastFfrWaitMs = 0;          // CPU time from queuing the foveation pass to its GPU completion (queueing behind the game)
     ID3D11Query* qDone = nullptr;
-    std::unique_ptr<FFR> ffr[visionalvr_ipc::kSlots];   // foveated compression of the shim slot (output = encoder input)
+    std::unique_ptr<FFR> ffr[airframexr_ipc::kSlots];   // foveated compression of the shim slot (output = encoder input)
     std::string gpuName;
-    ID3D11Texture2D* shared[visionalvr_ipc::kSlots] = {};   // opened shim slots (by slot index)
-    uint64_t sharedHandle[visionalvr_ipc::kSlots] = {};
+    ID3D11Texture2D* shared[airframexr_ipc::kSlots] = {};   // opened shim slots (by slot index)
+    uint64_t sharedHandle[airframexr_ipc::kSlots] = {};
     std::unique_ptr<KeepAlive> keepAlive;
     int gpuPriority = 0; long gpuPriorityHr = 0;   // IDXGIDevice::SetGPUThreadPriority on the encoder device (0 = not set)
     std::vector<ID3D11Texture2D*> noiseTex;          // noise == 2: independent random frames (nothing for motion search to reuse)
@@ -387,11 +387,11 @@ void* nvh_keepalive_start(int duty) { auto* k = new KeepAlive(); k->start(duty);
 void nvh_keepalive_stop(void* k) { delete (KeepAlive*)k; }
 
 // ---------------------------------------------------------------------------------------------------------
-using visionalvr_ipc::Ipc;
+using airframexr_ipc::Ipc;
 
 void* nvh_ipc_open(void) {
     auto* ipc = new Ipc();
-    if (!visionalvr_ipc::OpenIpc(*ipc)) { delete ipc; return nullptr; }
+    if (!airframexr_ipc::OpenIpc(*ipc)) { delete ipc; return nullptr; }
     return ipc;
 }
 
@@ -414,12 +414,12 @@ void nvh_ipc_publish_head(void* i, uint64_t ts, const float* q, const float* p, 
     auto& h = ((Ipc*)i)->state->host;
     h.headSeq++; MemoryBarrier();                      // odd: writing
     if (h.headClientTsNs != 0) {                       // push the previous latest into the history
-        for (int k = visionalvr_ipc::kHeadHist - 1; k > 0; k--) h.headHist[k] = h.headHist[k - 1];
+        for (int k = airframexr_ipc::kHeadHist - 1; k > 0; k--) h.headHist[k] = h.headHist[k - 1];
         auto& o = h.headHist[0];
         o.clientTsNs = h.headClientTsNs; o.hostTimeS = h.headHostTimeS; o.head = h.head;
         memcpy(o.linVel, h.headLinVel, 12); memcpy(o.angVel, h.headAngVel, 12);
     }
-    h.headClientTsNs = ts; h.headHostTimeS = visionalvr_ipc::QpcSeconds();
+    h.headClientTsNs = ts; h.headHostTimeS = airframexr_ipc::QpcSeconds();
     memcpy(h.head.orientation, q, 16); memcpy(h.head.position, p, 12); memcpy(h.headLinVel, lv, 12); memcpy(h.headAngVel, av, 12);
     MemoryBarrier(); h.headSeq++;                      // even: stable
 }
@@ -435,7 +435,7 @@ void nvh_ipc_publish_hand(void* i, int side, int valid, const float* q, const fl
 void nvh_ipc_vsync(void* i, double interval_s) {
     auto* ipc = (Ipc*)i;
     ipc->state->host.vsyncIntervalS = interval_s;
-    ipc->state->host.nextVsyncTimeS = visionalvr_ipc::QpcSeconds();
+    ipc->state->host.nextVsyncTimeS = airframexr_ipc::QpcSeconds();
     ipc->state->host.hostAlive++;
     SetEvent(ipc->vsync);
 }
@@ -450,7 +450,7 @@ void nvh_ipc_poll_haptic(void* i, int side, uint32_t* seq, float* freq, float* a
     *seq = h.seq; MemoryBarrier(); *freq = h.frequency; *amp = h.amplitude;
 }
 
-double nvh_qpc_seconds(void) { return visionalvr_ipc::QpcSeconds(); }
+double nvh_qpc_seconds(void) { return airframexr_ipc::QpcSeconds(); }
 float nvh_ipc_last_compose_ms(void* i) { return ((Ipc*)i)->state->shim.lastComposeMs; }
 float nvh_last_ffr_gpu_ms(void* hh) { return ((Nvh*)hh)->lastFfrMs; }
 float nvh_last_ffr_wait_ms(void* hh) { return ((Nvh*)hh)->lastFfrWaitMs; }
@@ -489,7 +489,7 @@ int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slo
 int nvh_ipc_shim_alive(void* i) {
     auto& s = ((Ipc*)i)->state->shim;
     static uint32_t lastBeat = 0; static double lastChange = 0;
-    const double now = visionalvr_ipc::QpcSeconds();
+    const double now = airframexr_ipc::QpcSeconds();
     if (s.shimHeartbeat != lastBeat) { lastBeat = s.shimHeartbeat; lastChange = now; }
     return (s.shimAlive && now - lastChange < 0.5) ? 1 : 0;
 }
@@ -517,13 +517,13 @@ double nvh_encode_green(void* hh, uint32_t frame_no, uint64_t ts_ns, int force_i
 static double encodeWithFfr(Nvh* n, FFR* ffr, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
 
 
-#ifdef VISIONALVR_SIMRIG
+#ifdef AIRFRAMEXR_SIMRIG
 // simrig (see simviewer.cpp): the viewer shares the encoder's D3D11 device and reads the shim's slots through it.
 extern "C" void* nvh_sim_device(void* hh) { return ((Nvh*)hh)->render->GetDevice(); }
 extern "C" void* nvh_sim_context(void* hh) { return ((Nvh*)hh)->render->GetContext(); }
 extern "C" void* nvh_sim_slot(void* hh, void* i, uint32_t slot) {
     auto* n = (Nvh*)hh;
-    if (!n || slot >= (uint32_t)visionalvr_ipc::kSlots) return nullptr;
+    if (!n || slot >= (uint32_t)airframexr_ipc::kSlots) return nullptr;
     (void)i;
     // the picture the encoder saw: the frame generation output when the last encode came from it (rotated or interpolated frame)
     if (n->fgLast && n->fg && n->fg->Output()) return n->fg->Output();
@@ -534,7 +534,7 @@ extern "C" void* nvh_sim_slot(void* hh, void* i, uint32_t slot) {
 
 // Opens (once) the shim's shared slot on the encoder device. Returns the texture, nullptr with err on failure.
 static ID3D11Texture2D* openSlot(Nvh* n, Ipc* ipc, uint32_t slot, char* err, int errlen) {
-    if (slot >= (uint32_t)visionalvr_ipc::kSlots) { seterr(err, errlen, "bad slot"); return nullptr; }
+    if (slot >= (uint32_t)airframexr_ipc::kSlots) { seterr(err, errlen, "bad slot"); return nullptr; }
     uint64_t handle = ipc->state->shim.slotHandle[slot];
     if (!handle) { seterr(err, errlen, "no shared handle"); return nullptr; }
     if (n->sharedHandle[slot] != handle || !n->shared[slot]) {
@@ -558,7 +558,7 @@ static double encodeWithFfr(Nvh* n, FFR* ffr, uint32_t frame_no, uint64_t ts_ns,
     double a = nowMs();
     try {
         ctx->Begin(n->qDisjoint); ctx->End(n->qT0);
-        static const bool zeroCopy = !(getenv("VISIONALVR_ZEROCOPY") && strcmp(getenv("VISIONALVR_ZEROCOPY"), "0") == 0);
+        static const bool zeroCopy = !(getenv("AIRFRAMEXR_ZEROCOPY") && strcmp(getenv("AIRFRAMEXR_ZEROCOPY"), "0") == 0);
         if (zeroCopy && ffr->CanRenderDirect()) {
             // zero copy: the foveation pass renders straight into the encoder's next input frame; Transmit skips its copy
             const NvEncInputFrame* in = n->enc->GetNvEncoder()->GetNextInputFrame();
@@ -608,9 +608,9 @@ int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid,
     c.flowScale = (float)flow_scale; c.perfLevel = perf_level; c.grid = grid; c.synth = synth == 1 ? 1 : 0;
     if (synth == 2) { c.synth = 1; c.photoScale = 0.f; }   // edge-blend: the edge synthesis without the photometric gate
     // edge synthesis tuning (lab knobs, env only)
-    if (const char* v = getenv("VISIONALVR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
-    if (const char* v = getenv("VISIONALVR_FG_COST_SCALE")) c.costScale = (float)atof(v);
-    if (const char* v = getenv("VISIONALVR_FG_PHOTO_SCALE")) c.photoScale = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_COST_SCALE")) c.costScale = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_PHOTO_SCALE")) c.photoScale = (float)atof(v);
     // the frame the shim composes: 2 x eye width by eye height (the encoder's own size may be the foveated one)
     const auto& S = Settings::Instance();
     if (!fg->Init((int)S.m_renderWidth, (int)S.m_renderHeight, c, err, errlen)) return 0;
@@ -688,7 +688,7 @@ void nvh_release_shared(void* hh) {
     if (n->fg) n->fg->ResetHistory();
     n->fgLast = false;
     for (auto& f : n->ffr) f.reset();
-    for (int k = 0; k < visionalvr_ipc::kSlots; k++) { if (n->shared[k]) { n->shared[k]->Release(); n->shared[k] = nullptr; } n->sharedHandle[k] = 0; }
+    for (int k = 0; k < airframexr_ipc::kSlots; k++) { if (n->shared[k]) { n->shared[k]->Release(); n->shared[k] = nullptr; } n->sharedHandle[k] = 0; }
 }
 
 void nvh_ipc_shim_stats(void* i, uint32_t* submit_mode, uint32_t* ts_matched, uint32_t* ts_fallback) {
@@ -697,7 +697,7 @@ void nvh_ipc_shim_stats(void* i, uint32_t* submit_mode, uint32_t* ts_matched, ui
 }
 
 void nvh_ipc_slot_busy(void* i, uint32_t slot, int busy) {
-    if (slot >= (uint32_t)visionalvr_ipc::kSlots) return;
+    if (slot >= (uint32_t)airframexr_ipc::kSlots) return;
     auto* mask = (volatile LONG*)&((Ipc*)i)->state->host.slotBusyMask;
     if (busy) InterlockedOr(mask, (LONG)(1u << slot)); else InterlockedAnd(mask, (LONG)~(1u << slot));
 }
@@ -749,7 +749,7 @@ long nvh_set_gpu_scheduling(int cls) {
     return fn(GetCurrentProcess(), std::max(0, std::min(5, cls)));
 }
 
-void nvh_ipc_close(void* i) { if (i) { visionalvr_ipc::CloseIpc(*(Ipc*)i); delete (Ipc*)i; } }
+void nvh_ipc_close(void* i) { if (i) { airframexr_ipc::CloseIpc(*(Ipc*)i); delete (Ipc*)i; } }
 
 int nvh_encoder_engines(void* hh) { auto* n = (Nvh*)hh; return n && n->enc ? n->enc->GetEncoderEngineCount() : 0; }
 
@@ -828,11 +828,11 @@ bool nvml() {
     g_nvml.reasons = (FnULL)GetProcAddress(h, "nvmlDeviceGetCurrentClocksEventReasons");
     if (!g_nvml.reasons) g_nvml.reasons = (FnULL)GetProcAddress(h, "nvmlDeviceGetCurrentClocksThrottleReasons");
     // Every NVIDIA GPU, not device 0: a PC with two (an older card next to the new one, a laptop with an eGPU) must use the right one.
-    // VISIONALVR_GPU (an index or a part of the name) forces a choice; otherwise the newest architecture, then the most memory.
+    // AIRFRAMEXR_GPU (an index or a part of the name) forces a choice; otherwise the newest architecture, then the most memory.
     auto pci = (FnPci)GetProcAddress(h, "nvmlDeviceGetPciInfo_v3"); if (!pci) pci = (FnPci)GetProcAddress(h, "nvmlDeviceGetPciInfo_v2");
     unsigned n = 0;
     if (count) count(&n); else n = 1;
-    char want[96] = ""; GetEnvironmentVariableA("VISIONALVR_GPU", want, sizeof want);
+    char want[96] = ""; GetEnvironmentVariableA("AIRFRAMEXR_GPU", want, sizeof want);
     int best = -1; unsigned bestArch = 0; unsigned long long bestMem = 0; bool forced = false;
     g_nvml.gpus = "[";
     for (unsigned i = 0; i < n; i++) {
@@ -945,7 +945,7 @@ int nvh_mem_sample(char* buf, int len) {
 
 static int pickNvidiaAdapter(IDXGIFactory1* fac, Nvh* n) {
     unsigned wantDev = 0, wantSub = 0;
-    const bool have = nvml_chosen_ids(&wantDev, &wantSub);   // NVML chose the best GPU (VISIONALVR_GPU can force one): find its DXGI adapter
+    const bool have = nvml_chosen_ids(&wantDev, &wantSub);   // NVML chose the best GPU (AIRFRAMEXR_GPU can force one): find its DXGI adapter
     int matched = -1, biggest = -1; SIZE_T bigMem = 0;
     for (UINT i = 0;; i++) {
         IDXGIAdapter1* ad = nullptr;

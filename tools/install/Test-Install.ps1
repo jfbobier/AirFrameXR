@@ -1,15 +1,15 @@
-# Exercises register_openxr_runtime.ps1 (portable VisionALVR folder) against a THROWAWAY registry key under HKCU (never HKLM)
+# Exercises register_openxr_runtime.ps1 (portable AirFrameXR folder) against a THROWAWAY registry key under HKCU (never HKLM)
 # and scratch folders: register, re-register, WhatIf, unregister (restores the previous runtime), no previous runtime, a
-# foreign runtime activated meanwhile, a moved folder, and taking over an earlier install (ClearXR / VisionALVR in Program Files).
+# foreign runtime activated meanwhile, a moved folder, and taking over an earlier install (ClearXR / AirFrameXR in Program Files).
 $ErrorActionPreference = 'Stop'
-$root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
-$pkg = "$root\out\dist\VisionALVR"
+$root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
+$pkg = "$root\out\dist\AirFrameXR"
 $tmp = "$root\runs\install_test"
-$testRoot = 'HKCU:\Software\VisionALVRTest'
+$testRoot = 'HKCU:\Software\AirFrameXRTest'
 $reg = "$testRoot\Khronos\OpenXR\1"
 $state = "$testRoot\State"
 $legacyState = "$testRoot\LegacyState"
-$inst = "$tmp\VisionALVR"                # "unzipped" here
+$inst = "$tmp\AirFrameXR"                # "unzipped" here
 $manifest = "$inst\bin\virtualdesktop-openxr.json"
 $fail = 0
 function Check($name, $ok, $detail = '') { if ($ok) { Write-Host "CHECK $name PASS $detail" } else { Write-Host "CHECK $name FAIL $detail"; $script:fail++ } }
@@ -25,15 +25,15 @@ New-ItemProperty -Path $reg -Name ActiveRuntime -Value 'C:\fake\previous_runtime
 New-Item -Path "$reg\AvailableRuntimes" | Out-Null
 New-ItemProperty -Path "$reg\AvailableRuntimes" -Name 'C:\fake\sibling_runtime.json' -Value 0 -PropertyType DWord | Out-Null   # another runtime next to ours
 
-$oldPf = @("$tmp\pf_ClearXR", "$tmp\pf_VisionALVR")
-$oldCfg = @("$tmp\lad_VisionALVR_host", "$tmp\lad_ClearXR_host")
+$oldPf = @("$tmp\pf_ClearXR", "$tmp\pf_AirFrameXR")
+$oldCfg = @("$tmp\lad_AirFrameXR_host", "$tmp\lad_ClearXR_host")
 $common = @{ RegistryRoot = $reg; StateKey = $state; LegacyStateKey = $legacyState; NoFirewall = $true; Quiet = $true; OldInstallDirs = $oldPf; OldConfigDirs = $oldCfg }
 $ps = "$inst\bin\register_openxr_runtime.ps1"
 
-Check 'package_layout' ((Test-Path "$inst\VisionALVR.exe") -and (Test-Path "$inst\bin\alvr_host.exe") -and (Test-Path "$inst\bin\LibOVRRT64_1.dll") -and (Test-Path "$inst\bin\virtualdesktop-openxr.dll") -and
+Check 'package_layout' ((Test-Path "$inst\AirFrameXR.exe") -and (Test-Path "$inst\bin\alvr_host.exe") -and (Test-Path "$inst\bin\LibOVRRT64_1.dll") -and (Test-Path "$inst\bin\virtualdesktop-openxr.dll") -and
     (Test-Path $manifest) -and (Test-Path "$inst\bin\register_openxr_runtime.ps1") -and (Test-Path "$inst\config\session.default.json"))
 $rootFiles = @(Get-ChildItem $inst -File | ForEach-Object { $_.Name })
-Check 'root_has_only_the_launcher' ($rootFiles.Count -eq 1 -and $rootFiles[0] -eq 'VisionALVR.exe') ($rootFiles -join ', ')
+Check 'root_has_only_the_launcher' ($rootFiles.Count -eq 1 -and $rootFiles[0] -eq 'AirFrameXR.exe') ($rootFiles -join ', ')
 & $ps @common | Out-Null
 Check 'active_runtime_is_this_folder' ((Active) -eq $manifest) (Active)
 Check 'available_runtimes_entry' ($null -ne (Get-ItemProperty "$reg\AvailableRuntimes" -Name $manifest -ErrorAction SilentlyContinue))
@@ -64,7 +64,7 @@ Check 'unregister_leaves_foreign_runtime' ((Active) -eq 'C:\other\runtime.json')
 # moved folder: register from the new place; the old place is ours and must not become "the previous runtime"
 Set-ItemProperty -Path $reg -Name ActiveRuntime -Value 'C:\fake\previous_runtime.json'
 & $ps @common | Out-Null
-$moved = "$tmp\moved\VisionALVR"
+$moved = "$tmp\moved\AirFrameXR"
 New-Item -ItemType Directory -Force (Split-Path $moved) | Out-Null
 Copy-Item $inst $moved -Recurse
 & "$moved\bin\register_openxr_runtime.ps1" @common | Out-Null
@@ -92,7 +92,7 @@ Check 'takeover_active_runtime_is_ours' ((Active) -eq $manifest) (Active)
 Check 'takeover_previous_from_clearxr' ((Saved) -eq 'C:\fake\before_clearxr.json') (Saved)
 Check 'takeover_old_entry_removed' ($null -eq (Get-ItemProperty "$reg\AvailableRuntimes" -Name "$cx\runtime\virtualdesktop-openxr.json" -ErrorAction SilentlyContinue))
 Check 'takeover_legacy_state_removed' (-not (Test-Path $legacyState))
-Check 'takeover_config_copied' ((Test-Path "$inst\config\session.json") -and (Test-Path "$inst\config\visionalvr_views.json"))
+Check 'takeover_config_copied' ((Test-Path "$inst\config\session.json") -and (Test-Path "$inst\config\airframexr_views.json"))
 Check 'takeover_old_files_removed' (-not (Test-Path $cx))
 & $ps @common -Unregister | Out-Null
 Check 'takeover_unregister_restores_pre_clearxr' ((Active) -eq 'C:\fake\before_clearxr.json') (Active)

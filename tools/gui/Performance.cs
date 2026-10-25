@@ -10,7 +10,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public class PerformanceForm : DpiForm
     {
@@ -22,7 +22,7 @@ namespace VisionALVR
 
         public PerformanceForm(string select)
         {
-            Text = "VisionALVR \u2013 Game statistics";
+            Text = "AirFrameXR \u2013 Game statistics";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -133,7 +133,7 @@ namespace VisionALVR
             var del = new Button { Text = "Forget this game", AutoSize = true };
             del.Click += (s, e) =>
             {
-                if (MessageBox.Show(this, "Delete the stored record of " + games.SelectedItem + "? (The game itself is not touched.)", "VisionALVR", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                if (MessageBox.Show(this, "Delete the stored record of " + games.SelectedItem + "? (The game itself is not touched.)", "AirFrameXR", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
                 try { File.Delete(Games.FileOf(exe)); } catch { }
                 Fill(null);
             };
@@ -210,14 +210,14 @@ namespace VisionALVR
             return lv;
         }
 
-        // only for a game where an earlier release installed the motion-vector DLL: one line and the button that removes VisionALVR's copy
+        // only for a game where an earlier release installed the motion-vector DLL: one line and the button that removes AirFrameXR's copy
         Control DllBox(string stem)
         {
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(3, 10, 3, 0), MaximumSize = new Size(Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), 0) };
             row.Controls.Add(new Label { Text = "DLSS motion-vector DLL:", AutoSize = true, Font = Ui.Bold, Margin = new Padding(0, 6, 4, 0) });
             row.Controls.Add(new Label { Text = MvDll.Installed(stem) + " installed by an earlier release, no longer used", AutoSize = true, Margin = new Padding(0, 6, 12, 0) });
             var b = new Button { Text = "Remove", AutoSize = true, Margin = new Padding(0) };
-            b.Click += (s, e) => { MessageBox.Show(this, MvDll.Uninstall(stem), "VisionALVR"); Render(); };
+            b.Click += (s, e) => { MessageBox.Show(this, MvDll.Uninstall(stem), "AirFrameXR"); Render(); };
             row.Controls.Add(b);
             return row;
         }

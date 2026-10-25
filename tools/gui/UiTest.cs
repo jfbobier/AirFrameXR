@@ -18,14 +18,14 @@ using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     /// The suggestions panel on its own, fed with fixture metrics and the fixture logs (what the results page shows below the verdict).
     class AdviceHost : DpiForm
     {
         public AdviceHost()
         {
-            Text = "VisionALVR - suggestions"; Font = Ui.Body; BackColor = Color.White; Icon = Ui.AppIcon();
+            Text = "AirFrameXR - suggestions"; Font = Ui.Body; BackColor = Color.White; Icon = Ui.AppIcon();
             var res = new Results { EncodeP95 = 9.0, SceneRan = true, HeadSamplesPerS = 60, HeadGapP95Ms = 22, SameTsPct = 9 };
             var panel = Advice.Panel(Advice.From(res, new Handshake { Rates = new List<double> { 90, 100 } }, 90, true, LogFacts.Read(Paths.Logs, Games.Dir), null));
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
@@ -155,9 +155,9 @@ namespace VisionALVR
         static FwReport DemoFirewall()
         {
             var r = new FwReport { State = FirewallState.Allowed, Headline = "Windows Firewall lets this folder's alvr_host.exe in. 3 leftover rule(s) can be removed." };
-            r.Rules.Add(new FwRule { Name = "{1}", DisplayName = "VisionALVR (alvr_host)", Direction = "Inbound", Action = "Allow", Profile = "Any", Protocol = "Any", Enabled = true, InPlace = true, Status = "in place: lets this folder in", Program = @"C:\Users\Someone With A Long Name\Downloads\VisionALVR-0.5\VisionALVR\bin\alvr_host.exe" });
+            r.Rules.Add(new FwRule { Name = "{1}", DisplayName = "AirFrameXR (alvr_host)", Direction = "Inbound", Action = "Allow", Profile = "Any", Protocol = "Any", Enabled = true, InPlace = true, Status = "in place: lets this folder in", Program = @"C:\Users\Someone With A Long Name\Downloads\AirFrameXR-0.5\AirFrameXR\bin\alvr_host.exe" });
             r.Rules.Add(new FwRule { Name = "{2}", DisplayName = "alvr_host.exe", Direction = "Inbound", Action = "Allow", Profile = "Public", Protocol = "TCP", Enabled = true, Propose = true, Status = "redundant: the rule above already covers all protocols", Program = @"C:\x\alvr_host.exe" });
-            r.Rules.Add(new FwRule { Name = "{3}", DisplayName = "alvr_host.exe", Direction = "Inbound", Action = "Allow", Profile = "Public", Protocol = "UDP", Enabled = true, Propose = true, Status = "stale: the file is gone (C:\\Old\\VisionALVR\\bin\\alvr_host.exe)", Program = @"C:\Old\alvr_host.exe" });
+            r.Rules.Add(new FwRule { Name = "{3}", DisplayName = "alvr_host.exe", Direction = "Inbound", Action = "Allow", Profile = "Public", Protocol = "UDP", Enabled = true, Propose = true, Status = "stale: the file is gone (C:\\Old\\AirFrameXR\\bin\\alvr_host.exe)", Program = @"C:\Old\alvr_host.exe" });
             r.Rules.Add(new FwRule { Name = "{4}", DisplayName = "ALVR Streamer (other copy)", Direction = "Inbound", Action = "Allow", Profile = "Private, Public", Protocol = "Any", Enabled = true, Status = "another copy of alvr_host.exe (left alone)", Program = @"D:\ALVR\alvr_host.exe" });
             return r;
         }
@@ -204,7 +204,7 @@ namespace VisionALVR
                 foreach (var line in File.ReadAllLines(file))
                 {
                     if (line.Trim().Length == 0 || line.TrimStart().StartsWith("#")) continue;
-                    var d = global::VisionALVR.Json.Parse(line);
+                    var d = global::AirFrameXR.Json.Parse(line);
                     n++;
                     if (d.TryGetValue("dump", out var lab)) { dump(Convert.ToString(lab)); foreach (var c in f.Sent) o.AppendLine("sent " + c); continue; }
                     if (d.TryGetValue("ui", out var ui)) { f.Sent.Clear(); f.UiAction(Convert.ToString(ui), d.TryGetValue("value", out var uv) ? Convert.ToString(uv) : ""); continue; }

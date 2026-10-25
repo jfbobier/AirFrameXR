@@ -1,6 +1,6 @@
 //! Precise waits for the clock and sender threads: a high-resolution waitable timer for the bulk of the wait, then a short spin for the
 //! last stretch. Windows' own timer slack decides the spin margin (the timer wakes up to ~0.5 ms late at worst); the old sleep-then-spin spun
-//! 1-1.5 ms per tick, a large share of a core at 100 Hz. `VISIONALVR_SPIN_US` overrides the margin (default 600).
+//! 1-1.5 ms per tick, a large share of a core at 100 Hz. `AIRFRAMEXR_SPIN_US` overrides the margin (default 600).
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
@@ -17,7 +17,7 @@ mod sys {
 
 fn spin_margin() -> Duration {
     static M: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
-    *M.get_or_init(|| Duration::from_micros(std::env::var("VISIONALVR_SPIN_US").ok().and_then(|v| v.parse().ok()).unwrap_or(600)))
+    *M.get_or_init(|| Duration::from_micros(std::env::var("AIRFRAMEXR_SPIN_US").ok().and_then(|v| v.parse().ok()).unwrap_or(600)))
 }
 
 #[cfg(windows)]

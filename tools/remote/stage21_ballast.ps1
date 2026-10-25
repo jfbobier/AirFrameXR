@@ -2,7 +2,7 @@
 #   builder.sh put tools/stability/vram_ballast.cpp _tmp/vram_ballast.cpp ; builder.sh ps tools/remote/stage21_ballast.ps1
 $ErrorActionPreference = 'Continue'
 $start = Get-Date
-$root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
+$root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
 $bdir = "$root\build\stability"
 New-Item -ItemType Directory -Force $bdir | Out-Null
 New-Item -ItemType Directory -Force "$root\logs" | Out-Null

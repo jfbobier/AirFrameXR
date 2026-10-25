@@ -37,7 +37,7 @@ Goal: once per setup (PC + router + Vision Pro), find the settings that give the
    - *Recommended*: the knee of the front (most quality per millisecond).
    - *Best quality*: the best quality within +8 ms of the fastest.
    Each with: resolution per eye, foveation, preset, AQ, split, bitrate, latency split (encode / network / decode), quality vs
-   today's settings. The choice is written to `session.json` (resolution, foveation, bitrate) and `visionalvr.json` (preset, AQ,
+   today's settings. The choice is written to `session.json` (resolution, foveation, bitrate) and `airframexr.json` (preset, AQ,
    split: today hardcoded in `nvidia_profile.rs`, they become profile defaults that the benchmark can override).
 
 ## Build steps (each testable on the builder without the headset, except 1 and 3)
@@ -45,7 +45,7 @@ Goal: once per setup (PC + router + Vision Pro), find the settings that give the
   host scene renderer, recon/NVDEC readback, display-space metric, phase 2 headless (`alvr_host --benchmark-quality`).
 - S2: phase 1 with the decode-capability check (most exists: `--benchmark-network`).
 - S3: phase 3, scoring, the configure.exe wizard (three proposals, apply).
-- S4: preset / AQ / split read from `visionalvr.json`.
+- S4: preset / AQ / split read from `airframexr.json`.
 
 ## Third-party code and data (to confirm)
 - Draco (Google, Apache-2.0) and cgltf (MIT) only in the offline converter; stb_image (public domain) in the host to decode the

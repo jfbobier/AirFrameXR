@@ -10,7 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public class WizardForm : DpiForm
     {
@@ -66,7 +66,7 @@ namespace VisionALVR
         {
             this.check = check;
             this.demo = demo;
-            Text = cmd.Contains("--diagnose") ? "VisionALVR \u2013 Diagnose" : "VisionALVR \u2013 Setup";
+            Text = cmd.Contains("--diagnose") ? "AirFrameXR \u2013 Diagnose" : "AirFrameXR \u2013 Setup";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
@@ -152,7 +152,7 @@ namespace VisionALVR
                     break;
                 case 4: page = PageTests(); next.Enabled = false; break;
                 case 5: page = PageResults(); break;
-                default: page = PageConfig(); next.Text = "Save and start VisionALVR"; break;
+                default: page = PageConfig(); next.Text = "Save and start AirFrameXR"; break;
             }
             Ui.LateScale(page, this);   // built after the window loaded: scaled by hand
             page.Dock = DockStyle.Fill;
@@ -196,12 +196,12 @@ namespace VisionALVR
         Control PageGate()
         {
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
-            p.Controls.Add(H("This PC cannot run VisionALVR"));
+            p.Controls.Add(H("This PC cannot run AirFrameXR"));
             var gpu = check != null && check.TryGetValue("gpu", out var g) ? g as Dictionary<string, object> : null;
             var reason = check != null && check.TryGetValue("reason", out var r) ? r as string : "the system check did not run (alvr_host.exe missing?)";
             p.Controls.Add(Ui.Line(reason));
             if (gpu != null) p.Controls.Add(Ui.Line($"Detected: {(gpu.TryGetValue("name", out var n) ? n : "?")}, driver {(gpu.TryGetValue("driver", out var d) ? d : "?")}"));
-            p.Controls.Add(Ui.Line("VisionALVR streams with NVIDIA's hardware video encoder (NVENC): it needs an NVIDIA GPU and a driver with NVENC API 12.2 or newer (any recent driver; update it from nvidia.com if this fails)."));
+            p.Controls.Add(Ui.Line("AirFrameXR streams with NVIDIA's hardware video encoder (NVENC): it needs an NVIDIA GPU and a driver with NVENC API 12.2 or newer (any recent driver; update it from nvidia.com if this fails)."));
             return p;
         }
 
@@ -234,7 +234,7 @@ namespace VisionALVR
             // Windows Firewall: rules are per executable path; without an allow rule the headset is not found and the stream may not connect
             var fwLine = new FlowLayoutPanel { AutoSize = true };
             var fwLabel = Ui.Line("Checking the Windows Firewall...");
-            var fwFix = new Button { Text = "Allow VisionALVR through the firewall (asks for administrator)", AutoSize = true, Visible = false };
+            var fwFix = new Button { Text = "Allow AirFrameXR through the firewall (asks for administrator)", AutoSize = true, Visible = false };
             fwLine.Controls.Add(fwLabel); fwLine.Controls.Add(fwFix);
             p.Controls.Add(fwLine);
             void fwCheck()
@@ -260,7 +260,7 @@ namespace VisionALVR
                 foreach (ListViewItem it in found.Items) it.Selected = ((string[])it.Tag)[1] == QuestUsb.Address;
             });
             p.Controls.Add(usbHint);
-            // the headsets we already know: paired in session.json, saved in visionalvr.json (they must be in the list AND selected)
+            // the headsets we already know: paired in session.json, saved in airframexr.json (they must be in the list AND selected)
             var hsPaired = Session.Headset(session);
             if (hsPaired != null) AddRow(hsPaired.Item1, hsPaired.Item3, hsPaired.Item2, "paired before", true);
             if (!string.IsNullOrEmpty(settings.HeadsetIp)) AddRow(settings.HeadsetHost, settings.HeadsetIp, string.IsNullOrEmpty(settings.HeadsetName) ? "Apple Vision Pro" : settings.HeadsetName, "saved address", true);
@@ -383,7 +383,7 @@ namespace VisionALVR
                 hsBar.Visible = false;
                 if (caps == null)
                 {
-                    if (hsStatus.ForeColor != Color.Firebrick) { hsStatus.Text = "The headset did not answer. Is the ALVR app open on it, on the same network (and is VisionALVR allowed through the firewall)?"; hsStatus.ForeColor = Color.DarkOrange; }
+                    if (hsStatus.ForeColor != Color.Firebrick) { hsStatus.Text = "The headset did not answer. Is the ALVR app open on it, on the same network (and is AirFrameXR allowed through the firewall)?"; hsStatus.ForeColor = Color.DarkOrange; }
                     hsRetry.Visible = true; hsSkip.Visible = true;
                     return;
                 }
@@ -424,7 +424,7 @@ namespace VisionALVR
             row("Panel resolution per eye", $"{hs.PanelW} x {hs.PanelH}");
             row("Refresh rates", string.Join(", ", hs.Rates.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture))) + " Hz");
             row("Foveated encoding", hs.Foveation ? "supported" : "not advertised");
-            row("Video codec", $"HEVC{(hs.EncHigh ? " (high profile)" : "")}{(hs.Enc10 ? ", 10-bit" : ", 8-bit")}{(hs.EncAv1 ? "; the headset also decodes AV1 (VisionALVR encodes HEVC)" : "")}");
+            row("Video codec", $"HEVC{(hs.EncHigh ? " (high profile)" : "")}{(hs.Enc10 ? ", 10-bit" : ", 8-bit")}{(hs.EncAv1 ? "; the headset also decodes AV1 (AirFrameXR encodes HEVC)" : "")}");
             row("Colour", $"{(hs.PreferFull ? "full range" : "limited range")}, encoding gamma {hs.Gamma:0.00}{(hs.PreferHdr ? ", HDR preferred" : "")}");
             row("Microphone", hs.MicRate > 0 ? $"{hs.MicRate} Hz" : "none advertised");
             Ui.LateScale(g, this);
@@ -503,7 +503,7 @@ namespace VisionALVR
                     modePanel.Controls.Add(net);
                     modePanel.Controls.Add(Ui.Line("The bitrate depends on it: pick what describes your Wi-Fi (you can change the value at the end)."));
                 }
-                else modePanel.Controls.Add(Ui.Line("No profile matches this headset yet. Import one shared by another user (see docs\\HMD_PROFILES.md, the VisionALVR Discord), or choose the manual configuration."));
+                else modePanel.Controls.Add(Ui.Line("No profile matches this headset yet. Import one shared by another user (see docs\\HMD_PROFILES.md, the AirFrameXR Discord), or choose the manual configuration."));
                 var import = new Button { Text = profile != null ? "Import another profile..." : "Import a profile...", AutoSize = true };
                 import.Click += (s, e) => ImportProfile(real);
                 modePanel.Controls.Add(import);
@@ -515,7 +515,7 @@ namespace VisionALVR
                 session = Session.Load();
                 const string V = "session_settings.video.";
                 var mbps = Json.Num(session, V + "bitrate.mode.ConstantMbps", 0);
-                modePanel.Controls.Add(Ui.Line("Your current settings (config\\session.json and visionalvr.json) are used exactly as they are: the tests check them on this PC and your link, and nothing is changed or searched."));
+                modePanel.Controls.Add(Ui.Line("Your current settings (config\\session.json and airframexr.json) are used exactly as they are: the tests check them on this PC and your link, and nothing is changed or searched."));
                 modePanel.Controls.Add(Ui.Line($"Now: {(int)Json.Num(session, V + "preferred_fps", 90)} Hz, {(mbps > 0 ? mbps.ToString("0", CultureInfo.InvariantCulture) + " Mbps" : "adaptive bitrate")}, encoding '{settings.EncodeProfile}'. At the end you can still change anything."));
                 var imp = new Button { Text = "Import my working ALVR session.json...", AutoSize = true };
                 imp.Click += (s, e) => { if (AlvrImport.Run(this)) RenderMode(real); };
@@ -563,7 +563,7 @@ namespace VisionALVR
         void ImportProfile(bool real)
         {
             string path;
-            using (var dlg = new OpenFileDialog { Title = "Import a headset profile", Filter = "VisionALVR profile (*.json)|*.json|All files (*.*)|*.*", CheckFileExists = true })
+            using (var dlg = new OpenFileDialog { Title = "Import a headset profile", Filter = "AirFrameXR profile (*.json)|*.json|All files (*.*)|*.*", CheckFileExists = true })
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 path = dlg.FileName;
@@ -664,7 +664,7 @@ namespace VisionALVR
             {
                 bool? heard = null;
                 if (auto) return null;   // the unattended harness run has nobody to ask
-                try { Invoke((Action)(() => heard = MessageBox.Show(this, "The scene played music (Sakura Breeze) while you were inside it.\n\nDid you hear it in the headset?", "VisionALVR \u2013 audio test", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)); } catch { }
+                try { Invoke((Action)(() => heard = MessageBox.Show(this, "The scene played music (Sakura Breeze) while you were inside it.\n\nDid you hear it in the headset?", "AirFrameXR \u2013 audio test", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)); } catch { }
                 return heard;
             };
             ctx.AskCable = () => { try { Invoke((Action)(() => { using (var f = new CableForm()) f.ShowDialog(this); })); } catch { } };
@@ -739,7 +739,7 @@ namespace VisionALVR
             testCancel.Enabled = false;
             for (int i = 0; i < steps.Count; i++) UpdateRow(steps[i]);
             var failed = steps.Count(x => x.State == TestState.Failed);
-            testStatus.Text = failed == 0 ? "Done." : $"Done: {failed} test(s) failed (details in logs\\VisionALVR.log); the proposal uses defaults where a measurement is missing.";
+            testStatus.Text = failed == 0 ? "Done." : $"Done: {failed} test(s) failed (details in logs\\AirFrameXR.log); the proposal uses defaults where a measurement is missing.";
             testStatus.ForeColor = failed == 0 ? Color.SeaGreen : Color.DarkOrange;
             proposal = profile != null ? Proposal.FromProfile(hs, profile, variantId, ctxFps, ctxScale, ctxFoveation) : Proposal.Build(hs, ctx.R, ctxFps);
             next.Enabled = true;
@@ -765,7 +765,7 @@ namespace VisionALVR
             p.Controls.Add(H("Your configuration"));
             p.Controls.Add(Ui.Line(autoconfig && proposal != null
                 ? "Proposed from your headset and the tests, with the reason next to each value. Change anything you like."
-                : "Your current settings (from config\\session.json and visionalvr.json). Change anything you like."));
+                : "Your current settings (from config\\session.json and airframexr.json). Change anything you like."));
             session = Session.Load();
             settingsPanel = new SettingsPanel(settings, session) { Dock = DockStyle.Fill };
             settingsPanel.Load();
@@ -793,13 +793,13 @@ namespace VisionALVR
             string err = null;
             if (settingsPanel == null || !settingsPanel.Save(out err)) { MessageBox.Show(this, err ?? "Cannot save the settings first.", "Export profile"); return; }
             var data = HmdProfiles.BuildExport(hs, ctx?.R, settings, author, networkLabel);
-            using (var dlg = new SaveFileDialog { Title = "Export this configuration as a profile", Filter = "VisionALVR profile (*.json)|*.json", FileName = ((string)data["id"]) + ".profile.json", OverwritePrompt = true })
+            using (var dlg = new SaveFileDialog { Title = "Export this configuration as a profile", Filter = "AirFrameXR profile (*.json)|*.json", FileName = ((string)data["id"]) + ".profile.json", OverwritePrompt = true })
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 try { Json.Save(dlg.FileName, data); }
                 catch (Exception e) { MessageBox.Show(this, "Cannot write the file: " + e.Message, "Export profile"); return; }
                 Log.Write("INFO", $"profile exported to {dlg.FileName}");
-                MessageBox.Show(this, $"Saved: {dlg.FileName}\n\nShare this file (for example on the VisionALVR Discord). Whoever imports it sees what ALVR declared about your headset and is warned if theirs differs.", "Export profile");
+                MessageBox.Show(this, $"Saved: {dlg.FileName}\n\nShare this file (for example on the AirFrameXR Discord). Whoever imports it sees what ALVR declared about your headset and is warned if theirs differs.", "Export profile");
             }
         }
 

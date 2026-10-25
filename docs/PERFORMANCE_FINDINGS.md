@@ -32,13 +32,13 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 
 | What | What happened | Lesson |
 |---|---|---|
-| **Latency modes "low" / "auto"** (pick `newest`) | superseded 15-30% of frames in GPU-bound games (Cyberpunk streamed 77-80 fps of 94-95 rendered; Dead Space 59 of 87). | When frame times jitter, two frames land inside one period and "newest" throws one away. Removed; the in-order queue is the only user-facing behaviour. `VISIONALVR_PICK` stays a lab hook. |
+| **Latency modes "low" / "auto"** (pick `newest`) | superseded 15-30% of frames in GPU-bound games (Cyberpunk streamed 77-80 fps of 94-95 rendered; Dead Space 59 of 87). | When frame times jitter, two frames land inside one period and "newest" throws one away. Removed; the in-order queue is the only user-facing behaviour. `AIRFRAMEXR_PICK` stays a lab hook. |
 | **Slot pacing v1-v6** (deliver exactly one frame per period at a fixed phase, hole filling) | each version regressed Cyberpunk: boundaries sat on the game's completion phase, frames were superseded just before their slot, bunching grew, the headset got about 60 fps with holes. | A compositor loop only works if the app is throttled at frame start; our `xrWaitFrame` released the app every tick regardless of GPU progress. Fixed later by the shim's GPU throttle and running start; the slot idea itself was dropped. |
 | **Head stamp `newest` + exact homography warp, "compositor-like" mode** | duplicates fell to about 0 but the moving-head feel did not improve. | The frame deficit was not the root cause of the tremble. Removed. |
 | **Predicting a missing head sample** (`video.predict_missing_head`, lab `OVRSHIM_INORDER_POSE`) | the predicted timestamp matched one of the client's own only 16% of the time (client timestamps jitter by tens of ns); the client looks the pose up by timestamp, so the picture came out misplaced (tilted, offset, even the head-locked title). | Never invent timestamps; the client's lookup is exact. Opt-in, off. |
 | **`video.head_in_order`** (consume head samples in order, wait up to 8 ms) | lab: duplicates 244 -> 11 and 3.7 ms less pose-to-display. Headset: Cyberpunk 13% -> 7% duplicates, Dead Space unchanged at 20%, and a one-frame flash of the Cyberpunk warning page, shifted out of place. | Tracking packets arrive unevenly (gaps over 12 ms on 13-19% of samples) so the wait often times out; the lab does not capture that. Removed in IPC v18. |
 | **Send pacing variants** (`vsync`, slot, `asap`) | no visible gain over `asap`; `asap` stayed. | |
-| **Zero-copy encoder input** | about 0.2 ms. | Below the 1 ms bar; it stays on by default (`VISIONALVR_ZEROCOPY=0` disables) because it costs nothing. |
+| **Zero-copy encoder input** | about 0.2 ms. | Below the 1 ms bar; it stays on by default (`AIRFRAMEXR_ZEROCOPY=0` disables) because it costs nothing. |
 | **Lower render scale (0.75)** | did not help the moving-head feel. | The GPU budget is not what differs from SteamVR. |
 | **HEVC QP-delta map** (foveal emphasis) | built and proven against a Python oracle, never judged on the headset. | Milder foveation plus a QP map is encode-bound on a one-engine GPU. Opt-in. |
 | **Client queue drain** (`video.client_queue_drain`) | never fired in the lab; untested on the headset. | Opt-in. |
@@ -108,7 +108,7 @@ Measured basis (RTX 5090, Vision Pro 100 Hz, nights of 2026-10-15/16): a GPU-bou
 about 3 ms, a copy about 50 us at 45 MB); the headset's tracking samples miss 1-2 % of boundaries (up to 13 % in the lab, where the phase is
 random per run). Bandwidth is not the lever, serialization and queue depth are.
 
-1. **REMOVED 2026-10-17 (never engaged on any headset: virtualdesktop-openxr calls WaitToBeginFrame right before the submit, so there was nothing to hold; the setting, tick, IPC field and lab A/B scenarios are gone, IPC v30).** Just-in-time release (`ipc.h appPacingJit`, settings `video.game_pacing` jit | queue, default jit; `--game-pacing`, `VISIONALVR_GAME_PACING`).
+1. **REMOVED 2026-10-17 (never engaged on any headset: virtualdesktop-openxr calls WaitToBeginFrame right before the submit, so there was nothing to hold; the setting, tick, IPC field and lab A/B scenarios are gone, IPC v30).** Just-in-time release (`ipc.h appPacingJit`, settings `video.game_pacing` jit | queue, default jit; `--game-pacing`, `AIRFRAMEXR_GAME_PACING`).
    The shim's queue throttle let the game start a frame while one was still on the GPU, so a GPU-bound game ran 2-3 frames ahead. Now the
    release is also held until the newest submitted frame is predicted to finish on the GPU (last GPU completion + frames pending x the EMA of
    the GPU time per frame, measured from the per-slot GPU-done events) minus the app's CPU time envelope (release -> submit) and a 1 ms lead:
@@ -332,7 +332,7 @@ after tick 8.6 ms against 3.9), arrived later at the headset, waited 3 ms longer
 never missed its tick (0.5 % repeated periods against 1.2-2.3 % in the earlier runs), at the same measured latency (67 ms p50: the headset
 displays at its next tick either way). The phase lock had been aiming the earliest arrivals 3 ms before the render tick with an arrival
 spread of 8 ms, so a share of the frames landed after the tick and were shown a tick late: that is the "lower performance" of the evening.
-`VISIONALVR_PHASE_MARGIN_MS=7` with debug off reproduced the cure by hand ("visual frame generation aspect was MUCH BETTER"); the default is
+`AIRFRAMEXR_PHASE_MARGIN_MS=7` with debug off reproduced the cure by hand ("visual frame generation aspect was MUCH BETTER"); the default is
 now 7 ms. Open: why debug mode costs 5 ms per frame (the CSV writers are buffered; the NVML sampler or the event writer are the suspects).
 
 Same margin with generation off (checked right after): the phase lock's arrival spread is 7.9-9.0 ms without generation (End of Abyss 372

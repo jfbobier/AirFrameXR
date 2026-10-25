@@ -1,16 +1,13 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
-    <img src="docs/images/logo.png" alt="VisionALVR" width="420">
-  </picture>
+  <img src="docs/images/airframexr-banner.png" alt="AirFrameXR: Wireless XR. Higher Frames." width="100%">
 </p>
 
-# VisionALVR
+# AirFrameXR
 
-**Stream PC VR games to any ALVR headset, without SteamVR, through one lean NVIDIA-accelerated chain, with frame generation built in.**
+**A wireless-first OpenXR runtime for NVIDIA GPUs: it renders, encodes, paces and generates frames as one pipeline, and streams to any headset that speaks the ALVR protocol (v20).**
 Made for the Apple Vision Pro and 90 Hz; tested on the Quest 3 too.
 
-VisionALVR replaces the SteamVR + ALVR server pair on the PC with a single streamer of about 20 MB: an OpenXR runtime, a compositor shim and
+AirFrameXR replaces the SteamVR + ALVR server pair on the PC with a single streamer of about 20 MB: an OpenXR runtime, a compositor shim and
 the ALVR protocol in one process chain, written for NVIDIA GPUs end to end. Because it owns the whole path from the game's swapchain to the
 Wi-Fi packet, every stage is tuned against the next one instead of stacked mods negotiating through SteamVR:
 
@@ -27,7 +24,7 @@ Wi-Fi packet, every stage is tuned against the next one instead of stacked mods 
   read, a launcher that proposes from measurements and never decides for you.
 
 > [!WARNING]
-> **ALPHA SOFTWARE (0.4): TEST AT YOUR OWN RISK.**
+> **VERSION 1.0: TEST AT YOUR OWN RISK.**
 > On real headsets it has been tested by one person, on one PC (RTX 5090) with one Vision Pro and one Quest 3, frame generation included
 > (plus automated tests on a laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
 > (both undone by the launcher's OpenXR runtime button, "Switch back"). Keep comfort in mind: a frozen or juddering image in a headset can cause
@@ -38,13 +35,18 @@ Apple Vision Pro**. That is what is built, tuned and tested here.
 
 This is a **personal project**. It targets NVIDIA because that is what I run, and the Vision Pro because that is my headset.
 It is not affiliated with or supported by NVIDIA, Apple or the ALVR project.
+
+**Relationship to ALVR.** AirFrameXR implements the ALVR streaming protocol (version 20) so that the existing ALVR headset apps work with it, and it is
+built on ALVR's open-source server libraries (MIT). It is a separate project: it is **not ALVR**, not affiliated with or endorsed by the ALVR
+project, and the ALVR developers' own streamer remains the place for SteamVR-based streaming. Formerly published as "VisionALVR" (before 1.0); the
+name was changed at the ALVR developers' request, so that nothing suggests an affiliation.
 - **Other headsets**: the ALVR protocol is device agnostic, so **other headsets with an ALVR client (Quest, Pico, ...) are expected to
   work**. The Quest 3 has been tested here with the Meta-store ALVR client, frame generation included; others are not, and the encoder
   settings, defaults and the idle chroma-key frame are tuned for the Vision Pro. Reports and small fixes for them are welcome, with no
   promise of an answer or a fix; nothing that makes the Vision Pro path worse will be merged.
 - **A plain green screen when the headset connects is normal and intended**: it is the streamer's idle frame while no game runs. On the
   Vision Pro turn on the ALVR app's **Enable Chroma Keyed Passthrough** and the idle colour (#107C10, the App Store app's own key colour) becomes transparent: you see your room between
-  games and the game appears when it starts. If the headset stays green, the chroma key is not set. VisionALVR does not mirror the Windows
+  games and the game appears when it starts. If the headset stays green, the chroma key is not set. AirFrameXR does not mirror the Windows
   desktop into the headset between sessions (Virtual Desktop's way) by design: see-through is the cleaner idle state.
 - **AMD / Intel GPUs**: not supported and not planned. The encode path is NVENC only; you are welcome to fork and adapt it.
   [ALVR](https://github.com/alvr-org/ALVR) itself supports them.
@@ -53,13 +55,13 @@ This project **does not aim to compete with existing commercial applications**. 
 already open source [ALVR](https://github.com/alvr-org/ALVR) as the infrastructure.
 
 > [!NOTE]
-> **Game compatibility is not the goal.** VisionALVR is a lean, low-latency path for the games that work with it; it does not aim
+> **Game compatibility is not the goal.** AirFrameXR is a lean, low-latency path for the games that work with it; it does not aim
 > to run every VR game. **For a game that does not work, use SteamVR + ALVR**: SteamVR is excellent at compatibility and at
 > configurability, and this project does not try to compete with that. In testing, the vast majority of **UEVR games**, the
 > **Luke Ross mods** and **native OpenXR / VR games** worked, but some games still have controller problems, crashes or both.
 > Not supported: SteamVR/OpenVR-only games (they need SteamVR).
 
-VisionALVR replaces the SteamVR + ALVR server pair on the PC with one lean streamer. It speaks the ALVR 20.14.1 protocol
+AirFrameXR replaces the SteamVR + ALVR server pair on the PC with one lean streamer. It speaks the ALVR 20.14.1 protocol
 unchanged, so the ALVR app on the headset sees an ordinary ALVR server. In between, it does less work:
 no SteamVR compositor, no extra frame copies between processes, and an encode path written for NVENC only.
 
@@ -71,7 +73,7 @@ flowchart LR
         V["VirtualDesktop-OpenXR<br/>OpenXR runtime, small patches"]
         S["OVRShim (LibOVRRT64_1.dll)<br/>composes layers, paces the game<br/>to 1/3, 1/2, 2/3 of the display rate,<br/>10-bit frame ring in shared GPU memory"]
         H["alvr_host.exe<br/>frame generation (NVIDIA Optical Flow,<br/>edge-aware synthesis), head-pose stamping,<br/>foveated encoding, NVENC HEVC 10-bit split encode,<br/>ALVR 20.14 server core"]
-        L["VisionALVR.exe launcher<br/>settings, game records,<br/>proposals, recenter"]
+        L["AirFrameXR.exe launcher<br/>settings, game records,<br/>proposals, recenter"]
         G --> V --> S --> H
         G -.-> D -.->|same process,<br/>no copy| S
         L <-.->|commands, events| H
@@ -98,7 +100,7 @@ OpenXR game
 The windows of 0.5, at 1080p and 125 % scale, rendered by the project's own UI harness with demo data (a made-up game history and headset, no real person's data).
 Regenerate them with `python3 harness/readme_screens.py`.
 
-**One front door.** Double-click `VisionALVR.exe`: a card per tool, the OpenXR runtime switch (it switches back, too), and reviews of the OpenXR layers and the firewall rules.
+**One front door.** Double-click `AirFrameXR.exe`: a card per tool, the OpenXR runtime switch (it switches back, too), and reviews of the OpenXR layers and the firewall rules.
 
 <p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, Logs and performance, Diagnose, Setup wizard, and the OpenXR runtime row"></p>
 
@@ -164,10 +166,10 @@ The desktop mirror (the Windows desktop floating in front of you between games, 
   at every game start) turns the tracking space to your current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md),
   [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md). Not automatic
   by design: a game that holds a steady 70-75 fps is often better left alone.
-- **New in 0.5: the windows.** Double-click **`VisionALVR.exe`** (the only file in the folder's root; a stub that opens the launcher) and pick a tool;
+- **New in 0.5: the windows.** Double-click **`AirFrameXR.exe`** (the only file in the folder's root; a stub that opens the launcher) and pick a tool;
   the launcher steps aside while a tool is open and comes back when you close it. Everything else sits in `bin\`.
   - **Launcher** (`bin\launcher.exe`): a card per tool, plus three switches that people kept asking for: the **OpenXR runtime** (shows the active one,
-    switches to VisionALVR, and the same button switches back to the previous runtime), the **OpenXR layers** review (some layers capture the
+    switches to AirFrameXR, and the same button switches back to the previous runtime), the **OpenXR layers** review (some layers capture the
     controllers before any runtime sees them; listed, switched off and on again reversibly) and the **firewall rules** review (finds the rule for
     this folder's exact `alvr_host.exe`, offers one only if none is in place, and lists leftovers from moved or deleted copies to clean up).
   - **Streamer** (`bin\streamer.exe`): live numbers as tiles (game, streamed and shown fps, bitrate, latency split, loss), display settings,
@@ -199,7 +201,7 @@ another role or another device are still heard, and games started as administrat
 mute your PC speakers (a checkbox in Settings, on by default) and puts the mute back when it closes, even after a crash.
 **Settings > Game audio capture** has the older route as a fallback: *Virtual cable (VB-CABLE)*. The streamer then makes the cable the default
 output for every role, mutes the speakers, holds the cable at 100 %, sets its format to plain 2-channel 48 kHz PCM and restores everything on exit; if no
-cable is installed it opens a dialog with the download page of VB-Audio (a separate product that VisionALVR neither distributes nor supports). The wizard's
+cable is installed it opens a dialog with the download page of VB-Audio (a separate product that AirFrameXR neither distributes nor supports). The wizard's
 *Audio output* test plays the Littlest Tokyo music (see the credits) and listens to it with the same API the host uses. Requires Windows 10 version 2004
 or newer for the default mode. The same code is checked end to end by the audio harnesses (below).
 
@@ -208,7 +210,7 @@ or newer for the default mode. The same code is checked end to end by the audio 
 ## Requirements
 - Windows 10/11, an **NVIDIA** GPU with a current driver (NVENC API 12.2+); RTX 40 series or newer recommended (several NVENC chips enable split encoding).
 - Apple Vision Pro with the **ALVR** app (20.14.x), PC and headset on the same LAN (Wi-Fi 6 on 5 GHz for the first Vision Pro; 6 GHz is for newer models and Quest 3). Other headsets with an ALVR client: see above.
-- **Wired connection**: a Meta Quest on USB works through **USB tethering** (the headset then appears to the PC as a network interface) or through [ADBForwarder](https://github.com/alvr-org/ADBForwarder) (ALVR's small adb helper; run it, open the ALVR app on the Quest, and use `127.0.0.1` as the headset address: the wizard shows a *Meta Quest on a USB cable?* link when nothing is found). VisionALVR itself does not run adb. The Vision Pro Developer Strap works as a network link the same way.
+- **Wired connection**: a Meta Quest on USB works through **USB tethering** (the headset then appears to the PC as a network interface) or through [ADBForwarder](https://github.com/alvr-org/ADBForwarder) (ALVR's small adb helper; run it, open the ALVR app on the Quest, and use `127.0.0.1` as the headset address: the wizard shows a *Meta Quest on a USB cable?* link when nothing is found). AirFrameXR itself does not run adb. The Vision Pro Developer Strap works as a network link the same way.
 - SteamVR and ALVR's own launcher closed while streaming (same ports).
 
 ## Recommended network setup
@@ -224,21 +226,21 @@ The stream is 100+ Mbit/s of low-latency video: the network matters more than th
 - Nothing else heavy on that access point while you play (downloads, other headsets).
 
 ## Install (users)
-Download the release zip, unzip it anywhere and double-click `VisionALVR.exe` (the launcher, the only file in the folder's root): switch the
-OpenXR runtime to VisionALVR once (one administrator prompt; the same button switches back), run the **Setup wizard** (pair the headset,
+Download the release zip, unzip it anywhere and double-click `AirFrameXR.exe` (the launcher, the only file in the folder's root): switch the
+OpenXR runtime to AirFrameXR once (one administrator prompt; the same button switches back), run the **Setup wizard** (pair the headset,
 tests, settings), then **Streamer** (keep it open while you play). Details, settings and logs: [docs/INSTALL.md](docs/INSTALL.md).
-The headset's address does not have to be fixed: VisionALVR dials the saved address, finds a paired headset again by name on its own,
+The headset's address does not have to be fixed: AirFrameXR dials the saved address, finds a paired headset again by name on its own,
 and the **Find headset...** button in its window searches the network, pairs a new headset or takes an address you type.
 `configure.exe` offers a shared **community profile** for your headset (JSON files, import/export, see [docs/HMD_PROFILES.md](docs/HMD_PROFILES.md); the
 starter Quest and Pico profiles are not verified yet), a manual configuration or your existing ALVR configuration, then tests the result on your PC and network.
 
 ## Build from source (contributors)
-VisionALVR builds **on Windows only** (MSVC, the Windows SDK and NVENC; cross-compiling from Linux is not supported). With the
+AirFrameXR builds **on Windows only** (MSVC, the Windows SDK and NVENC; cross-compiling from Linux is not supported). With the
 prerequisites installed ([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): Git, Rust, CMake, LLVM, NuGet, Visual Studio 2022 with C++,
 all available through `winget`, plus an NVIDIA driver):
 ```powershell
-git clone https://github.com/jfbobier/vision-alvr.git
-cd vision-alvr
+git clone https://github.com/jfbobier/AirFrameXR.git
+cd AirFrameXR
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 The first run fetches ALVR v20.14.1 and VirtualDesktop-OpenXR at pinned commits and builds them (10+ minutes, ~6 GB); the
@@ -253,7 +255,7 @@ See also [CONTRIBUTING.md](CONTRIBUTING.md).
 | `nvenc/hostlib/` | C++ library of the host: NVENC wrapper around ALVR's encoder, IPC, QP map, benchmark renderer + quality metric |
 | `nvenc/upstream/` | ALVR's encoder sources, vendored **unmodified** (checksums in `nvenc/upstream.sha256`; patched at build time by `tools/host/build.rs`) |
 | `ovrshim/` | OVRShim: the LibOVR-side driver loaded by VDXR (fork of VDXR's OVRNull): layer composition, frame ring, IPC |
-| `tools/gui/` | the C# WinForms tools: `Stub.cs` (root `VisionALVR.exe`), `Launcher.cs`, `VisionALVR.cs` (streamer), `Wizard.cs` / `Configure.cs` (`configure.exe`), `Performance.cs`, `Verdict.cs`, shared `Common.cs`; `UiTest.cs` is the UI harness's test program (not shipped) |
+| `tools/gui/` | the C# WinForms tools: `Stub.cs` (root `AirFrameXR.exe`), `Launcher.cs`, `AirFrameXR.cs` (streamer), `Wizard.cs` / `Configure.cs` (`configure.exe`), `Performance.cs`, `Verdict.cs`, shared `Common.cs`; `UiTest.cs` is the UI harness's test program (not shipped) |
 | `tools/install/` | portable-folder scripts (OpenXR runtime registration), shipped default session |
 | `tools/mock_client/` | headless ALVR client (Rust, ALVR's client_core) used by the harness |
 | `tools/probe/` | `xr_probe`: OpenXR test app (layers, input, pacing) |
@@ -308,14 +310,14 @@ the headset and the network, each by something whose behaviour is known exactly,
 
 How it is used: `python3 harness/simrig/run_sim.py build` once, then `run <scenario> --seconds 40`; results land in `harness/results/<UTC>_simrig_<name>/`
 with the verdict JSON, the viewer's CSVs and the host's debug session. `docs/DEVELOPMENT.md` has the full recipe, the builder setup and the
-profiles (`VISIONALVR_PROFILE`) that point the harness at your PC.
+profiles (`AIRFRAMEXR_PROFILE`) that point the harness at your PC.
 
 **Debug and release builds (the telemetry flavour).** The per-frame traces the lab needs cost CPU on every frame, so they are a compile-time
 flag. A **debug build** (the default of `python3 harness/run.py build ...`) keeps them: the shim's per-frame trace (`shim_frames.csv`: pose
 read, head-sample arrival, release, submit, publish), the host's frame fates and sent-frame CSVs, the audio-capture trace and a scheduler
 probe, written into a debug session folder when debug logging is on. The frame-by-frame analysis (`harness/frames.py`), the pacing and
 judder scenarios and the simrig need them. A **release build** (`--release`: cargo `--no-default-features`, the shim compiled with
-`VISIONALVR_RELEASE`) compiles them out; the periodic statistics behind Game history, Diagnose and its suggestions stay in both. Build one
+`AIRFRAMEXR_RELEASE`) compiles them out; the periodic statistics behind Game history, Diagnose and its suggestions stay in both. Build one
 with `python3 harness/run.py build host shim gui package` (debug) or `... package --release` (release; what a public release uses);
 `build.ps1` is the other way round (release by default, `debug` as a target). A debug package says so: its zip name ends in `-debug` and
 the windows show "version 0.5 (debug build)". New per-frame telemetry must sit behind the flag (`docs/DEVELOPMENT.md`).
@@ -325,17 +327,17 @@ in the description: the scenarios relevant to the change, their verdicts before 
 headset" is where this project started, and the harness exists because it was not enough. A PR that adds a scenario for the condition it
 fixes is the normal case. A change to the GUI needs `harness/ui_matrix.py` to stay at 0 FAIL (see [harness/README.md](harness/README.md): the rules it enforces).
 
-**Transferable.** Nothing in the harness is specific to VisionALVR except the IPC it hooks. A fake game with controllable cost and exact
+**Transferable.** Nothing in the harness is specific to AirFrameXR except the IPC it hooks. A fake game with controllable cost and exact
 vectors, a fake headset replaying recorded tracking imperfections, a viewer that reprojects like a client, and a judge that measures the
 picture rather than the counters, apply to any project that optimises the OpenXR-to-headset chain: another streamer, a compositor, a
 frame-generation layer. Take it.
 
 ## Credits
-VisionALVR stands on the shoulders of giants: the projects below made it possible and gave it solid foundations to build on.
+AirFrameXR stands on the shoulders of giants: the projects below made it possible and gave it solid foundations to build on.
 - **[ALVR](https://github.com/alvr-org/ALVR)** (MIT) by polygraphene and the alvr-org contributors: the foundational
   infrastructure this is built on, its streaming protocol, server core, networking, audio, foveated encoding and NVENC
   encoder code, and the [ALVR visionOS client](https://github.com/alvr-org/alvr-visionos) that runs on the headset.
-  VisionALVR exists because ALVR made wireless PC VR open.
+  AirFrameXR exists because ALVR made wireless PC VR open.
 - **[VirtualDesktop-OpenXR (VDXR)](https://github.com/mbucchia/VirtualDesktop-OpenXR)** (MIT) by Matthieu Bucchianeri and its
   contributors: the excellent, highly optimized OpenXR runtime every game here runs on; OVRShim started as its OVRNull sample.
   Thanks also for the many other OpenXR tools from the same author that the PC VR community relies on.
@@ -350,7 +352,7 @@ VisionALVR stands on the shoulders of giants: the projects below made it possibl
   in a textured room. Its music: "Sakura Breeze" by [Roa Music](https://soundcloud.com/roa_music1031), royalty-free music from
   [free-stock-music.com](https://www.free-stock-music.com), CC BY 3.0 ([licence](https://creativecommons.org/licenses/by/3.0/deed.en_US)), shortened and re-encoded.
 
-Details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). VisionALVR is not affiliated with or endorsed by the ALVR project,
+Details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). AirFrameXR is not affiliated with or endorsed by the ALVR project,
 Apple, NVIDIA, Virtual Desktop, OFXR-Bridge or VectorXR. Apple Vision Pro and visionOS are trademarks of Apple Inc.
 
 ## License

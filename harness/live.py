@@ -22,8 +22,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 def _local_env():
-    """tools/pc.local (gitignored): VISIONALVR_PC=user@host, VISIONALVR_HEADSET_IP=..., VISIONALVR_INSTALL=..., one KEY=VALUE per line."""
-    prof = os.environ.get("VISIONALVR_PROFILE")   # a machine: tools/pc.<profile>.local (e.g. VISIONALVR_PROFILE=5090); none: tools/pc.local
+    """tools/pc.local (gitignored): AIRFRAMEXR_PC=user@host, AIRFRAMEXR_HEADSET_IP=..., AIRFRAMEXR_INSTALL=..., one KEY=VALUE per line."""
+    prof = os.environ.get("AIRFRAMEXR_PROFILE")   # a machine: tools/pc.<profile>.local (e.g. AIRFRAMEXR_PROFILE=5090); none: tools/pc.local
     f = Path(__file__).resolve().parent.parent / "tools" / (f"pc.{prof}.local" if prof else "pc.local")
     if f.exists():
         for line in f.read_text().splitlines():
@@ -33,13 +33,13 @@ def _local_env():
 
 
 _local_env()
-PC = os.environ.get("VISIONALVR_PC", "user@pc")      # the test PC (ssh, key auth): set it in tools/pc.local or the environment
+PC = os.environ.get("AIRFRAMEXR_PC", "user@pc")      # the test PC (ssh, key auth): set it in tools/pc.local or the environment
 PC_USER = PC.split("@")[0]
-CLONE = os.environ.get("VISIONALVR_CLONE", rf"C:\Users\{PC_USER}\vision-alvr")   # the PC's checkout (tools/pc.local)
-INSTALL = os.environ.get("VISIONALVR_INSTALL", r"D:\_VR\VisionALVR")
+CLONE = os.environ.get("AIRFRAMEXR_CLONE", rf"C:\Users\{PC_USER}\AirFrameXR")   # the PC's checkout (tools/pc.local)
+INSTALL = os.environ.get("AIRFRAMEXR_INSTALL", r"D:\_VR\AirFrameXR")
 LOGS_LOCAL = ROOT / "logs" / "pilot3"
 RESULTS = ROOT / "harness" / "results" / "live"
-SCRATCH = Path(os.environ.get("VISIONALVR_SCRATCH", "/tmp/visionalvr-live"))
+SCRATCH = Path(os.environ.get("AIRFRAMEXR_SCRATCH", "/tmp/airframexr-live"))
 GAMES = {
     # exe name (for taskkill / shim log), how to launch (steam app id or a path), default scripted input
     # EA app version: launching the exe starts the EA app itself (it must be logged in); the mod loads with the game
@@ -52,7 +52,7 @@ GAMES = {
 # the probe "game": a light, regular app (cadence = the display rate) or random frame times; set per variant
 PROBE_CPU_MS = 1
 PROBE_LOAD = "fps:85:100"
-MUX = ["-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/visionalvr-ssh-%C", "-o", "ControlPersist=10m"]   # one connection for the many short commands (the PC's sshd drops some fresh ones)
+MUX = ["-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/airframexr-ssh-%C", "-o", "ControlPersist=10m"]   # one connection for the many short commands (the PC's sshd drops some fresh ones)
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", *MUX, PC]
 
 
@@ -101,11 +101,11 @@ def check():
         sys.exit(f"PC unreachable: {out[:200]}")
     print(ps(f"""
 'host elevated?'; ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators')
-'streamer running?'; [bool](Get-Process alvr_host,VisionALVR -ErrorAction SilentlyContinue)
+'streamer running?'; [bool](Get-Process alvr_host,AirFrameXR -ErrorAction SilentlyContinue)
 'steam running?'; [bool](Get-Process steam -ErrorAction SilentlyContinue)
 'install:'; Get-Item '{INSTALL}\\bin\\alvr_host.exe','{INSTALL}\\bin\\LibOVRRT64_1.dll','{INSTALL}\\bin\\virtualdesktop-openxr.dll' | Select-Object Name, LastWriteTime | Format-Table -AutoSize | Out-String
 'runtime registered:'; (Get-ItemProperty 'HKLM:\\SOFTWARE\\Khronos\\OpenXR\\1' -ErrorAction SilentlyContinue).ActiveRuntime
-'paired headset:'; Select-String -Path '{INSTALL}\\logs\\VisionALVR.log' -Pattern 'paired headset' | Select-Object -Last 1 | ForEach-Object {{ $_.Line }}
+'paired headset:'; Select-String -Path '{INSTALL}\\logs\\AirFrameXR.log' -Pattern 'paired headset' | Select-Object -Last 1 | ForEach-Object {{ $_.Line }}
 """))
 
 
@@ -142,7 +142,7 @@ def build(what, simrig=False, release=False):
     log(f"building {bld} on the PC")
     out = ps(f"""
 $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
-{"$env:VISIONALVR_SIMRIG_BUILD = '1'" if simrig else ""}
+{"$env:AIRFRAMEXR_SIMRIG_BUILD = '1'" if simrig else ""}
 Set-Location '{CLONE}'
 powershell -ExecutionPolicy Bypass -File build.ps1 {bld} {'' if release else 'debug'} 2>&1 | Select-String -Pattern 'RESULT|FAILED|== '
 Get-Content logs\\host_build.log -ErrorAction SilentlyContinue | Select-String -Pattern '^error' | Select-Object -First 5
@@ -155,10 +155,10 @@ Get-Content logs\\ovrshim_build.log -ErrorAction SilentlyContinue | Select-Strin
 
 def deploy():
     out = ps(f"""
-if (Get-Process alvr_host,VisionALVR -ErrorAction SilentlyContinue) {{ 'STREAMER RUNNING'; exit 1 }}
+if (Get-Process alvr_host,AirFrameXR -ErrorAction SilentlyContinue) {{ 'STREAMER RUNNING'; exit 1 }}
 $inst = '{INSTALL}'; $src = '{CLONE}\\src'
 $stamp = Get-Date -Format 'HHmm'
-$bak = "$inst\\..\\VisionALVR_backup_$(Get-Date -Format yyyyMMdd)"
+$bak = "$inst\\..\\AirFrameXR_backup_$(Get-Date -Format yyyyMMdd)"
 New-Item -ItemType Directory -Force $bak | Out-Null
 Copy-Item "$inst\\bin\\alvr_host.exe" "$bak\\alvr_host_$stamp.exe" -Force
 Copy-Item "$inst\\bin\\LibOVRRT64_1.dll" "$bak\\LibOVRRT64_1_$stamp.dll" -Force
@@ -171,7 +171,7 @@ Get-Item "$inst\\bin\\alvr_host.exe", "$inst\\bin\\LibOVRRT64_1.dll", "$inst\\bi
 
 
 BASE_SETTINGS = {
-    "display": {"gamma": 1.2}, "headset": {"ip": os.environ.get("VISIONALVR_HEADSET_IP", "")}, "debug": True,
+    "display": {"gamma": 1.2}, "headset": {"ip": os.environ.get("AIRFRAMEXR_HEADSET_IP", "")}, "debug": True,
     # the staged pipeline (tools/host/src/pipeline.rs): phase-paced sends, shim running start 2 ms, realtime GPU scheduling class
     "video": {"split_encode": "3", "send_pacing": "phase", "running_start_ms": 2.0, "boundary_offset_ms": 0, "gpu_priority": 0, "gpu_sched_class": 5},
 }
@@ -181,9 +181,9 @@ def write_settings(video_overrides, session_overrides):
     SCRATCH.mkdir(parents=True, exist_ok=True)
     s = json.loads(json.dumps(BASE_SETTINGS))
     s["video"].update(video_overrides or {})
-    f = SCRATCH / "visionalvr.json"
+    f = SCRATCH / "airframexr.json"
     f.write_text(json.dumps(s, indent=4))  # no BOM: the host rejects one
-    put(f, f"{INSTALL}/config/visionalvr.json".replace("\\", "/"))
+    put(f, f"{INSTALL}/config/airframexr.json".replace("\\", "/"))
     if session_overrides:
         # edit the ALVR session on the PC in place with plain text replacement (ConvertFrom/To-Json rewrites the whole file and can
         # flatten arrays and variants: a session.json rewritten that way once left the headset without a scene)
@@ -210,13 +210,13 @@ def start_host(auto_input="", synthetic=False, seconds=120):
     mode = f"--live --seconds {seconds}" if synthetic else "--shim --daemon"
     cmd = f'{INSTALL}\\bin\\alvr_host.exe --install-dir "{INSTALL}" {mode} --debug{extra}'
     ps(f"""
-schtasks /delete /tn visionalvr_live_host /f 2>$null | Out-Null
-schtasks /create /tn visionalvr_live_host /tr '{cmd}' /sc once /st 00:00 /rl HIGHEST /it /f | Out-Null
-schtasks /run /tn visionalvr_live_host | Out-Null
+schtasks /delete /tn airframexr_live_host /f 2>$null | Out-Null
+schtasks /create /tn airframexr_live_host /tr '{cmd}' /sc once /st 00:00 /rl HIGHEST /it /f | Out-Null
+schtasks /run /tn airframexr_live_host | Out-Null
 """)
     t0 = time.time()
     while time.time() - t0 < 60:
-        out = ps(f"Get-Content '{INSTALL}\\logs\\VisionALVR.log' -Tail 8")
+        out = ps(f"Get-Content '{INSTALL}\\logs\\AirFrameXR.log' -Tail 8")
         if "headset connected" in out and "host start" in out:
             log("host up, headset connected")
             return True
@@ -239,9 +239,9 @@ $cmd = "@echo off`r`nset XR_RUNTIME_JSON=""" + INSTALL + """\\bin\\virtualdeskto
     else:
         launch = f'start "" "steam://rungameid/{g["steam"]}"'
     ps(f"""
-schtasks /delete /tn visionalvr_live_game /f 2>$null | Out-Null
-schtasks /create /tn visionalvr_live_game /tr 'cmd /c {launch}' /sc once /st 00:00 /rl LIMITED /it /f | Out-Null
-schtasks /run /tn visionalvr_live_game | Out-Null
+schtasks /delete /tn airframexr_live_game /f 2>$null | Out-Null
+schtasks /create /tn airframexr_live_game /tr 'cmd /c {launch}' /sc once /st 00:00 /rl LIMITED /it /f | Out-Null
+schtasks /run /tn airframexr_live_game | Out-Null
 """)
     t0 = time.time()
     while time.time() - t0 < 90:
@@ -258,8 +258,8 @@ def stop_all(game):
     if game in GAMES:
         ps(f"Stop-Process -Name '{Path(GAMES[game]['exe']).stem}' -Force -ErrorAction SilentlyContinue")
         time.sleep(3)
-    ps("Stop-Process -Name alvr_host -Force -ErrorAction SilentlyContinue; Stop-Process -Name VisionALVR -Force -ErrorAction SilentlyContinue; "
-       "schtasks /delete /tn visionalvr_live_host /f 2>$null | Out-Null; schtasks /delete /tn visionalvr_live_game /f 2>$null | Out-Null")
+    ps("Stop-Process -Name alvr_host -Force -ErrorAction SilentlyContinue; Stop-Process -Name AirFrameXR -Force -ErrorAction SilentlyContinue; "
+       "schtasks /delete /tn airframexr_live_host /f 2>$null | Out-Null; schtasks /delete /tn airframexr_live_game /f 2>$null | Out-Null")
     time.sleep(2)
 
 
@@ -361,9 +361,9 @@ def run(variants_file, only=None, seconds=None):
         variants = [v for v in variants if v["name"] in only]
     RESULTS.mkdir(parents=True, exist_ok=True)
     results = []
-    # the variants overwrite the INSTALL's config\\visionalvr.json (headset, display, split...): keep the user's file and put it back at the end,
+    # the variants overwrite the INSTALL's config\\airframexr.json (headset, display, split...): keep the user's file and put it back at the end,
     # or a variant's leftovers (e.g. split_encode "off") silently become the user's configuration
-    keep = f"{INSTALL}\\config\\visionalvr.json"
+    keep = f"{INSTALL}\\config\\airframexr.json"
     ps(f"if ((Test-Path '{keep}') -and -not (Test-Path '{keep}.user-live')) {{ Copy-Item '{keep}' '{keep}.user-live' -Force }}")
     try:
         _run_variants(variants, results, seconds)

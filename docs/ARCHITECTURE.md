@@ -1,6 +1,6 @@
 # Architecture: the frame pipeline and its threads (v0.2)
 
-VisionALVR replaces the SteamVR + ALVR chain (three processes: the game, `vrcompositor`, `vrserver` with ALVR's driver)
+AirFrameXR replaces the SteamVR + ALVR chain (three processes: the game, `vrcompositor`, `vrserver` with ALVR's driver)
 with one runtime and one streamer process. What the multi-process chain gets for free, a thread and a one-deep buffer at
 every boundary, each stage keeping its own clock, v0.2 reproduces with threads. The principles come from what every working
 VR stack does (SteamVR's running start, Meta's Phase Sync, the OpenXR `xrWaitFrame` contract, ALVR's own send rule), see
@@ -17,7 +17,7 @@ VR stack does (SteamVR's running start, Meta's Phase Sync, the OpenXR `xrWaitFra
 |---|---|
 | the game | OpenXR app → VDXR (upstream, Oculus-emulation mode) → `LibOVRRT64_1.dll` = **OVRShim** (`ovrshim/driver.cpp`), which composes the layers into a side-by-side texture and hands it to the host |
 | `alvr_host.exe` | the streamer (`tools/host`): compositor boundary clock, encoder (ALVR's foveation pass + NVENC), ALVR's `server_core` for the connection, tracking, audio and the network |
-| `VisionALVR.exe` / `configure.exe` | GUIs (C#): launch, status, pairing; discovery is done by the host (`--discover`) |
+| `AirFrameXR.exe` / `configure.exe` | GUIs (C#): launch, status, pairing; discovery is done by the host (`--discover`) |
 
 Shim and host share one memory block (`ovrshim/ipc.h`, IPC v12): host → shim config, poses, display ticks, compositor
 pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock), heartbeat, haptics, diagnostics.
@@ -31,7 +31,7 @@ pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock
 | Shim GPU-complete wait → IPC publish | shim publisher thread (time-critical) | DXGI completion event per slot | the GPU |
 | Shim display clock (predicted display time to the game) | shim server thread (time-critical) | host vsync event | the host tick |
 | **Host clock**: display ticks to the shim, **compositor boundary** pick (newest complete frame → encoder mailbox; green idle frame at 30 fps with no game; empty boundary left empty) | host vsync thread (HIGHEST, sleep-then-spin) | ALVR's `duration_until_next_vsync` grid at the headset's refresh | nothing (one-deep mailboxes, newest wins) |
-| **Host intake**: IPC frame event → frame queue (two deep, oldest first; `VISIONALVR_INTAKE_DEPTH`), slot marked busy for the shim | host intake thread (HIGHEST) | the shim's publish event | nothing |
+| **Host intake**: IPC frame event → frame queue (two deep, oldest first; `AIRFRAMEXR_INTAKE_DEPTH`), slot marked busy for the shim | host intake thread (HIGHEST) | the shim's publish event | nothing |
 | **Host encoder**: foveation pass + NVENC on the picked slot (slot released when its copy is done), packets → sender queue | host encoder thread (HIGHEST) | encoder mailbox | the encode itself only; the main loop rebuilds the encoder under the same lock, only when no game runs |
 | **Host sender**: release each packet at its send time `asap` \| `vsync` (next tick) \| `phase` (boundary + encode-time envelope, default) → `send_video_nal` | host sender thread (HIGHEST) | sender queue | nothing |
 | Network send (shards over UDP/TCP) | ALVR sender thread (`server_core`) | | socket |

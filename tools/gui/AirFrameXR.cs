@@ -1,4 +1,4 @@
-// VisionALVR.exe: the runtime window. Checks the GPU and the OpenXR registration, starts the streamer host as soon as it opens
+// AirFrameXR.exe: the runtime window. Checks the GPU and the OpenXR registration, starts the streamer host as soon as it opens
 // (no start button), shows the headset / game state and the key numbers every 10 s, and offers the live settings (display gamma,
 // debug logging). Pairing and the one-time settings live in configure.exe.
 using System;
@@ -10,7 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public class RuntimeForm : DpiForm
     {
@@ -77,7 +77,7 @@ namespace VisionALVR
         {
             this.check = check;
             this.autoFind = autoFind;
-            Text = "VisionALVR \u2013 Streamer";
+            Text = "AirFrameXR \u2013 Streamer";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -90,7 +90,7 @@ namespace VisionALVR
             // the window is as big as its content, up to the work area; beyond that the body scrolls (Ui.AutoFitWindow)
             var body = new TableLayoutPanel { Dock = DockStyle.None, Location = Point.Empty, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
             var gpu = check != null && check.TryGetValue("gpu", out var g) ? g as Dictionary<string, object> : null;
-            runtime.Text = $"GPU: {S(gpu, "name")} ({S(gpu, "arch_name")}, driver {S(gpu, "driver")})   ·   OpenXR runtime: {(OpenXr.IsOurs() ? "VisionALVR (this folder)" : "NOT registered")}";
+            runtime.Text = $"GPU: {S(gpu, "name")} ({S(gpu, "arch_name")}, driver {S(gpu, "driver")})   ·   OpenXR runtime: {(OpenXr.IsOurs() ? "AirFrameXR (this folder)" : "NOT registered")}";
             runtime.ForeColor = Color.DimGray;
             var hrow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             hrow.Controls.Add(headset);
@@ -204,7 +204,7 @@ namespace VisionALVR
             mainMenu.Click += (s, e) =>
             {
                 var exe = Path.Combine(Paths.Bin, "launcher.exe");
-                try { if (File.Exists(exe)) Process.Start(exe); else MessageBox.Show(this, "bin\\launcher.exe is missing from this folder.", "VisionALVR"); }
+                try { if (File.Exists(exe)) Process.Start(exe); else MessageBox.Show(this, "bin\\launcher.exe is missing from this folder.", "AirFrameXR"); }
                 catch (Exception ex) { footer.Text = "Cannot open the main menu: " + ex.Message; footer.ForeColor = Color.Firebrick; }
             };
             tips.SetToolTip(mainMenu, "Open the main window (settings, game statistics, restart headset setup). The streamer keeps running.");
@@ -313,7 +313,7 @@ namespace VisionALVR
             FormClosing += (s, e) => { closing = true; MirrorSync(); footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); audio.Stop(); { var m = PowerPlan.Restore(); if (m != null) Log.Write("INFO", m); } Log.Write("INFO", "streamer.exe closed"); };
         }
 
-        // The Advanced settings window is a separate process: it writes config\visionalvr.json, and this timer hands the switches that act live to the running streamer
+        // The Advanced settings window is a separate process: it writes config\airframexr.json, and this timer hands the switches that act live to the running streamer
         // (the rate, the uncapped mode's cap and lag) and reloads the file, so that this window's own saves never put old values back over its edits.
         readonly Timer configWatch = new Timer { Interval = 1500 };
 
@@ -556,7 +556,7 @@ namespace VisionALVR
             host.Send($"color {f(settings.Brightness)} {f(settings.Contrast)} {f(settings.Saturation)} {f(settings.Sharpening)}");
         }
 
-        /// The virtual cable as the default output, the PC's output muted, the cable held at 100 %: what startvisionalvr.bat did, restored when the streamer closes.
+        /// The virtual cable as the default output, the PC's output muted, the cable held at 100 %: what startairframexr.bat did, restored when the streamer closes.
         /// Before the host starts: ALVR's own mute_when_streaming mutes the captured device (the cable now), so the streamer switches it off in session.json.
         void StartAudioRoute()
         {
@@ -577,12 +577,12 @@ namespace VisionALVR
             if (process)
             {
                 // Windows' process loopback: ALVR captures the PC's audio itself (the host inherits this variable), nothing else to route
-                Environment.SetEnvironmentVariable("VISIONALVR_AUDIO_CAPTURE", "process");
+                Environment.SetEnvironmentVariable("AIRFRAMEXR_AUDIO_CAPTURE", "process");
                 audio.StartMuteOnly(enabled, cfg.MuteSpeakers);
             }
             else
             {
-                Environment.SetEnvironmentVariable("VISIONALVR_AUDIO_CAPTURE", null);
+                Environment.SetEnvironmentVariable("AIRFRAMEXR_AUDIO_CAPTURE", null);
                 if (audio.Start(part, enabled, cfg.MuteSpeakers) && Json.Bool(s, "session_settings.audio.game_audio.content.mute_when_streaming", true))
                 {
                     Json.Set(s, "session_settings.audio.game_audio.content.mute_when_streaming", false);
@@ -613,7 +613,7 @@ namespace VisionALVR
             var err = host.Start(args);
             if (err != null)
             {
-                MessageBox.Show(this, err, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, err, "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Log.Write("ERROR", err);
                 return;
             }
@@ -627,7 +627,7 @@ namespace VisionALVR
         {
             if (finding) return;
             if (gameRunning && !autoPick && MessageBox.Show(this, "A game is running. Searching restarts the streamer: the game loses the headset for a few seconds. Continue?",
-                    "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                    "AirFrameXR", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             finding = true;
             find.Enabled = false;
             closing = true;
@@ -665,7 +665,7 @@ namespace VisionALVR
             if (code == 7)   // setup problem (e.g. config\session.json missing or broken): say what to do, do not restart
             {
                 headset.Text = "Setup problem: the streamer cannot start";
-                footer.Text = setupError ?? "The streamer reported a setup problem. Check logs\\VisionALVR.log.";
+                footer.Text = setupError ?? "The streamer reported a setup problem. Check logs\\AirFrameXR.log.";
                 footer.ForeColor = Color.Firebrick;
                 return;
             }
@@ -676,7 +676,7 @@ namespace VisionALVR
                 t.Tick += (s, e) => { t.Stop(); t.Dispose(); StartHost(); };
                 t.Start();
             }
-            else footer.Text = $"The streamer exited (code {code}) several times. Check logs\\VisionALVR.log.";
+            else footer.Text = $"The streamer exited (code {code}) several times. Check logs\\AirFrameXR.log.";
         }
 
         static string S(Dictionary<string, object> d, string k) => d != null && d.TryGetValue(k, out var v) && v != null ? Convert.ToString(v, CultureInfo.InvariantCulture) : "";
@@ -877,14 +877,14 @@ namespace VisionALVR
             }
         }
 
-        public void DemoDebugOn() { debug.Checked = true; settings.Debug = false; settings.Save(); exportStatus.Text = "Saved to C:\\Users\\someone\\Documents\\VisionALVR-logs-20261020-1200.zip"; exportStatus.ForeColor = Color.SeaGreen; exportStatus.Visible = exportLink.Visible = true; }
+        public void DemoDebugOn() { debug.Checked = true; settings.Debug = false; settings.Save(); exportStatus.Text = "Saved to C:\\Users\\someone\\Documents\\AirFrameXR-logs-20261020-1200.zip"; exportStatus.ForeColor = Color.SeaGreen; exportStatus.Visible = exportLink.Visible = true; }
 
         public void ApplyDemoState(bool worstCase = true)
         {
             HostEvent("client_connected", new Dictionary<string, object> { { "name", "Apple Vision Pro" }, { "ip", "192.168.1.50" } });
             HostEvent("height_calibrated", new Dictionary<string, object> { { "headset_y", 1.62 } });
             headset.Text = worstCase ? "Headset: connected - Apple Vision Pro of a person with a long name (192.168.100.123)" : "Headset: connected - Apple Vision Pro (192.168.1.50)"; headset.ForeColor = Color.SeaGreen;
-            runtime.Text = "GPU: NVIDIA GeForce RTX 5090 (Blackwell, driver 617.42)   \u00B7   OpenXR runtime: VisionALVR (this folder)";
+            runtime.Text = "GPU: NVIDIA GeForce RTX 5090 (Blackwell, driver 617.42)   \u00B7   OpenXR runtime: AirFrameXR (this folder)";
             if (!worstCase)
             {
                 NeedFind(false);
@@ -911,13 +911,13 @@ namespace VisionALVR
             Log.Component = "gui";
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            using (new System.Threading.Mutex(true, "VisionALVR_Runtime_Window", out bool first))
+            using (new System.Threading.Mutex(true, "AirFrameXR_Runtime_Window", out bool first))
             {
-                if (!first) { MessageBox.Show("VisionALVR is already running.", "VisionALVR"); return; }
+                if (!first) { MessageBox.Show("AirFrameXR is already running.", "AirFrameXR"); return; }
                 Log.Write("INFO", $"streamer.exe {Version.Text} start ({Paths.Dir})");
                 if (!File.Exists(Paths.Host))
                 {
-                    MessageBox.Show("bin\\alvr_host.exe was not found. Unzip the whole VisionALVR folder and start VisionALVR.exe from it.", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("bin\\alvr_host.exe was not found. Unzip the whole AirFrameXR folder and start AirFrameXR.exe from it.", "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
                 var check = SystemCheck.Run();
@@ -925,22 +925,22 @@ namespace VisionALVR
                 {
                     var why = check != null && check.TryGetValue("reason", out var r) ? r as string : "the system check failed (see logs)";
                     Log.Write("ERROR", "refusing to start: " + why);
-                    MessageBox.Show("VisionALVR cannot run on this PC: " + why, "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("AirFrameXR cannot run on this PC: " + why, "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
                 var testing = Ui.ScreenshotPath() != null || Environment.GetCommandLineArgs().Contains("--test");   // --test: no prompts (harness)
                 if (!OpenXr.IsOurs() && !testing)
                 {
                     var cur = OpenXr.ActiveRuntime();
-                    var q = MessageBox.Show($"VisionALVR is not the Windows OpenXR runtime (currently: {(cur.Length > 0 ? cur : "none")}).\n\n" +
+                    var q = MessageBox.Show($"AirFrameXR is not the Windows OpenXR runtime (currently: {(cur.Length > 0 ? cur : "none")}).\n\n" +
                                             "Register this folder now? (asks for administrator rights; the OpenXR runtime button of the launcher puts the previous one back)",
-                                            "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                                            "AirFrameXR", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                     if (q == DialogResult.Yes && !OpenXr.Register(null))
-                        MessageBox.Show("Registration did not take effect. Use the OpenXR runtime button of the launcher (VisionALVR.exe).", "VisionALVR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        MessageBox.Show("Registration did not take effect. Use the OpenXR runtime button of the launcher (AirFrameXR.exe).", "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 if (Session.Headset(Session.Load()) == null && !testing)
                 {
-                    if (MessageBox.Show("No headset is paired yet. Open configure.exe to set up and pair your headset? (Or answer No and use Find headset in the window.)", "VisionALVR", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    if (MessageBox.Show("No headset is paired yet. Open configure.exe to set up and pair your headset? (Or answer No and use Find headset in the window.)", "AirFrameXR", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                     {
                         Process.Start(Paths.Configure);
                         return;

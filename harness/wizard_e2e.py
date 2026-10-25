@@ -2,7 +2,7 @@
 """End-to-end run of the configure wizard on the PC against the mock headset (alvr_client_headless on loopback, restarted whenever a test's host
 process ends): the wizard runs unattended (`--auto`), through the handshake, every test and the proposal, and writes a report.
     python3 harness/wizard_e2e.py [--seconds 900]
-Needs the lab build (python3 harness/run.py build host client gui) and the package folder C:\\Users\\<u>\\VisionALVR_0.3test as the template."""
+Needs the lab build (python3 harness/run.py build host client gui) and the package folder C:\\Users\\<u>\\AirFrameXR_0.3test as the template."""
 import json, subprocess, sys, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -10,9 +10,9 @@ import live, lib
 
 U = live.PC_USER
 wd = rf"C:\Users\{U}\wizard_e2e"
-# --template <folder>: the unzipped package used as the base (default C:\Users\<u>\VisionALVR_0.3test)
+# --template <folder>: the unzipped package used as the base (default C:\Users\<u>\AirFrameXR_0.3test)
 # --local-profile <file>: a headset profile file copied to config\profiles\ so the mock headset ("Windows PC", 3552x3200, 100 Hz) matches it
-tmpl = sys.argv[sys.argv.index("--template") + 1] if "--template" in sys.argv else rf"C:\Users\{U}\VisionALVR_0.3test"
+tmpl = sys.argv[sys.argv.index("--template") + 1] if "--template" in sys.argv else rf"C:\Users\{U}\AirFrameXR_0.3test"
 local_profile = sys.argv[sys.argv.index("--local-profile") + 1] if "--local-profile" in sys.argv else None
 # --mode profile|manual|existing: which of the three options of the wizard's step 2 the unattended run takes (default profile)
 mode = sys.argv[sys.argv.index("--mode") + 1] if "--mode" in sys.argv else "profile"
@@ -26,7 +26,7 @@ schtasks /delete /tn va_mock /f 2>$null | Out-Null; schtasks /delete /tn va_wiz 
 if (Test-Path '{wd}') {{ Remove-Item '{wd}' -Recurse -Force }}
 New-Item -ItemType Directory -Force '{wd}' | Out-Null
 robocopy '{tmpl}' '{wd}' /E /NFL /NDL /NJH /NJS | Out-Null
-Remove-Item '{wd}\\config\\session.json','{wd}\\config\\visionalvr.json','{wd}\\logs' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item '{wd}\\config\\session.json','{wd}\\config\\airframexr.json','{wd}\\logs' -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force '{wd}\\bin' | Out-Null
 Copy-Item '{root}\\out\\gui\\configure.exe' '{wd}\\bin\\configure.exe' -Force
 Copy-Item '{root}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wd}\\bin\\alvr_host.exe' -Force
@@ -67,7 +67,7 @@ out.mkdir(parents=True, exist_ok=True)
 live.ps("Stop-Process -Name configure,alvr_host -Force -ErrorAction SilentlyContinue; schtasks /delete /tn va_mock /f 2>$null | Out-Null; Stop-Process -Name alvr_client_headless -Force -ErrorAction SilentlyContinue; Stop-Process -Name cmd -Force -ErrorAction SilentlyContinue")
 time.sleep(2)
 live.get_dir(wd.replace("\\", "/"), out / "folder_files") if False else None
-for f in ("report.json", "mock_stdout.txt", "config/session.json", "config/visionalvr.json", "logs/VisionALVR.log"):
+for f in ("report.json", "mock_stdout.txt", "config/session.json", "config/airframexr.json", "logs/AirFrameXR.log"):
     (out / Path(f).parent).mkdir(parents=True, exist_ok=True)
     live._retry(["scp", "-o", "BatchMode=yes", *live.MUX, "-q", f"{live.PC}:{wd.replace(chr(92), '/')}/{f}", str(out / f)])
 rep = out / "report.json"

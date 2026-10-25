@@ -1,7 +1,7 @@
 # Builds tools/probe/xr_probe.cpp -> build\probe\xr_probe.exe (no run). Includes nvenc\hostlib\bench_scene.h (XR_PROBE_SCENE) and stb_image.
 $ErrorActionPreference = 'Continue'
 $start = Get-Date
-$root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
+$root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
 $sdk  = "$root\src\VDXR\external\OpenXR-SDK\include"
 $lib  = "$root\build\oxr-sdk\src\loader\Release\openxr_loader.lib"
 $bdir = "$root\build\probe"

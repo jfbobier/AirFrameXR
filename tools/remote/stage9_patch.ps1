@@ -1,10 +1,10 @@
-# Idempotently applies the VisionALVR patches to the builder's ALVR v20.14.1 checkout:
+# Idempotently applies the AirFrameXR patches to the builder's ALVR v20.14.1 checkout:
 #   loopback-client.patch   mock client / harness loopback
 #   client-stats-log.patch  server_core logs the headset's raw per-frame statistics (host: client_frames.csv)
 #   client-caps-log.patch   server_core logs the capabilities the headset advertised at the handshake (host: client_capabilities event)
 #   audio-trace.patch       alvr_audio: a trace hook in the capture callback (host telemetry.rs, debug flavour)
 $ErrorActionPreference = 'Continue'
-$root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
+$root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
 Set-Location "$root\src\ALVR-v20.14.1"
 $ok = $true
 foreach ($name in 'loopback-client.patch', 'client-stats-log.patch', 'client-caps-log.patch', 'audio-trace.patch', 'audio-process-loopback.patch', 'client-audio-device.patch') {

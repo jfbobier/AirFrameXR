@@ -108,7 +108,7 @@ stamping unchanged and replaces the mask by a per-boundary pick of the bracketin
 3. **Generator** (`framegen.cpp`, `nvh_fg_*`): unchanged; the synthesis pass already takes t. The pipeline skips the flow computation for the
    pair that is one period apart (no synthetic output comes from it): 30 flows per second instead of 60 at 90 Hz.
 4. **Settings**: `video.frame_gen_ratio` = `"1/2"` | `"2/3"`; when the key is absent the value is **1/2** (the safe default: today's behaviour,
-   so existing users and first-time users see no change until they pick 2/3 themselves). CLI `--frame-gen-ratio`, env `VISIONALVR_FG_RATIO`,
+   so existing users and first-time users see no change until they pick 2/3 themselves). CLI `--frame-gen-ratio`, env `AIRFRAMEXR_FG_RATIO`,
    live GUI command `frame_gen_ratio 1/2|2/3`. Switching while running resets the cycle (the first cycle after a switch may hold one frame)
    and the shim mask follows at the next boundary.
 5. **Telemetry**: the active ratio in the session JSON; per-slot-kind counters (R, S, repeat, drop) already exist.
@@ -120,7 +120,7 @@ accepts), foveation, the encode tail, the Vision Pro client.
 
 Keep the existing control as is and only change its label and add one selector.
 
-Streamer window (`tools/gui/VisionALVR.cs`, the live row under the sliders: today the iOS-style `ToggleSwitch` plus a bold title and a
+Streamer window (`tools/gui/AirFrameXR.cs`, the live row under the sliders: today the iOS-style `ToggleSwitch` plus a bold title and a
 one-sentence explanation):
 
 ```

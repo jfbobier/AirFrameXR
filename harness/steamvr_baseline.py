@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import live
 
 ROOT = live.ROOT
-ALVR = os.environ.get("VISIONALVR_STOCK_ALVR", r"D:\_VR\alvr_launcher_windows\installations\v20.14.1")   # stock ALVR install (tools/pc.local)
+ALVR = os.environ.get("AIRFRAMEXR_STOCK_ALVR", r"D:\_VR\alvr_launcher_windows\installations\v20.14.1")   # stock ALVR install (tools/pc.local)
 HOME = rf"C:\Users\{live.PC_USER}\openxr"
 CLIENT = HOME + r"\src\ALVR-v20.14.1\target\release\alvr_client_headless.exe"
 PROBE = HOME + r"\build\probe\xr_probe.exe"
@@ -29,7 +29,7 @@ log = live.log
 
 def kill_all():
     live.ps("""
-Stop-Process -Name xr_probe,alvr_client_headless,alvr_host,VisionALVR -Force -ErrorAction SilentlyContinue
+Stop-Process -Name xr_probe,alvr_client_headless,alvr_host,AirFrameXR -Force -ErrorAction SilentlyContinue
 Stop-Process -Name 'ALVR Dashboard',vrserver,vrmonitor,vrcompositor,vrdashboard,vrwebhelper,vrstartup -Force -ErrorAction SilentlyContinue
 schtasks /delete /tn sbase_dash /f 2>$null | Out-Null; schtasks /delete /tn sbase_client /f 2>$null | Out-Null; schtasks /delete /tn sbase_probe /f 2>$null | Out-Null
 """)

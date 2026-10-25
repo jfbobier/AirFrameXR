@@ -12,7 +12,7 @@
 //! cluster that starts after the largest empty gap, and steers the 10th percentile of that cluster to `margin`. Corrections are small, at most
 //! one every half second, and the window is cleared after each (the effect takes a pipeline's time to show).
 //!
-//! VISIONALVR_PHASE_LOCK=0 disables it; VISIONALVR_PHASE_MARGIN_MS (default 7) sets the margin. The margin was 3 ms until 2026-10-17: with
+//! AIRFRAMEXR_PHASE_LOCK=0 disables it; AIRFRAMEXR_PHASE_MARGIN_MS (default 7) sets the margin. The margin was 3 ms until 2026-10-17: with
 //! an arrival spread of 8 ms a share of the frames landed after their tick and were shown a tick late, which the user saw as a loss of
 //! smoothness; a debug session that happened to delay every frame by 4.6 ms showed the cure (headset missed periods 0.5 % against 1.2-2.3 %,
 //! latency unchanged at the headset's own quantum), and 7 ms by hand was confirmed on Valor Mortis ("much better").
@@ -59,7 +59,7 @@ pub fn enabled() -> bool {
 }
 
 pub fn configure(on: bool) {
-    ENABLED.store(on && std::env::var("VISIONALVR_PHASE_LOCK").map(|v| v != "0").unwrap_or(true), Ordering::Relaxed);
+    ENABLED.store(on && std::env::var("AIRFRAMEXR_PHASE_LOCK").map(|v| v != "0").unwrap_or(true), Ordering::Relaxed);
 }
 
 /// the host's display period (ns) as the clock thread last set it
@@ -129,7 +129,7 @@ pub fn observe(queue_ms: f64) {
         }
     }
     let period_ms = PERIOD_NS.load(Ordering::Relaxed) as f64 / 1e6;
-    let margin = std::env::var("VISIONALVR_PHASE_MARGIN_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(7.0);
+    let margin = std::env::var("AIRFRAMEXR_PHASE_MARGIN_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(7.0);
     let mut g = STATE.lock();
     let s = g.get_or_insert_with(|| State { phases_ms: vec![], ignore: 12, last: Instant::now(), total_ms: 0.0, corrections: 0, recent: vec![] });
     if s.ignore > 0 {

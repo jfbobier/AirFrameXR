@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// VisionALVR: the projection-layer pass. cb.reprojectionMatrix is a homography (driver.cpp EyeHomography) from output NDC to
+// AirFrameXR: the projection-layer pass. cb.reprojectionMatrix is a homography (driver.cpp EyeHomography) from output NDC to
 // homogeneous source NDC; the pixel shader divides per pixel, so a rotation between the orientation the eye was rendered with
 // and the orientation the frame is stamped with is exact (upstream only handled a FoV change and dropped the divide).
 #include "constantsbuffer.h"

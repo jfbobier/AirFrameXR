@@ -30,7 +30,7 @@ def check(name, ok):
     fails += not ok
     print(f"CHECK {'PASS' if ok else 'FAIL'} {name}")
 check("game record in the zip", "game/Cyberpunk2077.json" in names)
-check("general log in the zip", "VisionALVR.log" in names)
+check("general log in the zip", "AirFrameXR.log" in names)
 check("newest debug run in the zip", any(n.startswith("debug/") for n in names))
 check("info.txt in the zip", "info.txt" in names)
 check("no window left open", "open_forms=0" in names)

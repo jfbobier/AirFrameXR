@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-  Registers (or with -Unregister, unregisters) the VisionALVR folder this script sits in as the Windows OpenXR runtime.
+  Registers (or with -Unregister, unregisters) the AirFrameXR folder this script sits in as the Windows OpenXR runtime.
 
 .DESCRIPTION
-  VisionALVR is portable: unzip it anywhere; the launcher (VisionALVR.exe) runs this script, with a UAC prompt, from its OpenXR runtime button. This sets
+  AirFrameXR is portable: unzip it anywhere; the launcher (AirFrameXR.exe) runs this script, with a UAC prompt, from its OpenXR runtime button. This sets
   HKLM\SOFTWARE\Khronos\OpenXR\1\ActiveRuntime to <package>\bin\virtualdesktop-openxr.json (the previous runtime is saved and put
   back by -Unregister), lists it under AvailableRuntimes, and adds an inbound firewall rule for <package>\bin\alvr_host.exe
   (skip with -NoFirewall). Nothing is copied anywhere. Moving the folder: run it again from the new place.
-  Earlier installs of this project (ClearXR, or VisionALVR in Program Files) are taken over: their saved previous runtime,
+  Earlier installs of this project (ClearXR, or AirFrameXR in Program Files) are taken over: their saved previous runtime,
   their host config (paired headset) and their registry/firewall entries; their files are deleted only if their install marker
   is there. -RegistryRoot / -StateKey / -Legacy* exist for the tests (a throwaway HKCU key).
 #>
@@ -15,10 +15,10 @@
 param(
     [switch]$Unregister,
     [switch]$NoFirewall,
-    [switch]$Quiet,              # no pause (used by VisionALVR.exe)
+    [switch]$Quiet,              # no pause (used by AirFrameXR.exe)
     [string]$InstallDir = '',
     [string]$RegistryRoot = 'HKLM:\SOFTWARE\Khronos\OpenXR\1',
-    [string]$StateKey = 'HKLM:\SOFTWARE\VisionALVR',
+    [string]$StateKey = 'HKLM:\SOFTWARE\AirFrameXR',
     [string]$LegacyStateKey = 'HKLM:\SOFTWARE\ClearXR',
     [string[]]$OldInstallDirs = @(),
     [string[]]$OldConfigDirs = @()
@@ -30,12 +30,12 @@ if (-not $InstallDir) { $InstallDir = Split-Path -Parent $(if ($PSScriptRoot) { 
 $InstallDir = (Resolve-Path $InstallDir).Path.TrimEnd('\')
 $pf = if ($env:ProgramFiles) { $env:ProgramFiles } else { 'C:\Program Files' }
 $lad = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE 'AppData\Local' }
-if (-not $OldInstallDirs) { $OldInstallDirs = @((Join-Path $pf 'ClearXR'), (Join-Path $pf 'VisionALVR')) }
-if (-not $OldConfigDirs) { $OldConfigDirs = @((Join-Path $lad 'VisionALVR\host'), (Join-Path $lad 'ClearXR\host')) }
+if (-not $OldInstallDirs) { $OldInstallDirs = @((Join-Path $pf 'ClearXR'), (Join-Path $pf 'AirFrameXR')) }
+if (-not $OldConfigDirs) { $OldConfigDirs = @((Join-Path $lad 'AirFrameXR\host'), (Join-Path $lad 'ClearXR\host')) }
 $Manifest = Join-Path $InstallDir 'bin\virtualdesktop-openxr.json'
 $HostExe = Join-Path $InstallDir 'bin\alvr_host.exe'
-$FirewallName = 'VisionALVR (alvr_host)'
-$OldFirewallNames = @('VisionALVR streamer (alvr_host)', 'ClearXR streamer (alvr_host)')
+$FirewallName = 'AirFrameXR (alvr_host)'
+$OldFirewallNames = @('AirFrameXR streamer (alvr_host)', 'ClearXR streamer (alvr_host)')
 
 function Done($code) { if (-not $Quiet) { Read-Host 'Press Enter to close' | Out-Null }; exit $code }
 
@@ -87,8 +87,8 @@ try {
                 if ((Test-Path (Join-Path $old 'session.json')) -and $PSCmdlet.ShouldProcess($cfg, "take over the host config from $old")) {
                     New-Item -ItemType Directory -Force -Path $cfg | Out-Null
                     Copy-Item (Join-Path $old 'session.json') (Join-Path $cfg 'session.json')
-                    foreach ($v in 'visionalvr_views.json', 'clearxr_views.json') {
-                        if (Test-Path (Join-Path $old $v)) { Copy-Item (Join-Path $old $v) (Join-Path $cfg 'visionalvr_views.json') }
+                    foreach ($v in 'airframexr_views.json', 'clearxr_views.json') {
+                        if (Test-Path (Join-Path $old $v)) { Copy-Item (Join-Path $old $v) (Join-Path $cfg 'airframexr_views.json') }
                     }
                     Write-Host "host config taken over from $old"
                     break
@@ -107,14 +107,14 @@ try {
         }
 
         # ---- leftovers of the installer era: logon tasks, Program Files copies (only with their install marker)
-        foreach ($t in 'VisionALVR Streamer', 'ClearXR Streamer') {
+        foreach ($t in 'AirFrameXR Streamer', 'ClearXR Streamer') {
             if ((Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) -and $PSCmdlet.ShouldProcess($t, 'remove the old logon task')) {
                 Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
                 Unregister-ScheduledTask -TaskName $t -Confirm:$false
             }
         }
         foreach ($d in $OldInstallDirs) {
-            $marked = (Test-Path (Join-Path $d 'clearxr-install.json')) -or (Test-Path (Join-Path $d 'visionalvr-install.json'))
+            $marked = (Test-Path (Join-Path $d 'clearxr-install.json')) -or (Test-Path (Join-Path $d 'airframexr-install.json'))
             if ($marked -and ($d -ine $InstallDir) -and $PSCmdlet.ShouldProcess($d, 'delete the old installed copy (its install marker is present)')) {
                 Remove-Item -Path $d -Recurse -Force
                 Write-Host "old copy removed: $d"

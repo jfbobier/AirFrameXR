@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Scoped helper for the Windows builder (the PC that builds and runs everything; see docs/DEVELOPMENT.md).
-# Host from $VISIONALVR_BUILDER or tools/builder.local (VISIONALVR_BUILDER=user@host, not committed), key-based auth only
+# Host from $AIRFRAMEXR_BUILDER or tools/builder.local (AIRFRAMEXR_BUILDER=user@host, not committed), key-based auth only
 # (BatchMode), working dir %USERPROFILE%\openxr on the builder.
 #
 #   tools/builder.sh run  'cmd /c command'            run a cmd.exe command on the builder
@@ -12,16 +12,16 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-LOCAL="$HERE/builder${VISIONALVR_PROFILE:+.$VISIONALVR_PROFILE}.local"   # VISIONALVR_PROFILE=5090 -> tools/builder.5090.local (a second machine)
-if [[ -z "${VISIONALVR_BUILDER:-}" && -f "$LOCAL" ]]; then
-  VISIONALVR_BUILDER="$(sed -n 's/^VISIONALVR_BUILDER=//p' "$LOCAL" | head -1)"
+LOCAL="$HERE/builder${AIRFRAMEXR_PROFILE:+.$AIRFRAMEXR_PROFILE}.local"   # AIRFRAMEXR_PROFILE=5090 -> tools/builder.5090.local (a second machine)
+if [[ -z "${AIRFRAMEXR_BUILDER:-}" && -f "$LOCAL" ]]; then
+  AIRFRAMEXR_BUILDER="$(sed -n 's/^AIRFRAMEXR_BUILDER=//p' "$LOCAL" | head -1)"
 fi
-if [[ -z "${VISIONALVR_BUILDER_ROOT:-}" && -f "$LOCAL" ]]; then
-  VISIONALVR_BUILDER_ROOT="$(sed -n 's/^VISIONALVR_BUILDER_ROOT=//p' "$LOCAL" | head -1)"
+if [[ -z "${AIRFRAMEXR_BUILDER_ROOT:-}" && -f "$LOCAL" ]]; then
+  AIRFRAMEXR_BUILDER_ROOT="$(sed -n 's/^AIRFRAMEXR_BUILDER_ROOT=//p' "$LOCAL" | head -1)"
 fi
-ROOTNAME="${VISIONALVR_BUILDER_ROOT:-openxr}"    # the working folder under %USERPROFILE% (default openxr; e.g. VisionALVR to work in a git clone)
-HOST="${VISIONALVR_BUILDER:?set VISIONALVR_BUILDER=user@host (or write it to tools/builder.local), see docs/DEVELOPMENT.md}"
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o LogLevel=ERROR -o ControlMaster=auto -o "ControlPath=/tmp/visionalvr-ssh-%C" -o ControlPersist=10m)   # one multiplexed connection: some sshd setups drop fresh ones
+ROOTNAME="${AIRFRAMEXR_BUILDER_ROOT:-openxr}"    # the working folder under %USERPROFILE% (default openxr; e.g. AirFrameXR to work in a git clone)
+HOST="${AIRFRAMEXR_BUILDER:?set AIRFRAMEXR_BUILDER=user@host (or write it to tools/builder.local), see docs/DEVELOPMENT.md}"
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o LogLevel=ERROR -o ControlMaster=auto -o "ControlPath=/tmp/airframexr-ssh-%C" -o ControlPersist=10m)   # one multiplexed connection: some sshd setups drop fresh ones
 NOISE='post-quantum|store now, decrypt later|openssh.com/pq|server may need to be upgraded|^\*\* *$'
 
 allow_destructive=0
@@ -43,7 +43,7 @@ case "$mode" in
     cmd="${1:?usage: builder.sh run '<cmd>'}"
     guard "$cmd"
     # the working folder is created on first use (fresh builder, or after the user removed it)
-    ssh "${SSH_OPTS[@]}" "$HOST" "(if not exist %USERPROFILE%\\$ROOTNAME mkdir %USERPROFILE%\\$ROOTNAME) & cd /d %USERPROFILE%\\$ROOTNAME && set VISIONALVR_ROOT=%USERPROFILE%\\$ROOTNAME&& $cmd" 2>&1 | filter
+    ssh "${SSH_OPTS[@]}" "$HOST" "(if not exist %USERPROFILE%\\$ROOTNAME mkdir %USERPROFILE%\\$ROOTNAME) & cd /d %USERPROFILE%\\$ROOTNAME && set AIRFRAMEXR_ROOT=%USERPROFILE%\\$ROOTNAME&& $cmd" 2>&1 | filter
     ;;
   ps)
     script="${1:?usage: builder.sh ps script.ps1 [args]}"; shift
@@ -52,7 +52,7 @@ case "$mode" in
     ssh "${SSH_OPTS[@]}" "$HOST" "if not exist %USERPROFILE%\\$ROOTNAME\\_tmp mkdir %USERPROFILE%\\$ROOTNAME\\_tmp" 2>&1 | filter   # mkdir creates openxr too
     base="$(basename "$script")"
     scp "${SSH_OPTS[@]}" "$script" "$HOST:$ROOTNAME/_tmp/$base" 2>&1 | filter
-    ssh "${SSH_OPTS[@]}" "$HOST" "cd /d %USERPROFILE%\\$ROOTNAME && set VISIONALVR_ROOT=%USERPROFILE%\\$ROOTNAME&& powershell -NoProfile -ExecutionPolicy Bypass -File _tmp\\$base $*" 2>&1 | filter
+    ssh "${SSH_OPTS[@]}" "$HOST" "cd /d %USERPROFILE%\\$ROOTNAME && set AIRFRAMEXR_ROOT=%USERPROFILE%\\$ROOTNAME&& powershell -NoProfile -ExecutionPolicy Bypass -File _tmp\\$base $*" 2>&1 | filter
     ;;
   put)
     src="${1:?usage: put local remote_rel}"; dst="${2:?usage: put local remote_rel}"

@@ -4,7 +4,7 @@ Goal: find and fix the failures that only show after hours, under memory pressur
 
 ## What triggered it: Gears of War E-Day, 2026-10-20
 
-Logs: `VisionALVR-GoWEDay-Steam-20261020-2340.zip` (debug was off). Two stalls with frame generation on:
+Logs: `AirFrameXR-GoWEDay-Steam-20261020-2340.zip` (debug was off). Two stalls with frame generation on:
 
 | | Stall 1 | Stall 2 |
 |---|---|---|
@@ -95,7 +95,7 @@ The harness exists and runs: `harness/README.md` (Stability harness), `harness/s
    meanwhile). The cause is not known yet; the watchdog (below) names it next time. Whole-process suspension is the closest lab model.
 2. With generation on, a boundary without a fresh tracking sample sent nothing; the visionOS client only sends tracking while frames reach it, so any pause turned into a
    stall far longer than the pause (lab: 5 s of silent uplink -> 61 s; a 30 s host freeze -> 86 s; a 30 s client freeze -> 56 s). Generation off was never affected.
-   Fix (`pipeline.rs`, `fg_stale_sample`): after 100 ms without a fresh sample (`VISIONALVR_FG_DARK_MS`, 0 = off) boundaries send frames stamped with the last real
+   Fix (`pipeline.rs`, `fg_stale_sample`): after 100 ms without a fresh sample (`AIRFRAMEXR_FG_DARK_MS`, 0 = off) boundaries send frames stamped with the last real
    sample, as the generation-off path does. Lab: 5 s silence -> 0.1 s stall; 30 s host freeze -> 31 s (the freeze itself); 30 s client freeze passes. Normal operation
    is unchanged (a late sample still skips one boundary, as before; `e2e_fg_latency` passes).
 

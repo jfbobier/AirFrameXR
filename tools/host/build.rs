@@ -199,7 +199,7 @@ void FFR::RenderTo(ID3D11Texture2D* target) {\n\
         .warnings(false);
     // The simrig (docs/DEVELOPMENT.md): the viewer and its hooks exist only with the cargo feature, never in a normal or release build.
     if env::var_os("CARGO_FEATURE_SIMRIG").is_some() {
-        b.define("VISIONALVR_SIMRIG", None).file(nvenc.join("hostlib/simviewer.cpp"));
+        b.define("AIRFRAMEXR_SIMRIG", None).file(nvenc.join("hostlib/simviewer.cpp"));
     }
     // NVH_SKIP_CC=1: type-check only (cargo check on a machine without MSVC, e.g. WSL): the C++ library is not compiled or linked.
     if env::var_os("NVH_SKIP_CC").is_none() {

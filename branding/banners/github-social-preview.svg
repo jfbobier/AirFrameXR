@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+<defs>
+ <linearGradient id="core" x1="10%" y1="0%" x2="90%" y2="100%">
+  <stop offset="0%" stop-color="#7FFCF9"/><stop offset="25%" stop-color="#00E7F4"/><stop offset="66%" stop-color="#0799F9"/><stop offset="100%" stop-color="#1456F1"/>
+ </linearGradient>
+ <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="100%">
+  <stop offset="0%" stop-color="#074BCF"/><stop offset="42%" stop-color="#26CAFF"/><stop offset="70%" stop-color="#047FFF"/><stop offset="100%" stop-color="#0953D7"/>
+ </linearGradient>
+ <linearGradient id="sweep" x1="10%" y1="0%" x2="95%" y2="100%">
+  <stop offset="0%" stop-color="#76FEF7"/><stop offset="40%" stop-color="#18D6FB"/><stop offset="100%" stop-color="#245AF7"/>
+ </linearGradient>
+ <linearGradient id="surface" x1="0%" y1="0%" x2="100%" y2="100%">
+  <stop offset="0%" stop-color="#0B2445"/><stop offset="48%" stop-color="#061426"/><stop offset="100%" stop-color="#030B17"/>
+ </linearGradient>
+ <linearGradient id="silver" x1="0%" y1="0%" x2="0%" y2="100%">
+  <stop offset="0%" stop-color="#FFFFFF"/><stop offset="100%" stop-color="#DCEAF5"/>
+ </linearGradient>
+ <linearGradient id="electric" x1="0%" y1="100%" x2="100%" y2="0%">
+  <stop offset="0%" stop-color="#1469FF"/><stop offset="100%" stop-color="#00E9F4"/>
+ </linearGradient>
+</defs>
+<rect width="1280" height="640" fill="#020B17"/><path d="M -110 223.8 C 256.0 -46.2 729.6 293.8 1370.0 -26.2" fill="none" stroke="#00E6F5" stroke-width="2.5" opacity="0.12"/><path d="M -103 252.8 C 256.0 -17.2 729.6 322.8 1370.0 2.8" fill="none" stroke="#1475FF" stroke-width="1.1" opacity="0.17"/><path d="M -96 281.8 C 256.0 11.8 729.6 351.8 1370.0 31.8" fill="none" stroke="#1475FF" stroke-width="1.1" opacity="0.23"/><path d="M -89 310.8 C 256.0 40.8 729.6 380.8 1370.0 60.8" fill="none" stroke="#00E6F5" stroke-width="2.5" opacity="0.28"/><path d="M -82 339.8 C 256.0 69.8 729.6 409.8 1370.0 89.8" fill="none" stroke="#1475FF" stroke-width="1.1" opacity="0.34"/><path d="M -75 368.8 C 256.0 98.8 729.6 438.8 1370.0 118.8" fill="none" stroke="#1475FF" stroke-width="1.1" opacity="0.12"/><path d="M -68 397.8 C 256.0 127.8 729.6 467.8 1370.0 147.8" fill="none" stroke="#00E6F5" stroke-width="2.5" opacity="0.17"/><path d="M -61 426.8 C 256.0 156.8 729.6 496.8 1370.0 176.8" fill="none" stroke="#1475FF" stroke-width="1.1" opacity="0.23"/><path d="M -54 455.8 C 256.0 185.8 729.6 525.8 1370.0 205.8" fill="none" stroke="#1475FF" stroke-width="1.1" opacity="0.28"/><path d="M -47 484.8 C 256.0 214.8 729.6 554.8 1370.0 234.8" fill="none" stroke="#00E6F5" stroke-width="2.5" opacity="0.34"/><path d="M -40 513.8 C 256.0 243.8 729.6 583.8 1370.0 263.8" fill="none" stroke="#1475FF" stroke-width="1.1" opacity="0.12"/>
+<text x="93" y="265" font-family="Inter Display, Inter, Arial, sans-serif" font-size="99" font-weight="750" letter-spacing="-4" fill="#F4FAFF">AirFrame</text>
+<text x="505" y="265" font-family="Inter Display, Inter, Arial, sans-serif" font-size="99" font-weight="760" letter-spacing="-4" fill="url(#electric)">XR</text>
+<text x="99" y="335" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="600" fill="#95BDE0" letter-spacing="4">WIRELESS XR. HIGHER FRAMES.</text>
+<text x="99" y="463" font-family="Inter, Arial, sans-serif" font-size="21" fill="#B8D3E8">OpenXR  /  GPU streaming  /  Frame generation</text>
+<g transform="translate(845 50) scale(.73)">
+ <path d="M161 139 C114 157 83 202 82 254 C80 295 97 330 129 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M176 190 C146 209 137 237 138 257 C139 281 149 298 166 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+ <path d="M351 139 C398 157 429 202 430 254 C432 295 415 330 383 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M336 190 C366 209 375 237 374 257 C373 281 363 298 346 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+
+ <path d="M159 356 L223 161 C233 125 243 91 257 91 C272 91 280 120 292 155 L357 356 L301 356 L265 244 C259 222 253 224 248 243 L213 356 Z" fill="url(#core)"/>
+ <path d="M238 161 C246 134 252 114 257 113 C264 116 269 138 277 163" fill="none" stroke="#AAFFFA" stroke-width="5" stroke-linecap="round" opacity=".45"/>
+
+ <path d="M105 401 C152 394 198 338 253 332 C303 326 349 386 408 402 C375 408 344 399 300 376 C260 356 244 357 207 379 C161 407 135 408 105 401 Z" fill="url(#sweep)"/>
+ <path d="M143 394 C199 366 222 342 261 343 C297 343 338 381 374 394" fill="none" stroke="#94FFFD" stroke-width="5" opacity=".28"/>
+ <path d="M238 388 L256 357 L274 388 Z" fill="url(#electric)"/>
+</g>
+</svg>

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A/B summary of simrig runs: python3 harness/simrig/ab.py <result dir> [<result dir> ...] -- one line each: judge hf, streamer CPU (cores), boundary
-interval tail, send time after the boundary, encode, viewer repeats. Used to compare optimisations (VISIONALVR_SIMEXE builds, --env knobs)."""
+interval tail, send time after the boundary, encode, viewer repeats. Used to compare optimisations (AIRFRAMEXR_SIMEXE builds, --env knobs)."""
 import csv, glob, json, sys
 from pathlib import Path
 import numpy as np

@@ -7,7 +7,7 @@ using System.Globalization;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public static class Verdict
     {

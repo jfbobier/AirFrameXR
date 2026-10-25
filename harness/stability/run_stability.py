@@ -4,7 +4,7 @@ judged by judge.py (stalls, tracking resumption, memory growth).
 
     python3 harness/stability/run_stability.py list
     python3 harness/stability/run_stability.py run <name>[,<name>...|all] [--seconds N] [--host-env K=V ...]   # --seconds stretches a scenario (host/client/app), e.g. for a soak;
-                                                                                                          # --host-env sets host variables (VISIONALVR_FG_DARK_MS=0 turns the dark-tracking fix off)
+                                                                                                          # --host-env sets host variables (AIRFRAMEXR_FG_DARK_MS=0 turns the dark-tracking fix off)
     python3 harness/stability/run_stability.py judge <results dir> <scenario>              # re-judge an existing run
 
 A scenario is scenarios.json: a base (derived from a regular harness scenario, `base_from`) + an override (deep merge; null removes a key) + criteria
@@ -126,7 +126,7 @@ def main(argv):
     if argv[1] == "run":
         seconds = int(argv[argv.index("--seconds") + 1]) if "--seconds" in argv else None
         names = list(SPEC["scenarios"]) if argv[2] == "all" else argv[2].split(",")
-        host_env = dict(a.split("=", 1) for a in argv[argv.index("--host-env") + 1:] if "=" in a) if "--host-env" in argv else None   # e.g. --host-env VISIONALVR_FG_DARK_MS=0
+        host_env = dict(a.split("=", 1) for a in argv[argv.index("--host-env") + 1:] if "=" in a) if "--host-env" in argv else None   # e.g. --host-env AIRFRAMEXR_FG_DARK_MS=0
         st = [run(n, seconds, host_env) for n in names]
         print("\n" + "\n".join(f"{s:8} {n}" for s, n in zip(st, names)))
         return 0 if all(s == "PASS" for s in st) else 1

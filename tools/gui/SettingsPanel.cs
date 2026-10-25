@@ -1,4 +1,4 @@
-// The settings VisionALVR actually uses, as one panel: the wizard's last step shows it prefilled with the proposal, and the user may change anything.
+// The settings AirFrameXR actually uses, as one panel: the wizard's last step shows it prefilled with the proposal, and the user may change anything.
 // Everything else (ALVR's advanced options) stays in config\session.json.
 using System;
 using System.Collections.Generic;
@@ -6,7 +6,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public class SettingsPanel : UserControl
     {
@@ -98,7 +98,7 @@ namespace VisionALVR
             CaptureBox.Items.AddRange(new object[] { "Process loopback (no virtual cable needed)", "Virtual cable (VB-CABLE)" });
             row("Game audio capture", CaptureBox);
             note(Mic);
-            Mic.Click += (s, e) => { if (Mic.Checked && AudioRoute.FindMicrophoneCable() == null && !string.Equals(Environment.GetEnvironmentVariable("VISIONALVR_TEST_NO_DIALOG"), "1")) using (var f = new CableForm(true)) { f.ShowDialog(this); if (AudioRoute.FindMicrophoneCable() == null) Mic.Checked = false; } };
+            Mic.Click += (s, e) => { if (Mic.Checked && AudioRoute.FindMicrophoneCable() == null && !string.Equals(Environment.GetEnvironmentVariable("AIRFRAMEXR_TEST_NO_DIALOG"), "1")) using (var f = new CableForm(true)) { f.ShowDialog(this); if (AudioRoute.FindMicrophoneCable() == null) Mic.Checked = false; } };
             note(Mute);
 
             section("Network and controllers");
@@ -138,7 +138,7 @@ namespace VisionALVR
 
         public void ClearReasons() { foreach (var l in reasons.Values) { l.Text = ""; l.Visible = false; } }
 
-        /// Reads the current values from session.json / visionalvr.json (what is on disk wins).
+        /// Reads the current values from session.json / airframexr.json (what is on disk wins).
         public new void Load()
         {
             session = Session.Load();

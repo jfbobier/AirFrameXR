@@ -1,8 +1,8 @@
 {
  "exe": "mirrordesktop.exe",
- "name": "VisionALVR desktop mirror",
+ "name": "AirFrameXR desktop mirror",
  "paths": [
-  "C:\\Games\\VisionALVR\\bin\\mirrordesktop.exe"
+  "C:\\Games\\AirFrameXR\\bin\\mirrordesktop.exe"
  ],
  "levels": {},
  "sessions": [

@@ -1,6 +1,6 @@
 @echo off
-rem Checks Windows Firewall for VisionALVR / ALVR and proposes a clean-up. Reads first; changes nothing without your Y.
-rem Put it anywhere (next to VisionALVR.exe is best: it then knows which alvr_host.exe is yours) and double-click it.
+rem Checks Windows Firewall for AirFrameXR / ALVR and proposes a clean-up. Reads first; changes nothing without your Y.
+rem Put it anywhere (next to AirFrameXR.exe is best: it then knows which alvr_host.exe is yours) and double-click it.
 rem It asks for administrator rights because removing or adding a rule needs them.
 setlocal
 set "BATDIR=%~dp0"
@@ -19,7 +19,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 function Ask($q) { if ($env:FWCHECK_ANSWERS) { $a = @($env:FWCHECK_ANSWERS -split ','); $env:FWCHECK_ANSWERS = ($a | Select-Object -Skip 1) -join ','; Write-Host "$q $($a[0])"; return $a[0] } else { return (Read-Host $q) } }   # FWCHECK_ANSWERS: for the test harness only
 
 Write-Host ''
-Write-Host '=== Windows Firewall rules of VisionALVR / ALVR (alvr_host.exe) ===' -ForegroundColor Cyan
+Write-Host '=== Windows Firewall rules of AirFrameXR / ALVR (alvr_host.exe) ===' -ForegroundColor Cyan
 Write-Host 'A rule lets ONE exact alvr_host.exe in. Moving the folder needs a new rule and Windows keeps the old ones; every "Allow" prompt adds a TCP and a UDP rule.'
 Write-Host 'This only reads until you answer. Nothing is changed without a Y.'
 Write-Host ''
@@ -37,7 +37,7 @@ $active = @(Get-NetConnectionProfile | ForEach-Object { [string]$_.NetworkCatego
 
 if (-not $exe) {
     $existing = @($rules | Where-Object { $_.Exists -and (Test-Path $_.Program) } | Select-Object -ExpandProperty Program -Unique)
-    Write-Host 'This file is not inside a VisionALVR folder. Which alvr_host.exe is the one you use?'
+    Write-Host 'This file is not inside a AirFrameXR folder. Which alvr_host.exe is the one you use?'
     for ($i = 0; $i -lt $existing.Count; $i++) { Write-Host ("  [{0}] {1}" -f ($i + 1), $existing[$i]) }
     $a = Ask 'Number from the list, or paste the full path of your alvr_host.exe (Enter = none)'
     if ($a -match '^\d+$' -and [int]$a -ge 1 -and [int]$a -le $existing.Count) { $exe = $existing[[int]$a - 1] } elseif ($a -and (Test-Path $a)) { $exe = (Resolve-Path $a).Path }
@@ -93,8 +93,8 @@ if ($exe -and ($state -eq 'NO RULE' -or $state -eq 'BLOCKED')) {
     Write-Host ''
     $a = Ask 'Add one rule that lets the current alvr_host.exe in (all protocols, all networks)?  [Y/N]'
     if ($a -match '^[Yy]') {
-        New-NetFirewallRule -DisplayName 'VisionALVR (alvr_host)' -Direction Inbound -Action Allow -Program $exe -Profile Any -Enabled True | Out-Null
-        Write-Host '  added: VisionALVR (alvr_host)' -ForegroundColor Green
+        New-NetFirewallRule -DisplayName 'AirFrameXR (alvr_host)' -Direction Inbound -Action Allow -Program $exe -Profile Any -Enabled True | Out-Null
+        Write-Host '  added: AirFrameXR (alvr_host)' -ForegroundColor Green
     }
 }
 Write-Host ''

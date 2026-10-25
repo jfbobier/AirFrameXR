@@ -8,7 +8,7 @@ index 3144dfe..c2c1905 100644
      let streaming_caps = if let Some(streaming_caps) = maybe_streaming_caps {
 -        alvr_packets::decode_video_streaming_capabilities(&streaming_caps).to_con()?
 +        let caps = alvr_packets::decode_video_streaming_capabilities(&streaming_caps).to_con()?;
-+        // VisionALVR (tools/patches/client-caps-log.patch): what the headset advertised at the handshake, raw, for the host's
++        // AirFrameXR (tools/patches/client-caps-log.patch): what the headset advertised at the handshake, raw, for the host's
 +        // `client_capabilities` event (the configure wizard shows it and bases its proposal on it).
 +        if let Ok(j) = serde_json::to_string(&caps) {
 +            info!("{{\"va_client_caps\":{j}}}");

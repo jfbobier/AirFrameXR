@@ -1,7 +1,7 @@
 # Builds OVRShim (fork of VDXR's OVRNull with the host-driven driver) and assembles out\vdxr-shim.
 $ErrorActionPreference = 'Continue'
 $start = Get-Date
-$root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
+$root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
 $vdxr = "$root\src\VDXR"
 $dst  = "$vdxr\OVRShim"
 $msbuild = 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe'
@@ -28,9 +28,9 @@ $proj = $proj.Replace($fxPs, $fxPs + "`n    " + $extra)
 $proj = $proj.Replace('$(SolutionDir)\bin\', '$(SolutionDir)\bin-shim\').Replace('<ClInclude Include="driver.h" />', '<ClInclude Include="driver.h" /><ClInclude Include="ipc.h" /><ClInclude Include="ipc_win.h" />')
 Set-Content "$dst\OVRShim.vcxproj" $proj -Encoding UTF8
 Set-Location $vdxr
-# flavour (run.py build --release): the release shim drops the per-frame telemetry (VISIONALVR_RELEASE undefines VISIONALVR_TELEMETRY)
+# flavour (run.py build --release): the release shim drops the per-frame telemetry (AIRFRAMEXR_RELEASE undefines AIRFRAMEXR_TELEMETRY)
 $flavour = if (Test-Path "$root\_tmp\flavour.txt") { (Get-Content "$root\_tmp\flavour.txt" -Raw).Trim() } else { 'debug' }
-$env:CL = if ($flavour -eq 'release') { '/DVISIONALVR_RELEASE' } else { '' }
+$env:CL = if ($flavour -eq 'release') { '/DAIRFRAMEXR_RELEASE' } else { '' }
 Write-Host "flavour: $flavour"
 (Get-Item "$dst\driver.cpp").LastWriteTime = Get-Date   # the flavour is a compile definition: always recompile the driver
 & $msbuild "OVRShim\OVRShim.vcxproj" /p:Configuration=Release /p:Platform=x64 "/p:SolutionDir=$vdxr\\" /m /v:minimal /nologo 2>&1 |

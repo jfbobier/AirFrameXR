@@ -1,0 +1,3 @@
+// Example for Windows builds; resource paths are relative to this .rc file.
+#define IDI_AIRFRAMEXR 101
+IDI_AIRFRAMEXR ICON "branding\\icons\\airframexr-windows.ico"

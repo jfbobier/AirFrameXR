@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     /// ALVR's VideoStreamingCapabilities as the headset sent them at the handshake (host event `client_capabilities`).
     public class Handshake
@@ -61,7 +61,7 @@ namespace VisionALVR
                 return new HeadsetProfile
                 {
                     Family = "avp", Label = "Apple Vision Pro", Tuned = true,
-                    CodecAdvice = h.EncAv1 ? "HEVC 10-bit. Your headset also decodes AV1 (newer chip): VisionALVR encodes HEVC today. H.264 is never recommended."
+                    CodecAdvice = h.EncAv1 ? "HEVC 10-bit. Your headset also decodes AV1 (newer chip): AirFrameXR encodes HEVC today. H.264 is never recommended."
                                            : "HEVC 10-bit (strongly recommended on the M2 Vision Pro; it has no AV1 decoder; H.264 is never recommended)",
                     WifiAdvice = "the first Vision Pro (M2) has Wi-Fi 6 on 5 GHz only (no 6 GHz): a Wi-Fi 6 router on 5 GHz with a 160 MHz channel, close to the headset, the PC on Ethernet; newer models can also use 6 GHz",
                 };
@@ -69,7 +69,7 @@ namespace VisionALVR
                 return new HeadsetProfile
                 {
                     Family = "quest3", Label = "Meta Quest 3",
-                    CodecAdvice = "HEVC 10-bit (AV1 also works on the Quest 3 with an RTX 40 GPU: VisionALVR encodes HEVC today; H.264 needs 3-4x the bitrate)",
+                    CodecAdvice = "HEVC 10-bit (AV1 also works on the Quest 3 with an RTX 40 GPU: AirFrameXR encodes HEVC today; H.264 needs 3-4x the bitrate)",
                     WifiAdvice = "Wi-Fi 6E on the 6 GHz band, close to the headset, the PC on Ethernet",
                 };
             if (n.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0)

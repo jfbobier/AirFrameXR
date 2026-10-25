@@ -1,6 +1,6 @@
 // configure.exe --switches: the Advanced settings window. The experimental and tuning switches of docs/EXPERIMENTAL_SWITCHES.md, grouped, each with the moment
 // its change takes effect (live in the running streamer, at the next streamer start, at the next game start) and its value read back from the file or the registry.
-// Everything applies when changed; a switch at its default is removed from config\visionalvr.json. The streamer may stay open: it forwards the live ones itself.
+// Everything applies when changed; a switch at its default is removed from config\airframexr.json. The streamer may stay open: it forwards the live ones itself.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -10,7 +10,7 @@ using System.Linq;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public class AdvancedForm : DpiForm
     {
@@ -42,7 +42,7 @@ namespace VisionALVR
 
         public AdvancedForm()
         {
-            Text = "VisionALVR – Advanced settings";
+            Text = "AirFrameXR – Advanced settings";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleDimensions = new SizeF(96F, 96F);
@@ -76,7 +76,7 @@ namespace VisionALVR
 
             var body = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(12, 4, 12, 12), Dock = DockStyle.None, Location = Point.Empty };
             var intro = Ui.Line("Switches that change timing, for people who measure. Each one says when it takes effect: live = the running streamer takes it within seconds; streamer restart = close and start the streamer; next game start = start the game again. " +
-                "A switch at its default is removed from config\\visionalvr.json. The signals to judge by are in logs\\VisionALVR.log: the 'frame generation perf' and 'frame generation samples' lines every 10 s, and 'game run recorded' at the end of a game.");
+                "A switch at its default is removed from config\\airframexr.json. The signals to judge by are in logs\\AirFrameXR.log: the 'frame generation perf' and 'frame generation samples' lines every 10 s, and 'game run recorded' at the end of a game.");
             intro.MaximumSize = new Size(900, 0); intro.ForeColor = Color.DimGray;
             body.Controls.Add(intro);
 
@@ -218,7 +218,7 @@ namespace VisionALVR
         void Save(AppSettings st, string what, string when)
         {
             try { st.Save(); }
-            catch (Exception e) { status.Text = "Cannot write config\\visionalvr.json: " + e.Message; status.ForeColor = Color.Firebrick; return; }
+            catch (Exception e) { status.Text = "Cannot write config\\airframexr.json: " + e.Message; status.ForeColor = Color.Firebrick; return; }
             Log.Write("INFO", "advanced: " + what + " (" + when + ")");
             var running = Process.GetProcessesByName("streamer").Length > 0;
             status.Text = "Saved: " + what + ". " + (when == Live ? (running ? "The running streamer takes it within a couple of seconds." : "It takes effect when the streamer starts.") : "It takes effect after a streamer restart.");

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="165" viewBox="0 0 940 165">
+<defs>
+ <linearGradient id="core" x1="10%" y1="0%" x2="90%" y2="100%">
+  <stop offset="0%" stop-color="#7FFCF9"/><stop offset="25%" stop-color="#00E7F4"/><stop offset="66%" stop-color="#0799F9"/><stop offset="100%" stop-color="#1456F1"/>
+ </linearGradient>
+ <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="100%">
+  <stop offset="0%" stop-color="#074BCF"/><stop offset="42%" stop-color="#26CAFF"/><stop offset="70%" stop-color="#047FFF"/><stop offset="100%" stop-color="#0953D7"/>
+ </linearGradient>
+ <linearGradient id="sweep" x1="10%" y1="0%" x2="95%" y2="100%">
+  <stop offset="0%" stop-color="#76FEF7"/><stop offset="40%" stop-color="#18D6FB"/><stop offset="100%" stop-color="#245AF7"/>
+ </linearGradient>
+ <linearGradient id="surface" x1="0%" y1="0%" x2="100%" y2="100%">
+  <stop offset="0%" stop-color="#0B2445"/><stop offset="48%" stop-color="#061426"/><stop offset="100%" stop-color="#030B17"/>
+ </linearGradient>
+ <linearGradient id="silver" x1="0%" y1="0%" x2="0%" y2="100%">
+  <stop offset="0%" stop-color="#FFFFFF"/><stop offset="100%" stop-color="#DCEAF5"/>
+ </linearGradient>
+ <linearGradient id="electric" x1="0%" y1="100%" x2="100%" y2="0%">
+  <stop offset="0%" stop-color="#1469FF"/><stop offset="100%" stop-color="#00E9F4"/>
+ </linearGradient>
+</defs>
+<g transform="translate(0 0) scale(1)"><text x="0" y="128" font-family="Inter Display, Inter, Arial, sans-serif" font-size="130" font-weight="750" letter-spacing="-6" fill="url(#silver)">AirFrame</text>
+<text x="522" y="128" font-family="Inter Display, Inter, Arial, sans-serif" font-size="130" font-weight="780" letter-spacing="-7" fill="url(#electric)">XR</text></g>
+</svg>

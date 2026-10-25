@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1390" viewBox="0 0 1920 1390">
+<defs>
+ <linearGradient id="core" x1="10%" y1="0%" x2="90%" y2="100%">
+  <stop offset="0%" stop-color="#7FFCF9"/><stop offset="25%" stop-color="#00E7F4"/><stop offset="66%" stop-color="#0799F9"/><stop offset="100%" stop-color="#1456F1"/>
+ </linearGradient>
+ <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="100%">
+  <stop offset="0%" stop-color="#074BCF"/><stop offset="42%" stop-color="#26CAFF"/><stop offset="70%" stop-color="#047FFF"/><stop offset="100%" stop-color="#0953D7"/>
+ </linearGradient>
+ <linearGradient id="sweep" x1="10%" y1="0%" x2="95%" y2="100%">
+  <stop offset="0%" stop-color="#76FEF7"/><stop offset="40%" stop-color="#18D6FB"/><stop offset="100%" stop-color="#245AF7"/>
+ </linearGradient>
+ <linearGradient id="surface" x1="0%" y1="0%" x2="100%" y2="100%">
+  <stop offset="0%" stop-color="#0B2445"/><stop offset="48%" stop-color="#061426"/><stop offset="100%" stop-color="#030B17"/>
+ </linearGradient>
+ <linearGradient id="silver" x1="0%" y1="0%" x2="0%" y2="100%">
+  <stop offset="0%" stop-color="#FFFFFF"/><stop offset="100%" stop-color="#DCEAF5"/>
+ </linearGradient>
+ <linearGradient id="electric" x1="0%" y1="100%" x2="100%" y2="0%">
+  <stop offset="0%" stop-color="#1469FF"/><stop offset="100%" stop-color="#00E9F4"/>
+ </linearGradient>
+</defs>
+<rect width="1920" height="1390" fill="#06111E"/>
+<text x="75" y="92" font-family="Inter Display, Inter, sans-serif" font-size="53" font-weight="700" fill="#F4FAFF">AirFrameXR</text>
+<text x="75" y="139" font-family="Inter, sans-serif" font-size="22" letter-spacing="4" fill="#81AFCC">VISUAL IDENTITY  /  AIRWAVE  /  VERSION 1.0</text>
+<rect x="75" y="182" width="1065" height="590" rx="28" fill="#071C34" stroke="#1C4364" stroke-width="2"/>
+<g transform="translate(335 130) scale(1.08)">
+ <path d="M161 139 C114 157 83 202 82 254 C80 295 97 330 129 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M176 190 C146 209 137 237 138 257 C139 281 149 298 166 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+ <path d="M351 139 C398 157 429 202 430 254 C432 295 415 330 383 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M336 190 C366 209 375 237 374 257 C373 281 363 298 346 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+
+ <path d="M159 356 L223 161 C233 125 243 91 257 91 C272 91 280 120 292 155 L357 356 L301 356 L265 244 C259 222 253 224 248 243 L213 356 Z" fill="url(#core)"/>
+ <path d="M238 161 C246 134 252 114 257 113 C264 116 269 138 277 163" fill="none" stroke="#AAFFFA" stroke-width="5" stroke-linecap="round" opacity=".45"/>
+
+ <path d="M105 401 C152 394 198 338 253 332 C303 326 349 386 408 402 C375 408 344 399 300 376 C260 356 244 357 207 379 C161 407 135 408 105 401 Z" fill="url(#sweep)"/>
+ <path d="M143 394 C199 366 222 342 261 343 C297 343 338 381 374 394" fill="none" stroke="#94FFFD" stroke-width="5" opacity=".28"/>
+ <path d="M238 388 L256 357 L274 388 Z" fill="url(#electric)"/>
+</g>
+<text x="603" y="655" text-anchor="middle" font-family="Inter Display, Inter, sans-serif" font-size="76" font-weight="730" fill="#F4FAFF">AirFrame</text>
+<text x="797" y="655" font-family="Inter Display, Inter, sans-serif" font-size="76" font-weight="750" fill="url(#electric)">XR</text>
+<text x="604" y="708" text-anchor="middle" font-family="Inter, sans-serif" font-size="17" letter-spacing="5" fill="#A9C5DE">WIRELESS XR. HIGHER FRAMES.</text>
+<rect x="1176" y="182" width="669" height="590" rx="28" fill="#0D2134" stroke="#1C4364" stroke-width="2"/>
+<text x="1210" y="239" font-family="Inter, sans-serif" font-size="25" font-weight="650" fill="#F4FAFF">APP ICON  /  DARK</text>
+<g transform="translate(1227 277) scale(.93)"><rect width="512" height="512" rx="112" fill="url(#surface)" stroke="#227AB9" stroke-width="3"/>
+ <path d="M161 139 C114 157 83 202 82 254 C80 295 97 330 129 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M176 190 C146 209 137 237 138 257 C139 281 149 298 166 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+ <path d="M351 139 C398 157 429 202 430 254 C432 295 415 330 383 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M336 190 C366 209 375 237 374 257 C373 281 363 298 346 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+
+ <path d="M159 356 L223 161 C233 125 243 91 257 91 C272 91 280 120 292 155 L357 356 L301 356 L265 244 C259 222 253 224 248 243 L213 356 Z" fill="url(#core)"/>
+ <path d="M238 161 C246 134 252 114 257 113 C264 116 269 138 277 163" fill="none" stroke="#AAFFFA" stroke-width="5" stroke-linecap="round" opacity=".45"/>
+
+ <path d="M105 401 C152 394 198 338 253 332 C303 326 349 386 408 402 C375 408 344 399 300 376 C260 356 244 357 207 379 C161 407 135 408 105 401 Z" fill="url(#sweep)"/>
+ <path d="M143 394 C199 366 222 342 261 343 C297 343 338 381 374 394" fill="none" stroke="#94FFFD" stroke-width="5" opacity=".28"/>
+ <path d="M238 388 L256 357 L274 388 Z" fill="url(#electric)"/>
+</g>
+<text x="75" y="845" font-family="Inter, sans-serif" font-size="26" font-weight="600" fill="#F4FAFF">LOGO APPLICATIONS</text>
+<rect x="75" y="877" width="846" height="215" rx="22" fill="#081E36"/>
+<g transform="translate(110 885) scale(.34)">
+ <path d="M161 139 C114 157 83 202 82 254 C80 295 97 330 129 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M176 190 C146 209 137 237 138 257 C139 281 149 298 166 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+ <path d="M351 139 C398 157 429 202 430 254 C432 295 415 330 383 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M336 190 C366 209 375 237 374 257 C373 281 363 298 346 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+
+ <path d="M159 356 L223 161 C233 125 243 91 257 91 C272 91 280 120 292 155 L357 356 L301 356 L265 244 C259 222 253 224 248 243 L213 356 Z" fill="url(#core)"/>
+ <path d="M238 161 C246 134 252 114 257 113 C264 116 269 138 277 163" fill="none" stroke="#AAFFFA" stroke-width="5" stroke-linecap="round" opacity=".45"/>
+
+ <path d="M105 401 C152 394 198 338 253 332 C303 326 349 386 408 402 C375 408 344 399 300 376 C260 356 244 357 207 379 C161 407 135 408 105 401 Z" fill="url(#sweep)"/>
+ <path d="M143 394 C199 366 222 342 261 343 C297 343 338 381 374 394" fill="none" stroke="#94FFFD" stroke-width="5" opacity=".28"/>
+ <path d="M238 388 L256 357 L274 388 Z" fill="url(#electric)"/>
+</g>
+<g transform="translate(310 938) scale(.47)"><g transform="translate(0 0) scale(1)"><text x="0" y="128" font-family="Inter Display, Inter, Arial, sans-serif" font-size="130" font-weight="750" letter-spacing="-6" fill="url(#silver)">AirFrame</text>
+<text x="522" y="128" font-family="Inter Display, Inter, Arial, sans-serif" font-size="130" font-weight="780" letter-spacing="-7" fill="url(#electric)">XR</text></g></g>
+<rect x="945" y="877" width="900" height="215" rx="22" fill="#F4FAFF"/>
+<g transform="translate(980 885) scale(.34)">
+ <path d="M161 139 C114 157 83 202 82 254 C80 295 97 330 129 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M176 190 C146 209 137 237 138 257 C139 281 149 298 166 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+ <path d="M351 139 C398 157 429 202 430 254 C432 295 415 330 383 357" fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="butt"/>
+ <path d="M336 190 C366 209 375 237 374 257 C373 281 363 298 346 311" fill="none" stroke="url(#core)" stroke-width="22" stroke-linecap="butt"/>
+
+ <path d="M159 356 L223 161 C233 125 243 91 257 91 C272 91 280 120 292 155 L357 356 L301 356 L265 244 C259 222 253 224 248 243 L213 356 Z" fill="url(#core)"/>
+ <path d="M238 161 C246 134 252 114 257 113 C264 116 269 138 277 163" fill="none" stroke="#AAFFFA" stroke-width="5" stroke-linecap="round" opacity=".45"/>
+
+ <path d="M105 401 C152 394 198 338 253 332 C303 326 349 386 408 402 C375 408 344 399 300 376 C260 356 244 357 207 379 C161 407 135 408 105 401 Z" fill="url(#sweep)"/>
+ <path d="M143 394 C199 366 222 342 261 343 C297 343 338 381 374 394" fill="none" stroke="#94FFFD" stroke-width="5" opacity=".28"/>
+ <path d="M238 388 L256 357 L274 388 Z" fill="url(#electric)"/>
+</g>
+<g transform="translate(1172 938) scale(.47)"><g transform="translate(0 0) scale(1)"><text x="0" y="128" font-family="Inter Display, Inter, Arial, sans-serif" font-size="130" font-weight="750" letter-spacing="-6" fill="#10243D">AirFrame</text>
+<text x="522" y="128" font-family="Inter Display, Inter, Arial, sans-serif" font-size="130" font-weight="780" letter-spacing="-7" fill="url(#electric)">XR</text></g></g>
+<text x="75" y="1168" font-family="Inter, sans-serif" font-size="25" font-weight="600" fill="#F4FAFF">CORE PALETTE</text>
+<rect x="75" y="1200" width="265" height="88" rx="12" fill="#020B17" stroke="#385066" stroke-width="1"/><text x="75" y="1326" font-family="Inter, sans-serif" font-size="19" font-weight="600" fill="#E8F5FF">NIGHT   #020B17</text><rect x="373" y="1200" width="265" height="88" rx="12" fill="#061426" stroke="#385066" stroke-width="1"/><text x="373" y="1326" font-family="Inter, sans-serif" font-size="19" font-weight="600" fill="#E8F5FF">MIDNIGHT   #061426</text><rect x="671" y="1200" width="265" height="88" rx="12" fill="#1475FF" stroke="#385066" stroke-width="1"/><text x="671" y="1326" font-family="Inter, sans-serif" font-size="19" font-weight="600" fill="#E8F5FF">ELECTRIC   #1475FF</text><rect x="969" y="1200" width="265" height="88" rx="12" fill="#00E6F5" stroke="#385066" stroke-width="1"/><text x="969" y="1326" font-family="Inter, sans-serif" font-size="19" font-weight="600" fill="#E8F5FF">CYAN   #00E6F5</text><rect x="1267" y="1200" width="265" height="88" rx="12" fill="#74F7FF" stroke="#385066" stroke-width="1"/><text x="1267" y="1326" font-family="Inter, sans-serif" font-size="19" font-weight="600" fill="#E8F5FF">ICE   #74F7FF</text><rect x="1565" y="1200" width="265" height="88" rx="12" fill="#F4FAFF" stroke="#385066" stroke-width="1"/><text x="1565" y="1326" font-family="Inter, sans-serif" font-size="19" font-weight="600" fill="#E8F5FF">WHITE   #F4FAFF</text><text x="75" y="1370" font-family="Inter, sans-serif" font-size="15" fill="#738FA9">Original AirFrameXR artwork · No third-party logos or trademark symbols used.</text>
+</svg>

@@ -31,5 +31,5 @@ A profile is one small JSON file for a headset (see `docs/HMD_PROFILES.md` and `
 profile and say on what (`verified`).
 
 ## Bug reports
-Attach `logs\VisionALVR.log` and the matching `logs\debug\<time>\` folder (turn debug on in VisionALVR.exe, reproduce, then zip
+Attach `logs\AirFrameXR.log` and the matching `logs\debug\<time>\` folder (turn debug on in AirFrameXR.exe, reproduce, then zip
 the folder), the game and how it is started (UEVR, mod, native OpenXR), GPU and driver.

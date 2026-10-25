@@ -1,6 +1,6 @@
-//! VisionALVR logging.
+//! AirFrameXR logging.
 //!
-//! * General log `logs/VisionALVR.log`: appended by every component (host, shim inside each game, GUIs), one line per fact that
+//! * General log `logs/AirFrameXR.log`: appended by every component (host, shim inside each game, GUIs), one line per fact that
 //!   matters later: start/stop, headset connect/disconnect, negotiated stream, game start/end, warnings and errors. Small.
 //! * Debug session (only when debug is on): `logs/debug/<yyyymmdd-hhmmss>/` per host run with the verbose files: `host_events.jsonl`
 //!   (every host event, `encoder_stats` every 2 s), `alvr.log` (server_core's own log), `gpu.csv` (NVML, 1 Hz), and one
@@ -85,10 +85,10 @@ pub fn init(logs_dir: Option<&Path>, alvr_default: Option<&Path>, debug: bool) {
         let mut s = state().lock();
         if let Some(d) = logs_dir {
             fs::create_dir_all(d).ok();
-            let g = d.join("VisionALVR.log");
+            let g = d.join("AirFrameXR.log");
             // keep the general log bounded: past 10 MB the old one is kept as .1
             if fs::metadata(&g).map(|m| m.len() > 10 << 20).unwrap_or(false) {
-                fs::rename(&g, d.join("VisionALVR.log.1")).ok();
+                fs::rename(&g, d.join("AirFrameXR.log.1")).ok();
             }
             s.general = open_append(&g);
             s.logs_dir = Some(d.to_path_buf());

@@ -46,7 +46,7 @@ def main(a):
         sc.setdefault("app", {})["timeout_s"] = s + 11
         sc["app"].pop("frames", None)
     label = ""
-    for kv in [a[i + 1] for i, x in enumerate(a) if x == "--set"]:      # --set host.send_pacing=asap --set host.env.VISIONALVR_PICK=newest (JSON values)
+    for kv in [a[i + 1] for i, x in enumerate(a) if x == "--set"]:      # --set host.send_pacing=asap --set host.env.AIRFRAMEXR_PICK=newest (JSON values)
         k, v = kv.split("=", 1)
         try:
             v = json.loads(v)

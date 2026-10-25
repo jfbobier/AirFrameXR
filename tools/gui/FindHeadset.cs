@@ -1,4 +1,4 @@
-// "Find headset": the runtime window's way to (re)discover the headset on the network. VisionALVR dials the saved address first and ALVR
+// "Find headset": the runtime window's way to (re)discover the headset on the network. AirFrameXR dials the saved address first and ALVR
 // re-finds a paired headset by name on its own; this dialog is for everything else: a changed address that was not picked up, a second or new
 // headset, a headset that was never paired. It lists what ALVR's two discovery protocols see (mDNS for the Vision Pro, UDP 9943 broadcasts for
 // Quest-style clients), lets the user take one (or only change the address of the paired one), and the runtime window then re-pairs and restarts
@@ -11,7 +11,7 @@ using System.Net.NetworkInformation;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace VisionALVR
+namespace AirFrameXR
 {
     public class FindHeadsetForm : DpiForm
     {
@@ -20,7 +20,7 @@ namespace VisionALVR
         readonly ListView list = new ListView { View = View.Details, FullRowSelect = true, Height = 170, Width = 700, HideSelection = false, MultiSelect = false };
         readonly Label status = Ui.Line("");
         readonly Label fwLabel = Ui.Line("");
-        readonly Button fwFix = new Button { Text = "Allow VisionALVR through the firewall (asks for administrator)", AutoSize = true, Visible = false };
+        readonly Button fwFix = new Button { Text = "Allow AirFrameXR through the firewall (asks for administrator)", AutoSize = true, Visible = false };
         readonly Button use = new Button { Text = "Use the selected headset", AutoSize = true, Font = Ui.Bold, Enabled = false };
         readonly TextBox ipBox = new TextBox { Width = 130 };
         readonly Dictionary<string, ListViewItem> rows = new Dictionary<string, ListViewItem>();
@@ -33,7 +33,7 @@ namespace VisionALVR
         {
             this.paired = paired;
             this.autoPick = autoPick;
-            Text = "VisionALVR \u2013 Find the headset";
+            Text = "AirFrameXR \u2013 Find the headset";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);   // the pixel sizes below are designed at 96 dpi; without this nothing scales and only the fonts grow
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -51,7 +51,7 @@ namespace VisionALVR
             title.ForeColor = Ui.Accent;
             p.Controls.Add(title);
             p.Controls.Add(Ui.Line("Open the ALVR app on the headset (same network as this PC). It appears below within a few seconds; a headset paired before is listed at once. " +
-                                   "VisionALVR normally dials the saved address and finds a paired headset again by name by itself: use this when that did not work."));
+                                   "AirFrameXR normally dials the saved address and finds a paired headset again by name by itself: use this when that did not work."));
             Ui.Col(list, "Name (hostname)", 290);
             Ui.Col(list, "IP address", 120);
             Ui.Col(list, "Status", 270);

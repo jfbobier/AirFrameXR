@@ -21,14 +21,14 @@ Versions, sources and checksums: `third_party/README.md`, `deps.lock.json`.
 - **Draco 1.5.7** (Apache-2.0) and the *Littlest Tokyo* GLB: only for the offline scene converter (`tools/bench_scene/build.sh`).
 
 ## In the release zip
-- `alvr_host.exe`: VisionALVR + ALVR (MIT) + 263 Rust crates, listed with their licenses in
+- `alvr_host.exe`: AirFrameXR + ALVR (MIT) + 263 Rust crates, listed with their licenses in
   `third_party/licenses/alvr_host-crates.txt`. All are permissive (MIT / Apache-2.0 / BSD / ISC / Zlib / Unicode-3.0 / BSL-1.0)
   except six under **MPL-2.0** (`symphonia*`, `webpki-roots`, `option-ext`), used unmodified; their source is at crates.io.
 - `virtualdesktop-openxr.dll` / `.json`: VirtualDesktop-OpenXR (MIT), patched as above.
 - `LibOVRRT64_1.dll`: OVRShim (MIT).
 - `bench\littlest_tokyo.vab`: **"Littlest Tokyo" by Glen Fox** (glenatron, https://sketchfab.com/glenatron), licensed
   **CC-BY-4.0** (https://creativecommons.org/licenses/by/4.0/), from the three.js examples (r169). Changes: converted to
-  VisionALVR's format (meshes decompressed, simplified shading), shown inside a room tiled with the scene's own texture.
+  AirFrameXR's format (meshes decompressed, simplified shading), shown inside a room tiled with the scene's own texture.
 - `bench\sakura_breeze.mp3`: the music of that scene. **Sakura Breeze by Roa Music** | https://soundcloud.com/roa_music1031 .
   Royalty Free Music by https://www.free-stock-music.com . Creative Commons / Attribution 3.0 Unported License (CC BY 3.0),
   https://creativecommons.org/licenses/by/3.0/deed.en_US . Changes: the first 75 seconds, re-encoded (128 kb/s, 48 kHz) with a fade in and out.
@@ -40,4 +40,4 @@ Versions, sources and checksums: `third_party/README.md`, `deps.lock.json`.
   per-pixel candidate choice at motion boundaries, doubtful motion shrinking toward the real frame, its default tuning) was studied from its
   code and re-implemented in `nvenc/hostlib/framegen.cpp`; no code copied.
 
-VisionALVR is not affiliated with or endorsed by the ALVR project, Apple, NVIDIA, Virtual Desktop or Glen Fox. OFXR-Bridge and VectorXR are independent projects; VisionALVR is not affiliated with them either.
+AirFrameXR is not affiliated with or endorsed by the ALVR project, Apple, NVIDIA, Virtual Desktop or Glen Fox. OFXR-Bridge and VectorXR are independent projects; AirFrameXR is not affiliated with them either.

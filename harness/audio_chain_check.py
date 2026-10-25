@@ -20,7 +20,7 @@ MIC = "icro"   # a recording device whose name has this (Microphone / Prise micr
 SINK = PC   # the mock headset plays into the (muted) PC speakers: nothing audible, and its process loopback hears it whatever the output's mute; the 16ch cable answered DEVICE_IN_USE and process loopback silence
 rid = "audio_chain"
 rd = f"runs\\{rid}"
-inst = f"{rd}\\VisionALVR"
+inst = f"{rd}\\AirFrameXR"
 sc = json.load(open(ROOT / "harness/scenarios/e2e_installed_layout.json"))
 lib.b_run(f"if not exist {rd} mkdir {rd}")
 lib.b_run("if not exist runs\\audio mkdir runs\\audio")
@@ -101,22 +101,22 @@ try:
 
     # -- the portable folder as a user unzips it, a trusted mock client, the streamer
     lib.kill_stale()
-    lib.b_run(f"robocopy out\\dist\\VisionALVR {inst} /MIR /NFL /NDL /NJH /NJS /NP")
+    lib.b_run(f"robocopy out\\dist\\AirFrameXR {inst} /MIR /NFL /NDL /NJH /NJS /NP")
     pin = (lib.builder_client_hostname(), "127.0.0.2")
     sess = ROOT / "harness/cache/audio_chain_session.json"
     lib.derive_session(sc, sess, pin)
-    lib.b_put(sess, f"runs/{rid}/VisionALVR/config/session.json")
-    cfgf = ROOT / "harness/cache/audio_chain_visionalvr.json"; cfgf.write_text(json.dumps({"audio": {"capture": MODE}, "debug": True}))
-    lib.b_put(cfgf, f"runs/{rid}/VisionALVR/config/visionalvr.json")
+    lib.b_put(sess, f"runs/{rid}/AirFrameXR/config/session.json")
+    cfgf = ROOT / "harness/cache/audio_chain_airframexr.json"; cfgf.write_text(json.dumps({"audio": {"capture": MODE}, "debug": True}))
+    lib.b_put(cfgf, f"runs/{rid}/AirFrameXR/config/airframexr.json")
     # the mock headset plays on this PC: the host must not capture its own client again (a real headset is another machine)
     streamer = lib.start_limited(rid, "va_chain_streamer", "streamer.bat", f"{inst}\\bin\\streamer.exe --test\r\n", "streamer.rc",
-                                 env={"VISIONALVR_AUDIO_EXCLUDE_PROCESS": "alvr_client_headless.exe"} if MODE == "process" else None)
+                                 env={"AIRFRAMEXR_AUDIO_EXCLUDE_PROCESS": "alvr_client_headless.exe"} if MODE == "process" else None)
     time.sleep(8)
     # the client runs in the interactive session like the host and the app: processes started from the SSH session live in another logon session, and process loopback
     # (include or exclude) does not hear them (measured; the earlier explanation 'elevated' was wrong, this builder's UAC makes no difference)
     client = lib.start_limited(rid, "va_chain_client", "client.bat",
                                f'{lib.CLIENT_EXE} --report {rd}\\client_report.json --frames-csv {rd}\\frames.csv --seconds 100 --connect-timeout 45 --yaw-amp 0.5 --yaw-hz 0.25 > {rd}\\client_stdout.txt 2>&1\r\n',
-                               "client.rc", env={"ALVR_BIND_IP": "127.0.0.2", "RUST_LOG": "warn", "VISIONALVR_CLIENT_AUDIO_DEVICE": SINK})
+                               "client.rc", env={"ALVR_BIND_IP": "127.0.0.2", "RUST_LOG": "warn", "AIRFRAMEXR_CLIENT_AUDIO_DEVICE": SINK})
     app = {"frames": 9000, "timeout_s": 85, "runtime": inst + "\\bin", "env": {"XR_PROBE_SCENE": f"{inst}\\bench\\littlest_tokyo.vab"}}
     t = threading.Thread(target=lambda: lib.launch_app(app, rid, rd, print)); t.start()
     time.sleep(12)   # connected, streaming, the music playing (each helper call below takes ~10 s: the app runs 85 s)
@@ -166,7 +166,7 @@ try:
     for f in ("app.log", "client_stdout.txt"):
         lib.b_get(f"{rd.replace(chr(92), '/')}/{f}", ROOT / "harness/cache" / f"chain_{f}")
     applog = (ROOT / "harness/cache/chain_app.log").read_text(errors="replace") if (ROOT / "harness/cache/chain_app.log").exists() else ""
-    hostlog = lib.b_run(f"findstr /s /i /c:\"process loopback\" {rd}\\VisionALVR\\logs\\alvr.log {rd}\\VisionALVR\\logs\\debug\\*\\alvr.log")[1]
+    hostlog = lib.b_run(f"findstr /s /i /c:\"process loopback\" {rd}\\AirFrameXR\\logs\\alvr.log {rd}\\AirFrameXR\\logs\\debug\\*\\alvr.log")[1]
     check("the host captured with process loopback" if MODE == "process" else "the host did not use process loopback", ("process loopback" in hostlog) == (MODE == "process"), hostlog[-300:])
     check("the scene app started its music", "scene sound" in applog and "playing" in applog, applog[-400:])
 finally:

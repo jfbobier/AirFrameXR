@@ -1,7 +1,7 @@
 # Builds tools/mirrordesktop/mirrordesktop.cpp -> out\mirrordesktop\mirrordesktop.exe: the desktop mirror, an OpenXR app (docs/DESKTOP_MIRROR.md).
 $ErrorActionPreference = 'Continue'
 $start = Get-Date
-$root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
+$root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
 $sdk  = "$root\src\VDXR\external\OpenXR-SDK\include"
 $lib  = "$root\build\oxr-sdk\src\loader\Release\openxr_loader.lib"
 $src  = "$root\tools\mirrordesktop"

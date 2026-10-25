@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to private/personal_config.json (gitignored). `VISIONALVR_PERSONAL=1 python3 harness/run.py build ... package` then ships these values in the portable folder (zip suffix -personal). Dotted keys are set inside session.default.json; `visionalvr` becomes config\\visionalvr.json (the host/GUI settings). Not for GitHub releases. `session_merge` is deep-merged into session.default.json (the paired headset: an entry with an empty hostname is a headset added by IP address); `visionalvr.headset` is the headset the runtime window connects to without asking. Optional `extra_files` (absent by default; the streamer now routes audio and sets the power plan itself) are files on the build PC copied next to VisionALVR.exe in the package (your launcher .bat and the tools it calls; keep them in a folder that is not the install folder, with a backup in private\\personal_files; a personal build FAILS if one listed is missing).",
+  "_comment": "Copy to private/personal_config.json (gitignored). `AIRFRAMEXR_PERSONAL=1 python3 harness/run.py build ... package` then ships these values in the portable folder (zip suffix -personal). Dotted keys are set inside session.default.json; `airframexr` becomes config\\airframexr.json (the host/GUI settings). Not for GitHub releases. `session_merge` is deep-merged into session.default.json (the paired headset: an entry with an empty hostname is a headset added by IP address); `airframexr.headset` is the headset the runtime window connects to without asking. Optional `extra_files` (absent by default; the streamer now routes audio and sets the power plan itself) are files on the build PC copied next to AirFrameXR.exe in the package (your launcher .bat and the tools it calls; keep them in a folder that is not the install folder, with a backup in private\\personal_files; a personal build FAILS if one listed is missing).",
   "version_suffix": "-personal",
   "session": {
     "session_settings.video.foveated_encoding.enabled": true,
@@ -11,7 +11,7 @@
     "session_settings.video.emulated_headset_view_resolution.Absolute.width": 3552,
     "session_settings.video.emulated_headset_view_resolution.Absolute.height.content": 3200
   },
-  "visionalvr": {
+  "airframexr": {
     "video": {
       "encode_profile": "foveated",
       "idle_rgb": "00ff00"

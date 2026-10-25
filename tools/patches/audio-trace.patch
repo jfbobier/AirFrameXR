@@ -6,7 +6,7 @@ index ca76d26..41973fc 100644
  }
  
  #[allow(unused_variables)]
-+/// VisionALVR audio telemetry hook (debug builds of the host set it): called from the capture callback and the receive loop with
++/// AirFrameXR audio telemetry hook (debug builds of the host set it): called from the capture callback and the receive loop with
 +/// (kind, time, [a, b, c, d]); kind "S" = capture started [sample rate, channels, 0, 0], "C" = one capture callback
 +/// [frames captured, send failed (1/0), microseconds since the previous callback, microseconds spent in the callback].
 +pub static TRACE: std::sync::OnceLock<Box<dyn Fn(&str, std::time::Instant, [u64; 4]) + Send + Sync>> =

@@ -7,11 +7,11 @@ BUILDER = ROOT / "tools" / "builder.sh"
 
 
 def _builder_root():
-    """The builder's working folder under %USERPROFILE% (tools/builder.local VISIONALVR_BUILDER_ROOT, default openxr; same as builder.sh)."""
-    v = os.environ.get("VISIONALVR_BUILDER_ROOT")
-    loc = ROOT / "tools" / (f"builder.{os.environ['VISIONALVR_PROFILE']}.local" if os.environ.get("VISIONALVR_PROFILE") else "builder.local")
+    """The builder's working folder under %USERPROFILE% (tools/builder.local AIRFRAMEXR_BUILDER_ROOT, default openxr; same as builder.sh)."""
+    v = os.environ.get("AIRFRAMEXR_BUILDER_ROOT")
+    loc = ROOT / "tools" / (f"builder.{os.environ['AIRFRAMEXR_PROFILE']}.local" if os.environ.get("AIRFRAMEXR_PROFILE") else "builder.local")
     if not v and loc.exists():
-        v = next((l.split("=", 1)[1].strip() for l in loc.read_text().splitlines() if l.startswith("VISIONALVR_BUILDER_ROOT=")), None)
+        v = next((l.split("=", 1)[1].strip() for l in loc.read_text().splitlines() if l.startswith("AIRFRAMEXR_BUILDER_ROOT=")), None)
     return v or "openxr"
 
 
@@ -141,14 +141,14 @@ def argline(d, mapping):
 
 
 def _builder_ip():
-    """The builder's address as the mock client on the builder reaches the host (VISIONALVR_BUILDER_IP, else the host part of
-    VISIONALVR_BUILDER / tools/builder.local)."""
-    if os.environ.get("VISIONALVR_BUILDER_IP"):
-        return os.environ["VISIONALVR_BUILDER_IP"]
-    b = os.environ.get("VISIONALVR_BUILDER", "")
-    loc = ROOT / "tools" / (f"builder.{os.environ['VISIONALVR_PROFILE']}.local" if os.environ.get("VISIONALVR_PROFILE") else "builder.local")
+    """The builder's address as the mock client on the builder reaches the host (AIRFRAMEXR_BUILDER_IP, else the host part of
+    AIRFRAMEXR_BUILDER / tools/builder.local)."""
+    if os.environ.get("AIRFRAMEXR_BUILDER_IP"):
+        return os.environ["AIRFRAMEXR_BUILDER_IP"]
+    b = os.environ.get("AIRFRAMEXR_BUILDER", "")
+    loc = ROOT / "tools" / (f"builder.{os.environ['AIRFRAMEXR_PROFILE']}.local" if os.environ.get("AIRFRAMEXR_PROFILE") else "builder.local")
     if not b and loc.exists():
-        b = next((l.split("=", 1)[1].strip() for l in loc.read_text().splitlines() if l.startswith("VISIONALVR_BUILDER=")), "")
+        b = next((l.split("=", 1)[1].strip() for l in loc.read_text().splitlines() if l.startswith("AIRFRAMEXR_BUILDER=")), "")
     return b.rsplit("@", 1)[-1] or "127.0.0.1"
 
 
@@ -395,15 +395,15 @@ def run_scenario(sc, outdir: Path, log=print):
     if sc.get("install"):
         # the portable folder exactly as a user unzips it (no registry: the app gets XR_RUNTIME_JSON); the host runs from it
         # with --install-dir, so config\ and logs\ are the folder's own
-        inst = f"{rd}\\VisionALVR"
-        rc, out = b_run(f"xcopy /E /I /Q /Y out\\dist\\VisionALVR {inst} && if exist {inst}\\bin\\alvr_host.exe echo COPIED")
+        inst = f"{rd}\\AirFrameXR"
+        rc, out = b_run(f"xcopy /E /I /Q /Y out\\dist\\AirFrameXR {inst} && if exist {inst}\\bin\\alvr_host.exe echo COPIED")
         if "COPIED" not in out:
             raise Blocked("portable package missing (build it first: python3 harness/run.py build gui package): " + out[-300:])
         host_exe = f"{inst}\\bin\\alvr_host.exe"
         h = sc["host"] = {**sc["host"], "install_dir": f"%USERPROFILE%\\{ROOTNAME}\\{inst}"}
         if sc.get("app"):
             sc["app"] = {**sc["app"], "runtime": inst + "\\bin"}
-        steps["installed_from"] = "out\\dist\\VisionALVR (portable folder)"
+        steps["installed_from"] = "out\\dist\\AirFrameXR (portable folder)"
     host_p = host_log = None
     if h is not None:
         if topo["host"] == "wsl":
@@ -430,7 +430,7 @@ def run_scenario(sc, outdir: Path, log=print):
         else:      # host on the builder (loopback topology: the client binds topology.client_bind_ip)
             src_arg = "" if (h.get("live") or h.get("shim")) else f'--file {sc["source"].replace("/", chr(92))} '
             dump_arg = f"--dump-qpmap {rd}\\qpmap.json " if h.get("dump_qpmap") else ""
-            envpre = "".join(f"set {k}={v}&& " for k, v in {"VISIONALVR_PIPELINE_CSV": f"{rd}\\host_pipeline.csv", "VISIONALVR_HEAD_CSV": f"{rd}\\host_head.csv", **(h.get("env") or {})}.items())
+            envpre = "".join(f"set {k}={v}&& " for k, v in {"AIRFRAMEXR_PIPELINE_CSV": f"{rd}\\host_pipeline.csv", "AIRFRAMEXR_HEAD_CSV": f"{rd}\\host_head.csv", **(h.get("env") or {})}.items())
             feedpre = ""
             if sc.get("stdin_feed"):
                 # stability harness: host commands at given times (the GUI's stdin lines: frame_gen, recenter, height, gamma, ...), seconds after the host starts. The pipe is held open
@@ -591,8 +591,8 @@ def run_scenario(sc, outdir: Path, log=print):
         for f in ("host_report.json", "host_stdout.txt", "host_frames.csv", "host_pipeline.csv", "host_pipeline_fates.csv", "host_head.csv"):
             b_get(f"runs/{rid}/{f}", outdir / f)
         if sc.get("install"):
-            b_get(f"runs/{rid}/VisionALVR/config/session.json", outdir / "host_session_final.json")
-            b_get(f"runs/{rid}/VisionALVR/logs", outdir / "logs")      # VisionALVR.log, alvr.log, debug\<time>\...
+            b_get(f"runs/{rid}/AirFrameXR/config/session.json", outdir / "host_session_final.json")
+            b_get(f"runs/{rid}/AirFrameXR/logs", outdir / "logs")      # AirFrameXR.log, alvr.log, debug\<time>\...
         else:
             b_get(f"runs/{rid}/host_cfg/session_log.txt", outdir / "host_session_log.txt")
             b_get(f"runs/{rid}/host_cfg/session.json", outdir / "host_session_final.json")
@@ -1284,7 +1284,7 @@ def analyse(sc, outdir: Path):
     lg = outdir / "logs"
     if lg.exists():
         dbg = sorted((lg / "debug").glob("*")) if (lg / "debug").exists() else []
-        a["install_logs"] = {"general": (lg / "VisionALVR.log").read_text(errors="replace") if (lg / "VisionALVR.log").exists() else "",
+        a["install_logs"] = {"general": (lg / "AirFrameXR.log").read_text(errors="replace") if (lg / "AirFrameXR.log").exists() else "",
                              "debug_files": sorted(p.name for p in dbg[-1].iterdir()) if dbg else []}
     if sc.get("reconnect"):
         a["client2"] = jload(outdir / "client2_report.json")
@@ -1668,7 +1668,7 @@ def evaluate(sc, a):
             chk("pose_varies", ap["yaw_range"] >= ck["min_yaw_range_rad"], round(ap["yaw_range"], 3), f">={ck['min_yaw_range_rad']}")
     if ck.get("install_logs"):
         il = a.get("install_logs") or {}
-        want = ["[host] INFO  VisionALVR", "headset connected", "stream: ", "game started: xr_probe.exe", "[shim:xr_probe.exe] INFO  game start", "game ended: xr_probe.exe", "host stop"]
+        want = ["[host] INFO  AirFrameXR", "headset connected", "stream: ", "game started: xr_probe.exe", "[shim:xr_probe.exe] INFO  game start", "game ended: xr_probe.exe", "host stop"]
         gen = il.get("general", "")
         chk("general_log_key_lines", all(w in gen for w in want), [w for w in want if w not in gen] or "all present", "general log has: " + ", ".join(want))
         files, need = il.get("debug_files", []), ["host_events.jsonl", "alvr.log", "gpu.csv"]

@@ -35,7 +35,7 @@ pub fn run(stop: Arc<AtomicBool>, udp: bool, on_seen: &dyn Fn(Seen)) -> Result<(
     let server_protocol_u64 = alvr_common::protocol_id_u64();
     let daemon = ServiceDaemon::new()?;
     let receiver = daemon.browse(alvr_sockets::MDNS_SERVICE_TYPE)?;
-    let debug = std::env::var_os("VISIONALVR_DISCOVERY_DEBUG").is_some();
+    let debug = std::env::var_os("AIRFRAMEXR_DISCOVERY_DEBUG").is_some();
     if debug {
         crate::logs::general("INFO", &format!("discovery: browsing {} (mdns-sd daemon up)", alvr_sockets::MDNS_SERVICE_TYPE));
     }
@@ -72,7 +72,7 @@ pub fn run(stop: Arc<AtomicBool>, udp: bool, on_seen: &dyn Fn(Seen)) -> Result<(
         }
         while let Ok(ev) = receiver.try_recv() {
             events += 1;
-            if std::env::var_os("VISIONALVR_DISCOVERY_DEBUG").is_some() {
+            if std::env::var_os("AIRFRAMEXR_DISCOVERY_DEBUG").is_some() {
                 crate::logs::general("INFO", &format!("discovery: mdns event {:?}", ev).chars().take(300).collect::<String>());
             }
             if let ServiceEvent::ServiceResolved(info) = ev {

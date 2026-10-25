@@ -2,7 +2,7 @@
 #  1. frame.cpp: honor eyeVisibility on quad/cylinder/cube layers also in "Oculus runtime" mode (VDXR computes the per-eye
 #     flags but only sets them when Virtual Desktop's own server is running; OVRShim implements the flags).
 #  2. d3d11_native.cpp: copy all 6 faces (and mips) of a cube swapchain; upstream copies subresource 0 only.
-#  4. RuntimeConfiguration.h: the runtime's display name (what apps show as the current OpenXR runtime) reads "VisionALVR (VDXR)"
+#  4. RuntimeConfiguration.h: the runtime's display name (what apps show as the current OpenXR runtime) reads "AirFrameXR (VDXR)"
 #     instead of "VirtualDesktopXR (Standalone)", which confused users; VDXR keeps its credit in the name and in THIRD_PARTY_NOTICES.
 #  3. -DHAS_CUBE_LAYERS (through the CL environment variable): advertise XR_KHR_composition_layer_cube.
 #  5. session.cpp: VDXR's own "running start" off by default. With it on, xrWaitFrame returns one display period minus 2 ms after
@@ -16,7 +16,7 @@
 param([switch]$Unpatched)
 $ErrorActionPreference = 'Continue'
 $start = Get-Date
-$root = if ($env:VISIONALVR_ROOT) { $env:VISIONALVR_ROOT } else { "$env:USERPROFILE\openxr" }
+$root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
 $src = "$root\src\VDXR\virtualdesktop-openxr"
 $msbuild = 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe'
 
@@ -58,7 +58,7 @@ if (xrSwapchain.ovrDesc.Type == ovrTexture_Cube) { /* OVRShim: copy every face a
 '@
     $ok = (Patch-File "$src\d3d11_native.cpp" $pat $new.Replace('$', '$$') 'OVRShim: copy every face and mip') -and $ok
     # 4. display name
-    $ok = (Patch-File "$src\RuntimeConfiguration.h" '#define RUNTIME_PRETTY_NAME "VirtualDesktopXR \(Standalone\)"' '#define RUNTIME_PRETTY_NAME "VisionALVR (VDXR)" /* OVRShim: display name */' 'OVRShim: display name') -and $ok
+    $ok = (Patch-File "$src\RuntimeConfiguration.h" '#define RUNTIME_PRETTY_NAME "VirtualDesktopXR \(Standalone\)"' '#define RUNTIME_PRETTY_NAME "AirFrameXR (VDXR)" /* OVRShim: display name */' 'OVRShim: display name') -and $ok
     # 5. VDXR's running start off by default (the shim's release is the frame start)
     $ok = (Patch-File "$src\session.cpp" 'm_useRunningStart = !getSetting\("quirk_disable_running_start"\)\.value_or\(false\);' 'm_useRunningStart = getSetting("ovrshim_vdxr_running_start").value_or(false) && !getSetting("quirk_disable_running_start").value_or(false); /* OVRShim: frame-start gate */' 'OVRShim: frame-start gate') -and $ok
     $env:CL = '/DHAS_CUBE_LAYERS'

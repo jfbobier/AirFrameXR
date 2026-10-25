@@ -1,4 +1,4 @@
-//! VisionALVR around the ALVR host: the portable install layout, `config/visionalvr.json`, the control channel from the GUI
+//! AirFrameXR around the ALVR host: the portable install layout, `config/airframexr.json`, the control channel from the GUI
 //! (stdin), the system check, the GPU sampler for the debug log, and the headset's identity from ALVR's client list.
 use serde_json::{json, Value};
 use std::{
@@ -10,10 +10,10 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "0.6.1-alpha";
+pub const VERSION: &str = "1.0.0";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
-/// `config/` (session.json, visionalvr.json) and `logs/` inside it.
+/// `config/` (session.json, airframexr.json) and `logs/` inside it.
 pub struct Install {
     pub dir: PathBuf,
     pub config: PathBuf,
@@ -26,7 +26,7 @@ impl Install {
     }
 }
 
-/// `config/visionalvr.json`, written by configure.exe / VisionALVR.exe. Command-line flags win over it.
+/// `config/airframexr.json`, written by configure.exe / AirFrameXR.exe. Command-line flags win over it.
 #[derive(Default, Debug)]
 pub struct Settings {
     pub idle_rgb: Option<u32>,
@@ -50,7 +50,7 @@ pub struct Settings {
     pub intake_gate: Option<bool>,
     /// slide the host's display grid so frames arrive just before the headset's tick (phase.rs); default on
     pub phase_lock: Option<bool>,
-    /// arrival margin of the phase lock, ms (default 7; the environment variable VISIONALVR_PHASE_MARGIN_MS wins)
+    /// arrival margin of the phase lock, ms (default 7; the environment variable AIRFRAMEXR_PHASE_MARGIN_MS wins)
     pub phase_margin_ms: Option<f64>,
     /// GPU keepalive duty in percent (a laptop GPU that drops to a low power state while streaming; --gpu-keepalive wins)
     pub gpu_keepalive: Option<i64>,
@@ -100,6 +100,13 @@ fn arr3(v: &Value) -> Option<[f32; 3]> {
 }
 
 pub fn load_settings(path: &Path) -> Settings {
+    // before 1.0 the project was called VisionALVR and its settings file visionalvr.json: a folder carried over keeps its settings (the old file stays as a backup)
+    if !path.exists() {
+        let old = path.with_file_name("visionalvr.json");
+        if old.exists() && fs::copy(&old, path).is_ok() {
+            crate::logs::general("INFO", "settings carried over from config/visionalvr.json (the name before 1.0)");
+        }
+    }
     // A UTF-8 BOM (Windows PowerShell's Set-Content / older Notepad) made serde_json reject the whole file and silently
     // dropped every setting (seen 2026-10-10): strip it.
     let v: Value = fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(t.trim_start_matches('\u{feff}')).ok()).unwrap_or_default();
@@ -214,9 +221,9 @@ pub static HEIGHT_REQ: AtomicU32 = AtomicU32::new(0);
 pub static GAMMA_REQ: AtomicU32 = AtomicU32::new(0);
 /// -1 nothing pending, 0 debug off, 1 debug on
 pub static DEBUG_REQ: AtomicI32 = AtomicI32::new(-1);
-/// frame generation on/off from VisionALVR.exe (-1 none, 0 off, 1 on); applied by the main loop to the running encoder and the shim's pacing
+/// frame generation on/off from AirFrameXR.exe (-1 none, 0 off, 1 on); applied by the main loop to the running encoder and the shim's pacing
 pub static FRAME_GEN_REQ: AtomicI32 = AtomicI32::new(-1);
-/// frame generation rate from VisionALVR.exe (-1 none, else `pipeline::FgRate::index`: 0 third, 1 half, 2 two_thirds, 3 uncapped)
+/// frame generation rate from AirFrameXR.exe (-1 none, else `pipeline::FgRate::index`: 0 third, 1 half, 2 two_thirds, 3 uncapped)
 pub static FG_RATE_REQ: AtomicI32 = AtomicI32::new(-1);
 /// fps cap of the game's releases (uncapped mode), -1 none, 0 = no cap
 pub static FG_CAP_REQ: AtomicI32 = AtomicI32::new(-1);
@@ -358,11 +365,11 @@ pub fn system_check(gpu_info: Value) -> Value {
         "nvenc_api": nvenc,
         "ok": ok,
         "reason": if ok { "".to_string() } else if !has_nvidia {
-            "VisionALVR streams with NVIDIA's hardware video encoder (NVENC); no NVIDIA GPU was found".to_string()
+            "AirFrameXR streams with NVIDIA's hardware video encoder (NVENC); no NVIDIA GPU was found".to_string()
         } else if api.is_none() {
             "the NVIDIA video encoder library (nvEncodeAPI64.dll) was not found: install or update the NVIDIA driver".to_string()
         } else {
-            format!("the NVIDIA driver supports NVENC API {nvenc}; VisionALVR needs {}.{} or newer: update the NVIDIA driver", MIN_NVENC_API.0, MIN_NVENC_API.1)
+            format!("the NVIDIA driver supports NVENC API {nvenc}; AirFrameXR needs {}.{} or newer: update the NVIDIA driver", MIN_NVENC_API.0, MIN_NVENC_API.1)
         },
     })
 }

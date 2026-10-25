@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""The streamer routes the game audio like startvisionalvr.bat did (tools/gui/AudioRoute.cs, Core Audio from .NET). On the builder, from a copy of the package
+"""The streamer routes the game audio like startairframexr.bat did (tools/gui/AudioRoute.cs, Core Audio from .NET). On the builder, from a copy of the package
 (run.py build gui package first), with the PC's own output at 55 % and the VB-Audio cable at 40 %; streamer.exe is started in the interactive session:
   plain    the cable is the default output for all three roles, at 100 % and unmuted, the PC output muted with its volume still 55 %; ALVR's mute_when_streaming is
            off in session.json; after the window is closed the streamer exits promptly, the defaults are back on the PC output, unmuted at 55 %
-  nomute   audio.mute_pc = false in visionalvr.json: the PC output is not muted
+  nomute   audio.mute_pc = false in airframexr.json: the PC output is not muted
   disturb  while it runs the default is moved back to the PC, the cable is muted and set to 30 % (Windows / a game / ALVR's own mute): all healed within 7 s
   named    the audio settings name the 16ch cable device: it is the default while the streamer runs
   format   the cable's Default format is 44.1 kHz before the start: set to plain 2 ch / 48000 Hz PCM
@@ -62,22 +62,22 @@ assert pc and "cable" not in pc.lower(), f"the default output must be the PC's o
 orig_rate = int(before.get('fmt', {}).get(cable, '2ch/48000/16bit').split('/')[1])
 orig_pc, orig_cable = before["device"][pc][0], before["device"][cable][0]
 print(f"before: default {pc}, PC volume {orig_pc}, cable volume {orig_cable}")
-base = lib.b_run("echo %USERPROFILE%")[1].strip().splitlines()[-1].strip() + f"\\{lib.ROOTNAME}\\runs\\audio_route\\VisionALVR"
+base = lib.b_run("echo %USERPROFILE%")[1].strip().splitlines()[-1].strip() + f"\\{lib.ROOTNAME}\\runs\\audio_route\\AirFrameXR"
 
 def fresh_copy(session_edit=None, settings=None):
     # /MIR makes the copy equal to the package, so the last phase's session.json, logs and state file are gone (the builder's guard refuses rmdir / del)
-    lib.b_run("robocopy out\\dist\\VisionALVR runs\\audio_route\\VisionALVR /MIR /NFL /NDL /NJH /NJS /NP")
+    lib.b_run("robocopy out\\dist\\AirFrameXR runs\\audio_route\\AirFrameXR /MIR /NFL /NDL /NJH /NJS /NP")
     if session_edit:
         for name in ("session.default.json", "session.json"):   # the package may carry both: the streamer reads session.json
             sess = ROOT / "harness/cache/audio_route_session.json"; sess.unlink(missing_ok=True)
-            lib.b_get(f"runs/audio_route/VisionALVR/config/{name}", sess)
+            lib.b_get(f"runs/audio_route/AirFrameXR/config/{name}", sess)
             if not sess.exists(): continue
             d = json.loads(sess.read_text(encoding="utf-8-sig")); session_edit(d); sess.write_text(json.dumps(d))
-            lib.b_put(sess, f"runs/audio_route/VisionALVR/config/{name}")
+            lib.b_put(sess, f"runs/audio_route/AirFrameXR/config/{name}")
     settings = {**(settings or {}), "audio": {**((settings or {}).get("audio") or {}), "capture": "device"}}   # this check is about the cable path; process loopback is audio_chain_check's default
     if settings is not None:
         f = ROOT / "harness/cache/audio_route_settings.json"; f.write_text(json.dumps(settings))
-        lib.b_put(f, "runs/audio_route/VisionALVR/config/visionalvr.json")
+        lib.b_put(f, "runs/audio_route/AirFrameXR/config/airframexr.json")
 
 def reset(cable_vol=0.40):
     ps(f'setdefault "{pc}"')
@@ -89,7 +89,7 @@ def run(mode="plain", seconds=12):
 
 def session_text():
     dst = ROOT / "harness/cache/audio_route_session_after.json"; dst.unlink(missing_ok=True)
-    lib.b_get("runs/audio_route/VisionALVR/config/session.json", dst)
+    lib.b_get("runs/audio_route/AirFrameXR/config/session.json", dst)
     return dst.read_text(encoding="utf-8-sig", errors="replace") if dst.exists() else ""
 
 try:
@@ -149,7 +149,7 @@ try:
     out = run("nocable", 8)
     during = section(out, "during")
     check("nocable: the default output and the PC volume are left alone", all(during["default"].get(r) == pc for r in ROLES) and during["device"][pc] == (0.55, False), (during["default"], during["device"][pc]))
-    log = lib.b_run("type runs\\audio_route\\VisionALVR\\logs\\VisionALVR.log")[1]
+    log = lib.b_run("type runs\\audio_route\\AirFrameXR\\logs\\AirFrameXR.log")[1]
     check("nocable: the log says no usable virtual audio cable was found", "no usable virtual audio cable found" in log, log[-400:])
 
     # -- crash and recovery

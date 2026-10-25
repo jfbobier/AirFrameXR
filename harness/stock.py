@@ -4,7 +4,7 @@ Same scenario file, same session.json (lib.derive_session writes it for both cha
 emulation, head trace replay), same OpenXR app (xr_probe, Littlest Tokyo) -- only the middle differs: here the app runs on SteamVR's OpenXR runtime and
 ALVR's own SteamVR driver streams it; there it runs on VDXR + OVRShim and our host streams it.
 
-Needs on the PC (tools/pc.local): stock ALVR (VISIONALVR_STOCK_ALVR, default C:\\Games\\ALVR) with SteamVR installed at the default path, the mock client and
+Needs on the PC (tools/pc.local): stock ALVR (AIRFRAMEXR_STOCK_ALVR, default C:\\Games\\ALVR) with SteamVR installed at the default path, the mock client and
 the probe built (python3 harness/run.py build client probe), the ALVR app on the headset closed. The stock dashboard's session.json is replaced for the run
 (the original is kept as session.json.bak-stockcmp and restored).
 """
@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import live, lib
 
-ALVR = os.environ.get("VISIONALVR_STOCK_ALVR", r"C:\Games\ALVR")
+ALVR = os.environ.get("AIRFRAMEXR_STOCK_ALVR", r"C:\Games\ALVR")
 HOME = rf"C:\Users\{live.PC_USER}\{lib.ROOTNAME}"          # the builder's working folder (clone)
 CLIENT = HOME + "\\" + lib.CLIENT_EXE
 PROBE = HOME + r"\build\probe\xr_probe.exe"
@@ -29,7 +29,7 @@ def _fwd(p):
 
 def kill_all():
     live.ps("""
-Stop-Process -Name xr_probe,alvr_client_headless,alvr_host,VisionALVR -Force -ErrorAction SilentlyContinue
+Stop-Process -Name xr_probe,alvr_client_headless,alvr_host,AirFrameXR -Force -ErrorAction SilentlyContinue
 Stop-Process -Name 'ALVR Dashboard',vrserver,vrmonitor,vrcompositor,vrdashboard,vrwebhelper,vrstartup -Force -ErrorAction SilentlyContinue
 foreach ($t in 'stock_dash','stock_client','stock_probe') { schtasks /delete /tn $t /f 2>$null | Out-Null }
 """)
