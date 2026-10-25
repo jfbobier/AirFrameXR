@@ -124,15 +124,19 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <p align="center"><img src="docs/images/ui_firewall.png" width="640" alt="The firewall review"></p>
 
-The desktop mirror (the Windows desktop floating in front of you between games, your right hand as the mouse) is only visible in a headset; its picture is tested on the GPU for 7 desktop shapes in SDR and HDR (see the harness below).
+**Desktop mirror.** Between games the Windows desktop floats in front of you in the headset, your right hand or controller is the mouse: start the next game from where you sit, without taking the headset off or looking at the monitor. The picture below is a frame of the stream from a test run through the whole chain, the left eye (a demo desktop, the controller's beam in orange); its picture is also tested on the GPU for 7 desktop shapes in SDR and HDR (see the harness below).
+
+<p align="center"><img src="docs/images/ui_mirror.png" width="640" alt="The desktop mirror in the headset: a game library floating over the idle colour, with the controller's beam"></p>
 
 ## Status
 - **Works on the real headset** (tested on RTX 5090 + Vision Pro, and on a Quest 3 with the Meta-store ALVR client): the vast majority of
   UEVR games, Luke Ross mods (Dead Space Remake), native VR games, controllers (ALVR's Quest/Touch emulation), haptics, game audio,
   discovery/pairing with the stock app.
-- **Known issues**: some games still have controller and/or crash issues (for example one Unity game crashes, one UEVR game shows
-  no image, one Unity game shows its menu very small). Use SteamVR + ALVR for those. Zelda: Breath of the Wild through Cemu + BetterVR,
-  once a problem case (elevated process, inventory flicker, controllers), now works fully (2026-10-18).
+- **Known issues**:
+  - Frame generation is still experimental.
+  - Some OpenXR games need the SteamVR + ALVR fallback. OpenVR games are not supported and none is planned.
+  - No USB streaming, except when bridged with ALVR's own tools.
+  - HEVC encoding is baked in for maximum split-encoding performance: no H.264 or AV1.
 - **Perceived quality varies a lot from one setup to another, especially with frame generation on.** The same build felt "restored" one
   evening and "lower" the next on the same PC and headset, and every time the cause was a condition of the setup, not a game: the Wi-Fi
   channel (a neighbour's network produced micro-stutters that stock ALVR showed too; channel 149 cured them), the panel running 100 Hz

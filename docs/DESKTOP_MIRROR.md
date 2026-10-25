@@ -22,7 +22,7 @@ layer with the views the runtime gives it, and reads the controllers through Ope
 Tests: `harness/mirror_check.py` (the maths in `mirror_math.h`, the picture on the GPU, a screen turned 40 degrees, the beam) and the scenarios `e2e_mirror` (the real chain with the mock client on a synthetic desktop: the idle colour
 outside the screen, the screen in it, the beam in the stream, the pointer on the screen, and the timing of every scripted trigger / grip / A / B edge against what the
 app decided, the app's frame rate and picture cost) `e2e_mirror_handover` (a game, `xr_probe`, starts while the mirror runs: the signal arrives, the mirror leaves within 2 s, the engine records the mirror's run then the game's) and `e2e_mirror_desktop` (the same on the real desktop, for a PC whose screen can be duplicated). Flags for
-the harness: `--synthetic` (a known picture instead of the desktop, no real mouse), `--input-log <csv>` (every button event with its wall-clock time).
+the harness: `--synthetic` (a known picture instead of the desktop, no real mouse; `--image-rgba <file>` a 1920 x 1080 raw BGRA picture instead of the grey patches, used for the README screenshot: `harness/mirror_screenshot.py`), `--input-log <csv>` (every button event with its wall-clock time).
 
 The old design (the mirror inside `alvr_host.exe`) is the git tag `pre-mirror-app`.
 

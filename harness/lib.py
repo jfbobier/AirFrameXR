@@ -299,12 +299,17 @@ def launch_app(app, rid, rd, log):
     OpenXR loader ignores XR_RUNTIME_JSON for elevated processes, so it goes through a temporary LIMITED scheduled task."""
     rc, home = b_run("echo %USERPROFILE%")
     home = home.strip().splitlines()[-1].strip()
+    if app.get("image"):   # a picture for the mirror's synthetic desktop (harness/mirror_demo_desktop.py), as the 1920 x 1080 raw BGRA the app reads (the desktop capture's own order)
+        CACHE.mkdir(parents=True, exist_ok=True)
+        raw = CACHE / "desktop.rgba"
+        sh([FFMPEG, "-hide_banner", "-v", "error", "-y", "-i", str(ROOT / app["image"]), "-vf", "scale=1920:1080", "-f", "rawvideo", "-pix_fmt", "bgra", str(raw)])
+        b_put(raw, f"runs/{rid}/desktop.rgba")
     rt = app.get("runtime", r"out\vdxr-shim")
     cmd = ("@echo off\r\n"
            f"set XR_RUNTIME_JSON={home}\\{ROOTNAME}\\{rt}\\virtualdesktop-openxr.json\r\n"
            + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\{ROOTNAME}\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\{ROOTNAME}\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_timing.csv", **app.get("env", {})}.items()) +
            f"cd /d {home}\\{ROOTNAME}\r\n"
-           + (f"out\\mirrordesktop\\mirrordesktop.exe --log {rd}\\app.log --seconds {app.get('seconds', 25)} --no-mouse --clear 00FF00 --input-log {rd}\\mirror_events.csv{' --synthetic' if app.get('synthetic') else ''} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "mirrordesktop" else
+           + (f"out\\mirrordesktop\\mirrordesktop.exe --log {rd}\\app.log --seconds {app.get('seconds', 25)} --no-mouse --clear {app.get('clear', '00FF00')} --input-log {rd}\\mirror_events.csv{' --synthetic' if app.get('synthetic') else ''}{(' --image-rgba ' + rd + chr(92) + 'desktop.rgba') if app.get('image') else ''} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "mirrordesktop" else
               f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n") +
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
     local = CACHE / "app.cmd"

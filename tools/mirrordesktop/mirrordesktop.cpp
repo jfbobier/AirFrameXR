@@ -5,7 +5,7 @@
 // trigger = left button, A / X = double click, grip or B / Y = right button, thumbstick = scroll.
 // Everything that is not the screen is the idle colour (107C10 by default), which the headset shows as passthrough.
 //
-//   mirrordesktop.exe [--log <file>] [--seconds N] [--no-mouse] [--clear RRGGBB] [--synthetic] [--input-log <csv>]
+//   mirrordesktop.exe [--log <file>] [--seconds N] [--no-mouse] [--clear RRGGBB] [--synthetic [--image-rgba <file>]] [--input-log <csv>]
 //   (the background colour is the streamer's idle colour, config\airframexr.json video.idle_rgb, 107C10 by default; --synthetic: a known test picture instead of the
 //    desktop, for the harness; --input-log: every button event with its wall-clock time, for the harness's timing checks)
 //
@@ -80,13 +80,14 @@ static uint32_t idleColour(const std::string& path) {
 }
 
 int main(int argc, char** argv) {
-    std::string logPath, inputLogPath; int seconds = 0; bool mouse = true, synthetic = false; uint32_t clear = 0x107C10; bool clearGiven = false;
+    std::string logPath, inputLogPath; int seconds = 0; bool mouse = true, synthetic = false; std::string imageFile; uint32_t clear = 0x107C10; bool clearGiven = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--log") && i + 1 < argc) logPath = argv[++i];
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-mouse")) mouse = false;
         else if (!strcmp(argv[i], "--clear") && i + 1 < argc) { clear = (uint32_t)strtoul(argv[++i], nullptr, 16) & 0xFFFFFF; clearGiven = true; }
         else if (!strcmp(argv[i], "--synthetic")) synthetic = true;
+        else if (!strcmp(argv[i], "--image-rgba") && i + 1 < argc) imageFile = argv[++i];   // with --synthetic: a 1920 x 1080 raw BGRA picture instead of the grey patches (the README's demo desktop)
         else if (!strcmp(argv[i], "--input-log") && i + 1 < argc) inputLogPath = argv[++i];
     }
     if (logPath.empty()) {   // <package>\logs\mirrordesktop.log (the exe is in <package>\bin)
@@ -142,6 +143,11 @@ int main(int argc, char** argv) {
         // a known picture instead of the desktop: 4 x 2 grey patches (p * 36), 1920 x 1080; no capture, no real mouse
         const int W = 1920, H = 1080; std::vector<uint8_t> img((size_t)W * H * 4);
         for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) { const int p = (y * 2 / H) * 4 + (x * 4 / W); uint8_t* px = &img[((size_t)y * W + x) * 4]; px[0] = px[1] = px[2] = (uint8_t)(p * 36 + 20); px[3] = 255; }
+        if (!imageFile.empty()) {
+            FILE* f = fopen(imageFile.c_str(), "rb");
+            if (!f || fread(img.data(), 1, img.size(), f) != img.size()) { L("synthetic desktop: %s is not a 1920 x 1080 raw BGRA file", imageFile.c_str()); if (f) fclose(f); return 2; }
+            fclose(f);
+        }
         if (!mirror.InitForTest(W, H, false, 1.f, err, 256)) { L("synthetic desktop: %s", err); return 2; }
         mirror.SetTestImage(img.data()); mouse = false;
     } else if (!mirror.Init(err, 256)) { L("desktop capture unavailable: %s", err); return 2; }
