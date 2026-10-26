@@ -10,6 +10,26 @@ Thanks for helping. A few things keep this project workable:
   vendor. **OS: Windows** for the streamer.
 - OpenXR games only (no SteamVR/OpenVR games).
 
+<!-- AirFrameXR contribution policy -->
+## Development philosophy: keep the project lean
+
+**No bloat. One tool, one job. Native tooling when appropriate.** AirFrameXR prioritizes a small, understandable, measurable PC-side OpenXR-to-headset pipeline over features for their own sake. The maintainer may decline requests that add broad compatibility layers, persistent services, configuration sprawl, dependencies, or maintenance burden without a clear benefit to the core performance path.
+
+Before writing a change, ask: does it measurably improve performance, reliability, correctness, or an existing core workflow? Can it be solved with the OS/platform tools already used by the project? Can an existing component own it without adding another layer? See [docs/DEVELOPMENT_PHILOSOPHY.md](docs/DEVELOPMENT_PHILOSOPHY.md).
+
+## AI-assisted contributions
+
+**Welcome, but documented and reviewed.** AI tools may help with code, tests, debugging and documentation. Contributors remain responsible for understanding and validating every change. An AI-generated test plan is not a passed test.
+
+For each pull request that includes material AI-assisted code or design work, add a **Markdown work summary** under `docs/ai-contributions/YYYY-MM-DD-short-topic.md`, using [the template](docs/ai-contributions/TEMPLATE.md). State:
+
+1. What the AI did, including the touched components and the reasoning for the change.
+2. Which decisions and code paths a human actually reviewed.
+3. Which builds, harness scenarios, and headset tests ran, with results; distinguish these from suggested or unrun checks.
+4. Known limitations, regressions, unverified assumptions, new dependencies and any effect on performance or complexity.
+
+Do **not** paste private prompts, credentials, personal data, or raw chat logs. A concise, factual summary is enough; opaque, unreviewed AI changes are not.
+
 ## Before a pull request
 1. Build on Windows with `build.ps1` (`docs/DEVELOPMENT.md`) and try your change with a game and the headset if you can.
 2. If you can run the automated harness (optional, `docs/DEVELOPMENT.md`): the scenarios your change touches, and

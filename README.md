@@ -2,26 +2,44 @@
   <img src="docs/images/airframexr-banner.png" alt="AirFrameXR: Wireless XR. Higher Frames." width="100%">
 </p>
 
+<!-- AirFrameXR overview: editorial refresh -->
 # AirFrameXR
 
-**A wireless-first OpenXR runtime for NVIDIA GPUs: it renders, encodes, paces and generates frames as one pipeline, and streams to any headset that speaks the ALVR protocol (v20).**
-Made for the Apple Vision Pro and 90 Hz; tested on the Quest 3 too.
+**Wireless PCVR, re-engineered for NVIDIA. No SteamVR required. Optional integrated frame generation.**
 
-AirFrameXR replaces the SteamVR + ALVR server pair on the PC with a single streamer of about 20 MB: an OpenXR runtime, a compositor shim and
-the ALVR protocol in one process chain, written for NVIDIA GPUs end to end. Because it owns the whole path from the game's swapchain to the
-Wi-Fi packet, every stage is tuned against the next one instead of stacked mods negotiating through SteamVR:
+AirFrameXR replaces the **SteamVR + traditional ALVR PC streamer** with a **lean, NVIDIA-optimized OpenXR runtime and streaming pipeline**. It handles frame pacing, optional frame generation, NVENC encoding, and wireless delivery together, instead of layering those components on top of SteamVR.
 
-- **No SteamVR.** The game talks OpenXR to a small runtime; no SteamVR compositor, no extra frame copies between processes, no dashboard.
-- **NVIDIA all the way.** NVENC HEVC 10-bit with split-frame encoding across the GPU's encoders, ALVR's foveated encoding when you want it,
-  NVIDIA Optical Flow for the generated frames. Shared GPU memory between the game, the shim and the encoder; nothing crosses the CPU.
-- **Frame generation that is part of the pipeline, not a mod on top of a mod.** The game is paced to 1/3, 1/2 or 2/3 of the display rate and
-  the streamer interpolates the rest, every output rotated to the newest head pose. On an RTX 5090 and a Vision Pro: a 40 fps Unreal game
-  streams at the panel's 90-100 Hz with 0.5-2 % of the headset's periods repeated and 67 ms of total latency, against 40-50 % repeated and
-  86 ms without it. A per-game record proposes the rate that held last time, on this headset.
-- **Every ALVR client.** The headset sees an ordinary ALVR 20.14 server: the stock ALVR app on the Vision Pro, the Meta-store client on the
-  Quest, the others untested but expected to work. Focus and tuning: the Vision Pro at 90 Hz.
-- **Lean by design.** One zip, no installer, no registry beyond the OpenXR runtime registration (undone by a script), a settings file you can
-  read, a launcher that proposes from measurements and never decides for you.
+**The headset side stays the same:** AirFrameXR speaks the **ALVR v20 protocol**, so you keep the existing ALVR headset client. The Windows streamer is NVIDIA-only; it has been tested on **Apple Vision Pro** and **Meta Quest 3**. Other ALVR-protocol clients may work, but are not verified here.
+
+<p align="center">
+  <img src="docs/images/airframexr-pipeline-comparison.png" alt="Architecture comparison: traditional OpenXR game to SteamVR to ALVR streamer to ALVR client, versus an OpenXR game to an integrated NVIDIA-optimized AirFrameXR runtime and streamer to the same ALVR headset client" width="100%">
+</p>
+
+### The difference at a glance
+
+| | Traditional PC-side ALVR setup | AirFrameXR |
+|---|---|---|
+| Runtime | SteamVR runtime and compositor | Dedicated OpenXR runtime based on VirtualDesktop-OpenXR (VDXR), with OVRShim |
+| Streaming | Separate ALVR PC streamer | Integrated streaming pipeline using ALVR server components and protocol v20 |
+| Encoding | General-purpose ALVR configuration | NVIDIA-specific NVENC HEVC 10-bit path |
+| Frame generation | Requires a separate approach if desired | Optional, built into the frame pipeline with NVIDIA Optical Flow and edge-aware synthesis |
+| Headset | ALVR client | **Same ALVR client — no custom headset app required** |
+| Compatibility priority | Broad SteamVR ecosystem | Lean OpenXR-first path; **SteamVR/OpenVR-only titles are not supported** |
+
+### Why build it this way?
+
+- **Remove SteamVR from the PC streaming path.** OpenXR games use a small runtime without the SteamVR compositor or extra inter-process frame copies.
+- **Optimize end to end for NVIDIA.** A shared-GPU-memory path, low-latency frame pacing, NVENC HEVC 10-bit encoding, and ALVR-compatible networking are tuned together.
+- **Make frame generation native to the streamer.** Optional GPU optical-flow interpolation and edge-aware synthesis can improve displayed smoothness when a game cannot sustain the headset's refresh rate. This feature is experimental and **can add interpolation latency**; it is not a free FPS boost.
+- **Keep it simple.** Portable distribution, readable settings, targeted tools, and no attempt to be a general-purpose SteamVR replacement.
+
+### Performance: measurements, not promises
+
+**In developer tests of the new pipeline, improvements of up to 10+ FPS and around 20 ms lower latency were observed** compared with the earlier SteamVR + ALVR path. These are observations from tested configurations, **not guaranteed gains** across games, headsets, or networks. Frame generation should be evaluated separately: it improves delivered/displayed cadence in some GPU-bound cases, but has its own latency trade-off. See the performance findings and testing harness below for technical context.
+
+> **Scope:** Windows + NVIDIA GPU + compatible OpenXR games. Keep using the ALVR app on your headset. For SteamVR/OpenVR-only games or maximum compatibility, use SteamVR + stock ALVR instead.
+
+<!-- End AirFrameXR overview -->
 
 > [!WARNING]
 > **VERSION 1.0: TEST AT YOUR OWN RISK.**
@@ -46,8 +64,7 @@ name was changed at the ALVR developers' request, so that nothing suggests an af
   promise of an answer or a fix; nothing that makes the Vision Pro path worse will be merged.
 - **A plain green screen when the headset connects is normal and intended**: it is the streamer's idle frame while no game runs. On the
   Vision Pro turn on the ALVR app's **Enable Chroma Keyed Passthrough** and the idle colour (#107C10, the App Store app's own key colour) becomes transparent: you see your room between
-  games and the game appears when it starts. If the headset stays green, the chroma key is not set. AirFrameXR does not mirror the Windows
-  desktop into the headset between sessions (Virtual Desktop's way) by design: see-through is the cleaner idle state.
+  games and the game appears when it starts. If the headset stays green, the chroma key is not set. Passthrough and the optional **desktop mirror** are two ways to spend the time between games: the setup wizard asks which one you want, and the streamer's **Desktop mirror** switch turns the mirror on or off (it follows the passthrough choice: on only when passthrough is not set up).
 - **AMD / Intel GPUs**: not supported and not planned. The encode path is NVENC only; you are welcome to fork and adapt it.
   [ALVR](https://github.com/alvr-org/ALVR) itself supports them.
 
@@ -61,9 +78,8 @@ already open source [ALVR](https://github.com/alvr-org/ALVR) as the infrastructu
 > **Luke Ross mods** and **native OpenXR / VR games** worked, but some games still have controller problems, crashes or both.
 > Not supported: SteamVR/OpenVR-only games (they need SteamVR).
 
-AirFrameXR replaces the SteamVR + ALVR server pair on the PC with one lean streamer. It speaks the ALVR 20.14.1 protocol
-unchanged, so the ALVR app on the headset sees an ordinary ALVR server. In between, it does less work:
-no SteamVR compositor, no extra frame copies between processes, and an encode path written for NVENC only.
+How it is built: the headset's ALVR app sees an ordinary ALVR 20.14.1 server; in between there is no SteamVR compositor, no extra frame copies
+between processes, and an encode path written for NVENC only.
 
 ```mermaid
 flowchart LR
@@ -124,9 +140,16 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <p align="center"><img src="docs/images/ui_firewall.png" width="640" alt="The firewall review"></p>
 
-**Desktop mirror.** Between games the Windows desktop floats in front of you in the headset, your right hand or controller is the mouse: start the next game from where you sit, without taking the headset off or looking at the monitor. The picture below is a frame of the stream from a test run through the whole chain, the left eye (a demo desktop, the controller's beam in orange); its picture is also tested on the GPU for 7 desktop shapes in SDR and HDR (see the harness below).
+<!-- AirFrameXR desktop mirror illustration -->
+**Desktop mirror (optional).** Between games, the Windows desktop can float in front of you in the headset, and a controller (or your right hand) is the mouse: the orange beam points, trigger or pinch clicks, A / X double-clicks, grip or B / Y right-clicks, the thumbstick scrolls. Start the next game from where you sit, without removing the headset or looking at the monitor. The right controller holds the beam; **left-handed**, press the left trigger or grip and the beam is the left controller's (press the right one to give it back). It is a switch in the streamer, and an alternative to chroma-key passthrough as the idle view.
 
-<p align="center"><img src="docs/images/ui_mirror.png" width="640" alt="The desktop mirror in the headset: a game library floating over the idle colour, with the controller's beam"></p>
+<p align="center"><img src="docs/images/airframexr-desktop-mirror-3d.png" width="860" alt="Illustration of a three-dimensional Windows desktop mirror in VR, with a visible controller projecting an orange pointing beam onto the desktop"></p>
+
+*Illustration (generated artwork based on a real desktop capture, not a headset screenshot; the real screen is flat and floats over your room or the idle colour).* What the headset really gets is below: frames of the decoded stream from a test run through the whole chain, the left eye, with the right controller's beam and, after a press of the left trigger, the left controller's. Its picture is also tested on the GPU for 7 desktop shapes in SDR and HDR (see the harness below).
+
+<p align="center"><img src="docs/images/ui_mirror_real.png" width="420" alt="The real desktop mirror in the stream, right controller's beam"> <img src="docs/images/ui_mirror_left.png" width="420" alt="The same, after the left trigger took the beam: the left controller's beam"></p>
+
+<!-- End desktop mirror illustration -->
 
 ## Status
 - **Works on the real headset** (tested on RTX 5090 + Vision Pro, and on a Quest 3 with the Meta-store ALVR client): the vast majority of
@@ -279,6 +302,19 @@ built with small, asserted patches, so an upstream change fails loudly instead o
 
 Everything else is new code (~11,000 lines): the host (`tools/host`, Rust), the encoder library and benchmark
 (`nvenc/hostlib`, C++), the GUIs, the installer scripts, the mock client, the OpenXR probe and the harness.
+
+<!-- AirFrameXR developer philosophy -->
+## For developers: design philosophy
+
+**Performance first. Complexity last.** AirFrameXR is deliberately narrow: a fast, lean OpenXR-to-headset pipeline, not a universal VR launcher or a collection of optional frameworks.
+
+- **No feature bloat.** Every feature must solve a real, demonstrated problem in the project's core streaming path. A larger settings surface, more modes, and broader platform coverage are not goals by themselves. A useful feature can still be declined if its long-term complexity outweighs its value.
+- **One tool, one job.** Keep each component focused, with a clear responsibility and minimal coupling. Prefer a small tool that does one thing reliably over a multipurpose layer full of switches.
+- **Native tooling where it fits.** Prefer Windows facilities, OpenXR, NVIDIA NVENC/Optical Flow, and existing build/runtime capabilities over extra dependencies, wrappers, background services, or bundled frameworks. Reuse working upstream code; avoid reinventing mature primitives.
+- **Measured improvements only.** Frame pacing, latency, quality, compatibility, and code size should be justified by reproducible tests and actual headset behavior. Don't trade predictable performance for features that only look attractive on a checklist.
+- **AI-assisted contributions welcome, with accountability.** If AI wrote, refactored, or materially designed any part of a contribution, include a separate Markdown work summary at `docs/ai-contributions/YYYY-MM-DD-short-topic.md` describing what the AI did, what the human reviewed, what was tested, and what remains unverified. Use [`TEMPLATE.md`](docs/ai-contributions/TEMPLATE.md). AI output is a starting point, not evidence that code works.
+
+See [the development philosophy](docs/DEVELOPMENT_PHILOSOPHY.md) and [contribution requirements](CONTRIBUTING.md) before proposing changes. **This project will not become feature-bloated.**
 
 ## For developers: the testing harness
 
