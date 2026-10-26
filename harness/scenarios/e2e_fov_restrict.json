@@ -94,6 +94,7 @@
         60
       ],
       "tol": 0.002
-    }
+    },
+    "timestamps_monotonic": false
   }
 }

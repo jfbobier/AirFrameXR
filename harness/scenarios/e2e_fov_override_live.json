@@ -95,7 +95,8 @@
       ],
       "tol": 0.002
     },
-    "fov_restrict_event": true
+    "fov_restrict_event": true,
+    "timestamps_monotonic": false
   },
   "stdin_feed": {
     "events": [
