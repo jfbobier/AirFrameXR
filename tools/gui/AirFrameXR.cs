@@ -221,7 +221,7 @@ namespace AirFrameXR
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             scroller.Controls.Add(body);
             Controls.Add(scroller);
-            var hdr = Ui.CompactHeader("Streamer for ALVR headsets (Vision Pro, Quest, ...)");
+            var hdr = Ui.CompactHeader("Integrated OpenXR renderer + streamer for ALVR client VR headsets");
             Controls.Add(hdr);
             Ui.AutoFitWindow(this, hdr, body, false, WithWorstCase);   // fixed size: only Advanced changes it
 

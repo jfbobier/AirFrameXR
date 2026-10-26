@@ -34,7 +34,7 @@ steps aside while a tool is open and returns when all are closed; starting the s
 Top to bottom. Controls are grouped where they balance the window (Picture and Position side by side), not one box per feature.
 
 ```
-[logo header: Streamer for ALVR headsets · version]
+[logo header: Integrated OpenXR renderer + streamer for ALVR client VR headsets · version]
 Headset: connected - Apple Vision Pro (192.168.1.50)                  [Find headset...]   <- the button only while not connected
 Game: Lies of P   (none while the mirror runs)    GPU ... · OpenXR runtime ...
 +- Streaming ---------------------------------------------------------------------+
