@@ -100,6 +100,11 @@ def kill_stale():
         b_run(f"schtasks /end /tn {task} >nul 2>&1")
     for exe in ("alvr_host.exe", "alvr_client_headless.exe", "xr_probe.exe", "vram_ballast.exe", "findstr.exe"):
         b_run(f"taskkill /f /im {exe} >nul 2>&1")
+    # the audio / UI harnesses start the packaged streamer (and its host) through their own scheduled tasks (va_*): end those tasks too, and any streamer, launcher or desktop mirror
+    # running from the harness's own folders (runs\, out\, build\; never an install the user started elsewhere). A streamer left by an aborted run kept its host's ports, and the next
+    # start's host died on them.
+    b_run('powershell -NoProfile -Command "Get-ScheduledTask | Where-Object { $_.TaskName -like \'va_*\' } | ForEach-Object { Stop-ScheduledTask -TaskName $_.TaskName }" >nul 2>&1')
+    b_run('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -match \'^(streamer|AirFrameXR|launcher|configure|mirrordesktop|uitest)\\.exe$\' -and $_.ExecutablePath -match \'\\\\(runs|out|build|_tmp)\\\\\' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1')
     # helper scripts of an aborted stability run (the sampler loops until its stop file exists, the freezers sleep): end them by their command line
     b_run('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \'*memsample.ps1*\' -or $_.CommandLine -like \'*suspend.ps1*\' -or $_.CommandLine -like \'*feed.ps1*\' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1')
 

@@ -53,6 +53,7 @@ def check(name, ok, detail=""):
     fails += not ok
     print(f"CHECK {'PASS' if ok else 'FAIL'} {name}" + ("" if ok else f": {detail}"))
 
+lib.kill_stale()   # no streamer of an earlier (aborted) run still holding the audio route or the host's ports
 ROLES = ("console", "multimedia", "communications")
 before = parse(ps("snapshot"))
 cable = next((n for n in before["device"] if "cable input" in n.lower()), None)
