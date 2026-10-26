@@ -173,7 +173,7 @@ Get-Item "$inst\\bin\\alvr_host.exe", "$inst\\bin\\LibOVRRT64_1.dll", "$inst\\bi
 BASE_SETTINGS = {
     "display": {"gamma": 1.2}, "headset": {"ip": os.environ.get("AIRFRAMEXR_HEADSET_IP", "")}, "debug": True,
     # the staged pipeline (tools/host/src/pipeline.rs): phase-paced sends, shim running start 2 ms, realtime GPU scheduling class
-    "video": {"split_encode": "3", "send_pacing": "phase", "running_start_ms": 2.0, "boundary_offset_ms": 0, "gpu_priority": 0, "gpu_sched_class": 5},
+    "video": {"split_encode": "3", "running_start_ms": 2.0, "gpu_priority": 0},
 }
 
 

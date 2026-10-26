@@ -51,9 +51,7 @@
   "connect_timeout": 45,
   "gpu_keepalive": 90,
   "exit_after_frames": 2000,
-  "send_pacing": "phase",
   "running_start_ms": 2.0,
-  "gpu_sched_class": 5,
   "predict_missing_head": true
  },
  "client": {

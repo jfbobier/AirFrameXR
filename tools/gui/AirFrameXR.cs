@@ -342,10 +342,10 @@ namespace AirFrameXR
             if (AlvrConnecting()) { if (link != Link.Orange || !headset.Text.Contains("connecting")) SetLink(Link.Orange, $"Headset: detected - {name}, connecting..."); }
             else if (link == Link.Orange && (DateTime.UtcNow - lastSeen).TotalSeconds > 30) SetLink(Link.Red, $"Headset: not found - searching for {name} ...");
         }
-        DateTime configSeen; string watchRate; double watchCap, watchLag;
+        DateTime configSeen; string watchRate; double watchCap;
         void ConfigWatchStart()
         {
-            watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchLag = settings.FrameGenLagMs;
+            watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps;
             try { configSeen = File.GetLastWriteTimeUtc(Paths.Settings); } catch { }
             configWatch.Tick += (s, e) =>
             {
@@ -365,7 +365,6 @@ namespace AirFrameXR
                     Log.Write("INFO", "frame generation rate " + watchRate + " (Advanced settings)");
                 }
                 if (settings.FrameGenCapFps != watchCap) { watchCap = settings.FrameGenCapFps; host.Send("frame_gen_cap " + watchCap.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation cap " + watchCap + " fps (Advanced settings)"); }
-                if (settings.FrameGenLagMs != watchLag) { watchLag = settings.FrameGenLagMs; host.Send("frame_gen_lag " + watchLag.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation lag " + watchLag + " ms (Advanced settings)"); }
             };
             configWatch.Start();
         }

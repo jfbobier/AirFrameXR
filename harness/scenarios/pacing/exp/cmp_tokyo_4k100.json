@@ -50,9 +50,7 @@
   "seconds": 40,
   "connect_timeout": 45,
   "exit_after_frames": 4400,
-  "send_pacing": "phase",
-  "running_start_ms": 2.0,
-  "gpu_sched_class": 5
+  "running_start_ms": 2.0
  },
  "client": {
   "seconds": 44,

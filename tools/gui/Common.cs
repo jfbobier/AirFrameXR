@@ -338,7 +338,11 @@ namespace AirFrameXR
     /// config\airframexr.json: AirFrameXR's own settings (the ALVR ones stay in session.json).
     public class AppSettings
     {
-        public Dictionary<string, object> Root = Json.Load(Paths.Settings);
+        /// settings that were removed in 1.0.1 (they measured no benefit): dropped from the file at the next save
+        static readonly string[] Retired = { "send_pacing", "intake_depth", "pick_policy", "client_queue_drain", "follow_client_rate", "boundary_offset_ms", "frame_gen_flow_scale",
+            "frame_gen_hold_age", "frame_gen_perf", "frame_gen_lag_ms", "gpu_sched_class" };
+        public Dictionary<string, object> Root = Load();
+        static Dictionary<string, object> Load() { var r = Json.Load(Paths.Settings); foreach (var k in Retired) Json.Remove(r, "video." + k); return r; }
         public string HeadsetHost { get => Json.Str(Root, "headset.hostname", ""); set => Json.Set(Root, "headset.hostname", value); }
         public string HeadsetName { get => Json.Str(Root, "headset.name", ""); set => Json.Set(Root, "headset.name", value); }
         public string HeadsetIp { get => Json.Str(Root, "headset.ip", ""); set => Json.Set(Root, "headset.ip", value); }
@@ -361,7 +365,6 @@ namespace AirFrameXR
         public string FrameGenRate { get => Json.Str(Root, "video.frame_gen_rate", "half"); set => Json.Set(Root, "video.frame_gen_rate", value); }
         /// uncapped mode's minimum spacing of the game's releases in fps (0 = none) and its content lag in ms (0 = automatic); the streamer takes a change live
         public double FrameGenCapFps { get => Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }
-        public double FrameGenLagMs { get => Json.Num(Root, "video.frame_gen_lag_ms", 0); set => Json.Set(Root, "video.frame_gen_lag_ms", value); }
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
         public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", true); set => Json.Set(Root, "video.frame_gen_recommended", value); }
         /// arrival margin of the phase lock in ms (host default 7; the host reads it at start) and the GPU keepalive duty in % (0 = off); 0 = not set

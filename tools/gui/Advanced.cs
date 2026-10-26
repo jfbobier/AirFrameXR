@@ -56,21 +56,10 @@ namespace AirFrameXR
             knobs.AddRange(new[]
             {
                 N(FG, "frame_gen_cap_fps", "Cap on the game's rate (fps)", 0, 0, 240, 5, 0, Live, "Uncapped mode only; 0 = none. A cap near 90 % of the game's GPU-bound rate shrinks its render queue (Dead Space 62 to 31 ms lag, 2026-10-15); with the frame-start gate on the queue is smaller to begin with, so measure."),
-                N(FG, "frame_gen_lag_ms", "Content lag (ms)", 0, 0, 100, 1, 0, Live, "Uncapped mode only; 0 = automatic (the game's frame period plus half a display period, up to 80 ms)."),
-                N(FG, "frame_gen_flow_scale", "Optical-flow input scale", 0.5, 0.1, 1.0, 0.05, 2, Restart, "0.25 cut the flow from 2.2 to 1.6 ms in the rig and changed nothing else; 1.0 costs 4x the engine time."),
-                C(FG, "frame_gen_perf", "Optical-flow preset", "fast", new[] { "fast", "medium", "slow" }, Restart, "The flow's budget is the running-start lead (a few ms): slower presets risk late outputs. Untested on a headset."),
                 C(FG, "frame_gen_synthesis", "Generated-frame synthesis", "edge", new[] { "edge", "classic", "edge-blend" }, Restart, "edge (default): sharp motion boundaries; where the motion is uncertain the real frame is shown (a little judder) instead of a double image (ideas from VectorXR). classic: the algorithm of 0.6 and earlier, the predictable fallback if edge misbehaves in a game. edge-blend: edge, but uncertain motion blends both frames (smoothest in the lab, double images where the motion estimate fails)."),
-                B(FG, "frame_gen_hold_age", "Hold the stamp regime", false, Restart, "A boundary left with one unused tracking sample repeats once instead of stamping it. On the Vision Pro it only turned 5-7 regime switches a second into 2.4-2.9 repeats: off."),
                 B(AR, "phase_lock", "Phase lock", true, Restart, "Slides the host's display grid so frames arrive the phase margin before the headset's render tick. Known debt: it slides 12-25 times a minute whatever it sees."),
-                N(AR, "boundary_offset_ms", "Boundary offset (ms)", 0, -20, 20, 0.5, 1, Restart, "Compositor boundary offset after the display tick. Never found useful; a lab knob."),
                 N(AR, "running_start_ms", "Running-start margin (ms)", 2, 0, 10, 0.5, 1, Restart, "The game is released envelope + margin before its boundary; 0 releases it at the tick. With the frame-start gate on this acts at frame start: 1-4 are plausible."),
                 B(AR, "intake_gate", "Intake gate", true, Restart, "The shim skips one release when the host's queue has stood 3 boundaries: drains a standing queue without dropping a frame. Works when the game keeps up, fires uselessly 3 times a second in GPU-bound games."),
-                N(AR, "intake_depth", "Intake depth (frames)", 3, 1, 3, 1, 0, Restart, "How many finished frames the host's intake holds in order."),
-                C(AR, "pick_policy", "Frame pick policy", "drain", new[] { "drain", "oldest", "newest" }, Restart, "Which waiting frame a boundary encodes. newest superseded 15-30 % of frames in heavy games; drain = in order plus one resync drop when a queue stood 8 boundaries."),
-                B(AR, "client_queue_drain", "Drain the headset's decoder queue", false, Restart, "Drops one frame when the headset's decoder queue stands a whole period, with a backoff. Never fired in the lab, untested on a headset."),
-                B(AR, "follow_client_rate", "Follow the headset's display rate", true, Restart, "Follows the display rate inferred from the headset's sample timestamps (the Vision Pro's 90 / 100 Hz switches); off pins the 90 Hz grid."),
-                C(AR, "send_pacing", "Send pacing", "asap", new[] { "asap", "vsync", "phase" }, Restart, "When an encoded frame leaves the host. No visible gain over asap in the 2026-10 tests."),
-                N(GE, "gpu_sched_class", "GPU scheduling class", 5, 0, 5, 1, 0, Restart, "5 = realtime (needs the elevated streamer), down to 2; 0 = leave it. 0 was clearly worse on 2026-10-23 (stream 70-86 fps, headset holes 25 %)."),
                 B(GE, "qp_map", "HEVC QP map", false, Restart, "Per-CTB QP delta map: lower QP in the foveal region. Proven against an oracle, never judged on a headset; costs encode time on a one-engine GPU."),
             });
 

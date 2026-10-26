@@ -458,9 +458,9 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "idle_rgb": "--idle-rgb", "gpu_priority": "--gpu-priority", "encode_profile": "--encode-profile",
                                      "install_dir": "--install-dir", "debug": "--debug", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
-                                     "send_pacing": "--send-pacing", "running_start_ms": "--running-start-ms", "boundary_offset_ms": "--boundary-offset-ms",
-                                     "gpu_sched_class": "--gpu-sched-class", "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order", "no_follow_rate": "--no-follow-rate",
-                                     "frame_gen": "--frame-gen", "frame_gen_flow_scale": "--frame-gen-flow-scale", "frame_gen_perf": "--frame-gen-perf", "frame_gen_t": "--frame-gen-t"})
+                                     "running_start_ms": "--running-start-ms",
+                                     "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
+                                     "frame_gen": "--frame-gen", "frame_gen_t": "--frame-gen-t"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -1222,7 +1222,7 @@ def analyse_pipeline(outdir):
                 pass
     if not last:
         return None
-    out = {k: last.get(k) for k in ("send_pacing", "arrived", "superseded", "slots_filled", "slots_empty", "encoder_overruns", "send_late", "encode_envelope_ms")}
+    out = {k: last.get(k) for k in ("arrived", "superseded", "slots_filled", "slots_empty", "encoder_overruns")}
     out["shim"] = last.get("shim")
     out["gpu_scheduling"] = last.get("gpu_scheduling")
     filled = out.get("slots_filled") or 0
@@ -1599,8 +1599,6 @@ def evaluate(sc, a):
                 chk("pipeline_encoder_overruns", (pp.get("encoder_overruns") or 0) <= pc2["max_encoder_overruns"], pp.get("encoder_overruns"), f"<= {pc2['max_encoder_overruns']} (encode longer than a period)")
             if "max_empty_frac" in pc2:
                 chk("pipeline_empty_frac", pp["empty_frac"] <= pc2["max_empty_frac"], pp["empty_frac"], f"<= {pc2['max_empty_frac']} boundaries without a new frame")
-            if "max_send_late" in pc2:
-                chk("pipeline_send_late", (pp.get("send_late") or 0) <= pc2["max_send_late"], pp.get("send_late"), f"<= {pc2['max_send_late']} sends after boundary + lead")
             if pc2.get("gpu_sched_class") is not None:
                 g = pp.get("gpu_scheduling") or {}
                 chk("pipeline_gpu_sched_class", g.get("class") == pc2["gpu_sched_class"] and g.get("status") == 0, g, f"class {pc2['gpu_sched_class']} granted")

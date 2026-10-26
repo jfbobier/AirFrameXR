@@ -13,7 +13,7 @@
 //! last frame on an empty boundary (what SteamVR's compositor does with a late app frame). The game is paced by the shim's
 //! running start (ovrshim/driver.cpp WaitForVsync) against the same boundaries, published to it through the IPC block.
 
-use crate::{event, logs, nvh, push_bounded, sleep_spin_until, LiveCtx, Shared, HOLD_MS, NEXT_TICK_NS, SAME_TS_FRAMES, SEND_PHASE_MS};
+use crate::{event, logs, nvh, push_bounded, sleep_spin_until, LiveCtx, Shared, HOLD_MS, SAME_TS_FRAMES, SEND_PHASE_MS};
 use alvr_common::parking_lot::{Condvar, Mutex};
 use alvr_server_core::ServerCoreContext;
 use alvr_session::CodecType;
@@ -28,39 +28,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// When an encoded frame leaves the host.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SendPacing {
-    /// as soon as it is encoded (arrival jitter = encode jitter)
-    Asap,
-    /// at the display tick after the encode (ALVR's SteamVR driver: one period of latency, flat phase)
-    Vsync,
-    /// at boundary + lead, lead = envelope of recent encode times (flat phase without the extra period when encodes are quick)
-    Phase,
-}
-
-impl SendPacing {
-    pub fn parse(s: &str) -> Result<Self, String> {
-        match s {
-            "asap" | "off" => Ok(Self::Asap),
-            "vsync" | "tick" => Ok(Self::Vsync),
-            "phase" | "boundary" => Ok(Self::Phase),
-            o => Err(format!("send pacing asap|vsync|phase, got {o}")),
-        }
-    }
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Asap => "asap",
-            Self::Vsync => "vsync",
-            Self::Phase => "phase",
-        }
-    }
-}
+/// Frames the intake holds in order. Depth 3 since 2026-10-13: at 2 the third frame of a GPU-bound game's burst was thrown away (Cyberpunk 1.7-2.0 % of
+/// frames, Dead Space 0.7 %); at 3 none is, for +1.5 ms of queue hold in those games. Frame rate before latency. (It was a setting; no other value was
+/// ever better, see docs/PERFORMANCE_KNOBS.md, "Removed on purpose".)
+const INTAKE_DEPTH: usize = 3;
 
 pub struct Config {
     pub origin: Instant,
     pub period_ns: Arc<AtomicU64>,
-    pub send_pacing: SendPacing,
     pub daemon: bool,
     pub fps: f64,
 }
@@ -303,17 +278,11 @@ pub struct Pipeline {
     ctx: Arc<ServerCoreContext>,
     shared: Arc<Shared>,
     pub enc: Mutex<Encoder>,
-    /// frames the app finished and no boundary has taken yet, oldest first (at most `intake_depth`)
+    /// frames the app finished and no boundary has taken yet, oldest first (at most INTAKE_DEPTH)
     intake: Mutex<VecDeque<Arrived>>,
-    intake_depth: usize,
     /// the previous boundary left a frame behind in the intake (a second one in a row drops the older instead: bounded lag)
     left_behind: AtomicBool,
     pub queue_picks: AtomicU64,
-    /// which frame a boundary takes when two wait: drain (default: in order, plus one dropped frame to resynchronise a queue that has stood
-    /// AIRFRAMEXR_DRAIN_AFTER (30) boundaries, at most once per AIRFRAMEXR_DRAIN_EVERY_MS; a fallback: the intake gate normally drains the queue first,
-    /// see `intake_gate`) | oldest (no drops, a standing queue stays a period late) | newest (lab only: drops the older of every pair, loses frames
-    /// when the app's frame times jitter) | adaptive (newest right after an empty boundary, else oldest) | aged
-    pick_policy: String,
     /// the shim holds the game's next release while a frame a boundary passed over still waits here (ipc intakeWaiting, written at every
     /// boundary): the queue drains at the next boundary without dropping a rendered frame. AIRFRAMEXR_INTAKE_GATE=0 disables it.
     intake_gate: bool,
@@ -326,15 +295,11 @@ pub struct Pipeline {
     /// display, 2026-10-13 evening); that is not a standing queue, and skipping its releases only lowered its frame rate (258 skips in 82 s, hold unchanged).
     last_empty_idx: AtomicU64,
     keepup_boundaries: u64,
-    last_empty: AtomicBool,
     /// `drain` pick policy: consecutive boundaries that left a frame behind in the intake (a standing queue: the app delivers exactly as fast as the
     /// display consumes, so every frame waits a period more than it needs to), and when it last dropped one
     standing: AtomicU64,
     drain_last: Mutex<Option<Instant>>,
     pub intake_drains: AtomicU64,
-    /// the headset's decoder queue stood a whole period or more (phase.rs): drop one frame at a boundary to let it drain (opt-in, see phase::client_drain_due)
-    client_drain: bool,
-    pub drains: AtomicU64,
     last_arrival: Mutex<Option<Instant>>,
     picked: Mutex<Option<Picked>>,
     picked_cv: Condvar,
@@ -354,11 +319,9 @@ pub struct Pipeline {
     pub slots_empty: AtomicU64,
     pub encoder_overruns: AtomicU64,
     pub green_frames: AtomicU64,
-    pub send_late: AtomicU64,
     pub encode_errors: AtomicU64,
     pub idr_restarts: AtomicU64,
     pub frames_before_first_tracking: AtomicU64,
-    encode_env_ms: Mutex<f64>,
     drained: Mutex<Drained>,
     last_sent_ts: Mutex<Duration>,
     frame_idx: AtomicU64,
@@ -382,23 +345,6 @@ pub struct Pipeline {
     pub fg_no_sample: AtomicU64,
     /// stamps that took the older of two waiting samples and left the newest in hand for the next boundary (see `fg_pick_sample_now`)
     pub fg_in_hand: AtomicU64,
-    /// Hold the stamp regime (AIRFRAMEXR_FG_HOLD_AGE=1, settings `video.frame_gen_hold_age`; default OFF: the Vision Pro night of 2026-10-23
-    /// measured 5-7 regime switches a second, so the hold only converted them into 2.5-3 repeats a second, see below). With one sample kept in hand every
-    /// output's stamp advances by exactly one of the headset's samples per boundary. A sample later than a whole period (or lost) left a
-    /// boundary with a single unused sample, which was stamped: the stamp jumped two samples and from then on every output was one period
-    /// younger, until a skipped boundary followed by a bunch rebuilt the one in hand and moved them back. On the Vision Pro that is the total
-    /// latency switching 67 <-> 77 ms in 10-20 s cycles (2026-10-23), each switch a pose-age jump shown as a hitch while the head turns.
-    /// Held: such a boundary waits for the next sample like any other and otherwise repeats once (`fg_hold_skips`), the regime stays.
-    /// Safety: a client whose samples come slower than the display rate would make the hold skip every missing sample, so more than
-    /// 5 hold skips within a second step it aside until they thin out (`fg_hold_bypassed`). The rig argued against it (uplink tail
-    /// over a period: such late samples several times a second) skipped 3.4 boundaries a second with it and the head path went TREMBLE
-    /// (late_turn_fg, 2026-10-23), and the Vision Pro's Wi-Fi turned out the same: Gears, 4 h 39 at 1/2, 5.5 regime switches/s, hold skips
-    /// 2.4/s = 97 % of all skipped boundaries (2.6 % against 0.6-2.4 % with the old rule on earlier nights). The counters stay.
-    pub fg_hold_age: AtomicBool,
-    pub fg_hold_skips: AtomicU64,
-    pub fg_hold_bypassed: AtomicU64,
-    fg_hold_pending: AtomicBool,
-    fg_hold_recent: Mutex<std::collections::VecDeque<Instant>>,
     /// regime switches: the number of unused samples left behind the stamped one changed (1 = one in hand, 0 = the newest was stamped)
     pub fg_regime_switches: AtomicU64,
     fg_prev_regime: Mutex<Option<u8>>,
@@ -455,26 +401,16 @@ impl Pipeline {
             shared,
             enc: Mutex::new(enc),
             intake: Mutex::new(VecDeque::new()),
-            // Depth 2: a GPU-bound game completes frames in bunches (two within one period, then none). Newest-wins threw the
-            // older of each pair away and left the next boundary empty (Cyberpunk: 90 submitted, ~65 streamed). With depth 2
-            // the older one goes out at the boundary and the newer at the next. AIRFRAMEXR_INTAKE_DEPTH=1: the old behaviour.
-            // Depth 3 since 2026-10-13: at 2 the third frame of a GPU-bound game's burst was thrown away (Cyberpunk 1.7-2.0 % of frames,
-            // Dead Space 0.7 %); at 3 none is, for +1.5 ms of queue hold in those games. Frame rate before latency.
-            intake_depth: std::env::var("AIRFRAMEXR_INTAKE_DEPTH").ok().and_then(|v| v.parse().ok()).unwrap_or(3usize).clamp(1, 3),
             left_behind: AtomicBool::new(false),
             queue_picks: AtomicU64::new(0),
-            pick_policy: std::env::var("AIRFRAMEXR_PICK").unwrap_or_else(|_| "drain".into()),
             intake_gate: intake_gate_enabled(),
             gate_after: std::env::var("AIRFRAMEXR_GATE_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).max(1),
             last_empty_idx: AtomicU64::new(0),
             keepup_boundaries: std::env::var("AIRFRAMEXR_KEEPUP_BOUNDARIES").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30),
             standing_total: AtomicU64::new(0),
-            last_empty: AtomicBool::new(false),
             standing: AtomicU64::new(0),
             drain_last: Mutex::new(None),
             intake_drains: AtomicU64::new(0),
-            client_drain: std::env::var("AIRFRAMEXR_CLIENT_DRAIN").map(|v| v == "1").unwrap_or(false),
-            drains: AtomicU64::new(0),
             last_arrival: Mutex::new(None),
             picked: Mutex::new(None),
             picked_cv: Condvar::new(),
@@ -491,11 +427,9 @@ impl Pipeline {
             slots_empty: AtomicU64::new(0),
             encoder_overruns: AtomicU64::new(0),
             green_frames: AtomicU64::new(0),
-            send_late: AtomicU64::new(0),
             encode_errors: AtomicU64::new(0),
             idr_restarts: AtomicU64::new(0),
             frames_before_first_tracking: AtomicU64::new(0),
-            encode_env_ms: Mutex::new(4.0),
             drained: Mutex::new(Drained::default()),
             last_sent_ts: Mutex::new(Duration::ZERO),
             frame_idx: AtomicU64::new(0),
@@ -514,11 +448,6 @@ impl Pipeline {
             fg_holds: AtomicU64::new(0),
             fg_no_sample: AtomicU64::new(0),
             fg_in_hand: AtomicU64::new(0),
-            fg_hold_age: AtomicBool::new(std::env::var("AIRFRAMEXR_FG_HOLD_AGE").map(|v| v == "1").unwrap_or(false)),
-            fg_hold_skips: AtomicU64::new(0),
-            fg_hold_bypassed: AtomicU64::new(0),
-            fg_hold_pending: AtomicBool::new(false),
-            fg_hold_recent: Mutex::new(std::collections::VecDeque::new()),
             fg_regime_switches: AtomicU64::new(0),
             fg_prev_regime: Mutex::new(None),
             fg_dropped: AtomicU64::new(0),
@@ -701,16 +630,10 @@ impl Pipeline {
             // a bunch: the older of the two newest is stamped, the newest kept for the next boundary
             self.fg_in_hand.fetch_add(1, Ordering::Relaxed);
             (ring[n - 2], 1u8)
-        } else if n - first_unused == 1 && display_cadence && self.fg_hold_age.load(Ordering::Relaxed) && self.fg_hold_allowed() {
-            // one unused sample: stamping it now would jump the stamp two samples ahead (see `fg_hold_age`); the caller waits for the next
-            // sample and otherwise skips this boundary
-            self.fg_hold_pending.store(true, Ordering::Relaxed);
-            return None;
         } else {
             (ring[n - 1], 0u8)
         };
         drop(ring);
-        self.fg_hold_pending.store(false, Ordering::Relaxed);
         if display_cadence {
             let mut prev = self.fg_prev_regime.lock();
             if prev.map_or(false, |p| p != regime) {
@@ -721,26 +644,6 @@ impl Pipeline {
         Some(pick)
     }
 
-    /// The hold steps aside after 5 hold skips within a second (a client sending fewer samples than display periods).
-    fn fg_hold_allowed(&self) -> bool {
-        let mut recent = self.fg_hold_recent.lock();
-        while recent.front().map_or(false, |t| t.elapsed() > Duration::from_secs(1)) {
-            recent.pop_front();
-        }
-        recent.len() < 5
-    }
-
-    fn fg_hold_skipped(&self) {
-        if self.fg_hold_pending.swap(false, Ordering::Relaxed) {
-            self.fg_hold_skips.fetch_add(1, Ordering::Relaxed);
-            let mut recent = self.fg_hold_recent.lock();
-            recent.push_back(Instant::now());
-            if recent.len() >= 5 {
-                self.fg_hold_bypassed.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    }
-
     /// Like `fg_pick_sample_now`, waiting up to AIRFRAMEXR_FG_SAMPLE_WAIT_MS (3) for one to arrive: with one sample in hand the wait is
     /// rare (a sample later than a whole period); a boundary that finds none sends nothing (a repeat on the headset).
     fn fg_pick_sample(&self) -> Option<(Duration, [f32; 4])> {
@@ -749,7 +652,6 @@ impl Pipeline {
         }
         let wait = *self.fg_sample_wait.lock();
         if wait <= Duration::ZERO {
-            self.fg_hold_skipped();
             return None;
         }
         let t0 = Instant::now();
@@ -767,7 +669,6 @@ impl Pipeline {
             }
         }
         self.fg_sample_wait_us.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
-        self.fg_hold_skipped();
         self.fg_stale_sample()
     }
 
@@ -970,14 +871,6 @@ impl Pipeline {
         self.ipc as *mut std::ffi::c_void
     }
 
-    /// `aged` pick: how long the older of two waiting frames may have waited (AIRFRAMEXR_PICK_AGE_MS, default 0.7 of a display period)
-    fn pick_age(&self) -> Duration {
-        match std::env::var("AIRFRAMEXR_PICK_AGE_MS").ok().and_then(|v| v.parse::<f64>().ok()) {
-            Some(ms) => Duration::from_secs_f64(ms / 1000.0),
-            None => self.period().mul_f64(0.7),
-        }
-    }
-
     pub fn period(&self) -> Duration {
         Duration::from_nanos(self.cfg.period_ns.load(Ordering::Relaxed).max(1_000_000))
     }
@@ -1050,7 +943,7 @@ impl Pipeline {
                 let mut q = self.intake.lock();
                 fate(counter, "A", now, slot as u64, cts);
                 q.push_back(a);
-                while q.len() > self.intake_depth {
+                while q.len() > INTAKE_DEPTH {
                     if let Some(old) = q.pop_front() {
                         fate(old.counter, "S", now, 0, 0);
                         if old.slot != slot {
@@ -1114,34 +1007,23 @@ impl Pipeline {
             // uncapped frame generation: every rendered frame is a link in the interpolation chain (and the frame the game's vectors describe
             // the motion from), so the frames go in order and none is superseded; the app is paced at the display rate, so at most one
             // arrives per boundary on average and a bunch drains at the next empty boundary
+            // frames go in order, plus one dropped frame to resynchronise a queue that has stood AIRFRAMEXR_DRAIN_AFTER boundaries (the only pick policy
+            // left: `oldest` left a standing queue a period late, `newest` lost 15-30 % of the frames of heavy games; the intake gate normally drains the
+            // queue first, this fires only when it could not: a shim without the gate, or the app ignoring its release)
             let take_older = (fg_unc && q.len() >= 2) || !self.fg_on.load(Ordering::Relaxed) && q.len() >= 2
-                && match self.pick_policy.as_str() {
-                    "newest" => false,
-                    "adaptive" => !self.last_empty.load(Ordering::Relaxed),
-                    // in order like `oldest`, but a queue that has stood AIRFRAMEXR_DRAIN_AFTER (8) boundaries without ever emptying drops its older frame
-                    // once (one rendered frame never shown, one period of latency back), at most once per AIRFRAMEXR_DRAIN_EVERY_MS (1000). The earlier
-                    // backoff doubled to 60 s whenever the queue came back, which in a GPU-bound game (a bunch every few seconds) left it standing most
-                    // of the time (Cyberpunk 2026-10-13: 3-4 drains in 100 s, hold 9.9 ms). With the intake gate on, the gate drains the queue first and
-                    // this fires only when it could not (shim without the gate, or the app ignoring its release).
-                    "drain" => {
-                        // 30 boundaries (0.3 s): the gate normally clears a standing queue within a few boundaries; the drain is the last resort and must
-                        // not fire on the arrival jitter the duplicate-timestamp re-stamp adds (77 frames dropped in 206 s of End of Abyss at 8)
-                        let after = std::env::var("AIRFRAMEXR_DRAIN_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30).max(1);
-                        let every = std::env::var("AIRFRAMEXR_DRAIN_EVERY_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1000.0).max(0.0) / 1000.0;
-                        let mut last = self.drain_last.lock();
-                        let due = keeps_up && self.standing.load(Ordering::Relaxed) >= after
-                            && last.map(|t| boundary.saturating_duration_since(t).as_secs_f64() >= every).unwrap_or(true);
-                        if due {
-                            *last = Some(boundary);
-                            self.intake_drains.fetch_add(1, Ordering::Relaxed);
-                        }
-                        !due
-                    }
-                    // oldest unless it has already waited long: a frame that waits more than a fraction of a period means a standing queue
-                    // (the app delivers as fast as the display consumes: the queue never drains and every frame is a period late), so drop
-                    // it for the newer one. A fresh bunch (a late frame followed by its catch-up frame) still goes out in order.
-                    "aged" => q.front().map(|f| boundary.saturating_duration_since(f.arrival) < self.pick_age()).unwrap_or(true),
-                    _ => true,
+                && {
+                // 30 boundaries (0.3 s): the gate normally clears a standing queue within a few boundaries; the drain is the last resort and must
+                // not fire on the arrival jitter the duplicate-timestamp re-stamp adds (77 frames dropped in 206 s of End of Abyss at 8)
+                let after = std::env::var("AIRFRAMEXR_DRAIN_AFTER").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(30).max(1);
+                let every = std::env::var("AIRFRAMEXR_DRAIN_EVERY_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(1000.0).max(0.0) / 1000.0;
+                let mut last = self.drain_last.lock();
+                let due = keeps_up && self.standing.load(Ordering::Relaxed) >= after
+                    && last.map(|t| boundary.saturating_duration_since(t).as_secs_f64() >= every).unwrap_or(true);
+                if due {
+                    *last = Some(boundary);
+                    self.intake_drains.fetch_add(1, Ordering::Relaxed);
+                }
+                !due
                 };
             let a = if take_older { q.pop_front() } else { q.pop_back() };
             if take_older {
@@ -1171,27 +1053,13 @@ impl Pipeline {
             }
             a
         };
-        if self.client_drain && newest.is_some() && alive && crate::phase::client_drain_due() {
-            // the headset's decoded frames wait a whole period or more (a FIFO standing queue that the phase lock, modulo the period, cannot see):
-            // not sending this one lets the headset's queue run dry once (one skipped picture) and gives the period back
-            if let Some(a) = newest {
-                fate(a.counter, "S", boundary, 1, 0);
-                unsafe { nvh::nvh_ipc_slot_busy(ipc, a.slot, 0) };
-                self.superseded.fetch_add(1, Ordering::Relaxed);
-                self.drains.fetch_add(1, Ordering::Relaxed);
-                event(self.cfg.origin, "client_queue_drain", json!({ "boundary": idx }));
-            }
-            return;
-        }
         let job = match newest {
             Some(a) => {
                 fate(a.counter, "P", boundary, idx, 0);
-                self.last_empty.store(false, Ordering::Relaxed);
                 self.slots_filled.fetch_add(1, Ordering::Relaxed);
                 Job::App(a)
             }
             None if alive => {
-                self.last_empty.store(true, Ordering::Relaxed);
                 self.last_empty_idx.store(idx, Ordering::Relaxed);
                 if self.fg_have_frame.load(Ordering::Relaxed) && self.fg_on.load(Ordering::Relaxed) {
                     // frame generation: the host fills this boundary from the rendered frames it holds (by design every other boundary)
@@ -1388,29 +1256,8 @@ impl Pipeline {
                     *self.fg_stats.lock() = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
                 }
             }
-            let period_ms = self.period().as_secs_f64() * 1000.0;
-            let lead_ms = {
-                // envelope of the encode time (fast attack, slow decay: 0.05 ms per frame), the send lead in phase pacing
-                let mut env = self.encode_env_ms.lock();
-                *env = ms.max(*env - 0.05).clamp(1.0, 100.0);
-                (*env + 0.5).clamp(1.0, (period_ms - 1.0).max(1.0))
-            };
-            let release_at = match self.cfg.send_pacing {
-                SendPacing::Asap => encoded_at,
-                SendPacing::Vsync => {
-                    let next = origin + Duration::from_nanos(NEXT_TICK_NS.load(Ordering::Relaxed));
-                    if next > encoded_at { next } else { encoded_at }
-                }
-                SendPacing::Phase => {
-                    let t = p.boundary + Duration::from_secs_f64(lead_ms / 1000.0);
-                    if t < encoded_at {
-                        self.send_late.fetch_add(1, Ordering::Relaxed);
-                        encoded_at
-                    } else {
-                        t
-                    }
-                }
-            };
+            // an encoded frame leaves the host as soon as it is encoded (the vsync / phase send pacings were measured to gain nothing)
+            let release_at = encoded_at;
             // CSV identity: the slot (app frames), -1 (green), -2 (synthetic), -3 (a rendered frame re-stamped by the generator)
             let (arrival_s, slot_s) = match &plan {
                 Plan::Slot(a) => (logs::qpc_at(a.arrival), a.slot as i64),
@@ -1523,26 +1370,21 @@ impl Pipeline {
         let unc_state = self.fg.try_lock().map(|s| json!({ "game_period_ms": s.game_period_s * 1000.0, "lag_ms": s.last_lag_s * 1000.0, "last_t": s.last_t,
             "behind": s.unc_behind, "ahead": s.unc_ahead })).unwrap_or(serde_json::Value::Null);
         json!({
-            "send_pacing": self.cfg.send_pacing.name(),
             "arrived": self.arrived.load(Ordering::Relaxed),
             "superseded": self.superseded.load(Ordering::Relaxed),
             "queue_picks": self.queue_picks.load(Ordering::Relaxed),
-            "drains": self.drains.load(Ordering::Relaxed),
             "intake_drains": self.intake_drains.load(Ordering::Relaxed),
             "standing_total": self.standing_total.load(Ordering::Relaxed),
             "intake_gate": self.intake_gate,
             "gate_after": self.gate_after,
             "keepup_boundaries": self.keepup_boundaries,
-            "intake_depth": self.intake_depth,
-            "pick_policy": self.pick_policy,
+            "intake_depth": INTAKE_DEPTH,
             "slots_filled": self.slots_filled.load(Ordering::Relaxed),
             "slots_empty": self.slots_empty.load(Ordering::Relaxed),
             "encoder_overruns": self.encoder_overruns.load(Ordering::Relaxed),
-            "send_late": self.send_late.load(Ordering::Relaxed),
             "green_frames": self.green_frames.load(Ordering::Relaxed),
             "encode_errors": self.encode_errors.load(Ordering::Relaxed),
             "idr_restarts": self.idr_restarts.load(Ordering::Relaxed),
-            "encode_envelope_ms": *self.encode_env_ms.lock(),
             "gpu_scheduling": self.gpu_sched.lock().map(|(c, st)| json!({ "class": c, "status": st })),
             "frame_gen": {
                 "on": self.fg_on.load(Ordering::Relaxed), "synths": self.fg_synths.load(Ordering::Relaxed), "reals": self.fg_reals.load(Ordering::Relaxed),
@@ -1553,7 +1395,7 @@ impl Pipeline {
                 "uncapped_state": unc_state,
                 "sample_waits": self.fg_sample_waits.load(Ordering::Relaxed), "sample_wait_ms_sum": self.fg_sample_wait_us.load(Ordering::Relaxed) as f64 / 1000.0,
                 "sample_wait_ms": self.fg_sample_wait.lock().as_secs_f64() * 1000.0,
-                "hold_age": self.fg_hold_age.load(Ordering::Relaxed), "hold_skips": self.fg_hold_skips.load(Ordering::Relaxed), "hold_bypassed": self.fg_hold_bypassed.load(Ordering::Relaxed), "regime_switches": self.fg_regime_switches.load(Ordering::Relaxed),
+                "regime_switches": self.fg_regime_switches.load(Ordering::Relaxed),
                 "queued": self.fg_queued.load(Ordering::Relaxed), "arrival_waits": self.fg_arrival_waits.load(Ordering::Relaxed),
                 "arrival_hits": self.fg_arrival_hits.load(Ordering::Relaxed), "arrival_wait_ms_sum": self.fg_arrival_wait_us.load(Ordering::Relaxed) as f64 / 1000.0,
                 "arrival_wait_ms": self.fg_arrival_wait.as_secs_f64() * 1000.0,

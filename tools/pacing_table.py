@@ -4,7 +4,7 @@ rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
 for r in rows:
     if r.get("event") == "pacing_config":
         d = r["data"]
-        print("send_pacing:", d.get("send_pacing"), "| stamp:", d.get("stamp"), "fresh_wait_ms:", d.get("fresh_wait_ms"), "| pacing:", d.get("pacing"), "guard_ms:", d.get("pacing_guard_ms"))
+        print("running_start_ms:", d.get("running_start_ms"), "| head_wait_ms:", d.get("head_wait_ms"), "| frame_gen:", d.get("frame_gen"), d.get("rate"))
     if r.get("event") != "encoder_stats":
         continue
     d = r["data"]; c = d.get("client") or {}

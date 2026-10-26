@@ -33,18 +33,12 @@ pub struct Settings {
     pub encode_profile: Option<String>,
     pub qp_map: Option<bool>,
     pub split_encode: Option<String>,
-    /// "asap" | "vsync" | "phase" (default): when an encoded frame leaves the host (tools/host/src/pipeline.rs)
-    pub send_pacing: Option<String>,
     pub gpu_priority: Option<i64>,
     /// shim running start margin in ms (0 = release the game at the display tick)
     pub running_start_ms: Option<f64>,
     /// head-sample policy of the shim (see main.rs Args::head_wait_ms) and the host's frame queue (pipeline.rs)
     pub head_wait_ms: Option<f64>,
     pub predict_missing_head: Option<bool>,
-    pub intake_depth: Option<i64>,
-    pub pick_policy: Option<String>,
-    /// drop one frame when the headset's decoder queue stands a whole period or more, once, with a backoff (phase::client_drain_due); default off while untested on the headset
-    pub client_queue_drain: Option<bool>,
     /// the shim holds the game's next release while the host's queue holds a frame a boundary passed over (drains a standing queue without
     /// dropping a rendered frame; pipeline.rs / ovrshim WaitForVsync); default on
     pub intake_gate: Option<bool>,
@@ -54,29 +48,16 @@ pub struct Settings {
     pub phase_margin_ms: Option<f64>,
     /// GPU keepalive duty in percent (a laptop GPU that drops to a low power state while streaming; --gpu-keepalive wins)
     pub gpu_keepalive: Option<i64>,
-    /// follow the client's display rate (detected from its sample timestamps) instead of the 90 Hz grid (default on)
-    pub follow_client_rate: Option<bool>,
-    /// compositor boundary offset after the display tick, ms
-    pub boundary_offset_ms: Option<f64>,
     /// frame generation (docs/FRAME_GENERATION.md): half-rate pacing + optical-flow interpolated frames; default off
     pub frame_gen: Option<bool>,
-    pub frame_gen_flow_scale: Option<f64>,
-    /// hold the stamp regime (one sample in hand, no two-sample jumps); default off (see pipeline.rs `fg_hold_age`)
-    pub frame_gen_hold_age: Option<bool>,
-    /// "fast" (default) | "medium" | "slow": the optical-flow engine's preset
-    pub frame_gen_perf: Option<String>,
     /// "edge" (default) | "edge-blend" | "classic" (the crossfade recipe, the predictable fallback): the synthesis of generated frames
     /// (nvenc/hostlib/framegen.cpp)
     pub frame_gen_synthesis: Option<String>,
     /// "half" (default) | "uncapped": the game paced at half the display rate with strict alternation, or at the display rate with every
     /// output interpolated (docs/FRAME_GENERATION_UNCAPPED.md)
     pub frame_gen_rate: Option<String>,
-    /// uncapped mode: content lag behind the newest tracking sample, ms (0 = the game's measured frame period + half a display period)
-    pub frame_gen_lag_ms: Option<f64>,
     /// uncapped mode: minimum spacing of the game's releases as an fps cap (0 = none): headroom for the host's own GPU work
     pub frame_gen_cap_fps: Option<f64>,
-    /// D3DKMT process scheduling class to ask for (5 realtime .. 2; 0 = leave)
-    pub gpu_sched_class: Option<i64>,
     pub debug: Option<bool>,
     pub gamma: Option<f32>,
     /// headset height above the floor handed to games (m); 0 = the headset's own floor estimate
@@ -111,34 +92,30 @@ pub fn load_settings(path: &Path) -> Settings {
     // dropped every setting (seen 2026-10-10): strip it.
     let v: Value = fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(t.trim_start_matches('\u{feff}')).ok()).unwrap_or_default();
     let video = &v["video"];
+    // settings of 1.0 that were removed because they measured no benefit (docs/PERFORMANCE_KNOBS.md, "Removed on purpose"): ignored, said once
+    const RETIRED: [&str; 11] = ["send_pacing", "intake_depth", "pick_policy", "client_queue_drain", "follow_client_rate", "boundary_offset_ms", "frame_gen_flow_scale",
+        "frame_gen_hold_age", "frame_gen_perf", "frame_gen_lag_ms", "gpu_sched_class"];
+    let found: Vec<&str> = RETIRED.iter().copied().filter(|k| !video[*k].is_null()).collect();
+    if !found.is_empty() {
+        crate::logs::general("INFO", &format!("settings ignored (removed in 1.0.1, the built-in value is used): {}", found.join(", ")));
+    }
     Settings {
         idle_rgb: video["idle_rgb"].as_str().and_then(|s| u32::from_str_radix(s.trim_start_matches('#'), 16).ok()),
         encode_profile: video["encode_profile"].as_str().map(str::to_string),
         qp_map: video["qp_map"].as_bool(),
         split_encode: video["split_encode"].as_str().map(str::to_string),
-        send_pacing: video["send_pacing"].as_str().map(str::to_string),
         gpu_priority: video["gpu_priority"].as_i64(),
         running_start_ms: video["running_start_ms"].as_f64(),
         head_wait_ms: video["head_wait_ms"].as_f64(),
         predict_missing_head: video["predict_missing_head"].as_bool(),
-        intake_depth: video["intake_depth"].as_i64(),
-        pick_policy: video["pick_policy"].as_str().map(str::to_string),
-        client_queue_drain: video["client_queue_drain"].as_bool(),
         intake_gate: video["intake_gate"].as_bool(),
         phase_lock: video["phase_lock"].as_bool(),
         phase_margin_ms: video["phase_margin_ms"].as_f64(),
         gpu_keepalive: video["gpu_keepalive"].as_i64(),
-        follow_client_rate: video["follow_client_rate"].as_bool(),
-        boundary_offset_ms: video["boundary_offset_ms"].as_f64(),
         frame_gen: video["frame_gen"].as_bool(),
-        frame_gen_flow_scale: video["frame_gen_flow_scale"].as_f64(),
-        frame_gen_hold_age: video["frame_gen_hold_age"].as_bool(),
-        frame_gen_perf: video["frame_gen_perf"].as_str().map(str::to_string),
         frame_gen_synthesis: video["frame_gen_synthesis"].as_str().map(str::to_string),
         frame_gen_rate: video["frame_gen_rate"].as_str().map(str::to_string),
-        frame_gen_lag_ms: video["frame_gen_lag_ms"].as_f64(),
         frame_gen_cap_fps: video["frame_gen_cap_fps"].as_f64(),
-        gpu_sched_class: video["gpu_sched_class"].as_i64(),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
         height_m: v["headset"]["height_m"].as_f64().map(|g| g as f32),
@@ -228,7 +205,6 @@ pub static FG_RATE_REQ: AtomicI32 = AtomicI32::new(-1);
 /// fps cap of the game's releases (uncapped mode), -1 none, 0 = no cap
 pub static FG_CAP_REQ: AtomicI32 = AtomicI32::new(-1);
 /// uncapped mode content lag in tenths of ms (-1 none, 0 = automatic)
-pub static FG_LAG_REQ: AtomicI32 = AtomicI32::new(-1);
 /// `recenter`: turn the published tracking space so the head's forward is -Z and its position the origin (taken at the next tracking sample)
 pub static RECENTER_REQ: AtomicBool = AtomicBool::new(false);
 /// colour correction (brightness, contrast, saturation, sharpening as f32 bits) and its "pending" flag
@@ -236,7 +212,7 @@ pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), At
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
-/// `frame_gen_cap <fps>` (0 = none), `frame_gen_lag <ms>` (0 = automatic), `recenter`,
+/// `frame_gen_cap <fps>` (0 = none), `recenter`,
 /// `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
@@ -317,11 +293,6 @@ pub fn spawn_stdin_control() {
                 (Some("frame_gen_cap"), Some(v)) => {
                     if let Ok(f) = v.parse::<f64>() {
                         FG_CAP_REQ.store(f.clamp(0.0, 240.0).round() as i32, Ordering::SeqCst);
-                    }
-                }
-                (Some("frame_gen_lag"), Some(v)) => {
-                    if let Ok(f) = v.parse::<f64>() {
-                        FG_LAG_REQ.store((f.clamp(0.0, 100.0) * 10.0).round() as i32, Ordering::SeqCst);
                     }
                 }
                 (Some("height"), Some(h)) => {

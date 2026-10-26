@@ -43,13 +43,13 @@ SCENARIOS = {
                     "note": "head turning 45 deg/s, app at 50-70 fps: the head-rotation path (dots) with a stuttering app"},
     "stutter_turn_fg": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1", "PROBE:XR_PROBE_MOVING": "25:0.25",
                     "ENV:AIRFRAMEXR_FRAME_GEN": "1", "note": "the same with frame generation (the generated frames must not make the head rotation tremble)"},
-    # the stamp regime (pipeline.rs fg_hold_age, 2026-10-23): every 150th tracking sample arrives 25 ms late (over two periods: the one in hand is
-    # lost). Without the hold the stamp jumps two samples and every later output is one period younger until a skip + bunch moves it back (the
-    # Vision Pro's 67 <-> 77 ms latency cycles); with it the boundary repeats once. Read `frame generation samples` / encoder_stats frame_gen
-    # regime_switches and hold_skips (harness/simrig/fg_samples.py). Verdict 2026-10-23: the rig's own uplink tail (up to 14 ms, over a period) makes
-    # such samples frequent, the hold skipped 3.4 boundaries/s and the head path went TREMBLE; the Vision Pro night agreed (5.5 switches/s): off by default, `--env AIRFRAMEXR_FG_HOLD_AGE=1` turns it on.
+    # the stamp regime (pipeline.rs fg_pick_sample_now): every 150th tracking sample arrives 25 ms late (over two periods: the one in hand is
+    # lost), so the stamp jumps two samples and every later output is one period younger until a skip + bunch moves it back (the Vision Pro's
+    # 67 <-> 77 ms latency cycles). Read `frame generation samples` / encoder_stats frame_gen regime_switches (harness/simrig/fg_samples.py).
+    # The hold that turned those switches into repeats was measured as a loss (the rig's uplink tail made it skip 3.4 boundaries/s, the head path went
+    # TREMBLE; the Vision Pro night agreed, 5.5 switches/s) and was removed in 1.0.1.
     "late_turn_fg": {"PROFILE": "real_games_pred0.json", "OMEGA_DPS": 45, "LATE_EVERY": 150, "LATE_MS": 25, "PROBE:XR_PROBE_LOAD": "fps:50:70", "PROBE:XR_PROBE_CPU_MS": "1",
-                    "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:AIRFRAMEXR_FRAME_GEN": "1", "note": "stutter_turn_fg with a tracking sample 25 ms late every 150: regime switches with and without the hold (AIRFRAMEXR_FG_HOLD_AGE=1)"},
+                    "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:AIRFRAMEXR_FRAME_GEN": "1", "note": "stutter_turn_fg with a tracking sample 25 ms late every 150: the stamp regime switches (regime_switches)"},
     "steady_fg":   {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25", "ENV:AIRFRAMEXR_FRAME_GEN": "1",
                     "note": "ideal timing, light app, frame generation on: the generator's null case (expect CLEAN + SMOOTH)"},
     "steady":      {"MODE": "still", "PROBE:XR_PROBE_MOVING": "25:0.25",
