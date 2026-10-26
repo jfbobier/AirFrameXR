@@ -17,7 +17,7 @@ namespace AirFrameXR
         enum Kind { Bool, Number, Choice }
         class Knob
         {
-            public string Key, Title, Desc, When, Section;
+            public string Key, Title, Desc, Tip, When, Section;
             public Kind Kind;
             public double Def, Min, Max, Step; public int Decimals;
             public bool DefBool;
@@ -60,9 +60,20 @@ namespace AirFrameXR
                 B(AR, "phase_lock", "Phase lock", true, Restart, "Slides the host's display grid so frames arrive the phase margin before the headset's render tick. Known debt: it slides 12-25 times a minute whatever it sees."),
                 N(AR, "running_start_ms", "Running-start margin (ms)", 2, 0, 10, 0.5, 1, Restart, "The game is released envelope + margin before its boundary; 0 releases it at the tick. With the frame-start gate on this acts at frame start: 1-4 are plausible."),
                 B(AR, "intake_gate", "Intake gate", true, Restart, "The shim skips one release when the host's queue has stood 3 boundaries: drains a standing queue without dropping a frame. Works when the game keeps up, fires uselessly 3 times a second in GPU-bound games."),
-                B(GE, "qp_map", "HEVC QP map", true, Restart, "On by default since 0.1: per-CTB QP delta map, QP -3 in the foveal region and +6 at the edges of the foveated frame. Proven against an oracle, never judged on a headset; costs encode time on a one-engine GPU. The full-frame + split encoding profile turns it off by itself."),
+                B(GE, "qp_map", "HEVC QP map", true, Restart, "A trade-off, on by default (since 0.1): more bits for the centre of the foveated picture, fewer for the edges (quality level -3 at the centre, +6 at the edges). Measured against the native render in the lab: the centre gains 0.1-0.3 dB and the periphery loses 0.2-0.9 dB at 40-100 Mbps, and the stream carries about 5 % fewer bits; at 250 Mbps nothing changes. No encode-time cost measured (within 0.5 ms). Untick it for an even picture with the most detail at the edges. Hover for the numbers and what is not measured."),
             });
 
+            knobs.Find(k => k.Key == "qp_map").Tip =
+                "HEVC QP map: what it does and what it costs\r\n\r\n" +
+                "Each 32 x 32 block of the foveated frame gets a quality offset: -3 in the region you look at, +6 at the edges, with a smooth ramp.\r\n" +
+                "The bitrate is the same budget, so the centre gets more of it and the edges less.\r\n\r\n" +
+                "Measured (quality benchmark, Littlest Tokyo, RTX 3080 Ti laptop, 2064 x 2208 per eye), map on against off:\r\n" +
+                "   250 Mbps: centre +0.02 dB, edges -0.04 dB\r\n" +
+                "   100 Mbps: centre +0.06 dB, edges -0.20 dB\r\n" +
+                "    40 Mbps: centre +0.14 dB, edges -0.55 dB\r\n" +
+                "The stream carries about 5 % fewer bits (the encoder does not spend what the map frees). Encode time and slices per frame are unchanged.\r\n\r\n" +
+                "Not measured: how it looks (PSNR is not what your eyes see; judge by looking, the switch takes effect at the next streamer start), and split encoding " +
+                "across several NVENC engines (the lab GPU has one). The full-frame + split encoding profile turns the map off by itself. Spatial AQ is separate and always on.";
             var body = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(12, 4, 12, 12), Dock = DockStyle.None, Location = Point.Empty };
             var intro = Ui.Line("Switches that change timing, for people who measure. Each one says when it takes effect: live = the running streamer takes it within seconds; streamer restart = close and start the streamer; next game start = start the game again. " +
                 "A switch at its default is removed from config\\airframexr.json. The signals to judge by are in logs\\AirFrameXR.log: the 'frame generation perf' and 'frame generation samples' lines every 10 s, and 'game run recorded' at the end of a game.");
@@ -110,7 +121,7 @@ namespace AirFrameXR
         }
 
         /// one switch: the control and its effect moment on a line, the explanation under it; returns the line
-        FlowLayoutPanel Row(FlowLayoutPanel body, Control ctl, string badge, string when, string desc)
+        FlowLayoutPanel Row(FlowLayoutPanel body, Control ctl, string badge, string when, string desc, string tip = null)
         {
             var top = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
             ctl.Margin = new Padding(3, 4, 12, 0);
@@ -120,7 +131,7 @@ namespace AirFrameXR
             body.Controls.Add(top);
             var d = Ui.Line(desc); d.ForeColor = Color.DimGray; d.Font = new Font(Ui.Body.FontFamily, 8.5f); d.MaximumSize = new Size(900, 0); d.Margin = new Padding(22, 0, 3, 2);
             body.Controls.Add(d);
-            tips.SetToolTip(ctl, desc);
+            tips.SetToolTip(ctl, tip ?? desc);
             return top;
         }
 
@@ -143,7 +154,7 @@ namespace AirFrameXR
                     co.SelectedIndexChanged += (s, e) => Changed(k);
                     k.Ctl = co; shown = Pair(k.Title, co); break;
             }
-            Row(body, shown, null, k.When, k.Desc + "  Default: " + DefaultText(k) + ".");
+            Row(body, shown, null, k.When, k.Desc + "  Default: " + DefaultText(k) + ".", k.Tip);
         }
 
         static FlowLayoutPanel Pair(string text, Control c)
