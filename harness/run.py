@@ -7,7 +7,7 @@
   python3 harness/run.py run  <scenario> [<scenario> ...]
   python3 harness/run.py all                               # every scenario, non-zero exit if any fail
   python3 harness/run.py report [results_dir]              # re-evaluate saved artifacts (no builder needed)
-  python3 harness/run.py bench-quality [quick|full]        # benchmark phase 2 headless on the builder + sanity checks
+  python3 harness/run.py bench-quality [quick|full] [--qp on|off]   # benchmark phase 2 headless on the builder + sanity checks
   python3 harness/run.py test-zip                          # unzip the package into a fresh folder and run from it (logs, debug, config)
 
 Exit code: 0 all PASS, 1 any FAIL, 2 any BLOCKED (infrastructure), 3 usage.
@@ -276,17 +276,17 @@ def build(what):
     return 0
 
 
-def bench_quality(plan):
+def bench_quality(plan, qp=None):
     """Runs the quality sweep (tools/remote/stage17_bench_quality.ps1) and checks that it measured something real: the
     reconstructed frame was used and matches the input's colour conversion, quality orders sensibly, proposals exist."""
-    rid = f"bq_{plan}"
+    rid = f"bq_{plan}" + (f"_qp{qp}" if qp else "")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    outdir = lib.RESULTS / f"{stamp}_bench_quality_{plan}"
+    outdir = lib.RESULTS / f"{stamp}_bench_quality_{plan}" + (f"_qp{qp}" if qp else "")
     outdir.mkdir(parents=True, exist_ok=True)
     lib.b_run(f"if not exist runs\\{rid} mkdir runs\\{rid}")
     lib.b_put(lib.ROOT / "harness/fixtures/session.user.json", f"runs/{rid}/session.json")
     frames = ["-Frames", "30", "-Warmup", "10", "-Every", "10"] if plan == "quick" else []
-    r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage17_bench_quality.ps1", "-Label", rid, "-Plan", plan, *frames],
+    r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage17_bench_quality.ps1", "-Label", rid, "-Plan", plan, *frames, *(["-QpMap", qp] if qp else [])],
                        cwd=lib.ROOT, capture_output=True, timeout=900)
     o = r.stdout.decode(errors="replace").replace("\x00", "")
     for f in ("stdout.jsonl", "stderr.txt", "bq.json", "preview.png"):
@@ -372,7 +372,8 @@ def main(argv):
                 print(line.rstrip())
         return 0 if "RESULT: PASS" in out else 1
     if cmd == "bench-quality":     # alvr_host --benchmark-quality on the builder (no headset), then checks on its results
-        return bench_quality(argv[2] if len(argv) > 2 else "quick")
+        qp = argv[argv.index("--qp") + 1] if "--qp" in argv else None   # on | off: the foveal QP delta map (default: the engine's, on)
+        return bench_quality(argv[2] if len(argv) > 2 and not argv[2].startswith("--") else "quick", qp)
     if cmd == "pacing":            # the pacing lab: every scenarios/pacing/*.json (or the named ones), then one KPI table
         names = argv[2:] or [p.stem for p in sorted((SCEN / "pacing").glob("*.json"))]
         rows = []
