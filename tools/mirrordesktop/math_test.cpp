@@ -75,6 +75,9 @@ int main() {
     float seg[4];
     check(segment(eye(ID, { 0, 1.5f, 0 }), { 0.2f, 1.2f, 0.1f }, { 0, 1.5f, -2.f }, seg) && std::isfinite(seg[0]) && std::isfinite(seg[3]), "beam: starts beside and behind the eye plane, still drawn");
     check(!segment(eye(ID, { 0, 1.5f, 0 }), { 0, 1.5f, 0.5f }, { 0, 1.5f, 1.5f }, seg), "beam: wholly behind the eye: nothing");
+    // the beam's hand: a firm trigger or grip press takes it, a light touch does not; the take-over press is swallowed until everything is released
+    check(takesBeam(0.6f, 0) && takesBeam(0, 0.8f) && !takesBeam(0.4f, 0.6f), "beam hand: trigger above 0.5 or grip above 0.7 takes it, less does not");
+    check(!takeOverReleased(0.3f, 0, false) && !takeOverReleased(0, 0.5f, false) && !takeOverReleased(0, 0, true) && takeOverReleased(0.1f, 0.2f, false), "beam hand: the take-over press ends only when trigger, grip and B / Y are released");
     printf("math_test: %s\n", fails ? "FAILED" : "OK");
     return fails ? 1 : 0;
 }

@@ -2,7 +2,8 @@
 // (it connects through the runtime and the shim, renders a projection layer with the views the runtime gives it, reads the controllers through OpenXR
 // actions), except that the host does not record it as a game. Its own jobs: a monitor-sized screen that floats in front of the user and follows them
 // when they walk away (and a quarter of the room at a time when they turn), a laser beam from the controller, and the mouse (SendInput): the beam moves the cursor,
-// trigger = left button, A / X = double click, grip or B / Y = right button, thumbstick = scroll.
+// trigger = left button, A / X = double click, grip or B / Y = right button, thumbstick = scroll (both controllers; the beam is the right one's until a press of the
+// left trigger or grip hands it over, and back).
 // Everything that is not the screen is the idle colour (107C10 by default), which the headset shows as passthrough.
 //
 //   mirrordesktop.exe [--log <file>] [--seconds N] [--no-mouse] [--clear RRGGBB] [--synthetic [--image-rgba <file>]] [--input-log <csv>]
@@ -200,10 +201,11 @@ int main(int argc, char** argv) {
     }
 
     // state
-    Screen screen{}; bool haveScreen = false, replace = true, moving = false; int64_t lastTime = 0; float refYaw = 0; int quad = 0; bool primWas = false;
+    Screen screen{}; bool haveScreen = false, replace = true, moving = false; int64_t lastTime = 0; float refYaw = 0; int quad = 0; bool primWas[2] = { false, false };
     LARGE_INTEGER qpf; QueryPerformanceFrequency(&qpf); auto qpcMs = [&] { LARGE_INTEGER t; QueryPerformanceCounter(&t); return (double)t.QuadPart * 1000.0 / (double)qpf.QuadPart; };
     double perfT0 = qpcMs(), frameStart = 0, frameMaxMs = 0, renderSumMs = 0; int perfFrames = 0;
     bool seenHand = false, seenHit = false; bool left = false, right = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
+    int activeHand = 1; bool swallow = false;   // the hand that holds the beam (the right one until the left trigger or grip is pressed); swallow: its take-over press does not click
     ULONGLONG t0 = GetTickCount64(); bool running = false, exiting = false, endKey = false; uint64_t frames = 0;
     int rc = 0; bool leaving = false; ULONGLONG leaveT0 = 0;
     while (!exiting) {
@@ -242,20 +244,34 @@ int main(int argc, char** argv) {
                 const Screen target = placeFacing(cardinal(refYaw, quad), hp, aspect);
                 if (!haveScreen || replace) { screen = target; haveScreen = true; replace = false; moving = false; } else screen = follow(screen, target, moving, dt);
 
-                // the pointer: the right controller (the left one when the right is not tracked); its aim along -Z
-                bool aimOk = false; V3 o{}, d{}; int hand = 1; float trig = 0, sq = 0, stickY = 0; bool prim = false, sec = false;
-                for (int k = 0; k < 2 && !aimOk; k++) {
-                    hand = k == 0 ? 1 : 0;
-                    XrSpaceLocation al{ XR_TYPE_SPACE_LOCATION }; xrLocateSpace(aimSpace[hand], space, fs.predictedDisplayTime, &al);
-                    if ((al.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) && (al.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
-                        o = toV(al.pose.position); d = norm(rotate(toQ(al.pose.orientation), { 0, 0, -1 })); aimOk = true;
-                        XrActionStateGetInfo gi{ XR_TYPE_ACTION_STATE_GET_INFO }; gi.subactionPath = hands[hand];
-                        XrActionStateFloat st{ XR_TYPE_ACTION_STATE_FLOAT };
-                        gi.action = aTrigger; xrGetActionStateFloat(sess, &gi, &st); trig = st.isActive ? st.currentState : 0;
-                        gi.action = aSqueeze; xrGetActionStateFloat(sess, &gi, &st); sq = st.isActive ? st.currentState : 0;
-                        XrActionStateBoolean sb{ XR_TYPE_ACTION_STATE_BOOLEAN }; gi.action = aPrimary; xrGetActionStateBoolean(sess, &gi, &sb); prim = sb.isActive && sb.currentState; gi.action = aSecondary; xrGetActionStateBoolean(sess, &gi, &sb); sec = sb.isActive && sb.currentState;
-                        XrActionStateVector2f sv{ XR_TYPE_ACTION_STATE_VECTOR2F }; gi.action = aStick; xrGetActionStateVector2f(sess, &gi, &sv); stickY = sv.isActive ? sv.currentState.y : 0;
+                // the pointer: the active controller (the right one at the start; the other one when the active one is not tracked); its aim along -Z
+                XrActionStateGetInfo gi{ XR_TYPE_ACTION_STATE_GET_INFO };
+                auto flt = [&](XrAction a, int h) { gi.subactionPath = hands[h]; gi.action = a; XrActionStateFloat st{ XR_TYPE_ACTION_STATE_FLOAT }; xrGetActionStateFloat(sess, &gi, &st); return st.isActive ? st.currentState : 0.f; };
+                auto btn = [&](XrAction a, int h) { gi.subactionPath = hands[h]; gi.action = a; XrActionStateBoolean st{ XR_TYPE_ACTION_STATE_BOOLEAN }; xrGetActionStateBoolean(sess, &gi, &st); return st.isActive && st.currentState; };
+                auto tracked = [&](int h, XrSpaceLocation& al) { al = XrSpaceLocation{ XR_TYPE_SPACE_LOCATION }; xrLocateSpace(aimSpace[h], space, fs.predictedDisplayTime, &al); return (al.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) && (al.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT); };
+                {   // a press of the trigger or the grip on the other controller takes the beam over (that press does not click)
+                    const int other = 1 - activeHand; XrSpaceLocation ol;
+                    if (tracked(other, ol) && takesBeam(flt(aTrigger, other), flt(aSqueeze, other))) {
+                        activeHand = other; swallow = true; smoothing = false; L("the %s controller takes the beam", activeHand ? "right" : "left");
+                        event("hand_switch", activeHand ? "right" : "left");
                     }
+                }
+                bool aimOk = false; V3 o{}, d{}; int hand = activeHand; float trig = 0, sq = 0, stickY = 0; bool prim[2] = { false, false }, sec = false;
+                for (int k = 0; k < 2 && !aimOk; k++) {
+                    hand = k == 0 ? activeHand : 1 - activeHand;
+                    XrSpaceLocation al;
+                    if (tracked(hand, al)) {
+                        o = toV(al.pose.position); d = norm(rotate(toQ(al.pose.orientation), { 0, 0, -1 })); aimOk = true;
+                        trig = flt(aTrigger, hand); sq = flt(aSqueeze, hand); sec = btn(aSecondary, hand);
+                        if (swallow) { if (takeOverReleased(trig, sq, sec)) swallow = false; else { trig = 0; sq = 0; sec = false; } }
+                    }
+                }
+                // the thumbsticks and A / X, B / Y work on either controller whichever one holds the beam
+                for (int h = 0; h < 2; h++) {
+                    gi.subactionPath = hands[h]; gi.action = aStick; XrActionStateVector2f sv{ XR_TYPE_ACTION_STATE_VECTOR2F }; xrGetActionStateVector2f(sess, &gi, &sv);
+                    const float y = sv.isActive ? sv.currentState.y : 0.f; if (std::fabs(y) > std::fabs(stickY)) stickY = y;
+                    prim[h] = btn(aPrimary, h);
+                    if (h != hand) sec = sec || (!swallow && btn(aSecondary, h));
                 }
                 float cu = -1, cv = -1; bool hit = false; float u = 0, v = 0;
                 if (aimOk) {
@@ -267,7 +283,7 @@ int main(int argc, char** argv) {
                 // a hand's pinch or a trigger rarely reaches 1: the button goes down at 0.3 and up at 0.15 ; the grip at 0.5 / 0.3 (or the B / Y button); A / X is a double click
                 const bool lWant = trig > (left ? 0.15f : 0.3f), rWant = sq > (right ? 0.3f : 0.5f) || sec;
                 trigMax = std::max(trigMax, trig); sqMax = std::max(sqMax, sq);
-                if (frames % 300 == 0 && frames < 6000) { L("input: trigger max %.2f, grip max %.2f, A/X %d B/Y %d, stick y %.2f in the last 5 s; left button %s, right %s", trigMax, sqMax, prim ? 1 : 0, sec ? 1 : 0, stickY, left ? "down" : "up", right ? "down" : "up"); trigMax = sqMax = 0; }
+                if (frames % 300 == 0 && frames < 6000) { L("input: trigger max %.2f, grip max %.2f, A/X %d B/Y %d, stick y %.2f in the last 5 s; left button %s, right %s", trigMax, sqMax, (prim[0] || prim[1]) ? 1 : 0, sec ? 1 : 0, stickY, left ? "down" : "up", right ? "down" : "up"); trigMax = sqMax = 0; }
                 // the pointer is smoothed (slow movements steadier, fast ones followed at once) and held still while a press starts: the click lands where it was aimed
                 if (hit) {
                     const float dpx = std::hypot((u - su) * mirror.DesktopW(), (v - sv_) * mirror.DesktopH());
@@ -286,12 +302,14 @@ int main(int argc, char** argv) {
                     if (l != left) { snprintf(det, sizeof det, "trigger %.2f", trig); event(l ? "left_down" : "left_up", det); if (mouse) sendMouse(0, 0, l ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP); }
                     if (r != right) { snprintf(det, sizeof det, "grip %.2f B/Y %d", sq, sec ? 1 : 0); event(r ? "right_down" : "right_up", det); if (mouse) sendMouse(0, 0, r ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP); }
                     left = l; right = r;
-                    // A / X: a double click (Windows opens a file or runs a program on one), on the press
-                    if (prim && !primWas && hit) {
-                        event("double_click", "A/X");
-                        if (mouse) { INPUT in[4]{}; const DWORD fl[4] = { MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP }; for (int i = 0; i < 4; i++) { in[i].type = INPUT_MOUSE; in[i].mi.dwFlags = fl[i]; } SendInput(4, in, sizeof(INPUT)); }
+                    // A / X (each on its own, so one pressed while the other is held still counts): a double click (Windows opens a file or runs a program on one), on the press
+                    for (int h = 0; h < 2; h++) {
+                        if (prim[h] && !primWas[h] && hit) {
+                            event("double_click", h ? "A" : "X");
+                            if (mouse) { INPUT in[4]{}; const DWORD fl[4] = { MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP }; for (int i = 0; i < 4; i++) { in[i].type = INPUT_MOUSE; in[i].mi.dwFlags = fl[i]; } SendInput(4, in, sizeof(INPUT)); }
+                        }
+                        primWas[h] = prim[h];
                     }
-                    primWas = prim;
                     // the thumbstick scrolls (a tick every 120 ms at full deflection, over the screen only)
                     if (hit && std::fabs(stickY) > 0.5f && GetTickCount64() - lastWheel > (ULONGLONG)(220 - 100 * std::fabs(stickY))) { event("wheel", stickY > 0 ? "up" : "down"); if (mouse) wheel(stickY > 0 ? 1 : -1); lastWheel = GetTickCount64(); }
                 }

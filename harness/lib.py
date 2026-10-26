@@ -961,6 +961,8 @@ def analyse_mirror(sc, outdir):
         counts = counts[20:]
         res["beam_frames"] = len(counts); res["beam_ok"] = sum(1 for c in counts if c >= 6); res["beam_pixels_median"] = sorted(counts)[len(counts) // 2] if counts else 0
         log = (outdir / "app.log").read_text(errors="replace") if (outdir / "app.log").exists() else ""
+        res["left_takes_beam"] = "the left controller takes the beam" in log and "the right controller takes the beam" not in log
+        res["aim_left"] = "aim: left hand" in log
         res["tracked_logged"] = "is tracked" in log; res["pointer_logged"] = "the pointer is on the screen" in log
         res["perf"] = [(float(m.group(1)), float(m.group(2)), float(m.group(3))) for m in re.finditer(r"perf: ([0-9.]+) fps over \d+ frames, the slowest frame's work ([0-9.]+) ms, picture \(capture \+ draw\) ([0-9.]+) ms", log)]
         res["clicks"] = analyse_mirror_clicks(outdir)
@@ -1014,15 +1016,16 @@ def analyse_mirror_clicks(outdir):
     for r in csv.DictReader(open(ef)):
         ev.setdefault(r["event"], []).append(int(r["wall_ns"]))
     exp = {"left_down": [], "left_up": [], "right_down": [], "right_up": [], "double_click": []}
-    left = right = False; a_prev = False
+    left = right = False; a_prev = x_prev = False
     for r in rows:
-        w = int(r["wall_ns"]); trig = float(r["trigger_r"]); sq = float(r["squeeze_r"]); b = r["b_r"] == "1"; a = r["a_r"] == "1"
+        w = int(r["wall_ns"]); trig = float(r["trigger_r"]); sq = float(r["squeeze_r"]); b = r["b_r"] == "1"; a = r["a_r"] == "1"; x = r["x_l"] == "1"
         l = trig > (0.15 if left else 0.3)
         rr = sq > (0.3 if right else 0.5) or b
         if l != left: exp["left_down" if l else "left_up"].append(w)
         if rr != right: exp["right_down" if rr else "right_up"].append(w)
         if a and not a_prev: exp["double_click"].append(w)
-        left, right, a_prev = l, rr, a
+        if x and not x_prev: exp["double_click"].append(w)
+        left, right, a_prev, x_prev = l, rr, a, x
     t0 = int(rows[0]["wall_ns"]) if rows else 0; t1 = int(rows[-1]["wall_ns"]) if rows else 0
     out = {}
     for k, xs in exp.items():
@@ -1547,6 +1550,9 @@ def evaluate(sc, a):
             fps = sorted(p[0] for p in P_[:3]); draw = max((p[2] for p in P_[:3]), default=99)
             chk("mirror_app_rate", len(P_) >= 2 and fps[len(fps) // 2] >= mk["perf"].get("min_fps", 80) and draw < mk["perf"].get("max_picture_ms", 4.0),
                 {"windows": P_[:3]}, f"while streaming the app renders at >= {mk['perf'].get('min_fps', 80)} fps and its picture work (capture + draw) stays under {mk['perf'].get('max_picture_ms', 4.0)} ms")
+        if mk.get("left_hand"):
+            chk("mirror_left_hand", M_.get("left_takes_beam") and M_.get("aim_left"), {"takes_beam_logged": M_.get("left_takes_beam"), "aim_from_left": M_.get("aim_left")},
+                "the left trigger's press handed the beam to the left controller (logged once, the right one never took it back) and the aim was then the left hand's")
         if mk.get("beam"):
             bf = M_["beam_ok"] / M_["beam_frames"] if M_.get("beam_frames") else 0.0
             chk("mirror_beam", M_.get("beam_frames", 0) >= mk.get("min_frames", 20) and bf >= mk.get("min_ok_frac", 0.9), {"frames": M_.get("beam_frames"), "ok_frac": round(bf, 2), "median_pixels": M_.get("beam_pixels_median")},

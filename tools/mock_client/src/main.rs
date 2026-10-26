@@ -10,7 +10,7 @@ use alvr_client_core::{ClientCapabilities, ClientCoreContext, ClientCoreEvent};
 use alvr_common::{
     glam::{Quat, UVec2, Vec3},
     parking_lot::Mutex,
-    DeviceMotion, Fov, Pose, RelaxedAtomic, ViewParams, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID, LEFT_SQUEEZE_VALUE_ID,
+    DeviceMotion, Fov, Pose, RelaxedAtomic, ViewParams, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID, LEFT_SQUEEZE_VALUE_ID, LEFT_TRIGGER_VALUE_ID,
     LEFT_THUMBSTICK_X_ID, LEFT_THUMBSTICK_Y_ID, LEFT_X_CLICK_ID, QUEST_CONTROLLER_PROFILE_ID, RIGHT_A_CLICK_ID,
     RIGHT_B_CLICK_ID, RIGHT_SQUEEZE_VALUE_ID, RIGHT_TRIGGER_VALUE_ID,
 };
@@ -869,16 +869,20 @@ fn tracking(
             for (id, pos) in [(*HAND_LEFT_ID, lpos), (*HAND_RIGHT_ID, rpos)] {
                 motions.push((id, DeviceMotion { pose: Pose { orientation: hand_q, position: pos }, linear_velocity: Vec3::ZERO, angular_velocity: Vec3::ZERO }));
             }
-            let trigger_r = tri(t, 4.0);
-            let squeeze_l = tri(t + 1.0, 3.0) * 0.8;
-            let a_r = (t as i64) % 2 == 1;
-            let squeeze_r = tri(t + 2.0, 5.0) * 0.9;
-            let b_r = (t as i64) % 3 == 1;
+            // MOCK_HAND_SCRIPT=left: a left-handed user (the desktop mirror): the left trigger is pressed for 0.4 s every 4 s (the first press takes the beam, later ones change nothing: the app may start late), the right controller stays quiet
+            let left_hand = std::env::var("MOCK_HAND_SCRIPT").map(|v| v == "left").unwrap_or(false);
+            let trigger_r = if left_hand { 0.0 } else { tri(t, 4.0) };
+            let trigger_l = if left_hand && (3.0..3.4).contains(&(t % 4.0)) { 1.0 } else { 0.0 };
+            let squeeze_l = tri(t + 1.0, 3.0) * 0.6;   // under the desktop mirror's take-over level (0.7): the left grip is scripted but must not move its beam
+            let a_r = !left_hand && (t as i64) % 2 == 1;
+            let squeeze_r = if left_hand { 0.0 } else { tri(t + 2.0, 5.0) * 0.9 };
+            let b_r = !left_hand && (t as i64) % 3 == 1;
             let stick = ((std::f32::consts::TAU * t / 3.0).sin(), (std::f32::consts::TAU * t / 3.0).cos() * 0.5);
             let x_l = (t as i64) % 3 == 2;
             // continuous values every tick, clicks only on change (like the headset)
             let mut entries = vec![
                 ButtonEntry { path_id: *RIGHT_TRIGGER_VALUE_ID, value: ButtonValue::Scalar(trigger_r) },
+                ButtonEntry { path_id: *LEFT_TRIGGER_VALUE_ID, value: ButtonValue::Scalar(trigger_l) },
                 ButtonEntry { path_id: *LEFT_SQUEEZE_VALUE_ID, value: ButtonValue::Scalar(squeeze_l) },
                 ButtonEntry { path_id: *RIGHT_SQUEEZE_VALUE_ID, value: ButtonValue::Scalar(squeeze_r) },
                 ButtonEntry { path_id: *LEFT_THUMBSTICK_X_ID, value: ButtonValue::Scalar(stick.0) },

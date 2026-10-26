@@ -94,5 +94,9 @@ static bool rayHit(const Screen& s, V3 o, V3 d, float& u, float& v) {
     u = dot(h, s.right) / s.width + 0.5f; v = 0.5f - dot(h, s.up) / s.height;
     return u >= 0.f && u <= 1.f && v >= 0.f && v <= 1.f;
 }
+// The beam's hand: a press of the trigger (above 0.5) or the grip (above 0.7) on the controller that does not hold it takes it over; that press is then
+// swallowed (it does not click) until the trigger, the grip and B / Y are all released.
+static bool takesBeam(float trigger, float grip) { return trigger > 0.5f || grip > 0.7f; }
+static bool takeOverReleased(float trigger, float grip, bool secondary) { return trigger < 0.15f && grip < 0.3f && !secondary; }
 static V3 screenPoint(const Screen& s, float u, float v) { return add(add(s.center, mul(s.right, (u - 0.5f) * s.width)), mul(s.up, (0.5f - v) * s.height)); }
 
