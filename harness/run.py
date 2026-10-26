@@ -7,7 +7,7 @@
   python3 harness/run.py run  <scenario> [<scenario> ...]
   python3 harness/run.py all                               # every scenario, non-zero exit if any fail
   python3 harness/run.py report [results_dir]              # re-evaluate saved artifacts (no builder needed)
-  python3 harness/run.py bench-quality [quick|full] [--qp on|off]   # benchmark phase 2 headless on the builder + sanity checks
+  python3 harness/run.py bench-quality [quick|full] [--qp on|off] [--eye WxH] [--mbps N]   # benchmark phase 2 headless on the builder + sanity checks
   python3 harness/run.py test-zip                          # unzip the package into a fresh folder and run from it (logs, debug, config)
 
 Exit code: 0 all PASS, 1 any FAIL, 2 any BLOCKED (infrastructure), 3 usage.
@@ -276,17 +276,26 @@ def build(what):
     return 0
 
 
-def bench_quality(plan, qp=None):
+def bench_quality(plan, qp=None, eye=None, mbps=None):
     """Runs the quality sweep (tools/remote/stage17_bench_quality.ps1) and checks that it measured something real: the
     reconstructed frame was used and matches the input's colour conversion, quality orders sensibly, proposals exist."""
-    rid = f"bq_{plan}" + (f"_qp{qp}" if qp else "")
+    rid = f"bq_{plan}" + (f"_qp{qp}" if qp else "") + (f"_{eye}" if eye else "") + (f"_{mbps}mbps" if mbps else "")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    outdir = lib.RESULTS / f"{stamp}_bench_quality_{plan}" + (f"_qp{qp}" if qp else "")
+    outdir = lib.RESULTS / (f"{stamp}_bench_quality_{plan}" + (f"_qp{qp}" if qp else "") + (f"_{eye}" if eye else "") + (f"_{mbps}mbps" if mbps else ""))
     outdir.mkdir(parents=True, exist_ok=True)
     lib.b_run(f"if not exist runs\\{rid} mkdir runs\\{rid}")
-    lib.b_put(lib.ROOT / "harness/fixtures/session.user.json", f"runs/{rid}/session.json")
+    sess = lib.ROOT / "harness/fixtures/session.user.json"
+    if eye:   # --eye WxH: the base eye size of the sweep (the fixture is the Vision Pro's 3552x3200; 2064x2208 = Meta Quest 3, lighter for a laptop GPU)
+        w, h = (int(x) for x in eye.lower().split("x"))
+        d = json.load(open(sess))
+        for k in ("eye_resolution", "target_eye_resolution"):
+            d["openvr_config"][k + "_width"], d["openvr_config"][k + "_height"] = w, h
+        sess = lib.CACHE / f"session_bq_{w}x{h}.json"
+        sess.parent.mkdir(parents=True, exist_ok=True)
+        json.dump(d, open(sess, "w"), indent=1)
+    lib.b_put(sess, f"runs/{rid}/session.json")
     frames = ["-Frames", "30", "-Warmup", "10", "-Every", "10"] if plan == "quick" else []
-    r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage17_bench_quality.ps1", "-Label", rid, "-Plan", plan, *frames, *(["-QpMap", qp] if qp else [])],
+    r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage17_bench_quality.ps1", "-Label", rid, "-Plan", plan, *frames, *(["-QpMap", qp] if qp else []), *(["-Mbps", str(mbps)] if mbps else [])],
                        cwd=lib.ROOT, capture_output=True, timeout=900)
     o = r.stdout.decode(errors="replace").replace("\x00", "")
     for f in ("stdout.jsonl", "stderr.txt", "bq.json", "preview.png"):
@@ -373,7 +382,9 @@ def main(argv):
         return 0 if "RESULT: PASS" in out else 1
     if cmd == "bench-quality":     # alvr_host --benchmark-quality on the builder (no headset), then checks on its results
         qp = argv[argv.index("--qp") + 1] if "--qp" in argv else None   # on | off: the foveal QP delta map (default: the engine's, on)
-        return bench_quality(argv[2] if len(argv) > 2 and not argv[2].startswith("--") else "quick", qp)
+        eye = argv[argv.index("--eye") + 1] if "--eye" in argv else None
+        mbps = argv[argv.index("--mbps") + 1] if "--mbps" in argv else None
+        return bench_quality(argv[2] if len(argv) > 2 and not argv[2].startswith("--") else "quick", qp, eye, mbps)
     if cmd == "pacing":            # the pacing lab: every scenarios/pacing/*.json (or the named ones), then one KPI table
         names = argv[2:] or [p.stem for p in sorted((SCEN / "pacing").glob("*.json"))]
         rows = []
