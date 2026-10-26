@@ -460,7 +460,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
-                                     "frame_gen": "--frame-gen", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale"})
+                                     "frame_gen": "--frame-gen", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -973,9 +973,8 @@ def analyse_fov_restrict(sc, outdir):
     """The field of view the game is told (Advanced picture and FOV settings, shim `fovScale`): what the OpenXR app received at startup (xr_probe's log: the four
     tangents per eye from xrLocateViews and the recommended size from xrEnumerateViewConfigurationViews) against the headset's views (the host's views_config event)
     and the restriction, and the decoded stream: the margin the game does not render is black, the stream still covers the headset's whole view."""
-    sc_pct = sc["checks"]["fov_restrict"]["scale"]
-    s = [p / 100.0 for p in sc_pct]   # outer, inner, upper, lower
-    out = {"scale": s}
+    cfgk = sc["checks"]["fov_restrict"]
+    out = {}
     headset = None
     for line in open(outdir / "host_stdout.txt", errors="replace"):
         if '"views_config"' in line and '"views_config_ignored"' not in line:
@@ -984,6 +983,12 @@ def analyse_fov_restrict(sc, outdir):
                 break
             except Exception:
                 pass
+    if "override" in cfgk and headset:   # the streamer's override, tangents: per edge a fraction of the headset's (averaged over the two eyes), at most 1, at least a fifth
+        cl = [(headset[0] + headset[5]) / 2, (headset[1] + headset[4]) / 2, (headset[2] + headset[6]) / 2, (headset[3] + headset[7]) / 2]
+        s = [1.0 if v + 0.005 >= c else max(0.2, v / c) for v, c in zip(cfgk["override"], cl)]
+    else:
+        s = [p / 100.0 for p in cfgk.get("scale", [100, 100, 100, 100])]   # outer, inner, upper, lower
+    out["scale"] = s
     log = (outdir / "app.log").read_text(errors="replace") if (outdir / "app.log").exists() else ""
     got = {}
     for m in re.finditer(r"view fov tan eye (\d): L ([0-9.]+) R ([0-9.]+) U ([0-9.]+) D ([0-9.]+)", log):
@@ -1652,7 +1657,7 @@ def evaluate(sc, a):
                 chk("fov_restrict_published_once", fa.get("host_events") == 1, fa.get("host_events"), "the host logged one fov_restrict event: the command was taken once and published, not repeated")
             tol = ck["fov_restrict"].get("tol", 0.01)
             chk("fov_restrict_app_fov", fa["fov_max_err"] <= tol, {"max_err": round(fa["fov_max_err"], 4), "got": fa["app_fov"], "expected": fa["expected_fov"]},
-                f"the four tangents per eye the app got from xrLocateViews are the headset's scaled per edge (outer, inner, upper, lower = {ck['fov_restrict']['scale']} %), within {tol}")
+                f"the four tangents per eye the app got from xrLocateViews are the headset's scaled per edge (outer, inner, upper, lower = {[round(x, 3) for x in fa['scale']]} of it), within {tol}")
             er, rr = fa["expected_recommended"], fa["recommended"]
             chk("fov_restrict_recommended_size", abs(er[0] - rr[0]) <= 2 and abs(er[1] - rr[1]) <= 2, {"app": rr, "expected": er, "stream_eye": fa["stream_eye"]},
                 "the recommended image size follows the area of the restricted view (the game renders fewer pixels, not the same pixels over less angle)")

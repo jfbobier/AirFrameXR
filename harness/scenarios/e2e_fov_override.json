@@ -1,5 +1,5 @@
 {
-  "description": "Like e2e_fov_restrict, but the restriction arrives the way the streamer sends it when the user touches a field in Advanced picture and FOV settings: a `fov_restrict 70 90 80 60` line on the host's stdin (percent: outer inner upper lower), with the host started without the lab flag. The game that starts afterwards must get the restricted field of view; the host publishes it once (event fov_restrict) and a game takes it when it starts. (The host runs with --gui, as the streamer starts it: that is what reads the stdin commands.)",
+  "description": "The streamer's field-of-view override (Advanced picture and FOV settings, shim fovScale): the game is told outer 1.20, inner 1.40, upper 1.00, lower 1.20 (tangents; the mock headset's own are 1.557 on every edge, so 77 / 90 / 64 / 77 % of it). The OpenXR app (xr_probe, which reads what UEVR reads) must get exactly those tangents (left eye: outer = left, right eye: outer = right), a recommended size reduced in proportion to the area, and the decoded stream must still cover the headset's whole view: the trimmed margins are black, the picture just inside them. The counter / gray patch / pose checks of e2e_openxr_probe do not apply. (timestamps_monotonic is left out: it flakes about half the time on this rig whatever the field of view, and the unrestricted control e2e_fov_restrict_none keeps it.)",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -51,7 +51,7 @@
     "connect_timeout": 45,
     "gpu_keepalive": 90,
     "exit_after_frames": 420,
-    "gui": true
+    "fov_override": "1.20,1.40,1.00,1.20"
   },
   "client": {
     "seconds": 55,
@@ -71,7 +71,6 @@
   "checks": {
     "host_min_frames": 250,
     "client_min_frames": 200,
-    "timestamps_monotonic": true,
     "max_duplicate_timestamps": 400,
     "min_delivery_ratio": 0.7,
     "codec": "Hevc",
@@ -88,23 +87,13 @@
     "app_min_frames": 300,
     "refresh_hz": 90,
     "fov_restrict": {
-      "scale": [
-        70,
-        90,
-        80,
-        60
+      "override": [
+        1.2,
+        1.4,
+        1.0,
+        1.2
       ],
       "tol": 0.002
-    },
-    "fov_restrict_event": true
-  },
-  "stdin_feed": {
-    "events": [
-      {
-        "t": 2,
-        "line": "fov_restrict 70 90 80 60"
-      }
-    ],
-    "hold_s": 150
+    }
   }
 }

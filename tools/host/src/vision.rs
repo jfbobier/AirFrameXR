@@ -58,12 +58,13 @@ pub struct Settings {
     pub frame_gen_rate: Option<String>,
     /// uncapped mode: minimum spacing of the game's releases as an fps cap (0 = none): headroom for the host's own GPU work
     pub frame_gen_cap_fps: Option<f64>,
-    /// the share (percent) of the headset's field of view the game is told it has, per edge: outer, inner, upper, lower (default 100 each); the stream
-    /// frame keeps covering the headset's whole FoV (shim: `fovScale`)
-    pub fov_outer_pct: Option<f64>,
-    pub fov_inner_pct: Option<f64>,
-    pub fov_upper_pct: Option<f64>,
-    pub fov_lower_pct: Option<f64>,
+    /// the field of view the game is told, set from the streamer (Advanced picture and FOV settings): override on/off and, per edge, the tangents the game gets
+    /// (outer = the side away from the nose, inner, upper, lower; never more than the headset's own, see `fov_scale_from`). Off: the headset's, untouched.
+    pub fov_override: Option<bool>,
+    pub fov_outer: Option<f64>,
+    pub fov_inner: Option<f64>,
+    pub fov_upper: Option<f64>,
+    pub fov_lower: Option<f64>,
     pub debug: Option<bool>,
     pub gamma: Option<f32>,
     /// headset height above the floor handed to games (m); 0 = the headset's own floor estimate
@@ -122,10 +123,11 @@ pub fn load_settings(path: &Path) -> Settings {
         frame_gen_synthesis: video["frame_gen_synthesis"].as_str().map(str::to_string),
         frame_gen_rate: video["frame_gen_rate"].as_str().map(str::to_string),
         frame_gen_cap_fps: video["frame_gen_cap_fps"].as_f64(),
-        fov_outer_pct: video["fov_outer_pct"].as_f64(),
-        fov_inner_pct: video["fov_inner_pct"].as_f64(),
-        fov_upper_pct: video["fov_upper_pct"].as_f64(),
-        fov_lower_pct: video["fov_lower_pct"].as_f64(),
+        fov_override: video["fov_override"].as_bool(),
+        fov_outer: video["fov_outer"].as_f64(),
+        fov_inner: video["fov_inner"].as_f64(),
+        fov_upper: video["fov_upper"].as_f64(),
+        fov_lower: video["fov_lower"].as_f64(),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
         height_m: v["headset"]["height_m"].as_f64().map(|g| g as f32),
@@ -220,16 +222,31 @@ pub static RECENTER_REQ: AtomicBool = AtomicBool::new(false);
 /// colour correction (brightness, contrast, saturation, sharpening as f32 bits) and its "pending" flag
 pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
-/// the field-of-view restriction (outer, inner, upper, lower as fractions, f32 bits) sent by the streamer when the user touches a field, and its "pending" flag
+/// the field-of-view override sent by the streamer when the user touches the tick or a field: on/off, the four tangents (outer, inner, upper, lower; f32 bits), pending flag
+pub static FOV_ON: AtomicBool = AtomicBool::new(false);
 pub static FOV_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static FOV_PENDING: AtomicBool = AtomicBool::new(false);
-/// percent -> fraction, within what the restriction accepts (a view cannot be emptied)
+/// percent -> fraction (the lab flag `--fov-scale`), within what a restriction accepts (a view cannot be emptied)
 pub fn fov_fraction(pct: f64) -> f32 {
     (pct / 100.0).clamp(0.2, 1.0) as f32
 }
+/// The per-edge fractions of the headset's field of view for an override given as tangents (outer, inner, upper, lower): the headset's tangents (fov8 = left eye l r u d,
+/// right eye l r u d) are averaged over the two eyes per edge (outer = the left eye's left and the right eye's right), a value above the headset's is the headset's
+/// (the game is never told more than the stream covers), below a fifth of it a fifth.
+pub fn fov_scale_from(t: &[f32; 4], fov8: &[f32; 8]) -> [f32; 4] {
+    let client = [(fov8[0] + fov8[5]) / 2.0, (fov8[1] + fov8[4]) / 2.0, (fov8[2] + fov8[6]) / 2.0, (fov8[3] + fov8[7]) / 2.0];
+    let mut s = [1.0f32; 4];
+    for k in 0..4 {
+        // within the two-decimal mask of the headset's own value (what an untouched field shows) is the headset's own: nothing is restricted
+        if t[k] > 0.0 && client[k] > 0.0 && t[k] + 0.005 < client[k] {
+            s[k] = (t[k] / client[k]).clamp(0.2, 1.0);
+        }
+    }
+    s
+}
 
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
-/// `frame_gen_cap <fps>` (0 = none), `fov_restrict <outer> <inner> <upper> <lower>` (percent of the headset's field of view the game is told, taken by the next game), `recenter`,
+/// `frame_gen_cap <fps>` (0 = none), `fov_override off` | `fov_override on <outer> <inner> <upper> <lower>` (the tangents the game is told, taken by the next game), `recenter`,
 /// `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
@@ -317,12 +334,17 @@ pub fn spawn_stdin_control() {
                         HEIGHT_REQ.store(if h <= 0.0 { f32::MIN_POSITIVE } else { h.clamp(0.5, 2.5) }.to_bits(), Ordering::SeqCst);
                     }
                 }
-                (Some("fov_restrict"), Some(first)) => {
-                    let vals: Vec<f64> = std::iter::once(first).chain(w).filter_map(|x| x.parse().ok()).collect();
-                    if vals.len() == 4 {
-                        for (k, p) in vals.iter().enumerate() {
-                            FOV_REQ[k].store(fov_fraction(*p).to_bits(), Ordering::SeqCst);
+                (Some("fov_override"), Some("off")) => {
+                    FOV_ON.store(false, Ordering::SeqCst);
+                    FOV_PENDING.store(true, Ordering::SeqCst);
+                }
+                (Some("fov_override"), Some("on")) => {
+                    let vals: Vec<f32> = w.filter_map(|x| x.parse().ok()).collect();
+                    if vals.len() == 4 && vals.iter().all(|v| v.is_finite() && *v > 0.0) {
+                        for (k, t) in vals.iter().enumerate() {
+                            FOV_REQ[k].store(t.to_bits(), Ordering::SeqCst);
                         }
+                        FOV_ON.store(true, Ordering::SeqCst);
                         FOV_PENDING.store(true, Ordering::SeqCst);
                     }
                 }
@@ -439,5 +461,29 @@ impl RateEstimator {
             self.cand_count = 1;
         }
         if self.cand_count >= 3 { Some(self.cand) } else { None }
+    }
+}
+
+#[cfg(test)]
+mod fov_tests {
+    use super::fov_scale_from;
+    // the Vision Pro's views as the host saved them: left eye l r u d, right eye l r u d
+    const AVP: [f32; 8] = [1.7823, 1.0186, 1.2169, 1.0186, 1.0249, 1.7995, 1.2253, 1.0249];
+
+    #[test]
+    fn the_headsets_own_values_restrict_nothing() {
+        // outer (1.7823 + 1.7995) / 2 = 1.7909, inner 1.0218, upper 1.2211, lower 1.0218: the mask shows 1.79 1.02 1.22 1.02
+        assert_eq!(fov_scale_from(&[1.79, 1.02, 1.22, 1.02], &AVP), [1.0; 4]);
+        assert_eq!(fov_scale_from(&[1.7909, 1.0218, 1.2211, 1.0218], &AVP), [1.0; 4]);
+        assert_eq!(fov_scale_from(&[3.0, 2.0, 2.0, 2.0], &AVP), [1.0; 4], "never more than the headset's");
+    }
+
+    #[test]
+    fn an_override_is_a_fraction_per_edge_clamped_to_a_fifth() {
+        let s = fov_scale_from(&[1.5, 1.02, 0.9, 0.1], &AVP);
+        assert!((s[0] - 1.5 / 1.7909).abs() < 1e-6 && s[1] == 1.0);
+        assert!((s[2] - 0.9 / 1.2211).abs() < 1e-6);
+        assert_eq!(s[3], 0.2, "a view cannot be emptied");
+        assert_eq!(fov_scale_from(&[0.0, -1.0, f32::NAN, 0.0], &AVP), [1.0; 4], "garbage means not restricted");
     }
 }

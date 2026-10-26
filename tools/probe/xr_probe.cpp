@@ -26,6 +26,10 @@
 #include <cstring>
 #include <string>
 #include <algorithm>
+// Run as fovgrid.exe (this exe renamed) it starts in that scene by itself and runs until the session ends.
+// XR_PROBE_SCENE=fovgrid: a head-locked grid of true angles for comparing what two headsets show (see docs/FOV_GRID.md): black, a line every
+// 5 deg (colour by 10 deg step: 10 red, 20 orange, 30 yellow, 40 green, 50 cyan, 60 blue, 70 violet, 80 magenta; the 5s dim grey), 0 deg white
+// and thick, and a white border at the edge of the FoV the runtime declared. Angles are from each eye's own view axis, so both eyes show the same.
 // XR_PROBE_SCENE=<file.vab>: render the benchmark scene (Littlest Tokyo in its textured room, animated) instead of the flat stamp
 // background, with the runtime's view poses: a full OpenXR scene for the pacing lab without a game.
 #define STB_IMAGE_IMPLEMENTATION
@@ -60,9 +64,14 @@ static const char* stateName(XrSessionState s) {
 }
 
 int main(int argc, char** argv) {
-    const char* logPath = argc > 1 ? argv[1] : "xr_probe.log";
-    int frames = argc > 2 ? atoi(argv[2]) : 60;
-    int timeoutS = argc > 3 ? atoi(argv[3]) : 30;
+    // Started as fovgrid.exe (a copy of this exe, double-click): the FoV grid scene, until the session ends, like a game
+    char exePath[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    const bool fovgridExe = strstr(exePath, "fovgrid") != nullptr || strstr(exePath, "FovGrid") != nullptr;
+    if (fovgridExe && !getenv("XR_PROBE_SCENE")) _putenv_s("XR_PROBE_SCENE", "fovgrid");
+    const char* logPath = argc > 1 ? argv[1] : (fovgridExe ? "fovgrid.log" : "xr_probe.log");
+    int frames = argc > 2 ? atoi(argv[2]) : (fovgridExe ? 100000000 : 60);
+    int timeoutS = argc > 3 ? atoi(argv[3]) : (fovgridExe ? 86400 : 30);
     const char* poseCsv = argc > 4 ? argv[4] : nullptr;
     FILE* poseF = poseCsv ? fopen(poseCsv, "w") : nullptr;
     // follow-the-frames markers: a magenta block at the projection of a world-fixed point, in both eyes, next to the 16-bit frame
@@ -125,6 +134,7 @@ int main(int argc, char** argv) {
     // XR_PROBE_SCENE=dots: black sky, white rectangles every XR_PROBE_DOT_DEG (default 10) degrees on the horizon ring (world-fixed, drawn per eye from the
     // pose the app located: the simplest scene whose motion is known exactly: the follow-the-frames "judge" of a constant head rotation reads them)
     const bool dotsOn = getenv("XR_PROBE_SCENE") && strcmp(getenv("XR_PROBE_SCENE"), "dots") == 0;
+    const bool fovgridOn = getenv("XR_PROBE_SCENE") && strcmp(getenv("XR_PROBE_SCENE"), "fovgrid") == 0;
     const double dotDeg = getenv("XR_PROBE_DOT_DEG") ? atof(getenv("XR_PROBE_DOT_DEG")) : 10.0;
     // XR_PROBE_MOVING=<amplitude deg>:<Hz>: a moving rectangle 7 deg below the horizon ring, swinging in world yaw as amp * sin(2 pi f t) with t =
     // the frame's predicted display time (so its motion is smooth in display time whatever the frame rate): the simrig viewer measures it on its own row and
@@ -137,7 +147,7 @@ int main(int argc, char** argv) {
     double movingWallT0 = 0.0, movingFrameStartMs = 0.0;
     long long movingT0 = 0;
     bool soundOn = false;
-    if (const char* scenePath = dotsOn ? nullptr : getenv("XR_PROBE_SCENE")) {
+    if (const char* scenePath = (dotsOn || fovgridOn) ? nullptr : getenv("XR_PROBE_SCENE")) {
         std::string err;
         sceneOn = LoadScene(dev, ctx, scenePath, scene, err);
         if (sceneOn && !scene.room.count) MakeRoom(dev, scene);
@@ -478,6 +488,38 @@ int main(int argc, char** argv) {
                                 if (dr.right > dr.left && dr.bottom > dr.top) dc->ClearView(rtv, white, &dr, 1);
                             }
                             dc->Release();
+                        }
+                    }
+                    if (fovgridOn && i < 2) {
+                        D3D11_TEXTURE2D_DESC gt{}; imgs[i][idx].texture->GetDesc(&gt);
+                        const XrFovf& gf = views[i].fov;
+                        const float gtl = -tanf(gf.angleLeft), gtr = tanf(gf.angleRight), gtu = tanf(gf.angleUp), gtd = -tanf(gf.angleDown);
+                        const float gW = (float)gt.Width, gH = (float)gt.Height;
+                        ID3D11DeviceContext1* gc = nullptr;
+                        if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&gc))) {
+                            const float black[4] = { 0, 0, 0, 1 };
+                            ctx->ClearRenderTargetView(rtv, black);
+                            static const float pal[9][4] = { {1,1,1,1}, {1,0,0,1}, {1,0.5f,0,1}, {1,1,0,1}, {0,1,0,1}, {0,1,1,1}, {0.2f,0.3f,1,1}, {0.6f,0,1,1}, {1,0,1,1} };
+                            const float dim[4] = { 0.35f, 0.35f, 0.35f, 1 };
+                            auto fill = [&](float x0, float y0, float x1, float y1, const float* col) {
+                                D3D11_RECT r{ (LONG)x0, (LONG)y0, (LONG)x1, (LONG)y1 };
+                                r.left = std::max<LONG>(r.left, 0); r.top = std::max<LONG>(r.top, 0);
+                                r.right = std::min<LONG>(r.right, (LONG)gt.Width); r.bottom = std::min<LONG>(r.bottom, (LONG)gt.Height);
+                                if (r.right > r.left && r.bottom > r.top) gc->ClearView(rtv, col, &r, 1);
+                            };
+                            for (int deg = -85; deg <= 85; deg += 5) {
+                                const float t = tanf((float)deg * 0.0174533f);
+                                const int a = abs(deg);
+                                const float* col = (a % 10 == 0) ? pal[std::min(a / 10, 8)] : dim;
+                                const float w = (a == 0) ? 8.f : (a % 10 == 0) ? 5.f : 2.f;
+                                const float px = (t + gtl) / (gtl + gtr) * gW;           // vertical line at this angle to the right (+) / left (-)
+                                const float py = (1.f - (t + gtd) / (gtu + gtd)) * gH;   // horizontal line at this angle up (+) / down (-)
+                                if (px >= 0.f && px < gW) fill(px - w * 0.5f, 0, px + w * 0.5f, gH, col);
+                                if (py >= 0.f && py < gH) fill(0, py - w * 0.5f, gW, py + w * 0.5f, col);
+                            }
+                            const float white[4] = { 1, 1, 1, 1 };   // the declared FoV's edge
+                            fill(0, 0, gW, 6, white); fill(0, gH - 6, gW, gH, white); fill(0, 0, 6, gH, white); fill(gW - 6, 0, gW, gH, white);
+                            gc->Release();
                         }
                     }
                     if (markF && i < 2) {

@@ -343,8 +343,10 @@ namespace AirFrameXR
             else if (link == Link.Orange && (DateTime.UtcNow - lastSeen).TotalSeconds > 30) SetLink(Link.Red, $"Headset: not found - searching for {name} ...");
         }
         DateTime configSeen; string watchRate; double watchCap; string watchFov;
-        /// the four field-of-view percentages as the host command takes them (outer inner upper lower)
-        string FovLine() => string.Join(" ", new[] { settings.FovOuterPct, settings.FovInnerPct, settings.FovUpperPct, settings.FovLowerPct }.Select(v => v.ToString("0.#", CultureInfo.InvariantCulture)));
+        /// the field-of-view override as the host command takes it: "off", or "on outer inner upper lower" (tangents)
+        string FovLine() => settings.FovOverride && settings.FovOuter > 0 && settings.FovInner > 0 && settings.FovUpper > 0 && settings.FovLower > 0
+            ? "on " + string.Join(" ", new[] { settings.FovOuter, settings.FovInner, settings.FovUpper, settings.FovLower }.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))
+            : "off";
 
         void ConfigWatchStart()
         {
@@ -376,7 +378,7 @@ namespace AirFrameXR
                 fgRateFromHost = false;
                 Log.Write("INFO", "frame generation rate " + watchRate + " (Advanced settings)");
             }
-            if (FovLine() != watchFov) { watchFov = FovLine(); host.Send("fov_restrict " + watchFov); Log.Write("INFO", "field of view the game is told: outer/inner/upper/lower " + watchFov + " % (Advanced picture and FOV settings; the next game takes it)"); }
+            if (FovLine() != watchFov) { watchFov = FovLine(); host.Send("fov_override " + watchFov); Log.Write("INFO", "field of view override: " + watchFov + " (Advanced picture and FOV settings; the next game takes it)"); }
             if (settings.FrameGenCapFps != watchCap) { watchCap = settings.FrameGenCapFps; host.Send("frame_gen_cap " + watchCap.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation cap " + watchCap + " fps (Advanced settings)"); }
         }
 
@@ -839,11 +841,12 @@ namespace AirFrameXR
                 case "saturation": bar("Saturation"); break;
                 case "debug": debug.Checked = on; break;
                 case "mirror": mirror.Checked = on; break;
-                case "settings_fov":   // the replay harness: the Advanced window wrote these four field-of-view percentages ("outer inner upper lower"), the watcher compares and forwards
+                case "settings_fov":   // the replay harness: the Advanced window wrote the override ("off" or "on outer inner upper lower"), the watcher compares and forwards
                     {
                         var p = value.Split(' ');
-                        string[] keys = { "video.fov_outer_pct", "video.fov_inner_pct", "video.fov_upper_pct", "video.fov_lower_pct" };
-                        for (int i = 0; i < 4 && i < p.Length; i++) global::AirFrameXR.Json.Set(settings.Root, keys[i], double.Parse(p[i], CultureInfo.InvariantCulture));
+                        string[] keys = { "video.fov_outer", "video.fov_inner", "video.fov_upper", "video.fov_lower" };
+                        global::AirFrameXR.Json.Set(settings.Root, "video.fov_override", p[0] == "on");
+                        for (int i = 0; i < 4 && p[0] == "on" && i + 1 < p.Length; i++) global::AirFrameXR.Json.Set(settings.Root, keys[i], double.Parse(p[i + 1], CultureInfo.InvariantCulture));
                         ForwardConfigChanges();
                         break;
                     }

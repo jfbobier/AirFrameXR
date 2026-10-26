@@ -56,9 +56,10 @@ EXPECT = {
         ("channels", ["has 16 channels: ALVR cannot capture more than 8"], []),
     ],
     "fov_forward": [
-        ("fov_changed", ["sent fov_restrict 80 100 100 100"], []),
-        ("fov_untouched", [], ["sent fov_restrict"]),   # the file changed but not the field of view: nothing is sent again
-        ("fov_again", ["sent fov_restrict 80 90 100 100"], []),
+        ("fov_on", ["sent fov_override on 1.50 1.02 1.22 1.02"], []),
+        ("fov_untouched", [], ["sent fov_override"]),   # the file changed but not the field of view: nothing is sent again
+        ("fov_changed", ["sent fov_override on 1.50 1.00 1.22 1.02"], []),
+        ("fov_off", ["sent fov_override off"], []),
     ],
     "window_size": [],
     "short12": [
