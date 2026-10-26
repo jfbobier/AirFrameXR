@@ -8,7 +8,7 @@
 ## What the AI contributed
 
 - Drafted a replacement README opening explaining that AirFrameXR replaces the **PC-side SteamVR + ALVR server path**, while the ALVR v20 headset client remains unchanged.
-- Incorporated the developer-reported improvements of **up to 10+ FPS** and **about 20 ms less latency** as observational, non-guaranteed measurements; described frame-generation latency trade-offs separately.
+- Incorporated the developer-reported improvements of **up to 10-20 % more FPS** (changed from "10+ FPS" at the maintainer's request, backed by their own measurements and user reports) and **up to about 20 ms less latency** as observational, non-guaranteed measurements; described frame-generation latency trade-offs separately.
 - Prepared the selected Before/After graphic for `docs/images/airframexr-pipeline-comparison.png` (reused from the project's earlier design discussion rather than re-generated for this update).
 - Drafted the design philosophy and AI-assisted contribution requirements for the README, `CONTRIBUTING.md`, and `docs/DEVELOPMENT_PHILOSOPHY.md`.
 - Created a standard-library-only local apply script and a reusable summary template.

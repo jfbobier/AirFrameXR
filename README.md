@@ -35,7 +35,7 @@ AirFrameXR replaces the **SteamVR + traditional ALVR PC streamer** with a **lean
 
 ### Performance: measurements, not promises
 
-**In developer tests of the new pipeline, improvements of up to 10+ FPS and around 20 ms lower latency were observed** compared with the earlier SteamVR + ALVR path. These are observations from tested configurations, **not guaranteed gains** across games, headsets, or networks. Frame generation should be evaluated separately: it improves delivered/displayed cadence in some GPU-bound cases, but has its own latency trade-off. See the performance findings and testing harness below for technical context.
+**In the maintainer's tests of the new pipeline, gains of up to 10-20 % more FPS and up to about 20 ms lower latency were observed** in some games compared with the earlier SteamVR + ALVR path, and users report similar numbers (for example Enshrouded: about 45 fps here against 35-40 with SteamVR, on one user's own reading). These are observations from tested configurations, **not guaranteed gains**: they vary with the game, headset and network, and in some setups the two paths are at parity. Frame generation should be evaluated separately: it improves delivered/displayed cadence in some GPU-bound cases, but has its own latency trade-off. See the performance findings and testing harness below for technical context.
 
 > **Scope:** Windows + NVIDIA GPU + compatible OpenXR games. Keep using the ALVR app on your headset. For SteamVR/OpenVR-only games or maximum compatibility, use SteamVR + stock ALVR instead.
 
