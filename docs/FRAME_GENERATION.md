@@ -40,7 +40,7 @@ generation itself (3080 Ti at 2048x1024: flow 3.3 ms, synthesis 0.2 ms; the RTX 
 | Host glue | `nvenc/hostlib/nvh.cpp` `nvh_fg_*` | own foveation pass on the output, encode tail shared with the slot path, stats JSON |
 | Decision per boundary | `tools/host/src/pipeline.rs` `FgState`, `fg_plan_app`, `fg_plan_hold` | synth / real / repeat, sample stamping, counters |
 | Sample ring | `tools/host/src/main.rs` `Shared::recent_samples`, `push_recent_sample` | the last 48 tracking samples with their head orientation |
-| Settings | `config/airframexr.json` `video.frame_gen` (+ `frame_gen_flow_scale`, `frame_gen_perf`), `--frame-gen on|off`, `AIRFRAMEXR_FRAME_GEN=1/0`; live: GUI command `frame_gen on|off` | CLI > env > settings; checkbox "Frame generation" in the streamer window (applies at once: generator created or dropped under the encoder lock, shim pacing follows) and in Settings |
+| Settings | `config/airframexr.json` `video.frame_gen` , `--frame-gen on|off`, `AIRFRAMEXR_FRAME_GEN=1/0`; live: GUI command `frame_gen on|off` | CLI > env > settings; checkbox "Frame generation" in the streamer window (applies at once: generator created or dropped under the encoder lock, shim pacing follows) and in Settings |
 | Headers | `third_party/nvof/` | `nvOpticalFlowCommon.h`, `nvOpticalFlowD3D11.h` (MIT notice; nothing of NVIDIA's is redistributed) |
 
 Rules of the per-boundary decision (`FgState`): the output schedule is a fixed pattern per game period, the m - 1 synthetic frames at
@@ -57,20 +57,20 @@ nothing and what it owed stays owed (`fg_no_sample`, the pattern slides one boun
 projection layer (quad-only loading screens) goes out as is; a frame still due when the encoder overran is dropped for the synthetic frame
 between the two newest (`fg_dropped`). With the generator on the newest waiting frame always wins a pick (older ones superseded): the shim's
 half-rate pacing runs open loop and the generator consumes one frame per two boundaries, so a standing queue would never drain otherwise.
-When the GPU/driver has no flow engine the host logs a WARN, streams as without the feature and keeps the game at full rate. **The regime switch, and the hold (2026-10-23, `video.frame_gen_hold_age`, default off after one headset night).** With one sample in hand every output's stamp
+When the GPU/driver has no flow engine the host logs a WARN, streams as without the feature and keeps the game at full rate. **The regime switch, and the hold that was tried (2026-10-23, removed in 1.0.1).** With one sample in hand every output's stamp
 advances by exactly one of the headset's samples per boundary, and a sample late by less than a period costs nothing (the one in hand covers
 its boundary, the late one is stamped at the next). A sample late by more than a period, or lost, left a boundary with a single unused
 sample, which was stamped: the stamp jumped two samples and every later output was one period younger, until a skipped boundary followed by
 a bunch rebuilt the one in hand and moved them back. On the Vision Pro that was the total latency switching between 67 and 77 ms in 10-20 s
 cycles, each switch a pose-age jump shown as a hitch while the head turns. `regime_switches` counts these switches (the number
-of unused samples left behind the stamped one changing between one and none). With the hold on (`AIRFRAMEXR_FG_HOLD_AGE=1` or the setting true) such a boundary waits for the next sample like any other and otherwise repeats once (`hold_skips`); more than 5 of those in a second step
+of unused samples left behind the stamped one changing between one and none). With the hold on (it was a setting then) such a boundary waits for the next sample like any other and otherwise repeats once (`hold_skips`); more than 5 of those in a second step
 the hold aside until they thin out (`hold_bypassed`). The rig argued against it as a default: its uplink tail (up to 14 ms, over a period) makes such
 late samples frequent, the hold skipped 3.4 boundaries a second and the head path went TREMBLE (`late_turn_fg`, one sample in 150 delivered two
 and a half periods late, hold on: 149-208 hold skips, 22-57 bypassed, 114 regime switches left, head TREMBLE once and CLEAN once, motion JUDDER; hold off: 60-75 skipped boundaries, 1278 regime switches a minute, CLEAN and SMOOTH). The Vision Pro's Wi-Fi is
 like that: the night of 2026-10-23 (Gears, 4 h 39 at 1/2, hold on) counted 5.5 regime switches a second, hold skips 2.4 a second = 97 % of all
 skipped boundaries (2.6 % of boundaries against 0.6-2.4 % with the old rule on earlier nights), the bypass engaging about once a second. So the
 67/77 ms reading is not a slow cycle but a sample late by more than a period about three times a second, a Wi-Fi fact the pipeline can only
-trade between a repeat and a pose-age jump; the old rule (jump) stays the default, the counters stay.
+trade between a repeat and a pose-age jump; the old rule (jump) is the only rule now, and `regime_switches` stays as the counter.
 
 ## Rates (2026-10-16): 1/3, 1/2, 2/3
 
@@ -86,7 +86,7 @@ Why these three and not a free ratio: on the boundary grid only 1/m patterns are
 alternates 10 and 20 ms frame times, which engines with frame-time smoothing turn into judder), so 2/3 is the free-running planner with a
 cap rather than a pattern. Why not "uncapped" in the launcher: the two headset nights of 2026-10-15/16 showed that the free-running game's
 render queue (2 to 3 frames when GPU-bound) sets the content lag, and that the user preferred the locked cadences on latency; `uncapped`
-stays available from the config and the command line, with `video.frame_gen_cap_fps` and `video.frame_gen_lag_ms`, for experiments.
+stays available from the config and the command line, with `video.frame_gen_cap_fps`, for experiments.
 Choosing: the 10-second `frame generation perf` line reports the game's `app fps`; pick the largest fraction the game sustains with margin.
 
 ### Game profiles (2026-10-17): the engine records, the launcher proposes
@@ -139,7 +139,7 @@ Lab for the rates (3080 Ti simrig, 2026-10-16, 40 s each, marker on the wall clo
 
 ## Telemetry
 
-`encoder_stats.pipeline.frame_gen`: `synths`, `reals`, `repeats`, `holds` (boundaries filled by the generator), `no_sample`, `in_hand`, `hold_age`, `hold_skips`, `hold_bypassed`, `ts_jumps`, `dropped`,
+`encoder_stats.pipeline.frame_gen`: `synths`, `reals`, `repeats`, `holds` (boundaries filled by the generator), `no_sample`, `in_hand`, `ts_jumps`, `dropped`,
 `queued`, `arrival_waits` / `arrival_hits` / `arrival_wait_ms_sum`, `sample_waits` / `sample_wait_ms_sum`, `pairs_skipped`, `errors`, `passthrough`, and `gen` = `nvh_fg_stats` (flow/synthesis GPU ms, flow size, engine info).
 General log every 10 s with generation on: `frame generation samples: N outputs, S boundaries skipped for want of a tracking sample (x %), W waited for one (mean m ms), H stamped
 with one in hand; tracking spacing p95 / max (gaps over 15 ms)`; the `game ended` line carries the game's skipped boundaries. Event `frame_gen`
@@ -201,7 +201,7 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
   scene (OFXR-Bridge copies them verbatim instead). A frame with no projection layer at all (a loading screen or a menu made of quads:
   Zelda BotW through BetterVR) is passed through as it is and drops the generator's held frame, so nothing stale is repeated between such
   frames (2026-10-16: the inventory alternated with the last world frame before this).
-- The flow runs on gamma-encoded colour at 50 %; `frame_gen_flow_scale` and `frame_gen_perf` (fast | medium | slow) are the two knobs.
+- The flow runs on gamma-encoded colour at 50 %; its input scale (0.5) and engine preset (fast) are fixed.
 - **Small fast high-contrast objects ghost.** The confidence saturate(1 - 6 max|dRGB|) is zero at any misaligned hard edge, so such an object
   falls back to the crossfade (two half-bright copies). The rig's marker (a white rectangle on black, ~9 px per app frame at 1024 px per eye)
   is lost in 11 % of the synthetic frames, 33 % at its top speed; game content is softer, but HUD elements and particles will show this.

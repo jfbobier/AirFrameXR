@@ -31,7 +31,7 @@ pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock
 | Shim GPU-complete wait → IPC publish | shim publisher thread (time-critical) | DXGI completion event per slot | the GPU |
 | Shim display clock (predicted display time to the game) | shim server thread (time-critical) | host vsync event | the host tick |
 | **Host clock**: display ticks to the shim, **compositor boundary** pick (newest complete frame → encoder mailbox; green idle frame at 30 fps with no game; empty boundary left empty) | host vsync thread (HIGHEST, sleep-then-spin) | ALVR's `duration_until_next_vsync` grid at the headset's refresh | nothing (one-deep mailboxes, newest wins) |
-| **Host intake**: IPC frame event → frame queue (two deep, oldest first; `AIRFRAMEXR_INTAKE_DEPTH`), slot marked busy for the shim | host intake thread (HIGHEST) | the shim's publish event | nothing |
+| **Host intake**: IPC frame event → frame queue (three deep, oldest first), slot marked busy for the shim | host intake thread (HIGHEST) | the shim's publish event | nothing |
 | **Host encoder**: foveation pass + NVENC on the picked slot (slot released when its copy is done), packets → sender queue | host encoder thread (HIGHEST) | encoder mailbox | the encode itself only; the main loop rebuilds the encoder under the same lock, only when no game runs |
 | **Host sender**: release each packet at its send time `asap` \| `vsync` (next tick) \| `phase` (boundary + encode-time envelope, default) → `send_video_nal` | host sender thread (HIGHEST) | sender queue | nothing |
 | Network send (shards over UDP/TCP) | ALVR sender thread (`server_core`) | | socket |
@@ -43,7 +43,7 @@ pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock
 Compared with v0.1, where one host thread at normal priority did IPC wait → synchronous encode (p95 12 ms, more than a display
 period under GPU contention) → send → statistics, so a long encode blinded the intake and shifted the whole chain's phase: now
 the boundary cadence belongs to the clock thread alone, encode time only moves the send time within the period, and the game is
-paced against the same boundaries. The host also asks for the realtime GPU scheduling class (`gpu_sched_class` 5, elevated host),
+paced against the same boundaries. The host also asks for the realtime GPU scheduling class (class 5, elevated host),
 the one SteamVR's compositor runs with, so the encoder's copy never queues behind the game's GPU work.
 
 ## Buffers

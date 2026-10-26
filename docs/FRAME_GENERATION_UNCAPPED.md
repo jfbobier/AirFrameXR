@@ -50,10 +50,8 @@ t = 0 repeats, frozen 12 %, verdict JUDDER on the stutter scenario against 2 % f
 | `video.frame_gen` | toggle "Frame generation" | `frame_gen on\|off` | the generator on the encoder, as before |
 | `video.frame_gen_rate` = `third` \| `half` (default) \| `two_thirds` \| `uncapped` | slider "Game rate 1/3 - 1/2 - 2/3" (2026-10-16) and the "Uncapped" tick beside it (2026-10-23) | `frame_gen_rate third\|half\|two_thirds\|uncapped` | `third`/`half`: fixed patterns, the shim paces at `appPeriodMul` 3 / 2; `two_thirds`: this note's planner with the game held to 2/3 of the display rate (the host sets `appMinPeriodUs` from the display period and follows rate changes); `uncapped`: this note's planner, free-running |
 | `video.frame_gen_cap_fps` (0 = none) | config only (2026-10-16) | `frame_gen_cap <fps>` | uncapped mode: the shim never releases the game sooner than 1/cap after the previous release (IPC v27 `appMinPeriodUs`); the headroom knob below |
-| `video.frame_gen_lag_ms` (0 = auto) | config only | `frame_gen_lag <ms>` | two-thirds and uncapped modes: the content lag; 0 = automatic as above |
 
-CLI `--frame-gen-rate`, `--frame-gen-cap`, `--frame-gen-lag-ms`; env `AIRFRAMEXR_FG_RATE`, `AIRFRAMEXR_FG_CAP_FPS`,
-`AIRFRAMEXR_FG_LAG_MS`. The cap acts in uncapped mode only, the lag in the two free-running modes. Nothing engages by itself. After the
+CLI `--frame-gen-rate`, `--frame-gen-cap`; env `AIRFRAMEXR_FG_RATE`, `AIRFRAMEXR_FG_CAP_FPS`. The cap acts in uncapped mode only; the content lag is always automatic (the manual override was removed in 1.0.1). Nothing engages by itself. After the
 two headset nights (below) the launcher shows three locked rates, 1/3, 1/2, 2/3 (`docs/FRAME_GENERATION.md`, "Rates"); 2/3 is this
 planner with the cap implied by the display rate, uncapped itself is a config-only experiment.
 
@@ -80,7 +78,7 @@ close to all releases (the game runs free), `gpu %` below 95 and the graphics cl
 "Let it rip" lets the game take the whole GPU and CPU; the host's own work (flow or vectors, synthesis, foveation, NVENC) then queues behind
 the game's frames, and queueing is what turns into late outputs and repeats. What already protects the host:
 
-- The host's D3D11 device runs at the realtime D3DKMT scheduling class (`gpu_sched_class` 5) and NVENC is a separate engine; the flow engine
+- The host's D3D11 device runs at the realtime D3DKMT scheduling class (class 5) and NVENC is a separate engine; the flow engine
   is separate too. What competes is the synthesis and foveation passes on the graphics engine (about 1 ms per output on a 5090), and the
   copy traffic.
 - The GPU's own scheduling preempts at draw boundaries, so a game drawing long passes delays the host by a pass, not a frame.
