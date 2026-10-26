@@ -22,8 +22,8 @@ namespace AirFrameXR
 {
     public static class Version
     {
-        public const string Number = "1.0.0";
-        /// "1.0.0", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
+        public const string Number = "1.1.0-pre";
+        /// "1.1.0-pre", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
         {

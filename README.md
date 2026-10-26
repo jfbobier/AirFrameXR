@@ -42,7 +42,7 @@ AirFrameXR replaces the **SteamVR + traditional ALVR PC streamer** with a **lean
 <!-- End AirFrameXR overview -->
 
 > [!WARNING]
-> **VERSION 1.0: TEST AT YOUR OWN RISK.**
+> **VERSION 1.1 (PRE-RELEASE): TEST AT YOUR OWN RISK.**
 > On real headsets it has been tested by one person, on one PC (RTX 5090) with one Vision Pro and one Quest 3, frame generation included
 > (plus automated tests on a laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
 > (both undone by the launcher's OpenXR runtime button, "Switch back"). Keep comfort in mind: a frozen or juddering image in a headset can cause
@@ -212,6 +212,20 @@ Regenerate them with `python3 harness/readme_screens.py`.
   were barely better than the optical flow, and in real games they often arrived paired with the wrong frame (see
   [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md)). The zip no longer ships the extractor DLL; a game folder where an earlier release
   installed it shows a **Remove** button in Logs and performance.
+- **New in 1.1 (pre-release):**
+  - **A field of view for the game, set from the streamer.** *Advanced picture and FOV settings* (the Advanced card, renamed) has a tick that opens four fields (outer,
+    inner, upper, lower; tangents, the angle shown next to each). Greyed, they show the headset's own field of view; ticked, they start from it and you can only go down. The
+    game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start; it applies at the next
+    game start), the stream still covers the whole headset view with a black margin: only the game's GPU work changes. Off by default, and then nothing differs from 1.0.
+    See [docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md).
+  - **The desktop mirror works left-handed**: a firm press of the left trigger or grip hands the beam to the left controller (and back); A / X, B / Y and both thumbsticks work on
+    either controller.
+  - **Fixes**: game audio captured with Windows' process loopback again (a build problem since 1.0 had left it on a device loopback that follows the system volume); the Encoding
+    choice (foveated / full frame) is saved as chosen; the QP map's checkbox can turn it off.
+  - **A leaner Advanced window**: eleven switches that measured as no benefit or a loss are gone (the built-in values stay; an old `airframexr.json` with them is ignored), and
+    every remaining one explains itself with the numbers we measured (hover for more). The HEVC QP map stays on by default; its trade-off is written next to it.
+  - **Lab tools**: a frame generation judge (generated frames scored against the rendered ground truth, `harness/fg_judge.py`, [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md)),
+    the QP map A/B, `docs/DEVELOPMENT_PHILOSOPHY.md` and the AI-contribution summaries.
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
   (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
 - Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
@@ -398,4 +412,5 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers (v0.2, extended in 0.3)
+- [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md): the lab judge for generated frames (against a rendered ground truth)
 - [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation (0.4): half-rate pacing + interpolated frames; [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md): the uncapped mode, cap and lag, headset-night verdicts; [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md): the DLSS motion-vector experiment (0.4-0.6) and why it was removed in 0.6.1
