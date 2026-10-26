@@ -71,6 +71,7 @@ namespace AirFrameXR
             row("Refresh rate (Hz)", Fps);
             row("Bitrate (Mbps)", Bitrate);
             var prof = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, Margin = new Padding(0) };
+            Ui.Exclusive(ProfFov, ProfFull);
             prof.Controls.Add(ProfFov);
             prof.Controls.Add(flow(ProfFull, Ui.Badge("Experimental")));
             row("Encoding", prof, ProfFov);

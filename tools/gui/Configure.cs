@@ -170,6 +170,7 @@ namespace AirFrameXR
             row("Refresh rate (Hz)", fps);
             row("Bitrate (Mbps)", flow(bitrate, Ui.Line("constant; the Benchmark tab can find yours")));
             var prof = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, Margin = new Padding(0) };
+            Ui.Exclusive(profFov, profFull);
             prof.Controls.Add(profFov);
             prof.Controls.Add(flow(profFull, Ui.Badge("Experimental")));
             row("Encoding", prof);

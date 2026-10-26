@@ -1462,6 +1462,16 @@ namespace AirFrameXR
 
     public static class Ui
     {
+        /// Radio buttons that sit in different containers (one of them next to a badge in its own flow panel) are not one group for Windows Forms: both could be
+        /// checked, and the save then took the second one (a foveated choice came back as full frame after a restart). Checking one unchecks the others.
+        public static void Exclusive(params RadioButton[] group)
+        {
+            foreach (var r in group)
+            {
+                var me = r;
+                me.CheckedChanged += (s, e) => { if (me.Checked) foreach (var o in group) if (o != me) o.Checked = false; };
+            }
+        }
         /// Test harness only (uitest.exe): pretend the display is this many dpi. 0 = the real one.
         public static int DpiOverride;
         /// Test harness only: the pretend work area (device pixels) the window-fitting code uses instead of the real screen's.

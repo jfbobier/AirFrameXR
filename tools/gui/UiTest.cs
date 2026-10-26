@@ -260,6 +260,22 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "export.txt"), names.Concat(new[] { "open_forms=" + Application.OpenForms.Count }));
                 return 0;
             }
+            if (Arg("--encoding-selftest") != null)   // harness/encoding_radios_check.py: the Encoding radio buttons are one group (both could be checked before 1.0.1)
+            {
+                var panel = new SettingsPanel(new AppSettings(), Session.Load());
+                var found = new List<RadioButton>();
+                void Walk(Control c) { foreach (Control k in c.Controls) { if (k is RadioButton rb && (rb.Text.StartsWith("Foveated") || rb.Text.StartsWith("Full frame"))) found.Add(rb); Walk(k); } }
+                Walk(panel);
+                var fov = found.Find(r => r.Text.StartsWith("Foveated")); var full = found.Find(r => r.Text.StartsWith("Full frame"));
+                var lines = new List<string> { "radios=" + found.Count };
+                if (fov != null && full != null)
+                {
+                    fov.Checked = true; full.Checked = true; lines.Add($"full_then: fov={fov.Checked} full={full.Checked}");
+                    fov.Checked = true; lines.Add($"fov_then: fov={fov.Checked} full={full.Checked}");
+                }
+                File.WriteAllLines(Path.Combine(outDir, "encoding.txt"), lines);
+                return 0;
+            }
             var fwExe = Arg("--firewall");   // harness/firewall_check.py: print the firewall analysis of this exe and stop
             if (fwExe != null)
             {
