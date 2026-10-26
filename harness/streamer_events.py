@@ -32,8 +32,8 @@ EXPECT = {
         ("avp_auto", ["headset reports 1.62 m", "Eye height", "Debug logging", "Export logs...", "Open logs folder", "Frame generation", "Position", "Picture", "Desktop mirror"], ["Between games"]),
         ("frame_gen_on", ["sent frame_gen on"], []),
         ("rate", ["sent frame_gen_rate two_thirds"], []),
-        ("uncapped_on", ["sent frame_gen_rate uncapped", "check[x] Uncapped"], []),
-        ("uncapped_off", ["sent frame_gen_rate two_thirds", "check[ ] Uncapped"], []),   # back to the slider's position (2/3, set above)
+        ("uncapped_on", [], []),   # the Uncapped tick lives in the Advanced window since 2026-10-23 (hidden in the streamer): nothing here to drive or read
+        ("uncapped_off", [], []),
         ("recenter", ["sent recenter"], []),
         ("manual", ["sent height 1.30"], ["headset reports"]),
         ("height", ["sent height 1.55"], []),
@@ -54,6 +54,11 @@ EXPECT = {
         ("forced", ["Audio: CABLE Input (VB-Audio Virtual Cable) was at 40 %, set back to 100 %"], []),
         ("failed", ["Audio: CABLE Input (VB-Audio Virtual Cable) could not be set to 100 %"], []),
         ("channels", ["has 16 channels: ALVR cannot capture more than 8"], []),
+    ],
+    "fov_forward": [
+        ("fov_changed", ["sent fov_restrict 80 100 100 100"], []),
+        ("fov_untouched", [], ["sent fov_restrict"]),   # the file changed but not the field of view: nothing is sent again
+        ("fov_again", ["sent fov_restrict 80 90 100 100"], []),
     ],
     "window_size": [],
     "short12": [

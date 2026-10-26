@@ -310,6 +310,8 @@ namespace {
             m_eyeFov[ovrEye_Left].UpTan = m_eyeFov[ovrEye_Left].DownTan = m_eyeFov[ovrEye_Left].LeftTan =
                 m_eyeFov[ovrEye_Left].RightTan = (float)M_PI_2;
             m_eyeFov[ovrEye_Right] = m_eyeFov[ovrEye_Left];
+            m_gameFov[ovrEye_Left] = m_eyeFov[ovrEye_Left];
+            m_gameFov[ovrEye_Right] = m_eyeFov[ovrEye_Right];
             m_recommendedResolution = {2496, 2688};
             LoadHostConfig();
             m_controllerButtons.ControllerType = ovrControllerType_Touch;
@@ -1986,6 +1988,38 @@ namespace {
                     m_eyePose[e].Position = {h.eyeOffset[e][0], h.eyeOffset[e][1], h.eyeOffset[e][2]};
                 }
             }
+            // The field of view the GAME is told: the headset's, with each edge scaled by the host's fovScale (outer = the side away from the nose, inner,
+            // upper, lower; 1 = all of it). The composition above keeps the headset's FoV: a game layer rendered with the smaller one is mapped into the
+            // frame by EyeHomography and the rest of the frame stays black. The recommended size follows the area (proportional in tangent space), so the game
+            // renders fewer pixels, not the same pixels over less angle. VDXR reads both once, when the app starts: a change is taken by the next game.
+            float sc[4];
+            for (int k = 0; k < 4; k++) {
+                sc[k] = (h.fovScale[k] >= 0.2f && h.fovScale[k] <= 1.f) ? h.fovScale[k] : 1.f;   // 0 / garbage = not restricted
+            }
+            double widthRatio = 0, heightRatio = 0;
+            int measured = 0;
+            for (int e = 0; e < 2; e++) {
+                if (h.eyeFovTan[e][0] > 0) {
+                    const float l = e == 0 ? sc[0] : sc[1], r = e == 0 ? sc[1] : sc[0];
+                    const ovrFovPort& f = m_eyeFov[e];
+                    m_gameFov[e].LeftTan = f.LeftTan * l;
+                    m_gameFov[e].RightTan = f.RightTan * r;
+                    m_gameFov[e].UpTan = f.UpTan * sc[2];
+                    m_gameFov[e].DownTan = f.DownTan * sc[3];
+                    widthRatio += (f.LeftTan * l + f.RightTan * r) / (f.LeftTan + f.RightTan);
+                    heightRatio += (f.UpTan * sc[2] + f.DownTan * sc[3]) / (f.UpTan + f.DownTan);
+                    measured++;
+                }
+            }
+            if (initial && measured && h.eyeWidth > 0 && h.eyeHeight > 0) {
+                auto even = [](double v) { return std::max(64, ((int)std::lround(v) + 1) / 2 * 2); };
+                m_recommendedResolution = {even(h.eyeWidth * widthRatio / measured), even(h.eyeHeight * heightRatio / measured)};
+                if (sc[0] < 1.f || sc[1] < 1.f || sc[2] < 1.f || sc[3] < 1.f) {
+                    shimlog::General("INFO", "field of view told to the game: outer %.0f%% inner %.0f%% upper %.0f%% lower %.0f%% of the headset's -> left eye L/R/U/D tan %.3f/%.3f/%.3f/%.3f, recommended %d x %d (stream %d x %d)",
+                                     sc[0] * 100, sc[1] * 100, sc[2] * 100, sc[3] * 100, m_gameFov[0].LeftTan, m_gameFov[0].RightTan, m_gameFov[0].UpTan,
+                                     m_gameFov[0].DownTan, m_recommendedResolution.w, m_recommendedResolution.h, h.eyeWidth, h.eyeHeight);
+                }
+            }
         }
 
         void CreateSbsRing() {
@@ -2068,7 +2102,7 @@ namespace {
         }
 
         ovrFovPort GetEyeFov(ovrEyeType eye) const override {
-            return m_eyeFov[eye];
+            return m_gameFov[eye];   // the game's (restricted) field of view; composition uses m_eyeFov
         }
 
         ovrPosef GetEyePose(ovrEyeType eye) const override {
@@ -2464,7 +2498,8 @@ namespace {
         float m_encodingGamma{1.f}; // negotiated ALVR encoding gamma
         uint32_t m_hostConfigSeq = 0;
         ovrSizei m_recommendedResolution{};
-        ovrFovPort m_eyeFov[ovrEye_Count]{};
+        ovrFovPort m_eyeFov[ovrEye_Count]{};   // the headset's: the stream frame's field of view (composition target, what the client maps the frame over)
+        ovrFovPort m_gameFov[ovrEye_Count]{};  // what the game is told (GetEyeFov): the headset's restricted per edge by the host's fovScale, see LoadHostConfig
         bool m_useStageTracking{false};
 
         mutable std::shared_mutex m_swapchainMutex;

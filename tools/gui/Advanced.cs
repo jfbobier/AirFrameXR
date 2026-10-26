@@ -1,4 +1,4 @@
-// configure.exe --switches: the Advanced settings window. The experimental and tuning switches of docs/EXPERIMENTAL_SWITCHES.md, grouped, each with the moment
+// configure.exe --switches: the Advanced picture and FOV settings window. The experimental and tuning switches of docs/EXPERIMENTAL_SWITCHES.md, grouped, each with the moment
 // its change takes effect (live in the running streamer, at the next streamer start, at the next game start) and its value read back from the file or the registry.
 // Everything applies when changed; a switch at its default is removed from config\airframexr.json. The streamer may stay open: it forwards the live ones itself.
 using System;
@@ -42,7 +42,7 @@ namespace AirFrameXR
 
         public AdvancedForm()
         {
-            Text = "AirFrameXR – Advanced settings";
+            Text = "AirFrameXR – Advanced picture and FOV settings";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleDimensions = new SizeF(96F, 96F);
@@ -52,9 +52,13 @@ namespace AirFrameXR
             Width = 1000; Height = 860;
             Ui.FitToWorkArea(this);
 
-            const string FG = "Frame generation (experimental)", AR = "Arrival and pacing", GE = "GPU and encoder";
+            const string FO = "Field of view the game renders", FG = "Frame generation (experimental)", AR = "Arrival and pacing", GE = "GPU and encoder";
             knobs.AddRange(new[]
             {
+                N(FO, "fov_outer_pct", "Outer (%)", 100, 20, 100, 1, 0, NextGame, "The side away from your nose, the widest on the Vision Pro (60.7 degrees against 45.5 inward). Every 10 % taken off saves about 6 % of the pixels the game renders there. 100 = all of it."),
+                N(FO, "fov_inner_pct", "Inner (%)", 100, 20, 100, 1, 0, NextGame, "The side towards your nose. Every 10 % taken off saves about 4 % of the pixels on the Vision Pro. 100 = all of it."),
+                N(FO, "fov_upper_pct", "Upper (%)", 100, 20, 100, 1, 0, NextGame, "The top edge. Every 10 % taken off saves about 5 % of the pixels on the Vision Pro. 100 = all of it."),
+                N(FO, "fov_lower_pct", "Lower (%)", 100, 20, 100, 1, 0, NextGame, "The bottom edge. Every 10 % taken off saves about 5 % of the pixels on the Vision Pro. 100 = all of it."),
                 N(FG, "frame_gen_cap_fps", "Cap on the game's rate (fps)", 0, 0, 240, 5, 0, Live, "Uncapped mode only; 0 = no cap. Holds the game back to at most this many frames per second, so a GPU-bound game stops building a queue of frames in front of the GPU. Rule of thumb from the nights: a little under the rate the game sustains (about 90 %). On Dead Space it cut the lag from 62 to 31 ms; 70 did nothing for 40 fps games, which needed about 37. With the frame-start gate on the queue is smaller to begin with, so measure. Hover for the numbers."),
                 C(FG, "frame_gen_synthesis", "Generated-frame synthesis", "edge", new[] { "edge", "classic", "edge-blend" }, Restart, "How a generated frame is drawn from the optical flow. edge (default): sharp motion boundaries; where the motion is uncertain the real frame is shown (a little local judder) instead of a double image. classic: the algorithm of 0.6 and earlier, the predictable fallback if edge misbehaves in a game. edge-blend: edge, but uncertain motion blends both frames. What we know: in games on the headset edge looks visibly better than classic, and edge could not be told apart from edge-blend. The lab's ground-truth test agrees (a frame generated from two rendered frames of the animated benchmark scene, compared with the frame the scene really has there): edge keeps the parts that did not move intact where classic softens them (whole-frame PSNR +2.0 dB, sharper in 63 of 63 cases), and edge against edge-blend is a statistical tie. Edge also costs less GPU (0.24 ms against 0.33 ms per generated frame). Hover for the numbers."),
                 B(AR, "phase_lock", "Phase lock", true, Restart, "Slides the host's frame clock (up to 2 ms every 2-4 s) so frames arrive 7 ms before the headset's render tick. The margin matters: at 3 ms 1.2-2.3 % of the headset's refreshes repeated, at 7 ms 0.5 %, with the same 67 ms latency. Known flaw: it slides 12-25 times a minute even when it has nothing to correct (999 slides in an hour of a game running free at 56 fps). Leave it on; turn it off only to compare. Hover for the numbers."),
@@ -63,6 +67,17 @@ namespace AirFrameXR
                 B(GE, "qp_map", "HEVC QP map", true, Restart, "A trade-off, on by default (since 0.1): more bits for the centre of the foveated picture, fewer for the edges (quality level -3 at the centre, +6 at the edges). Measured against the native render in the lab: the centre gains 0.1-0.3 dB and the periphery loses 0.2-0.9 dB at 40-100 Mbps, and the stream carries about 5 % fewer bits; at 250 Mbps nothing changes. No encode-time cost measured (within 0.5 ms). Untick it for an even picture with the most detail at the edges. Hover for the numbers and what is not measured."),
             });
 
+            foreach (var k in knobs.Where(x => x.Section == FO)) k.Tip =
+                "Field of view the game renders\r\n" +
+                "\r\n" +
+                "What it is: the share of the headset's field of view that the game is told it has, edge by edge (outer = away from the nose, inner = towards it, upper, lower), like SteamVR's Video > Field of View sliders. The game renders a smaller view with proportionally fewer pixels, so a GPU-bound game gets faster; you give up what was in the margin you trimmed. The edges of the Vision Pro's view are optically weaker than its centre, so a little off the edges costs little to see.\r\n" +
+                "What does not change: the stream. The frame still covers the headset's whole view (the headset maps it over the field of view it declared), the trimmed margin is black, encode, decode and network cost are the same, frame generation and the client are untouched. The saving is the game's GPU work.\r\n" +
+                "\r\n" +
+                "How games get it: through the OpenXR handshake. xrLocateViews returns the four angles per eye and xrEnumerateViewConfigurationViews the recommended image size; AirFrameXR returns the restricted angles and a size reduced in proportion to the area. UEVR reads exactly these (the four angles per eye for its projection and the first view's recommended size, scaled by its own resolution slider) when it starts, so it renders the narrower view. Other OpenXR games are expected to behave the same way (not tested here).\r\n" +
+                "When it applies: at the NEXT game start. The runtime reads the field of view once when the game starts and UEVR does not re-read it, so a game that is already running keeps what it began with. Changing a field while the streamer runs is enough; nothing else to restart.\r\n" +
+                "\r\n" +
+                "The Vision Pro's field of view as visionOS reports it (left eye): 60.7 degrees outer, 45.5 inner, 50.6 up, 45.5 down (about 106 x 96 degrees). Share of the pixels the game renders, for example: 100/100/100/100 -> 100 %; 90 outer + 90 upper -> 88.5 %; 90 on all four -> 81 %; 85 on all four -> 72 %.\r\n" +
+                "The numbers are percentages of the field of view's tangents (what a flat projection uses): 90 % outer is 90 % of the outer tangent, a little less than 90 % of the angle.";
             knobs.Find(k => k.Key == "frame_gen_cap_fps").Tip =
                 "Cap on the game's rate (uncapped mode only)\r\n" +
                 "\r\n" +
@@ -125,11 +140,16 @@ namespace AirFrameXR
                 "Not measured: how it looks (PSNR is not what your eyes see; judge by looking, the switch takes effect at the next streamer start), and split encoding " +
                 "across several NVENC engines (the lab GPU has one). The full-frame + split encoding profile turns the map off by itself. Spatial AQ is separate and always on.";
             var body = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(12, 4, 12, 12), Dock = DockStyle.None, Location = Point.Empty };
-            var intro = Ui.Line("Switches that change timing, for people who measure. Each one says when it takes effect: live = the running streamer takes it within seconds; streamer restart = close and start the streamer; next game start = start the game again. " +
+            var intro = Ui.Line("Switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect: live = the running streamer takes it within seconds; streamer restart = close and start the streamer; next game start = start the game again. " +
                 "A switch at its default is removed from config\\airframexr.json. The signals to judge by are in logs\\AirFrameXR.log: the 'frame generation perf' and 'frame generation samples' lines every 10 s, and 'game run recorded' at the end of a game.");
             intro.MaximumSize = new Size(900, 0); intro.ForeColor = Color.DimGray;
             body.Controls.Add(intro);
 
+            Section(body, FO);
+            var foIntro = Ui.Line("The share of the headset's field of view the game is told it has, edge by edge, like SteamVR's Video > Field of View. The game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start); the stream still covers the whole headset view and the margin is black, so only the game's GPU work changes. Takes effect at the next game start. Hover for details.");
+            foIntro.ForeColor = Color.DimGray; foIntro.MaximumSize = new Size(900, 0);
+            body.Controls.Add(foIntro);
+            foreach (var k in knobs.Where(x => x.Section == FO)) AddKnob(body, k);
             Section(body, FG);
             Row(body, uncapped, "Experimental", Live, "Frame generation without a fixed rate. Normally frame generation holds the game to a fraction of the display rate (1/3, 1/2, 2/3); here the game runs at its own speed and every frame the headset gets is interpolated between the two newest rendered ones, shown a little behind so the next real frame is already known. It pays off when the game cannot hold half the display rate (below 50 fps: Carma 25 % repeats at half rate, 4.5 % uncapped) or runs well above it (Lies of P 74 fps rendered against 50). At exactly 50 fps it changes nothing and adds latency: about two game periods of scene latency (head turns stay immediate). Headset nights 2026-10-15/16; it has not worked reliably since, so treat it as a test. Hover for the numbers.", "Uncapped mode, what the headset nights measured (RTX 5090, Vision Pro 100 Hz, nine games, 16 runs, optical flow)\r\n" +
                 "\r\n" +
@@ -174,7 +194,7 @@ namespace AirFrameXR
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             scroller.Controls.Add(body);
             Controls.Add(scroller);
-            var hdr = Ui.CompactHeader("Advanced settings");
+            var hdr = Ui.CompactHeader("Advanced picture and FOV settings");
             Controls.Add(hdr);
             Ui.AutoFitWindow(this, hdr, body);
             LoadValues();

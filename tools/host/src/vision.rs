@@ -58,6 +58,12 @@ pub struct Settings {
     pub frame_gen_rate: Option<String>,
     /// uncapped mode: minimum spacing of the game's releases as an fps cap (0 = none): headroom for the host's own GPU work
     pub frame_gen_cap_fps: Option<f64>,
+    /// the share (percent) of the headset's field of view the game is told it has, per edge: outer, inner, upper, lower (default 100 each); the stream
+    /// frame keeps covering the headset's whole FoV (shim: `fovScale`)
+    pub fov_outer_pct: Option<f64>,
+    pub fov_inner_pct: Option<f64>,
+    pub fov_upper_pct: Option<f64>,
+    pub fov_lower_pct: Option<f64>,
     pub debug: Option<bool>,
     pub gamma: Option<f32>,
     /// headset height above the floor handed to games (m); 0 = the headset's own floor estimate
@@ -116,6 +122,10 @@ pub fn load_settings(path: &Path) -> Settings {
         frame_gen_synthesis: video["frame_gen_synthesis"].as_str().map(str::to_string),
         frame_gen_rate: video["frame_gen_rate"].as_str().map(str::to_string),
         frame_gen_cap_fps: video["frame_gen_cap_fps"].as_f64(),
+        fov_outer_pct: video["fov_outer_pct"].as_f64(),
+        fov_inner_pct: video["fov_inner_pct"].as_f64(),
+        fov_upper_pct: video["fov_upper_pct"].as_f64(),
+        fov_lower_pct: video["fov_lower_pct"].as_f64(),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
         height_m: v["headset"]["height_m"].as_f64().map(|g| g as f32),
@@ -210,9 +220,16 @@ pub static RECENTER_REQ: AtomicBool = AtomicBool::new(false);
 /// colour correction (brightness, contrast, saturation, sharpening as f32 bits) and its "pending" flag
 pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
+/// the field-of-view restriction (outer, inner, upper, lower as fractions, f32 bits) sent by the streamer when the user touches a field, and its "pending" flag
+pub static FOV_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
+pub static FOV_PENDING: AtomicBool = AtomicBool::new(false);
+/// percent -> fraction, within what the restriction accepts (a view cannot be emptied)
+pub fn fov_fraction(pct: f64) -> f32 {
+    (pct / 100.0).clamp(0.2, 1.0) as f32
+}
 
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
-/// `frame_gen_cap <fps>` (0 = none), `recenter`,
+/// `frame_gen_cap <fps>` (0 = none), `fov_restrict <outer> <inner> <upper> <lower>` (percent of the headset's field of view the game is told, taken by the next game), `recenter`,
 /// `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
@@ -298,6 +315,15 @@ pub fn spawn_stdin_control() {
                 (Some("height"), Some(h)) => {
                     if let Ok(h) = h.parse::<f32>() {
                         HEIGHT_REQ.store(if h <= 0.0 { f32::MIN_POSITIVE } else { h.clamp(0.5, 2.5) }.to_bits(), Ordering::SeqCst);
+                    }
+                }
+                (Some("fov_restrict"), Some(first)) => {
+                    let vals: Vec<f64> = std::iter::once(first).chain(w).filter_map(|x| x.parse().ok()).collect();
+                    if vals.len() == 4 {
+                        for (k, p) in vals.iter().enumerate() {
+                            FOV_REQ[k].store(fov_fraction(*p).to_bits(), Ordering::SeqCst);
+                        }
+                        FOV_PENDING.store(true, Ordering::SeqCst);
                     }
                 }
                 (Some("color"), Some(first)) => {

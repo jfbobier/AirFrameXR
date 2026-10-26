@@ -453,14 +453,14 @@ def run_scenario(sc, outdir: Path, log=print):
                 steps["stdin_feed_events"] = len(feed)
             hostcmd = (envpre + feedpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
                        f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv ' + ('' if 'idle_rgb' in h else '--idle-rgb 00ff00 ')
-                       + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
+                       + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "gui": "--gui", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
                                      "width": "--width", "height": "--height", "height_m": "--height-m", "noise": "--noise", "qp_map": "--qp-map",
                                      "idle_rgb": "--idle-rgb", "gpu_priority": "--gpu-priority", "encode_profile": "--encode-profile",
                                      "install_dir": "--install-dir", "debug": "--debug", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
-                                     "frame_gen": "--frame-gen", "frame_gen_t": "--frame-gen-t"})
+                                     "frame_gen": "--frame-gen", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -969,6 +969,82 @@ def analyse_mirror(sc, outdir):
     return res
 
 
+def analyse_fov_restrict(sc, outdir):
+    """The field of view the game is told (Advanced picture and FOV settings, shim `fovScale`): what the OpenXR app received at startup (xr_probe's log: the four
+    tangents per eye from xrLocateViews and the recommended size from xrEnumerateViewConfigurationViews) against the headset's views (the host's views_config event)
+    and the restriction, and the decoded stream: the margin the game does not render is black, the stream still covers the headset's whole view."""
+    sc_pct = sc["checks"]["fov_restrict"]["scale"]
+    s = [p / 100.0 for p in sc_pct]   # outer, inner, upper, lower
+    out = {"scale": s}
+    headset = None
+    for line in open(outdir / "host_stdout.txt", errors="replace"):
+        if '"views_config"' in line and '"views_config_ignored"' not in line:
+            try:
+                headset = json.loads(line)["data"]["fov_tan"]
+                break
+            except Exception:
+                pass
+    log = (outdir / "app.log").read_text(errors="replace") if (outdir / "app.log").exists() else ""
+    got = {}
+    for m in re.finditer(r"view fov tan eye (\d): L ([0-9.]+) R ([0-9.]+) U ([0-9.]+) D ([0-9.]+)", log):
+        got[int(m.group(1))] = [float(m.group(k)) for k in range(2, 6)]
+    rec = re.search(r"views: \d+, recommended (\d+)x(\d+)", log)
+    out["host_events"] = sum(1 for line in open(outdir / "host_stdout.txt", errors="replace") if '"event":"fov_restrict"' in line.replace(' ', ''))
+    out["headset_fov"], out["app_fov"], out["recommended"] = headset, got, (int(rec.group(1)), int(rec.group(2))) if rec else None
+    if not headset or len(got) < 2 or not rec:
+        out["error"] = "no views_config event / no view fov line / no recommended size in the app log"
+        return out
+    exp = []
+    for e in range(2):
+        L, R, U, D = headset[4 * e:4 * e + 4]
+        l, r = (s[0], s[1]) if e == 0 else (s[1], s[0])
+        exp.append([L * l, R * r, U * s[2], D * s[3]])
+    out["expected_fov"] = exp
+    out["fov_max_err"] = max(abs(g - x) for e in range(2) for g, x in zip(got[e], exp[e]))
+    cfg = negotiated_cfg(outdir)
+    ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
+    wr = sum((exp[e][0] + exp[e][1]) / (headset[4 * e] + headset[4 * e + 1]) for e in range(2)) / 2
+    hr = sum((exp[e][2] + exp[e][3]) / (headset[4 * e + 2] + headset[4 * e + 3]) for e in range(2)) / 2
+    even = lambda v: max(64, (int(round(v)) + 1) // 2 * 2)
+    out["expected_recommended"] = (even(ew * wr), even(eh * hr))
+    out["stream_eye"] = (ew, eh)
+    # the stream frame: side by side, each eye covers the headset's view; the game's view sits inside it, the rest is black
+    pts, want = [], []
+    cuts = []
+    for e in range(2):
+        L, R, U, D = headset[4 * e:4 * e + 4]
+        l, r = (s[0], s[1]) if e == 0 else (s[1], s[0])
+        cuts.append(((1 - l) * L / (L + R), (1 - r) * R / (L + R)))
+    # a column along the top and bottom that is inside both eyes' views and clear of the probe's counter bar (16 blocks of 64 px along the top of its view)
+    lo, hi = max(c[0] for c in cuts) + 16 * 64 / ew + 0.02, 1 - max(c[1] for c in cuts) - 0.02
+    col = (lo + hi) / 2 if lo < hi else 0.5
+    for e in range(2):
+        L, R, U, D = headset[4 * e:4 * e + 4]
+        l, r = (s[0], s[1]) if e == 0 else (s[1], s[0])
+        cut = [(1 - l) * L / (L + R), (1 - r) * R / (L + R), (1 - s[2]) * U / (U + D), (1 - s[3]) * D / (U + D)]   # left, right, top, bottom shares of the eye
+        x0 = e * ew
+        for side, c in enumerate(cut):
+            if c < 0.03:
+                continue
+            m_, i_ = c / 2, c + 0.02    # the middle of the margin (black), just inside the game's view (content)
+            if side == 0: pts += [(x0 + int(m_ * ew), eh // 2), (x0 + int(i_ * ew), eh // 2)]
+            elif side == 1: pts += [(x0 + ew - 1 - int(m_ * ew), eh // 2), (x0 + ew - 1 - int(i_ * ew), eh // 2)]
+            elif side == 2: pts += [(x0 + int(col * ew), int(m_ * eh)), (x0 + int(col * ew), int(i_ * eh))]
+            else: pts += [(x0 + int(col * ew), eh - 1 - int(m_ * eh)), (x0 + int(col * ew), eh - 1 - int(i_ * eh))]
+            want.append((e, side, round(c, 3)))
+    out["margins"] = want
+    if pts:
+        frames = read_rgb_at(outdir / "client.hevc", pts)[30:]
+        lum = lambda px: 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]
+        black_ok = content_ok = 0
+        for fr in frames:
+            black_ok += sum(1 for k in range(0, len(pts), 2) if lum(fr[k]) < 16)
+            content_ok += sum(1 for k in range(1, len(pts), 2) if lum(fr[k]) >= 16)
+        n = max(1, len(frames) * len(want))
+        out["margin_black_frac"], out["inside_content_frac"], out["frames"] = round(black_ok / n, 3), round(content_ok / n, 3), len(frames)
+    return out
+
+
 def analyse_handover(sc, outdir):
     """The desktop mirror holding the headset when a game starts (checks.handover): the mirror must see the shim's signal and leave within a couple of seconds, the engine must
     end the mirror's run and start the game's (not count the game as the mirror), and the game must keep the headset after the mirror is gone."""
@@ -1365,6 +1441,8 @@ def analyse(sc, outdir: Path):
         a["mirror"] = analyse_mirror(sc, outdir)
     if sc.get("checks", {}).get("handover"):
         a["handover"] = analyse_handover(sc, outdir)
+    if sc.get("checks", {}).get("fov_restrict"):
+        a["fov_restrict"] = analyse_fov_restrict(sc, outdir)
     if sc.get("checks", {}).get("qpmap"):
         a["qpmap"] = analyse_qpmap(sc, outdir, a.get("host") or {})
     if sc.get("checks", {}).get("pacing") and sc.get("app"):
@@ -1565,6 +1643,24 @@ def evaluate(sc, a):
         chk("handover_mirror_leaves", H_["leave_s"] is not None and H_["leave_s"] <= hk.get("max_leave_s", 2.0) and not H_["forced_out"] and H_["mirror_rc"] == "0", {"leave_s": H_["leave_s"], "forced_out": H_["forced_out"], "rc": H_["mirror_rc"]}, f"the mirror ends by itself within {hk.get('max_leave_s', 2.0)} s of the signal, without the 1.5 s fallback")
         chk("handover_engine_switches", H_["mirror_run_ended_before_game_started"], H_["events"], "the engine ends the mirror's run, then starts the game's (the game is not recorded as the mirror)")
         chk("handover_game_ran", H_["game_ran"], H_["game_rc"], "the game ran to its end after the mirror left")
+    if "fov_restrict" in ck:
+        fa = a.get("fov_restrict") or {}
+        if fa.get("error"):
+            chk("fov_restrict_seen", False, fa["error"], "the app logged its field of view and recommended size")
+        else:
+            if ck.get("fov_restrict_event"):
+                chk("fov_restrict_published_once", fa.get("host_events") == 1, fa.get("host_events"), "the host logged one fov_restrict event: the command was taken once and published, not repeated")
+            tol = ck["fov_restrict"].get("tol", 0.01)
+            chk("fov_restrict_app_fov", fa["fov_max_err"] <= tol, {"max_err": round(fa["fov_max_err"], 4), "got": fa["app_fov"], "expected": fa["expected_fov"]},
+                f"the four tangents per eye the app got from xrLocateViews are the headset's scaled per edge (outer, inner, upper, lower = {ck['fov_restrict']['scale']} %), within {tol}")
+            er, rr = fa["expected_recommended"], fa["recommended"]
+            chk("fov_restrict_recommended_size", abs(er[0] - rr[0]) <= 2 and abs(er[1] - rr[1]) <= 2, {"app": rr, "expected": er, "stream_eye": fa["stream_eye"]},
+                "the recommended image size follows the area of the restricted view (the game renders fewer pixels, not the same pixels over less angle)")
+            if fa.get("margins"):
+                chk("fov_restrict_margin_black", fa.get("margin_black_frac", 0) >= 0.95, {"margin_black": fa.get("margin_black_frac"), "margins": fa["margins"]},
+                    ">= 95 % of the samples in the middle of each trimmed margin of the decoded stream are black: the stream still covers the headset's view")
+                chk("fov_restrict_content_inside", fa.get("inside_content_frac", 0) >= 0.95, {"content": fa.get("inside_content_frac")},
+                    ">= 95 % of the samples just inside the game's view carry its picture (the restricted view is placed where it belongs)")
     if "qpmap" in ck:
         qk, qa = ck["qpmap"], a.get("qpmap") or {}
         chk("qpmap_enabled_in_nvenc", qa.get("nvenc_qp_map_mode") == (2 if qk.get("on", True) else 0), qa.get("nvenc_qp_map_mode"), "NVENC reports qpMapMode 2 (delta) when the map is on, 0 when off")

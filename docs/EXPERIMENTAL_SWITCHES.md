@@ -1,6 +1,6 @@
-# Experimental switches (the Advanced settings window)
+# Experimental switches (the Advanced picture and FOV settings window)
 
-Built in 0.6 as `bin\configure.exe --switches` (launcher card **Advanced settings**, `tools/gui/Advanced.cs`): every key below except the removed ones (1.0.1 removed eleven keys that measured as no benefit or worse: they are listed in docs/PERFORMANCE_KNOBS.md, "Removed on purpose"; a file that still has them is ignored, with one log line), grouped, applied when changed, a switch at its default removed from `airframexr.json`. The streamer window forwards the live ones (`frame_gen_rate`, `frame_gen_cap_fps`) by watching the file. The uncapped tick moved from the streamer window into this window.
+Built in 0.6 as `bin\configure.exe --switches` (launcher card **Advanced picture and FOV settings**, `tools/gui/Advanced.cs`): every key below except the removed ones (1.0.1 removed eleven keys that measured as no benefit or worse: they are listed in docs/PERFORMANCE_KNOBS.md, "Removed on purpose"; a file that still has them is ignored, with one log line), grouped, applied when changed, a switch at its default removed from `airframexr.json`. The streamer window forwards the live ones (`frame_gen_rate`, `frame_gen_cap_fps`) by watching the file. The uncapped tick moved from the streamer window into this window.
 
 Written 2026-10-24 on branch `0.6`. Every knob below exists in the engine today and is **not** in the launcher's windows (the ones that are
 have a note). For each: where it lives, its values and default, when a change takes effect, what it does, how to read it back, and what we
@@ -41,6 +41,15 @@ Already in the launcher: `frame_gen` (tick), `frame_gen_rate` third | half | two
 | env only `AIRFRAMEXR_FG_SAMPLE_WAIT_MS` | 0-20, **3** | streamer restart | how long a boundary waits for a tracking sample newer than the last sent frame. Lab knob; no json key |
 | env only `AIRFRAMEXR_FG_ARRIVAL_WAIT_MS` | **4** | streamer restart | how long a boundary with nothing due waits for the frame the game is about to publish |
 | env only `AIRFRAMEXR_FG_DARK_MS` | **100**, 0 = never | streamer restart | after this long without a fresh sample, outputs are stamped with the last known one (cures the tracking-blackout deadlock, 2026-10-22) |
+
+## 0. Field of view the game renders (1.0.1)
+
+| key | values, default | effect | what it does, what we know |
+|---|---|---|---|
+| `fov_outer_pct`, `fov_inner_pct`, `fov_upper_pct`, `fov_lower_pct` | 20-100, **100** each | next game start (the streamer forwards a change to the host as `fov_restrict <outer> <inner> <upper> <lower>`; lab flag `--fov-scale o,i,u,l`) | the share of the headset's field of view (its tangents) the game is told it has, per edge: outer = the side away from the nose (the left tangent of the left eye, the right one of the right eye), inner = towards the nose, upper, lower. The game renders a smaller view and, because the recommended image size shrinks with the area, fewer pixels; the stream frame keeps covering the headset's whole view (the client maps it over the FoV it declared) and the trimmed margin is black, so encode, decode, network, frame generation and the client are unchanged: only the game's GPU work drops. On the Vision Pro's field of view as visionOS reports it (left eye 60.7 / 45.5 / 50.6 / 45.5 degrees outer / inner / up / down): 10 % off outer saves about 6 % of the pixels, inner 4 %, upper 5 %, lower 5 %; 90 on all four 81 % of the pixels, 85 on all four 72 %. |
+
+How a game gets it (the OpenXR contract): `xrLocateViews` returns the four angles per eye, `xrEnumerateViewConfigurationViews` the recommended image size; VDXR reads both from the shim when the app starts (`GetEyeFov`, `GetRecommendedResolution`; it caches them for the session), so a game takes new values at its next start and a running one keeps what it began with. UEVR reads exactly these (the four angles per eye for its projection, the first view's recommended size times its own resolution slider, once). Other OpenXR games are expected to behave the same way, untested. The shim keeps the headset's field of view for composition (`EyeHomography` maps the game's layer into the stream frame; pixels outside its source are discarded and the frame is cleared to black), IPC version 33 carries `fovScale`.
+Lab: `e2e_fov_restrict` (outer 70 / inner 90 / upper 80 / lower 60: the app's four tangents per eye exact, recommended size 1408 x 1120 for a 1760 x 1600 stream, margins black and the picture just inside them in the decoded stream), `e2e_fov_restrict_live` (the same through the `fov_restrict` stdin command, taken once) and `e2e_fov_restrict_none` (100 %: nothing changes, all the probe checks hold).
 
 ## 3. The arrival family (docs/PERFORMANCE_KNOBS.md)
 

@@ -395,7 +395,7 @@ void* nvh_ipc_open(void) {
     return ipc;
 }
 
-void nvh_ipc_config(void* i, void* hh, double rate, int ew, int eh, const float* fov8, const float* off6, int bits, float encoding_gamma) {
+void nvh_ipc_config(void* i, void* hh, double rate, int ew, int eh, const float* fov8, const float* off6, int bits, float encoding_gamma, const float* fov_scale4) {
     auto* ipc = (Ipc*)i; auto* n = (Nvh*)hh;
     auto& h = ipc->state->host;
     h.displayRateHz = rate; h.eyeWidth = ew; h.eyeHeight = eh; h.encodeBits = bits; h.encodingGamma = encoding_gamma;
@@ -403,6 +403,7 @@ void nvh_ipc_config(void* i, void* hh, double rate, int ew, int eh, const float*
         for (int k = 0; k < 4; k++) h.eyeFovTan[e][k] = fov8[e * 4 + k];
         for (int k = 0; k < 3; k++) h.eyeOffset[e][k] = off6[e * 3 + k];
     }
+    for (int k = 0; k < 4; k++) h.fovScale[k] = fov_scale4 && fov_scale4[k] > 0.f ? fov_scale4[k] : 1.f;   // the game's field of view (outer, inner, upper, lower)
     if (n) { h.adapterLuidLow = n->luid.LowPart; h.adapterLuidHigh = n->luid.HighPart; }
     MemoryBarrier();
     h.configSeq++;

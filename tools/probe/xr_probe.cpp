@@ -378,6 +378,12 @@ int main(int argc, char** argv) {
             XrViewState vs{ XR_TYPE_VIEW_STATE }; std::vector<XrView> views(vcv.size(), { XR_TYPE_VIEW }); uint32_t vc;
             r = xrLocateViews(sess, &li, &vs, (uint32_t)views.size(), &vc, views.data());
             if (XR_FAILED(r)) return fail("xrLocateViews", r);
+            static bool fovLogged = false;
+            if (!fovLogged && vc >= 2 && (vs.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT)) {   // the field of view the runtime tells the app (the harness compares it with the headset's)
+                fovLogged = true;
+                for (uint32_t k = 0; k < 2; k++)
+                    L("view fov tan eye %u: L %.4f R %.4f U %.4f D %.4f", k, -tanf(views[k].fov.angleLeft), tanf(views[k].fov.angleRight), tanf(views[k].fov.angleUp), -tanf(views[k].fov.angleDown));
+            }
             if (done % 20 == 0) L("frame %d: viewState 0x%llx pos(%.3f %.3f %.3f) period %lld ns", done, (unsigned long long)vs.viewStateFlags,
                 views[0].pose.position.x, views[0].pose.position.y, views[0].pose.position.z, (long long)fs.predictedDisplayPeriod);
             if (poseF) {

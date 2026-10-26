@@ -364,6 +364,11 @@ namespace AirFrameXR
         // frames in between; docs/FRAME_GENERATION.md), "uncapped" (experimental, from the Advanced settings; docs/FRAME_GENERATION_UNCAPPED.md)
         public string FrameGenRate { get => Json.Str(Root, "video.frame_gen_rate", "half"); set => Json.Set(Root, "video.frame_gen_rate", value); }
         /// uncapped mode's minimum spacing of the game's releases in fps (0 = none) and its content lag in ms (0 = automatic); the streamer takes a change live
+        /// the share (percent) of the headset's field of view the game is told, per edge (Advanced picture and FOV settings); 100 = all of it
+        public double FovOuterPct => Json.Num(Root, "video.fov_outer_pct", 100);
+        public double FovInnerPct => Json.Num(Root, "video.fov_inner_pct", 100);
+        public double FovUpperPct => Json.Num(Root, "video.fov_upper_pct", 100);
+        public double FovLowerPct => Json.Num(Root, "video.fov_lower_pct", 100);
         public double FrameGenCapFps { get => Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
         public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", true); set => Json.Set(Root, "video.frame_gen_recommended", value); }

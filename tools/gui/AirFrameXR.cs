@@ -342,10 +342,13 @@ namespace AirFrameXR
             if (AlvrConnecting()) { if (link != Link.Orange || !headset.Text.Contains("connecting")) SetLink(Link.Orange, $"Headset: detected - {name}, connecting..."); }
             else if (link == Link.Orange && (DateTime.UtcNow - lastSeen).TotalSeconds > 30) SetLink(Link.Red, $"Headset: not found - searching for {name} ...");
         }
-        DateTime configSeen; string watchRate; double watchCap;
+        DateTime configSeen; string watchRate; double watchCap; string watchFov;
+        /// the four field-of-view percentages as the host command takes them (outer inner upper lower)
+        string FovLine() => string.Join(" ", new[] { settings.FovOuterPct, settings.FovInnerPct, settings.FovUpperPct, settings.FovLowerPct }.Select(v => v.ToString("0.#", CultureInfo.InvariantCulture)));
+
         void ConfigWatchStart()
         {
-            watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps;
+            watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchFov = FovLine();
             try { configSeen = File.GetLastWriteTimeUtc(Paths.Settings); } catch { }
             configWatch.Tick += (s, e) =>
             {
@@ -353,20 +356,28 @@ namespace AirFrameXR
                 if (w == configSeen) return;
                 configSeen = w;
                 settings.Root = Json.Load(Paths.Settings);
-                if (settings.FrameGenRate != watchRate)
-                {
-                    watchRate = settings.FrameGenRate;
-                    host.Send("frame_gen_rate " + watchRate);
-                    fgRateFromHost = true;
-                    fgUnc.Checked = watchRate == "uncapped";
-                    var pos = Array.IndexOf(FgRates, watchRate);
-                    if (pos >= 0 && fgRate.Value != pos) fgRate.Value = pos;
-                    fgRateFromHost = false;
-                    Log.Write("INFO", "frame generation rate " + watchRate + " (Advanced settings)");
-                }
-                if (settings.FrameGenCapFps != watchCap) { watchCap = settings.FrameGenCapFps; host.Send("frame_gen_cap " + watchCap.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation cap " + watchCap + " fps (Advanced settings)"); }
+                ForwardConfigChanges();
             };
             configWatch.Start();
+        }
+
+        /// What the Advanced window changed in config\airframexr.json that the running host takes live: the frame generation rate and cap, and the field of view the game is
+        /// told (a game that starts later takes it). Only a value that differs from the last one sent is sent: nothing is repeated while the user does not touch a field.
+        public void ForwardConfigChanges()
+        {
+            if (settings.FrameGenRate != watchRate)
+            {
+                watchRate = settings.FrameGenRate;
+                host.Send("frame_gen_rate " + watchRate);
+                fgRateFromHost = true;
+                fgUnc.Checked = watchRate == "uncapped";
+                var pos = Array.IndexOf(FgRates, watchRate);
+                if (pos >= 0 && fgRate.Value != pos) fgRate.Value = pos;
+                fgRateFromHost = false;
+                Log.Write("INFO", "frame generation rate " + watchRate + " (Advanced settings)");
+            }
+            if (FovLine() != watchFov) { watchFov = FovLine(); host.Send("fov_restrict " + watchFov); Log.Write("INFO", "field of view the game is told: outer/inner/upper/lower " + watchFov + " % (Advanced picture and FOV settings; the next game takes it)"); }
+            if (settings.FrameGenCapFps != watchCap) { watchCap = settings.FrameGenCapFps; host.Send("frame_gen_cap " + watchCap.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation cap " + watchCap + " fps (Advanced settings)"); }
         }
 
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 400 };
@@ -828,6 +839,16 @@ namespace AirFrameXR
                 case "saturation": bar("Saturation"); break;
                 case "debug": debug.Checked = on; break;
                 case "mirror": mirror.Checked = on; break;
+                case "settings_fov":   // the replay harness: the Advanced window wrote these four field-of-view percentages ("outer inner upper lower"), the watcher compares and forwards
+                    {
+                        var p = value.Split(' ');
+                        string[] keys = { "video.fov_outer_pct", "video.fov_inner_pct", "video.fov_upper_pct", "video.fov_lower_pct" };
+                        for (int i = 0; i < 4 && i < p.Length; i++) global::AirFrameXR.Json.Set(settings.Root, keys[i], double.Parse(p[i], CultureInfo.InvariantCulture));
+                        ForwardConfigChanges();
+                        break;
+                    }
+                case "settings_baseline": watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchFov = FovLine(); break;   // the replay harness: what the streamer sent at its start
+                case "settings_touch": ForwardConfigChanges(); break;   // the replay harness: the file changed but not a forwarded value
                 case "advanced":
                     {
                         Button b = null; var todo = new Stack<Control>(); todo.Push(this);

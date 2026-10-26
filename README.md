@@ -207,7 +207,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
   - The windows follow the display: 1080p laptops to 4K, 100-200 % scale (WinForms' own per-monitor DPI mode), checked by the UI harness below.
 - **New in 0.6.1: sharper generated frames, and no more DLSS motion vectors.** Generated frames now use an **edge-aware synthesis**
   (default): motion edges stay sharp, and where the motion is uncertain the real frame is shown instead of a double image (ideas from
-  [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented). The previous algorithm stays as **classic** in Advanced settings, the
+  [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented). The previous algorithm stays as **classic** in Advanced picture and FOV settings, the
   predictable fallback if a game misbehaves. The DLSS motion-vector support is **removed**: measured against the images, correct vectors
   were barely better than the optical flow, and in real games they often arrived paired with the wrong frame (see
   [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md)). The zip no longer ships the extractor DLL; a game folder where an earlier release

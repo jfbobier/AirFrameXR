@@ -492,7 +492,7 @@ namespace AirFrameXR
             Application.SetCompatibleTextRenderingDefault(false);
             var args = Environment.GetCommandLineArgs();
             Log.Write("INFO", $"configure.exe {Version.Text} start ({Paths.Dir})");
-            if (args.Contains("--switches")) { Application.Run(new AdvancedForm()); return; }   // the Advanced settings window: no system check, no streamer port
+            if (args.Contains("--switches")) { Application.Run(new AdvancedForm()); return; }   // the Advanced picture and FOV settings window: no system check, no streamer port
             var check = File.Exists(Paths.Host) ? SystemCheck.Run() : null;
             if (args.Contains("--settings") || args.Contains("--advanced")) { Application.Run(new ConfigureForm(check)); return; }
             Application.Run(new WizardForm(check, args.Contains("--demo")));

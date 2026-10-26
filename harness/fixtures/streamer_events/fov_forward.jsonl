@@ -1,0 +1,8 @@
+# The Advanced window changes the field of view the game is told: the streamer sends it to the host once per change and nothing while the file's values stay the same
+{"ui": "settings_baseline"}
+{"ui": "settings_fov", "value": "80 100 100 100"}
+{"dump": "fov_changed"}
+{"ui": "settings_touch"}
+{"dump": "fov_untouched"}
+{"ui": "settings_fov", "value": "80 90 100 100"}
+{"dump": "fov_again"}

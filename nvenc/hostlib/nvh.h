@@ -38,7 +38,7 @@ void nvh_keepalive_stop(void* keepalive);
 void* nvh_ipc_open(void);
 // Writes the static device description the shim exposes to the OpenXR runtime. fov: per eye {left,right,up,down} tangents.
 // encoding_gamma: the negotiated ALVR encoding gamma (openvr_config.encoding_gamma); the shim sends frames as pow(v, 1/gamma).
-void nvh_ipc_config(void* ipc, void* nvh, double rate_hz, int eye_w, int eye_h, const float* fov8, const float* eye_offset6, int bits, float encoding_gamma);
+void nvh_ipc_config(void* ipc, void* nvh, double rate_hz, int eye_w, int eye_h, const float* fov8, const float* eye_offset6, int bits, float encoding_gamma, const float* fov_scale4);   // fov_scale4: outer, inner, upper, lower (fractions of the headset's tangents the game is told)
 void nvh_ipc_set_connected(void* ipc, int connected);
 void nvh_ipc_publish_head(void* ipc, uint64_t client_ts_ns, const float* quat_xyzw, const float* pos, const float* lin_vel, const float* ang_vel);
 void nvh_ipc_publish_hand(void* ipc, int side, int valid, const float* quat_xyzw, const float* pos, const float* lin_vel, const float* ang_vel);
