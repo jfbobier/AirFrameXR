@@ -381,16 +381,19 @@ void DrawSceneEye(Scene& s, ID3D11DeviceContext* ctx, const SceneFrame& f, const
 }
 
 // The benchmark's stereo render: both eyes side by side into one target, the scripted HeadPose camera.
-void RenderScene(Scene& s, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, int W, int H, double t,
-                 const float* fov8, float ipd) {
+// The scene's animation runs at time `t`; the scripted head's position at `tPos` and its orientation at `tRot` (the frame generation judge freezes one
+// of them to test the other alone; RenderScene uses `t` for all three).
+void RenderSceneAt(Scene& s, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, int W, int H, double t, double tPos, double tRot,
+                   const float* fov8, float ipd) {
     const float clear[4] = { 0.62f, 0.72f, 0.82f, 1 }; // sky-ish, not black: nothing the encoder gets for free
     ctx->ClearRenderTargetView(rtv, clear);
     ctx->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH, 1, 0);
     ctx->OMSetRenderTargets(1, &rtv, dsv);
     SceneFrame f;
     BeginSceneFrame(s, ctx, t, f);
-    XMVECTOR hp, hr;
-    HeadPose(t, hp, hr);
+    XMVECTOR hp, hr, unused;
+    HeadPose(tPos, hp, unused);
+    HeadPose(tRot, unused, hr);
     for (int eye = 0; eye < 2; eye++) {
         const XMVECTOR ep = XMVectorAdd(hp, XMVector3Rotate(XMVectorSet(eye ? ipd / 2 : -ipd / 2, 0, 0, 0), hr));
         const XMMATRIX view = XMMatrixLookToRH(ep, XMVector3Rotate(XMVectorSet(0, 0, -1, 0), hr), XMVector3Rotate(XMVectorSet(0, 1, 0, 0), hr));
@@ -400,6 +403,16 @@ void RenderScene(Scene& s, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv
     }
     ID3D11RenderTargetView* none = nullptr;
     ctx->OMSetRenderTargets(1, &none, nullptr);
+}
+void RenderScene(Scene& s, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, int W, int H, double t,
+                 const float* fov8, float ipd) {
+    RenderSceneAt(s, ctx, rtv, dsv, W, H, t, t, t, fov8, ipd);
+}
+// the head's orientation (x y z w) the scripted camera has at time t
+inline void HeadQuat(double t, float q[4]) {
+    XMVECTOR p, r; HeadPose(t, p, r);
+    XMFLOAT4 f; XMStoreFloat4(&f, r);
+    q[0] = f.x; q[1] = f.y; q[2] = f.z; q[3] = f.w;
 }
 
 } // namespace

@@ -38,6 +38,7 @@
 #include "ALVR-common/exception.h"
 #include "shim.h"
 #include "nvh.h"
+#include "framegen.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
@@ -342,6 +343,95 @@ int nvh_bench_preview(void* h, int eye_w, int eye_h, double t, const float* fov8
     ctx->Unmap(st.Get(), 0);
     return tg->w * tg->h * 4;
 }
+
+// ---- frame generation judge ---------------------------------------------------------------------------------------------------
+namespace {
+struct Fgj { std::unique_ptr<FrameGen> fg; int eyeW = 0, eyeH = 0; };
+
+// the frame's texture (R10G10B10A2 or RGBA8) into 8-bit RGBA
+bool ReadRgba8(Bench* b, ID3D11Texture2D* tex, uint8_t* rgba) {
+    auto ctx = b->render->GetContext();
+    D3D11_TEXTURE2D_DESC td; tex->GetDesc(&td);
+    td.Usage = D3D11_USAGE_STAGING; td.BindFlags = 0; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ; td.MiscFlags = 0; td.SampleDesc.Count = 1;
+    ComPtr<ID3D11Texture2D> st;
+    if (FAILED(b->render->GetDevice()->CreateTexture2D(&td, nullptr, &st))) return false;
+    ctx->CopyResource(st.Get(), tex);
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (FAILED(ctx->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
+    const bool ten = td.Format == DXGI_FORMAT_R10G10B10A2_UNORM;
+    for (UINT y = 0; y < td.Height; y++) {
+        const uint32_t* row = (const uint32_t*)((const uint8_t*)m.pData + (size_t)y * m.RowPitch);
+        for (UINT x = 0; x < td.Width; x++) {
+            const uint32_t v = row[x];
+            uint8_t* o = rgba + ((size_t)y * td.Width + x) * 4;
+            if (ten) { o[0] = (uint8_t)(((v >> 0) & 1023) >> 2); o[1] = (uint8_t)(((v >> 10) & 1023) >> 2); o[2] = (uint8_t)(((v >> 20) & 1023) >> 2); }
+            else { o[0] = (uint8_t)v; o[1] = (uint8_t)(v >> 8); o[2] = (uint8_t)(v >> 16); }
+            o[3] = 255;
+        }
+    }
+    ctx->Unmap(st.Get(), 0);
+    return true;
+}
+
+// the scene at the three times into the benchmark's target of that size, resolved; the 10-bit frame the game hands the shim
+Target* FgjRender(Bench* b, int eye_w, int eye_h, const double* tt, const float* fov8, float ipd, std::string& err) {
+    Settings::Instance().m_use10bitEncoder = true;   // what the streamer's frames are (R10G10B10A2)
+    Target* tg = b->target(eye_w * 2, eye_h, err);
+    if (!tg) return nullptr;
+    auto ctx = b->render->GetContext();
+    RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, tt[0], tt[1], tt[2], fov8, ipd);
+    ctx->ResolveSubresource(tg->resolved.Get(), 0, tg->msaa.Get(), 0, FrameFormat());
+    return tg;
+}
+}  // namespace
+
+int nvh_bench_fgj_frame(void* h, int eye_w, int eye_h, const double* times3, const float* fov8, float ipd, uint8_t* rgba, float* q4) {
+    auto* b = (Bench*)h;
+    std::string e;
+    Target* tg = FgjRender(b, eye_w, eye_h, times3, fov8, ipd, e);
+    if (!tg) return 0;
+    if (q4) HeadQuat(times3[2], q4);
+    return ReadRgba8(b, tg->resolved.Get(), rgba) ? tg->w * tg->h * 4 : 0;
+}
+
+void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, int errlen) {
+    auto* b = (Bench*)h;
+    Settings::Instance().m_use10bitEncoder = true;
+    auto j = std::make_unique<Fgj>();
+    j->fg = std::make_unique<FrameGen>(b->render->GetDevice(), b->render->GetContext());
+    FrameGenConfig c;   // the streamer's defaults: flow at half scale, the fast preset, grid 4
+    c.synth = synth == 0 ? 0 : 1;
+    if (synth == 2) c.photoScale = 0.f;   // edge-blend: the edge synthesis without the photometric gate
+    if (!j->fg->Init(eye_w * 2, eye_h, c, err, errlen)) return nullptr;
+    j->eyeW = eye_w; j->eyeH = eye_h;
+    return j.release();
+}
+
+int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt, const float* fov8, float ipd, uint8_t* rgba, float* info2, char* err, int errlen) {
+    auto* b = (Bench*)h; auto* j = (Fgj*)jh;
+    auto fail = [&](const std::string& m) { if (err && errlen > 0) strncpy_s(err, errlen, m.c_str(), _TRUNCATE); return 0; };
+    if (!j || !j->fg || j->eyeW != eye_w || j->eyeH != eye_h) return fail("judge generator not open for this size");
+    std::string e;
+    j->fg->ResetHistory();
+    float q8[8];
+    for (int k = 0; k < 2; k++) {   // A, then B: the second ingest computes the flow between them
+        Target* tg = FgjRender(b, eye_w, eye_h, tt + 3 * k, fov8, ipd, e);
+        if (!tg) return fail(e);
+        HeadQuat(tt[3 * k + 2], q8); memcpy(q8 + 4, q8, 16);
+        const int r = j->fg->Ingest(tg->resolved.Get(), q8, fov8, err, errlen);
+        if (r < 0 || (k == 1 && r != 1)) return fail(std::string("ingest: ") + (err ? err : ""));
+    }
+    float q4[4]; HeadQuat(tt[8], q4);
+    ID3D11Texture2D* tex = j->fg->Render(1, 0.5f, 0, q4, fov8, err, errlen);
+    if (!tex) return fail(std::string("render: ") + (err ? err : ""));
+    b->finish();
+    j->fg->CollectTimings();
+    if (info2) { info2[0] = j->fg->stats.lastFlowMs; info2[1] = j->fg->stats.lastSynthMs; }
+    if (!ReadRgba8(b, tex, rgba)) return fail("readback");
+    return eye_w * 2 * eye_h * 4;
+}
+
+void nvh_bench_fgj_close(void* jh) { delete (Fgj*)jh; }
 
 // One configuration of the quality sweep: the scene at eye_w x eye_h through ALVR's foveation pass and NVENC (the Settings singleton
 // is set from the config; everything else stays as the host configured it), the reconstructed frame compared, in display space,

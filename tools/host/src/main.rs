@@ -13,6 +13,7 @@ use alvr_packets::{ButtonValue, Haptics};
 use alvr_server_core::{ServerCoreContext, ServerCoreEvent};
 use alvr_session::CodecType;
 mod bench_quality;
+mod fg_judge;
 mod discovery;
 mod games;
 mod logs;
@@ -124,6 +125,12 @@ struct Args {
     bq_out: Option<PathBuf>,
     bq_preview: Option<PathBuf>,
     bq_ref_scale: i32,
+    /// `--fg-judge <dir>`: frame generation against a rendered ground truth on the benchmark scene (fg_judge.rs); eye size, number of start times, gaps of the rendered pair
+    fg_judge: Option<PathBuf>,
+    fgj_eye: (i32, i32),
+    fgj_starts: usize,
+    fgj_gaps: Vec<f64>,
+    fgj_speeds: Vec<f64>,
     bench_scene: Option<PathBuf>,
     /// simrig (cargo feature): run the pipeline without a headset against the synthetic client, results in this directory
     #[cfg(feature = "simrig")]
@@ -196,6 +203,11 @@ fn parse_args() -> Result<Args, String> {
         bq_metric_every: 10,
         bq_stride: 1,
         bq_out: None,
+        fg_judge: None,
+        fgj_eye: (1032, 1104),
+        fgj_starts: 6,
+        fgj_gaps: vec![22.2, 33.3, 44.4],
+        fgj_speeds: vec![1.0, 8.0, 24.0],
         bq_preview: None,
         bq_ref_scale: 1,
         bench_scene: None,
@@ -258,6 +270,15 @@ fn parse_args() -> Result<Args, String> {
             "--bq-out" => a.bq_out = Some(v()?.into()),
             "--bq-preview" => a.bq_preview = Some(v()?.into()),
             "--bq-ref-scale" => a.bq_ref_scale = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--fg-judge" => a.fg_judge = Some(v()?.into()),
+            "--fgj-eye" => {
+                let t = v()?;
+                let (w, h) = t.split_once(['x', 'X']).ok_or("--fgj-eye WxH")?;
+                a.fgj_eye = (w.parse().map_err(|e| format!("{e}"))?, h.parse().map_err(|e| format!("{e}"))?);
+            }
+            "--fgj-starts" => a.fgj_starts = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--fgj-speeds" => a.fgj_speeds = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
+            "--fgj-gaps" => a.fgj_gaps = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
             #[cfg(feature = "simrig")]
             "--simrig" => {
                 a.simrig = Some(v()?.into());
@@ -361,7 +382,7 @@ fn parse_args() -> Result<Args, String> {
     if let Some(v) = std::env::var("AIRFRAMEXR_FG_SYNTH").ok().and_then(|v| parse_fg_synth(&v).ok()) {
         a.fg_synth = v;
     }
-    if !a.live && a.file.as_os_str().is_empty() && !a.system_check && !a.bench_quality && a.discover.is_none() {
+    if !a.live && a.file.as_os_str().is_empty() && !a.system_check && !a.bench_quality && a.fg_judge.is_none() && a.discover.is_none() {
         return Err("--file <annexb.hevc> is required unless --live".into());
     }
     Ok(a)
@@ -1089,6 +1110,19 @@ fn check_session(path: &std::path::Path, installed: bool) -> Result<(), String> 
 const AVP_DEFAULT_FOV: [f32; 8] = [1.7823, 1.0186, 1.2169, 1.0186, 1.0249, 1.7995, 1.2253, 1.0249];
 const AVP_DEFAULT_IPD: f32 = 0.0623;
 
+/// `--fg-judge <dir>`: frame generation scored against a rendered ground truth (fg_judge.rs), on the benchmark scene, with the headset's last views.
+fn run_fg_judge(origin: Instant, args: &Args, _layout: &alvr_filesystem::Layout, install: Option<&vision::Install>, out: PathBuf) -> i32 {
+    let (fov, ipd) = match load_views(&args.config_dir.join("airframexr_views.json")) {
+        Some((f, o)) if f.iter().all(|x| x.is_finite() && *x > 0.0) => (f, (o[3] - o[0]).abs().max(0.04)),
+        _ => (AVP_DEFAULT_FOV, AVP_DEFAULT_IPD),
+    };
+    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .map(|d| if d.file_name().map(|n| n.eq_ignore_ascii_case("bin")).unwrap_or(false) { d.parent().map(|p| p.to_path_buf()).unwrap_or(d) } else { d });
+    let scene = args.bench_scene.clone().unwrap_or_else(|| install.map(|i| i.dir.clone()).or(exe_dir).unwrap_or_default().join("bench").join("littlest_tokyo.vab"));
+    let opt = fg_judge::Options { eye: args.fgj_eye, starts: args.fgj_starts, gaps_ms: args.fgj_gaps.clone(), speeds: args.fgj_speeds.clone(), out };
+    fg_judge::run(origin, &scene, fov, ipd, &opt, &|o, n, d| event(o, n, d))
+}
+
 /// `--benchmark-quality`: benchmark phase 2 (bench_quality.rs) from the session's stream settings, the headset's last views and the
 /// bitrate (`--bench-mbps`, else the session's constant bitrate). Results: `bq_*` events, `--bq-out` JSON, a general log line.
 fn run_quality_bench(origin: Instant, args: &Args, layout: &alvr_filesystem::Layout, install: Option<&vision::Install>) -> i32 {
@@ -1617,6 +1651,9 @@ fn main() {
     }
     if args.bench_quality {
         exit_now(run_quality_bench(origin, &args, &layout, install.as_ref()));
+    }
+    if let Some(dir) = args.fg_judge.clone() {
+        exit_now(run_fg_judge(origin, &args, &layout, install.as_ref(), dir));
     }
     let (aus, idr_count) = if args.live {
         (vec![], 0)
