@@ -92,8 +92,9 @@ def build(what):
             lib.b_put(lib.ROOT / "tools/patches" / pn, f"_tmp/{pn}")
         r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage9_patch.ps1"], cwd=lib.ROOT, capture_output=True)
         o = r.stdout.decode(errors="replace").replace("\x00", "")
-        print("patch:", "ok" if "applied" in o else "FAILED " + o[-300:])
-        if "applied" not in o:
+        patched = r.returncode == 0 and "patch:" in o and "DOES NOT APPLY" not in o and "missing in _tmp" not in o
+        print("patch:", "ok" if patched else "FAILED " + o[-300:])
+        if not patched:
             return 2
     for w in what or ["client", "host"]:
         if w == "vdxr":      # VDXR with the small OVRShim patches (tools/remote/stage15_vdxr.ps1)

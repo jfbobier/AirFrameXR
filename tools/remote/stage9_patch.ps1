@@ -12,6 +12,13 @@ foreach ($name in 'loopback-client.patch', 'client-stats-log.patch', 'client-cap
     if (-not (Test-Path $patch)) { Write-Host "patch: $name missing in _tmp"; $ok = $false; continue }
     git apply --reverse --check $patch 2>$null
     if ($LASTEXITCODE -eq 0) { Write-Host "patch: $name already applied"; continue }
+    # a checkout patched before the 1.0 rename carries the old names (VISIONALVR_ environment variables...): undo that version, the current one is applied below
+    $legacy = "$patch.legacy"
+    $text = [IO.File]::ReadAllText($patch).Replace('AIRFRAMEXR', 'VISIONALVR').Replace('AirFrameXR', 'VisionALVR').Replace('airframexr', 'visionalvr')
+    [IO.File]::WriteAllText($legacy, $text, (New-Object Text.UTF8Encoding($false)))
+    git apply --reverse --check $legacy 2>$null
+    if ($LASTEXITCODE -eq 0) { git apply --reverse $legacy; Write-Host "patch: $name pre-rename version removed" }
+    [IO.File]::Delete($legacy)
     git apply --check $patch
     if ($LASTEXITCODE -ne 0) { Write-Host "patch: $name DOES NOT APPLY"; $ok = $false; continue }
     git apply $patch
