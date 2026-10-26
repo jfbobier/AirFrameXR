@@ -60,7 +60,7 @@ Already in the launcher: `encode_profile` (foveated / full-split), `split_encode
 | key | values, default | effect | what it does, what we know |
 |---|---|---|---|
 | `gpu_priority` | | streamer restart (env `AIRFRAMEXR_GPU_PRIORITY`) | older GPU thread priority knob, superseded by the class above |
-| `qp_map` | true / false, **false** | streamer restart (env `AIRFRAMEXR_QP_MAP`) | HEVC per-CTB QP delta map (lower QP in the foveal region). Built and proven against an oracle, never judged on a headset; costs encode time on a one-engine GPU |
+| `qp_map` | true / false, **true** | streamer restart (env `AIRFRAMEXR_QP_MAP`) | HEVC per-CTB QP delta map: QP -3 in the foveal region, +6 at the edges of the foveated frame. **On by default** (since 0.1; this table said off until 1.0.1, and the Advanced window could not turn it off). Not in stock ALVR: it is this project's own code. Built and proven against an oracle, never judged on a headset; costs encode time on a one-engine GPU. The full-frame + split profile switches it off |
 | env only `AIRFRAMEXR_ZEROCOPY=0` | | streamer restart | disables the zero-copy encoder input (about 0.2 ms; on by default because it costs nothing) |
 | env only `AIRFRAMEXR_SPIN_US` | **600** | streamer restart | the spin margin of the host's high-resolution waits; CPU against precision |
 

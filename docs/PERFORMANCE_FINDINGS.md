@@ -40,7 +40,7 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 | **Send pacing variants** (`vsync`, slot, `asap`) | no visible gain over `asap`; `asap` stayed. | |
 | **Zero-copy encoder input** | about 0.2 ms. | Below the 1 ms bar; it stays on by default (`AIRFRAMEXR_ZEROCOPY=0` disables) because it costs nothing. |
 | **Lower render scale (0.75)** | did not help the moving-head feel. | The GPU budget is not what differs from SteamVR. |
-| **HEVC QP-delta map** (foveal emphasis) | built and proven against a Python oracle, never judged on the headset. | Milder foveation plus a QP map is encode-bound on a one-engine GPU. Opt-in. |
+| **HEVC QP-delta map** (foveal emphasis) | built and proven against a Python oracle, never judged on the headset. | Milder foveation plus a QP map is encode-bound on a one-engine GPU. **On by default** (center -3, edge +6; corrected 2026-10-26, this said opt-in). |
 | **Client queue drain** (`video.client_queue_drain`) | never fired in the lab; untested on the headset. | Opt-in. |
 | **Release alignment alone** (`OVRSHIM_ALIGN_RELEASE`) | no effect on duplicates. | Lab only. |
 | **Duplicate-timestamp re-stamp** (shim-side wait for the next sample + rotation, and host-side compositor stamping, 2026-10-13) | duplicates 0, shown fps = host fps, headset gaps halved in the heavy games; but the Vision Pro trembles with host-side stamping (the Quest 3 is clean either way) and the shim-side wait moves Wi-Fi jitter into the frame arrivals. | The visionOS client handles stamped frames differently; wait for a recompiled client rather than work around it in the streamer. Parked on branch `exp/restamp-2026-10-13`; the product sends every frame with its render sample's timestamp. |

@@ -60,7 +60,7 @@ namespace AirFrameXR
                 B(AR, "phase_lock", "Phase lock", true, Restart, "Slides the host's display grid so frames arrive the phase margin before the headset's render tick. Known debt: it slides 12-25 times a minute whatever it sees."),
                 N(AR, "running_start_ms", "Running-start margin (ms)", 2, 0, 10, 0.5, 1, Restart, "The game is released envelope + margin before its boundary; 0 releases it at the tick. With the frame-start gate on this acts at frame start: 1-4 are plausible."),
                 B(AR, "intake_gate", "Intake gate", true, Restart, "The shim skips one release when the host's queue has stood 3 boundaries: drains a standing queue without dropping a frame. Works when the game keeps up, fires uselessly 3 times a second in GPU-bound games."),
-                B(GE, "qp_map", "HEVC QP map", false, Restart, "Per-CTB QP delta map: lower QP in the foveal region. Proven against an oracle, never judged on a headset; costs encode time on a one-engine GPU."),
+                B(GE, "qp_map", "HEVC QP map", true, Restart, "On by default since 0.1: per-CTB QP delta map, QP -3 in the foveal region and +6 at the edges of the foveated frame. Proven against an oracle, never judged on a headset; costs encode time on a one-engine GPU. The full-frame + split encoding profile turns it off by itself."),
             });
 
             var body = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(12, 4, 12, 12), Dock = DockStyle.None, Location = Point.Empty };
