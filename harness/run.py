@@ -173,7 +173,7 @@ def build(what):
                 merge(sess, pc.get("session_merge", {}))   # e.g. the paired headset (client_connections)
                 (out_dir / "session.default.json").write_text(json.dumps(sess, indent=2))
                 lib.b_put(out_dir / "session.default.json", "_tmp/install/session.default.json")
-                vis = json.dumps(pc.get("airframexr", {}), indent=2)
+                vis = json.dumps(pc.get("airframexr", pc.get("visionalvr", {})), indent=2)   # "visionalvr": the key before the 1.0 rename (a personal_config.json written then still works)
                 ver = pc.get("version_suffix", "-personal")
                 print(f"package: personal build ({ver}) from {pers.name}")
             extra = []
