@@ -2011,10 +2011,12 @@ namespace {
                     measured++;
                 }
             }
-            if (initial && measured && h.eyeWidth > 0 && h.eyeHeight > 0) {
+            const bool restricted = sc[0] < 1.f || sc[1] < 1.f || sc[2] < 1.f || sc[3] < 1.f;
+            // not restricted: exactly what it always was (the recommended size is the stream's eye size, whatever its parity)
+            if (initial && restricted && measured && h.eyeWidth > 0 && h.eyeHeight > 0) {
                 auto even = [](double v) { return std::max(64, ((int)std::lround(v) + 1) / 2 * 2); };
                 m_recommendedResolution = {even(h.eyeWidth * widthRatio / measured), even(h.eyeHeight * heightRatio / measured)};
-                if (sc[0] < 1.f || sc[1] < 1.f || sc[2] < 1.f || sc[3] < 1.f) {
+                {
                     shimlog::General("INFO", "field of view told to the game: outer %.0f%% inner %.0f%% upper %.0f%% lower %.0f%% of the headset's -> left eye L/R/U/D tan %.3f/%.3f/%.3f/%.3f, recommended %d x %d (stream %d x %d)",
                                      sc[0] * 100, sc[1] * 100, sc[2] * 100, sc[3] * 100, m_gameFov[0].LeftTan, m_gameFov[0].RightTan, m_gameFov[0].UpTan,
                                      m_gameFov[0].DownTan, m_recommendedResolution.w, m_recommendedResolution.h, h.eyeWidth, h.eyeHeight);
