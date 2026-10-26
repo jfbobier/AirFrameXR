@@ -55,14 +55,58 @@ namespace AirFrameXR
             const string FG = "Frame generation (experimental)", AR = "Arrival and pacing", GE = "GPU and encoder";
             knobs.AddRange(new[]
             {
-                N(FG, "frame_gen_cap_fps", "Cap on the game's rate (fps)", 0, 0, 240, 5, 0, Live, "Uncapped mode only; 0 = none. A cap near 90 % of the game's GPU-bound rate shrinks its render queue (Dead Space 62 to 31 ms lag, 2026-10-15); with the frame-start gate on the queue is smaller to begin with, so measure."),
-                C(FG, "frame_gen_synthesis", "Generated-frame synthesis", "edge", new[] { "edge", "classic", "edge-blend" }, Restart, "edge (default): sharp motion boundaries; where the motion is uncertain the real frame is shown (a little judder) instead of a double image (ideas from VectorXR). classic: the algorithm of 0.6 and earlier, the predictable fallback if edge misbehaves in a game. edge-blend: edge, but uncertain motion blends both frames (smoothest in the lab, double images where the motion estimate fails)."),
-                B(AR, "phase_lock", "Phase lock", true, Restart, "Slides the host's display grid so frames arrive the phase margin before the headset's render tick. Known debt: it slides 12-25 times a minute whatever it sees."),
-                N(AR, "running_start_ms", "Running-start margin (ms)", 2, 0, 10, 0.5, 1, Restart, "The game is released envelope + margin before its boundary; 0 releases it at the tick. With the frame-start gate on this acts at frame start: 1-4 are plausible."),
-                B(AR, "intake_gate", "Intake gate", true, Restart, "The shim skips one release when the host's queue has stood 3 boundaries: drains a standing queue without dropping a frame. Works when the game keeps up, fires uselessly 3 times a second in GPU-bound games."),
+                N(FG, "frame_gen_cap_fps", "Cap on the game's rate (fps)", 0, 0, 240, 5, 0, Live, "Uncapped mode only; 0 = no cap. Holds the game back to at most this many frames per second, so a GPU-bound game stops building a queue of frames in front of the GPU. Rule of thumb from the nights: a little under the rate the game sustains (about 90 %). On Dead Space it cut the lag from 62 to 31 ms; 70 did nothing for 40 fps games, which needed about 37. With the frame-start gate on the queue is smaller to begin with, so measure. Hover for the numbers."),
+                C(FG, "frame_gen_synthesis", "Generated-frame synthesis", "edge", new[] { "edge", "classic", "edge-blend" }, Restart, "How a generated frame is drawn from the optical flow. edge (default): sharp motion boundaries; where the motion is uncertain the real frame is shown (a little local judder) instead of a double image. classic: the algorithm of 0.6 and earlier, the predictable fallback if edge misbehaves in a game. edge-blend: edge, but uncertain motion blends both frames (smoothest in the lab, double images where the motion estimate fails). GPU cost is small (edge 0.24 ms per generated frame, classic 0.33 ms); the choice is about looks. Hover for the numbers."),
+                B(AR, "phase_lock", "Phase lock", true, Restart, "Slides the host's frame clock (up to 2 ms every 2-4 s) so frames arrive 7 ms before the headset's render tick. The margin matters: at 3 ms 1.2-2.3 % of the headset's refreshes repeated, at 7 ms 0.5 %, with the same 67 ms latency. Known flaw: it slides 12-25 times a minute even when it has nothing to correct (999 slides in an hour of a game running free at 56 fps). Leave it on; turn it off only to compare. Hover for the numbers."),
+                N(AR, "running_start_ms", "Running-start margin (ms)", 2, 0, 10, 0.5, 1, Restart, "How much earlier than the display tick the game is released, on top of its own frame-time envelope: 0 releases it at the tick, higher gives the game's frame more time to finish before the host needs it. The default is 2 ms; 1-4 are plausible. Honest status: no headset A/B for this value. In the lab a run with 0 was the cleanest (0.1 % repeats, no empty boundary) and a lead capped below one game period changed nothing. Hover for the context."),
+                B(AR, "intake_gate", "Intake gate", true, Restart, "When the host's queue has stood 3 frames in a row (the game runs a frame ahead of the stream), the shim skips one release of the game, so the queue drains without dropping a rendered frame. In the lab on a GPU-bound scene it cut pose-to-display latency to 32 ms against 43 ms for plain in-order sending (33 ms with the drop-based drain), same fps and repeats. It only acts when the game keeps up: in GPU-bound games that deliver in bunches it fired uselessly 3 times a second, hence its guard. Hover for the numbers."),
                 B(GE, "qp_map", "HEVC QP map", true, Restart, "A trade-off, on by default (since 0.1): more bits for the centre of the foveated picture, fewer for the edges (quality level -3 at the centre, +6 at the edges). Measured against the native render in the lab: the centre gains 0.1-0.3 dB and the periphery loses 0.2-0.9 dB at 40-100 Mbps, and the stream carries about 5 % fewer bits; at 250 Mbps nothing changes. No encode-time cost measured (within 0.5 ms). Untick it for an even picture with the most detail at the edges. Hover for the numbers and what is not measured."),
             });
 
+            knobs.Find(k => k.Key == "frame_gen_cap_fps").Tip =
+                "Cap on the game's rate (uncapped mode only)\r\n" +
+                "\r\n" +
+                "Headset nights of 2026-10-15/16 (RTX 5090, Vision Pro at 100 Hz), uncapped, free-running against capped at 70 fps:\r\n" +
+                "   Dead Space:  80 fps, lag 62 ms, newest rendered frame 35 ms old (2.8 periods)  ->  67 fps, lag 41 then 31 ms, 13 ms (0.9 periods)\r\n" +
+                "   Avatar:      98 fps, lag 22-61 ms  ->  67 fps, lag 30 ms\r\n" +
+                "   Cyberpunk:   89 fps, lag 61 ms  ->  67 fps, lag 33 ms\r\n" +
+                "   Carma, Valor Mortis (about 40 fps): 70 changed nothing (lag 78-80 ms either way); they needed a cap near 37.\r\n" +
+                "Free-running, 90-96 % of the releases were late (the GPU-bound signature); capped, 0 %.\r\n" +
+                "The user: capping at 70 felt better than free-running in every game that could exceed it.\r\n" +
+                "\r\n" +
+                "Pick the number from the 'frame generation perf' line in logs\\AirFrameXR.log: the game's app fps with most releases late. The frame-start gate (below) was added after these runs and makes the queue smaller to begin with: re-measure.";
+            knobs.Find(k => k.Key == "frame_gen_synthesis").Tip =
+                "Generated-frame synthesis\r\n" +
+                "\r\n" +
+                "Rig (RTX 5090, 7104 x 3200 frame, 2026-10-24), per generated output:\r\n" +
+                "   edge synthesis 0.24 ms on average, classic 0.33 ms; the optical flow itself 2.17 ms either way. No added latency.\r\n" +
+                "Marker position error in the lab rig (high-frequency rms, degrees; all three CLEAN and SMOOTH):\r\n" +
+                "   classic 0.024-0.031, edge 0.030-0.036, edge-blend 0.017-0.022.\r\n" +
+                "The rig cannot show the double image that edge's gate prevents; that is what the headset is for: edge 'looked great' in Valor Mortis (2026-10-24).\r\n" +
+                "\r\n" +
+                "edge: 3 x 3 vector median, the vector solved where the content comes from, per-pixel choice among neighbouring vectors at motion boundaries; doubtful motion shrinks towards the real frame.\r\n" +
+                "classic: the crossfade recipe of 0.4-0.6. edge-blend: edge without the photometric gate.";
+            knobs.Find(k => k.Key == "phase_lock").Tip =
+                "Phase lock\r\n" +
+                "\r\n" +
+                "The arrival cluster of the frames spans 8-9 ms of a 10 ms display period (7.9-9.0 ms with frame generation off). The lock slides the host's frame clock so the earliest 10 % arrive 'phase margin' ms before the headset's render tick (default 7 ms, set from Diagnose).\r\n" +
+                "Margin 3 ms: a share of the frames landed after the tick and were shown a tick late: the headset repeated 1.2-2.3 % of its refreshes.\r\n" +
+                "Margin 7 ms: 0.5 %, and the total latency stayed 67 ms, because the panel shows a frame at its next tick either way. Cost: up to one period of latency, invisible until a frame crosses a tick.\r\n" +
+                "Flaw: it corrects 12-25 times a minute in every session (999 slides in an hour of Gears with frame generation off, where a free-running 56 fps game gives it nothing to measure). A guard is planned: no action when the stream runs well under the display rate.";
+            knobs.Find(k => k.Key == "running_start_ms").Tip =
+                "Running-start margin\r\n" +
+                "\r\n" +
+                "The shim releases the game at: next host boundary - the game's frame-time envelope - this margin (the design follows SteamVR's running start). One release per boundary; a game slower than a period free-runs.\r\n" +
+                "With the frame-start gate on, the game's xrWaitFrame returns at this release, so the margin decides when the game starts its frame.\r\n" +
+                "What we know: the default (2 ms) held through the headset nights; the lab's run with 0 was the cleanest (0.1 % repeats, no empty boundary) but was never A/B'd on a headset; a lead capped below one game period changed nothing.\r\n" +
+                "Nothing here is measured against a headset: change it only to compare, one value at a time, with the 'frame generation perf' line (releases late) and your own eyes.";
+            knobs.Find(k => k.Key == "intake_gate").Tip =
+                "Intake gate\r\n" +
+                "\r\n" +
+                "Lab, GPU-bound scene, pose-to-display latency: 32 ms with the gate, 43 ms for plain in-order sending, 33 ms with the drop-based drain; same fps and repeats. Neutral on steady and jittery scenes; spiky scenes pay about 1 fps.\r\n" +
+                "Why: a standing queue costs a whole display period (stock ALVR's in-order queue held about 11.7 ms between arrival and encode start on the same rig), and only the game can drain it without losing a rendered frame.\r\n" +
+                "A single frame left behind is not a standing queue (a late frame paired with an on-time one: both are shown in order); 3 boundaries in a row are.\r\n" +
+                "Guard: a game that delivers in bunches, with empty boundaries in between (GPU-bound), got 3 useless skips a second; so it acts only when no empty boundary came in the last 30 boundaries.";
             knobs.Find(k => k.Key == "qp_map").Tip =
                 "HEVC QP map: what it does and what it costs\r\n\r\n" +
                 "Each 32 x 32 block of the foveated frame gets a quality offset: -3 in the region you look at, +6 at the edges, with a smooth ramp.\r\n" +
@@ -81,7 +125,17 @@ namespace AirFrameXR
             body.Controls.Add(intro);
 
             Section(body, FG);
-            Row(body, uncapped, "Experimental", Live, "The game runs at its own rate and every frame sent is interpolated: a game that cannot hold the rate stops stuttering, at the price of latency in the scene (head turns stay immediate). On the headset (2026-10-15) it was better below and above 50 fps, not at 50; it has not worked reliably since, so treat it as a test.");
+            Row(body, uncapped, "Experimental", Live, "Frame generation without a fixed rate. Normally frame generation holds the game to a fraction of the display rate (1/3, 1/2, 2/3); here the game runs at its own speed and every frame the headset gets is interpolated between the two newest rendered ones, shown a little behind so the next real frame is already known. It pays off when the game cannot hold half the display rate (below 50 fps: Carma 25 % repeats at half rate, 4.5 % uncapped) or runs well above it (Lies of P 74 fps rendered against 50). At exactly 50 fps it changes nothing and adds latency: about two game periods of scene latency (head turns stay immediate). Headset nights 2026-10-15/16; it has not worked reliably since, so treat it as a test. Hover for the numbers.", "Uncapped mode, what the headset nights measured (RTX 5090, Vision Pro 100 Hz, nine games, 16 runs, optical flow)\r\n" +
+                "\r\n" +
+                "Smoothness, repeated outputs, half rate against uncapped:\r\n" +
+                "   Carma (41 fps):          25 %  ->  4.5 %\r\n" +
+                "   Valor Mortis (40 fps):   16 %  ->  1-10 %   (1.2 % with a 70 fps cap)\r\n" +
+                "   Lies of P:               rendered 50 fps at half rate  ->  74 fps uncapped (dips to 49)\r\n" +
+                "   Mortal Shell II (50 fps): no difference (1-3 % repeats either way), plus the lag: half rate stays the right mode there.\r\n" +
+                "   Luke Ross titles above 50: 80-98 fps rendered (Dead Space 80, Cyberpunk 89, Avatar 98), repeats 0 %.\r\n" +
+                "Cost, free-running: the lag in force is 22-80 ms, the newest rendered frame already 2.2-2.9 game periods old when an output is made (the game's render queue). Capped at 70: 0.7-0.9 periods (see the cap).\r\n" +
+                "Client intervals over 15 ms: 1-3 % in every mode. GPU: optical flow + synthesis 2.6-3.3 ms + 0.4 ms per output on the 5090 at 3552 x 1600 flow input.\r\n" +
+                "The user: 'works as intended'; capping at 70 fps felt better than free-running in every game that could exceed it; no obvious smoothness gain over half rate.");
             uncapped.CheckedChanged += (s, e) => { if (!loading) SetUncapped(uncapped.Checked); };
             foreach (var k in knobs.Where(x => x.Section == FG)) AddKnob(body, k);
             Section(body, AR);
@@ -89,8 +143,15 @@ namespace AirFrameXR
             Section(body, GE);
             foreach (var k in knobs.Where(x => x.Section == GE)) AddKnob(body, k);
             Section(body, "Frame-start gate (the OpenXR layer)");
-            var gateRow = Row(body, gate, null, NextGame, "On (default): the game's xrWaitFrame waits for the shim's release, so the running start and the GPU throttle act at frame start (frame start to GPU done 55 to 42 ms at the 1/2 cap in the rig; no fps loss in 6 h on the headset). Off: the pre-0.6 behaviour, the game wakes one display period minus 2 ms after the previous release. " +
-                "Needs bin\\virtualdesktop-openxr.dll of 0.6 or newer. Changing it asks for administrator rights once.");
+            var gateRow = Row(body, gate, null, NextGame, "On (default): the game's xrWaitFrame waits for the shim's release, so the GPU throttle and the running start act at the game's frame start. Off: the pre-0.6 behaviour, where VDXR's own running start woke the game a display period minus 2 ms after its previous release, one frame ahead of the release, so the game's render queue sat at 2-3 frames. Lab A/B on a GPU-bound scene: frame start to GPU done 55 -> 42 ms (p50) at the same fps, one display period less between the pose being read and the frame being finished. On the headset: no fps loss in 6 h (Gears of War at 1/2: 49.0 fps median against a 50 fps cap). Needs bin\\virtualdesktop-openxr.dll of 0.6 or newer; changing it asks for administrator rights once. Hover for the numbers.", "Frame-start gate (VDXR patch 5)\r\n" +
+                "\r\n" +
+                "Cause: VDXR's async submission thread calls the shim's release, but the game's xrWaitFrame did not wait for it: it woke the game at the earlier of 'the shim released' and 'one display period minus 2 ms after the previous release'. So in every GPU-bound game the CPU ran a frame ahead of the release, the frame was submitted before the shim's throttle could look at the GPU, and the render queue sat at 2-3 frames. xrWaitFrame returned 10-13 ms before the shim's release of the same frame.\r\n" +
+                "Lab A/B (RTX 3080 Ti laptop, stream 3520 x 1600 at 100 Hz, 40 s runs), stock VDXR against gate on:\r\n" +
+                "   GPU-bound under the 1/2 cap: fps 46.2 -> 46.5; frame start to GPU done p50 / p95 55.1 / 66.2 -> 41.8 / 50.4 ms; xrWaitFrame returned 12.3 ms before the release -> 0.\r\n" +
+                "   GPU-bound, generation off:   fps 55.1 -> 55.1; frame start to GPU done p50 / p95 46.5 / 56.5 -> 35.9 / 45.3 ms.\r\n" +
+                "   Host repeats and motion verdicts unchanged (7.5 % -> 6.9 %). The pose a frame is rendered with is read at xrWaitFrame, so the gain comes straight off the pose-to-photon latency.\r\n" +
+                "Headset (Vision Pro, 5090, first night): Gears of War E-Day 4 h 39 at 1/2 held 49.0 fps median against the 50 fps cap (the day before it read 36-49); End of Abyss 89.2 of 90; no fps loss anywhere, so the CPU-overlap risk did not show. The latency gain itself is not isolated on the headset (every session had the gate): the clean test is a GPU-bound game with the gate off for the reference run.\r\n" +
+                "Off = VDXR's own behaviour (registry value ovrshim_vdxr_running_start = 1).");
             gateRow.Controls.Add(gateNow);
             gate.CheckedChanged += (s, e) => { if (!loading) SetGate(gate.Checked); };
 
