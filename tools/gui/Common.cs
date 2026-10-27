@@ -371,6 +371,26 @@ namespace AirFrameXR
         public double FovInner => Json.Num(Root, "video.fov_inner", 0);
         public double FovUpper => Json.Num(Root, "video.fov_upper", 0);
         public double FovLower => Json.Num(Root, "video.fov_lower", 0);
+        /// The headset's tangents as the host saved them at its last connection (config\airframexr_views.json: left eye l r u d, right eye l r u d), per edge averaged over the eyes.
+        public static double[] ReadClientFov()
+        {
+            try
+            {
+                var d = Json.Load(Path.Combine(Paths.Config, "airframexr_views.json"));
+                var a = Json.Get(d, "fov_tan") as System.Collections.IList;
+                if (a == null || a.Count < 8) return null;
+                var f = new double[8];
+                for (int i = 0; i < 8; i++) f[i] = Convert.ToDouble(a[i], CultureInfo.InvariantCulture);
+                if (f.Any(x => double.IsNaN(x) || !(x > 0))) return null;
+                return new[] { (f[0] + f[5]) / 2, (f[1] + f[4]) / 2, (f[2] + f[6]) / 2, (f[3] + f[7]) / 2 };
+            }
+            catch { return null; }
+        }
+
+        /// the headset's own tangents (outer, inner, upper, lower) the override was made for; null = saved before this was recorded (applies to any headset)
+        public double[] FovFor { get { var a = Json.Get(Root, "video.fov_for") as System.Collections.IList; if (a == null || a.Count < 4) return null; try { return new[] { 0, 1, 2, 3 }.Select(i => Convert.ToDouble(a[i], CultureInfo.InvariantCulture)).ToArray(); } catch { return null; } } }
+        /// the saved override fits the connected headset: it was made for the same shape of field of view (every edge in the same ratio within 5 %, so the headset app's own FoV scale, a uniform factor, keeps it), or the headset or the record of it is unknown
+        public bool FovFits(double[] current) { var f = FovFor; if (f == null || current == null) return true; var r = Enumerable.Range(0, 4).Select(i => current[i] / f[i]).ToList(); return r.Max() <= 1.05 * r.Min(); }
         /// 0..1: where the game's render size sits between the floor (the stream's pixel density over the restricted view) and the stream's eye size; 0 = the floor
         public double FovRenderQuality => Math.Max(0, Math.Min(1, Json.Num(Root, "video.fov_render_quality", 0)));
         public double FrameGenCapFps { get => Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }

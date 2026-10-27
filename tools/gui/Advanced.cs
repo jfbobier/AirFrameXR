@@ -286,25 +286,9 @@ namespace AirFrameXR
             return new[] { EvenAtLeast64(fw + (eyeW - fw) * q), EvenAtLeast64(fh + (eyeH - fh) * q) };
         }
 
-        /// The headset's tangents as the host saved them at its last connection (config\airframexr_views.json: left eye l r u d, right eye l r u d), per edge averaged over the eyes.
-        static double[] ReadClientFov()
-        {
-            try
-            {
-                var d = Json.Load(Path.Combine(Paths.Config, "airframexr_views.json"));
-                var a = Json.Get(d, "fov_tan") as System.Collections.IList;
-                if (a == null || a.Count < 8) return null;
-                var f = new double[8];
-                for (int i = 0; i < 8; i++) f[i] = Convert.ToDouble(a[i], CultureInfo.InvariantCulture);
-                if (f.Any(x => double.IsNaN(x) || !(x > 0))) return null;
-                return new[] { (f[0] + f[5]) / 2, (f[1] + f[4]) / 2, (f[2] + f[6]) / 2, (f[3] + f[7]) / 2 };
-            }
-            catch { return null; }
-        }
-
         void BuildFov(FlowLayoutPanel body)
         {
-            clientFov = testClient ?? ReadClientFov();
+            clientFov = testClient ?? AppSettings.ReadClientFov();
             Section(body, "Field of view the game is told");
             var intro = Ui.Line("The field of view the game is told it has, edge by edge, as tangents (the angle is shown next to each field), like SteamVR's Video > Field of View. The game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start); the stream still covers the whole headset view and the margin is black, so only the game's GPU work changes. Takes effect at the next game start. Hover for details.");
             intro.ForeColor = Color.DimGray; intro.MaximumSize = new Size(900, 0);
@@ -360,7 +344,8 @@ namespace AirFrameXR
         {
             var st = new AppSettings();
             var was = loading; loading = true;
-            bool on = testTick || st.FovOverride;
+            bool other = st.FovOverride && clientFov != null && !st.FovFits(clientFov);   // saved for a headset with another field of view (absolute tangents would cut this one)
+            bool on = testTick || (st.FovOverride && !other);
             streamEye = testEye ?? ReadStreamEye();
             fovQ.Value = (int)Math.Round(st.FovRenderQuality * 100);
             fovTick.Enabled = clientFov != null;
@@ -381,7 +366,7 @@ namespace AirFrameXR
                     var top = Math.Ceiling(clientFov[k] * 100) / 100;
                     fovNum[k].Minimum = (decimal)Math.Max(0.10, Math.Floor(clientFov[k] * 20) / 100);
                     fovNum[k].Maximum = (decimal)top;
-                    var v = on && saved[k] > 0 ? saved[k] : testEye != null ? clientFov[k] * new[] { 0.7, 0.9, 0.8, 0.6 }[k] : clientFov[k];   // the UI harness shows a restriction
+                    var v = on && !other && saved[k] > 0 ? saved[k] : testEye != null ? clientFov[k] * new[] { 0.7, 0.9, 0.8, 0.6 }[k] : clientFov[k];   // the UI harness shows a restriction
                     fovNum[k].Value = Math.Max(fovNum[k].Minimum, Math.Min(fovNum[k].Maximum, (decimal)Math.Round(v, 2)));
                     fovNum[k].Enabled = on;
                 }
@@ -405,7 +390,8 @@ namespace AirFrameXR
             for (int k = 0; k < 4; k++) fovDeg[k].Text = "= " + (Math.Atan(Math.Min(v[k], clientFov[k])) * 180 / Math.PI).ToString("0.0", CultureInfo.InvariantCulture) + "\u00B0";
             if (!fovTick.Checked)
             {
-                fovNote.Text = "Greyed: the headset's own field of view as it reported it (including any FoV scale set in its app). Nothing is changed.";
+                fovNote.Text = "Greyed: the headset's own field of view as it reported it (including any FoV scale set in its app). Nothing is changed."
+                    + (clientFov != null && new AppSettings() is var cs && cs.FovOverride && !cs.FovFits(clientFov) ? " An override saved for a headset with another field of view is not applied to this one; tick to start from this headset's values." : "");
                 fovShare.Text = "";
                 fovQRow.Visible = false;
                 return;
@@ -439,6 +425,7 @@ namespace AirFrameXR
                 var v = FovValues();
                 for (int k = 0; k < 4; k++) Json.Set(st.Root, V + FovKeys[k], Math.Round(v[k], 4));
                 Json.Set(st.Root, V + "fov_render_quality", Math.Round(fovQ.Value / 100.0, 2));
+                Json.Set(st.Root, V + "fov_for", clientFov.Select(x => (object)Math.Round(x, 4)).ToList());   // the headset these values were made for (they are absolute tangents)
             }
             else Json.Remove(st.Root, V + "fov_override");   // the saved values stay: ticking again brings them back
         }
@@ -453,7 +440,7 @@ namespace AirFrameXR
                 var saved = new[] { st.FovOuter, st.FovInner, st.FovUpper, st.FovLower };
                 for (int k = 0; k < 4; k++)
                 {
-                    var v = saved[k] > 0 ? saved[k] : clientFov[k];
+                    var v = saved[k] > 0 && st.FovFits(clientFov) ? saved[k] : clientFov[k];
                     fovNum[k].Value = Math.Max(fovNum[k].Minimum, Math.Min(fovNum[k].Maximum, (decimal)Math.Round(v, 2)));
                     fovNum[k].Enabled = true;
                 }
@@ -581,6 +568,7 @@ namespace AirFrameXR
             Json.Remove(st.Root, V + "fov_override");
             foreach (var fk in FovKeys) Json.Remove(st.Root, V + fk);
             Json.Remove(st.Root, V + "fov_render_quality");
+            Json.Remove(st.Root, V + "fov_for");
             if (st.FrameGenRate == "uncapped") st.FrameGenRate = Back(st);
             Save(st, "all the switches back to their defaults", Restart);
             LoadValues();

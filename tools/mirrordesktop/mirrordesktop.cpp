@@ -16,6 +16,9 @@
 #define NOMINMAX
 #include <windows.h>
 #include <sddl.h>
+#include <tlhelp32.h>
+#include <atomic>
+#include <thread>
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <cmath>
@@ -80,14 +83,34 @@ static uint32_t idleColour(const std::string& path) {
     return end && *end == 0 ? (uint32_t)(c & 0xFFFFFF) : 0x107C10;
 }
 
+// Which other app holds the headset, seen from outside: any other process that has the OpenXR runtime's DLL loaded (the loader loads it at xrCreateInstance, before any
+// session). The shim's signal is one edge at one moment; a game that touches OpenXR early (a console, a launcher stage) and opens its session later would leave the mirror
+// over it, so this level is checked too (a thread every second, and before the mirror takes the headset). Processes that deny the query (elevated) are skipped.
+// Returns the exe name of the first one found, empty when none.
+static std::string otherRuntimeUser() {
+    std::string found;
+    HANDLE ps = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0); if (ps == INVALID_HANDLE_VALUE) return found;
+    PROCESSENTRY32W pe{ sizeof pe };
+    for (BOOL ok = Process32FirstW(ps, &pe); ok && found.empty(); ok = Process32NextW(ps, &pe)) {
+        if (pe.th32ProcessID == GetCurrentProcessId() || pe.th32ProcessID == 0 || _wcsicmp(pe.szExeFile, L"mirrordesktop.exe") == 0) continue;
+        HANDLE ms = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pe.th32ProcessID); if (ms == INVALID_HANDLE_VALUE) continue;
+        MODULEENTRY32W me{ sizeof me };
+        for (BOOL mok = Module32FirstW(ms, &me); mok; mok = Module32NextW(ms, &me)) if (_wcsicmp(me.szModule, L"virtualdesktop-openxr.dll") == 0) { char b[MAX_PATH]; WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, b, MAX_PATH, nullptr, nullptr); found = b; break; }
+        CloseHandle(ms);
+    }
+    CloseHandle(ps);
+    return found;
+}
+
 int main(int argc, char** argv) {
-    std::string logPath, inputLogPath; int seconds = 0; bool mouse = true, synthetic = false; std::string imageFile; uint32_t clear = 0x107C10; bool clearGiven = false;
+    std::string logPath, inputLogPath; int seconds = 0; bool mouse = true, synthetic = false; std::string imageFile; uint32_t clear = 0x107C10; bool clearGiven = false, ignoreSignal = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--log") && i + 1 < argc) logPath = argv[++i];
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-mouse")) mouse = false;
         else if (!strcmp(argv[i], "--clear") && i + 1 < argc) { clear = (uint32_t)strtoul(argv[++i], nullptr, 16) & 0xFFFFFF; clearGiven = true; }
         else if (!strcmp(argv[i], "--synthetic")) synthetic = true;
+        else if (!strcmp(argv[i], "--ignore-signal")) ignoreSignal = true;   // harness: the shim's event is not looked at, so the loaded-runtime check has to do the job alone
         else if (!strcmp(argv[i], "--image-rgba") && i + 1 < argc) imageFile = argv[++i];   // with --synthetic: a 1920 x 1080 raw BGRA picture instead of the grey patches (the README's demo desktop)
         else if (!strcmp(argv[i], "--input-log") && i + 1 < argc) inputLogPath = argv[++i];
     }
@@ -113,6 +136,17 @@ int main(int argc, char** argv) {
     ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:(A;;0x1F0003;;;WD)S:(ML;;NW;;;LW)", SDDL_REVISION_1, &evSa.lpSecurityDescriptor, nullptr);
     HANDLE gameEvent = CreateEventW(evSa.lpSecurityDescriptor ? &evSa : nullptr, TRUE, FALSE, L"Local\\AirFrameXR_GameStarting");
     if (evSa.lpSecurityDescriptor) LocalFree(evSa.lpSecurityDescriptor);
+
+    // another app already holds the runtime (a game that is still starting or closing): stay out of the headset until it is gone
+    { const ULONGLONG w0 = GetTickCount64(); std::string who = otherRuntimeUser();
+      if (!who.empty()) {
+          L("%s has the runtime loaded: waiting for it to leave before taking the headset", who.c_str());
+          while (!(who = otherRuntimeUser()).empty()) { if (seconds > 0 && GetTickCount64() - w0 > (ULONGLONG)seconds * 1000) { L("done after %d s of waiting", seconds); return 0; } Sleep(500); }
+          L("the other app left after %.1f s: starting", (GetTickCount64() - w0) / 1000.0);
+      } }
+    std::atomic<bool> otherApp{ false }, scanStop{ false }; std::string otherName; std::thread scanner([&] {
+        while (!scanStop) { for (int i = 0; i < 10 && !scanStop; i++) Sleep(100); if (scanStop || otherApp) continue; std::string w = otherRuntimeUser(); if (!w.empty()) { otherName = w; otherApp = true; } } });
+    struct JoinScan { std::atomic<bool>& stop; std::thread& t; ~JoinScan() { stop = true; if (t.joinable()) t.join(); } } joinScan{ scanStop, scanner };
 
     std::vector<const char*> ext = { XR_KHR_D3D11_ENABLE_EXTENSION_NAME };
     XrInstanceCreateInfo ici{ XR_TYPE_INSTANCE_CREATE_INFO };
@@ -204,14 +238,15 @@ int main(int argc, char** argv) {
     Screen screen{}; bool haveScreen = false, replace = true, moving = false; int64_t lastTime = 0; float refYaw = 0; int quad = 0; bool primWas[2] = { false, false };
     LARGE_INTEGER qpf; QueryPerformanceFrequency(&qpf); auto qpcMs = [&] { LARGE_INTEGER t; QueryPerformanceCounter(&t); return (double)t.QuadPart * 1000.0 / (double)qpf.QuadPart; };
     double perfT0 = qpcMs(), frameStart = 0, frameMaxMs = 0, renderSumMs = 0; int perfFrames = 0;
-    bool seenHand = false, seenHit = false; bool left = false, right = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
+    bool seenHand = false, seenHit = false; bool left = false, right = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, stickMax = 0; bool primSeen = false, secSeen = false; float su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
     int activeHand = 1; bool swallow = false;   // the hand that holds the beam (the right one until the left trigger or grip is pressed); swallow: its take-over press does not click
     ULONGLONG t0 = GetTickCount64(); bool running = false, exiting = false, endKey = false; uint64_t frames = 0;
     int rc = 0; bool leaving = false; ULONGLONG leaveT0 = 0;
     while (!exiting) {
         if (seconds > 0 && GetTickCount64() - t0 > (ULONGLONG)seconds * 1000) { L("done after %d s", seconds); break; }
-        if (WaitForSingleObject(gameEvent, 0) == WAIT_OBJECT_0) {
-            if (!leaving) { leaving = true; leaveT0 = GetTickCount64(); L("a game is starting: giving the headset back"); if (running) xrRequestExitSession(sess); else break; }
+        const bool bySignal = !ignoreSignal && WaitForSingleObject(gameEvent, 0) == WAIT_OBJECT_0;
+        if (bySignal || otherApp) {
+            if (!leaving) { leaving = true; leaveT0 = GetTickCount64(); if (bySignal) L("a game is starting: giving the headset back"); else L("a game is starting (%s has the runtime loaded): giving the headset back", otherName.c_str()); if (running) xrRequestExitSession(sess); else break; }
             else if (GetTickCount64() - leaveT0 > 1500) { L("the session did not end within 1.5 s of the game's signal: leaving anyway"); break; }   // the runtime is busy with the game: do not hold the headset
         }
         XrEventDataBuffer ev{ XR_TYPE_EVENT_DATA_BUFFER };
@@ -282,8 +317,8 @@ int main(int argc, char** argv) {
                 }
                 // a hand's pinch or a trigger rarely reaches 1: the button goes down at 0.3 and up at 0.15 ; the grip at 0.5 / 0.3 (or the B / Y button); A / X is a double click
                 const bool lWant = trig > (left ? 0.15f : 0.3f), rWant = sq > (right ? 0.3f : 0.5f) || sec;
-                trigMax = std::max(trigMax, trig); sqMax = std::max(sqMax, sq);
-                if (frames % 300 == 0 && frames < 6000) { L("input: trigger max %.2f, grip max %.2f, A/X %d B/Y %d, stick y %.2f in the last 5 s; left button %s, right %s", trigMax, sqMax, (prim[0] || prim[1]) ? 1 : 0, sec ? 1 : 0, stickY, left ? "down" : "up", right ? "down" : "up"); trigMax = sqMax = 0; }
+                trigMax = std::max(trigMax, trig); sqMax = std::max(sqMax, sq); stickMax = std::max(stickMax, std::fabs(stickY)); primSeen |= prim[0] || prim[1]; secSeen |= sec;
+                if (frames % 300 == 0 && frames < 6000) { L("input: trigger max %.2f, grip max %.2f, A/X %d B/Y %d, stick y %.2f in the last 5 s; left button %s, right %s", trigMax, sqMax, primSeen ? 1 : 0, secSeen ? 1 : 0, stickMax, left ? "down" : "up", right ? "down" : "up"); trigMax = sqMax = stickMax = 0; primSeen = secSeen = false; }
                 // the pointer is smoothed (slow movements steadier, fast ones followed at once) and held still while a press starts: the click lands where it was aimed
                 if (hit) {
                     const float dpx = std::hypot((u - su) * mirror.DesktopW(), (v - sv_) * mirror.DesktopH());

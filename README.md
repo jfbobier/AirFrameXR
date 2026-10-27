@@ -227,8 +227,8 @@ must keep covering all of it. Only the game is told something else. With the Vis
    above).
 
 So the saving is the game's GPU work only; encode time, bitrate, decode time, frame generation and the headset app are unchanged. A game that is not GPU-bound gains nothing. The values
-apply at the **next game start**, and they are not stored per headset: tuned for one headset they are tangents for that headset (on a Quest, a lower of 1.00 would cut its 55-degree
-down edge).
+apply at the **next game start**, and the override remembers the headset's field of view it was made for: connected to a headset whose field of view differs (a Quest after a Vision Pro), it is not applied and the window says so (on a Quest, a lower of 1.00 would cut its 55-degree
+down edge); ticking again starts from the new headset's own values.
 
 **Spending the saving: the render quality slider.** Under the fields, a slider moves the recommended size between two limits computed from your own settings: the **floor** (what
 the restriction gives, the stream's pixel density over the smaller view) and the **ceiling** (the stream's own per-eye size, from your resolution settings, so a Quest's smaller one

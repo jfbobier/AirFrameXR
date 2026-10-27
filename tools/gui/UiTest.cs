@@ -303,6 +303,32 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "fovprofile.txt"), lines);
                 return 0;
             }
+            if (Arg("--fov-other-headset-selftest") != null)   // harness/fov_profile_check.py: an override made for the Vision Pro is not applied to a headset with another field of view
+            {
+                var lines = new List<string>();
+                var avp = new[] { 1.7909, 1.0218, 1.2211, 1.0218 }; var quest = new[] { 1.07, 1.07, 0.99, 1.43 };
+                var st0 = new AppSettings();
+                global::AirFrameXR.Json.Set(st0.Root, "video.fov_override", true);
+                var vals = new[] { 0.94, 0.93, 0.90, 0.76 }; var keys = new[] { "video.fov_outer", "video.fov_inner", "video.fov_upper", "video.fov_lower" };
+                for (int k = 0; k < 4; k++) global::AirFrameXR.Json.Set(st0.Root, keys[k], vals[k]);
+                global::AirFrameXR.Json.Set(st0.Root, "video.fov_for", avp.Select(x => (object)x).ToList());
+                st0.Save();
+                lines.Add("fits_avp=" + new AppSettings().FovFits(avp) + " fits_quest=" + new AppSettings().FovFits(quest) + " fits_unknown=" + new AppSettings().FovFits(null) + " fits_avp_scaled=" + new AppSettings().FovFits(avp.Select(x => x * 0.8).ToArray()));   // the visionOS app's FoV Scale 0.8 is a uniform factor: the override stays
+                using (var f = new AdvancedForm(quest, false, null, null))
+                {
+                    f.Opacity = 0; f.ShowInTaskbar = false; f.StartPosition = FormStartPosition.Manual; f.Location = new Point(-4000, -4000);
+                    f.Show(); Application.DoEvents();
+                    CheckBox tick = null; var nums = new List<NumericUpDown>();
+                    void Find(Control c) { foreach (Control k in c.Controls) { if (k is CheckBox x && x.AccessibleName == "Override the headset's field of view") tick = x; if (k is NumericUpDown n && (n.AccessibleName == "Outer" || n.AccessibleName == "Inner" || n.AccessibleName == "Upper" || n.AccessibleName == "Lower")) nums.Add(n); Find(k); } }
+                    Find(f);
+                    lines.Add("tick_on_quest=" + (tick != null && tick.Checked) + " lower_shown=" + (nums.Count == 4 ? nums[3].Value.ToString(CultureInfo.InvariantCulture) : "?"));
+                    if (tick != null) { tick.Checked = true; Application.DoEvents(); }
+                    var st = new AppSettings();
+                    lines.Add(string.Format(CultureInfo.InvariantCulture, "after_tick: override={0} lower={1:0.00} fits_quest={2}", st.FovOverride, st.FovLower, st.FovFits(quest)));
+                }
+                File.WriteAllLines(Path.Combine(outDir, "fovother.txt"), lines);
+                return 0;
+            }
             var fwExe = Arg("--firewall");   // harness/firewall_check.py: print the firewall analysis of this exe and stop
             if (fwExe != null)
             {

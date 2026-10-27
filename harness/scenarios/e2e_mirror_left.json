@@ -95,7 +95,8 @@
       "max_latency_ms": 150,
       "perf": {
         "min_fps": 80,
-        "max_picture_ms": 4.0
+        "max_picture_ms": 4.0,
+        "max_slowest_ms": 15
       },
       "left_hand": true
     },

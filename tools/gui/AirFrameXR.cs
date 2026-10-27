@@ -344,7 +344,7 @@ namespace AirFrameXR
         }
         DateTime configSeen; string watchRate; double watchCap; string watchFov;
         /// the field-of-view override as the host command takes it: "off", or "on outer inner upper lower render_quality" (tangents, then 0..1)
-        string FovLine() => settings.FovOverride && settings.FovOuter > 0 && settings.FovInner > 0 && settings.FovUpper > 0 && settings.FovLower > 0
+        string FovLine() => settings.FovOverride && settings.FovFits(AppSettings.ReadClientFov()) && settings.FovOuter > 0 && settings.FovInner > 0 && settings.FovUpper > 0 && settings.FovLower > 0
             ? "on " + string.Join(" ", new[] { settings.FovOuter, settings.FovInner, settings.FovUpper, settings.FovLower }.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))) + " " + settings.FovRenderQuality.ToString("0.00", CultureInfo.InvariantCulture)
             : "off";
 
@@ -388,6 +388,10 @@ namespace AirFrameXR
         // starting takes the headset (the app leaves by itself when the shim signals it; this only makes sure it is gone), and the mirror returns when it ends.
         static bool IsMirrorApp(string exe) => Games.IsHidden(exe);
         bool mirrorInHost;
+        // A game that ends is not always over: some start an OpenXR session for a moment (a console or launcher stage), end it, and open the real one seconds later. The mirror waits
+        // this long after a game ends before it comes back, so it is not on the headset when the game returns (the mirror also waits by itself while another app has the runtime loaded).
+        const int MirrorReturnDelayS = 5;
+        DateTime mirrorNotBefore = DateTime.MinValue;
         Process mirrorProc; bool headsetConnected; int mirrorFails; DateTime mirrorStarted;
         readonly Timer mirrorTimer = new Timer { Interval = 1500 };
         void MirrorSync()
@@ -396,7 +400,7 @@ namespace AirFrameXR
             bool want = mirror.Checked && headsetConnected && !gameRunning && !closing && !finding && mirrorFails < 3;
             bool alive = mirrorProc != null && !mirrorProc.HasExited;
             if (!want && alive) { try { mirrorProc.Kill(); } catch { } mirrorProc = null; Log.Write("INFO", "desktop mirror stopped"); }
-            else if (want && !alive) { mirrorTimer.Start(); }   // a moment after a game ends or the headset connects: the previous session has to be gone
+            else if (want && !alive) { mirrorTimer.Interval = (int)Math.Max(1500, (mirrorNotBefore - DateTime.Now).TotalMilliseconds); mirrorTimer.Start(); }   // a moment after a game ends or the headset connects: the previous session has to be gone
         }
         void MirrorStart()
         {
@@ -752,7 +756,7 @@ namespace AirFrameXR
                         if (settings.FrameGen) host.Send("frame_gen on");   // the user's choice comes back for the next game
                         break;
                     }
-                    gameRunning = false; MirrorSync();
+                    gameRunning = false; mirrorNotBefore = DateTime.Now.AddSeconds(MirrorReturnDelayS); MirrorSync();
                     game.Text = $"Game: none (last: {S(d, "exe")}, {F(D(d, "seconds") / 60, "0.0")} min)";
                     break;
                 case "game_run":

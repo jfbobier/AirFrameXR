@@ -26,4 +26,13 @@ lines = (loc / "fovprofile.txt").read_text(errors="replace").splitlines() if (lo
 print("\n".join(lines))
 ok = "button=True visible=True" in lines and "override=True outer=0.94 inner=0.93 upper=0.90 lower=0.76 quality=0.50" in lines
 print("CHECK", "PASS" if ok else "FAIL", "the button fills the fields and the slider, ticks the override and saves")
-sys.exit(0 if ok and ok_doc else 1)
+
+# an override made for the Vision Pro must not be applied to a headset with another field of view (a Quest's lower edge is 55 degrees; the Vision Pro's tuned 0.76 would cut it to 37; the Vision Pro with its app's FoV Scale at 0.8 keeps its override)
+lib.b_run(f"_tmp\\uitest\\run\\uitest.exe --fov-other-headset-selftest 1 --out runs\\{rid}")
+lib.b_get(f"runs/{rid}/fovother.txt", loc / "fovother.txt")
+lines2 = (loc / "fovother.txt").read_text(errors="replace").splitlines() if (loc / "fovother.txt").exists() else []
+print("\n".join(lines2))
+ok2 = (len(lines2) == 3 and lines2[0] == "fits_avp=True fits_quest=False fits_unknown=True fits_avp_scaled=True" and lines2[1].startswith("tick_on_quest=False lower_shown=1.43")
+       and lines2[2] == "after_tick: override=True lower=1.43 fits_quest=True")
+print("CHECK", "PASS" if ok2 else "FAIL", "an override saved for the Vision Pro is off on a Quest (the fields show the Quest's own values) and ticking starts from the Quest's values")
+sys.exit(0 if ok and ok_doc and ok2 else 1)
