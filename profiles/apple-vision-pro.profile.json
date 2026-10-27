@@ -105,7 +105,7 @@
       ]
     ],
     "session_settings.video.passthrough.content.RgbChromaKey.blue": 0,
-    "session_settings.video.passthrough.content.RgbChromaKey.distance_threshold": 16,
+    "session_settings.video.passthrough.content.RgbChromaKey.distance_threshold": 4,
     "session_settings.video.passthrough.content.RgbChromaKey.feathering": 0.19999999,
     "session_settings.video.passthrough.content.RgbChromaKey.green": 255,
     "session_settings.video.passthrough.content.RgbChromaKey.red": 0,

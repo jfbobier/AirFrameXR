@@ -96,7 +96,7 @@
             "red": 0,
             "green": 255,
             "blue": 0,
-            "distance_threshold": 16,
+            "distance_threshold": 4,
             "feathering": 0.19999999
           },
           "HsvChromaKey": {
