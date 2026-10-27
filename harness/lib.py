@@ -1294,8 +1294,28 @@ def analyse_pacing(sc, outdir, period_ms):
     d = [(y - x) / 1e6 for x, y in zip(arr, arr[1:])][warm:]
     if len(d) < 30:
         return None
+    late = [x > 1.5 * period_ms for x in d]
+    run = best = 0
+    for v in late:                                   # the longest stretch of consecutive late frames: one skipped slot is a flicker, three in a row is a hitch
+        run = run + 1 if v else 0
+        best = max(best, run)
+    # queue creep: the pipeline latency (arrival minus the pose timestamp the frame was rendered with) of the first and the last third of the run; a standing queue only grows
+    lat = [(int(c[1]) - int(c[0])) / 1e6 for c in crows[first + warm:last + 1]]
+    third = max(1, len(lat) // 3)
+    drift = round(pct(lat[-third:], .5) - pct(lat[:third], .5), 2) if len(lat) >= 30 else None
+    # where the skipped slots are made: the same count on the host's own send times means the slot was already empty when the host picked a frame for it (the app or the stage before
+    # the encoder had nothing ready); more at the client means the network or the client added them
+    host_late = None
+    _, prow = read_csv(outdir / "host_pipeline.csv")   # frame,ts_ns,slot,t_boundary,t_arrival,t_encode_start,encode_ms,t_send,...
+    try:
+        ts_ = [float(r[7]) for r in prow if int(r[0]) >= 0][warm:]
+        sd = [(y - x) * 1000.0 for x, y in zip(ts_, ts_[1:])]
+        host_late = round(sum(x > 1.5 * period_ms for x in sd) / len(sd), 4) if sd else None
+    except Exception:
+        pass
     return {"period_ms": period_ms, "n": len(d), "p50": round(pct(d, .5), 2), "p95": round(pct(d, .95), 2), "p99": round(pct(d, .99), 2),
-            "max": round(max(d), 2), "late": sum(x > 1.5 * period_ms for x in d), "late_frac": round(sum(x > 1.5 * period_ms for x in d) / len(d), 4)}
+            "max": round(max(d), 2), "max_gap_periods": round(max(d) / period_ms, 2), "late": sum(late), "late_frac": round(sum(late) / len(d), 4),
+            "longest_late_run": best, "latency_drift_ms": drift, "late_frac_at_host_send": host_late}
 
 
 def analyse_display(sc, outdir, client, period_ms):
@@ -1867,6 +1887,18 @@ def evaluate(sc, a):
                 chk("pacing_client_p99_ms", pk["p99"] <= pc["client_p99_ms"], pk["p99"], f"<= {pc['client_p99_ms']} (p50 {pk['p50']}, p95 {pk['p95']}, max {pk['max']})")
             if "max_late_frac" in pc:
                 chk("pacing_late_frac", pk["late_frac"] <= pc["max_late_frac"], pk["late_frac"], f"<= {pc['max_late_frac']} of frames later than 1.5 periods ({pk['late']}/{pk['n']})")
+        if pk:
+            # hard guards, the same on every rig: what a person sees as a hitch, a wrong rate or a growing delay (no machine-dependent number in them)
+            if "max_gap_periods" in pc:
+                chk("pacing_no_stall", pk["max_gap_periods"] <= pc["max_gap_periods"], pk["max_gap_periods"], f"no gap between two frames longer than {pc['max_gap_periods']} periods (max {pk['max']} ms of {pk['period_ms']:.1f}): at most one skipped slot, never a stall")
+            if "p50_tolerance" in pc:
+                chk("pacing_cadence", abs(pk["p50"] / pk["period_ms"] - 1) <= pc["p50_tolerance"], pk["p50"], f"the typical gap is the display period ({pk['period_ms']:.2f} ms) within {100 * pc['p50_tolerance']:.0f} %")
+            if "max_late_run" in pc:
+                chk("pacing_no_hitch", pk["longest_late_run"] <= pc["max_late_run"], pk["longest_late_run"], f"at most {pc['max_late_run']} late frames in a row (three in a row is a visible hitch)")
+            if "max_drift_ms" in pc and pk.get("latency_drift_ms") is not None:
+                chk("pacing_latency_steady", abs(pk["latency_drift_ms"]) <= pc["max_drift_ms"], pk["latency_drift_ms"], f"the pipeline latency of the last third of the run is within {pc['max_drift_ms']} ms of the first third's (a queue that only grows)")
+            if pk.get("late_frac_at_host_send") is not None:
+                chk("pacing_late_attribution", True, {"late_frac_at_client": pk["late_frac"], "late_frac_at_host_send": pk["late_frac_at_host_send"]}, "information: the skipped slots counted at the host's send (made before the encoder: the app or the pick had no frame) and at the client (the same = none added by the network or the client)")
         pj = (h or {}).get("pacing") or {}
         vs, it = pj.get("vsync_interval_ms"), pj.get("frame_intake_ms")
         if "vsync_p99_ms" in pc:

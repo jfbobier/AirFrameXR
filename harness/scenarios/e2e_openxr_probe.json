@@ -47,13 +47,13 @@
   "host": {
     "shim": true,
     "fps": 90,
-    "seconds": 60,
+    "seconds": 90,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "exit_after_frames": 420
+    "exit_after_frames": 1800
   },
   "client": {
-    "seconds": 55,
+    "seconds": 85,
     "connect_timeout": 45,
     "yaw_amp": 0.5,
     "yaw_hz": 0.25
@@ -62,8 +62,8 @@
     "RUST_LOG": "warn"
   },
   "app": {
-    "frames": 420,
-    "timeout_s": 60
+    "frames": 1800,
+    "timeout_s": 90
   },
   "gpu_sample": true,
   "timeout_s": 200,
@@ -96,12 +96,16 @@
     "refresh_hz": 90,
     "max_pipeline_latency_ms": 150,
     "pacing": {
-      "warmup_frames": 30,
+      "warmup_frames": 150,
       "client_p99_ms": 20,
       "max_late_frac": 0.01,
       "vsync_p99_ms": 12.5,
       "vsync_max_ms": 40,
-      "intake_p99_ms": 16
+      "intake_p99_ms": 16,
+      "max_gap_periods": 2.6,
+      "p50_tolerance": 0.03,
+      "max_late_run": 2,
+      "max_drift_ms": 4.0
     }
   }
 }

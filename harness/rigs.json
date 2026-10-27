@@ -1,6 +1,14 @@
 {
-  "comment": "Pacing thresholds a scenario's checks.pacing gets on a rig whose GPU name contains `match` (the file rig.txt a run records from nvidia-smi). The scenarios' own numbers are for a desktop GPU. The laptop's measured run (2026-10-27, e2e_openxr_probe): client p99 22.1 ms, 2.9 % of frames one period late, host intake p99 25.0-30.3 ms; on 2026-10-08/09 the same laptop measured p99 about 14 ms and 0 % late, so these are a ceiling for the present state, not a target: a further regression still fails.",
+  "comment": "The rate of skipped display slots (checks.pacing.max_late_frac) is the one pacing number that depends on the machine; the other pacing checks (no stall, cadence, no hitch, steady latency, vsync) are the same everywhere. On this rig e2e_openxr_probe (1800 frames) measured 2.46 % and 2.52 % in two runs, all of it made before the encoder (the same 2.5 % at the host's send): the app or the boundary pick had nothing ready for that slot. It measured about 0 % on 2026-10-08/09, before the Oct 10 pacing redesign. The ceiling is twice today's value: a regression on this rig still fails. client_p99_ms and intake_p99_ms are the one-skipped-slot values (22 ms) with margin.",
   "rigs": [
-    { "name": "RTX 3080 Ti Laptop", "match": "Laptop", "pacing": { "client_p99_ms": 26, "max_late_frac": 0.05, "intake_p99_ms": 36 } }
+    {
+      "name": "RTX 3080 Ti Laptop",
+      "match": "Laptop",
+      "pacing": {
+        "client_p99_ms": 26,
+        "max_late_frac": 0.05,
+        "intake_p99_ms": 36
+      }
+    }
   ]
 }
