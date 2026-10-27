@@ -217,7 +217,13 @@ Regenerate them with `python3 harness/readme_screens.py`.
     inner, upper, lower; tangents, the angle shown next to each). Greyed, they show the headset's own field of view; ticked, they start from it and you can only go down. The
     game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start; it applies at the next
     game start), the stream still covers the whole headset view with a black margin: only the game's GPU work changes. Off by default, and then nothing differs from 1.0.
+    A **Game render quality** slider under the fields spends part of that saving on a finer render: from the smallest size the restriction gives up to the stream's own per-eye
+    size (both taken from your resolution settings, so a Quest's lower one works the same), filtered down by composition (cleaner edges, no detail beyond the stream). The
+    Vision Pro's measured visible window and the values that fit it are in [docs/AVP_FOV.md](docs/AVP_FOV.md); the frame size at each step is drawn below.
     See [docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md).
+
+    ![Frame size at each step on the Vision Pro with the measured visible field of view and foveation](docs/images/fov-pipeline-frame-sizes.svg)
+
   - **The desktop mirror works left-handed**: a firm press of the left trigger or grip hands the beam to the left controller (and back); A / X, B / Y and both thumbsticks work on
     either controller.
   - **Fixes**: game audio captured with Windows' process loopback again (a build problem since 1.0 had left it on a device loopback that follows the system volume); the Encoding
