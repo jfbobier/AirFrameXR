@@ -1585,6 +1585,26 @@ namespace AirFrameXR
 
         /// Column widths from what they hold (header and cells), then the widest shrunk so the list never needs sideways scrolling. Fonts and dpi
         /// change what fits, which fixed pixel widths cannot follow. Re-run when the items change; hooked to the list's resize once.
+        /// A list that is `designMax` px wide at most, narrower when the page it sits in is (a scrolling page must not need a sideways bar for one list): follows the parent's width.
+        public static void FitWidth(Control c, int designMax, bool asMinimum = false, bool asMaximum = false)
+        {
+            Control Room() { for (var q = c.Parent; q != null; q = q.Parent) if (q is ScrollableControl sc && sc.AutoScroll) return q; return c.Parent; }   // the page that scrolls, not a box that sizes itself to the list
+            Control hooked = null;
+            void fit()
+            {
+                var a = Room(); if (a == null || a.ClientSize.Width <= 0) return;
+                if (!ReferenceEquals(a, hooked)) { hooked = a; a.SizeChanged += (s, e) => fit(); }
+                int room = a.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - c.Margin.Horizontal - (ReferenceEquals(a, c.Parent) ? a.Padding.Horizontal : Px(c, 48)) - 4;
+                int w = Math.Max(Px(c, 240), Math.Min(Px(c, designMax), room));
+                if (asMinimum) c.MinimumSize = new Size(w, c.MinimumSize.Height); else if (asMaximum) c.MaximumSize = new Size(w, 0); else c.Width = w;   // a box that sizes itself to its text keeps this as its least width
+            }
+            c.ParentChanged += (s, e) => fit();
+            c.HandleCreated += (s, e) => fit();
+            c.VisibleChanged += (s, e) => fit();   // a list in a box that opens later (the page it is in is only known then)
+            c.ParentChanged += (s, e) => { if (c.Parent != null) c.Parent.ParentChanged += (s2, e2) => fit(); };
+            fit();
+        }
+
         public static void FitColumns(ListView lv)
         {
             if (lv.View != View.Details || lv.Columns.Count == 0) return;

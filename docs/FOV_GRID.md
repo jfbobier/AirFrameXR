@@ -20,7 +20,7 @@ It is an ordinary OpenXR app, so it runs like a game:
 1. Copy `fovgrid.exe` (this `xr_probe.exe` renamed: under that name it starts in the grid scene by itself and runs until
    the session ends) anywhere on the PC, e.g. next to the games.
 2. Start AirFrameXR, connect the headset, and double-click `fovgrid.exe` (or add it to Steam as a non-Steam game).
-   Fresh settings: the FoV restriction fields at 100 %, FoV scale in the visionOS app at 1.0.
+   Fresh settings: "Override the headset's field of view" unticked in the Advanced window (the game gets the headset's own), FoV scale in the visionOS app at 1.0.
 3. Put the headset on, look straight ahead, head still. Repeat on the other headset. Close it from its console window.
 
 It writes `fovgrid.log` next to itself. If the OpenXR runtime of this PC is not AirFrameXR, set

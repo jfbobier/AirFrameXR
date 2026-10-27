@@ -98,7 +98,7 @@ namespace AirFrameXR
             Ui.Col(found, "Name (hostname)", 260);
             Ui.Col(found, "IP address", 140);
             Ui.Col(found, "ALVR version", 170);
-            p.Controls.Add(found);
+            p.Controls.Add(found); Ui.FitWidth(found, 760);
             var pair = new Button { Text = "Pair the selected headset", AutoSize = true, Font = Ui.Bold };
             pair.Click += (s, e) => PairSelected();
             found.DoubleClick += (s, e) => PairSelected();
@@ -331,7 +331,7 @@ namespace AirFrameXR
             benchList.Width = 840;
             foreach (var c in new[] { ("Test", 200), ("Mbps", 60), ("fps", 50), ("lost/s", 60), ("total ms", 70), ("encode ms", 75), ("network ms", 80), ("decode ms", 75), ("result", 160) })
                 Ui.Col(benchList, c.Item1, c.Item2);
-            p.Controls.Add(benchList);
+            p.Controls.Add(benchList); Ui.FitWidth(benchList, 840);
             Ui.FitColumns(benchList);
             p.Controls.Add(benchStatus);
             applyBitrate.Click += (s, e) =>

@@ -527,11 +527,12 @@ int main(int argc, char** argv) {
                         const unsigned long long wallNs = ((((unsigned long long)wft.dwHighDateTime << 32) | wft.dwLowDateTime) - 116444736000000000ull) * 100ull;
                         D3D11_TEXTURE2D_DESC mt{}; imgs[i][idx].texture->GetDesc(&mt);
                         const XrPosef& xp = views[i].pose; const XrFovf& xf = views[i].fov;
+                        static const float markY = xp.position.y - 0.2f;   // the world-fixed point sits 0.2 m below the head's height at the first frame (1.3 m with the mock's 1.5 m head; -0.2 m since the eye-level origin)
                         const XMMATRIX mpose = XMMatrixRotationQuaternion(XMVectorSet(xp.orientation.x, xp.orientation.y, xp.orientation.z, xp.orientation.w))
                                              * XMMatrixTranslation(xp.position.x, xp.position.y, xp.position.z);
                         const float mtan[4] = { -tanf(xf.angleLeft), tanf(xf.angleRight), tanf(xf.angleUp), -tanf(xf.angleDown) };
                         const XMMATRIX mvp = XMMatrixInverse(nullptr, mpose) * Projection(mtan, 0.05f, 100.f);
-                        XMFLOAT3 ndc; XMStoreFloat3(&ndc, XMVector3TransformCoord(XMVectorSet(0.f, 1.3f, -3.f, 1.f), mvp));
+                        XMFLOAT3 ndc; XMStoreFloat3(&ndc, XMVector3TransformCoord(XMVectorSet(0.f, markY, -3.f, 1.f), mvp));
                         const float mx = (ndc.x * 0.5f + 0.5f) * (float)mt.Width, my = (1.f - (ndc.y * 0.5f + 0.5f)) * (float)mt.Height;
                         fprintf(markF, "%d,%d,%.2f,%.2f,%u,%u,%.7f,%.7f,%.7f,%.7f,%.5f,%.5f,%.5f,%.6f,%.6f,%.6f,%.6f,%lld,%llu\n", done + 1, (int)i, mx, my, mt.Width, mt.Height,
                             xp.orientation.x, xp.orientation.y, xp.orientation.z, xp.orientation.w, xp.position.x, xp.position.y, xp.position.z,
@@ -604,6 +605,7 @@ int main(int argc, char** argv) {
                 lay.push_back(proj);
             } else {
                 const int phase = (done / 90) % 6;
+                const float headY = 0.5f * (views[0].pose.position.y + views[1].pose.position.y);   // the head's height in the app's space: 1.5 m with the mock's own height, 0 since the eye-level origin (the world-locked layers are placed at the head's height, as the oracle in harness/lib.py assumes)
                 auto drawQuadrants = [&](std::vector<ID3D11RenderTargetView*>& r) {
                     ID3D11DeviceContext1* c1 = nullptr;
                     if (FAILED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) return;
@@ -631,7 +633,7 @@ int main(int argc, char** argv) {
                     lay.push_back(proj);
                     if (drawLayerSwap(quadSw, drawQuadrants)) return 1;
                     if (phase == 0) fillQuad(q1, viewSpace, pose(0, 0, -2, 0), 1.0f, 1.0f, quadSw, full512);
-                    if (phase == 1) fillQuad(q1, space, pose(0.3f, 1.5f, -2.0f, 25.f * 3.14159265f / 180.f), 1.0f, 1.0f, quadSw, full512);
+                    if (phase == 1) fillQuad(q1, space, pose(0.3f, headY, -2.0f, 25.f * 3.14159265f / 180.f), 1.0f, 1.0f, quadSw, full512);
                     if (phase == 3) {   // submission order: a small green quad submitted after a red one covers its center
                         fillQuad(q1, viewSpace, pose(0, 0, -2, 0), 1.0f, 1.0f, quadSw, { {0, 0}, {256, 256} });
                         fillQuad(q2, viewSpace, pose(0, 0, -2, 0), 0.4f, 0.4f, quadSw, { {256, 0}, {256, 256} });
@@ -644,7 +646,7 @@ int main(int argc, char** argv) {
                         q2.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
                     }
                     if (phase == 2) {
-                        cylL.space = space; cylL.pose = pose(0, 1.5f, 0, 0); cylL.radius = 2.5f; cylL.centralAngle = 1.2f; cylL.aspectRatio = 2.0f;
+                        cylL.space = space; cylL.pose = pose(0, headY, 0, 0); cylL.radius = 2.5f; cylL.centralAngle = 1.2f; cylL.aspectRatio = 2.0f;
                         cylL.eyeVisibility = XR_EYE_VISIBILITY_BOTH; cylL.subImage.swapchain = quadSw.sc; cylL.subImage.imageRect = full512; cylL.subImage.imageArrayIndex = 0;
                         lay.push_back((XrCompositionLayerBaseHeader*)&cylL);
                     } else {

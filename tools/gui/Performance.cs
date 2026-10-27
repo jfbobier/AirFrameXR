@@ -195,10 +195,10 @@ namespace AirFrameXR
         Control SessionList(List<Dictionary<string, object>> sessions)
         {
             var lv = new ListView { View = View.Details, FullRowSelect = true, GridLines = false, Height = 150, Width = Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40)), HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(3) };
-            string[] cols = { "Date", "Headset", "Generation", "Minutes", "Game fps", "Shown fps", "Repeated %", "Latency ms", "Enc+net+dec ms" };
+            string[] cols = { "Date", "Headset", "Gen.", "Min", "Game fps", "Shown fps", "Repeat %", "Lat. ms", "E+N+D ms" };   // short headers: the nine fit the page without a sideways bar (Gen. = frame generation level, Repeat = repeated periods, E+N+D = encoder + network + decoder)
             int[] w = { 125, 125, 55, 45, 55, 60, 75, 65, 90 };
             for (int i = 0; i < cols.Length; i++) Ui.Col(lv, cols[i], w[i]);
-            right.Resize += (s, e) => lv.Width = Math.Max(400, right.ClientSize.Width - 40);
+            Ui.FitWidth(lv, 1600);   // the page's width (and again when the window changes), not the width the page had when this list was built
             foreach (var s in Enumerable.Reverse(sessions))
             {
                 var net = O(s, "net");

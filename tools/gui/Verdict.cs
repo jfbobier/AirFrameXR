@@ -74,7 +74,7 @@ namespace AirFrameXR
                 fw.Headline + " Review the rules with the button below.");
             add("GPU", string.IsNullOrEmpty(r.GpuName) ? "-" : r.GpuName, $"{r.Engines} hardware encoder engine(s), {r.VramMb / 1024.0:0} GB", Rating.Unknown);
             var details = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
-            details.Controls.Add(list);
+            details.Controls.Add(list); Ui.FitWidth(list, 790);
             Ui.FitColumns(list);
             if (!fwClean && fw.State != FirewallState.Unknown)
             {

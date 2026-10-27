@@ -875,9 +875,9 @@ namespace AirFrameXR
         void WithWorstCase(Action doFit)
         {
             var tiles = new[] { tGame, tStreamed, tShown, tBitrate, tLatency, tLoss };
-            var labels = new Control[] { headset, game, runtime, heightReport, stats, statsBox };
-            var shown = new Control[] { find, heightReport };
-            var hidden = new Control[] { audioLine, exportStatus, exportLink };   // their line is reserved by the notices slot
+            var labels = new Control[] { headset, game, runtime, heightReport, stats, statsBox, audioLine };
+            var shown = new Control[] { find, heightReport, audioLine };   // the audio line at its longest (two lines): the window is not taller than the line it may have to show
+            var hidden = new Control[] { exportStatus, exportLink };   // their line is reserved by the notices slot
             var hidBack = hidden.Select(c => (c, c.Visible)).ToList();
             var textBack = labels.Select(c => (c, c.Text, c.ForeColor)).ToList();
             var visBack = shown.Select(c => (c, c.Visible)).ToList();
@@ -887,6 +887,7 @@ namespace AirFrameXR
                 headset.Text = "Headset: connected - Apple Vision Pro (192.168.100.123)";
                 game.Text = "Game: Cyberpunk2077.exe (last: Cyberpunk2077.exe, 123.4 min)";
                 heightReport.Text = "headset reports 1.62 m";
+                audioLine.Text = "Audio: cannot set CABLE Input (VB-Audio Virtual Cable) to 100 %. The headset's volume follows the PC's.";
                 stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: 1/2.";
                 statsBox.Text = "Streaming: last session, Cyberpunk2077.exe, 123.4 min, Apple Vision Pro";
                 tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at 1/2"); tShown.Set("144.4 fps", "repeated periods 12.3 %");

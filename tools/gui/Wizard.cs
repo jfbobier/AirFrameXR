@@ -223,7 +223,7 @@ namespace AirFrameXR
                 chosenHost = t[0]; chosenIp = t[1]; chosenName = t[2];
             };
             found.DoubleClick += (s, e) => GoNext();
-            p.Controls.Add(found);
+            p.Controls.Add(found); Ui.FitWidth(found, 780);
             var manual = new FlowLayoutPanel { AutoSize = true };
             var ipBox = new TextBox { Width = 140 };
             var add = new Button { Text = "Add this IP address", AutoSize = true };
@@ -624,7 +624,7 @@ namespace AirFrameXR
             p.Controls.Add(Ui.Line("Each test is ticked off when it is done. This takes a few minutes; the headset ones need the ALVR app open on it."));
             testList = new ListView { View = View.Details, FullRowSelect = true, Width = 790, Height = 300, HeaderStyle = ColumnHeaderStyle.None, ShowItemToolTips = true };
             Ui.Col(testList, "Test", 330); Ui.Col(testList, "Result", 440);
-            p.Controls.Add(testList);
+            p.Controls.Add(testList); Ui.FitWidth(testList, 790);
             testStatus = Ui.Line("");
             p.Controls.Add(testStatus);
             testCancel = new Button { Text = "Cancel the tests", AutoSize = true };

@@ -414,6 +414,10 @@ namespace AirFrameXR
         static void Audit(Form f, Size work, string tag, List<string> issues)
         {
             void add(string level, string msg) { var m = level + " " + msg + (tag.Length > 0 ? " (" + tag.TrimStart('-') + ")" : ""); if (!issues.Contains(m)) issues.Add(m); }
+            // the scale is emulated by resizing a window built at the machine's own scale: a scrolling container keeps the extent it measured then (a sideways bar the real scale would not
+            // show), so every one measures again before the audit
+            foreach (var sc in Descend(f).OfType<ScrollableControl>().Where(x => x.AutoScroll).ToList()) { sc.AutoScroll = false; sc.AutoScroll = true; }
+            f.PerformLayout();
             // 1. the window against the work area
             bool resizable = f.FormBorderStyle == FormBorderStyle.Sizable || f.FormBorderStyle == FormBorderStyle.SizableToolWindow;
             if (f.Width > work.Width || f.Height > work.Height)
@@ -430,7 +434,11 @@ namespace AirFrameXR
                     if (c.Right > r.Right + 2 || c.Bottom > r.Bottom + 2 || c.Left < r.Left - 2 || c.Top < r.Top - 2)
                         add("FAIL", $"clipped: {Desc(c)} {c.Bounds} outside {p.GetType().Name} {r.Size}");
                 }
-                if (scrolls && scroll.HorizontalScroll.Visible && p == scroll) add("WARN", $"{Desc(p)} needs a horizontal scroll bar");
+                if (scrolls && scroll.HorizontalScroll.Visible && p == scroll)
+                {
+                    var wide = p.Controls.Cast<Control>().Where(k => k.Visible).OrderByDescending(k => k.Right).FirstOrDefault();   // who reaches furthest right
+                    add("WARN", $"{Desc(p)} needs a horizontal scroll bar [min {scroll.AutoScrollMinSize}, display {scroll.DisplayRectangle.Size}, pref {p.PreferredSize}, vscroll {scroll.VerticalScroll.Visible}]" + (wide != null ? $" (client {scroll.ClientSize.Width}px, widest: {string.Join("; ", p.Controls.Cast<Control>().OrderByDescending(k => k.Right + k.Margin.Right).Take(3).Select(k => (k.Visible ? "" : "(hidden) ") + Desc(k) + " " + k.Width + "w right " + (k.Right + k.Margin.Right)))})" : ""));
+                }
                 // 3. text cut off
                 var flags = TextFormatFlags.NoPadding | TextFormatFlags.WordBreak;
                 if ((c is Button || c is CheckBox || c is RadioButton) && !c.AutoSize && !string.IsNullOrEmpty(c.Text))

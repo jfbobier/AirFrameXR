@@ -125,6 +125,23 @@ namespace AirFrameXR
             more.ForeColor = Color.DimGray;
             note(more);
             Controls.Add(g);
+            // the notes wrap to the room the panel has beside the label column (never wider than they were made), so the panel does not need a sideways scroll bar
+            void descend(Control c) { foreach (Control k in c.Controls) { if (k is Label l && l.MaximumSize.Width > 0 && !wrapMax.ContainsKey(l)) wrapMax[l] = l.MaximumSize.Width; descend(k); } }
+            descend(g);
+            Resize += (s, e) => Rewrap(g);
+            g.Layout += (s, e) => Rewrap(g);
+        }
+
+        readonly Dictionary<Label, int> wrapMax = new Dictionary<Label, int>();
+        bool rewrapping;
+        void Rewrap(TableLayoutPanel g)
+        {
+            if (rewrapping || g.ColumnCount < 2 || ClientSize.Width <= 0) return;
+            var cols = g.GetColumnWidths(); if (cols.Length < 2) return;
+            int avail = Math.Max(Ui.Px(this, 240), ClientSize.Width - Math.Max(SystemInformation.VerticalScrollBarWidth, Ui.Px(this, 17)) - cols[0] - Ui.Px(this, 24));
+            rewrapping = true;
+            try { foreach (var kv in wrapMax) { int w = Math.Min(kv.Value, avail); if (kv.Key.MaximumSize.Width != w) kv.Key.MaximumSize = new Size(w, 0); } }
+            finally { rewrapping = false; }
         }
 
         void SetIdle(Color c) { idle.BackColor = c; idle.Text = $"#{c.R:X2}{c.G:X2}{c.B:X2}"; idle.ForeColor = c.GetBrightness() > 0.5 ? Color.Black : Color.White; }

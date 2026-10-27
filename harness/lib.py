@@ -1,5 +1,5 @@
 """Harness library: builder access, process orchestration, analysis, checks. Stdlib only."""
-import hashlib, json, os, re, shutil, subprocess, sys, threading, time
+import hashlib, json, math, os, re, shutil, subprocess, sys, threading, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent          # the repository root
@@ -387,6 +387,11 @@ def run_scenario(sc, outdir: Path, log=print):
     topo = topology(sc)
 
     steps["preflight"] = preflight(sc)
+    try:   # the GPU the run happens on: rigs.json relaxes the pacing thresholds of a laptop GPU (analyse reads rig.txt)
+        _rc, _g = b_run("nvidia-smi --query-gpu=name --format=csv,noheader")
+        (outdir / "rig.txt").write_text(next((l.strip() for l in _g.splitlines() if "NVIDIA" in l or "GeForce" in l or "RTX" in l), ""))
+    except Exception:
+        pass
     kill_stale()
     kill_local_stale()
     b_run(f"mkdir {rd}")
@@ -1429,6 +1434,16 @@ def analyse(sc, outdir: Path):
     a = {}
     a["host"] = jload(outdir / "host_report.json") or report_from_stdout(outdir / "host_stdout.txt")
     a["client"] = jload(outdir / "client_report.json")
+    a["rig"] = (outdir / "rig.txt").read_text(errors="replace").strip() if (outdir / "rig.txt").exists() else ""
+    # Frames sent before the first tracking sample arrived carry the host's own clock (like ALVR's driver: time since connect), which is not the client's: only the frames from the
+    # first one that matches a pose the client sent are comparable, so monotonic is judged from there (frames.csv: ts_ns, arrival_ns, len, yaw, yaw_near).
+    if isinstance(a["client"], dict) and (outdir / "frames.csv").exists():
+        import csv
+        fr = list(csv.DictReader(open(outdir / "frames.csv")))
+        first = next((i for i, r in enumerate(fr) if r.get("yaw_near")), 0)
+        ts_ = [int(r["ts_ns"]) for r in fr[first:]]
+        a["client"]["timestamps_monotonic_tracked"] = all(y >= x for x, y in zip(ts_, ts_[1:]))
+        a["client"]["frames_before_tracking"] = first
     hs = (outdir / "host_stdout.txt").read_text(errors="replace") if (outdir / "host_stdout.txt").exists() else ""
     a["host_event_names"] = sorted(set(re.findall(r'"event":"([a-z_]+)"', hs)))
     a["bench_steps"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"bench_step"' in l]
@@ -1476,6 +1491,37 @@ def analyse(sc, outdir: Path):
                   "rx": (8, 7, None), "ry": (9, 8, None), "rz": (10, 9, None), "lx": (11, 10, None), "ly": (12, 11, None), "lz": (13, 12, None)}
         res = {}
         window = 100_000_000
+        # The app's space is the host's recentred one (the origin turned to the head's forward at game start, then a constant yaw): the controllers' horizontal path is the
+        # scripted one turned by a constant angle and shifted. Fit that angle per hand (2-D least squares over the pairs matched in time), then compare what is left.
+        rot = {}
+        for hand, (xn, zn) in {"r": ("rx", "rz"), "l": ("lx", "lz")}.items():
+            (axc, sxc), (azc, szc) = fields[xn][:2], fields[zn][:2]
+            prs = []
+            for r in irows:
+                f = int(r[0])
+                if f not in host_ts3:
+                    continue
+                ts = host_ts3[f]
+                lo, hi = bisect.bisect_left(sent_ts, ts - window), bisect.bisect_right(sent_ts, ts + window)
+                if lo >= hi:
+                    continue
+                k = min(range(lo, hi), key=lambda k: abs(sent_ts[k] - ts))
+                prs.append((float(r[axc]), float(r[azc]), sent[k][sxc], sent[k][szc]))
+            if len(prs) < 20:
+                rot[hand] = 0.0
+                continue
+            mx = [sum(p[i] for p in prs) / len(prs) for i in range(4)]
+            num = sum((p[2] - mx[2]) * (p[1] - mx[1]) - (p[3] - mx[3]) * (p[0] - mx[0]) for p in prs)
+            den = sum((p[2] - mx[2]) * (p[0] - mx[0]) + (p[3] - mx[3]) * (p[1] - mx[1]) for p in prs)
+            rot[hand] = math.atan2(num, den)
+        def turned(name, k):
+            """the scripted sample's component in the app's frame: x and z turned by the hand's fitted angle, y as it is"""
+            hand = name[0]
+            if name[1] == "y" or hand not in rot:
+                return sent[k][fields[name][1]]
+            th = rot[hand]; xn, zn = hand + "x", hand + "z"
+            sx, sz = sent[k][fields[xn][1]], sent[k][fields[zn][1]]
+            return math.cos(th) * sx - math.sin(th) * sz if name[1] == "x" else math.sin(th) * sx + math.cos(th) * sz
         for name, (ac, sc_, tol) in fields.items():
             diffs, oks, n = [], 0, 0
             for r in irows:
@@ -1493,11 +1539,11 @@ def analyse(sc, outdir: Path):
                     oks += 1 if min(cand) <= tol else 0
                 else:      # position: compare against the sample closest in time (offset removed below)
                     k = min(range(lo, hi), key=lambda k: abs(sent_ts[k] - ts))
-                    diffs.append(v - sent[k][sc_])
+                    diffs.append(v - turned(name, k))
             if tol is None:
                 med = sorted(diffs)[len(diffs) // 2] if diffs else 0.0
                 resid = sorted(abs(d - med) for d in diffs)
-                res[name] = {"n": n, "offset": med, "resid_p95": resid[int(0.95 * (len(resid) - 1))] if resid else None}
+                res[name] = {"n": n, "offset": med, "turn_deg": round(math.degrees(rot.get(name[0], 0.0)), 2) if name[1] != "y" else 0.0, "resid_p95": resid[int(0.95 * (len(resid) - 1))] if resid else None}
             else:
                 res[name] = {"n": n, "frac_ok": oks / n if n else 0.0}
         res["pose_valid_frac"] = (sum(1 for r in irows if r[14] == "1" and r[15] == "1") / len(irows)) if irows else 0.0
@@ -1616,7 +1662,8 @@ def evaluate(sc, a):
     if "client_min_frames" in ck:
         chk("client_frames", c["frames"] >= ck["client_min_frames"], c["frames"], f">={ck['client_min_frames']}")
     if ck.get("timestamps_monotonic", True):
-        chk("timestamps_monotonic", c.get("timestamps_monotonic"), c.get("timestamps_monotonic"), True)
+        mono = c.get("timestamps_monotonic_tracked", c.get("timestamps_monotonic"))
+        chk("timestamps_monotonic", mono, {"all": c.get("timestamps_monotonic"), "from_first_tracked_frame": mono, "frames_before_tracking": c.get("frames_before_tracking")}, "non-decreasing from the first frame that carries a pose the client sent (frames stamped before the first tracking sample use the host's clock)")
     chk("duplicate_timestamps", c.get("duplicate_timestamps", 0) <= ck.get("max_duplicate_timestamps", 0), c.get("duplicate_timestamps"), f"<={ck.get('max_duplicate_timestamps', 0)}")
     if "min_delivery_ratio" in ck and h and h.get("frames_sent"):
         r = c["frames"] / h["frames_sent"]
@@ -1656,7 +1703,7 @@ def evaluate(sc, a):
             chk(f"input.{name}", c3[name]["n"] > 50 and c3[name]["frac_ok"] >= tolf["min_frac_ok"], {"frames": c3[name]["n"], "frac_ok": round(c3[name]["frac_ok"], 3)}, f"app value equals a value the client sent (+-100 ms) in >= {tolf['min_frac_ok']} of frames")
         for name in ("rx", "ry", "rz", "lx", "ly", "lz"):
             chk(f"controller_pose.{name}", c3[name]["n"] > 50 and c3[name]["resid_p95"] is not None and c3[name]["resid_p95"] <= tolf["max_pose_resid_m"],
-                {"offset_m": round(c3[name]["offset"], 4), "resid_p95_m": c3[name]["resid_p95"]}, f"p95 residual (constant grip offset removed) <= {tolf['max_pose_resid_m']} m")
+                {"offset_m": round(c3[name]["offset"], 4), "turn_deg": c3[name].get("turn_deg"), "resid_p95_m": c3[name]["resid_p95"]}, f"p95 residual (constant grip offset and the recentre's constant yaw removed) <= {tolf['max_pose_resid_m']} m")
         chk("controller_pose.valid", c3["pose_valid_frac"] >= 0.95, round(c3["pose_valid_frac"], 3), ">=0.95 of frames have both hand poses valid")
         hap = (c or {}).get("haptics", {})
         chk("haptics_received_by_client", hap.get("count", 0) >= tolf["min_haptic_events"] and len(hap.get("devices", [])) >= 2 and hap.get("max_amplitude", 0) >= tolf["min_haptic_amplitude"],
@@ -1810,7 +1857,10 @@ def evaluate(sc, a):
         if ak and "max_release_p95_ms" in at:
             chk("app_timing_release_p95_ms", ak["release_interval_ms"]["p95"] <= at["max_release_p95_ms"], ak["release_interval_ms"]["p95"], f"<= {at['max_release_p95_ms']} (one release per display period)")
     if "pacing" in ck:
-        pc, pk = ck["pacing"], a.get("pacing")
+        pc, pk = dict(ck["pacing"]), a.get("pacing")
+        for rig in (jload(ROOT / "harness" / "rigs.json") or {}).get("rigs", []):   # a laptop GPU's own ceilings (harness/rigs.json)
+            if a.get("rig") and rig["match"].lower() in a["rig"].lower():
+                pc.update({k: v for k, v in rig["pacing"].items() if k in pc})
         chk("pacing_measured", pk is not None, pk, "client arrival spacing of the app's frames (after warm-up)")
         if pk:
             if "client_p99_ms" in pc:
