@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="dia" viewBox="0 0 1290 400" width="1290" height="400" role="img" aria-label="Frame size per pipeline stage with the field of view restricted to 70, 90, 80 and 60 percent and foveation on. The game renders 2842 by 2240 per eye, composition pads it to the headset's 3552 by 3200 with black margins, the foveation warp packs both eyes into 4224 by 1664, the stream keeps that size through encode, network and decode, and the client unwarps back to 3552 by 3200 per eye."><style>
+.dia{color:#55646a}
+.dia text{fill:#14201f;font-family:system-ui,"Segoe UI",sans-serif;font-size:12px}
+.dia .h{font-weight:600;font-size:14px}
+.dia .m{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:500}
+.dia .s{fill:#55646a}
+.dia .arr{stroke:#55646a;stroke-width:1.5;fill:none}
+.pic{fill:#2a9d8f}.mar{fill:#12181b;stroke:#c3cdd1;stroke-width:1}
+.ctr{fill:none;stroke:#d98a00;stroke-width:1.6;stroke-dasharray:4 3}
+.bg{fill:#f3f5f6}
+@media (prefers-color-scheme:dark){.dia{color:#93a4a8}.dia text{fill:#e4eceb}.dia .s{fill:#93a4a8}.dia .arr{stroke:#93a4a8}
+.pic{fill:#35b8a8}.mar{fill:#000;stroke:#33444a}.ctr{stroke:#f0a82a}.bg{fill:#0e1416}}
+</style>
+<rect class="bg" width="1290" height="400"/>
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker>
+        <g id="game">
+          <rect class="pic" x="0" y="0" width="142" height="112"/>
+          <rect class="ctr" x="32.3" y="39" width="60" height="50"/>
+        </g>
+        <g id="comp">
+          <rect class="mar" x="0" y="0" width="178" height="160"/>
+          <rect class="pic" x="26.7" y="16" width="142.1" height="112"/>
+          <rect class="ctr" x="59" y="55" width="60" height="50"/>
+        </g>
+        <g id="ffrL">
+          <rect class="mar" x="0" y="0" width="105.6" height="83.2"/>
+          <rect class="pic" x="10.4" y="4.9" width="91.8" height="68.7"/>
+          <rect class="ctr" x="22.8" y="16.6" width="60" height="50"/>
+        </g>
+        <g id="ffrR">
+          <rect class="mar" x="0" y="0" width="105.6" height="83.2"/>
+          <rect class="pic" x="3.5" y="4.9" width="91.8" height="68.7"/>
+          <rect class="ctr" x="22.8" y="16.6" width="60" height="50"/>
+        </g>
+      </defs>
+
+      <!-- stage headers -->
+      <g>
+        <text class="h" x="125" y="34" text-anchor="middle">Game render</text>
+        <text class="s" x="125" y="52" text-anchor="middle">told the restricted FoV</text>
+        <text class="h" x="385" y="34" text-anchor="middle">Composition</text>
+        <text class="s" x="385" y="52" text-anchor="middle">shim, headset FoV</text>
+        <text class="h" x="645" y="34" text-anchor="middle">Foveation warp</text>
+        <text class="s" x="645" y="52" text-anchor="middle">host, ALVR FFR</text>
+        <text class="h" x="905" y="34" text-anchor="middle">Encode, network, decode</text>
+        <text class="s" x="905" y="52" text-anchor="middle">HEVC, both eyes side by side</text>
+        <text class="h" x="1165" y="34" text-anchor="middle">Unwarp and display</text>
+        <text class="s" x="1165" y="52" text-anchor="middle">headset client</text>
+      </g>
+
+      <!-- frames, centred on y=190 -->
+      <use href="#game" transform="translate(54 134)"/>
+      <use href="#comp" transform="translate(296 110)"/>
+      <use href="#ffrL" transform="translate(592.2 148.4)"/>
+      <use href="#ffrL" transform="translate(799.4 148.4)"/>
+      <use href="#ffrR" transform="translate(905 148.4)"/>
+      <use href="#comp" transform="translate(1076 110)"/>
+
+      <!-- stream frame outline and eye tags -->
+      <rect x="799.4" y="148.4" width="211.2" height="83.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text class="s" x="852" y="243" text-anchor="middle">left eye</text>
+      <text class="s" x="958" y="243" text-anchor="middle">right eye</text>
+
+      <!-- arrows -->
+      <path class="arr" d="M204 190 H288" marker-end="url(#ah)"/>
+      <text class="s" x="246" y="180" text-anchor="middle">pad with black</text>
+      <path class="arr" d="M482 190 H584" marker-end="url(#ah)"/>
+      <text class="s" x="533" y="180" text-anchor="middle">shrink periphery</text>
+      <path class="arr" d="M706 190 H791" marker-end="url(#ah)"/>
+      <text class="s" x="748" y="180" text-anchor="middle">pack eyes</text>
+      <path class="arr" d="M1018 190 H1068" marker-end="url(#ah)"/>
+      <text class="s" x="1043" y="180" text-anchor="middle">unwarp</text>
+
+      <!-- sizes -->
+      <g text-anchor="middle">
+        <text class="m" x="125" y="304">2842 × 2240</text>
+        <text class="s" x="125" y="322">6.4 Mpx per eye</text>
+        <text class="s" x="125" y="340">FoV 70 / 90 / 80 / 60 %</text>
+
+        <text class="m" x="385" y="304">3552 × 3200</text>
+        <text class="s" x="385" y="322">11.4 Mpx per eye</text>
+        <text class="s" x="385" y="340">picture is 56% of the frame</text>
+
+        <text class="m" x="645" y="304">2112 × 1664</text>
+        <text class="s" x="645" y="322">3.5 Mpx per eye</text>
+        <text class="s" x="645" y="340">picture is 72% of the frame</text>
+
+        <text class="m" x="905" y="304">4224 × 1664</text>
+        <text class="s" x="905" y="322">7.0 Mpx, same size at every hop</text>
+        <text class="s" x="905" y="340">picture is 72% of the frame</text>
+
+        <text class="m" x="1165" y="304">3552 × 3200</text>
+        <text class="s" x="1165" y="322">11.4 Mpx per eye</text>
+        <text class="s" x="1165" y="340">picture is 56% of the frame</text>
+      </g>
+
+      <!-- legend -->
+      <g>
+        <rect class="pic" x="24" y="372" width="18" height="12"/>
+        <text x="50" y="383">what the game rendered</text>
+        <rect class="mar" x="236" y="372" width="18" height="12"/>
+        <text x="262" y="383">black margin, nothing rendered, almost no bits</text>
+        <rect class="ctr" x="560" y="372" width="18" height="12"/>
+        <text x="586" y="383">full-density centre of the warp (kept 1:1)</text>
+      </g>
+    </svg>
