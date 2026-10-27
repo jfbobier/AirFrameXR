@@ -57,7 +57,7 @@ namespace AirFrameXR
             const string FG = "Frame generation (experimental)", AR = "Arrival and pacing", GE = "GPU and encoder";
             knobs.AddRange(new[]
             {
-                N(FG, "frame_gen_cap_fps", "Cap on the game's rate (fps)", 0, 0, 240, 5, 0, Live, "Uncapped mode only; 0 = no cap. Holds the game back to at most this many frames per second, so a GPU-bound game stops building a queue of frames in front of the GPU. Rule of thumb from the nights: a little under the rate the game sustains (about 90 %). On Dead Space it cut the lag from 62 to 31 ms; 70 did nothing for 40 fps games, which needed about 37. With the frame-start gate on the queue is smaller to begin with, so measure. Hover for the numbers."),
+                N(AR, "frame_gen_cap_fps", "Game fps lock (fps)", 0, 0, 240, 5, 0, Live, "0 = no lock. Holds the game back to at most this many frames per second, with or without frame generation. For a game that forces its own rate (cutscenes locked at 30, a game that renders in bursts) or a GPU-bound game that builds a queue of frames in front of the GPU. Pick a rate that divides the headset's refresh rate evenly (45 or 30 at 90 Hz, 50 or 25 at 100 Hz); a lock that does not divide it gives uneven repeats. Hover for the numbers."),
                 C(FG, "frame_gen_synthesis", "Generated-frame synthesis", "edge", new[] { "edge", "classic", "edge-blend" }, Restart, "How a generated frame is drawn from the optical flow. edge (default): sharp motion boundaries; where the motion is uncertain the real frame is shown (a little local judder) instead of a double image. classic: the algorithm of 0.6 and earlier, the predictable fallback if edge misbehaves in a game. edge-blend: edge, but uncertain motion blends both frames. What we know: in games on the headset edge looks visibly better than classic, and edge could not be told apart from edge-blend. The lab's ground-truth test agrees (a frame generated from two rendered frames of the animated benchmark scene, compared with the frame the scene really has there): edge keeps the parts that did not move intact where classic softens them (whole-frame PSNR +2.0 dB, sharper in 63 of 63 cases), and edge against edge-blend is a statistical tie. Edge also costs less GPU (0.24 ms against 0.33 ms per generated frame). Hover for the numbers."),
                 B(AR, "phase_lock", "Phase lock", true, Restart, "Slides the host's frame clock (up to 2 ms every 2-4 s) so frames arrive 7 ms before the headset's render tick. The margin matters: at 3 ms 1.2-2.3 % of the headset's refreshes repeated, at 7 ms 0.5 %, with the same 67 ms latency. Known flaw: it slides 12-25 times a minute even when it has nothing to correct (999 slides in an hour of a game running free at 56 fps). Leave it on; turn it off only to compare. Hover for the numbers."),
                 N(AR, "running_start_ms", "Running-start margin (ms)", 2, 0, 10, 0.5, 1, Restart, "How much earlier than the display tick the game is released, on top of its own frame-time envelope: 0 releases it at the tick, higher gives the game's frame more time to finish before the host needs it. The default is 2 ms; 1-4 are plausible. Honest status: no headset A/B for this value. In the lab a run with 0 was the cleanest (0.1 % repeats, no empty boundary) and a lead capped below one game period changed nothing. Hover for the context."),
@@ -66,8 +66,12 @@ namespace AirFrameXR
             });
 
             knobs.Find(k => k.Key == "frame_gen_cap_fps").Tip =
-                "Cap on the game's rate (uncapped mode only)\r\n" +
+                "Game fps lock\r\n" +
                 "\r\n" +
+                "Applies in every mode: frame generation off, fixed rates, uncapped. The shim never releases the game sooner than 1/lock after the last release.\r\n" +
+                "Choose a rate that divides the headset's refresh rate: at 100 Hz, 45 gives 2-2-2-2-3 repeats; at 90 Hz it is an even 2.\r\n" +
+                "\r\n" +
+                "What we measured (uncapped frame generation):\r\n" +
                 "Headset nights of 2026-10-15/16 (RTX 5090, Vision Pro at 100 Hz), uncapped, free-running against capped at 70 fps:\r\n" +
                 "   Dead Space:  80 fps, lag 62 ms, newest rendered frame 35 ms old (2.8 periods)  ->  67 fps, lag 41 then 31 ms, 13 ms (0.9 periods)\r\n" +
                 "   Avatar:      98 fps, lag 22-61 ms  ->  67 fps, lag 30 ms\r\n" +

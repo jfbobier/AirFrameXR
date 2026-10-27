@@ -357,6 +357,8 @@ pub struct Pipeline {
     fg_real_due: AtomicBool,
     /// the shim's minimum release spacing the pipeline last applied for the two-thirds rate (us); 0 = none applied
     fg_cap_us: AtomicU32,
+    /// the user's game fps lock as a minimum release spacing (us; 0 = none), kept when the rate's own spacing is refreshed
+    fps_lock_us: AtomicU32,
     /// boundaries at which an arrived frame was left waiting because the previous rendered frame was still due
     pub fg_queued: AtomicU64,
     /// how long a boundary with nothing due waits for the expected rendered frame (AIRFRAMEXR_FG_ARRIVAL_WAIT_MS, default 4)
@@ -454,6 +456,7 @@ impl Pipeline {
             fg_pairs_skipped: AtomicU64::new(0),
             fg_real_due: AtomicBool::new(false),
             fg_cap_us: AtomicU32::new(0),
+            fps_lock_us: AtomicU32::new(0),
             fg_queued: AtomicU64::new(0),
             fg_arrival_wait: Duration::from_secs_f64(
                 std::env::var("AIRFRAMEXR_FG_ARRIVAL_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(4.0).clamp(0.0, 10.0) / 1000.0),
@@ -489,6 +492,10 @@ impl Pipeline {
 
     /// Frame generation rate (`FgRate`): the fixed patterns (third, half) or the content-clock planner (two thirds, uncapped).
     /// `lag_ms` = 0: the lag of the content-clock planner follows the arrivals.
+    pub fn set_fps_lock_us(&self, us: u32) {
+        self.fps_lock_us.store(us, Ordering::Relaxed);
+    }
+
     pub fn set_frame_gen_rate(&self, rate: FgRate, lag_ms: f64) {
         let mut st = self.fg.lock();
         let uncapped = rate.is_uncapped();
@@ -987,7 +994,7 @@ impl Pipeline {
         let fg_unc = self.fg_on.load(Ordering::Relaxed) && self.fg_uncapped.load(Ordering::Relaxed);
         if fg_unc {
             // two-thirds rate: the shim's minimum release spacing follows the display period (the host clock follows the client's rate)
-            let want = self.fg.lock().rate.min_period_us(self.period().as_secs_f64());
+            let want = self.fg.lock().rate.min_period_us(self.period().as_secs_f64()).max(self.fps_lock_us.load(Ordering::Relaxed));
             if want != 0 && self.fg_cap_us.swap(want, Ordering::Relaxed) != want && self.ipc != 0 {
                 unsafe { nvh::nvh_ipc_set_app_min_period(self.ipc(), want) };
             }

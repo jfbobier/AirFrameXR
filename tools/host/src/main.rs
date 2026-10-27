@@ -1390,18 +1390,21 @@ pub(crate) fn push_recent_sample(shared: &Shared, ts: Duration, q: [f32; 4]) {
 }
 
 /// The shim's pacing for the frame-generation rate in force: (release step in display periods, minimum release spacing in us; 0 = none).
-/// Generation off: every boundary, no cap. Third / half: every 3rd / 2nd boundary. Two thirds: free-running held to two thirds of the
-/// display rate (the pipeline refreshes it when the display period changes). Uncapped: free-running, the user's fps cap if any.
+/// Generation off: every boundary, only the user's lock. Third / half: every 3rd / 2nd boundary. Two thirds: free-running held to two thirds of
+/// the display rate (the pipeline refreshes it when the display period changes). Uncapped: free-running. The user's game fps lock
+/// (`frame_gen_cap_fps`) applies in every mode, on top of the rate's own spacing.
 fn fg_pacing(args: &Args, fg_active: bool, display_period_s: f64) -> (u32, u32) {
+    let lock = fps_lock_us(args);
     if !fg_active {
-        return (1, 0);
+        return (1, lock);
     }
     let rate = args.fg_rate.unwrap_or(FgRate::Half);
-    let cap = match rate {
-        FgRate::Uncapped => match args.fg_cap_fps { Some(f) if f > 0.0 => (1_000_000.0 / f).round() as u32, _ => 0 },
-        r => r.min_period_us(display_period_s),
-    };
-    (rate.period_mul(), cap)
+    (rate.period_mul(), rate.min_period_us(display_period_s).max(lock))
+}
+
+/// The user's game fps lock as a minimum release spacing in us (0 = none).
+fn fps_lock_us(args: &Args) -> u32 {
+    match args.fg_cap_fps { Some(f) if f > 0.0 => (1_000_000.0 / f).round() as u32, _ => 0 }
 }
 
 /// Applies `fg_pacing` to the shim (ipc appPeriodMul and appMinPeriodUs).
@@ -1433,7 +1436,7 @@ fn log_fov_restriction(origin: Instant, s: &[f32; 4], quality: f32, why: &str) {
 fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
     let rate = args.fg_rate.unwrap_or(FgRate::Half).name();
     let cap = args.fg_cap_fps.unwrap_or(0.0);
-    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, fps cap {}",
+    logs::general("INFO", &format!("frame generation config ({why}): generation {}, rate {rate}, game fps lock {}",
         if fg_active { "ON" } else { "off" }, if cap > 0.0 { format!("{cap:.0}") } else { "none".into() }));
     event(origin, "frame_gen_config", json!({ "why": why, "on": fg_active, "rate": rate,
         "cap_fps": cap, "flow_scale": FG_FLOW_SCALE, "perf": FG_PERF, "synthesis": args.fg_synth }));
@@ -1904,6 +1907,7 @@ fn main() {
             p.set_frame_gen(fg_active);
         }
         p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half), 0.0);
+        p.set_fps_lock_us(fps_lock_us(&args));
         apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
         log_fg_config(origin, &args, fg_active, "start");
         p.start();
@@ -2434,6 +2438,9 @@ fn main() {
             let cap = vision::FG_CAP_REQ.swap(-1, Ordering::SeqCst);
             if cap >= 0 {
                 args.fg_cap_fps = Some(cap as f64);
+                if let Some(p) = pipeline.as_ref() {
+                    p.set_fps_lock_us(fps_lock_us(&args));
+                }
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_cap");
             }
