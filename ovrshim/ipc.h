@@ -14,7 +14,7 @@
 namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 33;
+constexpr uint32_t kVersion = 34;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -113,6 +113,9 @@ struct HostToShim {
     // the field of view the GAME is told, as fractions of the headset's tangents (eyeFovTan): outer (the side away from the nose), inner, upper, lower; 1 = all of it.
     // The stream frame keeps covering the headset's whole FoV (the client maps it over the FoV it declared); an app that started later takes new values.
     float fovScale[4];
+    // with a restricted field of view: where the recommended size sits between the floor (the stream's pixel density over the smaller view) and the ceiling
+    // (the stream's eye size itself), 0..1; 0 = the floor, the way it was. Read with the recommended size, so an app that started later takes a new value.
+    float renderQuality;
 };
 
 struct Haptic {

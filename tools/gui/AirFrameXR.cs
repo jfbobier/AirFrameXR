@@ -343,9 +343,9 @@ namespace AirFrameXR
             else if (link == Link.Orange && (DateTime.UtcNow - lastSeen).TotalSeconds > 30) SetLink(Link.Red, $"Headset: not found - searching for {name} ...");
         }
         DateTime configSeen; string watchRate; double watchCap; string watchFov;
-        /// the field-of-view override as the host command takes it: "off", or "on outer inner upper lower" (tangents)
+        /// the field-of-view override as the host command takes it: "off", or "on outer inner upper lower render_quality" (tangents, then 0..1)
         string FovLine() => settings.FovOverride && settings.FovOuter > 0 && settings.FovInner > 0 && settings.FovUpper > 0 && settings.FovLower > 0
-            ? "on " + string.Join(" ", new[] { settings.FovOuter, settings.FovInner, settings.FovUpper, settings.FovLower }.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))
+            ? "on " + string.Join(" ", new[] { settings.FovOuter, settings.FovInner, settings.FovUpper, settings.FovLower }.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))) + " " + settings.FovRenderQuality.ToString("0.00", CultureInfo.InvariantCulture)
             : "off";
 
         void ConfigWatchStart()
@@ -844,9 +844,9 @@ namespace AirFrameXR
                 case "settings_fov":   // the replay harness: the Advanced window wrote the override ("off" or "on outer inner upper lower"), the watcher compares and forwards
                     {
                         var p = value.Split(' ');
-                        string[] keys = { "video.fov_outer", "video.fov_inner", "video.fov_upper", "video.fov_lower" };
+                        string[] keys = { "video.fov_outer", "video.fov_inner", "video.fov_upper", "video.fov_lower", "video.fov_render_quality" };
                         global::AirFrameXR.Json.Set(settings.Root, "video.fov_override", p[0] == "on");
-                        for (int i = 0; i < 4 && p[0] == "on" && i + 1 < p.Length; i++) global::AirFrameXR.Json.Set(settings.Root, keys[i], double.Parse(p[i + 1], CultureInfo.InvariantCulture));
+                        for (int i = 0; i < 5 && p[0] == "on" && i + 1 < p.Length; i++) global::AirFrameXR.Json.Set(settings.Root, keys[i], double.Parse(p[i + 1], CultureInfo.InvariantCulture));
                         ForwardConfigChanges();
                         break;
                     }

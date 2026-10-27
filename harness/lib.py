@@ -465,7 +465,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
-                                     "frame_gen": "--frame-gen", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override"})
+                                     "frame_gen": "--frame-gen", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override", "fov_quality": "--fov-quality"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -1015,8 +1015,9 @@ def analyse_fov_restrict(sc, outdir):
     ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
     wr = sum((exp[e][0] + exp[e][1]) / (headset[4 * e] + headset[4 * e + 1]) for e in range(2)) / 2
     hr = sum((exp[e][2] + exp[e][3]) / (headset[4 * e + 2] + headset[4 * e + 3]) for e in range(2)) / 2
-    even = lambda v: max(64, (int(round(v)) + 1) // 2 * 2)
-    out["expected_recommended"] = (even(ew * wr), even(eh * hr))
+    even = lambda v: max(64, (int(v + 0.5) + 1) // 2 * 2)   # std::lround: half away from zero
+    q = min(1.0, max(0.0, float(cfgk.get("quality", 0.0))))   # render quality: from the floor (the stream's density over the smaller view) to the stream's eye size
+    out["expected_recommended"] = (even(ew * wr + (ew - ew * wr) * q), even(eh * hr + (eh - eh * hr) * q))
     out["stream_eye"] = (ew, eh)
     # the stream frame: side by side, each eye covers the headset's view; the game's view sits inside it, the rest is black
     pts, want = [], []

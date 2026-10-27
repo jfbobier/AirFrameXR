@@ -6,5 +6,7 @@
 {"dump": "fov_untouched"}
 {"ui": "settings_fov", "value": "on 1.50 1.00 1.22 1.02"}
 {"dump": "fov_changed"}
+{"ui": "settings_fov", "value": "on 1.50 1.00 1.22 1.02 0.60"}
+{"dump": "fov_quality"}
 {"ui": "settings_fov", "value": "off"}
 {"dump": "fov_off"}

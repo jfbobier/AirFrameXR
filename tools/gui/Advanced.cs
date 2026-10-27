@@ -41,9 +41,9 @@ namespace AirFrameXR
         static Knob N(string sec, string key, string title, double def, double min, double max, double step, int dec, string when, string desc) => new Knob { Section = sec, Key = key, Title = title, Kind = Kind.Number, Def = def, Min = min, Max = max, Step = step, Decimals = dec, When = when, Desc = desc };
         static Knob C(string sec, string key, string title, string def, string[] choices, string when, string desc) => new Knob { Section = sec, Key = key, Title = title, Kind = Kind.Choice, DefChoice = def, Choices = choices, When = when, Desc = desc };
 
-        public AdvancedForm(double[] clientFovForTest = null, bool tickForTest = false)
+        public AdvancedForm(double[] clientFovForTest = null, bool tickForTest = false, int[] streamEyeForTest = null)
         {
-            testClient = clientFovForTest; testTick = tickForTest;
+            testClient = clientFovForTest; testTick = tickForTest; testEye = streamEyeForTest;
             Text = "AirFrameXR – Advanced picture and FOV settings";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
@@ -232,9 +232,12 @@ namespace AirFrameXR
         readonly NumericUpDown[] fovNum = new NumericUpDown[4];
         readonly Label[] fovDeg = new Label[4];
         Label fovNote, fovShare;
+        TrackBar fovQ;
+        FlowLayoutPanel fovQRow;
+        int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
         FlowLayoutPanel fovFields;
         double[] clientFov;   // the headset's tangents per edge (outer, inner, upper, lower), averaged over the two eyes; null = no headset seen yet
-        readonly double[] testClient; readonly bool testTick;   // the UI harness: a pretend headset, the override ticked
+        readonly double[] testClient; readonly bool testTick; readonly int[] testEye;   // the UI harness: a pretend headset, the override ticked
         static readonly string[] FovNames = { "Outer", "Inner", "Upper", "Lower" };
         static readonly string[] FovKeys = { "fov_outer", "fov_inner", "fov_upper", "fov_lower" };
         const string FovTip =
@@ -248,6 +251,37 @@ namespace AirFrameXR
                 "When it applies: at the NEXT game start. The runtime reads the field of view once when the game starts and UEVR does not re-read it, so a game that is already running keeps what it began with. Changing a field while the streamer runs is enough; nothing else to restart.\r\n" +
                 "\r\n" +
                 "The Vision Pro's field of view as visionOS reports it (left eye): tangents 1.78 outer, 1.02 inner, 1.22 up, 1.02 down = 60.7, 45.5, 50.6, 45.5 degrees (about 106 x 96 degrees). Share of the pixels the game renders, for example: outer 1.60 and upper 1.10 -> 88.5 %; every edge 90 % of the headset's -> 81 %; 85 % -> 72 %. The fields need the headset's values: connect the headset once (they are saved when it connects).";
+
+        const string FovQualityTip =
+                "Game render quality\r\n" +
+                "\r\n" +
+                "What it is: how many pixels the game renders per eye, between two limits worked out from your settings. Left end: the stream's pixel density over the smaller view you chose (the fewest pixels, the biggest GPU saving). Right end: the stream's own per-eye size (the pixels an unrestricted game renders).\r\n" +
+                "What you get: the pixels the restriction saved can be spent on a finer render. The game's picture is filtered down to the stream's pixels, so you get cleaner edges and less shimmer (like supersampling); you do not get detail beyond what the stream carries.\r\n" +
+                "What it costs: game GPU time and video memory, rising with the pixels shown. Encode, decode and network are unchanged.\r\n" +
+                "The limits follow your resolution settings (the per-eye size of the stream, e.g. a Quest's lower one) and the field of view fields above; the slider only works while a restriction is on.\r\n" +
+                "When it applies: at the NEXT game start, like the field of view.";
+
+        /// The stream's per-eye size from the user's resolution settings (session.json: the negotiated cache the host reads too), null when unknown.
+        static int[] ReadStreamEye()
+        {
+            try
+            {
+                var s = Session.Load();
+                int w = (int)Json.Num(s, "openvr_config.eye_resolution_width", 0), h = (int)Json.Num(s, "openvr_config.eye_resolution_height", 0);
+                return w > 0 && h > 0 ? new[] { w, h } : null;
+            }
+            catch { return null; }
+        }
+
+        static int EvenAtLeast64(double v) { return Math.Max(64, ((int)Math.Round(v, MidpointRounding.AwayFromZero) + 1) / 2 * 2); }
+
+        /// the game's render size per eye at quality q (0..1): the same maths as the shim (ovrshim/render_size.h), widthRatio / heightRatio = the restricted span of the headset's
+        public static int[] GameRenderSize(int eyeW, int eyeH, double widthRatio, double heightRatio, double q)
+        {
+            q = Math.Max(0, Math.Min(1, q));
+            double fw = eyeW * widthRatio, fh = eyeH * heightRatio;
+            return new[] { EvenAtLeast64(fw + (eyeW - fw) * q), EvenAtLeast64(fh + (eyeH - fh) * q) };
+        }
 
         /// The headset's tangents as the host saved them at its last connection (config\airframexr_views.json: left eye l r u d, right eye l r u d), per edge averaged over the eyes.
         static double[] ReadClientFov()
@@ -290,6 +324,13 @@ namespace AirFrameXR
             fovShare = Ui.Line(""); fovShare.ForeColor = Color.SeaGreen; fovShare.Margin = new Padding(22, 0, 3, 2); fovShare.MaximumSize = new Size(900, 0);
             body.Controls.Add(fovNote);
             body.Controls.Add(fovShare);
+            fovQRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 2, 0, 0), Visible = false };
+            fovQ = new TrackBar { Minimum = 0, Maximum = 100, TickStyle = TickStyle.None, SmallChange = 5, LargeChange = 10, Width = 200, AutoSize = false, Height = 26, AccessibleName = "Game render quality" };
+            fovQ.ValueChanged += (s, e) => FovQualityChanged();
+            fovQRow.Controls.Add(new Label { Text = "Game render quality", AutoSize = true, Margin = new Padding(0, 5, 6, 0) });
+            fovQRow.Controls.Add(fovQ);
+            tips.SetToolTip(fovQ, FovQualityTip);
+            body.Controls.Add(fovQRow);
             fovTick.CheckedChanged += (s, e) => FovTickChanged();
         }
 
@@ -299,6 +340,8 @@ namespace AirFrameXR
             var st = new AppSettings();
             var was = loading; loading = true;
             bool on = testTick || st.FovOverride;
+            streamEye = testEye ?? ReadStreamEye();
+            fovQ.Value = (int)Math.Round(st.FovRenderQuality * 100);
             fovTick.Enabled = clientFov != null;
             fovTick.Checked = on && clientFov != null;
             fovFields.Visible = clientFov != null;
@@ -315,7 +358,7 @@ namespace AirFrameXR
                     var top = Math.Ceiling(clientFov[k] * 100) / 100;
                     fovNum[k].Minimum = (decimal)Math.Max(0.10, Math.Floor(clientFov[k] * 20) / 100);
                     fovNum[k].Maximum = (decimal)top;
-                    var v = on && saved[k] > 0 ? saved[k] : clientFov[k];
+                    var v = on && saved[k] > 0 ? saved[k] : testEye != null ? clientFov[k] * new[] { 0.7, 0.9, 0.8, 0.6 }[k] : clientFov[k];   // the UI harness shows a restriction
                     fovNum[k].Value = Math.Max(fovNum[k].Minimum, Math.Min(fovNum[k].Maximum, (decimal)Math.Round(v, 2)));
                     fovNum[k].Enabled = on;
                 }
@@ -341,12 +384,28 @@ namespace AirFrameXR
             {
                 fovNote.Text = "Greyed: the headset's own field of view as it reported it (including any FoV scale set in its app). Nothing is changed.";
                 fovShare.Text = "";
+                fovQRow.Visible = false;
                 return;
             }
             fovNote.Text = "Override on: the game is told these values (never more than the headset's). Applies at the next game start.";
             double w0 = clientFov[0] + clientFov[1], h0 = clientFov[2] + clientFov[3];
             double w = Math.Min(v[0], clientFov[0]) + Math.Min(v[1], clientFov[1]), h = Math.Min(v[2], clientFov[2]) + Math.Min(v[3], clientFov[3]);
             fovShare.Text = "The game renders " + (100 * w * h / (w0 * h0)).ToString("0", CultureInfo.InvariantCulture) + " % of the pixels the headset's whole view would.";
+            QualityLabel(w / w0, h / h0);   // appends its line to fovShare
+        }
+
+        /// the render quality row: floor and ceiling from the stream's size and the restriction, the size at the slider; hidden unless a restriction is on
+        void QualityLabel(double wr, double hr)
+        {
+            bool restricted = wr < 0.995 || hr < 0.995;
+            bool show = streamEye != null && fovTick.Checked && restricted;   // not read back from Visible: it is false until the window is shown
+            fovQRow.Visible = show;
+            if (!show) return;
+            var floor = GameRenderSize(streamEye[0], streamEye[1], wr, hr, 0);
+            var now = GameRenderSize(streamEye[0], streamEye[1], wr, hr, fovQ.Value / 100.0);
+            double mpx(int[] z) { return z[0] * (double)z[1] / 1e6; }
+            fovShare.Text += "\r\nIn that view the game renders " + now[0] + " \u00D7 " + now[1] + " per eye (" + mpx(now).ToString("0.0", CultureInfo.InvariantCulture) + " Mpx, " + (100 * mpx(now) / mpx(new[] { streamEye[0], streamEye[1] })).ToString("0", CultureInfo.InvariantCulture)
+                + " % of an unrestricted game's). Left end of the slider: " + floor[0] + " \u00D7 " + floor[1] + ", right end: " + streamEye[0] + " \u00D7 " + streamEye[1] + " (the stream's own size).";
         }
 
         void FovStore(AppSettings st)
@@ -356,6 +415,7 @@ namespace AirFrameXR
                 Json.Set(st.Root, V + "fov_override", true);
                 var v = FovValues();
                 for (int k = 0; k < 4; k++) Json.Set(st.Root, V + FovKeys[k], Math.Round(v[k], 4));
+                Json.Set(st.Root, V + "fov_render_quality", Math.Round(fovQ.Value / 100.0, 2));
             }
             else Json.Remove(st.Root, V + "fov_override");   // the saved values stay: ticking again brings them back
         }
@@ -380,6 +440,16 @@ namespace AirFrameXR
             FovStore(st);
             Save(st, "field of view override " + (fovTick.Checked ? "on" : "off"), NextGame);
             if (!fovTick.Checked) LoadFov(); else FovLabels();
+        }
+
+        void FovQualityChanged()
+        {
+            if (loading || clientFov == null) return;
+            FovLabels();
+            if (!fovTick.Checked) return;
+            var st = new AppSettings();
+            FovStore(st);
+            Save(st, "game render quality " + fovQ.Value + " %", NextGame);
         }
 
         void FovValueChanged()
@@ -467,6 +537,7 @@ namespace AirFrameXR
             foreach (var k in knobs) Json.Remove(st.Root, V + k.Key);
             Json.Remove(st.Root, V + "fov_override");
             foreach (var fk in FovKeys) Json.Remove(st.Root, V + fk);
+            Json.Remove(st.Root, V + "fov_render_quality");
             if (st.FrameGenRate == "uncapped") st.FrameGenRate = Back(st);
             Save(st, "all the switches back to their defaults", Restart);
             LoadValues();

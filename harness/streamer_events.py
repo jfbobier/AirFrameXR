@@ -59,6 +59,7 @@ EXPECT = {
         ("fov_on", ["sent fov_override on 1.50 1.02 1.22 1.02"], []),
         ("fov_untouched", [], ["sent fov_override"]),   # the file changed but not the field of view: nothing is sent again
         ("fov_changed", ["sent fov_override on 1.50 1.00 1.22 1.02"], []),
+        ("fov_quality", ["sent fov_override on 1.50 1.00 1.22 1.02 0.60"], []),   # the render quality is the fifth value
         ("fov_off", ["sent fov_override off"], []),
     ],
     "window_size": [],

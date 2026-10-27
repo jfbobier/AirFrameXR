@@ -65,6 +65,8 @@ pub struct Settings {
     pub fov_inner: Option<f64>,
     pub fov_upper: Option<f64>,
     pub fov_lower: Option<f64>,
+    /// 0..1: where the game's render size sits between the floor (the stream's pixel density over the restricted view) and the stream's eye size (0 = the floor)
+    pub fov_render_quality: Option<f64>,
     pub debug: Option<bool>,
     pub gamma: Option<f32>,
     /// headset height above the floor handed to games (m); 0 = the headset's own floor estimate
@@ -128,6 +130,7 @@ pub fn load_settings(path: &Path) -> Settings {
         fov_inner: video["fov_inner"].as_f64(),
         fov_upper: video["fov_upper"].as_f64(),
         fov_lower: video["fov_lower"].as_f64(),
+        fov_render_quality: video["fov_render_quality"].as_f64(),
         debug: v["debug"].as_bool(),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
         height_m: v["headset"]["height_m"].as_f64().map(|g| g as f32),
@@ -226,6 +229,12 @@ pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 pub static FOV_ON: AtomicBool = AtomicBool::new(false);
 pub static FOV_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static FOV_PENDING: AtomicBool = AtomicBool::new(false);
+/// the render quality sent with the override (f32 bits)
+pub static FOV_QUALITY_REQ: AtomicU32 = AtomicU32::new(0);
+/// 0..1 for a quality given in the settings, the lab flag or the command; anything else is the floor
+pub fn render_quality(v: f64) -> f32 {
+    if v.is_finite() { v.clamp(0.0, 1.0) as f32 } else { 0.0 }
+}
 /// percent -> fraction (the lab flag `--fov-scale`), within what a restriction accepts (a view cannot be emptied)
 pub fn fov_fraction(pct: f64) -> f32 {
     (pct / 100.0).clamp(0.2, 1.0) as f32
@@ -246,7 +255,7 @@ pub fn fov_scale_from(t: &[f32; 4], fov8: &[f32; 8]) -> [f32; 4] {
 }
 
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
-/// `frame_gen_cap <fps>` (0 = none), `fov_override off` | `fov_override on <outer> <inner> <upper> <lower>` (the tangents the game is told, taken by the next game), `recenter`,
+/// `frame_gen_cap <fps>` (0 = none), `fov_override off` | `fov_override on <outer> <inner> <upper> <lower> [<render quality 0..1>]` (the tangents the game is told and where its render size sits between the floor and the stream's eye size, taken by the next game), `recenter`,
 /// `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
@@ -340,10 +349,11 @@ pub fn spawn_stdin_control() {
                 }
                 (Some("fov_override"), Some("on")) => {
                     let vals: Vec<f32> = w.filter_map(|x| x.parse().ok()).collect();
-                    if vals.len() == 4 && vals.iter().all(|v| v.is_finite() && *v > 0.0) {
-                        for (k, t) in vals.iter().enumerate() {
+                    if (vals.len() == 4 || vals.len() == 5) && vals[..4].iter().all(|v| v.is_finite() && *v > 0.0) {
+                        for (k, t) in vals[..4].iter().enumerate() {
                             FOV_REQ[k].store(t.to_bits(), Ordering::SeqCst);
                         }
+                        FOV_QUALITY_REQ.store(vals.get(4).map_or(0.0, |q| render_quality(*q as f64)).to_bits(), Ordering::SeqCst);
                         FOV_ON.store(true, Ordering::SeqCst);
                         FOV_PENDING.store(true, Ordering::SeqCst);
                     }

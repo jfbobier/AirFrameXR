@@ -371,6 +371,8 @@ namespace AirFrameXR
         public double FovInner => Json.Num(Root, "video.fov_inner", 0);
         public double FovUpper => Json.Num(Root, "video.fov_upper", 0);
         public double FovLower => Json.Num(Root, "video.fov_lower", 0);
+        /// 0..1: where the game's render size sits between the floor (the stream's pixel density over the restricted view) and the stream's eye size; 0 = the floor
+        public double FovRenderQuality => Math.Max(0, Math.Min(1, Json.Num(Root, "video.fov_render_quality", 0)));
         public double FrameGenCapFps { get => Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
         public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", true); set => Json.Set(Root, "video.frame_gen_recommended", value); }
