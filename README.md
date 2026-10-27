@@ -100,20 +100,9 @@ flowchart LR
     C -.->|tracking 90-270 Hz,<br/>per-frame statistics| H
 ```
 
-In words:
-
-```
-OpenXR game
-  -> VirtualDesktop-OpenXR (VDXR, OpenXR runtime, small patches)
-  -> OVRShim (LibOVRRT64_1.dll: composes layers, paces the game, shared 10-bit side-by-side frame ring)
-  -> alvr_host.exe (frame generation, ALVR v20.14.1 server_core, ALVR's foveated encoding, NVENC HEVC 10-bit split encode)
-  -> ALVR protocol over Wi-Fi
-  -> ALVR client on the headset (stock Vision Pro app, Quest client, ...)
-```
-
 ## What it looks like
 
-The windows of 0.5, at 1080p and 125 % scale, rendered by the project's own UI harness with demo data (a made-up game history and headset, no real person's data).
+The windows, at 1080p and 125 % scale, rendered by the project's own UI harness with demo data (a made-up game history and headset, no real person's data).
 Regenerate them with `python3 harness/readme_screens.py`.
 
 **One front door.** Double-click `AirFrameXR.exe`: a card per tool, the OpenXR runtime switch (it switches back, too), and reviews of the OpenXR layers and the firewall rules.
@@ -151,6 +140,30 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <!-- End desktop mirror illustration -->
 
+## Features
+- **Setup wizard** (`configure.exe`): reads what the headset supports, offers a community profile, a pre-filled manual configuration or your existing ALVR settings, then
+  tests the result (system and NVENC, encoder speed, network at the configured bitrate, a real scene streamed through the pipeline with the headset's own head pose, audio).
+  **Find headset...** in the streamer window searches the network and pairs. Any NVIDIA GPU with NVENC API 12.2+ works.
+- **Frame pacing** with an intake gate and a three-deep in-order queue. The Vision Pro profile defaults to foveated encoding at 300 Mbps.
+- **Frame generation** (off by default, a switch in the streamer and in Settings; experimental): for games that cannot hold the display rate. A slider sets the game's rate as a
+  fraction of the display rate, **1/3, 1/2 (default) or 2/3**, and the streamer generates the frames in between. In-scene motion comes from the GPU's optical-flow engine
+  (NVIDIA Optical Flow, Turing or later), the synthesis is edge-aware (motion edges stay sharp, and where the motion is uncertain the real frame is shown instead of a double
+  image; ideas from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented; the earlier algorithm stays as **classic** in Advanced picture and FOV settings), and
+  every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3.
+  It costs latency by construction (interpolation: one game period), and it is not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
+  A **Recommended** tick sets the rate from the game's recorded runs on the connected headset, and **Recenter** (a button and a key, **End** by default; also sent at every game start) turns the tracking space to your
+  current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), and
+  [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md) for why DLSS motion vectors were tried and removed.
+- **A field of view for the game, set from the streamer**, and a render quality slider: [how it works](#how-fov-restriction-works).
+- **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the firewall and OpenXR-layer reviews. They follow the display
+  (1080p laptops to 4K, 100-200 % scale), checked by the UI harness below.
+- **Desktop mirror** (optional): see above; it works with either hand.
+- **Advanced picture and FOV settings**: the switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect and what we
+  measured; a switch at its default is removed from the settings file. The HEVC QP map stays on by default and its trade-off is written next to it.
+- **Lab tools**: the test harness below, including a frame generation judge ([docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md)) and the QP map A/B.
+
+What changed in each version: [docs/releases/](docs/releases/). `docs/progress.md` is the detailed log: what is built, what is tested (and how), what is not.
+
 ## Status
 - **Works on the real headset** (tested on RTX 5090 + Vision Pro, and on a Quest 3 with the Meta-store ALVR client): the vast majority of
   UEVR games, Luke Ross mods (Dead Space Remake), native VR games, controllers (ALVR's Quest/Touch emulation), haptics, game audio,
@@ -160,83 +173,82 @@ Regenerate them with `python3 harness/readme_screens.py`.
   - Some OpenXR games need the SteamVR + ALVR fallback. OpenVR games are not supported and none is planned.
   - No USB streaming, except when bridged with ALVR's own tools.
   - HEVC encoding is baked in for maximum split-encoding performance: no H.264 or AV1.
-- **Perceived quality varies a lot from one setup to another, especially with frame generation on.** The same build felt "restored" one
-  evening and "lower" the next on the same PC and headset, and every time the cause was a condition of the setup, not a game: the Wi-Fi
-  channel (a neighbour's network produced micro-stutters that stock ALVR showed too; channel 149 cured them), the panel running 100 Hz
-  instead of 90 under 50 Hz lighting (every generation cap 11 % tighter), the margin frames need before the headset's tick (3 ms was too
-  thin for an 8-9 ms arrival spread, 7 ms is the default now), the generation rate per game (a game under its cap re-sends frozen frames
-  that the headset counts as shown), the Quest tracking at 270 Hz being read as a 241 Hz display. All of these are measured now and most
-  are handled, but a new PC, router or headset will find the next one. If something feels off, the logs usually say why; see
+  - On the Vision Pro, in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips them (shown fps a little under the host
+    fps). A fix exists (branch `exp/restamp-2026-10-13`) but needs a change on the visionOS client side, so it is not in the release.
+  - The field of view override and render quality slider have not been tried in a real game yet (lab scenarios only).
+- **Perceived quality varies a lot from one setup to another, especially with frame generation on.** Every time the same build felt different on the same PC and headset, the
+  cause was a condition of the setup, not a game: the Wi-Fi channel (a neighbour's network produced micro-stutters that stock ALVR showed too; channel 149 cured them), the panel
+  running 100 Hz instead of 90, the margin frames need before the headset's tick (7 ms is the default), the generation rate per game, the Quest tracking at 270 Hz being read as
+  a 241 Hz display. All of these are measured and most are handled, but a new PC, router or headset will find the next one. If something feels off, the logs usually say why; see
   [docs/PERFORMANCE_KNOBS.md](docs/PERFORMANCE_KNOBS.md) for every knob, what it does and what should drive it, and
   [docs/PERFORMANCE_FINDINGS.md](docs/PERFORMANCE_FINDINGS.md) for the nights that taught us.
-- **New in 0.3**: a **setup wizard** (`configure.exe`) that reads what the headset supports, offers a community profile, a pre-filled
-  manual configuration or your existing ALVR settings, then tests the result (system and NVENC, encoder speed, network at the configured
-  bitrate, a real scene streamed through the pipeline with the headset's own head pose, audio); **Find headset...** in the streamer window;
-  any NVIDIA GPU with NVENC API 12.2+ (the RTX 40 check is gone); frame pacing with an intake gate and a three-deep in-order queue;
-  the Vision Pro profile defaults to foveated encoding at 300 Mbps. The "low"/"auto" latency modes were removed (they dropped 15-30 % of
-  frames in GPU-bound games).
-- **Vision Pro known issue**: in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips
-  them (shown fps a little under the host fps). A fix exists (branch `exp/restamp-2026-10-13`) but needs a change on the visionOS
-  client side, so it is not in the release.
-- **New in 0.4: frame generation** (toggle in the streamer window and in Settings, `video.frame_gen`, off by default): for games that cannot
-  hold the display rate. A slider sets the game's rate as a fraction of the display rate, **1/3, 1/2 (default) or 2/3**, and the streamer
-  generates the frames in between: at 1/2 and 1/3 the game is locked to the display cadence (one or two generated frames per rendered one),
-  at 2/3 it is held to two thirds of the rate and every frame sent is interpolated. In-scene motion comes from the GPU's optical-flow
-  engine (NVIDIA Optical Flow, Turing or later). Every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz
-  with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3. Costs latency by construction (interpolation:
-  one game period). The rate is fixed for a run; a **Recommended** tick sets it from the
-  game's recorded runs on the connected headset (`config/games/<exe>.json`, written by the streamer at every game end: fps, the headset's repeated
-  periods, the streamer's repeats), and the streamer window shows the last run's record when a game ends. A **Recenter** button (also sent
-  at every game start) turns the tracking space to your current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md),
-  [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md). Not automatic
-  by design: a game that holds a steady 70-75 fps is often better left alone.
-- **New in 0.5: the windows.** Double-click **`AirFrameXR.exe`** (the only file in the folder's root; a stub that opens the launcher) and pick a tool;
-  the launcher steps aside while a tool is open and comes back when you close it. Everything else sits in `bin\`.
-  - **Launcher** (`bin\launcher.exe`): a card per tool, plus three switches that people kept asking for: the **OpenXR runtime** (shows the active one,
-    switches to AirFrameXR, and the same button switches back to the previous runtime), the **OpenXR layers** review (some layers capture the
-    controllers before any runtime sees them; listed, switched off and on again reversibly) and the **firewall rules** review (finds the rule for
-    this folder's exact `alvr_host.exe`, offers one only if none is in place, and lists leftovers from moved or deleted copies to clean up).
-  - **Streamer** (`bin\streamer.exe`): live numbers as tiles (game, streamed and shown fps, bitrate, latency split, loss), display settings,
-    frame generation, **Recenter** (and a recenter key, **End** by default, set in the wizard), and an optional **Mirror Windows desktop between
-    sessions** toggle: the desktop floats in front of you (SDR or HDR, converted to SDR), your right hand is the mouse (pinch = click, grip = right click);
-    for games you start from the headset, off by default.
-  - **Logs and performance** (`bin\performance.exe`): the games you played, one file per game (`config/games/<exe>.json`) with the last sessions (fps,
-    latency, network, GPU); export a log zip; records of uninstalled games are cleaned.
-  - **Diagnose** (`bin\configure.exe --diagnose`): the wizard's checks and verdict on your settings as they are, now also covering the OpenXR layers
-    and the firewall. The **Setup wizard** asks Vision Pro users once to turn on passthrough in the ALVR app (the streamer cannot set it).
-  - The windows follow the display: 1080p laptops to 4K, 100-200 % scale (WinForms' own per-monitor DPI mode), checked by the UI harness below.
-- **New in 0.6.1: sharper generated frames, and no more DLSS motion vectors.** Generated frames now use an **edge-aware synthesis**
-  (default): motion edges stay sharp, and where the motion is uncertain the real frame is shown instead of a double image (ideas from
-  [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented). The previous algorithm stays as **classic** in Advanced picture and FOV settings, the
-  predictable fallback if a game misbehaves. The DLSS motion-vector support is **removed**: measured against the images, correct vectors
-  were barely better than the optical flow, and in real games they often arrived paired with the wrong frame (see
-  [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md)). The zip no longer ships the extractor DLL; a game folder where an earlier release
-  installed it shows a **Remove** button in Logs and performance.
-- **New in 1.1 (pre-release):**
-  - **A field of view for the game, set from the streamer.** *Advanced picture and FOV settings* (the Advanced card, renamed) has a tick that opens four fields (outer,
-    inner, upper, lower; tangents, the angle shown next to each). Greyed, they show the headset's own field of view; ticked, they start from it and you can only go down. The
-    game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start; it applies at the next
-    game start), the stream still covers the whole headset view with a black margin: only the game's GPU work changes. Off by default, and then nothing differs from 1.0.
-    A **Game render quality** slider under the fields spends part of that saving on a finer render: from the smallest size the restriction gives up to the stream's own per-eye
-    size (both taken from your resolution settings, so a Quest's lower one works the same), filtered down by composition (cleaner edges, no detail beyond the stream). The
-    Vision Pro's measured visible window and the values that fit it are in [docs/AVP_FOV.md](docs/AVP_FOV.md); the frame size at each step is drawn below.
-    See [docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md).
+- The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying
+  the results are next. Measured on a 1-NVENC laptop GPU and a 5090.
 
-    ![Frame size at each step on the Vision Pro with the measured visible field of view and foveation](docs/images/fov-pipeline-frame-sizes.svg)
+## How FOV restriction works
 
-  - **The desktop mirror works left-handed**: a firm press of the left trigger or grip hands the beam to the left controller (and back); A / X, B / Y and both thumbsticks work on
-    either controller.
-  - **Fixes**: game audio captured with Windows' process loopback again (a build problem since 1.0 had left it on a device loopback that follows the system volume); the Encoding
-    choice (foveated / full frame) is saved as chosen; the QP map's checkbox can turn it off.
-  - **A leaner Advanced window**: eleven switches that measured as no benefit or a loss are gone (the built-in values stay; an old `airframexr.json` with them is ignored), and
-    every remaining one explains itself with the numbers we measured (hover for more). The HEVC QP map stays on by default; its trade-off is written next to it.
-  - **Lab tools**: a frame generation judge (generated frames scored against the rendered ground truth, `harness/fg_judge.py`, [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md)),
-    the QP map A/B, `docs/DEVELOPMENT_PHILOSOPHY.md` and the AI-contribution summaries.
-- The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works
-  (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying the results are next.
-- Measured on a 1-NVENC laptop GPU and a 5090. Multi-engine split encode is wired in but not yet active in `auto` mode.
+**What a field of view is.** A headset image is a window onto the world, and OpenXR describes the window by four angles from the eye's view axis to its edges: left, right, up and
+down (`XrFovf`). Renderers use their tangents, because a flat projection is linear in the tangent: the picture is a rectangle spanning `tan(left) + tan(right)` across and
+`tan(up) + tan(down)` down, and a pixel density is "pixels per unit of tangent". The four angles are rarely equal: the nose side is smaller than the outer side. The Vision Pro's app
+declares (left eye, the right is its mirror, outer = away from the nose):
 
-`docs/progress.md` is the detailed log: what is built, what is tested (and how), what is not.
+| Edge | Outer | Inner | Up | Down |
+|---|---|---|---|---|
+| declared angle | 60.8 deg | 45.6 deg | 50.6 deg | 45.6 deg |
+| declared tangent | 1.79 | 1.02 | 1.22 | 1.02 |
+
+That is 106 x 96 degrees, with a recommended image of 3552 x 3200 per eye. The Quest 3 declares 94 x 99 degrees and shows all of it. The Vision Pro does not: measured with a grid
+([docs/AVP_FOV.md](docs/AVP_FOV.md), one person, left eye, a first estimate) it shows about 80 x 74 degrees of the 106 x 96 it declares (tangents 1.69 x 1.49 instead of
+2.81 x 2.24), so about half the pixels of the frame land outside what you can see.
+
+**How games use it** (we read UEVR's OpenXR path to see). An OpenXR game asks the runtime two things when it starts. `xrEnumerateViewConfigurationViews` returns the recommended image
+size per eye; `xrLocateViews` returns, with each eye's pose, the four angles. UEVR builds its projection from those angles, creates the swapchain at the recommended size (times its own
+resolution slider), renders, and submits a projection layer carrying the same angles and size. It does not use a visibility mask, and nothing in the handshake announces a change
+later, so a game takes these values once, when it starts. The runtime reads them once too (VDXR latches them at system creation). The consequence is the lever: **the game renders
+what it is told it has**. Tell it a smaller field of view and a proportionally smaller image, and a GPU-bound game does less work.
+
+**How AirFrameXR uses it.** The headset's real window is the contract with the client: the Vision Pro app maps the stream frame over the field of view it declared, so the frame
+must keep covering all of it. Only the game is told something else. With the Vision Pro, the frame flow is:
+
+![Frame size at each step on the Vision Pro with the measured visible field of view and foveation](docs/images/fov-pipeline-frame-sizes.svg)
+
+1. **The headset declares its views** when it connects (the app sends the render frustum, `views_config`). The host saves them in `config\airframexr_views.json`; the Advanced window
+   shows them greyed.
+2. **You choose what the game is told**: in *Advanced picture and FOV settings*, tick the override and set the four tangents (outer, inner, upper, lower). Values are never more than
+   the headset's and at least a fifth of them. For the Vision Pro, [docs/AVP_FOV.md](docs/AVP_FOV.md) gives the visible window and a row of values that fit it (0.94 / 0.93 / 0.90 /
+   0.76). The host turns them into per-edge fractions of the headset's tangents and publishes them to the shim.
+3. **The shim answers the game** at its next start: `GetEyeFov` returns the restricted angles, and the recommended size is the stream's eye size scaled by the restricted span on
+   each axis (2366 x 2370 for the row above, 49 % of the pixels). The game renders that, with the restricted projection.
+4. **Composition puts it back where it belongs.** The shim maps the game's layer into a frame that covers the headset's whole field of view (3552 x 3200 per eye), the margin the game
+   did not render stays black, and the picture sits where those angles fall in the frame.
+5. **The foveation warp, encode, network and decode do not know.** Both eyes go through ALVR's foveation warp into one 4224 x 1664 frame and through NVENC as before. The black
+   margin lies in the periphery, which the warp shrinks the most, so it is 51 % of the composed frame but 34 % of the stream frame, and black blocks cost almost no bits.
+6. **The client unwarps** and maps the frame over the declared field of view, as always. The margin shows as black at the edges, outside what the lens shows anyway (for the values
+   above).
+
+So the saving is the game's GPU work only; encode time, bitrate, decode time, frame generation and the headset app are unchanged. A game that is not GPU-bound gains nothing. The values
+apply at the **next game start**, and they are not stored per headset: tuned for one headset they are tangents for that headset (on a Quest, a lower of 1.00 would cut its 55-degree
+down edge).
+
+**Spending the saving: the render quality slider.** Under the fields, a slider moves the recommended size between two limits computed from your own settings: the **floor** (what
+the restriction gives, the stream's pixel density over the smaller view) and the **ceiling** (the stream's own per-eye size, from your resolution settings, so a Quest's smaller one
+works the same way). The window shows both and the size at the slider. For the Vision Pro with the values above:
+
+| Slider | Game render per eye | Cost vs the floor | Samples per stream pixel |
+|---|---|---|---|
+| 0 % | 2366 x 2370 (5.6 Mpx) | 1.0x | 1.0 |
+| 50 % | 2959 x 2785 (8.2 Mpx) | 1.5x | about 1.5 |
+| 100 % | 3552 x 3200 (11.4 Mpx) | 2.0x | about 2.0 |
+
+The game's picture is filtered down to the stream's pixels by composition, so the extra pixels are supersampling: cleaner edges and less shimmer, not detail beyond what the stream
+carries. The cost is the game's GPU time and video memory, roughly linear in pixels for a GPU-bound game; 100 % costs what the game cost with no restriction. About 2 samples per pixel
+is already near where supersampling stops paying much, so there is no reason to go higher. Which position is right depends on how much headroom the game has: raise it while the game
+holds its frame rate. Off by default (0 %), and with no restriction nothing differs from 1.0.
+
+**What is not known yet.** The visible window is one person's left eye at one fit of the headset; it moves with the seal, glasses inserts and IPD, so start from the recommended row
+(visible + 3 degrees) and check the corners for black with `fovgrid.exe` ([docs/FOV_GRID.md](docs/FOV_GRID.md)). The feature is covered by lab scenarios (the app gets exactly the tangents
+and recommended size, the margin is black, the picture sits inside it) and has not been tried in a real game. The bigger lever, spending the stream's own pixels on the visible window
+only, needs the client to declare that window; the host alone cannot do it. Details and keys: [docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md).
 
 ## Game audio
 The game's sound reaches the headset without installing anything: the host captures it with **Windows' process loopback** (everything the PC plays,
@@ -380,7 +392,7 @@ judder scenarios and the simrig need them. A **release build** (`--release`: car
 `AIRFRAMEXR_RELEASE`) compiles them out; the periodic statistics behind Game history, Diagnose and its suggestions stay in both. Build one
 with `python3 harness/run.py build host shim gui package` (debug) or `... package --release` (release; what a public release uses);
 `build.ps1` is the other way round (release by default, `debug` as a target). A debug package says so: its zip name ends in `-debug` and
-the windows show "version 0.5 (debug build)". New per-frame telemetry must sit behind the flag (`docs/DEVELOPMENT.md`).
+the windows show "(debug build)" after the version. New per-frame telemetry must sit behind the flag (`docs/DEVELOPMENT.md`).
 
 **Pull requests.** A change to anything on the frame path (shim, pipeline, generator, encoder, pacing) is accepted only with the lab's proof
 in the description: the scenarios relevant to the change, their verdicts before and after, and the compile checks. "It looks fine in my
@@ -420,6 +432,7 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 
 ## Documentation
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers (v0.2, extended in 0.3)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers
 - [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md): the lab judge for generated frames (against a rendered ground truth)
-- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation (0.4): half-rate pacing + interpolated frames; [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md): the uncapped mode, cap and lag, headset-night verdicts; [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md): the DLSS motion-vector experiment (0.4-0.6) and why it was removed in 0.6.1
+- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation: half-rate pacing + interpolated frames; [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md): the uncapped mode, cap and lag, headset-night verdicts; [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md): the DLSS motion-vector experiment and why it was removed
+- [docs/AVP_FOV.md](docs/AVP_FOV.md): the Vision Pro's declared and visible field of view, and the override values that fit it; [docs/FOV_GRID.md](docs/FOV_GRID.md): the grid app that measures it; [How FOV restriction works](#how-fov-restriction-works)
