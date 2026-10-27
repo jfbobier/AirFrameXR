@@ -48,7 +48,7 @@ Copy `profiles\template.profile.json`, rename it `<headset>.profile.json`, fill 
 | `match` | `name_contains` [strings], `default_view_resolution` [w, h], `supported_refresh_rates_include` [Hz] |
 | `stream` | `eye_resolution` [w, h], `fps`, `codec` (hevc), `bit_depth`, `full_range`, `encoding_gamma`, `foveated`, `split_encode` (0-3), `protocol` (udp/tcp) |
 | `network` | `default` (variant id) and `variants[]`: `id`, `label`, `bitrate_mbps` |
-| `fov` | optional, a measured visible window (see below): `visible_deg` {outer, inner, upper, lower} (degrees from the view axis to the edge of what the headset shows), `margin_deg` (default 3), `render_quality` (0 to 1), `note` |
+| `fov` | optional, a measured visible window (see below): `visible_deg` {outer, inner, upper, lower} (degrees from the view axis to the edge of what the headset shows), `margin_deg` (default 3), `render_quality` (0 to 1), `client_fov_scale` (the headset app's own FoV scale to recommend, 0.2 to 1.6), `note` |
 | `session_overrides` | ALVR session settings as dotted paths into `config\session.json`, for example `session_settings.video.encoder_config.nvenc.quality_preset.variant`: `"P3"` |
 | `notes`, `verified` | what another user should know; GPU, client, date and result of the runs that back the values |
 
@@ -79,4 +79,4 @@ CABAC, 1.5 buffered frames, no microphone, the VideoToolbox low-latency option, 
 7.7 ms for the full 7104x3200 frame, a lighter headset decode, and three times the bits per pixel at the same bitrate; the full frame looked no better. The
 full frame (encode profile `full-split`) remains selectable in the Settings window.
 
-It also carries the Vision Pro's measured visible window (`fov`: 40.3 / 40.0 / 39.0 / 34.4 degrees outer / inner / upper / lower, margin 3 degrees, render quality 0.25), which the Advanced window offers with one button (tangents 0.94 / 0.93 / 0.90 / 0.76). One person's left eye, not yet tried in a game; the note in the profile says so.
+It also carries the Vision Pro's measured visible window (`fov`: 40.3 / 40.0 / 39.0 / 34.4 degrees outer / inner / upper / lower, margin 3 degrees, render quality 0.25), which the Advanced window offers with one button (tangents 0.94 / 0.93 / 0.90 / 0.76), and recommends 0.8 for the visionOS app's own FoV Scale (a line under the button and in the wizard's proposal). One person's left eye, not yet tried in a game; the note in the profile says so.

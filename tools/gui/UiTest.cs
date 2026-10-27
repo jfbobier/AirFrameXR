@@ -40,7 +40,7 @@ namespace AirFrameXR
     /// a profile with a measured window, as the shipped Vision Pro one has (profiles\apple-vision-pro.profile.json), for the Advanced window's button
     static class UiTestProfiles
     {
-        public static HmdProfile WithMeasuredFov() => HmdProfiles.Parse("{\"id\":\"apple-vision-pro-test\",\"display_name\":\"Apple Vision Pro (ALVR visionOS client)\",\"match\":{\"name_contains\":[\"Apple\"]},\"stream\":{\"eye_resolution\":[3552,3200]},\"network\":{\"default\":\"a\",\"variants\":[{\"id\":\"a\",\"label\":\"a\",\"bitrate_mbps\":300}]},\"fov\":{\"visible_deg\":{\"outer\":40.3,\"inner\":40.0,\"upper\":39.0,\"lower\":34.4},\"margin_deg\":3,\"render_quality\":0.5,\"note\":\"test\"}}", "test")[0];
+        public static HmdProfile WithMeasuredFov() => HmdProfiles.Parse("{\"id\":\"apple-vision-pro-test\",\"display_name\":\"Apple Vision Pro (ALVR visionOS client)\",\"match\":{\"name_contains\":[\"Apple\"]},\"stream\":{\"eye_resolution\":[3552,3200]},\"network\":{\"default\":\"a\",\"variants\":[{\"id\":\"a\",\"label\":\"a\",\"bitrate_mbps\":300}]},\"fov\":{\"visible_deg\":{\"outer\":40.3,\"inner\":40.0,\"upper\":39.0,\"lower\":34.4},\"margin_deg\":3,\"render_quality\":0.5,\"client_fov_scale\":0.8,\"note\":\"test\"}}", "test")[0];
     }
 
     static class UiTest

@@ -235,6 +235,7 @@ namespace AirFrameXR
         TrackBar fovQ;
         FlowLayoutPanel fovQRow;
         Button fovProfileBtn;
+        Label fovProfileHint;
         HmdProfile fovProfile;   // the connected headset's profile with a measured window, null = none
         int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
         FlowLayoutPanel fovFields;
@@ -321,6 +322,14 @@ namespace AirFrameXR
                     (fovProfile.FovNote.Length > 0 ? fovProfile.FovNote + "\r\n" : "") + "It ticks the override and fills the fields and the render quality slider; you can change them afterwards. Applies at the next game start.");
                 fovProfileBtn.Click += (s, e) => FovUseProfile();
                 body.Controls.Add(fovProfileBtn);
+                if (fovProfile.FovClientScale > 0)
+                {
+                    fovProfileHint = Ui.Line("Recommended with it: set FoV Scale to " + fovProfile.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " in the headset's own app (its settings, before you enter), then connect once so the values above refresh. "
+                        + "The stream then covers less angle, so every pixel you see is about " + (1 / fovProfile.FovClientScale).ToString("0.00", CultureInfo.InvariantCulture) + " times denser at the same encode and network cost; the values above are the same with it at 1.0 or at " + fovProfile.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture)
+                        + ". The edge nearest the nose is the limit: check that corner with fovgrid.exe.");
+                    fovProfileHint.ForeColor = Color.DimGray; fovProfileHint.Margin = new Padding(22, 2, 3, 2); fovProfileHint.MaximumSize = new Size(900, 0); fovProfileHint.Visible = false;
+                    body.Controls.Add(fovProfileHint);
+                }
             }
             fovFields = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 4, 0, 0) };
             for (int k = 0; k < 4; k++)
@@ -360,6 +369,7 @@ namespace AirFrameXR
             fovTick.Checked = on && clientFov != null;
             fovFields.Visible = clientFov != null;
             fovProfileBtn.Visible = clientFov != null && fovProfile != null;
+            if (fovProfileHint != null) fovProfileHint.Visible = clientFov != null;
             if (clientFov == null)
             {
                 fovNote.Text = "The headset's field of view is not known yet: connect the headset once with the streamer (it is saved when it connects) and these fields appear.";

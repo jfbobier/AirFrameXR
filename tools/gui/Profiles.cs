@@ -34,6 +34,8 @@ namespace AirFrameXR
         /// the Advanced window offers it as a button.
         public double[] FovVisibleDeg;
         public double FovMarginDeg = 3, FovRenderQuality;
+        /// the headset app's own FoV scale this profile is meant to be used with (0 = none to recommend): a uniform scale of what the headset declares, so the stream covers less angle
+        public double FovClientScale;
         public string FovNote = "";
         public bool HasFov => FovVisibleDeg != null;
 
@@ -102,6 +104,7 @@ namespace AirFrameXR
                     p.FovVisibleDeg = new[] { "outer", "inner", "upper", "lower" }.Select(k => D(vis[k])).ToArray();
                     if (fv.TryGetValue("margin_deg", out var mg)) p.FovMarginDeg = Math.Max(0, Math.Min(15, D(mg)));
                     if (fv.TryGetValue("render_quality", out var rq)) p.FovRenderQuality = Math.Max(0, Math.Min(1, D(rq)));
+                    if (fv.TryGetValue("client_fov_scale", out var cs)) { var c = D(cs); p.FovClientScale = c >= 0.2 && c <= 1.6 && Math.Abs(c - 1) > 0.001 ? c : 0; }
                     p.FovNote = S(fv, "note");
                 }
                 if (p.Variants.Count == 0) continue;

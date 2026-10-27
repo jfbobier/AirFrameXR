@@ -35,7 +35,8 @@
     "visible_deg": { "outer": 40.3, "inner": 40.0, "upper": 39.0, "lower": 34.4 },
     "margin_deg": 3,
     "render_quality": 0.25,
-    "note": "Measured with the FoV grid (docs/AVP_FOV.md): left eye only, one person, one fit, the stock visionOS app (RealityKit) at its default FoV scale. The headset declares 106 x 96 degrees and shows about 80 x 74. Not yet tried in a game; check the corners for black with fovgrid.exe."
+    "client_fov_scale": 0.8,
+    "note": "Set FoV Scale to 0.8 in the visionOS app too (users report it as the right value; the nose-side edge is the limit), then reconnect once: the stream then covers less angle and every pixel in view is about 1.25 times denser. The values here are the same with it at 1.0 or 0.8. Measured with the FoV grid (docs/AVP_FOV.md): left eye only, one person, one fit, the stock visionOS app (RealityKit) at its default FoV scale. The headset declares 106 x 96 degrees and shows about 80 x 74. Not yet tried in a game; check the corners for black with fovgrid.exe."
   },
   "network": {
     "default": "wifi-good",

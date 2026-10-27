@@ -64,6 +64,14 @@ The recommended row is what the Vision Pro profile carries (`fov` in `profiles\a
 picture and FOV settings* shows a button, "Use the Apple Vision Pro's measured values", that fills the fields and the slider from it (see [HMD_PROFILES.md](HMD_PROFILES.md)). The
 button is a convenience, not a default: nothing is restricted until it is pressed.
 
+## Also set FoV Scale to 0.8 in the visionOS app
+
+The Vision Pro profile recommends it (users report 0.8 as the right value). The stock app multiplies the tangents it declares by its **FoV Scale** (`RealityKitClientSystem.swift`,
+applied when the immersive space is entered), so the stream then covers less angle: every pixel in view is 1.25 times denser at the same encode, decode and bitrate cost. Reconnect once
+afterwards so the Advanced window's greyed values refresh. The fields above stay the same (they are absolute; the inner value is clamped to the headset's own, 0.82), and at 0.8 the
+game's floor becomes 2778 x 2966 (8.2 Mpx, 72 % of an unrestricted game's cost), which is why the profile suggests a render quality of 25 %. The edge nearest the nose is the limit: at 0.8
+it declares 39.2 degrees against the 40.0 measured visible, so check that corner with `fovgrid.exe`. A scale is uniform; going further needs a per-edge scale in the client.
+
 ## Check it
 
 Tick the override, enter the values, start a new `fovgrid.exe`: the white border should now touch the edge of what you see on all four
