@@ -29,6 +29,16 @@ namespace AirFrameXR
         public string Author = "";
         /// ALVR session settings the profile sets (dotted paths into config\session.json -> value), applied when the wizard saves the configuration
         public Dictionary<string, object> SessionOverrides = new Dictionary<string, object>();
+        /// A measured visible window (docs/AVP_FOV.md): the angle in degrees from the view axis to the edge of what the headset shows (outer, inner, upper, lower), the margin to add
+        /// (head and eye position, fit, the width of the measuring stroke), and the render quality (0..1) suggested with it. null = the profile has none. Nothing applies it by itself:
+        /// the Advanced window offers it as a button.
+        public double[] FovVisibleDeg;
+        public double FovMarginDeg = 3, FovRenderQuality;
+        public string FovNote = "";
+        public bool HasFov => FovVisibleDeg != null;
+
+        /// The tangents the game is told for the measured window plus the margin (outer, inner, upper, lower), two decimals like the Advanced window's fields.
+        public double[] FovTangents() => FovVisibleDeg.Select(d => Math.Round(Math.Tan((d + FovMarginDeg) * Math.PI / 180), 2)).ToArray();
 
         public NetworkVariant Variant(string id)
         {
@@ -86,6 +96,14 @@ namespace AirFrameXR
                 p.Sources = A(e, "sources").OfType<string>().ToList();
                 foreach (var v in A(e, "verified").OfType<Dictionary<string, object>>())
                     p.Verified.Add($"{S(v, "gpu")}, {S(v, "client")}, {S(v, "date")}: {S(v, "result")}");
+                var fv = O(e, "fov"); var vis = O(fv, "visible_deg");
+                if (vis != null && new[] { "outer", "inner", "upper", "lower" }.All(k => D(vis.TryGetValue(k, out var x) ? x : 0) > 0))
+                {
+                    p.FovVisibleDeg = new[] { "outer", "inner", "upper", "lower" }.Select(k => D(vis[k])).ToArray();
+                    if (fv.TryGetValue("margin_deg", out var mg)) p.FovMarginDeg = Math.Max(0, Math.Min(15, D(mg)));
+                    if (fv.TryGetValue("render_quality", out var rq)) p.FovRenderQuality = Math.Max(0, Math.Min(1, D(rq)));
+                    p.FovNote = S(fv, "note");
+                }
                 if (p.Variants.Count == 0) continue;
                 list.Add(p);
             }
@@ -113,6 +131,13 @@ namespace AirFrameXR
                 }
             }
             return all;
+        }
+
+        /// The profile with a measured field of view whose name fields match the headset's name (the saved one: "Apple Vision Pro", or ALVR's "Apple Headset"); null when none has.
+        public static HmdProfile WithFovFor(string headsetName)
+        {
+            if (string.IsNullOrEmpty(headsetName)) return null;
+            return LoadAll().FirstOrDefault(p => p.HasFov && p.NameContains.Any(n => headsetName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0));
         }
 
         /// Writes the profile's session settings into config\session.json (after the wizard's own values, so a profile can refine them). False: nothing to do or it failed.

@@ -41,9 +41,9 @@ namespace AirFrameXR
         static Knob N(string sec, string key, string title, double def, double min, double max, double step, int dec, string when, string desc) => new Knob { Section = sec, Key = key, Title = title, Kind = Kind.Number, Def = def, Min = min, Max = max, Step = step, Decimals = dec, When = when, Desc = desc };
         static Knob C(string sec, string key, string title, string def, string[] choices, string when, string desc) => new Knob { Section = sec, Key = key, Title = title, Kind = Kind.Choice, DefChoice = def, Choices = choices, When = when, Desc = desc };
 
-        public AdvancedForm(double[] clientFovForTest = null, bool tickForTest = false, int[] streamEyeForTest = null)
+        public AdvancedForm(double[] clientFovForTest = null, bool tickForTest = false, int[] streamEyeForTest = null, HmdProfile profileForTest = null)
         {
-            testClient = clientFovForTest; testTick = tickForTest; testEye = streamEyeForTest;
+            testClient = clientFovForTest; testTick = tickForTest; testEye = streamEyeForTest; testProfile = profileForTest;
             Text = "AirFrameXR – Advanced picture and FOV settings";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
@@ -234,10 +234,12 @@ namespace AirFrameXR
         Label fovNote, fovShare;
         TrackBar fovQ;
         FlowLayoutPanel fovQRow;
+        Button fovProfileBtn;
+        HmdProfile fovProfile;   // the connected headset's profile with a measured window, null = none
         int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
         FlowLayoutPanel fovFields;
         double[] clientFov;   // the headset's tangents per edge (outer, inner, upper, lower), averaged over the two eyes; null = no headset seen yet
-        readonly double[] testClient; readonly bool testTick; readonly int[] testEye;   // the UI harness: a pretend headset, the override ticked
+        readonly double[] testClient; readonly bool testTick; readonly int[] testEye; readonly HmdProfile testProfile;   // the UI harness: a pretend headset, the override ticked
         static readonly string[] FovNames = { "Outer", "Inner", "Upper", "Lower" };
         static readonly string[] FovKeys = { "fov_outer", "fov_inner", "fov_upper", "fov_lower" };
         const string FovTip =
@@ -308,6 +310,18 @@ namespace AirFrameXR
             body.Controls.Add(intro);
             fovTick = new CheckBox { AutoSize = true, Text = "Override the headset's field of view", AccessibleName = "Override the headset's field of view" };
             Row(body, fovTick, null, NextGame, "Off: the game gets the headset's own field of view (greyed below, as the headset reported it). On: the fields open, starting from the headset's values; you can only go down from them.", FovTip);
+            fovProfile = testProfile ?? HmdProfiles.WithFovFor(new AppSettings().HeadsetName);
+            fovProfileBtn = new Button { AutoSize = true, Margin = new Padding(22, 4, 0, 0), Visible = false, AccessibleName = "Use the measured values" };
+            if (fovProfile != null)
+            {
+                var m = fovProfile.FovTangents();
+                fovProfileBtn.Text = "Use the " + fovProfile.DisplayName.Split('(')[0].Trim() + "'s measured values (visible + " + fovProfile.FovMarginDeg.ToString("0.#", CultureInfo.InvariantCulture) + "\u00B0: "
+                    + string.Join(" / ", m.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))) + ", render quality " + (100 * fovProfile.FovRenderQuality).ToString("0", CultureInfo.InvariantCulture) + " %)";
+                tips.SetToolTip(fovProfileBtn, "From the headset's profile (" + fovProfile.Id + "): the edge of what the headset shows, measured with the FoV grid (docs/AVP_FOV.md), plus a margin.\r\n" +
+                    (fovProfile.FovNote.Length > 0 ? fovProfile.FovNote + "\r\n" : "") + "It ticks the override and fills the fields and the render quality slider; you can change them afterwards. Applies at the next game start.");
+                fovProfileBtn.Click += (s, e) => FovUseProfile();
+                body.Controls.Add(fovProfileBtn);
+            }
             fovFields = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 4, 0, 0) };
             for (int k = 0; k < 4; k++)
             {
@@ -345,6 +359,7 @@ namespace AirFrameXR
             fovTick.Enabled = clientFov != null;
             fovTick.Checked = on && clientFov != null;
             fovFields.Visible = clientFov != null;
+            fovProfileBtn.Visible = clientFov != null && fovProfile != null;
             if (clientFov == null)
             {
                 fovNote.Text = "The headset's field of view is not known yet: connect the headset once with the streamer (it is saved when it connects) and these fields appear.";
@@ -440,6 +455,26 @@ namespace AirFrameXR
             FovStore(st);
             Save(st, "field of view override " + (fovTick.Checked ? "on" : "off"), NextGame);
             if (!fovTick.Checked) LoadFov(); else FovLabels();
+        }
+
+        /// The profile's measured window into the fields and the slider (never above the headset's own values), ticked and saved in one go.
+        void FovUseProfile()
+        {
+            if (clientFov == null || fovProfile == null) return;
+            var was = loading; loading = true;
+            var m = fovProfile.FovTangents();
+            for (int k = 0; k < 4; k++)
+            {
+                fovNum[k].Value = Math.Max(fovNum[k].Minimum, Math.Min(fovNum[k].Maximum, (decimal)Math.Min(m[k], clientFov[k])));
+                fovNum[k].Enabled = true;
+            }
+            fovQ.Value = (int)Math.Round(fovProfile.FovRenderQuality * 100);
+            fovTick.Checked = true;
+            loading = was;
+            var st = new AppSettings();
+            FovStore(st);
+            Save(st, "field of view from the " + fovProfile.Id + " profile", NextGame);
+            FovLabels();
         }
 
         void FovQualityChanged()

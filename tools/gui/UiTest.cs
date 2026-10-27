@@ -37,6 +37,12 @@ namespace AirFrameXR
         }
     }
 
+    /// a profile with a measured window, as the shipped Vision Pro one has (profiles\apple-vision-pro.profile.json), for the Advanced window's button
+    static class UiTestProfiles
+    {
+        public static HmdProfile WithMeasuredFov() => HmdProfiles.Parse("{\"id\":\"apple-vision-pro-test\",\"display_name\":\"Apple Vision Pro (ALVR visionOS client)\",\"match\":{\"name_contains\":[\"Apple\"]},\"stream\":{\"eye_resolution\":[3552,3200]},\"network\":{\"default\":\"a\",\"variants\":[{\"id\":\"a\",\"label\":\"a\",\"bitrate_mbps\":300}]},\"fov\":{\"visible_deg\":{\"outer\":40.3,\"inner\":40.0,\"upper\":39.0,\"lower\":34.4},\"margin_deg\":3,\"render_quality\":0.5,\"note\":\"test\"}}", "test")[0];
+    }
+
     static class UiTest
     {
         class Case { public string Name; public Func<Form> Make; public Action<Form> Prepare; }
@@ -57,6 +63,7 @@ namespace AirFrameXR
             yield return new Case { Name = "streamer-headset-seen", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); ((RuntimeForm)f).HostEvent("headset_seen", new Dictionary<string, object> { { "hostname", "1234.client.alvr" }, { "ip", "192.168.1.50" } }); } };
             yield return new Case { Name = "streamer-headset-lost", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); } };
             yield return new Case { Name = "advanced-switches", Make = () => new AdvancedForm() };
+            yield return new Case { Name = "advanced-switches-fov-profile", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, false, new[] { 3552, 3200 }, UiTestProfiles.WithMeasuredFov()) };   // the profile button, override off
             yield return new Case { Name = "advanced-switches-fov-quality", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true, new[] { 3552, 3200 }) };   // the same, restricted, with the render quality row
             yield return new Case { Name = "advanced-switches-fov", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true) };   // a pretend Vision Pro, the override ticked
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
@@ -276,6 +283,24 @@ namespace AirFrameXR
                     fov.Checked = true; lines.Add($"fov_then: fov={fov.Checked} full={full.Checked}");
                 }
                 File.WriteAllLines(Path.Combine(outDir, "encoding.txt"), lines);
+                return 0;
+            }
+            if (Arg("--fov-profile-selftest") != null)   // harness/fov_profile_check.py: the profile button fills the fields and the slider and saves (into this folder's own config)
+            {
+                var lines = new List<string>();
+                using (var f = new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, false, new[] { 3552, 3200 }, UiTestProfiles.WithMeasuredFov()))
+                {
+                    f.Opacity = 0; f.ShowInTaskbar = false; f.StartPosition = FormStartPosition.Manual; f.Location = new Point(-4000, -4000);
+                    f.Show(); Application.DoEvents();
+                    Button b = null;
+                    void Find(Control c) { foreach (Control k in c.Controls) { if (k is Button x && x.AccessibleName == "Use the measured values") b = x; Find(k); } }
+                    Find(f);
+                    lines.Add("button=" + (b != null) + " visible=" + (b != null && b.Visible));
+                    if (b != null) { lines.Add("text=" + b.Text); b.PerformClick(); Application.DoEvents(); }
+                    var st = new AppSettings();
+                    lines.Add(string.Format(CultureInfo.InvariantCulture, "override={0} outer={1:0.00} inner={2:0.00} upper={3:0.00} lower={4:0.00} quality={5:0.00}", st.FovOverride, st.FovOuter, st.FovInner, st.FovUpper, st.FovLower, st.FovRenderQuality));
+                }
+                File.WriteAllLines(Path.Combine(outDir, "fovprofile.txt"), lines);
                 return 0;
             }
             var fwExe = Arg("--firewall");   // harness/firewall_check.py: print the firewall analysis of this exe and stop

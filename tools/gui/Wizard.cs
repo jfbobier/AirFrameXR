@@ -571,7 +571,7 @@ namespace AirFrameXR
             var p = HmdProfiles.Read(path, hs, out var warnings, out var error);
             if (p == null) { MessageBox.Show(this, error, "Import profile", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             var text = $"Profile: {p.DisplayName}{(p.Author.Length > 0 ? " by " + p.Author : "")}\n{p.EyeW} x {p.EyeH} per eye at {p.Fps:0} fps, {p.Codec.ToUpperInvariant()} {p.BitDepth}-bit, " +
-                       $"{(p.Foveated ? "foveated" : "full frame")}, split encode {p.SplitEncode}, {p.Variant(null).Mbps:0} Mbps, {p.SessionOverrides.Count} ALVR setting(s)\n\n" +
+                       $"{(p.Foveated ? "foveated" : "full frame")}, split encode {p.SplitEncode}, {p.Variant(null).Mbps:0} Mbps, {p.SessionOverrides.Count} ALVR setting(s)\n{(p.HasFov ? "A measured field of view is in the profile: Advanced picture and FOV settings offers it with one button (off until you press it).\n" : "")}\n" +
                        $"Your headset, as ALVR reports it:\n{HmdProfiles.Describe(hs)}\n\n";
             if (warnings.Count > 0)
             {

@@ -31,6 +31,12 @@
     "split_encode": 3,
     "protocol": "udp"
   },
+  "fov": {
+    "visible_deg": { "outer": 40.3, "inner": 40.0, "upper": 39.0, "lower": 34.4 },
+    "margin_deg": 3,
+    "render_quality": 0.5,
+    "note": "Measured with the FoV grid (docs/AVP_FOV.md): left eye only, one person, one fit, the stock visionOS app (RealityKit) at its default FoV scale. The headset declares 106 x 96 degrees and shows about 80 x 74. Not yet tried in a game; check the corners for black with fovgrid.exe."
+  },
   "network": {
     "default": "wifi-good",
     "variants": [

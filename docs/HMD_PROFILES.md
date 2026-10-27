@@ -48,10 +48,20 @@ Copy `profiles\template.profile.json`, rename it `<headset>.profile.json`, fill 
 | `match` | `name_contains` [strings], `default_view_resolution` [w, h], `supported_refresh_rates_include` [Hz] |
 | `stream` | `eye_resolution` [w, h], `fps`, `codec` (hevc), `bit_depth`, `full_range`, `encoding_gamma`, `foveated`, `split_encode` (0-3), `protocol` (udp/tcp) |
 | `network` | `default` (variant id) and `variants[]`: `id`, `label`, `bitrate_mbps` |
+| `fov` | optional, a measured visible window (see below): `visible_deg` {outer, inner, upper, lower} (degrees from the view axis to the edge of what the headset shows), `margin_deg` (default 3), `render_quality` (0 to 1), `note` |
 | `session_overrides` | ALVR session settings as dotted paths into `config\session.json`, for example `session_settings.video.encoder_config.nvenc.quality_preset.variant`: `"P3"` |
 | `notes`, `verified` | what another user should know; GPU, client, date and result of the runs that back the values |
 
 A profile only changes this PC's configuration files, and only when you run the wizard and save.
+
+### A measured field of view (`fov`)
+
+A headset does not always show the whole field of view it declares (the Vision Pro declares 106 x 96 degrees and shows about 80 x 74: [AVP_FOV.md](AVP_FOV.md)). A profile can carry the
+measured window: the angle from the view axis to each visible edge, a margin to add, and a render quality to suggest. Nothing applies it by itself. *Advanced picture and FOV settings*
+looks up the profile whose `match.name_contains` fits the saved headset's name and, if it has `fov`, shows a button, "Use the <headset>'s measured values (visible + 3 degrees: ...)". One
+click ticks the override, fills the four fields with `tan(visible + margin)` (never above the headset's own values) and the render quality slider, and saves; they can be changed after.
+The wizard only says on the proposal that such values exist. A headset that shows all it declares (the Quest 3) has no `fov` and no button. Values from another person's fit may not fit
+yours: check the corners for black with `fovgrid.exe` ([FOV_GRID.md](FOV_GRID.md)).
 
 ## Starting-point profiles for other headsets
 
@@ -68,3 +78,5 @@ CABAC, 1.5 buffered frames, no microphone, the VideoToolbox low-latency option, 
 `config\session.default.json` in the package (the author's session, foveated, 300 Mbps). Foveated is the measured choice on the RTX 5090: encode 3.1 ms against
 7.7 ms for the full 7104x3200 frame, a lighter headset decode, and three times the bits per pixel at the same bitrate; the full frame looked no better. The
 full frame (encode profile `full-split`) remains selectable in the Settings window.
+
+It also carries the Vision Pro's measured visible window (`fov`: 40.3 / 40.0 / 39.0 / 34.4 degrees outer / inner / upper / lower, margin 3 degrees, render quality 0.5), which the Advanced window offers with one button (tangents 0.94 / 0.93 / 0.90 / 0.76). One person's left eye, not yet tried in a game; the note in the profile says so.
