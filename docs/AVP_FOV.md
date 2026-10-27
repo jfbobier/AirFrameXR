@@ -66,7 +66,7 @@ button is a convenience, not a default: nothing is restricted until it is presse
 
 ## Also set FoV Scale to 0.8 in the visionOS app
 
-The Vision Pro profile recommends it (users report 0.8 as the right value). The stock app multiplies the tangents it declares by its **FoV Scale** (`RealityKitClientSystem.swift`,
+The Vision Pro profile recommends it ("0.8 client slider recommended (manually)": a value circulating in the community, not measured here; you set it yourself in the app). The stock app multiplies the tangents it declares by its **FoV Scale** (`RealityKitClientSystem.swift`,
 applied when the immersive space is entered), so the stream then covers less angle: every pixel in view is 1.25 times denser at the same encode, decode and bitrate cost. Reconnect once
 afterwards so the Advanced window's greyed values refresh. The fields above stay the same (they are absolute; the inner value is clamped to the headset's own, 0.82), and at 0.8 the
 game's floor becomes 2778 x 2966 (8.2 Mpx, 72 % of an unrestricted game's cost), which is why the profile suggests a render quality of 25 %. The edge nearest the nose is the limit: at 0.8

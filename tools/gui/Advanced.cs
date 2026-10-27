@@ -324,9 +324,7 @@ namespace AirFrameXR
                 body.Controls.Add(fovProfileBtn);
                 if (fovProfile.FovClientScale > 0)
                 {
-                    fovProfileHint = Ui.Line("Recommended with it: set FoV Scale to " + fovProfile.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " in the headset's own app (its settings, before you enter), then connect once so the values above refresh. "
-                        + "The stream then covers less angle, so every pixel you see is about " + (1 / fovProfile.FovClientScale).ToString("0.00", CultureInfo.InvariantCulture) + " times denser at the same encode and network cost; the values above are the same with it at 1.0 or at " + fovProfile.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture)
-                        + ". The edge nearest the nose is the limit: check that corner with fovgrid.exe.");
+                    fovProfileHint = Ui.Line(fovProfile.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " client slider recommended (manually)");
                     fovProfileHint.ForeColor = Color.DimGray; fovProfileHint.Margin = new Padding(22, 2, 3, 2); fovProfileHint.MaximumSize = new Size(900, 0); fovProfileHint.Visible = false;
                     body.Controls.Add(fovProfileHint);
                 }

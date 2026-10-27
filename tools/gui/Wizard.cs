@@ -571,7 +571,7 @@ namespace AirFrameXR
             var p = HmdProfiles.Read(path, hs, out var warnings, out var error);
             if (p == null) { MessageBox.Show(this, error, "Import profile", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             var fovLine = !p.HasFov ? "" : "A measured field of view is in the profile: Advanced picture and FOV settings offers it with one button (off until you press it)."
-                + (p.FovClientScale > 0 ? " Set FoV Scale to " + p.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " in the headset's app as well." : "") + "\n";
+                + (p.FovClientScale > 0 ? " " + p.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " client slider recommended (manually)." : "") + "\n";
             var text = $"Profile: {p.DisplayName}{(p.Author.Length > 0 ? " by " + p.Author : "")}\n{p.EyeW} x {p.EyeH} per eye at {p.Fps:0} fps, {p.Codec.ToUpperInvariant()} {p.BitDepth}-bit, " +
                        $"{(p.Foveated ? "foveated" : "full frame")}, split encode {p.SplitEncode}, {p.Variant(null).Mbps:0} Mbps, {p.SessionOverrides.Count} ALVR setting(s)\n{fovLine}\n" +
                        $"Your headset, as ALVR reports it:\n{HmdProfiles.Describe(hs)}\n\n";
