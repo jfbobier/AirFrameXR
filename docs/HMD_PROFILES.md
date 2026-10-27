@@ -79,4 +79,4 @@ CABAC, 1.5 buffered frames, no microphone, the VideoToolbox low-latency option, 
 7.7 ms for the full 7104x3200 frame, a lighter headset decode, and three times the bits per pixel at the same bitrate; the full frame looked no better. The
 full frame (encode profile `full-split`) remains selectable in the Settings window.
 
-It also carries the Vision Pro's measured visible window (`fov`: 40.3 / 40.0 / 39.0 / 34.4 degrees outer / inner / upper / lower, margin 3 degrees, render quality 0.5), which the Advanced window offers with one button (tangents 0.94 / 0.93 / 0.90 / 0.76). One person's left eye, not yet tried in a game; the note in the profile says so.
+It also carries the Vision Pro's measured visible window (`fov`: 40.3 / 40.0 / 39.0 / 34.4 degrees outer / inner / upper / lower, margin 3 degrees, render quality 0.25), which the Advanced window offers with one button (tangents 0.94 / 0.93 / 0.90 / 0.76). One person's left eye, not yet tried in a game; the note in the profile says so.

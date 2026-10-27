@@ -60,7 +60,7 @@ Effect, recommended row: the game renders 66 % x 74 % of the declared span, abou
 stream, encode and decode are unchanged). Full-frame UI then fits the visible window. A new value is taken at the
 next game start.
 
-The recommended row is what the Vision Pro profile carries (`fov` in `profiles\apple-vision-pro.profile.json`: the visible angles, a 3 degree margin and a render quality of 0.5). *Advanced
+The recommended row is what the Vision Pro profile carries (`fov` in `profiles\apple-vision-pro.profile.json`: the visible angles, a 3 degree margin and a render quality of 0.25). *Advanced
 picture and FOV settings* shows a button, "Use the Apple Vision Pro's measured values", that fills the fields and the slider from it (see [HMD_PROFILES.md](HMD_PROFILES.md)). The
 button is a convenience, not a default: nothing is restricted until it is pressed.
 
