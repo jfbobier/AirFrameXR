@@ -77,6 +77,7 @@ struct Args {
     fg_rate: Option<FgRate>,
     /// uncapped mode: fps cap on the game's releases (0 = none), headroom for the host's own GPU work
     fg_cap_fps: Option<f64>,
+    drop_dup_frames: bool,
     /// field-of-view restriction (outer, inner, upper, lower as fractions of the headset's tangents; 1 = none): what the game is told, taken by the next game
     fov_scale: [f32; 4],
     fov_scale_explicit: bool,
@@ -176,6 +177,7 @@ fn parse_args() -> Result<Args, String> {
         frame_gen: None,
         fg_rate: None,
         fg_cap_fps: None,
+        drop_dup_frames: false,
         fov_scale: [1.0; 4],
         fov_scale_explicit: false,
         fov_quality: 0.0,
@@ -466,6 +468,7 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if let Some(v) = st.predict_missing_head {
         a.predict_missing_head = a.predict_missing_head || v;
     }
+    a.drop_dup_frames = st.drop_duplicate_frames.unwrap_or(false);
     if let Some(v) = st.intake_gate {
         if std::env::var_os("AIRFRAMEXR_INTAKE_GATE").is_none() {
             std::env::set_var("AIRFRAMEXR_INTAKE_GATE", if v { "1" } else { "0" });
@@ -912,6 +915,7 @@ mod nvh {
         pub fn nvh_fg_stats(nvh: *mut c_void, buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_ipc_set_app_period_mul(ipc: *mut c_void, mul: u32);
         pub fn nvh_ipc_set_app_min_period(ipc: *mut c_void, min_period_us: u32);
+        pub fn nvh_ipc_set_drop_duplicates(ipc: *mut c_void, on: u32);
         pub fn nvh_qpc_seconds() -> f64;
         pub fn nvh_encode_green(nvh: *mut c_void, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_ipc_shim_alive(ipc: *mut c_void) -> i32;
@@ -1860,6 +1864,7 @@ fn main() {
         logs::set_clock(Instant::now(), unsafe { nvh::nvh_qpc_seconds() });
         unsafe { nvh::nvh_ipc_set_pacing(ipc, 0.0, args.running_start_ms as f32) };
         unsafe { nvh::nvh_ipc_set_intake_gate(ipc, if pipeline::intake_gate_enabled() { 1 } else { 0 }) };
+        unsafe { nvh::nvh_ipc_set_drop_duplicates(ipc, if args.drop_dup_frames { 1 } else { 0 }) };
         unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
         {
             // hand pose convention fix (see Args::hand_rotation_deg); the right hand mirrors y and z like ALVR's own offsets

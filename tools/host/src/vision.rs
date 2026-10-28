@@ -42,6 +42,8 @@ pub struct Settings {
     /// the shim holds the game's next release while the host's queue holds a frame a boundary passed over (drains a standing queue without
     /// dropping a rendered frame; pipeline.rs / ovrshim WaitForVsync); default on
     pub intake_gate: Option<bool>,
+    /// game frame pacing fix: a frame submitted with the same render poses as the one before is not composed or published (ovrshim SubmitFrame); default off
+    pub drop_duplicate_frames: Option<bool>,
     /// slide the host's display grid so frames arrive just before the headset's tick (phase.rs); default on
     pub phase_lock: Option<bool>,
     /// arrival margin of the phase lock, ms (default 7; the environment variable AIRFRAMEXR_PHASE_MARGIN_MS wins)
@@ -118,6 +120,7 @@ pub fn load_settings(path: &Path) -> Settings {
         head_wait_ms: video["head_wait_ms"].as_f64(),
         predict_missing_head: video["predict_missing_head"].as_bool(),
         intake_gate: video["intake_gate"].as_bool(),
+        drop_duplicate_frames: video["drop_duplicate_frames"].as_bool(),
         phase_lock: video["phase_lock"].as_bool(),
         phase_margin_ms: video["phase_margin_ms"].as_f64(),
         gpu_keepalive: video["gpu_keepalive"].as_i64(),

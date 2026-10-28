@@ -65,6 +65,7 @@ namespace shimlog {
     static std::vector<std::string> g_pending;
     static std::wstring g_debugDir;
     static bool g_dirKnown = false;   // the host told us (debug on with a folder, or off)
+    static std::atomic<bool> g_debugActive{false}; // debug logging on (read per frame without the lock: the duplicate-frame count only runs then)
 
     static std::string Now() {
         SYSTEMTIME t;
@@ -149,6 +150,8 @@ namespace shimlog {
         }
     }
 
+    static bool DebugActive() { return g_debugActive.load(std::memory_order_relaxed); }
+
     // Opens the debug log in the host's debug session folder (empty: debug off).
     static void SetDebugDir(const std::wstring& dir) {
         std::lock_guard lock(g_mutex);
@@ -158,6 +161,7 @@ namespace shimlog {
         }
         g_dirKnown = true;
         g_debugDir = dir;
+        g_debugActive.store(!dir.empty(), std::memory_order_relaxed);
         if (g_session) {
             fclose(g_session);
             g_session = nullptr;
@@ -768,6 +772,29 @@ namespace {
             if (frameIndex <= m_lastWaitedFrame) {
                 m_waitRepeatedIndex++;
             }
+            // Game frame pacing fix (ipc dropDuplicateFrames): an app that waits twice per real frame (a VR mod: wait / begin / end for the
+            // frame, then a second wait / begin / end that only resubmits it) is measured to wait right after a real submit for that
+            // second time (probe of 2026-10-28: 0 ms after a real submit, 10-15 ms after a duplicate). That wait paces nothing: it returns
+            // at once, takes no boundary and no release, so the real frame's wait is the only one paced (one step per real frame and the
+            // fps lock counts real frames). Only with the fix on and about half of the recent submits duplicates; one free wait per real submit.
+            if (m_waitDoubled.load(std::memory_order_relaxed) && m_ipc.state && *(volatile uint32_t*)&m_ipc.state->host.dropDuplicateFrames != 0 &&
+                m_lastSubmitReal.exchange(false, std::memory_order_relaxed)) {
+                m_freeWaits++;
+                {
+                    std::lock_guard dl(m_displayMutex);
+                    m_nextFramePredictedDisplayTime += m_vsyncInterval; // later than the previous frame's time, earlier than the next real wait's
+                    m_lastWaitedFrame = std::max(m_lastWaitedFrame, frameIndex);
+                }
+                {
+                    std::lock_guard rq(m_releaseQueueMutex); // the dropped duplicate takes one release token (SubmitFrame), so this wait gives one
+                    m_releaseQueue.push_back(QpcSeconds());
+                    while (m_releaseQueue.size() > 4) {
+                        m_releaseQueue.pop_front();
+                    }
+                }
+                TraceLoggingWriteStop(local, "HostDriver_WaitForVsync", TLArg(m_nextFramePredictedDisplayTime, "NextFramePredictedDisplayTime"));
+                return;
+            }
             if (frameIndex > m_lastWaitedFrame || submittedSinceWait) {
                 using namespace std::chrono_literals;
 
@@ -1348,6 +1375,51 @@ namespace {
             }
             LogLayersIfChanged(layers);
 
+            // Game frame pacing fix (ipc dropDuplicateFrames, docs/EXPERIMENTAL_SWITCHES.md): a frame with exactly the render poses of the one
+            // before carries no new picture (a VR mod resubmits its last frame for the next display slot: probe of 2026-10-27, every frame
+            // twice). Off: nothing here runs unless debug logging is on, and then it only counts. On: the duplicate is neither composed nor
+            // published (its release token is taken so the queue stays in step); never two in a row.
+            if (m_ipc.state) {
+                const bool dropOn = *(volatile uint32_t*)&m_ipc.state->host.dropDuplicateFrames != 0;
+                if (dropOn || shimlog::DebugActive()) {
+                    const ovrLayerEyeFov* proj = nullptr;
+                    for (const ovrLayerHeader* h : layers) {
+                        if (h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth)) {
+                            proj = (const ovrLayerEyeFov*)h;
+                            break;
+                        }
+                    }
+                    if (!proj) {
+                        m_dupPoseValid = false;
+                        m_dupLastDropped = false;
+                        m_lastSubmitReal.store(false, std::memory_order_relaxed);
+                    } else {
+                        const bool same = m_dupPoseValid && memcmp(proj->RenderPose, m_dupLastPose, sizeof(m_dupLastPose)) == 0;
+                        memcpy(m_dupLastPose, proj->RenderPose, sizeof(m_dupLastPose));
+                        m_dupPoseValid = true;
+                        m_lastSubmitReal.store(!same, std::memory_order_relaxed);
+                        if (same) {
+                            m_dupSeen++;
+                        }
+                        // the app waits twice per real frame when about half of its submits repeat the previous one (window of 100 submits)
+                        m_dupWinTotal++;
+                        m_dupWinSeen += same ? 1 : 0;
+                        if (m_dupWinTotal >= 100) {
+                            m_waitDoubled.store(m_dupWinSeen * 100 > m_dupWinTotal * 40, std::memory_order_relaxed);
+                            m_dupWinTotal = m_dupWinSeen = 0;
+                        }
+                        if (same && dropOn && !m_dupLastDropped) {
+                            m_dupDropped++;
+                            m_dupLastDropped = true;
+                            (void)TakeFrameRelease();
+                            TraceLoggingWriteStop(local, "HostDriver_SubmitFrame");
+                            return true;
+                        }
+                        m_dupLastDropped = false;
+                    }
+                }
+            }
+
             // The timestamp the frame leaves with: the tracking sample the app rendered with. When it is not newer than the previous
             // frame's the headset skips the frame (5-10 % of the Vision Pro's frames in heavy games, 2026-10-13). Re-stamping with
             // the next sample fixes that on the Quest but trembles on the Vision Pro: parked in branch exp/restamp-2026-10-13 until
@@ -1440,13 +1512,14 @@ namespace {
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
                             "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x, "
-                            "period mul %u, fps cap %.1f (holds %llu)",
+                            "period mul %u, fps cap %.1f (holds %llu), duplicate frames seen %llu dropped %llu (pacing fix %s, free waits %llu)",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
                             (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
-                            m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds);
+                            m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds,
+                            (unsigned long long)m_dupSeen, (unsigned long long)m_dupDropped, m_ipc.state->host.dropDuplicateFrames ? "on" : "off", (unsigned long long)m_freeWaits);
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
                             return 0.0f;
@@ -2574,6 +2647,13 @@ namespace {
             return r;
         }
         uint64_t m_capHolds{0};                    // releases the fps cap (ipc appMinPeriodUs) pushed past their boundary
+        ovrPosef m_dupLastPose[2]{};               // render poses of the previous submitted frame (duplicate-frame check, SubmitFrame)
+        bool m_dupPoseValid{false}, m_dupLastDropped{false};
+        uint32_t m_dupWinTotal{0}, m_dupWinSeen{0};
+        std::atomic<bool> m_lastSubmitReal{false}; // the last submit was not a duplicate (the app's next wait is the free one)
+        uint64_t m_freeWaits{0};                   // second waits of a real frame returned at once (pacing fix)
+        std::atomic<bool> m_waitDoubled{false};    // about half of the recent submits repeated the previous frame (WaitForVsync: the second wait of a real frame is free)
+        uint64_t m_dupSeen{0}, m_dupDropped{0};    // frames with the previous frame's exact render poses / of those, the ones not published
         std::atomic<double> m_appTimeS{0.004};     // envelope of release -> frame GPU-complete (published), seconds
         long long m_lastTargetBoundary{0};         // boundary (tick index) the last release aimed at: one release per boundary
         double m_latestTickS{0.0};                 // shim-clock time of the host's latest display tick (under m_frameMutex)

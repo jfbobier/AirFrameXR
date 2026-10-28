@@ -103,6 +103,7 @@ void nvh_ipc_set_intake_gate(void* ipc, uint32_t on);
 void nvh_ipc_set_app_period_mul(void* ipc, uint32_t mul);
 // Uncapped frame generation: the minimum spacing of the game's releases (us, 0 = none): an fps cap that leaves the host GPU headroom.
 void nvh_ipc_set_app_min_period(void* ipc, uint32_t min_period_us);
+void nvh_ipc_set_drop_duplicates(void* ipc, uint32_t on);
 // Process-wide GPU scheduling class (D3DKMT): 0 idle .. 4 high, 5 realtime (needs the increase-base-priority privilege, i.e. an
 // elevated host). SteamVR's compositor runs realtime, so its copy/encode never queues behind the game's GPU work. Returns the
 // NTSTATUS (0 = success).

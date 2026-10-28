@@ -14,7 +14,7 @@
 namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 34;
+constexpr uint32_t kVersion = 35;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -116,6 +116,9 @@ struct HostToShim {
     // with a restricted field of view: where the recommended size sits between the floor (the stream's pixel density over the smaller view) and the ceiling
     // (the stream's eye size itself), 0..1; 0 = the floor, the way it was. Read with the recommended size, so an app that started later takes a new value.
     float renderQuality;
+    // Game frame pacing fix (docs/EXPERIMENTAL_SWITCHES.md): 1 = a frame the app submits with exactly the same render poses as the one
+    // before (a game or mod that resubmits its last frame for the next display slot) is not composed or published; 0 = everything goes out.
+    uint32_t dropDuplicateFrames;
 };
 
 struct Haptic {
