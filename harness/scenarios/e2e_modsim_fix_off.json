@@ -53,7 +53,8 @@
     "exit_after_frames": 100000,
     "running_start_ms": 2.0,
     "frame_gen": "on",
-    "frame_gen_rate": "half"
+    "frame_gen_rate": "half",
+    "drop_duplicate_frames": false
   },
   "client": {
     "seconds": 80,

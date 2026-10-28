@@ -470,8 +470,9 @@ def run_scenario(sc, outdir: Path, log=print):
                 b_put(fl, f"runs/{rid}/feed.ps1")
                 feedpre = f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\feed.ps1 | "
                 steps["stdin_feed_events"] = len(feed)
+            lab_knob = ' --drop-duplicate-frames' if os.environ.get('AIRFRAMEXR_LAB_DROP_DUP') and 'drop_duplicate_frames' not in h else ''   # AIRFRAMEXR_LAB_DROP_DUP=1: the game frame pacing fix ON in every scenario (a scenario that sets the key itself keeps its value)
             hostcmd = (envpre + feedpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
-                       f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv ' + ('' if 'idle_rgb' in h else '--idle-rgb 00ff00 ')
+                       f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv ' + ('' if 'idle_rgb' in h else '--idle-rgb 00ff00 ') + lab_knob.lstrip()+' '
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "gui": "--gui", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
                                      "width": "--width", "height": "--height", "height_m": "--height-m", "noise": "--noise", "qp_map": "--qp-map",
                                      "idle_rgb": "--idle-rgb", "gpu_priority": "--gpu-priority", "encode_profile": "--encode-profile",
