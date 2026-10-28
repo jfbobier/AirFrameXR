@@ -37,6 +37,8 @@
 // in tangent space with x outward from the nose. XR_PROBE_SWEEP_FIT labels the run, XR_PROBE_SWEEP_GAZE=fixed|following, XR_PROBE_SWEEP_EYES=01|0|1, XR_PROBE_SWEEP_RAYS=24,
 // XR_PROBE_SWEEP_LATENCY_MS=50 is subtracted from the pinch time.
 // XR_PROBE_FOVGRID=outline XR_PROBE_OUTLINE=<csv eye,theta_deg,tan_r>: draws that polygon as a thin white line (the measured edge) to confirm it by eye.
+// XR_PROBE_RECT=outer,inner,upper,lower (tangents) with outline mode: the candidate rectangle as a white line, mirrored per eye (outer = away from the nose), with a
+// white cross at the centre; the measured polygon (if XR_PROBE_OUTLINE is given) is drawn green.
 // XR_PROBE_SCENE=<file.vab>: render the benchmark scene (Littlest Tokyo in its textured room, animated) instead of the flat stamp
 // background, with the runtime's view poses: a full OpenXR scene for the pacing lab without a game.
 #define STB_IMAGE_IMPLEMENTATION
@@ -171,6 +173,9 @@ int main(int argc, char** argv) {
             sweepRays.insert(sweepRays.end(), one.begin(), one.end());
         }
     }
+    float outlineRect[4] = {};   // outer, inner, upper, lower
+    bool outlineRectOn = false;
+    if (outlineOn && getenv("XR_PROBE_RECT")) outlineRectOn = sscanf(getenv("XR_PROBE_RECT"), "%f,%f,%f,%f", &outlineRect[0], &outlineRect[1], &outlineRect[2], &outlineRect[3]) == 4;
     std::vector<XMFLOAT2> outlinePoly[2];
     if (outlineOn) {
         if (const char* op = getenv("XR_PROBE_OUTLINE")) if (FILE* of = fopen(op, "r")) {
@@ -586,13 +591,14 @@ int main(int argc, char** argv) {
                             const float black[4] = { 0, 0, 0, 1 }, white[4] = { 1, 1, 1, 1 };
                             ctx->ClearRenderTargetView(rtv, black);
                             // tangent-space point (x to the right of the view axis, y up) -> a square of half-size hs pixels
-                            auto dot = [&](float x, float y, float hs) {
+                            auto dot = [&](float x, float y, float hs, const float* colour = nullptr) {
                                 const float cx = (x + gtl) / (gtl + gtr) * gW, cy = (1.f - (y + gtd) / (gtu + gtd)) * gH;
                                 D3D11_RECT r{ (LONG)(cx - hs), (LONG)(cy - hs), (LONG)(cx + hs), (LONG)(cy + hs) };
                                 r.left = std::max<LONG>(r.left, 0); r.top = std::max<LONG>(r.top, 0);
                                 r.right = std::min<LONG>(r.right, (LONG)gt.Width); r.bottom = std::min<LONG>(r.bottom, (LONG)gt.Height);
-                                if (r.right > r.left && r.bottom > r.top) gc->ClearView(rtv, white, &r, 1);
+                                if (r.right > r.left && r.bottom > r.top) gc->ClearView(rtv, colour ? colour : white, &r, 1);
                             };
+                            const float green[4] = { 0.2f, 1.f, 0.3f, 1 };
                             const float outSign = (i == 0) ? -1.f : 1.f;   // outward from the nose is left of the view axis for the left eye
                             if (sweepOn && sweepEye == (int)i) {
                                 if (sweepCross) for (int k = -40; k <= 40; k++) { dot(k * 0.0005f * 1.f, 0.f, 2.f); dot(0.f, k * 0.0005f, 2.f); }   // ~2.3 deg arms
@@ -606,7 +612,14 @@ int main(int argc, char** argv) {
                                 for (size_t k = 0; k < pg.size(); k++) {
                                     const XMFLOAT2 a = pg[k], b = pg[(k + 1) % pg.size()];
                                     const int steps = std::max(1, (int)(hypotf(b.x - a.x, b.y - a.y) * pxPerTan / 3.f));
-                                    for (int s = 0; s <= steps; s++) dot(outSign * (a.x + (b.x - a.x) * s / steps), a.y + (b.y - a.y) * s / steps, 2.f);
+                                    for (int s = 0; s <= steps; s++) dot(outSign * (a.x + (b.x - a.x) * s / steps), a.y + (b.y - a.y) * s / steps, 2.f, outlineRectOn ? green : nullptr);
+                                }
+                                if (outlineRectOn) {
+                                    const float xo = outlineRect[0], xi = outlineRect[1], yu = outlineRect[2], yd = outlineRect[3];
+                                    const int nx = (int)((xo + xi) * pxPerTan / 3.f), ny = (int)((yu + yd) * pxPerTan / 3.f);
+                                    for (int k = 0; k <= nx; k++) { const float x = -xi + (xo + xi) * k / nx; dot(outSign * x, yu, 2.f); dot(outSign * x, -yd, 2.f); }
+                                    for (int k = 0; k <= ny; k++) { const float y = -yd + (yu + yd) * k / ny; dot(outSign * xo, y, 2.f); dot(-outSign * xi, y, 2.f); }
+                                    for (int k = -40; k <= 40; k++) { dot(k * 0.0005f, 0.f, 2.f); dot(0.f, k * 0.0005f, 2.f); }
                                 }
                             }
                             gc->Release();

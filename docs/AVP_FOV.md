@@ -1,5 +1,22 @@
 # Apple Vision Pro: declared vs visible field of view
 
+## Calibrated values (2026-10-28), the current default
+
+A sweep on the 5090 (`docs/FOV_CALIBRATION.md`: a dot drifts outward along 24 rays per eye, the wearer clicks when it is gone, eyes free to follow; data in
+[`fov_sweeps/`](fov_sweeps/)), one person, one fit. One rectangle for both eyes: the tight box around the larger of the two eyes' windows, no margin. The outline
+check on the headset (white rectangle, green measured window) looked like a good fit; not yet tried in a game.
+
+| | Outer | Inner | Upper | Lower |
+|---|---|---|---|---|
+| **Calibrated (tangents)** | **0.71** | **0.59** | **0.61** | **0.57** |
+| angle | 35.4 deg | 30.5 | 31.4 | 29.7 |
+
+About 76 % of the headset's declared pixels are not rendered (computed from the tangent areas, game GPU only). The first sweep with the dot starting at 28 degrees was
+cut off at its start (many rays hit the earliest accepted click) and is not used; fixed gaze (eyes on the cross) gives windows 4 to 8 degrees larger and is kept in
+`fov_sweeps/` for comparison. What is not known: other wearers and fits (one fit only, no margin from repeats), a game's HUD corners.
+
+The tables below are the first estimate (2026-10-27, grid traced by eye, left eye), kept for history; the calibrated row replaces its "Recommended" row.
+
 Measured 2026-10-27 with the stock ALVR visionOS app (RealityKit renderer, FoV scale 1.0) and `fovgrid.exe`
 (`docs/FOV_GRID.md`). One person, one fit of the headset, **left eye only**: a first estimate, not a calibration.
 

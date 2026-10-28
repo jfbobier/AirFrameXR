@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The Advanced window's profile button (docs/HMD_PROFILES.md, key `fov`): with a headset profile that has a measured visible window it fills the four fields (the visible
 angles plus the margin, as tangents) and the render quality slider, ticks the override and saves. Run python3 harness/ui_matrix.py first (it builds uitest.exe).
-Also checks the shipped Vision Pro profile against the row of docs/AVP_FOV.md.
+Also checks the shipped Vision Pro profile against the calibrated row of docs/AVP_FOV.md.
 
     python3 harness/fov_profile_check.py
 """
@@ -13,7 +13,7 @@ import lib
 root = Path(__file__).resolve().parent.parent
 prof = json.loads((root / "profiles" / "apple-vision-pro.profile.json").read_text())["fov"]
 want = [round(math.tan(math.radians(prof["visible_deg"][k] + prof["margin_deg"])), 2) for k in ("outer", "inner", "upper", "lower")]
-doc = [0.94, 0.93, 0.90, 0.76]   # docs/AVP_FOV.md, the recommended row
+doc = [0.71, 0.59, 0.61, 0.57]   # docs/AVP_FOV.md, the calibrated row
 ok_doc = want == doc and prof["render_quality"] == 0.25 and prof.get("client_fov_scale") == 0.8
 print("CHECK", "PASS" if ok_doc else "FAIL", f"shipped Vision Pro profile gives {want} and quality {prof['render_quality']} (docs/AVP_FOV.md: {doc}, 0.25) and client FoV scale {prof.get('client_fov_scale')} (0.8)")
 
