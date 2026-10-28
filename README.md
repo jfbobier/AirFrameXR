@@ -130,9 +130,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <p align="center"><img src="docs/images/airframexr-desktop-mirror-3d.png" width="860" alt="Illustration of a three-dimensional Windows desktop mirror in VR, with a visible controller projecting an orange pointing beam onto the desktop"></p>
 
-*Illustration (generated artwork based on a real desktop capture, not a headset screenshot; the real screen is flat and floats over your room or the idle colour).* What the headset really gets is below: frames of the decoded stream from a test run through the whole chain, the left eye, with the right controller's beam and, after a press of the left trigger, the left controller's. Its picture is also tested on the GPU for 7 desktop shapes in SDR and HDR (see the harness below).
-
-<p align="center"><img src="docs/images/ui_mirror_real.png" width="420" alt="The real desktop mirror in the stream, right controller's beam"> <img src="docs/images/ui_mirror_left.png" width="420" alt="The same, after the left trigger took the beam: the left controller's beam"></p>
+*Illustration (generated artwork based on a real desktop capture, not a headset screenshot; the real screen is flat and floats over your room or the idle colour).* The picture the headset gets is also tested on the GPU for 7 desktop shapes in SDR and HDR (see the harness below).
 
 <!-- End desktop mirror illustration -->
 
