@@ -26,10 +26,17 @@
 #include <cstring>
 #include <string>
 #include <algorithm>
+#include <random>
 // Run as fovgrid.exe (this exe renamed) it starts in that scene by itself and runs until the session ends.
 // XR_PROBE_SCENE=fovgrid: a head-locked grid of true angles for comparing what two headsets show (see docs/FOV_GRID.md): black, a line every
 // 5 deg (colour by 10 deg step: 10 red, 20 orange, 30 yellow, 40 green, 50 cyan, 60 blue, 70 violet, 80 magenta; the 5s dim grey), 0 deg white
 // and thick, and a white border at the edge of the FoV the runtime declared. Angles are from each eye's own view axis, so both eyes show the same.
+// XR_PROBE_FOVGRID=sweep (with the fovgrid scene, docs/FOV_CALIBRATION.md phase 1): the visible-window measurement. Head-locked black, one eye at a time, a white
+// cross at the centre (gaze "fixed") and a bright dot that moves outward along a ray at XR_PROBE_SWEEP_DEG_S (default 1) degrees per second from XR_PROBE_SWEEP_START_DEG
+// (25) in random ray order; pinch (either trigger) when it disappears. One CSV row per ray in XR_PROBE_SWEEP_CSV (default fov_sweep.csv, appended): eye, fit, gaze, theta, ecc, x, y
+// in tangent space with x outward from the nose. XR_PROBE_SWEEP_FIT labels the run, XR_PROBE_SWEEP_GAZE=fixed|following, XR_PROBE_SWEEP_EYES=01|0|1, XR_PROBE_SWEEP_RAYS=24,
+// XR_PROBE_SWEEP_LATENCY_MS=50 is subtracted from the pinch time.
+// XR_PROBE_FOVGRID=outline XR_PROBE_OUTLINE=<csv eye,theta_deg,tan_r>: draws that polygon as a thin white line (the measured edge) to confirm it by eye.
 // XR_PROBE_SCENE=<file.vab>: render the benchmark scene (Littlest Tokyo in its textured room, animated) instead of the flat stamp
 // background, with the runtime's view poses: a full OpenXR scene for the pacing lab without a game.
 #define STB_IMAGE_IMPLEMENTATION
@@ -135,6 +142,45 @@ int main(int argc, char** argv) {
     // pose the app located: the simplest scene whose motion is known exactly: the follow-the-frames "judge" of a constant head rotation reads them)
     const bool dotsOn = getenv("XR_PROBE_SCENE") && strcmp(getenv("XR_PROBE_SCENE"), "dots") == 0;
     const bool fovgridOn = getenv("XR_PROBE_SCENE") && strcmp(getenv("XR_PROBE_SCENE"), "fovgrid") == 0;
+    const char* fgMode = getenv("XR_PROBE_FOVGRID");
+    const bool sweepOn = fovgridOn && fgMode && strcmp(fgMode, "sweep") == 0;
+    const bool outlineOn = fovgridOn && fgMode && strcmp(fgMode, "outline") == 0;
+    struct SweepRay { int eye; double theta; };
+    std::vector<SweepRay> sweepRays; size_t sweepK = 0; int sweepPhase = 0;   // 0 waiting for the first pinch, 1 dwell, 2 dot moving, 3 done
+    XrTime sweepT0 = 0, sweepDwellEnd = 0; bool sweepPressed = false;
+    const double sweepSpeed = getenv("XR_PROBE_SWEEP_DEG_S") ? atof(getenv("XR_PROBE_SWEEP_DEG_S")) : 1.0;
+    const double sweepStartDeg = getenv("XR_PROBE_SWEEP_START_DEG") ? atof(getenv("XR_PROBE_SWEEP_START_DEG")) : 25.0;
+    const double sweepMaxDeg = 80.0;
+    const double sweepLatencyS = (getenv("XR_PROBE_SWEEP_LATENCY_MS") ? atof(getenv("XR_PROBE_SWEEP_LATENCY_MS")) : 50.0) / 1000.0;
+    const std::string sweepFit = getenv("XR_PROBE_SWEEP_FIT") ? getenv("XR_PROBE_SWEEP_FIT") : "1";
+    const bool sweepFollowing = getenv("XR_PROBE_SWEEP_GAZE") && strcmp(getenv("XR_PROBE_SWEEP_GAZE"), "following") == 0;
+    FILE* sweepF = nullptr;
+    if (sweepOn) {
+        const char* sp = getenv("XR_PROBE_SWEEP_CSV") ? getenv("XR_PROBE_SWEEP_CSV") : "fov_sweep.csv";
+        const bool fresh = GetFileAttributesA(sp) == INVALID_FILE_ATTRIBUTES;
+        sweepF = fopen(sp, "a");
+        if (sweepF && fresh) fprintf(sweepF, "eye,fit,gaze,theta_deg,ecc_deg,tan_r,x_out,y,timeout,latency_ms,deg_s,display_time_ns\n");
+        const char* eyes = getenv("XR_PROBE_SWEEP_EYES") ? getenv("XR_PROBE_SWEEP_EYES") : "01";
+        const int nRays = getenv("XR_PROBE_SWEEP_RAYS") ? std::max(4, atoi(getenv("XR_PROBE_SWEEP_RAYS"))) : 24;
+        std::mt19937 rng(getenv("XR_PROBE_SWEEP_SEED") ? (unsigned)atoi(getenv("XR_PROBE_SWEEP_SEED")) : (unsigned)GetTickCount64());
+        for (const char* e = eyes; *e; e++) {
+            if (*e != '0' && *e != '1') continue;
+            std::vector<SweepRay> one;
+            for (int k = 0; k < nRays; k++) one.push_back({ *e - '0', 360.0 * k / nRays });
+            std::shuffle(one.begin(), one.end(), rng);
+            sweepRays.insert(sweepRays.end(), one.begin(), one.end());
+        }
+    }
+    std::vector<XMFLOAT2> outlinePoly[2];
+    if (outlineOn) {
+        if (const char* op = getenv("XR_PROBE_OUTLINE")) if (FILE* of = fopen(op, "r")) {
+            char line[256]; int oe; double th, tr;
+            while (fgets(line, sizeof line, of)) if (sscanf(line, "%d,%lf,%lf", &oe, &th, &tr) == 3 && (oe == 0 || oe == 1))
+                outlinePoly[oe].push_back({ (float)(tr * cos(th * 3.14159265358979 / 180.0)), (float)(tr * sin(th * 3.14159265358979 / 180.0)) });
+            fclose(of);
+        }
+        L("outline: %zu / %zu points", outlinePoly[0].size(), outlinePoly[1].size());
+    }
     const double dotDeg = getenv("XR_PROBE_DOT_DEG") ? atof(getenv("XR_PROBE_DOT_DEG")) : 10.0;
     // XR_PROBE_MOVING=<amplitude deg>:<Hz>: a moving rectangle 7 deg below the horizon ring, swinging in world yaw as amp * sin(2 pi f t) with t =
     // the frame's predicted display time (so its motion is smooth in display time whatever the frame rate): the simrig viewer measures it on its own row and
@@ -221,7 +267,7 @@ int main(int argc, char** argv) {
     // ---- input actions (Touch profile), only when an input log was requested
     XrActionSet aset = XR_NULL_HANDLE; XrAction aTrigger{}, aSqueeze{}, aPrimary{}, aStick{}, aPose{}, aHaptic{};
     XrPath hands[2]; XrSpace handSpace[2] = {};
-    if (inputF) {
+    if (inputF || sweepOn) {
         XrActionSetCreateInfo asci{ XR_TYPE_ACTION_SET_CREATE_INFO }; strcpy(asci.actionSetName, "gameplay"); strcpy(asci.localizedActionSetName, "Gameplay");
         CK(xrCreateActionSet(inst, &asci, &aset));
         xrStringToPath(inst, "/user/hand/left", &hands[0]); xrStringToPath(inst, "/user/hand/right", &hands[1]);
@@ -244,7 +290,7 @@ int main(int argc, char** argv) {
         CK(xrSuggestInteractionProfileBindings(inst, &sb));
     }
 
-    if (inputF) {
+    if (inputF || sweepOn) {
         XrSessionActionSetsAttachInfo ai{ XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO }; ai.countActionSets = 1; ai.actionSets = &aset;
         CK(xrAttachSessionActionSets(sess, &ai));
         for (int h = 0; h < 2; h++) {
@@ -375,6 +421,40 @@ int main(int argc, char** argv) {
             fflush(inputF);
         }
 
+        double sweepEcc = -1.0; int sweepEye = -1; double sweepTheta = 0.0; bool sweepCross = false;
+        if (sweepOn) {
+            XrActiveActionSet act{ aset, XR_NULL_PATH }; XrActionsSyncInfo syn{ XR_TYPE_ACTIONS_SYNC_INFO }; syn.countActiveActionSets = 1; syn.activeActionSets = &act;
+            xrSyncActions(sess, &syn);
+            float trig = 0.f;
+            for (int h = 0; h < 2; h++) { XrActionStateGetInfo gi{ XR_TYPE_ACTION_STATE_GET_INFO }; gi.action = aTrigger; gi.subactionPath = hands[h]; XrActionStateFloat st{ XR_TYPE_ACTION_STATE_FLOAT }; xrGetActionStateFloat(sess, &gi, &st); trig = std::max(trig, st.currentState); }
+            const bool wasPressed = sweepPressed;
+            if (trig > 0.8f) sweepPressed = true; else if (trig < 0.5f) sweepPressed = false;
+            const bool edge = sweepPressed && !wasPressed;
+            const XrTime now = fs.predictedDisplayTime;
+            auto secs = [](XrTime a, XrTime b) { return (double)(a - b) / 1e9; };
+            auto nextRay = [&] {
+                sweepK++;
+                if (sweepK >= sweepRays.size()) { sweepPhase = 3; L("sweep: done, %zu rays", sweepRays.size()); return; }
+                sweepPhase = 1; sweepDwellEnd = now + (XrTime)((sweepRays[sweepK].eye != sweepRays[sweepK - 1].eye ? 10.0 : 1.5) * 1e9);
+                if (sweepRays[sweepK].eye != sweepRays[sweepK - 1].eye) L("sweep: switch to eye %d", sweepRays[sweepK].eye);
+            };
+            if (sweepRays.empty()) sweepPhase = 3;
+            if (sweepPhase == 0 && edge) { sweepPhase = 1; sweepDwellEnd = now + (XrTime)(2.0e9); L("sweep: start, %zu rays, fit %s, gaze %s", sweepRays.size(), sweepFit.c_str(), sweepFollowing ? "following" : "fixed"); }
+            else if (sweepPhase == 1 && now >= sweepDwellEnd) { sweepPhase = 2; sweepT0 = now; }
+            if (sweepPhase == 2) {
+                const double el = secs(now, sweepT0), ecc = sweepStartDeg + sweepSpeed * el;
+                const SweepRay& ry = sweepRays[sweepK];
+                const bool timeout = ecc > sweepMaxDeg;
+                if ((edge && el > 0.5) || timeout) {
+                    const double eccP = timeout ? sweepMaxDeg : sweepStartDeg + sweepSpeed * (el - sweepLatencyS), tr = tan(eccP * 3.14159265358979 / 180.0), th = ry.theta * 3.14159265358979 / 180.0;
+                    if (sweepF) { fprintf(sweepF, "%d,%s,%s,%.1f,%.3f,%.5f,%.5f,%.5f,%d,%.0f,%.2f,%lld\n", ry.eye, sweepFit.c_str(), sweepFollowing ? "following" : "fixed", ry.theta, eccP, tr, tr * cos(th), tr * sin(th), timeout ? 1 : 0, sweepLatencyS * 1000.0, sweepSpeed, (long long)now); fflush(sweepF); }
+                    L("sweep: eye %d theta %.0f gone at %.2f deg%s (%zu/%zu)", ry.eye, ry.theta, eccP, timeout ? " TIMEOUT" : "", sweepK + 1, sweepRays.size());
+                    nextRay();
+                } else { sweepEcc = ecc; }
+            }
+            if (sweepPhase <= 2) { sweepEye = sweepRays[sweepK].eye; sweepTheta = sweepRays[sweepK].theta; sweepCross = sweepPhase < 2 || !sweepFollowing; }
+        }
+
         std::vector<XrCompositionLayerProjectionView> pv(vcv.size(), { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW });
         XrCompositionLayerProjection layer{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
         std::vector<const XrCompositionLayerBaseHeader*> lay;
@@ -490,6 +570,42 @@ int main(int argc, char** argv) {
                             dc->Release();
                         }
                     }
+                    if ((sweepOn || outlineOn) && i < 2) {
+                        D3D11_TEXTURE2D_DESC gt{}; imgs[i][idx].texture->GetDesc(&gt);
+                        const XrFovf& gf = views[i].fov;
+                        const float gtl = -tanf(gf.angleLeft), gtr = tanf(gf.angleRight), gtu = tanf(gf.angleUp), gtd = -tanf(gf.angleDown);
+                        const float gW = (float)gt.Width, gH = (float)gt.Height, pxPerTan = gW / (gtl + gtr);
+                        ID3D11DeviceContext1* gc = nullptr;
+                        if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&gc))) {
+                            const float black[4] = { 0, 0, 0, 1 }, white[4] = { 1, 1, 1, 1 };
+                            ctx->ClearRenderTargetView(rtv, black);
+                            // tangent-space point (x to the right of the view axis, y up) -> a square of half-size hs pixels
+                            auto dot = [&](float x, float y, float hs) {
+                                const float cx = (x + gtl) / (gtl + gtr) * gW, cy = (1.f - (y + gtd) / (gtu + gtd)) * gH;
+                                D3D11_RECT r{ (LONG)(cx - hs), (LONG)(cy - hs), (LONG)(cx + hs), (LONG)(cy + hs) };
+                                r.left = std::max<LONG>(r.left, 0); r.top = std::max<LONG>(r.top, 0);
+                                r.right = std::min<LONG>(r.right, (LONG)gt.Width); r.bottom = std::min<LONG>(r.bottom, (LONG)gt.Height);
+                                if (r.right > r.left && r.bottom > r.top) gc->ClearView(rtv, white, &r, 1);
+                            };
+                            const float outSign = (i == 0) ? -1.f : 1.f;   // outward from the nose is left of the view axis for the left eye
+                            if (sweepOn && sweepEye == (int)i) {
+                                if (sweepCross) for (int k = -40; k <= 40; k++) { dot(k * 0.0005f * 1.f, 0.f, 2.f); dot(0.f, k * 0.0005f, 2.f); }   // ~2.3 deg arms
+                                if (sweepEcc >= 0.0) {
+                                    const double tr = tan(sweepEcc * 3.14159265358979 / 180.0), th = sweepTheta * 3.14159265358979 / 180.0;
+                                    dot(outSign * (float)(tr * cos(th)), (float)(tr * sin(th)), std::max(4.f, 0.0131f * pxPerTan));   // 1.5 deg square
+                                }
+                            }
+                            if (outlineOn) {
+                                const auto& pg = outlinePoly[i];
+                                for (size_t k = 0; k < pg.size(); k++) {
+                                    const XMFLOAT2 a = pg[k], b = pg[(k + 1) % pg.size()];
+                                    const int steps = std::max(1, (int)(hypotf(b.x - a.x, b.y - a.y) * pxPerTan / 3.f));
+                                    for (int s = 0; s <= steps; s++) dot(outSign * (a.x + (b.x - a.x) * s / steps), a.y + (b.y - a.y) * s / steps, 2.f);
+                                }
+                            }
+                            gc->Release();
+                        }
+                    } else
                     if (fovgridOn && i < 2) {
                         D3D11_TEXTURE2D_DESC gt{}; imgs[i][idx].texture->GetDesc(&gt);
                         const XrFovf& gf = views[i].fov;

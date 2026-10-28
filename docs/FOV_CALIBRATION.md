@@ -1,6 +1,9 @@
 # FoV calibration: plan
 
-Status 2026-10-28: **plan only, nothing built.** Goal: find the field-of-view restriction that shows the game on the
+Status 2026-10-28: **phase 0 and the probe's sweep/outline modes are built** (branch `fov-calibration`; the probe compiles on the 5090, nothing has run on a headset
+yet; the client branch exists with no changes). Phase 0 result (ellipse through the four measured crossings, `python3 harness/fov_calibration.py --ellipse-from-axes --curve`):
+today's 0.94 / 0.93 / 0.90 / 0.76 cover 100 % of that ellipse and save 50.6 % of the pixels; the tight box also covers 100 % and saves 59.9 %; 99 % coverage
+saves 62.0 %, 95 % saves 65.8 %. So the 3-degree margin costs about 9 points of savings *if the ellipse is the real V*; the sweep decides that. Goal: find the field-of-view restriction that shows the game on the
 largest possible part of the Vision Pro's panel while rendering the fewest pixels that the panel will never show, and
 measure it instead of guessing. Today's values (`docs/AVP_FOV.md`: four tangents in the streamer, FoV Scale 1.0 in the
 headset app) come from one person tracing a grid with one eye; the author's estimate is that they are within about 5 %
@@ -9,6 +12,22 @@ of the optimum. This plan tests that estimate and replaces it with a measured cu
 The work happens in **two forks** (streamer host + probe, and the visionOS client), both branches named
 `fov-calibration`. They are a calibration runtime, not the product: the engine rule in `CLAUDE.md` is lifted on those
 branches, and only the final numbers (and whatever small change they need) come back to `main`.
+
+### Run the sweep (phase 1)
+
+On the 5090 with AirFrameXR connected, hands-as-controllers on in the client, FoV Scale 1.0, override off. Command prompt next to the exe (the probe renamed or not):
+
+    set XR_PROBE_SCENE=fovgrid
+    set XR_PROBE_FOVGRID=sweep
+    set XR_PROBE_SWEEP_FIT=1
+    set XR_PROBE_SWEEP_GAZE=following
+    xr_probe.exe fovgrid.log 100000000 86400 fov_input.csv
+
+(`fov_input.csv` only turns the input actions on; the sweep creates them itself.) Pinch once to start; a white cross shows for 2 s, then a dot
+moves outward from 25 degrees at 1 degree/s in random ray order. Pinch when it disappears. After the 24 rays of the first eye the other eye follows (10 s
+pause). One row per ray is appended to `fov_sweep.csv` (`XR_PROBE_SWEEP_CSV`). Repeat with `XR_PROBE_SWEEP_FIT=2,3` (headset off and on) and
+`XR_PROBE_SWEEP_GAZE=fixed`. Confirmation: `XR_PROBE_FOVGRID=outline` with `XR_PROBE_OUTLINE=<csv eye,theta_deg,tan_r>` draws a polygon.
+Row format and tangent convention: header of `tools/probe/xr_probe.cpp`.
 
 ## 1. The problem in one picture
 
