@@ -6,6 +6,7 @@ Everything is in tangent space for one eye (x = outward from the nose, y = up). 
 
     python3 harness/fov_calibration.py --ellipse-from-axes          # phase 0: V = ellipse through the four measured axis crossings (docs/AVP_FOV.md)
     python3 harness/fov_calibration.py --ellipse-from-axes --curve  # plus the coverage/savings table of the minimum-area rectangles
+    python3 harness/fov_calibration.py --sweep docs/fov_sweeps/<file>.csv [--sweep other.csv ...]   # phase 3: V from the sweep(s), per eye
 
 Area is counted on a fine grid with an integral image, so the area of any rectangle is four lookups (the search below visits millions).
 """
@@ -117,14 +118,56 @@ def curve(win, targets, declared=DECLARED):
     return rows
 
 
+def load_sweeps(paths, max_deg=60.0):
+    """Per eye and ray, the tightest window seen across the files (rows that timed out or are beyond max_deg are outliers and dropped).
+    Returns {eye: {theta: [ecc per file]}}: the per-ray spread is the uncertainty once there are several fits."""
+    import csv
+    rays = {0: {}, 1: {}}
+    for path in paths:
+        for r in csv.DictReader(open(path)):
+            if r["timeout"] == "1" or float(r["ecc_deg"]) > max_deg:
+                continue
+            rays[int(r["eye"])].setdefault(float(r["theta_deg"]), []).append(float(r["ecc_deg"]))
+    return rays
+
+
+def poly_of(rays_eye, how=min):
+    th = sorted(rays_eye)
+    return polygon_from_rays(th, [math.tan(math.radians(how(rays_eye[t]))) for t in th])
+
+
+def report_window(name, poly, curve_targets):
+    win = Window(poly)
+    print(f"\n== {name}: area {win.area:.3f}, today's values cover {100 * coverage(win, RECOMMENDED):.1f} % (save {100 * savings(RECOMMENDED):.1f} %), "
+          f"tight box would be {tuple(round(v, 2) for v in _bbox(poly))}")
+    print("target  coverage  savings   outer inner upper lower   (minimum-area rectangle)")
+    for t, r, c, sv in curve(win, curve_targets):
+        print(f"{100 * t:5.0f} %  {100 * c:6.2f} %  {100 * sv:5.1f} %   {r[0]:.2f}  {r[1]:.2f}  {r[2]:.2f}  {r[3]:.2f}")
+    return win
+
+
+def _bbox(poly):
+    return (poly[:, 0].max(), -poly[:, 0].min(), poly[:, 1].max(), -poly[:, 1].min())
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--sweep", action="append", help="sweep CSV (xr_probe XR_PROBE_FOVGRID=sweep); repeat for several fits")
     ap.add_argument("--ellipse-from-axes", action="store_true", help="phase 0: V = ellipse through the four measured crossings")
     ap.add_argument("--axes", type=float, nargs=4, default=MEASURED, metavar=("OUTER", "INNER", "UP", "DOWN"))
     ap.add_argument("--curve", action="store_true", help="coverage/savings of the minimum-area rectangles, 90 to 100 %% in 1 %% steps")
     a = ap.parse_args()
+    if a.sweep:
+        rays = load_sweeps(a.sweep)
+        targets = [x / 100 for x in (90, 92, 94, 95, 96, 97, 98, 99, 100)]
+        print(f"sweeps: {len(a.sweep)} file(s), rays kept per eye: {len(rays[0])} / {len(rays[1])}")
+        for e, nm in ((0, "left eye"), (1, "right eye")):
+            report_window(nm, poly_of(rays[e]), targets)
+        both = {t: [max(max(rays[0].get(t, [0])), max(rays[1].get(t, [0])))] for t in set(rays[0]) | set(rays[1])}
+        report_window("shared set: window = per-ray larger of the two eyes (covers what either eye sees)", poly_of(both), targets)
+        return 0
     if not a.ellipse_from_axes:
-        ap.error("only --ellipse-from-axes exists so far (phase 0)")
+        ap.error("give --sweep or --ellipse-from-axes")
     win = Window(ellipse_from_axes(*a.axes))
     bbox = tuple(a.axes)
     print(f"V: ellipse through outer {a.axes[0]} inner {a.axes[1]} up {a.axes[2]} down {a.axes[3]}  area {win.area:.3f} (box {rect_area(bbox):.3f}, ellipse/box {win.area / rect_area(bbox):.3f}, pi/4 = {math.pi / 4:.3f})")
