@@ -1686,7 +1686,9 @@ def analyse_modsim(sc, outdir):
         if not g:
             return None
         m = sum(g) / len(g)
-        return {"frames": len(r), "fps": round(len(r) / max(t1 - t0, 1e-6), 2), "p5": round(pct(g, .05), 1), "p50": round(pct(g, .5), 1), "p95": round(pct(g, .95), 1),
+        med = pct(g, .5)
+        return {"frames": len(r), "fps": round(len(r) / max(t1 - t0, 1e-6), 2), "p5": round(pct(g, .05), 1), "p50": round(med, 1), "p95": round(pct(g, .95), 1),
+                "max": round(max(g), 1), "hitches_per_s": round(sum(1 for x in g if x > 1.5 * med) / max(t1 - t0, 1e-6), 2),
                 "stdev": round((sum((x - m) ** 2 for x in g) / len(g)) ** 0.5, 2)}
     skip = 3.0     # the first seconds include the session start
     sw = float(sc.get("app", {}).get("env", {}).get("MODSIM_SWITCH_S", 0) or 0)
@@ -1695,6 +1697,10 @@ def analyse_modsim(sc, outdir):
         res["after_switch"] = spacing(t_first + sw + 2.0, t_last - 1.0)
     else:
         res["steady"] = spacing(t_first + skip, t_last - 1.0)
+    stop = float(sc.get("app", {}).get("env", {}).get("MODSIM_DUP_STOP_S", 0) or 0)
+    if stop > 0:
+        res["before_stop"] = spacing(t_first + skip, t_first + stop)
+        res["after_stop"] = spacing(t_first + stop + 3.0, t_last - 1.0)
     # the waits: block time by what the last END before the wait was (real: the mod's second wait of a frame; dup: the real frame's wait)
     end_t = [r[0] for r in ends]
     import bisect
@@ -1718,12 +1724,12 @@ def analyse_modsim(sc, outdir):
     if sl.exists():
         last = None
         for line in sl.read_text(errors="replace").splitlines():
-            m = re.search(r"releases (\d+) \(late (\d+)\).*duplicate frames seen (\d+) dropped (\d+) \(pacing fix (on|off), free waits (\d+)\)", line)
+            m = re.search(r"releases (\d+) \(late (\d+)\).*duplicate frames seen (\d+) dropped (\d+) \(pacing fix (on|off), (\d+) duplicates per real frame, free waits (\d+)\)", line)
             if m:
                 last = m
         if last:
             res["shim"] = {"releases": int(last.group(1)), "late": int(last.group(2)), "dups_seen": int(last.group(3)), "dups_dropped": int(last.group(4)),
-                           "fix": last.group(5), "free_waits": int(last.group(6))}
+                           "fix": last.group(5), "dup_per_real": int(last.group(6)), "free_waits": int(last.group(7))}
     return res
 
 def evaluate(sc, a):
@@ -2054,7 +2060,13 @@ def evaluate(sc, a):
     if ck.get("modsim") and a.get("modsim") is not None:
         M = a["modsim"]; mk = ck["modsim"]
         chk("modsim_ran", M["real_frames"] >= mk.get("min_real_frames", 200), M["real_frames"], f">= {mk.get('min_real_frames', 200)} real frames")
-        if mk.get("dup", True):
+        dn = int(mk.get("dup_count", 1))
+        generic = not mk.get("dups_stop")    # a scenario whose duplicates stop halfway: the whole-run duplicate checks do not apply
+        if not generic:
+            pass
+        elif mk.get("dup", True) and dn != 1:
+            chk("modsim_submits_%dx" % (dn + 1), abs(M["dup_ends"] - dn * M["real_frames"]) <= max(3 * dn, 0.03 * dn * M["real_frames"]), {"real": M["real_frames"], "dup": M["dup_ends"]}, "the mimic submits every real frame %d times" % (dn + 1))
+        elif mk.get("dup", True):
             chk("modsim_submits_twice", abs(M["dup_ends"] - M["real_frames"]) <= max(3, 0.03 * M["real_frames"]), {"real": M["real_frames"], "dup": M["dup_ends"]}, "the mimic submits every real frame twice")
         else:
             chk("modsim_submits_once", M["dup_ends"] == 0, {"real": M["real_frames"], "dup": M["dup_ends"]}, "the mimic submits each frame once (a normal game)")
@@ -2063,9 +2075,17 @@ def evaluate(sc, a):
             chk("fix_off_nothing_changes", sh is not None and sh["dups_dropped"] == 0 and sh["free_waits"] == 0 and sh["fix"] == "off", sh, "knob off: no frame dropped, no free wait")
             wr = (M.get("wait_after_real") or {}).get("p50_ms")
             chk("fix_off_second_wait_paced", wr is not None and wr >= mk.get("min_second_wait_ms", 1.0), wr, f"second wait still blocks (>= {mk.get('min_second_wait_ms', 1.0)} ms p50): the behavior of before")
+        if mk.get("fix") == "on_idle":    # a client the pattern does not describe: the fix must not act
+            chk("fix_on_idle_nothing_dropped", sh is not None and sh["fix"] == "on" and sh["dups_dropped"] == 0 and sh["free_waits"] == 0 and sh["dup_per_real"] == 0, sh, "knob ON, no duplicate pattern (stationary pose): nothing dropped, no free wait")
+        if "expect_dup_per_real_at_end" in mk:
+            chk("shim_dup_per_real_at_end", sh is not None and sh["dup_per_real"] == mk["expect_dup_per_real_at_end"], sh and sh["dup_per_real"], f"the shim ends with {mk['expect_dup_per_real_at_end']} duplicates per real frame")
+        if "min_drop_ratio" in mk:
+            chk("fix_on_drop_ratio", sh is not None and sh["dups_seen"] > 0 and sh["dups_dropped"] >= mk["min_drop_ratio"] * sh["dups_seen"], sh, f">= {mk['min_drop_ratio']} of the duplicates seen are dropped")
+        if "min_free_per_release" in mk:
+            chk("fix_on_free_per_release", sh is not None and sh["free_waits"] >= mk["min_free_per_release"] * max(sh["releases"], 1), sh, f"free waits >= {mk['min_free_per_release']} x paced releases")
         if mk.get("fix") == "on_nodup":
             chk("fix_on_normal_game_untouched", sh is not None and sh["fix"] == "on" and sh["dups_dropped"] == 0 and sh["free_waits"] == 0, sh, "knob ON with a game that does not resubmit: nothing dropped, no free wait (the fix does not act)")
-        if mk.get("fix") == "on":
+        if mk.get("fix") == "on" and generic:
             chk("fix_on_dups_dropped", sh is not None and sh["fix"] == "on" and sh["dups_seen"] > 0 and sh["dups_dropped"] >= 0.95 * sh["dups_seen"], sh, "knob on: >= 95 % of the duplicates seen are dropped")
             chk("fix_on_free_waits", sh is not None and sh["free_waits"] >= mk.get("min_free_wait_ratio", 0.8) * max(sh["releases"], 1), sh, f"knob on: free waits >= {mk.get('min_free_wait_ratio', 0.8)} x paced releases")
             wr = (M.get("wait_after_real") or {}).get("p50_ms")
@@ -2073,6 +2093,14 @@ def evaluate(sc, a):
         if "min_real_fps" in mk:
             part = M.get("steady") or M.get("before_switch") or {}
             chk("modsim_real_fps", (part.get("fps") or 0) >= mk["min_real_fps"], part.get("fps"), f">= {mk['min_real_fps']} real fps")
+        if "max_gap_ms" in mk:
+            for nm in ("steady", "before_switch", "after_switch", "before_stop", "after_stop"):
+                part = M.get(nm)
+                if part:
+                    chk("modsim_gap_" + nm, part["max"] <= mk["max_gap_ms"], part["max"], f"longest real-frame gap <= {mk['max_gap_ms']} ms")
+        if "min_fps_after_stop" in mk:
+            part = M.get("after_stop") or {}
+            chk("modsim_fps_after_stop", (part.get("fps") or 0) >= mk["min_fps_after_stop"], part.get("fps"), f">= {mk['min_fps_after_stop']} real fps once the duplicates stopped")
         if "max_spacing_stdev_ms" in mk:
             for nm in ("steady", "before_switch", "after_switch"):
                 part = M.get(nm)

@@ -772,13 +772,15 @@ namespace {
             if (frameIndex <= m_lastWaitedFrame) {
                 m_waitRepeatedIndex++;
             }
-            // Game frame pacing fix (ipc dropDuplicateFrames): an app that waits twice per real frame (a VR mod: wait / begin / end for the
-            // frame, then a second wait / begin / end that only resubmits it) is measured to wait right after a real submit for that
-            // second time (probe of 2026-10-28: 0 ms after a real submit, 10-15 ms after a duplicate). That wait paces nothing: it returns
-            // at once, takes no boundary and no release, so the real frame's wait is the only one paced (one step per real frame and the
-            // fps lock counts real frames). Only with the fix on and about half of the recent submits duplicates; one free wait per real submit.
-            if (m_waitDoubled.load(std::memory_order_relaxed) && m_ipc.state && *(volatile uint32_t*)&m_ipc.state->host.dropDuplicateFrames != 0 &&
-                m_lastSubmitReal.exchange(false, std::memory_order_relaxed)) {
+            // Game frame pacing fix (ipc dropDuplicateFrames): an app that waits again for every duplicate it submits (a VR mod: wait / begin /
+            // end for the frame, then a second wait / begin / end that only resubmits it) waits right after a real submit for that second
+            // time (probe of 2026-10-28: 0 ms after a real submit, 10-15 ms after a duplicate). Those waits pace nothing: each returns at once,
+            // takes no boundary and no release, so the real frame's wait is the only one paced (one step per real frame, and the fps lock counts
+            // real frames). Only with the fix on and a duplicate pattern confirmed (SubmitFrame: dupPerReal, 1 or 2 extra submits per real
+            // frame); a real submit gives dupPerReal free waits, so an app that stops duplicating loses the free waits within a second.
+            int budget = m_freeBudget.load(std::memory_order_relaxed);
+            if (m_dupPerReal.load(std::memory_order_relaxed) > 0 && budget > 0 && m_ipc.state && *(volatile uint32_t*)&m_ipc.state->host.dropDuplicateFrames != 0 &&
+                m_freeBudget.compare_exchange_strong(budget, budget - 1, std::memory_order_relaxed)) {
                 m_freeWaits++;
                 {
                     std::lock_guard dl(m_displayMutex);
@@ -1377,8 +1379,11 @@ namespace {
 
             // Game frame pacing fix (ipc dropDuplicateFrames, docs/EXPERIMENTAL_SWITCHES.md): a frame with exactly the render poses of the one
             // before carries no new picture (a VR mod resubmits its last frame for the next display slot: probe of 2026-10-27, every frame
-            // twice). Off: nothing here runs unless debug logging is on, and then it only counts. On: the duplicate is neither composed nor
-            // published (its release token is taken so the queue stays in step); never two in a row.
+            // twice). Off: nothing here runs unless debug logging is on, and then it only counts. On: once a duplicate PATTERN is confirmed
+            // (over windows of 40 submits, two in a row to start, one to stop: 1 or 2 duplicates per real frame, i.e. 40-70 % of the submits)
+            // the duplicates are neither composed nor published (their release tokens are taken so the queue stays in step). A client whose
+            // poses never change (every submit "the same") is not that pattern and is left alone; a duplicate is also published when no frame
+            // was for 250 ms.
             if (m_ipc.state) {
                 const bool dropOn = *(volatile uint32_t*)&m_ipc.state->host.dropDuplicateFrames != 0;
                 if (dropOn || shimlog::DebugActive()) {
@@ -1391,31 +1396,40 @@ namespace {
                     }
                     if (!proj) {
                         m_dupPoseValid = false;
-                        m_dupLastDropped = false;
-                        m_lastSubmitReal.store(false, std::memory_order_relaxed);
+                        m_freeBudget.store(0, std::memory_order_relaxed);
                     } else {
                         const bool same = m_dupPoseValid && memcmp(proj->RenderPose, m_dupLastPose, sizeof(m_dupLastPose)) == 0;
                         memcpy(m_dupLastPose, proj->RenderPose, sizeof(m_dupLastPose));
                         m_dupPoseValid = true;
-                        m_lastSubmitReal.store(!same, std::memory_order_relaxed);
                         if (same) {
                             m_dupSeen++;
+                        } else {
+                            m_freeBudget.store(m_dupPerReal.load(std::memory_order_relaxed), std::memory_order_relaxed);   // the waits that follow a real frame
                         }
-                        // the app waits twice per real frame when about half of its submits repeat the previous one (window of 100 submits)
                         m_dupWinTotal++;
                         m_dupWinSeen += same ? 1 : 0;
-                        if (m_dupWinTotal >= 100) {
-                            m_waitDoubled.store(m_dupWinSeen * 100 > m_dupWinTotal * 40, std::memory_order_relaxed);
+                        if (m_dupWinTotal >= 40) {
+                            const uint32_t reals = m_dupWinTotal - m_dupWinSeen;
+                            const int n = reals ? (int)std::lround((double)m_dupWinSeen / (double)reals) : 0;
+                            const double ratio = (double)m_dupWinSeen / (double)m_dupWinTotal;
+                            const bool pattern = n >= 1 && n <= 2 && ratio >= 0.4 && ratio <= 0.7;
+                            if (!pattern) {
+                                m_dupPerReal.store(0, std::memory_order_relaxed);
+                                m_freeBudget.store(0, std::memory_order_relaxed);
+                                m_dupPatternWindows = 0;
+                            } else if (++m_dupPatternWindows >= 2) {
+                                m_dupPerReal.store(n, std::memory_order_relaxed);
+                            }
                             m_dupWinTotal = m_dupWinSeen = 0;
                         }
-                        if (same && dropOn && !m_dupLastDropped) {
+                        const double nowS = QpcSeconds();
+                        if (same && dropOn && m_dupPerReal.load(std::memory_order_relaxed) > 0 && nowS - m_dupLastPassS < 0.25) {
                             m_dupDropped++;
-                            m_dupLastDropped = true;
                             (void)TakeFrameRelease();
                             TraceLoggingWriteStop(local, "HostDriver_SubmitFrame");
                             return true;
                         }
-                        m_dupLastDropped = false;
+                        m_dupLastPassS = nowS;
                     }
                 }
             }
@@ -1512,14 +1526,14 @@ namespace {
                             (unsigned long long)m_waitRepeatedIndex, (unsigned long long)m_waitTimeouts);
                     ShimLog("pacing: running start %s (margin %.1f ms, boundary offset %.1f ms), app time envelope %.2f ms, releases %llu "
                             "(late %llu), intake gate %s (skips %llu, standing seen while quiet %llu), GPU throttle timeouts %llu, slot waits %llu, host busy mask 0x%x, "
-                            "period mul %u, fps cap %.1f (holds %llu), duplicate frames seen %llu dropped %llu (pacing fix %s, free waits %llu)",
+                            "period mul %u, fps cap %.1f (holds %llu), duplicate frames seen %llu dropped %llu (pacing fix %s, %d duplicates per real frame, free waits %llu)",
                             m_ipc.state->host.runningStartMs > 0.f ? "on" : "off", m_ipc.state->host.runningStartMs,
                             m_ipc.state->host.boundaryOffsetMs, m_appTimeS.load() * 1000.0, (unsigned long long)m_releases.load(),
                             (unsigned long long)m_releasesLate.load(), m_ipc.state->host.intakeGate ? "on" : "off",
                             (unsigned long long)m_gateHolds, (unsigned long long)m_gateSuppressed, (unsigned long long)m_gpuThrottleTimeouts,
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
                             m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds,
-                            (unsigned long long)m_dupSeen, (unsigned long long)m_dupDropped, m_ipc.state->host.dropDuplicateFrames ? "on" : "off", (unsigned long long)m_freeWaits);
+                            (unsigned long long)m_dupSeen, (unsigned long long)m_dupDropped, m_ipc.state->host.dropDuplicateFrames ? "on" : "off", m_dupPerReal.load(), (unsigned long long)m_freeWaits);
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
                             return 0.0f;
@@ -2648,11 +2662,12 @@ namespace {
         }
         uint64_t m_capHolds{0};                    // releases the fps cap (ipc appMinPeriodUs) pushed past their boundary
         ovrPosef m_dupLastPose[2]{};               // render poses of the previous submitted frame (duplicate-frame check, SubmitFrame)
-        bool m_dupPoseValid{false}, m_dupLastDropped{false};
-        uint32_t m_dupWinTotal{0}, m_dupWinSeen{0};
-        std::atomic<bool> m_lastSubmitReal{false}; // the last submit was not a duplicate (the app's next wait is the free one)
-        uint64_t m_freeWaits{0};                   // second waits of a real frame returned at once (pacing fix)
-        std::atomic<bool> m_waitDoubled{false};    // about half of the recent submits repeated the previous frame (WaitForVsync: the second wait of a real frame is free)
+        bool m_dupPoseValid{false};
+        uint32_t m_dupWinTotal{0}, m_dupWinSeen{0}, m_dupPatternWindows{0};
+        double m_dupLastPassS{0.0};                // when SubmitFrame last let a frame through while the duplicate check ran
+        std::atomic<int> m_dupPerReal{0};          // confirmed duplicate pattern: extra submits per real frame (1 or 2), 0 = none (the fix idles)
+        std::atomic<int> m_freeBudget{0};          // waits after the last real submit that return at once (WaitForVsync)
+        uint64_t m_freeWaits{0};                   // waits of a duplicate cycle returned at once (pacing fix)
         uint64_t m_dupSeen{0}, m_dupDropped{0};    // frames with the previous frame's exact render poses / of those, the ones not published
         std::atomic<double> m_appTimeS{0.004};     // envelope of release -> frame GPU-complete (published), seconds
         long long m_lastTargetBoundary{0};         // boundary (tick index) the last release aimed at: one release per boundary

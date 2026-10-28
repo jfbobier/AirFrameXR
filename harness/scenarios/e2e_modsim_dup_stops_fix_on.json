@@ -1,0 +1,101 @@
+{
+  "description": "MOD-LOOP MIMIC, the duplicates STOP after 20 s (a client that stops resubmitting), knob ON: the fix must let go by itself (no duplicate pattern -> no free waits, the real wait is paced again), the app must not stall or free-run, and the shim must end with 0 duplicates per real frame.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 80,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 100000,
+    "running_start_ms": 2.0,
+    "frame_gen": "on",
+    "frame_gen_rate": "half",
+    "drop_duplicate_frames": true
+  },
+  "client": {
+    "seconds": 85,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "display_sim": true,
+    "poll_ms": 5,
+    "queue_max": 2,
+    "motion": "yaw"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "exe": "xr_modsim",
+    "frames": 1900,
+    "timeout_s": 70,
+    "env": {
+      "MODSIM_ENGINE_MS": "9",
+      "MODSIM_GPU_COPIES": "0",
+      "MODSIM_DUP": "1",
+      "MODSIM_POOL": "9",
+      "MODSIM_SWITCH_S": "0",
+      "MODSIM_DUP_STOP_S": "20"
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 240,
+  "checks": {
+    "host_min_frames": 600,
+    "client_min_frames": 600,
+    "max_duplicate_timestamps": 10,
+    "modsim": {
+      "fix": "on",
+      "min_real_frames": 600,
+      "expect_dup_per_real_at_end": 0,
+      "min_fps_after_stop": 40,
+      "max_gap_ms": 150,
+      "dups_stop": true,
+      "min_drop_ratio": 0.9
+    }
+  }
+}

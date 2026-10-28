@@ -7,6 +7,10 @@
 //  - the worker acquires, draws and releases the swapchain images, calls xrEndFrame for that frame, and then, with MODSIM_DUP=1 (default), makes a
 //    SECOND xrWaitFrame / xrBeginFrame / xrEndFrame cycle that resubmits the very same layers (same poses, same images) for the next display slot:
 //    every real frame is submitted twice;
+//  - MODSIM_DUP = how many extra wait / begin / end cycles resubmit each real frame (default 1; 0 = a normal game, 2 = three submits per frame); MODSIM_DUP_STOP_S
+//    ends the duplicates after that many seconds (a client that stops resubmitting); MODSIM_STATIC_POSE=1 keeps the head pose constant (every submit "the same");
+//  - at the switch the engine time changes too: MODSIM_SWITCH_ENGINE_MS (new engine frame cost) and MODSIM_SWITCH_JITTER_MS (+- uniform jitter), MODSIM_JITTER_MS before it:
+//    the field flip made the mod faster and raggeder;
 //  - the worker is one of MODSIM_POOL threads used in turn (default 9), and from MODSIM_SWITCH_S seconds on a single thread (0 = never): the
 //    mod's submit work collapsed to one thread about four minutes after the game started.
 // The render thread starts its next xrWaitFrame only after the worker is done (the mod serialises them with a mutex).
@@ -73,7 +77,8 @@ struct Worker {
     std::thread th; std::mutex m; std::condition_variable cv; std::deque<Task> q; bool stop = false;
 };
 static std::atomic<int> g_taskDone{0};
-static bool g_dup = true;
+static std::atomic<int> g_dupN{1};
+static bool g_staticPose = false;
 static std::atomic<bool> g_failed{false};
 
 // draws the next image of both eyes (a flat colour from the frame id, the id stamped in the left eye) and releases them
@@ -132,8 +137,8 @@ static void workerLoop(Worker* w) {
             t = w->q.front(); w->q.pop_front();
         }
         if (!drawFrame(t.id) || !endFrame(t, t.time, t.id)) { g_failed = true; g_taskDone++; continue; }
-        if (g_dup) {
-            // the second cycle: a new frame (wait, begin) that only resubmits the same layers
+        for (int k = 0, n = g_dupN.load(); k < n; k++) {
+            // the extra cycle: a new frame (wait, begin) that only resubmits the same layers
             XrFrameState fs{ XR_TYPE_FRAME_STATE };
             ev("WAIT_IN", 0, t.id);
             if (XR_FAILED(xrWaitFrame(g_sess, nullptr, &fs))) { g_failed = true; g_taskDone++; continue; }
@@ -155,10 +160,17 @@ int main(int argc, char** argv) {
     if (const char* c = getenv("MODSIM_CSV")) { g_csv = fopen(c, "w"); if (g_csv) fprintf(g_csv, "t_ms,tid,ev,a,b\n"); }
     const double engineMs = getenv("MODSIM_ENGINE_MS") ? atof(getenv("MODSIM_ENGINE_MS")) : 8.0;
     const int gpuCopies = getenv("MODSIM_GPU_COPIES") ? atoi(getenv("MODSIM_GPU_COPIES")) : 0;
-    g_dup = !getenv("MODSIM_DUP") || atoi(getenv("MODSIM_DUP")) != 0;
+    g_dupN = getenv("MODSIM_DUP") ? std::max(0, atoi(getenv("MODSIM_DUP"))) : 1;
+    g_staticPose = getenv("MODSIM_STATIC_POSE") && atoi(getenv("MODSIM_STATIC_POSE")) != 0;
+    const double dupStopS = getenv("MODSIM_DUP_STOP_S") ? atof(getenv("MODSIM_DUP_STOP_S")) : 0.0;
+    const double jitterMs = getenv("MODSIM_JITTER_MS") ? atof(getenv("MODSIM_JITTER_MS")) : 0.0;
+    const double switchEngineMs = getenv("MODSIM_SWITCH_ENGINE_MS") ? atof(getenv("MODSIM_SWITCH_ENGINE_MS")) : -1.0;
+    const double switchJitterMs = getenv("MODSIM_SWITCH_JITTER_MS") ? atof(getenv("MODSIM_SWITCH_JITTER_MS")) : -1.0;
+    uint32_t rng = 12345u;
+    auto rnd = [&]() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return (double)(rng & 0xFFFFFF) / 16777216.0; };   // 0..1
     const int pool = std::max(1, getenv("MODSIM_POOL") ? atoi(getenv("MODSIM_POOL")) : 9);
     const double switchS = getenv("MODSIM_SWITCH_S") ? atof(getenv("MODSIM_SWITCH_S")) : 0.0;
-    L("start real_frames=%d timeout=%ds engine_ms=%.1f gpu_copies=%d dup=%d pool=%d switch_s=%.1f", realFrames, timeoutS, engineMs, gpuCopies, (int)g_dup, pool, switchS);
+    L("start real_frames=%d timeout=%ds engine_ms=%.1f gpu_copies=%d dup=%d pool=%d switch_s=%.1f dup_stop_s=%.1f static_pose=%d jitter_ms=%.1f switch_engine_ms=%.1f switch_jitter_ms=%.1f", realFrames, timeoutS, engineMs, gpuCopies, g_dupN.load(), pool, switchS, dupStopS, (int)g_staticPose, jitterMs, switchEngineMs, switchJitterMs);
 
     XrInstanceCreateInfo ici{ XR_TYPE_INSTANCE_CREATE_INFO };
     const char* ext[] = { XR_KHR_D3D11_ENABLE_EXTENSION_NAME };
@@ -229,7 +241,14 @@ int main(int argc, char** argv) {
 
         // an engine frame: CPU work and GPU copies (only the parity frames talk to OpenXR)
         ev("EF", ef, ef & 1);
-        { const double t = qpcMs(); while (qpcMs() - t < engineMs) YieldProcessor(); }
+        const bool switched = switchS > 0 && loopStart > 0 && (qpcMs() - loopStart) / 1000.0 >= switchS;
+        if (dupStopS > 0 && loopStart > 0 && (qpcMs() - loopStart) / 1000.0 >= dupStopS && g_dupN.load() != 0) { g_dupN = 0; L("duplicates stop now"); }
+        {
+            const double base = (switched && switchEngineMs >= 0) ? switchEngineMs : engineMs;
+            const double jit = (switched && switchJitterMs >= 0) ? switchJitterMs : jitterMs;
+            const double cost = std::max(0.0, base + (jit > 0 ? (rnd() * 2.0 - 1.0) * jit : 0.0));
+            const double t = qpcMs(); while (qpcMs() - t < cost) YieldProcessor();
+        }
         if (loadTex[0]) { std::lock_guard<std::mutex> g(g_gpuMx); for (int k = 0; k < gpuCopies; k++) g_ctx->CopyResource(loadTex[(k + 1) & 1], loadTex[k & 1]); g_ctx->Flush(); }
         const bool vrFrame = (ef++ & 1) == 1;
         if (!vrFrame) continue;
@@ -245,6 +264,8 @@ int main(int argc, char** argv) {
         XrViewLocateInfo li{ XR_TYPE_VIEW_LOCATE_INFO }; li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO; li.displayTime = fs.predictedDisplayTime; li.space = g_space;
         XrViewState vs{ XR_TYPE_VIEW_STATE }; XrView views[2] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } }; uint32_t vc;
         r = xrLocateViews(g_sess, &li, &vs, 2, &vc, views); if (XR_FAILED(r)) return fail("xrLocateViews", r);
+        static XrView firstViews[2]; static bool haveFirst = false;
+        if (g_staticPose) { if (!haveFirst) { firstViews[0] = views[0]; firstViews[1] = views[1]; haveFirst = true; } views[0] = firstViews[0]; views[1] = firstViews[1]; }
         t.views[0] = views[0]; t.views[1] = views[1];
         const bool single = switchS > 0 && (qpcMs() - loopStart) / 1000.0 >= switchS;
         static bool announced = false; if (single && !announced) { announced = true; L("switch: from now on one worker thread (%.1f s)", (qpcMs() - loopStart) / 1000.0); }
