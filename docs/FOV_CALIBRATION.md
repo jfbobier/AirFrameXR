@@ -13,6 +13,13 @@ The work happens in **two forks** (streamer host + probe, and the visionOS clien
 `fov-calibration`. They are a calibration runtime, not the product: the engine rule in `CLAUDE.md` is lifted on those
 branches, and only the final numbers (and whatever small change they need) come back to `main`.
 
+### For a group: the calibration bundle
+
+`tools/fov_calibration_bundle/` (`make_zip.sh` builds `private/dist/AirFrameXR-fov-calibration.zip`): the probe as `fov_sweep.exe`, `run_sweep.bat` (asks name, headset,
+run number; following gaze, dot from 15 degrees at 2 degrees/s, both eyes) and `README.txt` (the instructions written for the participants). Each person sends back
+`fov_sweep_<name>_<headset>_run<N>.csv`; analysis is `python3 harness/fov_calibration.py --sweep <csv> [--sweep <csv2> ...]` (a shared `--sweep` list gives the per-ray
+larger/tighter window across runs). The launcher was tested on the 5090 up to the session start (runtime found from `..\bin`, CSV created); no participant has run it.
+
 ### Run the sweep (phase 1)
 
 On the 5090 with AirFrameXR connected, hands-as-controllers on in the client, FoV Scale 1.0, override off. Command prompt next to the exe (the probe renamed or not):
