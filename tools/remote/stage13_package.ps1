@@ -5,7 +5,7 @@
 #   bench\, profiles\, config\, docs\, logs\ (created on use)
 $ErrorActionPreference = 'Continue'
 $root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
-$version = if ($env:AIRFRAMEXR_VERSION) { $env:AIRFRAMEXR_VERSION } else { '1.1.0-pre' }
+$version = if ($env:AIRFRAMEXR_VERSION) { $env:AIRFRAMEXR_VERSION } else { '1.1.1-pre' }
 $pkg = "$root\out\dist\AirFrameXR"   # a folder no earlier layout used (out\airframexr = the old installer package)
 # an earlier layout (loose files in the root, or libs\ / licenses\ folders) would hide a broken new one: the old folder is moved aside once, never deleted
 $stale = (Test-Path $pkg) -and ((@(Get-ChildItem $pkg -File | Where-Object { $_.Name -ne 'AirFrameXR.exe' }).Count -gt 0) -or (Test-Path "$pkg\libs") -or (Test-Path "$pkg\licenses") -or (Test-Path "$pkg\bin\logs"))
@@ -50,6 +50,8 @@ Set-Content -Path "$pkg\bin\flavour.txt" -Value $flavour -NoNewline
 if ($flavour -ne 'release') { $version += '-debug' }
 $persFile = "$root\_tmp\install\airframexr.personal.json"
 $persShip = @()
+# a generic build ships no config\airframexr.json: one left in the folder by an earlier personal build is moved out of the package, not shipped
+if (-not ((Test-Path $persFile) -and ((Get-Content $persFile -Raw).Trim().Length -gt 2)) -and (Test-Path "$pkg\config\airframexr.json")) { Move-Item "$pkg\config\airframexr.json" "$root\_tmp\stale_airframexr.json" -Force }
 if ((Test-Path $persFile) -and ((Get-Content $persFile -Raw).Trim().Length -gt 2)) { Copy-Item $persFile "$pkg\config\airframexr.json" -Force; $persShip = @('config\airframexr.json') }
 # personal build: extra files from the build PC (tools of the owner's own session, e.g. an audio switcher) in extras\ (never in the root)
 $persFiles = @()
