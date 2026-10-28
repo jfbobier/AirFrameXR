@@ -34,7 +34,7 @@
   "fov": {
     "visible_deg": { "outer": 35.4, "inner": 30.5, "upper": 31.4, "lower": 29.7 },
     "margin_deg": 0,
-    "render_quality": 0.25,
+    "render_quality": 0,
     "client_fov_scale": 0.8,
     "note": "0.8 client slider recommended (manually): set FoV Scale to 0.8 in the visionOS app, a value circulating in the community, then reconnect once; the stream then covers less angle and every pixel in view is about 1.25 times denser. The values here are the same with it at 1.0 or 0.8. Calibrated 2026-10-28 with the sweep of docs/FOV_CALIBRATION.md (roaming eyes, both eyes, one person, one fit): one rectangle for both eyes, the tight box around the larger of the two eyes' visible windows, margin 0. The outline check on the headset looked like a good fit; not yet tried in a game; check the corners for black with fovgrid.exe."
   },

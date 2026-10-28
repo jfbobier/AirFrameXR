@@ -14,8 +14,8 @@ root = Path(__file__).resolve().parent.parent
 prof = json.loads((root / "profiles" / "apple-vision-pro.profile.json").read_text())["fov"]
 want = [round(math.tan(math.radians(prof["visible_deg"][k] + prof["margin_deg"])), 2) for k in ("outer", "inner", "upper", "lower")]
 doc = [0.71, 0.59, 0.61, 0.57]   # docs/AVP_FOV.md, the calibrated row
-ok_doc = want == doc and prof["render_quality"] == 0.25 and prof.get("client_fov_scale") == 0.8
-print("CHECK", "PASS" if ok_doc else "FAIL", f"shipped Vision Pro profile gives {want} and quality {prof['render_quality']} (docs/AVP_FOV.md: {doc}, 0.25) and client FoV scale {prof.get('client_fov_scale')} (0.8)")
+ok_doc = want == doc and prof["render_quality"] == 0 and prof.get("client_fov_scale") == 0.8
+print("CHECK", "PASS" if ok_doc else "FAIL", f"shipped Vision Pro profile gives {want} and quality {prof['render_quality']} (docs/AVP_FOV.md: {doc}, 0) and client FoV scale {prof.get('client_fov_scale')} (0.8)")
 
 rid = f"fovp_{time.strftime('%H%M%S')}"
 lib.b_run(f"if not exist runs\\{rid} mkdir runs\\{rid}")

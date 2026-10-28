@@ -11,7 +11,7 @@ check on the headset (white rectangle, green measured window) looked like a good
 | **Calibrated (tangents)** | **0.71** | **0.59** | **0.61** | **0.57** |
 | angle | 35.4 deg | 30.5 | 31.4 | 29.7 |
 
-About 76 % of the headset's declared pixels are not rendered (computed from the tangent areas, game GPU only). The first sweep with the dot starting at 28 degrees was
+Render quality 0 (no oversampling) is the default: the game renders at the floor size, so all the savings go to performance; the slider in the Advanced window raises it for supersampling. About 76 % of the headset's declared pixels are not rendered (computed from the tangent areas, game GPU only). The first sweep with the dot starting at 28 degrees was
 cut off at its start (many rays hit the earliest accepted click) and is not used; fixed gaze (eyes on the cross) gives windows 4 to 8 degrees larger and is kept in
 `fov_sweeps/` for comparison. What is not known: other wearers and fits (one fit only, no margin from repeats), a game's HUD corners.
 
@@ -77,7 +77,7 @@ Effect, recommended row: the game renders 66 % x 74 % of the declared span, abou
 stream, encode and decode are unchanged). Full-frame UI then fits the visible window. A new value is taken at the
 next game start.
 
-The recommended row is what the Vision Pro profile carries (`fov` in `profiles\apple-vision-pro.profile.json`: the visible angles, a 3 degree margin and a render quality of 0.25). *Advanced
+The recommended row is what the Vision Pro profile carries (`fov` in `profiles\apple-vision-pro.profile.json`: the visible angles, a 3 degree margin and a render quality of 0.25: the first estimate, replaced by the calibrated profile above, render quality 0). *Advanced
 picture and FOV settings* shows a button, "Use the Apple Vision Pro's measured values", that fills the fields and the slider from it (see [HMD_PROFILES.md](HMD_PROFILES.md)). The
 button is a convenience, not a default: nothing is restricted until it is pressed.
 
