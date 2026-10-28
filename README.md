@@ -37,12 +37,10 @@ AirFrameXR replaces the **SteamVR + traditional ALVR PC streamer** with a **lean
 
 **In the maintainer's tests of the new pipeline, gains of up to 10-20 % more FPS and up to about 20 ms lower latency were observed** in some games compared with the earlier SteamVR + ALVR path, and users report similar numbers (for example Enshrouded: about 45 fps here against 35-40 with SteamVR, on one user's own reading). These are observations from tested configurations, **not guaranteed gains**: they vary with the game, headset and network, and in some setups the two paths are at parity. Frame generation should be evaluated separately: it improves delivered/displayed cadence in some GPU-bound cases, but has its own latency trade-off. See the performance findings and testing harness below for technical context.
 
-> **Scope:** Windows + NVIDIA GPU + compatible OpenXR games. Keep using the ALVR app on your headset. For SteamVR/OpenVR-only games or maximum compatibility, use SteamVR + stock ALVR instead.
-
 <!-- End AirFrameXR overview -->
 
 > [!WARNING]
-> **VERSION 1.1 (PRE-RELEASE): TEST AT YOUR OWN RISK.**
+> **VERSION 1.1.1 (PRE-RELEASE): TEST AT YOUR OWN RISK.**
 > On real headsets it has been tested by one person, on one PC (RTX 5090) with one Vision Pro and one Quest 3, frame generation included
 > (plus automated tests on a laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
 > (both undone by the launcher's OpenXR runtime button, "Switch back"). Keep comfort in mind: a frozen or juddering image in a headset can cause
@@ -62,9 +60,7 @@ name was changed at the ALVR developers' request, so that nothing suggests an af
   work**. The Quest 3 has been tested here with the Meta-store ALVR client, frame generation included; others are not, and the encoder
   settings, defaults and the idle chroma-key frame are tuned for the Vision Pro. Reports and small fixes for them are welcome, with no
   promise of an answer or a fix; nothing that makes the Vision Pro path worse will be merged.
-- **A plain green screen when the headset connects is normal and intended**: it is the streamer's idle frame while no game runs. On the
-  Vision Pro turn on the ALVR app's **Enable Chroma Keyed Passthrough** and the idle colour (#107C10, the App Store app's own key colour) becomes transparent: you see your room between
-  games and the game appears when it starts. If the headset stays green, the chroma key is not set. Passthrough and the optional **desktop mirror** are two ways to spend the time between games: the setup wizard asks which one you want, and the streamer's **Desktop mirror** switch turns the mirror on or off (it follows the passthrough choice: on only when passthrough is not set up).
+- **A plain colour when the headset connects, before a game starts, is normal**: it is the streamer's idle frame while no game runs. What you see there is your choice, made in the setup wizard and the streamer: the **desktop mirror** (a floating Windows screen, on by default) or **chroma-key passthrough** (your room: on the Vision Pro, turn on the ALVR app's **Enable Chroma Keyed Passthrough**; the key colour is #00FF00 and the idle frame follows it). Passthrough is optional and off by default; with it off the idle frame is black. If you chose passthrough and the headset shows plain green, the chroma key is not set in the ALVR app. Details: [docs/INSTALL.md](docs/INSTALL.md).
 - **AMD / Intel GPUs**: not supported and not planned. The encode path is NVENC only; you are welcome to fork and adapt it.
   [ALVR](https://github.com/alvr-org/ALVR) itself supports them.
 
@@ -174,7 +170,7 @@ What changed in each version: [docs/releases/](docs/releases/) (1.0 onward; earl
   - No USB streaming, except when bridged with ALVR's own tools.
   - HEVC encoding is baked in for maximum split-encoding performance: no H.264 or AV1.
   - On the Vision Pro, in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips them (shown fps a little under the host
-    fps). A fix exists (branch `exp/restamp-2026-10-13`) but needs a change on the visionOS client side, so it is not in the release.
+    fps). A host-side fix was built and parked (tag `archive/exp-restamp-2026-10-13`); it needs a change in the visionOS client, so it is not in the release.
   - The field of view override and render quality slider have not been tried in a real game yet (lab scenarios only).
 - **Perceived quality varies a lot from one setup to another, especially with frame generation on.** Every time the same build felt different on the same PC and headset, the
   cause was a condition of the setup, not a game: the Wi-Fi channel (a neighbour's network produced micro-stutters that stock ALVR showed too; channel 149 cured them), the panel
@@ -251,17 +247,7 @@ and recommended size, the margin is black, the picture sits inside it) and has n
 only, needs the client to declare that window; the host alone cannot do it. Details and keys: [docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md).
 
 ## Game audio
-The game's sound reaches the headset without installing anything: the host captures it with **Windows' process loopback** (everything the PC plays,
-taken before the output's volume, mute and format, converted to 48 kHz stereo PCM), so the Windows default output is left alone, games that play to
-another role or another device are still heard, and games started as administrator (UEVR, mods) are captured too. While the streamer runs it can
-mute your PC speakers (a checkbox in Settings, on by default) and puts the mute back when it closes, even after a crash.
-**Settings > Game audio capture** has the older route as a fallback: *Virtual cable (VB-CABLE)*. The streamer then makes the cable the default
-output for every role, mutes the speakers, holds the cable at 100 %, sets its format to plain 2-channel 48 kHz PCM and restores everything on exit; if no
-cable is installed it opens a dialog with the download page of VB-Audio (a separate product that AirFrameXR neither distributes nor supports). The wizard's
-*Audio output* test plays the Littlest Tokyo music (see the credits) and listens to it with the same API the host uses. Requires Windows 10 version 2004
-or newer for the default mode. The same code is checked end to end by the audio harnesses (below).
-
-**Headset microphone** (VRChat voice, chat): ALVR's own path, which needs a virtual cable (a recording device cannot be created without a driver): tick *Headset microphone for games* in Settings or on the wizard's configuration page; if VB-CABLE is missing a dialog links to its download page (VB-Audio's own product, at your own risk). While the streamer runs, the cable's recording side (CABLE Output) is the default microphone, and your previous one comes back when it closes; the game audio then uses process loopback, whatever the capture setting says. Off by default, and nothing changes when it is off. Not covered by the lab: it was never tested with a real voice.
+The game's sound reaches the headset without installing anything: the host captures it with **Windows' process loopback** (everything the PC plays, taken before the output's volume and mute), so your Windows default output is left alone and games started as administrator are heard too. While the streamer runs it can mute your PC speakers (a checkbox in Settings, on by default) and puts the mute back when it closes. A virtual cable (VB-CABLE, a separate product) is the fallback, and the only way to get the headset's **microphone** into a game. Details, and what is not tested: [docs/INSTALL.md](docs/INSTALL.md#game-audio-and-headset-microphone).
 
 ## Requirements
 - Windows 10/11, an **NVIDIA** GPU with a current driver (NVENC API 12.2+); RTX 40 series or newer recommended (several NVENC chips enable split encoding).
@@ -305,48 +291,15 @@ a headless mock ALVR client, no headset needed) is described in [harness/README.
 See also [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Repository layout
-| Path | What |
-|---|---|
-| `tools/host/` | `alvr_host` (Rust): ALVR server_core embedded, encoder loop, pacing, benchmarks, logging |
-| `nvenc/hostlib/` | C++ library of the host: NVENC wrapper around ALVR's encoder, IPC, QP map, benchmark renderer + quality metric |
-| `nvenc/upstream/` | ALVR's encoder sources, vendored **unmodified** (checksums in `nvenc/upstream.sha256`; patched at build time by `tools/host/build.rs`) |
-| `ovrshim/` | OVRShim: the LibOVR-side driver loaded by VDXR (fork of VDXR's OVRNull): layer composition, frame ring, IPC |
-| `tools/gui/` | the C# WinForms tools: `Stub.cs` (root `AirFrameXR.exe`), `Launcher.cs`, `AirFrameXR.cs` (streamer), `Wizard.cs` / `Configure.cs` (`configure.exe`), `Performance.cs`, `Verdict.cs`, shared `Common.cs`; `UiTest.cs` is the UI harness's test program (not shipped) |
-| `tools/install/` | portable-folder scripts (OpenXR runtime registration), shipped default session |
-| `tools/mock_client/` | headless ALVR client (Rust, ALVR's client_core) used by the harness |
-| `tools/probe/` | `xr_probe`: OpenXR test app (layers, input, pacing) |
-| `tools/bench_scene/` | offline converter of the benchmark scene (glTF + Draco -> `.vab`) |
-| `tools/patches/`, `tools/remote/` | the one ALVR patch (test-only loopback binding), PowerShell build/test stages run on the builder |
-| `tools/check_firewall_rules.bat` | prompt-driven firewall check and clean-up for `alvr_host.exe` rules (not shipped in the zip) |
-| `harness/` | test harness (Python, stdlib only): scenarios, checks, builder orchestration, and the GUI / desktop harnesses |
-| `third_party/` | vendored headers (cgltf, stb_image) and licence texts |
-| `docs/` | install guide, benchmark design, progress log |
+The host is Rust (`tools/host/`) on a C++ NVENC library (`nvenc/hostlib/`); the OpenXR side is `ovrshim/` (a fork of VDXR's sample driver); the windows are C# WinForms (`tools/gui/`); the test harness is Python (`harness/`). The full table is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#repository-layout).
 
-## Relationship to upstream (how much is forked)
-Nothing is a long-lived fork: ALVR and VirtualDesktop-OpenXR are fetched at pinned upstream commits (`deps.lock.json`) and
-built with small, asserted patches, so an upstream change fails loudly instead of drifting.
-| Upstream | How it is used | Changes |
-|---|---|---|
-| **ALVR v20.14.1** (Rust) | `server_core`, protocol, sockets, audio, session crates linked into `alvr_host` as a workspace member; client_core in the test client | one patch, 26 changed lines (`tools/patches/loopback-client.patch`): lets the test client bind its own loopback address; inactive unless `ALVR_BIND_IP` is set (it is compiled into `alvr_host.exe` through the shared `sockets` crate) |
-| **ALVR encoder C++** (`VideoEncoderNVENC`, `NvEncoder*`, foveated encoding `FFR`, ~3,900 lines + NVIDIA's header) | vendored **unmodified** in `nvenc/upstream/` (checksums) | about 20 asserted build-time text replacements in `tools/host/build.rs`: 10-bit texture format, NVENC SDK 12.2 field names, a struct initializer the newer SDK broke, real error messages, split-frame encoding, QP delta map, reconstructed-frame output, accessors and a config dump |
-| **VirtualDesktop-OpenXR** (the OpenXR runtime) | built from upstream at a pinned commit | 4 text patches + 1 define at build time (`tools/remote/stage15_vdxr.ps1`): per-eye visibility on quad/cylinder/cube layers in "Oculus runtime" mode, all 6 faces of cube swapchains, the runtime's display name, VDXR's own running start off (the game's `xrWaitFrame` waits for the shim's release), advertise the cube-layer extension |
-| **VDXR's OVRNull** (sample "null" LibOVR driver) | `ovrshim/` = OVRShim, the one real fork | `driver.cpp` grew from 793 to ~1,850 lines (~1,190 new or changed), 6 new files (IPC, layer shaders); OVRNull's other ~1,570 lines are used unchanged |
-
-Everything else is new code (~11,000 lines): the host (`tools/host`, Rust), the encoder library and benchmark
-(`nvenc/hostlib`, C++), the GUIs, the installer scripts, the mock client, the OpenXR probe and the harness.
+## Relationship to upstream
+Nothing is a long-lived fork: ALVR (v20.14.1) and VirtualDesktop-OpenXR are fetched at pinned upstream commits (`deps.lock.json`) and built with small, asserted patches, so an upstream change fails loudly instead of drifting. ALVR's encoder sources are vendored unmodified and patched at build time; `ovrshim/` is the one real fork (of VDXR's sample driver). What exactly is patched, and how much: [docs/UPSTREAM.md](docs/UPSTREAM.md).
 
 <!-- AirFrameXR developer philosophy -->
 ## For developers: design philosophy
 
-**Performance first. Complexity last.** AirFrameXR is deliberately narrow: a fast, lean OpenXR-to-headset pipeline, not a universal VR launcher or a collection of optional frameworks.
-
-- **No feature bloat.** Every feature must solve a real, demonstrated problem in the project's core streaming path. A larger settings surface, more modes, and broader platform coverage are not goals by themselves. A useful feature can still be declined if its long-term complexity outweighs its value.
-- **One tool, one job.** Keep each component focused, with a clear responsibility and minimal coupling. Prefer a small tool that does one thing reliably over a multipurpose layer full of switches.
-- **Native tooling where it fits.** Prefer Windows facilities, OpenXR, NVIDIA NVENC/Optical Flow, and existing build/runtime capabilities over extra dependencies, wrappers, background services, or bundled frameworks. Reuse working upstream code; avoid reinventing mature primitives.
-- **Measured improvements only.** Frame pacing, latency, quality, compatibility, and code size should be justified by reproducible tests and actual headset behavior. Don't trade predictable performance for features that only look attractive on a checklist.
-- **AI-assisted contributions welcome, with accountability.** If AI wrote, refactored, or materially designed any part of a contribution, include a separate Markdown work summary at `docs/ai-contributions/YYYY-MM-DD-short-topic.md` describing what the AI did, what the human reviewed, what was tested, and what remains unverified. Use [`TEMPLATE.md`](docs/ai-contributions/TEMPLATE.md). AI output is a starting point, not evidence that code works.
-
-See [the development philosophy](docs/DEVELOPMENT_PHILOSOPHY.md) and [contribution requirements](CONTRIBUTING.md) before proposing changes. **This project will not become feature-bloated.**
+**Performance first. Complexity last.** AirFrameXR is deliberately narrow: a fast, lean OpenXR-to-headset pipeline, not a universal VR launcher. No feature bloat, one tool one job, native tooling where it fits, and measured improvements only. AI-assisted contributions are welcome with accountability (a work summary in `docs/ai-contributions/`). Read [the development philosophy](docs/DEVELOPMENT_PHILOSOPHY.md) and [CONTRIBUTING.md](CONTRIBUTING.md) before proposing changes. **This project will not become feature-bloated.**
 
 ## For developers: the testing harness
 
@@ -357,42 +310,9 @@ person's eyes on one evening's Wi-Fi, and the lab is the same pipeline under con
 Nothing in the lab is a mock of the pipeline: the real host, shim, intake, clock, generator and encoder run; what is replaced is the game,
 the headset and the network, each by something whose behaviour is known exactly, so that any defect in the picture is the pipeline's.
 
-| piece | what it is | where |
-|---|---|---|
-| **Fake game** | `xr_probe`, a real OpenXR app with knobs: frame time as a range (`XR_PROBE_LOAD=fps:40:50`, `jitter:30`, `ramp`, `burst`), CPU and GPU cost separately (`XR_PROBE_CPU_MS`, `XR_PROBE_GPU_COPIES`), a world-fixed ring of markers for the head-rotation judge, a marker moving at a known speed for the motion judge, on the game clock or the wall clock, and exact DLSS-style motion vectors (`XR_PROBE_MV=truth`) to test the vector path without a game | `tools/probe/xr_probe.cpp` |
-| **Fake headset** | the simrig (`cargo feature simrig`): a synthetic head, still or turning, that sends tracking with the timing imperfections of a *recorded* real session (tick jitter, bunching, prediction noise), and a viewer (`simviewer`) that displays what the headset would, reprojection included, at a chosen panel rate, waking up late the way a client does | `tools/host/src/simrig.rs`, `nvenc/hostlib/simviewer.cpp` |
-| **Real-life conditions** | profiles made from recorded headset sessions: `real_games_pred0.json` (the timing of real game sessions), `real_probe_pred100.json` (the client's 100 ms prediction noise); the ideal profile is the null case that must be clean or the rig itself is wrong | `harness/simrig/profiles`, `make_profile.py` |
-| **Judge** | from what the viewer displayed, not from host counters: the head-rotation residual against the analytic view of the ring (rms, p99, high-frequency part, stereo disparity) gives **CLEAN / TREMBLE** (0.04 deg hf, about 0.7 px on a Vision Pro); the moving marker's world angle per display tick (frozen periods, gaps the host did not fill, step regularity) gives **SMOOTH / JUDDER**. A self-test injects wrong poses and must say TREMBLE | `harness/simrig/judge.py` |
-| **Scenarios** | 34 named conditions, each a sentence long: the null cases (`ideal`, `steady`, `steady_fg`), stuttering apps with and without generation (`stutter`, `stutter_fg`, `stutter_turn_fg`), each rate (`third`, `stutter_third`, `two_thirds`, `jitter_two_thirds`), the vector path (`*_mv`), uncapped generation (`*_unc`), GPU-bound apps (`gpu`, `gpu_unc`), the judge's own trap (`inject`). `run_sim.py list` prints them with what each expects | `harness/simrig/run_sim.py` |
-| **Live harness** | the same loop on the real headset, unattended: build on the PC from the working tree, deploy, start the host and a game or the synthetic source, stream N seconds, fetch the debug session, score it; A/B variant files; a baseline run against stock SteamVR + ALVR on the same rig | `harness/live.py`, `live_variants.json`, `baseline.py`, `stock.py` |
-| **Session logs** | with the launcher's debug tick: every host event (`host_events.jsonl`, 2-second encoder windows with the pipeline's counters), the headset's per-frame statistics (`client_frames.csv`), the shim's per-frame trace, the GPU's clocks and power state (`gpu.csv`); the analyses in `docs/PERFORMANCE_FINDINGS.md` are joins over these | `logs\debug\<session>` |
-| **Benchmarks and probes** | the headless encoder quality sweep and the network bench behind the setup wizard, the wizard's own end-to-end test, the NVENC split-frame probe, the D3D11/D3D12 interop test that pinned the shared-texture flag bug, the motion-vector plumbing check | `harness/run.py`, `wizard_e2e.py`, `tools/nvenc_split_probe`, `tools/interop_test`, `harness/simrig/check_mv.py` |
-| **Stability harness** | fault injection and soaks on the real chain (host, shim, fake game, mock headset): the headset's tracking silent for 5 or 30 s, the host or the headset frozen, 15 reconnects, the streamer window not reading the host's output, VRAM and RAM squeezed to what a smaller PC has, motion vectors dropped or re-created, and a seeded soak of plausible events (settings, generation toggles, blackouts, audio device changes); a judge reads stalls, vectors used and memory growth per process. Slow (about 90 minutes for the suite, hours for a soak), so it is **optional**: run it on major changes, not on every build | `harness/stability/` (`python3 harness/stability/run_stability.py list`), harness/README.md |
-| **GUI matrix** | every window and wizard page at 1080p / 1440p / 4K x 100-200 % Windows scale, audited for fit, clipping, overlap and cut-off text, with a screenshot per case | `harness/ui_matrix.py`, `tools/gui/UiTest.cs` |
-| **Launcher round trip** | the launcher hides while a tool is open and returns when all are closed; the root stub starts it | `harness/launcher_flow.py` |
-| **Desktop mirror** | 7 desktop shapes x SDR / HDR (3 SDR-white levels) rendered on the GPU: colours, placement, cursor size; the input maths (including the left / right hand-over of the beam) as unit tests; the app through the whole chain with scripted controllers (right-handed: `e2e_mirror`; the left trigger takes the beam: `e2e_mirror_left`); real-desktop screenshots of both hands | `harness/mirror_check.py`, `tools/probe/desktop_probe.cpp`, `tools/mirrordesktop/`; `e2e_mirror`, `e2e_mirror_left`; `harness/mirror_screenshot.py --real` |
-| **Field of view the game is told** | what an OpenXR app receives at startup against what the headset declared and what was asked: the probe app logs what UEVR reads (the four tangents per eye from `xrLocateViews`, the recommended image size); the checks compare them with the headset's views, then sample the decoded stream (the trimmed margin black, the picture just inside it). Unrestricted control (nothing differs from 1.0), a restriction in percent (lab flag), an override in tangents (lab flag and as the streamer sends it on the host's stdin); the streamer forwards a change once and never repeats it (render quality included, as the fifth value); the render quality slider at 0.5 and 1 (the recommended size lands halfway and at the stream's eye size, the tangents, margin and picture unchanged), and its Advanced-window row in the GUI matrix at every resolution and scale; the headset profile's measured-window button (the shipped Vision Pro profile reproduces the documented row, the click fills the fields and the slider and saves) | `e2e_fov_restrict_none`, `e2e_fov_restrict`, `e2e_fov_override`, `e2e_fov_override_live`, `e2e_fov_restrict_quality_half` / `_full`, `ui_matrix.py` (`advanced-switches-fov-quality`, `advanced-switches-fov-profile`), `fov_profile_check.py`, `streamer_events.py` (`fov_forward`), host unit tests (`vision::fov_scale_from`) |
-| **Frame generation judge** | the generated frame against the frame the scene really has there: the animated benchmark scene is rendered at two times (the pair a half-rate game delivers) and at the midpoint (the ground truth); each synthesis (classic, edge, edge-blend) generates the midpoint with the streamer's own generator; PSNR / SSIM over the frame, in the moving region and on its boundary band, edge energy in excess (double images) or in deficit (blur), holding and blending as references, scene / head / both motion at several speeds and rates, paired statistics with standard errors, picture montages. First run: edge +2.0 dB over classic (sharper in 63 of 63 cases), edge against edge-blend a tie | `harness/fg_judge.py`, `tools/host/src/fg_judge.rs`, [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md) |
-| **Encoder A/B** | the quality benchmark as the judge of an encoder setting: the same sweep with the foveal QP map off and on, at several bitrates and a Quest-class eye size (centre / periphery / weighted PSNR, encode time, produced bitrate); the Encoding radio buttons of the settings window exclude each other | `harness/qpmap_ab.py`, `run.py bench-quality --qp on\|off --eye WxH --mbps N`, `harness/encoding_radios_check.py` |
-| **Audio chain** | the streamer, the mock headset and the Littlest Tokyo scene (it plays music): in process-loopback mode the default output stays untouched and the headset's process plays what the host captured; in cable mode the cable is the default and carries the music; the PC speakers are muted (checked on the endpoint and, in a quiet room, with the builder's microphone against an unmuted control); the streamer exits when its window closes and everything is restored | `harness/audio_chain_check.py [--device]` |
-| **Audio routing (cable path)** | defaults, mute, 100 % and the 2 ch / 48 kHz format, a default stolen while running, a named device, no cable, crash recovery | `harness/audio_route_check.py` |
-| **Audio probes** | process loopback independent of mute, volume and the device's own format; an elevated player heard by a normal process | `harness/process_loopback_probe.py`, `harness/elevated_audio_check.py` (accept the UAC prompt) |
-| **Firewall review** | the rule analysis against real throwaway rules, and the `.bat` | `harness/firewall_check.py` |
-| **Compile checks from WSL** | host, shim and C++ checked without the Windows builder | `tools/wsl/check_host.sh`, `check_cpp.sh`, `check_gui.sh` |
+The pieces, in short: a **fake game** (a real OpenXR app with knobs for frame time, CPU and GPU cost and moving markers), a **fake headset** (a synthetic head that replays the timing imperfections of recorded real sessions, and a viewer that shows what the headset would), a **judge** that scores the picture the viewer displayed (head-rotation tremble, moving-marker judder, generated frames against a rendered ground truth) rather than host counters, named **scenarios**, a **live harness** that runs the same loop on the real headset, **stability** fault-injection and soak runs, and checks for the windows, the desktop mirror, audio, the firewall review and the field of view. The full table, with where each piece lives and how to run it, is in [harness/README.md](harness/README.md#lab-overview-what-each-piece-is).
 
-How it is used: `python3 harness/simrig/run_sim.py build` once, then `run <scenario> --seconds 40`; results land in `harness/results/<UTC>_simrig_<name>/`
-with the verdict JSON, the viewer's CSVs and the host's debug session. `docs/DEVELOPMENT.md` has the full recipe, the builder setup and the
-profiles (`AIRFRAMEXR_PROFILE`) that point the harness at your PC.
-
-**Debug and release builds (the telemetry flavour).** The per-frame traces the lab needs cost CPU on every frame, so they are a compile-time
-flag. A **debug build** (the default of `python3 harness/run.py build ...`) keeps them: the shim's per-frame trace (`shim_frames.csv`: pose
-read, head-sample arrival, release, submit, publish), the host's frame fates and sent-frame CSVs, the audio-capture trace and a scheduler
-probe, written into a debug session folder when debug logging is on. The frame-by-frame analysis (`harness/frames.py`), the pacing and
-judder scenarios and the simrig need them. A **release build** (`--release`: cargo `--no-default-features`, the shim compiled with
-`AIRFRAMEXR_RELEASE`) compiles them out; the periodic statistics behind Game history, Diagnose and its suggestions stay in both. Build one
-with `python3 harness/run.py build host shim gui package` (debug) or `... package --release` (release; what a public release uses);
-`build.ps1` is the other way round (release by default, `debug` as a target). A debug package says so: its zip name ends in `-debug` and
-the windows show "(debug build)" after the version. New per-frame telemetry must sit behind the flag (`docs/DEVELOPMENT.md`).
+How it is used: `python3 harness/simrig/run_sim.py build` once, then `run <scenario> --seconds 40`; results land in `harness/results/`. [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) has the recipe and the builder setup. A **debug build** keeps the per-frame telemetry the lab needs; a **release build** compiles it out (what a public release uses).
 
 **Pull requests.** A change to anything on the frame path (shim, pipeline, generator, encoder, pacing) is accepted only with the lab's proof
 in the description: the scenarios relevant to the change, their verdicts before and after, and the compile checks. "It looks fine in my
@@ -432,7 +352,8 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 
 ## Documentation
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers
-- [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md): the lab judge for generated frames (against a rendered ground truth)
-- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation: half-rate pacing + interpolated frames; [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md): the uncapped mode, cap and lag, headset-night verdicts; the DLSS motion-vector experiment (removed in 0.6.1) is in the archive, [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md)
-- [docs/AVP_FOV.md](docs/AVP_FOV.md): the Vision Pro's declared and visible field of view, and the override values that fit it; [docs/FOV_GRID.md](docs/FOV_GRID.md): the grid app that measures it; [How FOV restriction works](#how-fov-restriction-works)
+- **Start here:** [docs/INSTALL.md](docs/INSTALL.md) (install, settings, logs, audio), [docs/PERFORMANCE_KNOBS.md](docs/PERFORMANCE_KNOBS.md) (every knob and what should drive it), [docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md) (the Advanced window), [docs/HMD_PROFILES.md](docs/HMD_PROFILES.md) (community profiles).
+- **How it works:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (frame pipeline, threads, buffers), [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md) and [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md), [docs/AVP_FOV.md](docs/AVP_FOV.md) and [docs/FOV_GRID.md](docs/FOV_GRID.md) (field of view; [how FOV restriction works](#how-fov-restriction-works)), [docs/CHROMA_KEY_PROTOCOL.md](docs/CHROMA_KEY_PROTOCOL.md), [docs/DESKTOP_MIRROR.md](docs/DESKTOP_MIRROR.md), [docs/UI_SPEC.md](docs/UI_SPEC.md), [docs/CONFIGURE_WIZARD.md](docs/CONFIGURE_WIZARD.md), [docs/BENCHMARK_DESIGN.md](docs/BENCHMARK_DESIGN.md).
+- **What we learned:** [docs/PERFORMANCE_FINDINGS.md](docs/PERFORMANCE_FINDINGS.md) (what was tried, so nobody repeats the dead ends).
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), [docs/DEVELOPMENT_PHILOSOPHY.md](docs/DEVELOPMENT_PHILOSOPHY.md), [docs/UPSTREAM.md](docs/UPSTREAM.md), [harness/README.md](harness/README.md).
+- **Status and history:** [docs/progress.md](docs/progress.md), [docs/releases/](docs/releases/). The older plans and logs are archived in [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) (only for revisiting a past decision).

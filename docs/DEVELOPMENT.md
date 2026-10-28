@@ -123,3 +123,23 @@ The feature is off in normal and release builds; the knobs are the `AIRFRAMEXR_S
 Scenario `ideal` is the null test (must be CLEAN) and `inject` validates the judge (must be TREMBLE).
 
 `build.ps1` builds the **release** flavour by default (per-frame debug traces compiled out); add the target `debug` (`build.ps1 host shim debug`) to keep them.
+
+## Repository layout
+| Path | What |
+|---|---|
+| `tools/host/` | `alvr_host` (Rust): ALVR server_core embedded, encoder loop, pacing, benchmarks, logging |
+| `nvenc/hostlib/` | C++ library of the host: NVENC wrapper around ALVR's encoder, IPC, QP map, benchmark renderer + quality metric |
+| `nvenc/upstream/` | ALVR's encoder sources, vendored **unmodified** (checksums in `nvenc/upstream.sha256`; patched at build time by `tools/host/build.rs`) |
+| `ovrshim/` | OVRShim: the LibOVR-side driver loaded by VDXR (fork of VDXR's OVRNull): layer composition, frame ring, IPC |
+| `tools/gui/` | the C# WinForms tools: `Stub.cs` (root `AirFrameXR.exe`), `Launcher.cs`, `AirFrameXR.cs` (streamer), `Wizard.cs` / `Configure.cs` (`configure.exe`), `Performance.cs`, `Verdict.cs`, shared `Common.cs`; `UiTest.cs` is the UI harness's test program (not shipped) |
+| `tools/install/` | portable-folder scripts (OpenXR runtime registration), shipped default session |
+| `tools/mock_client/` | headless ALVR client (Rust, ALVR's client_core) used by the harness |
+| `tools/probe/` | `xr_probe`: OpenXR test app (layers, input, pacing) |
+| `tools/bench_scene/` | offline converter of the benchmark scene (glTF + Draco -> `.vab`) |
+| `tools/patches/`, `tools/remote/` | the one ALVR patch (test-only loopback binding), PowerShell build/test stages run on the builder |
+| `tools/check_firewall_rules.bat` | prompt-driven firewall check and clean-up for `alvr_host.exe` rules (not shipped in the zip) |
+| `harness/` | test harness (Python, stdlib only): scenarios, checks, builder orchestration, and the GUI / desktop harnesses |
+| `third_party/` | vendored headers (cgltf, stb_image) and licence texts |
+| `tools/mirrordesktop/` | the desktop mirror: an OpenXR app that draws the Windows desktop into the stream between games |
+| `tools/stability/` | helpers for the stability harness (VRAM/RAM ballast) |
+| `docs/` | install guide, design notes and findings; `docs/progress.md` is the current status, `docs/PERMANENT_RECORD.md` the archive (do not read unless revisiting a past decision) |

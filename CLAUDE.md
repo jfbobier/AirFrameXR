@@ -12,6 +12,7 @@ Wireless PCVR for NVIDIA: OpenXR runtime (VDXR + our shim `ovrshim/`) -> Rust ho
 
 ## Where things are
 
+- `README.md` is written for humans and may lag: read it only when editing it. For facts use `docs/progress.md` and the code. A fact lives in one place (the README links to docs instead of repeating numbers).
 - Current status and what is untested: `docs/progress.md`. Release notes: `docs/releases/`.
 - How it works: `docs/ARCHITECTURE.md`, `docs/FRAME_GENERATION.md`, `docs/PERFORMANCE_KNOBS.md`, `docs/EXPERIMENTAL_SWITCHES.md`.
 - Before optimizing, read what was already tried: `docs/PERFORMANCE_FINDINGS.md` (dead ends are listed there).
