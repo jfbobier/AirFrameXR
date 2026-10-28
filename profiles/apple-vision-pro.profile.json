@@ -32,11 +32,11 @@
     "protocol": "udp"
   },
   "fov": {
-    "visible_deg": { "outer": 35.4, "inner": 30.5, "upper": 31.4, "lower": 29.7 },
+    "visible_deg": { "outer": 43.8, "inner": 35.4, "upper": 34.6, "lower": 31.4 },
     "margin_deg": 0,
     "render_quality": 0,
     "client_fov_scale": 0.8,
-    "note": "0.8 client slider recommended (manually): set FoV Scale to 0.8 in the visionOS app, a value circulating in the community, then reconnect once; the stream then covers less angle and every pixel in view is about 1.25 times denser. The values here are the same with it at 1.0 or 0.8. Calibrated 2026-10-28 with the sweep of docs/FOV_CALIBRATION.md (roaming eyes, both eyes, one person, one fit): one rectangle for both eyes, the tight box around the larger of the two eyes' visible windows, margin 0. The outline check on the headset looked like a good fit; not yet tried in a game; check the corners for black with fovgrid.exe."
+    "note": "0.8 client slider recommended (manually): set FoV Scale to 0.8 in the visionOS app, a value circulating in the community, then reconnect once; the stream then covers less angle and every pixel in view is about 1.25 times denser. The values here are the same with it at 1.0 or 0.8. Calibrated 2026-10-28/29 with the sweeps of docs/FOV_CALIBRATION.md (eyes following the dot and eyes fixed, both eyes, one person, one fit): one mirrored rectangle for both eyes covering 99 % of the larger of the two eyes' windows over both gaze states, margin 0. The first set (following gaze only) left a black strip at the right eye's outer edge in a game; this one was played by the author and the black was gone. One person, one fit; check the corners for black with fovgrid.exe."
   },
   "network": {
     "default": "wifi-good",

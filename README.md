@@ -209,10 +209,10 @@ must keep covering all of it. Only the game is told something else. With the Vis
 1. **The headset declares its views** when it connects (the app sends the render frustum, `views_config`). The host saves them in `config\airframexr_views.json`; the Advanced window
    shows them greyed.
 2. **You choose what the game is told**: in *Advanced picture and FOV settings*, tick the override and set the four tangents (outer, inner, upper, lower). Values are never more than
-   the headset's and at least a fifth of them. For the Vision Pro, [docs/AVP_FOV.md](docs/AVP_FOV.md) gives the visible window and the calibrated values that fit it (0.71 / 0.59 / 0.61 /
-   0.57). The host turns them into per-edge fractions of the headset's tangents and publishes them to the shim.
+   the headset's and at least a fifth of them. For the Vision Pro, [docs/AVP_FOV.md](docs/AVP_FOV.md) gives the visible window and the calibrated values that fit it (0.96 / 0.71 / 0.69 /
+   0.61). The host turns them into per-edge fractions of the headset's tangents and publishes them to the shim.
 3. **The shim answers the game** at its next start: `GetEyeFov` returns the restricted angles, and the recommended size is the stream's eye size scaled by the restricted span on
-   each axis (about 1645 x 1687 for the row above, 24 % of the pixels: computed, not measured). The game renders that, with the restricted projection.
+   each axis (about 2800 x 2500 for the row above with the AirFrameXR client's own visible limit declared, about 68 % of the pixels: computed, not measured). The game renders that, with the restricted projection.
 4. **Composition puts it back where it belongs.** The shim maps the game's layer into a frame that covers the headset's whole field of view (3552 x 3200 per eye), the margin the game
    did not render stays black, and the picture sits where those angles fall in the frame.
 5. **The foveation warp, encode, network and decode do not know.** Both eyes go through ALVR's foveation warp into one 4224 x 1664 frame and through NVENC as before. The black

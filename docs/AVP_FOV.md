@@ -1,19 +1,25 @@
 # Apple Vision Pro: declared vs visible field of view
 
-## Calibrated values (2026-10-28), the current default
+## Calibrated values (2026-10-29), the current default
 
-A sweep on the 5090 (`docs/FOV_CALIBRATION.md`: a dot drifts outward along 24 rays per eye, the wearer clicks when it is gone, eyes free to follow; data in
-[`fov_sweeps/`](fov_sweeps/)), one person, one fit. One rectangle for both eyes: the tight box around the larger of the two eyes' windows, no margin. The outline
-check on the headset (white rectangle, green measured window) looked like a good fit; not yet tried in a game.
+Two sweeps on the 5090 (`docs/FOV_CALIBRATION.md`: a dot drifts outward along 24 rays per eye, the wearer clicks when it is gone; data in [`fov_sweeps/`](fov_sweeps/)), one person, one fit:
+eyes **following** the dot, and eyes **fixed** on the cross. The two windows differ a lot at the right eye's outer edge (35.5 deg following, 43 to 47 fixed), and a game is played with
+the eyes mostly forward, so the rectangle has to cover **both**. One mirrored rectangle for both eyes (the host's override is mirrored): the smallest one that covers 99 % of the larger of
+the two eyes' windows, over both gaze states. A first set that used the following sweep only (0.71 / 0.59 / 0.61 / 0.57, release 1.1.0) left a black strip at the right eye's outer edge in a game.
 
 | | Outer | Inner | Upper | Lower |
 |---|---|---|---|---|
-| **Calibrated (tangents)** | **0.71** | **0.59** | **0.61** | **0.57** |
-| angle | 35.4 deg | 30.5 | 31.4 | 29.7 |
+| **Calibrated (tangents)** | **0.96** | **0.71** | **0.69** | **0.61** |
+| angle | 43.8 deg | 35.4 | 34.6 | 31.4 |
 
-Render quality 0 (no oversampling) is the default: the game renders at the floor size, so all the savings go to performance; the slider in the Advanced window raises it for supersampling. About 76 % of the headset's declared pixels are not rendered (computed from the tangent areas, game GPU only). The first sweep with the dot starting at 28 degrees was
-cut off at its start (many rays hit the earliest accepted click) and is not used; fixed gaze (eyes on the cross) gives windows 4 to 8 degrees larger and is kept in
-`fov_sweeps/` for comparison. What is not known: other wearers and fits (one fit only, no margin from repeats), a game's HUD corners.
+Played by the author in a game on the Vision Pro (one session, one fit): the black strip was gone. Not measured: frame time, HUD corners in other games, other wearers.
+
+The wearer's eyes differ (right eye 44 deg outward but 28 toward the nose, left eye 37 / 35 / 35 / 31): per-eye boxes would need about 13 % fewer pixels than the mirrored one, but the override cannot express them, only a client that declares a box per eye (`docs/FOV_PIPELINE_OPTIM.md`).
+
+Render quality 0 (no oversampling) is the default: the game renders at the floor size, so all the savings go to performance; the slider in the Advanced window raises it for supersampling.
+How much that saves depends on the frame the headset declares (computed from tangent areas, not measured): against the stock app's declared 1.79 / 1.02 / 1.22 / 1.02 frustum the game
+renders about 35 % of the pixels; against the AirFrameXR client's own visible limit (0.94 / 0.93 / 0.90 / 0.76, what the 5090's headset declares) about 68 %, and the earlier "recommended" row below
+restricted nothing at all there. Do not read the old "about half the pixels" below as a saving on that client.
 
 The tables below are the first estimate (2026-10-27, grid traced by eye, left eye), kept for history; the calibrated row replaces its "Recommended" row.
 
