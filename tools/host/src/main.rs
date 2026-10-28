@@ -113,7 +113,7 @@ struct Args {
     recenter_key: String,
     /// hand pose convention fix (shim, Oculus-emulation path): local rotation in degrees (XYZ Euler, left hand; right hand mirrors
     /// y and z like ALVR's controller offsets) and local position offset in metres (in the LibOVR frame, after the rotation).
-    /// Default (derived 2026-10-13, see docs/progress.md): ALVR's hand motion is the OpenXR grip pose turned by its Quest 2 offset (-15 deg
+    /// Default (derived 2026-10-13, see docs/permanent_record/progress-log-2026-10-07_to_10-28.md): ALVR's hand motion is the OpenXR grip pose turned by its Quest 2 offset (-15 deg
     /// about X) with its +0.11 m controller offset behind the origin; VDXR's calibration says the LibOVR hand pose is the OpenXR aim frame
     /// and the grip is +60 deg about X from it, so LibOVR = ALVR * Rx(+15) * Rx(-60) = ALVR * Rx(-45 deg), position (0, -0.048, 0.038). The earlier
     /// 180 deg about Y turned the hands to face backwards in every game (OpenXR and LibOVR).

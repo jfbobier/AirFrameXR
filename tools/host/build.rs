@@ -1,7 +1,7 @@
 // Compiles the unmodified ALVR NVENC sources + our shims/wrapper (nvenc/ in the harness repo, on the builder
 // at %USERPROFILE%\openxr\nvenc) into a static library linked into alvr_host.
 // NvEncoderD3D11.cpp is compiled from a build-time copy with ABGR10 -> DXGI_FORMAT_R10G10B10A2_UNORM
-// (upstream maps it to R8G8B8A8_UNORM, which makes 10-bit encodes black; see docs/progress.md).
+// (upstream maps it to R8G8B8A8_UNORM, which makes 10-bit encodes black; see docs/permanent_record/progress-log-2026-10-07_to_10-28.md).
 use std::{env, fs, path::{Path, PathBuf}};
 
 /// A vendored source as text with LF line endings: a Windows clone with git's default core.autocrlf=true checks the files out

@@ -1,5 +1,5 @@
 {
-  "description": "U7 (docs/PLAN_0.5.md): generation on, the app finishes first so the host emits game_run; the run's latency must be believable: median under 200 ms and no garbage client samples dropped by the aggregator (the real-game bug: 4 958 802 102 ms).",
+  "description": "U7 (docs/permanent_record/PLAN_0.5.md): generation on, the app finishes first so the host emits game_run; the run's latency must be believable: median under 200 ms and no garbage client samples dropped by the aggregator (the real-game bug: 4 958 802 102 ms).",
   "topology": {
     "host": "builder",
     "client": "builder",

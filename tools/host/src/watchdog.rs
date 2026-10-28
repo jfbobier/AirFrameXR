@@ -1,4 +1,4 @@
-//! The host's stall detector and memory line (docs/STABILITY_PLAN.md, phase 0). Release builds carry both: one thread waking four times a second,
+//! The host's stall detector and memory line (docs/permanent_record/STABILITY_PLAN.md, phase 0; scenarios in harness/stability/). Release builds carry both: one thread waking four times a second,
 //! comparing a few counters, writing a line only when something is wrong (and one memory line every 30 s while a headset is connected).
 //!
 //! Why: the gears 2026-10-20 stalls left nothing in a log written with debug off but a statistics line missing for 38 s. A stall now names itself:

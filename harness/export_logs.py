@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""U1 (docs/PLAN_0.5.md): the log export writes its zip to a path with no dialog and leaves no window open. `uitest.exe --export-selftest <zip> --game <stem>` runs
+"""U1 (docs/permanent_record/PLAN_0.5.md): the log export writes its zip to a path with no dialog and leaves no window open. `uitest.exe --export-selftest <zip> --game <stem>` runs
 LogExport.Write against the fixture's logs and game records; the checks are on the zip's entries and on Application.OpenForms. Exit 0 = pass."""
 import sys, time, subprocess
 from pathlib import Path

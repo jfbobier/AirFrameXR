@@ -32,7 +32,7 @@ for the lab and the command line; a panel should write the json key (or send the
 
 Already in the launcher: `frame_gen` (tick), `frame_gen_rate` third | half | two_thirds | uncapped (slider + Uncapped tick),
 `frame_gen_recommended` (tick). Live commands behind them: `frame_gen on|off`, `frame_gen_rate <name>`. The DLSS motion vectors
-(`game_motion_vectors`, `frame_gen_vector_candidate`) were removed in 0.6.1 (docs/MOTION_VECTORS.md).
+(`game_motion_vectors`, `frame_gen_vector_candidate`) were removed in 0.6.1 (archived: docs/PERMANENT_RECORD.md).
 
 | key | values, default | effect | what it does, what we know |
 |---|---|---|---|
@@ -83,7 +83,7 @@ Already in the launcher: `encode_profile` (foveated / full-split), `split_encode
 ## 5. Removed on purpose: do not offer these
 
 `video.game_pacing` jit | queue (the just-in-time release, 2026-10-17: it was inert because of the gate problem; may return as a fixed rule, item A2 of
-docs/PLAN_0.6.md, not as a switch), the automatic rate controller ("Auto"), the frame-cost readout, `frame_gen_predict_sample`, the
+the 0.6 plan, now archived in docs/PERMANENT_RECORD.md, not as a switch), the automatic rate controller ("Auto"), the frame-cost readout, `frame_gen_predict_sample`, the
 duplicate-timestamp re-stamp paths. Each is documented in docs/PERFORMANCE_KNOBS.md "Removed on purpose" with the measurement that killed it.
 
 ## Panel notes

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stability harness runner (docs/STABILITY_PLAN.md): fault-injection and soak scenarios on the real chain (host + shim + probe + mock client on the builder),
+"""Stability harness runner (docs/permanent_record/STABILITY_PLAN.md): fault-injection and soak scenarios on the real chain (host + shim + probe + mock client on the builder),
 judged by judge.py (stalls, tracking resumption, memory growth).
 
     python3 harness/stability/run_stability.py list

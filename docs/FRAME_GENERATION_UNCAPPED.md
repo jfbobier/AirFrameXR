@@ -1,8 +1,8 @@
 # Frame generation, uncapped: every output synthesised (2026-10-15)
 
 Status: implemented on branch `fg/uncapped` (host pipeline, shim cap, GUI, logs), lab-checked on the 3080 Ti simrig, first headset night 2026-10-15 (verdict below).
-Builds on `docs/FRAME_GENERATION.md` (half rate, optical flow) and `docs/MOTION_VECTORS.md` (the game's DLSS vectors). Replaces the 2/3-ratio
-plan of `docs/FRAME_GENERATION_RATIOS.md` (kept as the record of why ratios are not the answer).
+Builds on `docs/FRAME_GENERATION.md` (half rate, optical flow) and the game's DLSS vectors (removed in 0.6.1, archived). Replaces the 2/3-ratio
+plan of the archived 2/3-ratio note (docs/PERMANENT_RECORD.md: why ratios are not the answer).
 
 ## Idea
 
@@ -113,7 +113,7 @@ app being CPU-paced at 50-70 fps): the latency price of interpolation, to be rea
 
 User verdict: "it works as intended"; capping at 70 fps felt better than free-running in every game that could exceed it ("fully uncapped it
 becomes slower"); uncapped did not obviously beat half rate on smoothness. The logs (general log perf lines, `fg_uncapped.csv`, NVML samples,
-client intervals; nine games, 16 runs) agree and say why. Vectors were off all night by accident (the shared-copy bug, `docs/MOTION_VECTORS.md`
+client intervals; nine games, 16 runs) agree and say why. Vectors were off all night by accident (the shared-copy bug, the archived motion-vector note
 step 3), so every run below is optical flow.
 
 | game (mod) | mode | app fps | GPU % / W | repeats | lag in force | game frames in flight at output | client intervals > 15 ms |

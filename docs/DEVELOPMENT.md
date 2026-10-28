@@ -87,7 +87,7 @@ A release zip is built in the release flavour.
    plus `run soak_tokyo --seconds 14400` for a leak verdict) on the debug flavour (`run.py build nvenc vdxr host shim probe ballast`). It is not part of
    a normal build or a normal release: run it when the frame-generation pipeline, the tracking / timestamp path, the audio capture or
    the host's threading changed, and before a release that carries such a change. A small fix needs the regular scenarios only. See harness/README.md
-   (Stability harness) and docs/STABILITY_PLAN.md.
+   (Stability harness) (the original plan is archived).
 
 ## Automated tests (optional)
 The harness (`harness/`, Python stdlib) runs end-to-end scenarios on the Windows PC with a headless mock ALVR client: real

@@ -1,4 +1,4 @@
-// Stability harness: takes VRAM and RAM away from the chain so a machine with less memory than the dev PCs can be imitated (docs/STABILITY_PLAN.md).
+// Stability harness: takes VRAM and RAM away from the chain so a machine with less memory than the dev PCs can be imitated (harness/README.md, "Stability harness").
 //
 //   vram_ballast.exe [--vram "0:0,30:6000,90:0"] [--ram "0:0,30:8000"] [--seconds 120] [--stop-file <file>] [--log <file>]
 //

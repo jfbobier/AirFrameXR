@@ -153,7 +153,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
   It costs latency by construction (interpolation: one game period), and it is not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
   A **Recommended** tick sets the rate from the game's recorded runs on the connected headset, and **Recenter** (a button and a key, **End** by default; also sent at every game start) turns the tracking space to your
   current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), and
-  [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md) for why DLSS motion vectors were tried and removed.
+  [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) (archive) for why DLSS motion vectors were tried and removed.
 - **A field of view for the game, set from the streamer**, and a render quality slider: [how it works](#how-fov-restriction-works).
 - **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the firewall and OpenXR-layer reviews. They follow the display
   (1080p laptops to 4K, 100-200 % scale), checked by the UI harness below.
@@ -162,7 +162,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
   measured; a switch at its default is removed from the settings file. The HEVC QP map stays on by default and its trade-off is written next to it.
 - **Lab tools**: the test harness below, including a frame generation judge ([docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md)) and the QP map A/B.
 
-What changed in each version: [docs/releases/](docs/releases/). `docs/progress.md` is the detailed log: what is built, what is tested (and how), what is not.
+What changed in each version: [docs/releases/](docs/releases/) (1.0 onward; earlier notes are in the GitHub releases and the archive). `docs/progress.md` is the current status: what is built, what is tested (and how), what is not. Older history: [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md).
 
 ## Status
 - **Works on the real headset** (tested on RTX 5090 + Vision Pro, and on a Quest 3 with the Meta-store ALVR client): the vast majority of
@@ -434,5 +434,5 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the frame pipeline, its threads and buffers
 - [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md): the lab judge for generated frames (against a rendered ground truth)
-- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation: half-rate pacing + interpolated frames; [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md): the uncapped mode, cap and lag, headset-night verdicts; [docs/MOTION_VECTORS.md](docs/MOTION_VECTORS.md): the DLSS motion-vector experiment and why it was removed
+- [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md): frame generation: half-rate pacing + interpolated frames; [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md): the uncapped mode, cap and lag, headset-night verdicts; the DLSS motion-vector experiment (removed in 0.6.1) is in the archive, [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md)
 - [docs/AVP_FOV.md](docs/AVP_FOV.md): the Vision Pro's declared and visible field of view, and the override values that fit it; [docs/FOV_GRID.md](docs/FOV_GRID.md): the grid app that measures it; [How FOV restriction works](#how-fov-restriction-works)

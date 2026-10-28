@@ -67,7 +67,7 @@ live in another logon session and process loopback does not hear them (start the
 (use `robocopy /MIR` for a clean copy); the VB 16ch cable refuses a second loopback client. The scene music: `tools/bench_scene/sakura_breeze.mp3`
 (credits in `THIRD_PARTY_NOTICES.md`), played by `xr_probe` when it renders a scene (`XR_PROBE_SOUND=0` silences it, `XR_PROBE_SOUND=<file>` picks another).
 
-## Stability harness (2026-10-22, docs/STABILITY_PLAN.md)
+## Stability harness (2026-10-22, docs/permanent_record/STABILITY_PLAN.md)
 
 `python3 harness/stability/run_stability.py list | run <name>[,<name>|all] [--seconds N] [--host-env K=V ...] | judge <results dir> <scenario>`: fault injection and soak
 scenarios on the real chain (host + shim + probe + mock client on the builder), judged by `harness/stability/judge.py` (`--selftest`). Scenarios are `stability/scenarios.json`

@@ -176,7 +176,7 @@ Two syntheses draw a generated frame from the same optical flow (`video.frame_ge
   flow are within its noise), no added latency.
 - **classic**: the 0.4-0.6 recipe below, kept as the predictable fallback.
 
-The game's DLSS motion vectors were an alternative motion source from 0.4 to 0.6; they were removed in 0.6.1 (docs/MOTION_VECTORS.md).
+The game's DLSS motion vectors were an alternative motion source from 0.4 to 0.6; they were removed in 0.6.1 (archived: docs/PERMANENT_RECORD.md).
 
 ## Borrowed from OFXR-Bridge (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge): the classic synthesis
 

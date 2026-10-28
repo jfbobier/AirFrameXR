@@ -1,7 +1,7 @@
 # AirFrameXR UI specification (0.5)
 
 What each window is for, what it shows, where the numbers come from, and the rules every window follows. Written 2026-10-20 from what was built in
-0.5 (docs/PLAN_0.5.md) and the directions of the 2026-10-20 review (the "UI round 2" section of the plan). Marked **[target]** where the window is not
+0.5 (its plan is archived) and the directions of the 2026-10-20 review (the "UI round 2" section of the plan). Marked **[target]** where the window is not
 yet like that. The harnesses that hold each rule are named at the end of each section.
 
 ## Principles

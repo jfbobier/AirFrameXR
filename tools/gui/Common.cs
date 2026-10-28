@@ -1436,7 +1436,7 @@ namespace AirFrameXR
     }
 
     /// A latency the engine could not measure is shown as n/a, not as a number: above one second, or when over 10 % of the run's client samples were dropped
-    /// by the engine's aggregator as garbage (`latency_outliers` of `samples`; docs/PLAN_0.5.md U7).
+    /// by the engine's aggregator as garbage (`latency_outliers` of `samples`; docs/permanent_record/PLAN_0.5.md U7).
     public static class Latency
     {
         public const string Why = "n/a: the headset's latency samples were not usable (a duration that wrapped, or too many dropped). The other numbers are fine.";

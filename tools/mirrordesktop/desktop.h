@@ -1,4 +1,4 @@
-// Desktop mirror (docs/PLAN_0.5.md phase 5): the Windows desktop drawn as a quad into the stream's frame while no game runs.
+// Desktop mirror (docs/DESKTOP_MIRROR.md): the Windows desktop drawn as a quad into the stream's frame while no game runs.
 // Capture: DXGI desktop duplication of the primary output on the adapter that owns it (a laptop's display is often on the other GPU), through the
 // CPU into a texture of the encoder's device: one path for same-adapter and cross-adapter. SDR (BGRA8) and HDR (scRGB FP16) desktops; HDR is
 // converted to SDR in the shader (Windows' SDR white level as 1.0, a soft knee above, sRGB encode). The cursor is not in the duplicated image: the

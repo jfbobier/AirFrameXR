@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desktop mirror checks (docs/PLAN_0.5.md, phase 5). Everything that can be checked without a headset, across the desktops people have:
+"""Desktop mirror checks (docs/permanent_record/PLAN_0.5.md, phase 5). Everything that can be checked without a headset, across the desktops people have:
 
   1. input maths: tools/mirrordesktop/math_test.cpp (screen placement for every desktop shape, the lazy follow, per-eye projection, ray -> screen point, the beam)
   2. the picture on the builder's GPU (tools/probe/desktop_probe.cpp), for 7 desktop shapes x 4 display modes:

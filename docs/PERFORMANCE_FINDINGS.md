@@ -1,7 +1,7 @@
 # Performance and smoothness: what we tried and what we learned
 
 A map of the experiments behind the streaming pipeline, so nobody repeats the dead ends. Day-by-day detail with numbers is in
-[progress.md](progress.md); the list of ideas that were never started is in [PERFORMANCE_NOTES.md](PERFORMANCE_NOTES.md). Setup of all
+the archived progress log (docs/PERMANENT_RECORD.md); the older list of ideas is archived there too. Setup of all
 measurements: an RTX 5090 PC streaming to an Apple Vision Pro (ALVR client 20.14.1), plus a headset-less lab (mock client, probe app, simrig).
 
 Targets that shaped every decision: consistency before latency (a stable 90 fps beats a lower average with spikes), frame rate before latency,
@@ -406,7 +406,7 @@ same repeats, same verdicts; the 60-copy pair is within the run-to-run noise (ye
 pose-to-photon latency. What remains (42 ms for a 21 ms GPU frame) is the shim's own rule, "at most one frame still completing on the GPU
 at the release": double buffering, two GPU frames when the GPU is the bottleneck. The just-in-time hold removed on 2026-10-17 (release when
 the previous frame is predicted done, minus the app's CPU time) was built for exactly this and was inert only because of the early wake; it
-is the next candidate, now that a release is a frame start (docs/PLAN_0.6.md).
+is the next candidate, now that a release is a frame start (the 0.6 plan, archived).
 
 Verified with the patched DLL and the registry at stock: gpu_fg 70 copies 42.1 / 51.0 ms, gpu 70 copies 36.6 / 46.0 ms, xrWaitFrame returning
 at the release in both. Shipped as VDXR patch 5 (`tools/remote/stage15_vdxr.ps1`): running start off by default; `ovrshim_vdxr_running_start` = 1 in the same registry

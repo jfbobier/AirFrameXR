@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The streamer window against scripted host events (docs/PLAN_0.5.md, UI round 2). For each fixture in harness/fixtures/streamer_events/*.jsonl (host
+"""The streamer window against scripted host events (docs/permanent_record/PLAN_0.5.md, UI round 2). For each fixture in harness/fixtures/streamer_events/*.jsonl (host
 events in the host's own {"event","data"} format, taken from real host_stdout.txt files or written for a case; {"dump":"label"} lines snapshot the window),
 `uitest.exe --replay` builds the streamer, feeds the events to RuntimeForm.HostEvent (the function the live host drives) and writes the text of every
 visible control per snapshot. The assertions below are on that text. Exit 0 = every check passes.

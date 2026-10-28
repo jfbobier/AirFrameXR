@@ -1,4 +1,4 @@
-"""Soak schedule generator (docs/STABILITY_PLAN.md, scenario `soak_tokyo`): a seeded, replayable list of plausible events for a long run in Little Tokyo with
+"""Soak schedule generator (docs/permanent_record/STABILITY_PLAN.md, scenario `soak_tokyo`): a seeded, replayable list of plausible events for a long run in Little Tokyo with
 frame generation on.
 
     soak.plan(seconds, seed) -> {"stdin": [{"t", "line"}], "client_blackouts": "start:dur[:frame],...", "faults": [{"type": "suspend", ...}], "windows": [...]}

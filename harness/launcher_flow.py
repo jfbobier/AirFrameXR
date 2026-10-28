@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The launcher (bin\\launcher.exe; the root AirFrameXR.exe is a stub that starts it, tested last) steps aside while a tool is open and returns when it is closed (docs/PLAN_0.5.md). For each tool: a copy of the package on the builder,
+"""The launcher (bin\\launcher.exe; the root AirFrameXR.exe is a stub that starts it, tested last) steps aside while a tool is open and returns when it is closed (docs/permanent_record/PLAN_0.5.md). For each tool: a copy of the package on the builder,
 AirFrameXR.exe --test-flow "<tool>" launches the tool exactly as its Launch button does (the tool closes itself after its own screenshot), and the
 launcher samples its state to a log. Checks, per tool:
   - the launcher is visible before the launch

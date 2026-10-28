@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The GUI at 1080p, 1440p and 4K, at the Windows scales people use (docs/PLAN_0.5.md). Builds tools/gui/UiTest.cs (uitest.exe) on the builder, runs it
+"""The GUI at 1080p, 1440p and 4K, at the Windows scales people use (docs/permanent_record/PLAN_0.5.md). Builds tools/gui/UiTest.cs (uitest.exe) on the builder, runs it
 in the interactive session and audits every window, dialog and wizard page at each resolution x scale:
   - the window fits the work area (screen minus the taskbar); a resizable window must at least have a minimum size that fits
   - no control is clipped by its parent, no siblings overlap, no button / label / list header is cut off, lists do not need sideways scrolling

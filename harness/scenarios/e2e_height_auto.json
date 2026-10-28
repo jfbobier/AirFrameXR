@@ -1,5 +1,5 @@
 {
-  "description": "U5b (docs/PLAN_0.5.md): the mock headset at 1.62 m, the host told height 0 (Auto: the headset own floor estimate); height_calibrated must report the eye height 1.62 m.",
+  "description": "U5b (docs/permanent_record/PLAN_0.5.md): the mock headset at 1.62 m, the host told height 0 (Auto: the headset own floor estimate); height_calibrated must report the eye height 1.62 m.",
   "topology": {
     "host": "builder",
     "client": "builder",
