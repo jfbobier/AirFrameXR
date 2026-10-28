@@ -16,6 +16,7 @@ Legend: **source-verified** (read only) | **built** (compiles) | **tested-pass**
 - The hardened game frame pacing fix (`video.drop_duplicate_frames`) and the game fps lock on Assassin's Creed Black Flag (field results come from the build before the hardening).
 - The field-of-view override with a real UEVR game and on the Vision Pro; the left-handed desktop mirror; the audio fix on the 5090.
 - Chroma-key threshold 4 (raise it if room edges look eaten).
+- visionOS client (fork `kteque/alvr-visionos`, branch `airframexr-client`, TestFlight build of 2026-10-28): the PS button override on visionOS 27. Two earlier builds failed in the field with the app listed under Home Button Overrides. Apple documents the app's half as `preferredSystemGestureState = .disabled` on the profile's Home element; the new build claims before the first press, reads the press from both input collections, sends it as the game's menu click, and shows a "PS button" row in the Entry window. Decides it: the `[home]` lines in the host log (`Button Home=absent` means visionOS does not expose the PS button to apps at all).
 
 ## Known open
 
