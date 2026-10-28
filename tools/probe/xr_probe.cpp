@@ -282,6 +282,10 @@ int main(int argc, char** argv) {
         bind(aTrigger, "/user/hand/left/input/trigger/value"); bind(aTrigger, "/user/hand/right/input/trigger/value");
         bind(aSqueeze, "/user/hand/left/input/squeeze/value"); bind(aSqueeze, "/user/hand/right/input/squeeze/value");
         bind(aPrimary, "/user/hand/left/input/x/click"); bind(aPrimary, "/user/hand/right/input/a/click");
+        if (sweepOn) {   // the sweep takes any click as the answer: face buttons and stick clicks of both hands (the trigger is read separately)
+            bind(aPrimary, "/user/hand/left/input/y/click"); bind(aPrimary, "/user/hand/right/input/b/click");
+            bind(aPrimary, "/user/hand/left/input/thumbstick/click"); bind(aPrimary, "/user/hand/right/input/thumbstick/click");
+        }
         bind(aStick, "/user/hand/left/input/thumbstick"); bind(aStick, "/user/hand/right/input/thumbstick");
         bind(aPose, "/user/hand/left/input/grip/pose"); bind(aPose, "/user/hand/right/input/grip/pose");
         bind(aHaptic, "/user/hand/left/output/haptic"); bind(aHaptic, "/user/hand/right/output/haptic");
@@ -425,11 +429,13 @@ int main(int argc, char** argv) {
         if (sweepOn) {
             XrActiveActionSet act{ aset, XR_NULL_PATH }; XrActionsSyncInfo syn{ XR_TYPE_ACTIONS_SYNC_INFO }; syn.countActiveActionSets = 1; syn.activeActionSets = &act;
             xrSyncActions(sess, &syn);
-            float trig = 0.f;
-            for (int h = 0; h < 2; h++) { XrActionStateGetInfo gi{ XR_TYPE_ACTION_STATE_GET_INFO }; gi.action = aTrigger; gi.subactionPath = hands[h]; XrActionStateFloat st{ XR_TYPE_ACTION_STATE_FLOAT }; xrGetActionStateFloat(sess, &gi, &st); trig = std::max(trig, st.currentState); }
+            float trig = 0.f, th2[2] = { 0.f, 0.f };
+            for (int h = 0; h < 2; h++) { XrActionStateGetInfo gi{ XR_TYPE_ACTION_STATE_GET_INFO }; gi.action = aTrigger; gi.subactionPath = hands[h]; XrActionStateFloat st{ XR_TYPE_ACTION_STATE_FLOAT }; xrGetActionStateFloat(sess, &gi, &st); th2[h] = st.currentState; trig = std::max(trig, st.currentState); }
+            for (int h = 0; h < 2; h++) { XrActionStateGetInfo gi{ XR_TYPE_ACTION_STATE_GET_INFO }; gi.action = aPrimary; gi.subactionPath = hands[h]; XrActionStateBoolean st{ XR_TYPE_ACTION_STATE_BOOLEAN }; xrGetActionStateBoolean(sess, &gi, &st); if (st.currentState) { trig = 1.f; th2[h] = std::max(th2[h], 0.99f); } }
             const bool wasPressed = sweepPressed;
             if (trig > 0.8f) sweepPressed = true; else if (trig < 0.5f) sweepPressed = false;
             const bool edge = sweepPressed && !wasPressed;
+            if (sweepPressed != wasPressed) L("sweep: trigger %s left %.2f right %.2f (phase %d)", sweepPressed ? "DOWN" : "up", th2[0], th2[1], sweepPhase);
             const XrTime now = fs.predictedDisplayTime;
             auto secs = [](XrTime a, XrTime b) { return (double)(a - b) / 1e9; };
             auto nextRay = [&] {
