@@ -102,7 +102,6 @@
       "client_connected",
       "game_started",
       "game_ended",
-      "status",
       "encoder_stats"
     ]
   },

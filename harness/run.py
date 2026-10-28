@@ -54,6 +54,9 @@ def run_one(name):
     result = {"scenario": name, "started": stamp, "outdir": str(outdir)}
     try:
         steps = lib.run_scenario(sc, outdir, log=print)
+        marker = sc.get("blocked_if_app_log")   # an environment the scenario cannot measure in (e.g. a screen the OS does not let a program duplicate) is BLOCKED, not a failed product
+        if marker and marker in ((outdir / "app.log").read_text(errors="replace") if (outdir / "app.log").exists() else ""):
+            raise lib.Blocked(f"the app reports {marker!r}: this machine cannot run the scenario (see the app.log)")
         a = lib.analyse(sc, outdir)
         checks = lib.evaluate(sc, a)
         result.update(status=verdict(checks), steps=steps, checks=checks)

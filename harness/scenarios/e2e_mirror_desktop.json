@@ -1,5 +1,6 @@
 {
   "description": "Like e2e_mirror, but on the REAL desktop (DXGI duplication, copied on the GPU when the screen's adapter is the renderer's): for a PC whose screen can be duplicated (BLOCKED elsewhere). The app's picture work with the real capture must stay under 4 ms",
+  "blocked_if_app_log": "desktop capture unavailable",
   "topology": {
     "host": "builder",
     "client": "builder",

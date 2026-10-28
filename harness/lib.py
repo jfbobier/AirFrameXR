@@ -423,6 +423,8 @@ def run_scenario(sc, outdir: Path, log=print):
         rc, out = b_run(f"xcopy /E /I /Q /Y out\\dist\\AirFrameXR {inst} && if exist {inst}\\bin\\alvr_host.exe echo COPIED")
         if "COPIED" not in out:
             raise Blocked("portable package missing (build it first: python3 harness/run.py build gui package): " + out[-300:])
+        if not sc.get("keep_package_config"):   # a user's fresh unzip has no personal settings: the lab starts from the defaults whatever the builder's folder holds
+            b_run(f"echo {{}}> {inst}\\config\\airframexr.json")   # emptied, not deleted (the builder wrapper refuses deletes): {} = every default
         host_exe = f"{inst}\\bin\\alvr_host.exe"
         h = sc["host"] = {**sc["host"], "install_dir": f"%USERPROFILE%\\{ROOTNAME}\\{inst}"}
         if sc.get("app"):
