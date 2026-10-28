@@ -5,7 +5,7 @@
 #   bench\, profiles\, config\, docs\, logs\ (created on use)
 $ErrorActionPreference = 'Continue'
 $root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
-$version = if ($env:AIRFRAMEXR_VERSION) { $env:AIRFRAMEXR_VERSION } else { '1.1.1-pre' }
+$version = if ($env:AIRFRAMEXR_VERSION) { $env:AIRFRAMEXR_VERSION } else { '1.1.0' }
 $pkg = "$root\out\dist\AirFrameXR"   # a folder no earlier layout used (out\airframexr = the old installer package)
 # an earlier layout (loose files in the root, or libs\ / licenses\ folders) would hide a broken new one: the old folder is moved aside once, never deleted
 $stale = (Test-Path $pkg) -and ((@(Get-ChildItem $pkg -File | Where-Object { $_.Name -ne 'AirFrameXR.exe' }).Count -gt 0) -or (Test-Path "$pkg\libs") -or (Test-Path "$pkg\licenses") -or (Test-Path "$pkg\bin\logs"))

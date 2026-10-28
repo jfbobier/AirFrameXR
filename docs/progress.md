@@ -5,14 +5,15 @@ Add a line here for anything a user would notice; write what was tested and how,
 
 Legend: **source-verified** (read only) | **built** (compiles) | **tested-pass** | **tested-fail** | **blocked**.
 
-## State at 1.1.1-pre (2026-10-28, main)
+## State at 1.1.0 (2026-10-28, main)
 
-- Released: 1.0.0, 1.1.0-pre, 1.1.1-pre (notes in `docs/releases/`). IPC version 35: host, shim and package come from the same build.
+- Released: 1.0.0, 1.1.0-pre, 1.1.1-pre, 1.1.0 (notes in `docs/releases/`). IPC version 35: host, shim and package come from the same build.
 - Chain: game (OpenXR/UEVR via VDXR + our shim) -> host (frame generation, foveation, NVENC) -> ALVR streaming -> visionOS client (Apple Vision Pro), Quest 3 also works. See `docs/ARCHITECTURE.md`, `docs/FRAME_GENERATION.md`, `docs/PERFORMANCE_FINDINGS.md`.
 - Lab: `harness/` (see `harness/README.md`); whole suite on the build PC with the pacing fix forced on: 43 of 46 passed, the other three explained.
 
 ## Not yet tested on a headset
 
+- The calibrated Vision Pro field of view (0.71 / 0.59 / 0.61 / 0.57, render quality 0, `docs/AVP_FOV.md`): measured by a sweep on one person, one fit, **tested-pass** only as the outline drawn on the headset (looked like a good fit); not played in a game, no frame-time measurement; the client branch declaring the rectangle itself is not built.
 - The hardened game frame pacing fix (`video.drop_duplicate_frames`) and the game fps lock on Assassin's Creed Black Flag (field results come from the build before the hardening).
 - The field-of-view override with a real UEVR game and on the Vision Pro; the left-handed desktop mirror; the audio fix on the 5090.
 - Chroma-key threshold 4 (raise it if room edges look eaten).
