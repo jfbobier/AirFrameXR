@@ -312,10 +312,11 @@ def launch_app(app, rid, rd, log):
     rt = app.get("runtime", r"out\vdxr-shim")
     cmd = ("@echo off\r\n"
            f"set XR_RUNTIME_JSON={home}\\{ROOTNAME}\\{rt}\\virtualdesktop-openxr.json\r\n"
-           + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\{ROOTNAME}\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\{ROOTNAME}\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_timing.csv", **app.get("env", {})}.items()) +
+           + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\{ROOTNAME}\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\{ROOTNAME}\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_timing.csv", "MODSIM_CSV": f"{home}\\{ROOTNAME}\\{rd}\\modsim.csv", **app.get("env", {})}.items()) +
            f"cd /d {home}\\{ROOTNAME}\r\n"
            + (f"out\\mirrordesktop\\mirrordesktop.exe --log {rd}\\app.log --seconds {app.get('seconds', 25)} --no-mouse --clear {app.get('clear', '00FF00')} --input-log {rd}\\mirror_events.csv{' --synthetic' if app.get('synthetic') else ''}{' --ignore-signal' if app.get('ignore_signal') else ''}{(' --image-rgba ' + rd + chr(92) + 'desktop.rgba') if app.get('image') else ''} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "mirrordesktop" else
-              f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n") +
+              (f"build\\probe\\xr_modsim.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "xr_modsim" else
+  f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n")) +
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
     local = CACHE / "app.cmd"
     CACHE.mkdir(parents=True, exist_ok=True)
@@ -478,7 +479,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
-                                     "frame_gen": "--frame-gen", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override", "fov_quality": "--fov-quality"})
+                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override", "fov_quality": "--fov-quality"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -632,7 +633,7 @@ def run_scenario(sc, outdir: Path, log=print):
     if audio_state:
         (outdir / "audio_events.log").write_text("\n".join(audio_state.get("log", [])) + "\n")
     if app:
-        for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log", "mirror_events.csv"):
+        for f in ("app.log", "app_pose.csv", "app_input.csv", "app_timing.csv", "app_markers.csv", "shim_frames.csv", "app_stdout.txt", "app.rc", "ovrshim.log", "mirror_events.csv", "modsim.csv"):
             b_get(f"runs/{rid}/{f}", outdir / f)
         nthen = len([app["then"]] if isinstance(app.get("then"), dict) else (app.get("then") or []))
         for i in range(nthen):
@@ -1582,6 +1583,8 @@ def analyse(sc, outdir: Path):
         a["fov_restrict"] = analyse_fov_restrict(sc, outdir)
     if sc.get("checks", {}).get("qpmap"):
         a["qpmap"] = analyse_qpmap(sc, outdir, a.get("host") or {})
+    if sc.get("checks", {}).get("modsim") and sc.get("app"):
+        a["modsim"] = analyse_modsim(sc, outdir)
     if sc.get("checks", {}).get("pacing") and sc.get("app"):
         a["pacing"] = analyse_pacing(sc, outdir, 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0))
     period = 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0)
@@ -1644,6 +1647,84 @@ def analyse(sc, outdir: Path):
                                   "decoder": mode, "source_decoder": src["mode"]}
     return a
 
+
+
+def analyse_modsim(sc, outdir):
+    """The mod-loop mimic (tools/probe/xr_modsim.cpp, scenarios e2e_modsim_*): from the app's own event CSV (modsim.csv) the real frames and their duplicates,
+    how long the second wait of a real frame blocks against the real wait, the spacing of the real frames before and after the app's thread switch; from the
+    shim log the pacing line's duplicate / free-wait counters (docs/EXPERIMENTAL_SWITCHES.md, Game frame pacing fix)."""
+    res = {}
+    f = Path(outdir) / "modsim.csv"
+    rows = []
+    if f.exists() and f.stat().st_size > 0:
+        for line in f.read_text(errors="replace").splitlines()[1:]:
+            q = line.split(",")
+            if len(q) >= 5:
+                try:
+                    rows.append((float(q[0]) / 1000.0, int(q[1]), q[2], int(q[3]), int(q[4])))
+                except ValueError:
+                    pass
+    res["events"] = len(rows)
+    ends = [r for r in rows if r[2] == "END"]
+    real_ends, last_id = [], None
+    kind = {}    # index of an END in `ends` -> real | dup
+    for i, r in enumerate(ends):
+        kind[i] = "dup" if r[4] == last_id else "real"
+        if kind[i] == "real":
+            real_ends.append(r[0])
+        last_id = r[4]
+    res["ends"] = len(ends); res["real_frames"] = len(real_ends); res["dup_ends"] = len(ends) - len(real_ends)
+    t_first = rows[0][0] if rows else 0.0
+    t_last = rows[-1][0] if rows else 0.0
+    res["seconds"] = round(t_last - t_first, 1)
+    def pct(v, q):
+        v = sorted(v)
+        return v[min(len(v) - 1, int(q * len(v)))] if v else None
+    def spacing(t0, t1):
+        r = [x for x in real_ends if t0 <= x < t1]
+        g = [(r[i] - r[i - 1]) * 1000.0 for i in range(1, len(r))]
+        if not g:
+            return None
+        m = sum(g) / len(g)
+        return {"frames": len(r), "fps": round(len(r) / max(t1 - t0, 1e-6), 2), "p5": round(pct(g, .05), 1), "p50": round(pct(g, .5), 1), "p95": round(pct(g, .95), 1),
+                "stdev": round((sum((x - m) ** 2 for x in g) / len(g)) ** 0.5, 2)}
+    skip = 3.0     # the first seconds include the session start
+    sw = float(sc.get("app", {}).get("env", {}).get("MODSIM_SWITCH_S", 0) or 0)
+    if sw > 0:
+        res["before_switch"] = spacing(t_first + skip, t_first + sw)
+        res["after_switch"] = spacing(t_first + sw + 2.0, t_last - 1.0)
+    else:
+        res["steady"] = spacing(t_first + skip, t_last - 1.0)
+    # the waits: block time by what the last END before the wait was (real: the mod's second wait of a frame; dup: the real frame's wait)
+    end_t = [r[0] for r in ends]
+    import bisect
+    open_in, blocks = {}, {"after_real": [], "after_dup": []}
+    for r in rows:
+        if r[2] == "WAIT_IN":
+            open_in[r[1]] = r[0]
+        elif r[2] == "WAIT_OUT" and r[1] in open_in:
+            t0 = open_in.pop(r[1])
+            j = bisect.bisect_left(end_t, t0) - 1
+            if j >= 0 and t0 >= t_first + skip:
+                blocks["after_real" if kind[j] == "real" else "after_dup"].append((r[0] - t0) * 1000.0)
+    for k, v in blocks.items():
+        res["wait_" + k] = {"n": len(v), "p50_ms": round(pct(v, .5), 2) if v else None, "p95_ms": round(pct(v, .95), 2) if v else None}
+    threads = {}
+    for r in ends:
+        threads.setdefault(int(r[0] // 10), set()).add(r[1])
+    res["end_threads_per_10s"] = [len(v) for _, v in sorted(threads.items())]
+    # the shim's own counters (last pacing line of the app's shim log)
+    sl = Path(outdir) / "ovrshim.log"
+    if sl.exists():
+        last = None
+        for line in sl.read_text(errors="replace").splitlines():
+            m = re.search(r"releases (\d+) \(late (\d+)\).*duplicate frames seen (\d+) dropped (\d+) \(pacing fix (on|off), free waits (\d+)\)", line)
+            if m:
+                last = m
+        if last:
+            res["shim"] = {"releases": int(last.group(1)), "late": int(last.group(2)), "dups_seen": int(last.group(3)), "dups_dropped": int(last.group(4)),
+                           "fix": last.group(5), "free_waits": int(last.group(6))}
+    return res
 
 def evaluate(sc, a):
     """Returns list of checks: {name, ok, value, expected}."""
@@ -1970,6 +2051,33 @@ def evaluate(sc, a):
         m, f = h["shim"].get("ts_matched", 0), h["shim"].get("ts_fallback", 0)
         v = m / max(1, m + f)
         chk("shim_frame_ts_from_pose_match", v >= ck["shim_ts_matched_min_frac"], {"matched": m, "fallback": f}, f">= {ck['shim_ts_matched_min_frac']} of frames")
+    if ck.get("modsim") and a.get("modsim") is not None:
+        M = a["modsim"]; mk = ck["modsim"]
+        chk("modsim_ran", M["real_frames"] >= mk.get("min_real_frames", 200), M["real_frames"], f">= {mk.get('min_real_frames', 200)} real frames")
+        if mk.get("dup", True):
+            chk("modsim_submits_twice", abs(M["dup_ends"] - M["real_frames"]) <= max(3, 0.03 * M["real_frames"]), {"real": M["real_frames"], "dup": M["dup_ends"]}, "the mimic submits every real frame twice")
+        else:
+            chk("modsim_submits_once", M["dup_ends"] == 0, {"real": M["real_frames"], "dup": M["dup_ends"]}, "the mimic submits each frame once (a normal game)")
+        sh = M.get("shim")
+        if mk.get("fix") == "off":
+            chk("fix_off_nothing_changes", sh is not None and sh["dups_dropped"] == 0 and sh["free_waits"] == 0 and sh["fix"] == "off", sh, "knob off: no frame dropped, no free wait")
+            wr = (M.get("wait_after_real") or {}).get("p50_ms")
+            chk("fix_off_second_wait_paced", wr is not None and wr >= mk.get("min_second_wait_ms", 1.0), wr, f"second wait still blocks (>= {mk.get('min_second_wait_ms', 1.0)} ms p50): the behavior of before")
+        if mk.get("fix") == "on_nodup":
+            chk("fix_on_normal_game_untouched", sh is not None and sh["fix"] == "on" and sh["dups_dropped"] == 0 and sh["free_waits"] == 0, sh, "knob ON with a game that does not resubmit: nothing dropped, no free wait (the fix does not act)")
+        if mk.get("fix") == "on":
+            chk("fix_on_dups_dropped", sh is not None and sh["fix"] == "on" and sh["dups_seen"] > 0 and sh["dups_dropped"] >= 0.95 * sh["dups_seen"], sh, "knob on: >= 95 % of the duplicates seen are dropped")
+            chk("fix_on_free_waits", sh is not None and sh["free_waits"] >= mk.get("min_free_wait_ratio", 0.8) * max(sh["releases"], 1), sh, f"knob on: free waits >= {mk.get('min_free_wait_ratio', 0.8)} x paced releases")
+            wr = (M.get("wait_after_real") or {}).get("p50_ms")
+            chk("fix_on_second_wait_free", wr is not None and wr <= mk.get("max_second_wait_ms", 1.0), wr, f"second wait returns at once (<= {mk.get('max_second_wait_ms', 1.0)} ms p50)")
+        if "min_real_fps" in mk:
+            part = M.get("steady") or M.get("before_switch") or {}
+            chk("modsim_real_fps", (part.get("fps") or 0) >= mk["min_real_fps"], part.get("fps"), f">= {mk['min_real_fps']} real fps")
+        if "max_spacing_stdev_ms" in mk:
+            for nm in ("steady", "before_switch", "after_switch"):
+                part = M.get(nm)
+                if part:
+                    chk("modsim_spacing_" + nm, part["stdev"] <= mk["max_spacing_stdev_ms"], part["stdev"], f"real-frame spacing stdev <= {mk['max_spacing_stdev_ms']} ms")
     if "shim_submit_mode" in ck and h and h.get("shim"):
         chk("shim_submit_mode", h["shim"].get("submit_mode") == ck["shim_submit_mode"], h["shim"].get("submit_mode"), ck["shim_submit_mode"])
     if "gray_patch" in ck:

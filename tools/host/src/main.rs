@@ -78,6 +78,7 @@ struct Args {
     /// uncapped mode: fps cap on the game's releases (0 = none), headroom for the host's own GPU work
     fg_cap_fps: Option<f64>,
     drop_dup_frames: bool,
+    drop_dup_frames_flag: bool,
     /// field-of-view restriction (outer, inner, upper, lower as fractions of the headset's tangents; 1 = none): what the game is told, taken by the next game
     fov_scale: [f32; 4],
     fov_scale_explicit: bool,
@@ -178,6 +179,7 @@ fn parse_args() -> Result<Args, String> {
         fg_rate: None,
         fg_cap_fps: None,
         drop_dup_frames: false,
+        drop_dup_frames_flag: false,
         fov_scale: [1.0; 4],
         fov_scale_explicit: false,
         fov_quality: 0.0,
@@ -320,6 +322,7 @@ fn parse_args() -> Result<Args, String> {
             "--running-start-ms" => a.running_start_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--head-wait-ms" => a.head_wait_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--predict-missing-head" => a.predict_missing_head = true,
+            "--drop-duplicate-frames" => a.drop_dup_frames_flag = true,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
             "--fov-scale" => {
@@ -468,7 +471,7 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if let Some(v) = st.predict_missing_head {
         a.predict_missing_head = a.predict_missing_head || v;
     }
-    a.drop_dup_frames = st.drop_duplicate_frames.unwrap_or(false);
+    a.drop_dup_frames = a.drop_dup_frames_flag || st.drop_duplicate_frames.unwrap_or(false);
     if let Some(v) = st.intake_gate {
         if std::env::var_os("AIRFRAMEXR_INTAKE_GATE").is_none() {
             std::env::set_var("AIRFRAMEXR_INTAKE_GATE", if v { "1" } else { "0" });

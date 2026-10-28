@@ -226,6 +226,7 @@ def build(what):
             continue
         if w == "probe":     # the OpenXR test app (+ the benchmark scene renderer it can show, and the scene file)
             lib.b_put(lib.ROOT / "tools/probe/xr_probe.cpp", "_tmp/xr_probe.cpp")
+            lib.b_put(lib.ROOT / "tools/probe/xr_modsim.cpp", "_tmp/xr_modsim.cpp")   # the mod-loop mimic (e2e_modsim_*)
             lib.b_run("if not exist nvenc\\hostlib mkdir nvenc\\hostlib")
             lib.b_put(lib.ROOT / "nvenc/hostlib/bench_scene.h", "nvenc/hostlib/bench_scene.h")
             lib.b_run("if not exist third_party\\stb mkdir third_party\\stb")

@@ -12,8 +12,10 @@ $vcvars = 'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\
 call "$vcvars" >nul
 cd /d "$bdir"
 cl /nologo /EHsc /MD /O2 /std:c++17 /I"$sdk" /I"$root\nvenc\hostlib" /I"$root\third_party\stb" "$root\_tmp\xr_probe.cpp" /Fe:xr_probe.exe /link "$lib" d3d11.lib dxgi.lib d3dcompiler.lib advapi32.lib winmm.lib
+if exist "$root\_tmp\xr_modsim.cpp" cl /nologo /EHsc /MD /O2 /std:c++17 /I"$sdk" "$root\_tmp\xr_modsim.cpp" /Fe:xr_modsim.exe /link "$lib" d3d11.lib dxgi.lib advapi32.lib
 "@ | Set-Content -Encoding ASCII "$bdir\build.cmd"
 cmd /c "$bdir\build.cmd" 2>&1 | Out-File -Encoding utf8 "$root\logs\xr_probe_build.log"
 Get-Content "$root\logs\xr_probe_build.log" | Select-String -Pattern 'error|fatal' | Select-Object -First 10
 $exe = Get-Item "$bdir\xr_probe.exe" -ErrorAction SilentlyContinue
 if ($exe -and $exe.LastWriteTime -ge $start) { Write-Host "RESULT: OK $($exe.FullName) $($exe.Length)" } else { Write-Host "RESULT: FAILED (exe not rebuilt; see logs\xr_probe_build.log)" }
+if (Test-Path "$root\_tmp\xr_modsim.cpp") { $m = Get-Item "$bdir\xr_modsim.exe" -ErrorAction SilentlyContinue; if ($m -and $m.LastWriteTime -ge $start) { Write-Host "MODSIM: OK $($m.Length)" } else { Write-Host "MODSIM: FAILED (see logs\xr_probe_build.log)" } }

@@ -146,6 +146,12 @@ source stream decoded the same way; tolerance = `max_unknown_frame_ratio`, to al
 - `e2e_benchmark_network`: `--benchmark-network 100,200` to the mock client: steps must reach their target bitrate at >= 80 fps.
 - `e2e_heavy_app_async` (and `optional/e2e_heavy_app_sync`, `OVRSHIM_SYNC_SUBMIT=1`): xr_probe with a synthetic CPU + GPU load per
   frame (`XR_PROBE_CPU_MS`, `XR_PROBE_GPU_COPIES`) that only fits 90 Hz when the app's CPU and GPU work overlap; laptop: 93.5 vs 65.4 fps.
+- `e2e_modsim_fix_off`, `e2e_modsim_fix_on`, `e2e_modsim_nodup_fix_on` (2026-10-28): `xr_modsim` (tools/probe/xr_modsim.cpp) mimics the frame loop of a VR mod measured in the field
+  (acbfvr, alternate-eye rendering): the render thread waits and begins on every second engine frame, a worker thread (one of a pool of 9, a single thread after `MODSIM_SWITCH_S`)
+  draws and ends the frame and then runs a second wait / begin / end that resubmits the same layers, so every real frame is submitted twice. Frame generation at half rate.
+  Knob off: nothing is dropped, the second wait is paced like any other (22.5 real fps on the laptop, the behavior of before); knob on (`drop_duplicate_frames`): every duplicate
+  dropped, the second wait returns at once, real frames paced alone (45 real fps, spacing stdev 0.7 ms); knob on with a game that does not resubmit (`MODSIM_DUP=0`): the fix does not act.
+  The app's own event CSV (`modsim.csv`) and the shim's pacing line (`duplicate frames seen N dropped M (pacing fix on|off, free waits K)`) are what the checks read.
 - optional: `e2e_openxr_foveated_split` (needs a GPU with >= 2 NVENC engines, e.g. the 5090) and `e2e_wslhost_hevc10_30mbps` (host in WSL, client on the builder over the real network) and
   `net_capacity_250mbps` (records what that network can carry).
 
