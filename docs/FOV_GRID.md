@@ -18,8 +18,9 @@ bigger than the window the headset really shows, the border is cut off and the p
 It is an ordinary OpenXR app, so it runs like a game:
 
 1. Since 1.2.0-pre the package ships it: `bench\fovgrid.exe` (this `xr_probe.exe` renamed: under that name it starts in the grid scene by itself
-   and runs until the session ends) and `bench\fovgrid.bat`, which points it at the package's own OpenXR runtime; `fovgrid.bat 0.96,0.71,0.69,0.61`
-   draws that rectangle (outer, inner, upper, lower tangents, the Advanced window's fields) on the grid to check a calibration. Older packages: copy
+   and runs until the session ends) and `bench\fovgrid.bat`, which points it at the package's own OpenXR runtime; `fovgrid.bat 0.96,0.71,0.69,0.66`
+   draws that rectangle (outer, inner, upper, lower tangents, the Advanced window's fields) as a white outline with a centre cross on black, to check a
+   calibration: run it with the override **off** (with it on, the game's view is that rectangle and the outline falls on the picture's edge: black with a few pixels of line). Older packages: copy
    `xr_probe.exe` as `fovgrid.exe` anywhere on the PC, e.g. next to the games.
 2. Start AirFrameXR, connect the headset, and double-click `fovgrid.bat` (or `fovgrid.exe`, or add it to Steam as a non-Steam game).
    Fresh settings: "Override the headset's field of view" unticked in the Advanced window (the game gets the headset's own), FoV scale in the visionOS app at 1.0.
