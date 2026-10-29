@@ -22,6 +22,7 @@ if exist "%CSV%" (
   exit /b 1
 )
 if exist "%~dp0..\bin\virtualdesktop-openxr.json" set XR_RUNTIME_JSON=%~dp0..\bin\virtualdesktop-openxr.json
+if exist "%~dp0..\AirFrameXR\bin\virtualdesktop-openxr.json" set XR_RUNTIME_JSON=%~dp0..\AirFrameXR\bin\virtualdesktop-openxr.json
 set XR_PROBE_SCENE=fovgrid
 set XR_PROBE_FOVGRID=sweep
 set XR_PROBE_SWEEP_FIT=%HEADSET%_%FIT%

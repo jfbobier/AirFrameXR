@@ -9,10 +9,11 @@ the two eyes' windows, over both gaze states. A first set that used the followin
 
 | | Outer | Inner | Upper | Lower |
 |---|---|---|---|---|
-| **Calibrated (tangents)** | **1.00** | **0.71** | **0.73** | **0.66** |
-| angle | 45.0 deg | 35.4 | 36.1 | 33.4 |
+| **Shipped default (99 % of the author's window)** | **0.97** | **0.71** | **0.69** | **0.63** |
+| angle | 44.1 deg | 35.4 | 34.6 | 32.2 |
+| The author's 100 % set (what the sweeps and the grid showed) | 1.00 | 0.71 | 0.73 | 0.66 |
 
-Set on 2026-10-29 night (the ceiling client, which declares 1.045 / 0.800 / 0.759 / 0.871, so every value is inside what the headset shows): the lower edge from the third sweep
+**Release 1.2.0 ships the 99 % rectangle as the default** (the wizard applies it with the profile; 26 % fewer game pixels than an unrestricted game on the AirFrameXR client, a sliver of black at the far outer and lower corners): the author chose the compromise over the 100 % set for about 5 points more saving. The 100 % set, found on 2026-10-29 night (the ceiling client, which declares 1.045 / 0.800 / 0.759 / 0.871, so every value is inside what the headset shows): the lower edge from the third sweep
 (0.61 -> 0.66, fit 3 below), the outer and upper edges from the grid read with the whole box shown (the 45-degree band visible on both sides; the picture visible up to the frame's
 top at 37 degrees, so 0.73 keeps a degree of margin), the inner edge unchanged. About 13 % more game pixels than the 1.1.1 set (0.96 / 0.71 / 0.69 / 0.61). A trial at lower 0.70
 read the same at the bottom as every frame before it (the band below the 30-degree line cut), so the sweep's 0.66 stands there.

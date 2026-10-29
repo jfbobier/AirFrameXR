@@ -143,6 +143,30 @@ namespace AirFrameXR
             return LoadAll().FirstOrDefault(p => p.HasFov && p.NameContains.Any(n => headsetName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0));
         }
 
+        /// The profile's measured field of view becomes the default the games are told (video.fov_override on with the profile's tangents, never above the
+        /// headset's own when they are known, the profile's render quality, the record of the headset they were made for): what the Advanced window's button does,
+        /// done by the wizard when it applies a profile that has one (docs/AVP_FOV.md: the 99 % rectangle since 1.2.0). False: no field of view in the profile or it failed.
+        public static bool ApplyFovDefault(HmdProfile p, string headsetName)
+        {
+            if (p == null || !p.HasFov) return false;
+            try
+            {
+                var st = new AppSettings();
+                var client = AppSettings.ReadClientFov();
+                var t = p.FovTangents();
+                var keys = new[] { "video.fov_outer", "video.fov_inner", "video.fov_upper", "video.fov_lower" };
+                for (int k = 0; k < 4; k++) Json.Set(st.Root, keys[k], Math.Round(client != null ? Math.Min(t[k], client[k]) : t[k], 4));
+                Json.Set(st.Root, "video.fov_override", true);
+                Json.Set(st.Root, "video.fov_render_quality", Math.Round(p.FovRenderQuality, 2));
+                if (client != null) Json.Set(st.Root, "video.fov_for", client.Select(x => (object)Math.Round(x, 4)).ToList());
+                if (!string.IsNullOrEmpty(headsetName)) Json.Set(st.Root, "video.fov_for_headset", headsetName);
+                st.Save();
+                Log.Write("INFO", $"profile '{p.Id}': field of view {string.Join(" / ", t.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))} applied as the default the games are told (render quality {p.FovRenderQuality:0.##}); Advanced picture and FOV settings changes it");
+                return true;
+            }
+            catch (Exception e) { Log.Write("WARN", $"profile '{p.Id}': field of view not applied: {e.Message}"); return false; }
+        }
+
         /// Writes the profile's session settings into config\session.json (after the wizard's own values, so a profile can refine them). False: nothing to do or it failed.
         public static bool ApplySessionOverrides(HmdProfile p)
         {

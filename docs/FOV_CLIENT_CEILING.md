@@ -1,6 +1,6 @@
 # FoV client ceiling: plan
 
-Status 2026-10-29 night: **the ceiling client ran on the author's Vision Pro.** `config\airframexr_views.json` on the 5090 shows the declared box **1.045 / 0.800 / 0.759 / 0.871** (left eye; right 0.802 / 1.048 / 0.761 / 0.873), the predicted 1.05 / 0.80 / 0.76 / 0.87 within 0.005: the circumscribing factor holds. The 1.1.1 override applied against it (92 / 89 / 91 / 70 % per edge), the game was told 0.959 / 0.709 / 0.689 / 0.609 exactly and rendered 3212 x 2552. Logs: `private/logs/5090-2026-10-29-fovgrid`. Client constants: fork branch `fov-calibration` `acf3de9`. Follows `docs/FOV_CALIBRATION.md` and the release 1.1.1 (`docs/AVP_FOV.md`).
+Status 2026-10-29 night: **shipped as visionOS client 1.2.0 (fork tag `v1.2.0`, branch `airframexr-client`, built by TestFlight run 16's content minus the debug line; not re-dispatched). The ceiling client ran on the author's Vision Pro.** `config\airframexr_views.json` on the 5090 shows the declared box **1.045 / 0.800 / 0.759 / 0.871** (left eye; right 0.802 / 1.048 / 0.761 / 0.873), the predicted 1.05 / 0.80 / 0.76 / 0.87 within 0.005: the circumscribing factor holds. The 1.1.1 override applied against it (92 / 89 / 91 / 70 % per edge), the game was told 0.959 / 0.709 / 0.689 / 0.609 exactly and rendered 3212 x 2552. Logs: `private/logs/5090-2026-10-29-fovgrid`. Client constants: fork branch `fov-calibration` `acf3de9`. Follows `docs/FOV_CALIBRATION.md` and the release 1.1.1 (`docs/AVP_FOV.md`).
 
 ## Problem
 

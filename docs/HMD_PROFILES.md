@@ -26,7 +26,8 @@ against every profile it finds (`profiles\` shipped with the package, then `conf
    audio, and **whether split encoding really engaged** (its own row: engines and strips per frame from the encoder test and the live stream; a GPU that
    cannot split is flagged).
 4. **Save.** The values go into `config\session.json` and `config\airframexr.json`, then the profile's `session_overrides` are written into
-   `session.json`.
+   `session.json`. A profile with a measured field of view (key `fov`, docs/AVP_FOV.md) also sets the field of view the games are told (`video.fov_override` on with its tangents,
+   never above the headset's own, and its render quality): since 1.2.0 the calibration is the default, the Advanced window shows and changes it.
 
 ## Exporting yours
 

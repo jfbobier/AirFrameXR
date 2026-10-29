@@ -32,14 +32,11 @@
     "protocol": "udp"
   },
   "fov": {
-    "visible_deg": { "outer": 45.0, "inner": 35.4, "upper": 36.1, "lower": 33.4 },
+    "visible_deg": { "outer": 44.1, "inner": 35.4, "upper": 34.6, "lower": 32.2 },
     "margin_deg": 0,
     "render_quality": 0,
     "client_fov_scale": 0.8,
-    "note": "Set of 2026-10-29 night: outer 45.0 deg (tan 1.00), inner 35.4 (0.71), upper 36.1 (0.73), lower 33.4 (0.66). Lower from the third sweep (following gaze, Sense clicks: 0.66 where the first set had 0.61); outer and upper from the grid read with the headset's whole box shown (the 45-degree band seen on both sides, the picture seen up to the frame's top at 37 degrees), both inside the client's ceiling. About 13 % more game pixels than the 1.1.1 set. 0.8 client slider recommended (manually): set FoV Scale to 0.8 in the visionOS app, a value circulating in the community, then reconnect once; the stream then covers less angle and every pixel in view is about 1.25 times denser. The values here are the same with it at 1.0 or 0.8. Calibrated 2026-10-28/29 with the sweeps of docs/FOV_CALIBRATION.md (eyes following the dot and eyes fixed, both eyes, one person, one fit): one mirrored rectangle for both eyes covering 99 % of the larger of the two eyes' windows over both gaze states, margin 0. The first set (following gaze only) left a black strip at the right eye's outer edge in a game; this one was played by the author and the black was gone. One person, one fit; check the corners for black with fovgrid.exe."
-  },
-  "network": {
-    "default": "wifi-good",
+    "note": "The 99 % rectangle of the author's three sweeps (2026-10-28/29, eyes following and fixed, two fits, Sense clicks): outer 44.1 deg (tan 0.97), inner 35.4 (0.71), upper 34.6 (0.69), lower 32.2 (0.63). Covers 99 % of what the author sees; the black is at the far outer and lower corners only. 26 % fewer game pixels than an unrestricted game on the AirFrameXR client (whose ceiling is 1.05 / 0.80 / 0.76 / 0.87), 62 % fewer than on the stock app. Applied as the default field of view when the wizard uses this profile; the Advanced window changes it. The author's own 100 % set is 1.00 / 0.71 / 0.73 / 0.66 (21 % fewer).",
     "variants": [
       {
         "id": "wifi-good",

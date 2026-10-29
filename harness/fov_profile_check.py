@@ -13,7 +13,7 @@ import lib
 root = Path(__file__).resolve().parent.parent
 prof = json.loads((root / "profiles" / "apple-vision-pro.profile.json").read_text())["fov"]
 want = [round(math.tan(math.radians(prof["visible_deg"][k] + prof["margin_deg"])), 2) for k in ("outer", "inner", "upper", "lower")]
-doc = [1.00, 0.71, 0.73, 0.66]   # docs/AVP_FOV.md, the calibrated row of 2026-10-29 night
+doc = [0.97, 0.71, 0.69, 0.63]   # docs/AVP_FOV.md, the shipped 99 % rectangle (2026-10-29)
 ok_doc = want == doc and prof["render_quality"] == 0 and prof.get("client_fov_scale") == 0.8
 print("CHECK", "PASS" if ok_doc else "FAIL", f"shipped Vision Pro profile gives {want} and quality {prof['render_quality']} (docs/AVP_FOV.md: {doc}, 0) and client FoV scale {prof.get('client_fov_scale')} (0.8)")
 
