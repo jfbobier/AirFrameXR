@@ -16,6 +16,14 @@ Played by the author in a game on the Vision Pro (one session, one fit): the bla
 
 The wearer's eyes differ (right eye 44 deg outward but 28 toward the nose, left eye 37 / 35 / 35 / 31): per-eye boxes would need about 13 % fewer pixels than the mirrored one, but the override cannot express them, only a client that declares a box per eye (`docs/FOV_PIPELINE_OPTIM.md`).
 
+**Fit 3 (2026-10-29 night, following gaze only, Sense controller clicks, data in `fov_sweeps/fov_sweep_2026-10-29_jf_avp_fit3_following_run1.csv`):** 48 rays, no time-outs,
+run under the ceiling client (declared 1.045 / 0.800 / 0.759 / 0.871, not clamping: every crossing is inside). Tight box per eye: left 0.77 / 0.70 / 0.63 / 0.66, right 0.86 / 0.53 / 0.56 / 0.63;
+shared 0.86 / 0.70 / 0.63 / 0.66. Against fit 1's following pass it is the larger on every edge, so the union of the two following fits is tonight's box. Over all three of the author's
+sweeps (fit 1 following and fixed, fit 3 following) the window's bounding box is 1.03 / 0.74 / 0.71 / 0.66 and the 99 % rectangle 0.97 / 0.71 / 0.69 / 0.63; the calibrated set above covers
+99.2 % of it. **The one edge the new data moves is the lower one: 0.61 -> 0.66** (100 % of all data; 0.63 for 99 %), which matches what the wearer saw on the grid the same night (no
+limit visible at the bottom). Proposed, not yet in the profile: 0.96 / 0.71 / 0.69 / 0.66 (about 4 % more game pixels), to check with `bench\fovgrid.bat 0.96,0.71,0.69,0.66`. The fixed-gaze
+pass of fit 3 was not run.
+
 Render quality 0 (no oversampling) is the default: the game renders at the floor size, so all the savings go to performance; the slider in the Advanced window raises it for supersampling.
 How much that saves depends on the frame the headset declares (computed from tangent areas, not measured): against the stock app's declared 1.79 / 1.02 / 1.22 / 1.02 frustum the game
 renders about 35 % of the pixels; against the AirFrameXR client's own visible limit (0.94 / 0.93 / 0.90 / 0.76, what the 5090's headset declares) about 68 %, and the earlier "recommended" row below
