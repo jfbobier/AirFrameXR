@@ -9,10 +9,13 @@ the two eyes' windows, over both gaze states. A first set that used the followin
 
 | | Outer | Inner | Upper | Lower |
 |---|---|---|---|---|
-| **Calibrated (tangents)** | **0.96** | **0.71** | **0.69** | **0.66** |
-| angle | 43.8 deg | 35.4 | 34.6 | 33.4 |
+| **Calibrated (tangents)** | **1.00** | **0.71** | **0.73** | **0.66** |
+| angle | 45.0 deg | 35.4 | 36.1 | 33.4 |
 
-The lower edge moved from 0.61 to 0.66 on 2026-10-29 night (fit 3, below); the three other edges are the set of release 1.1.1.
+Set on 2026-10-29 night (the ceiling client, which declares 1.045 / 0.800 / 0.759 / 0.871, so every value is inside what the headset shows): the lower edge from the third sweep
+(0.61 -> 0.66, fit 3 below), the outer and upper edges from the grid read with the whole box shown (the 45-degree band visible on both sides; the picture visible up to the frame's
+top at 37 degrees, so 0.73 keeps a degree of margin), the inner edge unchanged. About 13 % more game pixels than the 1.1.1 set (0.96 / 0.71 / 0.69 / 0.61). A trial at lower 0.70
+read the same at the bottom as every frame before it (the band below the 30-degree line cut), so the sweep's 0.66 stands there.
 
 Played by the author in a game on the Vision Pro (one session, one fit): the black strip was gone. Not measured: frame time, HUD corners in other games, other wearers.
 
@@ -23,7 +26,7 @@ run under the ceiling client (declared 1.045 / 0.800 / 0.759 / 0.871, not clampi
 shared 0.86 / 0.70 / 0.63 / 0.66. Against fit 1's following pass it is the larger on every edge, so the union of the two following fits is tonight's box. Over all three of the author's
 sweeps (fit 1 following and fixed, fit 3 following) the window's bounding box is 1.03 / 0.74 / 0.71 / 0.66 and the 99 % rectangle 0.97 / 0.71 / 0.69 / 0.63; the calibrated set above covers
 99.2 % of it. **The one edge the new data moves is the lower one: 0.61 -> 0.66** (100 % of all data; 0.63 for 99 %), which matches what the wearer saw on the grid the same night (no
-limit visible at the bottom). **Applied the same night** (profile and the author's settings): 0.96 / 0.71 / 0.69 / 0.66 (about 4 % more game pixels), to be confirmed on the grid with `bench\fovgrid.bat 0.96,0.71,0.69,0.66`. The fixed-gaze
+limit visible at the bottom). **Applied the same night** together with the grid's outer and upper readings: 1.00 / 0.71 / 0.73 / 0.66 (profile and the author's settings). The fixed-gaze
 pass of fit 3 was not run.
 
 Render quality 0 (no oversampling) is the default: the game renders at the floor size, so all the savings go to performance; the slider in the Advanced window raises it for supersampling.
