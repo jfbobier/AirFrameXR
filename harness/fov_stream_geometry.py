@@ -12,6 +12,14 @@ cs = band width and sh = 2 start / (1 - cs) - 1.
     python3 harness/fov_stream_geometry.py --json               # the same as JSON (for other checks)
     python3 harness/fov_stream_geometry.py --declared 1.79,1.02,1.22,1.02   # the stock visionOS app's box
     python3 harness/fov_stream_geometry.py --selftest           # the band formula against the shader's own equations
+    python3 harness/fov_stream_geometry.py --restrict 50 --no-foveation --split-mode 0 --engines 3   # a stock-client user: 50 % restriction, full frame, auto split
+    python3 harness/fov_stream_geometry.py --quality 1 --panel 3552x3200   # the render quality slider at the top: the game renders the panel size over R
+
+The parameter space the launcher's pipeline model must cover (docs/FOV_PIPELINE_OPTIM.md section 2b): the box the client declares, the
+rectangle (client-declared or the streamer's override, --restrict as a percent of the declared area down to 50), the stream density
+(--eye over the declared box), the render quality slider (--quality 0..1 between the stream's size over R and the panel's size, --panel),
+foveation on / off (--no-foveation) and its geometry, the split mode (--split-mode 0 auto, 1 auto-forced, 2, 3, 15 off), the NVENC preset and
+tuning (--preset 1..7, --tuning ll|ull|hq) and the GPU's engine count (--engines). `warnings` lists what the UI must say.
 
 Tangents are the left eye's outer, inner, upper, lower (the right eye mirrors). Stdlib + numpy (through lib.fov_vars).
 """
@@ -69,6 +77,43 @@ def deg(t):
     return math.degrees(math.atan(t))
 
 
+# NVENC Video Codec SDK programming guide 13.0, section 8.14 (read 2026-10-29): split frame encoding (HEVC / AV1, >= 2 NVENCs). Auto mode
+# needs the frame at least 2112 high (HEVC; 2048 AV1) and P1-P2 with the high-quality tuning or P1-P4 with low / ultra-low latency; the forced
+# modes split "for all configurations", the strip count capped by the engine count.
+SPLIT_MIN_HEIGHT = {"hevc": 2112, "av1": 2048}
+
+
+def split_strips(height, mode, engines, preset=3, tuning="ll", codec="hevc", conditions_met=True):
+    """Strips NVENC is expected to encode, and why, for an encoded frame of this height."""
+    if engines < 2:
+        return 1, "one NVENC engine: no split"
+    if not conditions_met:
+        return 1, "split disabled by the configuration (weighted prediction, alpha, sub-frame readback or video-memory output)"
+    if mode == 15:
+        return 1, "split mode off"
+    if mode in (2, 3, 4):
+        n = min(mode, engines)
+        return n, f"forced {mode}-strip mode" + (f" capped by {engines} engines" if n < mode else "")
+    if mode == 1:
+        return min(engines, 3), "auto-forced: the driver chooses the strip count"
+    # auto
+    if height < SPLIT_MIN_HEIGHT[codec]:
+        return 1, f"auto mode splits only frames at least {SPLIT_MIN_HEIGHT[codec]} high ({codec.upper()}); this one is {height}"
+    if (tuning == "hq" and preset > 2) or (tuning in ("ll", "ull") and preset > 4):
+        return 1, f"auto mode does not split with P{preset} {tuning}: P1-P2 high quality or P1-P4 low latency only"
+    return min(engines, 3), "auto mode: height and preset allow it, the driver chooses the strip count"
+
+
+def even_at_least_64(v):
+    return max(64, (int(round(v)) + 1) // 2 * 2)   # ovrshim/render_size.h EvenAtLeast64
+
+
+def game_render_size(floor, ceiling, quality):
+    """ovrshim/render_size.h GameRenderSize: quality 0 = the floor (the stream's density over R), 1 = the ceiling."""
+    q = min(1.0, max(0.0, quality))
+    return (even_at_least_64(floor[0] + (ceiling[0] - floor[0]) * q), even_at_least_64(floor[1] + (ceiling[1] - floor[1]) * q))
+
+
 def case(name, box, eye, fov):
     outer, inner, up, down = box
     v = lib.fov_vars(eye[0], eye[1], fov)
@@ -88,8 +133,12 @@ def case(name, box, eye, fov):
     }
 
 
-def compute(declared=DECLARED, rect=RECT, eye=EYE, fov=FOVEATION):
-    out = {"today": case("today: stream over the declared box", declared, eye, fov)}
+def compute(declared=DECLARED, rect=RECT, eye=EYE, fov=FOVEATION, foveated=True, quality=0.0, panel=None, split_mode=3, engines=3,
+            preset=3, tuning="ll", restrict_pct=None):
+    if restrict_pct is not None:   # a uniform restriction of the declared box's area, as the streamer's override could ask (down to 50 %)
+        k = math.sqrt(restrict_pct / 100.0)
+        rect = tuple(round(v * k, 3) for v in declared)
+    out = {"today": case("today: stream over the declared box", declared, eye, fov), "rect": list(rect), "foveated": foveated}
     # the same pixels per tangent unit over R, aligned the way ALVR aligns an Absolute size
     dens = (eye[0] / (declared[0] + declared[1]), eye[1] / (declared[2] + declared[3]))
     eye_r = (align32(dens[0] * (rect[0] + rect[1])), align32(dens[1] * (rect[2] + rect[3])))
@@ -110,6 +159,27 @@ def compute(declared=DECLARED, rect=RECT, eye=EYE, fov=FOVEATION):
         c = out[k]
         c["saving_vs_today"] = {"frame_px_pct": round(100 * (1 - c["frame_mpx"] / out["today"]["frame_mpx"]), 1),
                                 "encoded_px_pct": round(100 * (1 - c["encoded_mpx"] / out["today"]["encoded_mpx"]), 1)}
+    # without foveation the encoded frame is the stream frame itself
+    for k in ("today", "same_fractions", "same_band"):
+        c = out[k]
+        c["encoded_sent"] = c["encoded"] if foveated else [2 * c["eye"][0], c["eye"][1]]
+        c["encoded_sent_mpx"] = c["encoded_mpx"] if foveated else c["frame_mpx"]
+    # the game's render size: floor = the stream over R, ceiling = the panel reference (the stream's size over the declared box when none given)
+    ceiling = tuple(panel) if panel else tuple(eye)
+    out["game_render"] = {"floor": list(eye_r), "ceiling": list(ceiling), "quality": quality, "size": list(game_render_size(eye_r, ceiling, quality))}
+    # what the UI must say
+    warnings = []
+    frame_h = eye_r[1] if foveated is False else out["same_band"]["encoded"][1]
+    for label, h in (("re-anchored foveation", out["same_band"]["encoded"][1]), ("same fractions", out["same_fractions"]["encoded"][1])) if foveated else (("full frame", eye_r[1]),):
+        strips, why = split_strips(h, split_mode, engines, preset, tuning)
+        out.setdefault("split", {})[label] = {"encoded_height": h, "expected_strips": strips, "why": why}
+        if engines >= 2 and strips < min(engines, 3):
+            warnings.append(f"split encoding: {strips} strip(s) expected for the {label} frame ({why}); a forced mode splits at any size")
+    if eye_r[0] > 4096 or eye_r[1] > 8192:
+        warnings.append(f"stream {eye_r[0]}x{eye_r[1]} per eye exceeds NVENC's 8192-wide limit side by side")
+    if quality > 0 and out["game_render"]["size"] == list(eye_r):
+        warnings.append("the render quality slider has no room: the floor and the ceiling are the same size (give the slider the panel's size as ceiling)")
+    out["warnings"] = warnings
     return out
 
 
@@ -127,7 +197,16 @@ def selftest():
                     bad += 1
                     print("INVERSE MISMATCH", cs, sh, c2, s2)
     print("CHECK", "PASS" if bad == 0 else "FAIL", "band formula against the shader equations (36 cases, forward and inverse)")
-    return 0 if bad == 0 else 1
+    rules = [((1664, 0, 3, 3, "ll"), 1), ((2112, 0, 3, 3, "ll"), 3), ((2496, 0, 3, 5, "ll"), 1), ((2496, 0, 3, 2, "hq"), 3), ((2496, 0, 3, 3, "hq"), 1),
+             ((1312, 3, 3, 3, "ll"), 3), ((1312, 3, 2, 3, "ll"), 2), ((1312, 2, 3, 3, "ll"), 2), ((3200, 0, 1, 1, "ll"), 1), ((3200, 15, 3, 1, "ll"), 1)]
+    bad2 = 0
+    for (h, mode, eng, p, t), want in rules:
+        got = split_strips(h, mode, eng, p, t)[0]
+        if got != want:
+            bad2 += 1
+            print("SPLIT MISMATCH", h, mode, eng, p, t, "got", got, "want", want)
+    print("CHECK", "PASS" if bad2 == 0 else "FAIL", "split-encode strip rules (SDK 13.0 guide 8.14: 2112 rows, preset table, forced modes, engine cap)")
+    return 0 if bad == 0 and bad2 == 0 else 1
 
 
 def main(argv):
@@ -140,7 +219,12 @@ def main(argv):
         rect = tuple(float(x) for x in argv[argv.index("--rect") + 1].split(","))
     if "--eye" in argv:
         eye = tuple(int(x) for x in argv[argv.index("--eye") + 1].lower().split("x"))
-    out = compute(declared, rect, eye)
+    opt = lambda k, d, f=float: f(argv[argv.index(k) + 1]) if k in argv else d
+    panel = tuple(int(x) for x in argv[argv.index("--panel") + 1].lower().split("x")) if "--panel" in argv else None
+    out = compute(declared, rect, eye, foveated="--no-foveation" not in argv, quality=opt("--quality", 0.0), panel=panel,
+                  split_mode=opt("--split-mode", 3, int), engines=opt("--engines", 3, int), preset=opt("--preset", 3, int),
+                  tuning=opt("--tuning", "ll", str), restrict_pct=opt("--restrict", None))
+    rect = tuple(out["rect"])
     if "--json" in argv:
         print(json.dumps(out, indent=1))
         return 0
@@ -156,6 +240,14 @@ def main(argv):
         if "saving_vs_today" in c:
             s = c["saving_vs_today"]
             print(f"    against today: frame pixels -{s['frame_px_pct']} % (compose, frame generation, VRAM), encoded pixels -{s['encoded_px_pct']} % (NVENC, network at equal bits per pixel, decode)")
+    if not out["foveated"]:
+        print(f"- no foveation: the encoded frame is the stream frame, {out['today']['encoded_sent'][0]}x{out['today']['encoded_sent'][1]} today, {2 * out['eye_r'][0]}x{out['eye_r'][1]} over R ({out['same_fractions']['saving_vs_today']['frame_px_pct']} % fewer encoded pixels)")
+    g = out["game_render"]
+    print(f"- game render size at quality {g['quality']}: {g['size'][0]}x{g['size'][1]} (floor {g['floor'][0]}x{g['floor'][1]}, ceiling {g['ceiling'][0]}x{g['ceiling'][1]})")
+    for label, sp in out["split"].items():
+        print(f"- split, {label} frame {sp['encoded_height']} high: {sp['expected_strips']} strip(s), {sp['why']}")
+    for w in out["warnings"]:
+        print(f"- WARNING: {w}")
     return 0
 
 

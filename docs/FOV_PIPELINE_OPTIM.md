@@ -18,13 +18,16 @@ shrinking the stream to the calibrated rectangle"), which is kept in its last fo
 3. Only the client can close that gap on the v20 protocol (the client maps the frame over the box *it* declares). So the plan is: **the client
    declares R, the stream frame is sized to R at the same pixels per degree, and ALVR's foveation is re-anchored** so the full-density band keeps
    its place in degrees. The shim, the IPC and the host's frame path need no change for it; the host's override then restricts nothing.
-4. Measured gain at equal quality (same density, same full-density band in degrees, same bits per pixel): the unwarped stages (compose, frame
-   generation, VRAM) drop by 29 %; the encoded frame drops by 12 % only, because ALVR's foveation already compresses most of the never-seen
-   margin 4-5x. Keeping the session's foveation *fractions* instead drops the encoded frame by 30 % but narrows the full-density band from
-   -12..+32 to -18..+24 degrees horizontally: a quality change to judge by eye, not an iso-quality saving.
-5. On the 3080 Ti that is encode 11.3 -> 8.4 ms at P3 (-25 %) for the 30 % variant, about 10.2 ms (-10 %) for the iso variant; on the 5090
-   (3.1 ms foveated) expect about 0.3 ms (iso) to 0.8 ms (fractions) of encode and the same order of headset decode. Frame generation's flow and
-   synthesis drop 29-31 % (measured). Latency, not fps, is what the shrink buys: the game's GPU saving is already banked by the restriction itself.
+4. Measured gain at equal quality (same density, same bits per pixel): every unwarped stage (compose, frame generation, VRAM) drops by 30 %.
+   **On the author's own profile (full frame, no foveation, 3 split strips on the 5090) the encoded frame drops by the same 30 %**: 7104 x 3200
+   -> 6336 x 2496, encode 9 ms -> about 6.5 and headset decode 9 -> about 6.5 (proportions measured on the 3080 Ti: 20.2 -> 15.4 ms at P1),
+   about 5 ms off the critical path. With the foveated profile the encoded frame drops by 13 % only (keeping the full-density band in degrees),
+   because ALVR's foveation already compresses most of the never-seen margin 4-5x; keeping the session's foveation *fractions* instead gives 30 %
+   but narrows the band from -12..+32 to -18..+24 degrees horizontally, a quality change to judge by eye.
+5. On the 3080 Ti the foveated encode goes 11.3 -> 8.4 ms at P3 (-25 %) for the fractions variant, about 10.0 ms (-11 %) for the iso variant;
+   frame generation's flow and synthesis drop 29-31 % (measured). Latency, not fps, is what the shrink buys: the game's GPU saving is already
+   banked by the restriction itself. With the client under our control more is available (section 2c), and the client's own queues, not the
+   PC, hold the largest latency reserve.
 6. **NVENC split encoding**: the SDK guide (13.0, section 8.14) says the *automatic* mode splits only frames **2112 pixels high or more (HEVC;
    2048 for AV1)**, with P1-P2 high-quality or P1-P4 low-latency presets; the forced modes split "for all configurations". Our foveated frame is
    1664 high today and 1312-1536 after the shrink, so it only ever split because the profile forces 3 strips; the full frame (3200, 2496 after
@@ -52,7 +55,7 @@ rectangle before the connection**, which it does (the profile and the Advanced w
 ## 2. Geometry (computed, `harness/fov_stream_geometry.py`)
 
 Today's stream (3552 x 3200 over D) is 1899 x 1928 px per tangent unit. R at that density is **3168 x 2496 per eye** (ALVR floors sizes to 32):
-16.2 Mpx side by side instead of 22.7 (-29 %). With the stock app's box the same density gives 2112 x 1888.
+15.8 Mpx side by side instead of 22.7 (-30 %). With the stock app's box the same density gives 2112 x 1888.
 
 Where ALVR's foveation puts its full-density band today, in degrees (left eye; the shader mirrors the right eye): the band in source space is
 `[(1 - cs)(1 + sh) / 2, that + cs]` of the eye's width from the **outer** edge (derived from `CompressAxisAlignedPixelShader.hlsl`, checked by the
@@ -62,8 +65,9 @@ tool's self-test), so with centre size 0.45 x 0.4 and shift 0.4 / 0.1:
 |---|---|---|---|---|---|---|
 | today, over D (AirFrameXR client) | 3552 x 3200 | 4224 x 1664, 7.03 Mpx | -12.3 .. +31.8 deg | -17.4 .. +19.3 deg | | |
 | today, over D (stock app) | 3552 x 3200 | 4224 x 1664 | -35 .. +29 deg | -23 .. +26 deg | | |
-| **R frame, same foveation fractions** | 3168 x 2496 | 3776 x 1312, 4.95 Mpx | -17.6 .. +23.5 deg | -14.6 .. +14.5 deg | **-29 %** | **-30 %** |
-| **R frame, band re-anchored to today's degrees** (centre size 0.50 x 0.51, shift 0.78 / 0.07) | 3168 x 2496 | 4032 x 1536, 6.19 Mpx | -12.1 .. +31.8 deg | -17.4 .. +19.2 deg | **-29 %** | **-12 %** |
+| **R frame, same foveation fractions** | 3168 x 2496 | 3776 x 1312, 4.95 Mpx | -17.6 .. +23.5 deg | -14.6 .. +14.5 deg | **-30 %** | **-30 %** |
+| **R frame, band re-anchored to today's degrees** (centre size 0.50 x 0.51, shift 0.78 / 0.07) | 3168 x 2496 | 3968 x 1536, 6.09 Mpx | -12.1 .. +31.9 deg | -17.4 .. +19.1 deg | **-30 %** | **-13 %** |
+| **R frame, no foveation** (the author's full-frame profile) | 3168 x 2496 | 6336 x 2496, 15.8 Mpx | the whole frame | | **-30 %** | **-30 %** |
 
 Two things this table says that the 10-28 note did not:
 
@@ -79,6 +83,63 @@ Two things this table says that the 10-28 note did not:
 The corners of R (about 21 % of it) are inside the frame and outside the visible ellipse; only the QP map could make them cheaper and no setting
 is proposed without a measurement.
 
+## 2b. Everything is a parameter: the pipeline model the UI must carry
+
+The author's baseline is one point (the calibrated rectangle, 70 % of the declared box, no foveation, render quality 0, 3552 x 3200); the plan
+must hold for the whole space the user can set, and the UI must tell the user what the pipeline will do with a given setting **before** the
+game runs. The inputs and the stage sizes they decide:
+
+| Input | Where it is set | What it decides |
+|---|---|---|
+| The box the headset declares (D, per eye) | the client (stock app: its frustum, times its FoV Scale; AirFrameXR client: the visible limit) | the stream frame's angular cover; saved in `config\airframexr_views.json` at each connection |
+| The rectangle the game renders (R) | the client when it declares R, else the streamer's override (tangents per edge, from the headset's own down to a fifth; the calibration saw 50 % of the area as a plausible tight choice) | the game's view; with the override, the black margin in the frame |
+| The stream resolution | Settings panel (3552 x 3200 today) | the pixels per tangent unit over D; **proposal: keep the field as the size over the headset's full box (the panel reference the user knows) and derive the stream frame over whatever box is declared at that density**, so the number keeps its meaning across clients and restrictions |
+| The render quality slider | Advanced window, 0..1 | the game's size between the floor (the stream's density over R) and the ceiling; today the ceiling is the stream's eye size, so **when the client declares R the floor equals the ceiling and the slider disappears**; the user wants it to reach the panel's size (3552 x 3200 over R, "upsample the restricted view to the panel"): the ceiling must become the panel reference, a small shim change (`render_size.h` ceiling from a new IPC field, step S9) |
+| Foveation on / off and its geometry | Settings (encode profile), session | the encoded frame F and the full-density band in degrees (section 2) |
+| Split mode, preset, tuning, engines | profile / Advanced, the GPU | the strips NVENC will use (section 4): forced modes always split, auto only at 2112 rows or more with P1-P4 low latency |
+
+`harness/fov_stream_geometry.py` is that model as an oracle: `--restrict 50 --no-foveation --split-mode 0 --engines 3`, `--quality 1 --panel
+3552x3200`, `--eye`, `--preset`, `--tuning`; it prints every stage size and a `warnings` list, and its self-test covers the band formula and the
+strip rules (2112 rows, the preset table, forced modes, the engine cap). Examples it gives: a stock-client user at 50 % of the declared area with
+the full frame in auto mode gets 4992 x 2240 encoded and still 3 strips (2240 rows); the same user with foveation on gets a 1312-1536-row frame
+and **1 strip in auto mode**, which is the warning the UI must show (today this case is silent: the profile's forced 3 hides it, and a user who
+picks auto, or whose GPU has one engine, sees nothing). The launcher's C# port of this model (`PipelineModel`, step S3b) is checked against the
+script over a grid (`pipeline_model_check.py`, section 8).
+
+What the user should see, in two places:
+
+- **Before the run**, in the Advanced window next to the FoV and quality fields: the stage sizes the settings imply (game render, stream frame,
+  encoded frame, strips) and the warnings.
+- **After the run**, in the Game statistics app (`performance.exe`, the per-game record): a **frame pipeline strip** for the last session, one box
+  per stage with what really happened: game render size (shim log line "field of view told to the game"), the declared box and the rectangle
+  (`views_config`, `fov_restrict`), the stream frame, frame generation (on / off, flow size, flow and synthesis ms), the foveated frame and its
+  band, NVENC (preset, strips expected and `slices_per_frame` seen, encode p50 / p95, bitrate), the network (Mbps), the headset (decode ms,
+  repeated periods) and, next to each box, the predicted value from the settings so a mismatch shows (strips expected 3, seen 1). The host
+  already publishes every number in `encoder_stats`, `nvenc_config` and the client statistics; what is missing is the record: `games.rs` writes
+  one entry per run with fps and repeats, it must gain a `pipeline` block with these facts (host change, step S8). The GUI then draws it; no
+  engine logic decides anything.
+
+## 2c. With the client under our control: what more end-to-end gives, ranked by gain over risk
+
+1. **The client declares R** (fork branch `fov-calibration`, built next) and the stream is sized to it: -30 % on every stage for the full-frame
+   profile, about 5 ms of encode + decode on the 5090 at 90-100 Hz. The largest FoV-related gain; settings and client only.
+2. **Per-eye rectangles**: the calibration found the two eyes differ (right eye 44 degrees outward, 28 toward the nose; left 37 / 35) and a box
+   per eye needs 13 % fewer pixels than the mirrored one. The shim and the host are per-eye already (`m_eyeFov[2]`, `eyeFovTan[2][4]`); the
+   client declares per eye today; only the streamer's override is mirrored. Comes free with the client declaring, or with the declare channel.
+3. **A visible-shape warp** instead of ALVR's rectangular two-level foveation, on both ends (host `FFR` shader, client un-warp shader, negotiated
+   over the `Reserved` channel): compress only what lies outside the measured visible ellipse inside R (about 21 % of R, the corners) and keep the
+   rest at full density. At 4x on the corners that is about 16 % fewer encoded pixels **at no visible cost**, on top of 1; or the budget to run
+   milder foveation inside the window. Engine on both sides, medium effort; gated by the quality benchmark (band judge) and a headset look.
+4. **The client's queues** are where the latency is: on the 2026-10-23 debug session the headset's vsync queue was 22.9 ms and its decoder queue
+   8.3 ms against 9.5 ms of encode and 9.1 of decode (`docs/PERFORMANCE_FINDINGS.md`), and stock ALVR shows the same queue. Not a FoV item and
+   not free (every earlier attempt to shave the headset's queue traded against repeated frames), but with the fork it is ours to study: how the
+   decoded frame waits for a drawable, and whether a decoded frame can go to the next drawable instead of the one after. A separate plan;
+   named here because no PC-side change buys 20 ms.
+5. **The declare channel** (host -> client rectangle, `docs/FOV_CALIBRATION.md` phase 2): no gain by itself, it moves the rectangle to the PC
+   (per wearer, per eye, no client rebuild) and lets the launcher's pipeline model be the single owner of the geometry.
+
+Not available: a per-frame field of view (the v20 video header has no room for it) and anything that makes the stock app show less than it declares.
+
 ## 3. Measured on the 3080 Ti (2026-10-29, one NVENC engine, 250 Mbps, 10-bit HEVC, QP map on, GPU keep-alive, P0)
 
 Encode, from `bench-quality full --eye` (p50 / p95 ms per frame):
@@ -92,7 +153,7 @@ Encode, from `bench-quality full --eye` (p50 / p95 ms per frame):
 | no foveation, P3 | 32.2 / 32.7 | not in the sweep | |
 
 A third point, the stock-density R size (2464 x 2272, encoded 2944 x 1184 = 3.49 Mpx): P3 6.7 / 7.4 ms. The three points sit on a line,
-**1.30 ms per encoded Mpx plus 2.1 ms** at P3 strong foveation on this GPU, so the iso-band variant (6.19 Mpx) lands at about 10.2 ms: -10 %. The
+**1.30 ms per encoded Mpx plus 2.1 ms** at P3 strong foveation on this GPU, so the iso-band variant (6.09 Mpx) lands at about 10.0 ms: -11 %. The
 5090 encodes the foveated frame in 3.1 ms p50 with three engines (`docs/PERFORMANCE_FINDINGS.md`); the same proportions give about 2.8 ms (iso)
 or 2.3 ms (fractions). The headset decodes in proportion to the same pixels (5.4-6.4 ms p50 today).
 
@@ -149,6 +210,10 @@ D = R), the client samples the frame over R. No stage scales R's pixels up.
 | S5 | **Headset A/B** (5090 + Vision Pro, `harness/live.py` variants, same game section, same bitrate): (1) stream over D 3552 x 3200 against R 3168 x 2496 same fractions, (2) against R re-anchored; read `client_frames.csv` (decode ms, total latency, repeated periods), `encoder_stats` (encode p50/p95, `ffr_ms`, `compose_ms`, `gen.flow_ms`), and the wearer's verdict on the band; (3) split 3 against 2 against off on the 1312/1536-high frame (`slices_per_frame`, encode ms, eyes) | live harness (settings only) | numbers in `docs/PERFORMANCE_FINDINGS.md`; the preset that wins becomes the profile's default | after S3 + S4 |
 | S6 | Optional, **engine**: the host tells the client the rectangle (`ServerControlPacket::Reserved` JSON, phase 2 of `docs/FOV_CALIBRATION.md`: `server_core` `send_reserved`, host stdin `cal_declare`, client `ClientCoreEvent::Reserved` -> re-declare) so the rectangle lives on the PC (per wearer, per eye) and the client needs no rebuild; with it, per-eye boxes (the calibration found 13 % fewer pixels than the mirrored one) | host (`tools/host`, vendored `server_core` patch), client fork; **shim and IPC untouched** | `e2e_fov_declared_r*` with a mock that declares R; a re-declaration reaches the next game start cleanly (the untested `pending_views` path) | after S5 says the shrink is worth keeping |
 | S7 | Docs and profile: `docs/AVP_FOV.md` (the band finding), `docs/PERFORMANCE_KNOBS.md` (stream density as a structural choice), `profiles/apple-vision-pro.profile.json` (density, foveation preset), `docs/progress.md` | docs | | with S3 / S5 |
+| S3b | **Pipeline model in the launcher** (`PipelineModel`, a port of `fov_stream_geometry.py`): stage sizes and warnings from the current settings in the Advanced window (FoV, quality, resolution, encode profile, split mode, preset, the GPU's engine count from the host's `nvenc_config`); the split warning whenever the expected strip count is below what the GPU can do | `tools/gui/` (allowed) | `pipeline_model_check.py` equals the oracle over the grid; `ui_matrix.py` row | to do |
+| S8 | **Frame pipeline strip in Game statistics**: the host's run record gains a `pipeline` block (declared box, rectangle, game render size, stream frame, generation sizes and ms, foveated frame, strips expected / seen, encode p50 / p95, bitrate, decode ms); `performance.exe` draws one box per stage with predicted against seen | host `games.rs` (engine, small, on this branch) + `tools/gui/Performance.cs` | `host_tests.py` / `streamer_events.py`: the record carries the block from a fixture session; `ui_matrix.py` row for the strip | to do |
+| S9 | **Render quality ceiling** when the client declares R: the slider's top becomes the panel reference (the resolution field's size), not the stream's eye size; IPC gains the ceiling (v36), `render_size.h` takes it, the host passes it | shim + IPC + host (engine, small) | `e2e_fov_stream_r_quality_full`: the app's recommended size equals the panel size while the stream is 3168 x 2496 | after S3 |
+| S10 | **Visible-shape warp** (2c item 3): host shader + client shader + negotiation | engine, both ends | quality benchmark with the band judge; encode ms; headset look | after S5, if the shrink is kept |
 
 Rejected after measurement, so nobody re-opens them without new evidence:
 
@@ -186,6 +251,10 @@ checks (`analyse_fov_restrict`), the `foveation` layout check (`fov_vars` port),
 |---|---|---|---|
 | `fov_stream_geometry.py --selftest` | the band formula against the shader's equations; prints the sizes and bands of this document | nothing (numpy) | **done, PASS** |
 | `e2e_fov_stream_r` | the chain with the stream at 3168 x 2496, foveation on: negotiated size, encoded frame = ALVR's layout for that size, counter and gray patch through the decoded stream, pose round trip, pacing guards, encode p95 under 16 ms; compose / foveation / encode timings for the comparison | builder | **added, PASS 2026-10-29 (33 checks)** |
+| `e2e_fov_stream_r_full` | the author's baseline at the R size: no foveation, the encoded frame is the stream frame 6336 x 2496, the same chain checks; encode time for the no-foveation curve | builder | **added 2026-10-29, see section 9** |
+| `pipeline_model_check.py` | the launcher's `PipelineModel` against `fov_stream_geometry.py` over a grid: restriction 100 / 70 / 50 %, render quality 0 / 0.5 / 1, foveation off / mild / strong, resolution 2848 / 3552 / 4256, split auto / forced 3 / off, presets P1-P5 low latency and P2-P3 high quality, engines 1 / 2 / 3; every stage size and every warning equal | `uitest.exe` | after S3b |
+| `e2e_split_rules` (optional, 5090) | the split rules against the driver: foveated 1664 rows in auto mode -> 1 slice per frame; forced 3 -> 3; full frame 2496 rows auto P3 LL -> 3; full frame auto P5 -> 1 (`slices_per_frame` from `encoder_stats`); documents why the profile forces | a GPU with 3 engines | to add |
+| `game_record_pipeline` (in `host_tests.py` or `streamer_events.py`) | the run record's `pipeline` block from a fixture session: sizes, strips expected and seen, encode p50 / p95, decode ms present and plausible; `performance.exe` renders the strip (`ui_matrix.py` row) | `uitest.exe`, fixture logs | after S8 |
 | `e2e_fov_stream_r_fg` | the same with frame generation at half rate (`e2e_fg_latency` at the R size): `gen.flow_size` follows the frame, latency believable, no generator errors | builder | to add (copy of `e2e_fg_latency` with the size overrides) |
 | `e2e_fov_declared_r` | the mock headset **declares R** (new mock flag `--views-tan o,i,u,l`, `tools/mock_client`, lab only) with the override set to the same R: the host logs `fov_restrict` with scale 1.0 ("none"), the app gets R's tangents and a recommended size equal to the stream's eye size, the decoded frame has **no black margin** (the inverse of `fov_restrict_margin_black`: content to the edges) | builder, mock flag | to add |
 | `e2e_fov_declared_r_tighter` | the mock declares R, the override asks 0.8 x R: the restriction is computed against R (`fov_scale_from`), margins black at the right place | builder, mock flag | to add |

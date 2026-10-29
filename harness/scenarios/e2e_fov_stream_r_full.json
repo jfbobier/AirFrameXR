@@ -1,0 +1,109 @@
+{
+  "description": "The author's own baseline shrunk to the calibrated window: full frame (no foveation, the full-split encode profile on the 5090), stream 3168x2496 per eye instead of 3552x3200, so the encoded frame itself is 6336x2496 (30 % fewer pixels than 7104x3200). The chain at that size without the foveation pass: negotiation, the encoded frame equal to the stream frame, the probe's counter and gray patch through the decoded stream, pacing; encode time for the no-foveation curve.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "openvr_config.eye_resolution_width": 3168,
+    "openvr_config.eye_resolution_height": 2496,
+    "openvr_config.target_eye_resolution_width": 3168,
+    "openvr_config.target_eye_resolution_height": 2496,
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 3168,
+        "height": {
+          "set": true,
+          "content": 2496
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 3168,
+        "height": {
+          "set": true,
+          "content": 2496
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 420
+  },
+  "client": {
+    "seconds": 55,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 420,
+    "timeout_s": 60
+  },
+  "gpu_sample": true,
+  "timeout_s": 200,
+  "checks": {
+    "host_min_frames": 250,
+    "client_min_frames": 200,
+    "timestamps_monotonic": true,
+    "max_duplicate_timestamps": 400,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "color_range": "pc",
+      "width": 6336,
+      "height": 2496
+    },
+    "decode": true,
+    "decode_frame_slack": 60,
+    "counter_readback": true,
+    "counter_block_px": 64,
+    "gray_patch": [
+      176,
+      200
+    ],
+    "app_min_frames": 300,
+    "pose_roundtrip_max_rad": 0.06,
+    "min_yaw_range_rad": 0.3,
+    "refresh_hz": 90,
+    "max_pipeline_latency_ms": 150,
+    "negotiated": {
+      "view_resolution": [
+        3168,
+        2496
+      ],
+      "use_full_range": true,
+      "enable_foveated_encoding": false
+    },
+    "foveation": false,
+    "max_encode_ms_p95": 30
+  }
+}
