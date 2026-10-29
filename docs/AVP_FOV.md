@@ -21,6 +21,28 @@ How much that saves depends on the frame the headset declares (computed from tan
 renders about 35 % of the pixels; against the AirFrameXR client's own visible limit (0.94 / 0.93 / 0.90 / 0.76, what the 5090's headset declares) about 68 %, and the earlier "recommended" row below
 restricted nothing at all there. Do not read the old "about half the pixels" below as a saving on that client.
 
+## Second wearer: Kevin (2026-10-29, calibration bundle, one run)
+
+Sweep `fov_sweeps/fov_sweep_2026-10-29_kevin_fit1_following_run1.csv` (`run_sweep.bat`: eyes **following** the dot, 2 deg/s, 50 ms latency compensation, both eyes,
+24 rays each, no timeouts; his headset ran AirFrameXR 1.1.1 with the AirFrameXR client, which declared 0.946 / 0.936 / 0.906 / 0.765, override off during the sweep).
+Measured window, following gaze: left eye outer 43.0 / inner 34.0 / up 32.4 / down 34.0 deg, right eye 39.9 / 30.8 / **24.8** / 37.9. The two eyes differ by 7.6 deg at the
+top (the headset sits lower in front of the right eye, or the fit): the mirrored box takes the larger of the two per edge. `python3 harness/fov_calibration.py --sweep <csv>`:
+the shared window's tight box is 0.93 / 0.67 / 0.69 / 0.80, its 99 % rectangle 0.92 / 0.65 / 0.64 / 0.79.
+
+| Set (override tangents outer / inner / upper / lower) | degrees | game pixels | covers his window (left / right) | when |
+|---|---|---|---|---|
+| A tight: the whole following-gaze window | 0.93 / 0.67 / 0.69 / 0.77 (42.9 / 33.8 / 34.6 / 37.4) | 74 % | 100 / 99.1 % | the most saving; the following sweep underestimates the edges (below) |
+| **B recommended: A plus 2 degrees per edge** | **0.95 / 0.72 / 0.74 / 0.77** (43.4 / 35.8 / 36.6 / 37.4) | **80 %** | 100 / 99.1 % | start here, render quality 0 |
+| C safe: A scaled by the author's following-to-final ratios (1.35 / 1.20 / 1.13 / 1.07) | 0.95 / 0.81 / 0.78 / 0.77 (43.4 / 38.9 / 38.0 / 37.4) | 86 % | 100 / 99.1 % | if B shows black at an edge in a game |
+| the author's calibrated set, for comparison | 0.96 / 0.71 / 0.69 / 0.61 | 68 % | 96.8 / **90.6** % | does not fit Kevin: a black band at the bottom of his right eye |
+
+Two things the run says beyond the numbers. (1) The lower edge is **capped by the client, not by the override**: Kevin's right eye sees 37.9 deg downward and the
+AirFrameXR client declares 37.4 (the author's limit 0.765), so the frame's bottom edge is visible to him in the right eye whatever the override says, and the 99.1 % right-eye
+coverage above is that cap. A visible limit baked into the client fits one wearer; the fix is the rectangle owned by the PC per wearer (docs/FOV_PIPELINE_OPTIM.md, step S6), or
+a looser client constant (lower 0.80 or more). (2) The author's sweeps showed the following protocol under-reads the outer edge badly (35.5 deg following against 43-47 fixed on the
+right eye), which is why the margin of set B and the fixed-gaze run exist: a second run with the eyes on the cross (`XR_PROBE_SWEEP_GAZE=fixed`, six minutes) would replace B by a
+measured rectangle. Check as always with `fovgrid.exe` (the white border at the visible edge) or an intro screen, and raise the edge that shows black.
+
 The tables below are the first estimate (2026-10-27, grid traced by eye, left eye), kept for history; the calibrated row replaces its "Recommended" row.
 
 Measured 2026-10-27 with the stock ALVR visionOS app (RealityKit renderer, FoV scale 1.0) and `fovgrid.exe`
