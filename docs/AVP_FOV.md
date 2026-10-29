@@ -36,6 +36,17 @@ the shared window's tight box is 0.93 / 0.67 / 0.69 / 0.80, its 99 % rectangle 0
 | C safe: A scaled by the author's following-to-final ratios (1.35 / 1.20 / 1.13 / 1.07) | 0.95 / 0.81 / 0.78 / 0.77 (43.4 / 38.9 / 38.0 / 37.4) | 86 % | 100 / 99.1 % | if B shows black at an edge in a game |
 | the author's calibrated set, for comparison | 0.96 / 0.71 / 0.69 / 0.61 | 68 % | 96.8 / **90.6** % | does not fit Kevin: a black band at the bottom of his right eye |
 
+**Run 2 (same evening, 23:38, `fov_sweeps/fov_sweep_2026-10-29_kevin_fit2_following_run2.csv`) contradicts run 1 and changes the proposal.** Every ray reads wider:
++7.0 deg on the left eye (+1.6 to +12.5), +10.0 on the right (one timeout), and **12 of 24 rays on the left eye and 14 of 24 on the right end at or beyond the edge of the rendered
+frame** (the client's declared box, 43.4 / 43.1 / 42.2 / 37.4 deg on the axes): the dot left the frame before it left his view, so those rays measure the frame, not the lens,
+and the uncensored rays sit 1-6 deg inside it on the left eye. Read literally, run 2 says Kevin sees the whole box the AirFrameXR client declares on more than half of the
+directions, and its 99 % rectangle (1.00 / 0.89 / 0.91 / 0.82) clamps to the declared box on three edges: nothing left to restrict. A 7-10 degree change between two runs three
+hours apart is a change of fit (eye relief, light seal) or of criterion (clicking when the dot dims against when it is gone), not measurement noise; the author's single fit cannot
+say which. Consequence for the proposal: the safe setting for Kevin on this client is **override off** (set B of run 1 saves 20 % of the game's pixels at the price of black edges
+if run 2 is the true fit); and his window cannot be measured on this client at all where it is censored. Next: one sweep with a client that declares the full frustum (the stock
+ALVR visionOS app, 1.79 / 1.02 / 1.22 / 1.02, or a build with the visible limit off), eyes **fixed** on the cross and then following, the headset put on once and left alone,
+the same click criterion (the dot gone) in both; that run gives the rectangle. Until then the client's baked-in limit is the thing cutting his view, not the override.
+
 Two things the run says beyond the numbers. (1) The lower edge is **capped by the client, not by the override**: Kevin's right eye sees 37.9 deg downward and the
 AirFrameXR client declares 37.4 (the author's limit 0.765), so the frame's bottom edge is visible to him in the right eye whatever the override says, and the 99.1 % right-eye
 coverage above is that cap. A visible limit baked into the client fits one wearer; the fix is the rectangle owned by the PC per wearer (docs/FOV_PIPELINE_OPTIM.md, step S6), or
