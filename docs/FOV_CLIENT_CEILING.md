@@ -121,6 +121,6 @@ following-only box plus about 2 degrees (no fixed-gaze data): 0.96 / 0.74 / 0.74
 
 The run connected with the **ceiling client** (the probe saw 1.045 / 0.800 / 0.759 / 0.871), not the calibration build: TestFlight build 15 is the `calibration` branch, build 11 the
 ceiling; the app that opened on the headset was still the ceiling one. The measurement was not clamped (every crossing inside the ceiling), so the result stands: shared tight box
-0.86 / 0.70 / 0.63 / 0.66 (following gaze; `docs/AVP_FOV.md`, fit 3). The lower edge measured 0.66 against the shipped 0.61 and the ceiling's 0.87: the ceiling leaves room for it.
+0.86 / 0.70 / 0.63 / 0.66 (following gaze; `docs/AVP_FOV.md`, fit 3). The lower edge measured 0.66 against the shipped 0.61 and the ceiling's 0.87: the ceiling leaves room for it, and the profile moved to 0.66 the same night (`docs/AVP_FOV.md`).
 The sweep only ran the following pass (the fixed-gaze pass of `run_sweep.bat` was not started). The first attempt of the evening failed because the probe was launched before the
 streamer (the probe binds to the host at its start and goes headless after 20 s); the order is streamer, headset connected, then `run_sweep.bat`.
