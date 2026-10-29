@@ -19,6 +19,8 @@ Legend: **source-verified** (read only) | **built** (compiles) | **tested-pass**
 - Chroma-key threshold 4 (raise it if room edges look eaten).
 - visionOS client (fork `kteque/alvr-visionos`, branch `airframexr-client`, TestFlight builds of 2026-10-28): the PS button on visionOS 27. **tested-fail** in the field (Silas, PSVR2 Sense): the host log shows `Button Home=absent` on both controllers with `inAppAction=deliveredToApp`, i.e. the Home Button Overrides setting is read, but visionOS exposes no Home element on the Sense profile, so no app can take the PS button (Apple's side). The Menu (Create/Options) press also opened the Home View; the second build of the day claims only Home and logs each Menu press to tell whether our earlier claim on Menu caused that. Untested.
 
+- Branch `fov-restriction-aware-engine` (2026-10-29): the FoV pipeline plan analysed and measured on the 3080 Ti (`docs/FOV_PIPELINE_OPTIM.md`): shrinking the stream to the calibrated window saves 29 % of the unwarped work (compose, frame generation, VRAM) but only 10-12 % of the encoded pixels at equal quality (the foveation already compresses the margin); the frame path needs no engine change, the client must declare the rectangle and the launcher must size the stream. **tested-pass** in the lab: `e2e_fov_stream_r` (3168x2496, 33 checks). Not on a headset, not on the 5090; the launcher tick and the client build are to do.
+
 ## Known open
 
 - The Black Flag mod's change of rhythm about 4 minutes in (its submit thread pool shrinks): the lock evens out its effect, nothing removes it.
