@@ -53,3 +53,10 @@ Left eye, declared half-angles in degrees (outer, inner, up, down) from `views_c
   tan(declared) / tan(visible), per axis.
 - Border visible on the Quest with black beyond it: the Quest shows the frame smaller than its panel (margin), which
   also makes the same content look smaller there.
+
+## Known defect of the outline mode (2026-10-29 night)
+
+On the Vision Pro the rectangle of `fovgrid.bat outer,inner,upper,lower` is hard to see: the probe draws it as 4-pixel dots every 3 pixels on black
+(`tools/probe/xr_probe.cpp`, `dot(..., 2.f)`), which the stream and the panel turn into a faint line; the wearer saw "a black rectangle with a few pixels at
+the left and right edges". To do (needs a probe build): draw the outline 3-4 times thicker and over the grid, not on black, so the rectangle reads against the
+degree lines. Until then, check a lower edge with the plain grid (override off): 0.66 is 33.4 degrees, between the 30-degree yellow line and the 35-degree grey one.
