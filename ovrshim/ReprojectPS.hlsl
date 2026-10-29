@@ -43,7 +43,37 @@ float4 main(in float4 position : SV_Position, in float3 reprojectedCoord : TEXCO
     float2 texCoord = NdcToTexCoord(reprojectedNdc);
     float2 realTexCoord = ApplyImageRect(texCoord, cb.imageRectNormalized, cb.flipY);
 
-    float4 color = sourceColor.SampleLevel(linearSampler, realTexCoord, 0);
+    // A game layer denser than the stream (the render quality slider above 0: the game spends the restriction's saved pixels on a finer
+    // render, docs/EXPERIMENTAL_SWITCHES.md) is averaged over this output pixel's footprint instead of being read with one bilinear tap,
+    // which skipped most of the extra pixels (2026-10-29: "no clarity gain"). The footprint in source texels comes from the screen-space
+    // derivatives of the source coordinate (homography included); up to 3 x 3 taps spread over it, one tap at 1:1 as before.
+    float srcW, srcH;
+    sourceColor.GetDimensions(srcW, srcH);
+    const float2 footprint = max(abs(ddx(realTexCoord)), abs(ddy(realTexCoord))) * float2(srcW, srcH);
+    const int nx = clamp((int)ceil(footprint.x - 0.05), 1, 3), ny = clamp((int)ceil(footprint.y - 0.05), 1, 3);
+    float4 color = 0;
+    if (nx == 1 && ny == 1)
+    {
+        color = sourceColor.SampleLevel(linearSampler, realTexCoord, 0);
+    }
+    else
+    {
+        const float2 step = footprint / float2(srcW, srcH) / float2(nx, ny);
+        const float2 start = realTexCoord - 0.5 * footprint / float2(srcW, srcH) + 0.5 * step;
+        [unroll]
+        for (int j = 0; j < 3; j++)
+        {
+            [unroll]
+            for (int i = 0; i < 3; i++)
+            {
+                if (i < nx && j < ny)
+                {
+                    color += sourceColor.SampleLevel(linearSampler, start + step * float2(i, j), 0);
+                }
+            }
+        }
+        color /= (float)(nx * ny);
+    }
     if (cb.finalPass && cb.sharpening > 0.0)
     {
         // unsharp mask on the 4 neighbours (ALVR uses 8 at weight sharpening / 8)
