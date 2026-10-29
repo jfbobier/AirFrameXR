@@ -725,6 +725,26 @@ int main(int argc, char** argv) {
                         D3D11_RECT gr{ 1024, 0, 1088, 64 };
                         c1->ClearView(rtv, gray, &gr, 1);
                         c1->Release();
+                        // a 64 x 64 one-pixel checkerboard at x = 1152 (left eye): the composition's downsample test. At 1:1 it reaches the stream as a
+                        // checkerboard; with the game denser than the stream (the render quality slider) the compose pass must average it flat (ovrshim
+                        // ReprojectPS.hlsl, 2026-10-29). Copied from a texture made once in the swapchain's own format (4 bytes per pixel formats only).
+                        D3D11_TEXTURE2D_DESC sd{}; imgs[i][idx].texture->GetDesc(&sd);
+                        if (sd.Width >= 1216 && sd.Height >= 64) {
+                            static ID3D11Texture2D* checker = nullptr; static DXGI_FORMAT checkerFmt = DXGI_FORMAT_UNKNOWN;
+                            if (checker && checkerFmt != sd.Format) { checker->Release(); checker = nullptr; }
+                            if (!checker) {
+                                const bool tenBit = sd.Format == DXGI_FORMAT_R10G10B10A2_UNORM;
+                                std::vector<uint32_t> px(64 * 64);
+                                for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) px[y * 64 + x] = ((x + y) & 1) ? 0xFFFFFFFFu : (tenBit ? 0xC0000000u : 0xFF000000u);
+                                D3D11_TEXTURE2D_DESC cd{}; cd.Width = 64; cd.Height = 64; cd.MipLevels = 1; cd.ArraySize = 1; cd.Format = sd.Format; cd.SampleDesc.Count = 1; cd.Usage = D3D11_USAGE_IMMUTABLE; cd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                                D3D11_SUBRESOURCE_DATA cdd{ px.data(), 64 * 4, 0 };
+                                if (FAILED(dev->CreateTexture2D(&cd, &cdd, &checker))) checker = nullptr;
+                                checkerFmt = sd.Format;
+                                static bool said = false;
+                                if (!said) { said = true; L("checker: %s at 1152,0 64x64 (format %d)", checker ? "drawn" : "not available", (int)sd.Format); }
+                            }
+                            if (checker) ctx->CopySubresourceRegion(imgs[i][idx].texture, 0, 1152, 0, 0, checker, 0, nullptr);
+                        }
                     }
                     rtv->Release();
                 }

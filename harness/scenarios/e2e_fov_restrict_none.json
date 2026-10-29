@@ -1,5 +1,5 @@
 {
-  "description": "Field of view the game is told, control: no restriction (the override unticked: the game gets the headset's own tangents; the lab's percent flag at 100 on every edge). Everything e2e_openxr_probe checks must hold, and the app's four tangents per eye are the headset's, its recommended size the stream's eye size (Advanced picture and FOV settings; shim fovScale). (The pacing thresholds of e2e_openxr_probe are left out: they fail on the laptop rig on their own, and this scenario is about the field of view.)",
+  "description": "Field of view the game is told, control: no restriction (the override unticked: the game gets the headset's own tangents; the lab's percent flag at 100 on every edge). Everything e2e_openxr_probe checks must hold, and the app's four tangents per eye are the headset's, its recommended size the stream's eye size (Advanced picture and FOV settings; shim fovScale). (The pacing thresholds of e2e_openxr_probe are left out: they fail on the laptop rig on their own, and this scenario is about the field of view.) The probe's one-pixel checkerboard: at 1:1 it reaches the decoded stream as a checkerboard (std >= 55).",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -104,6 +104,9 @@
         100
       ],
       "tol": 0.002
+    },
+    "checker": {
+      "min_std": 55
     }
   }
 }
