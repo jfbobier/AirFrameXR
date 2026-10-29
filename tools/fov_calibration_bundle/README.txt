@@ -5,8 +5,8 @@ What this is for
 ----------------
 Your headset does not show the whole field of view the game renders: the lens cuts
 the edges, and how much depends on the headset and on how it sits on your face.
-This test measures what YOU actually see, in 48 short steps (24 per eye), so we can
-choose the picture size that wastes nothing. Time: about 12 minutes per run.
+This test measures what YOU actually see, in two passes of 48 short steps (24 per eye), so we
+can choose the picture size that wastes nothing. Time: about 25 minutes per run (two passes).
 
 What you send back: the file  fov_sweep_<name>_<headset>_run<N>.csv  (in this folder),
 plus one line saying which headset and controllers you used, and anything that went wrong.
@@ -54,8 +54,14 @@ standard every time (the first moment you can no longer see it).
     do not click. After about 30 seconds the step ends by itself and is marked as a time-out.
   - After the 24 steps of the first eye, there is a 10 second pause, then the other eye.
     You may close the eye that is not being tested, or leave both open: do the same every run.
-  - When the screen stays black after the last step, the run is finished: take the headset
-    off, then close the black window (or press Ctrl+C).
+  - When the screen stays black after the last step, the FIRST pass is finished. The command
+    window then asks you to press a key for the SECOND pass: the same 48 steps, but this time
+    keep your eyes FIXED on the white + and do not follow the square; click when, looking at the +,
+    you can no longer see the square at the edge of your view. Both passes matter: with the eyes
+    following the square the window is smaller than with the eyes forward, and a game is played
+    both ways.
+  - When the screen stays black after the last step of the second pass, the run is finished:
+    take the headset off, then close the black window (or press Ctrl+C).
   - Controllers sleeping: some controllers go to sleep after a while. If a click stops
     working, wake the controller, and tell us which steps were affected.
 

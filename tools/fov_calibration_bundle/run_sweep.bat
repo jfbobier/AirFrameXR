@@ -38,7 +38,15 @@ echo  take the headset off and close this window (or press Ctrl+C).
 echo.
 "%~dp0fov_sweep.exe" "%~dp0fov_sweep.log" 100000000 86400
 echo.
-echo  The probe has stopped. Result file: %CSV%
+echo  First pass done (eyes following the dot). Second pass: the same rays with your
+echo  eyes FIXED on the white + (do not follow the dot; click when it is gone).
+echo  The first set that shipped was too tight because only the following pass was run.
+echo  Put the headset back on if you took it off; press a key to start the second pass.
+pause
+set XR_PROBE_SWEEP_GAZE=fixed
+"%~dp0fov_sweep.exe" "%~dp0fov_sweep.log" 100000000 86400
+echo.
+echo  The probe has stopped. Result file (both passes, one row per ray): %CSV%
 pause
 exit /b 0
 :bad
