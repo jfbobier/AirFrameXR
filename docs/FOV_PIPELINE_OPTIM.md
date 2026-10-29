@@ -251,7 +251,7 @@ checks (`analyse_fov_restrict`), the `foveation` layout check (`fov_vars` port),
 |---|---|---|---|
 | `fov_stream_geometry.py --selftest` | the band formula against the shader's equations; prints the sizes and bands of this document | nothing (numpy) | **done, PASS** |
 | `e2e_fov_stream_r` | the chain with the stream at 3168 x 2496, foveation on: negotiated size, encoded frame = ALVR's layout for that size, counter and gray patch through the decoded stream, pose round trip, pacing guards, encode p95 under 16 ms; compose / foveation / encode timings for the comparison | builder | **added, PASS 2026-10-29 (33 checks)** |
-| `e2e_fov_stream_r_full` | the author's baseline at the R size: no foveation, the encoded frame is the stream frame 6336 x 2496, the same chain checks; encode time for the no-foveation curve | builder | **added 2026-10-29, see section 9** |
+| `e2e_fov_stream_r_full` | the author's baseline at the R size: no foveation, the encoded frame is the stream frame 6336 x 2496, the same chain checks; encode time for the no-foveation curve | builder | **added, PASS 2026-10-29** |
 | `pipeline_model_check.py` | the launcher's `PipelineModel` against `fov_stream_geometry.py` over a grid: restriction 100 / 70 / 50 %, render quality 0 / 0.5 / 1, foveation off / mild / strong, resolution 2848 / 3552 / 4256, split auto / forced 3 / off, presets P1-P5 low latency and P2-P3 high quality, engines 1 / 2 / 3; every stage size and every warning equal | `uitest.exe` | after S3b |
 | `e2e_split_rules` (optional, 5090) | the split rules against the driver: foveated 1664 rows in auto mode -> 1 slice per frame; forced 3 -> 3; full frame 2496 rows auto P3 LL -> 3; full frame auto P5 -> 1 (`slices_per_frame` from `encoder_stats`); documents why the profile forces | a GPU with 3 engines | to add |
 | `game_record_pipeline` (in `host_tests.py` or `streamer_events.py`) | the run record's `pipeline` block from a fixture session: sizes, strips expected and seen, encode p50 / p95, decode ms present and plausible; `performance.exe` renders the strip (`ui_matrix.py` row) | `uitest.exe`, fixture logs | after S8 |
@@ -275,5 +275,8 @@ The mock client flag and the `live.py` edits are lab tooling, not the engine.
   fixture session has split 3: a label mismatch in `run.py bench_quality`, not a measurement problem (to fix separately).
   Results: `20261029T100202Z_bench_quality_full_3552x3200`, `20261029T100328Z_bench_quality_full_3168x2496`, `20261029T100441Z_bench_quality_quick_2464x2272`,
   `20261029T100452Z_fg_judge` (3552 x 3200), `20261029T100515Z_fg_judge` (3168 x 2496), `20261029T100537Z_e2e_fov_stream_r` (PASS).
+- 2026-10-29, later: `run e2e_fov_stream_r_full` PASS (`20261029T102927Z_e2e_fov_stream_r_full`): the host negotiated 3168 x 2496 without foveation, the
+  decoded stream was 6336 x 2496, counter, gray patch and pose round trip held; encode p50 / p95 20.3 / 22.0 ms on the laptop's single engine
+  (the probe's simple picture; the benchmark scene reads 32 ms at P3 for 7104 x 3200), compose 1.25 ms, 1 slice per frame as expected with one engine.
 - Not done: anything on a headset or on the 5090 (split strips at the shrunk size, the compose saving, the band judgement); the launcher (S3); the
   client build (S4); the mock's declare flag and the `e2e_fov_declared_r*` scenarios.
