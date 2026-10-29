@@ -230,12 +230,12 @@ Rejected after measurement, so nobody re-opens them without new evidence:
 | Stage | Today | Expected | Basis |
 |---|---|---|---|
 | Game GPU | renders R (3168 x 2496 equivalent) | unchanged | already restricted |
-| Compose (shim) | one pass over 7104 x 3200 | -29 % | per pixel; the laptop's reading is clock-bound (section 3), measure on the 5090 |
+| Compose (shim) | one pass over 7104 x 3200: **0.34-0.52 ms on the 5090** (2026-10-29 night) | -30 %, about 0.1-0.15 ms | measured in the run record's pipeline block |
 | Frame generation | flow 2.2 ms + synthesis 0.24 ms (5090, 7104 x 3200) | about 1.5 + 0.17 ms | measured -31 % / -29 % on the 3080 Ti |
 | Foveation pass | 0.11 ms (3080 Ti) | 0.08 ms | per pixel |
-| NVENC | 3.1 ms p50 foveated (5090) | about 2.8 ms (iso), 2.3 ms (fractions) | 3080 Ti: 1.30 ms per Mpx + 2.1 ms, three sizes on a line |
+| NVENC | 3.1 ms p50 foveated; **7.55 ms p50 full frame, 3 strips (5090, 2026-10-29 night)** | foveated: about 2.8 ms (iso), 2.3 ms (fractions); full frame: about 5.3 ms | 3080 Ti: 1.30 ms per Mpx + 2.1 ms, three sizes on a line; the 5090 full-frame point measured |
 | Network | 300 Mbps, 0.39 bpp | 0.44 bpp at the same bitrate, or -12 % bitrate at the same bpp | arithmetic |
-| Decode (headset) | 5.4-6.4 ms p50 | about -0.7 ms (iso), -1.7 ms (fractions) | per pixel, unmeasured |
+| Decode (headset) | 5.4-6.4 ms p50 foveated; **6.9 ms p50 full frame (2026-10-29 night)** | foveated: about -0.7 ms (iso), -1.7 ms (fractions); full frame: about -2.1 ms | per pixel |
 | VRAM (ring + generator) | 6 + 3 frames of 91 MB | -29 % | arithmetic |
 | Total latency | 67 ms p50 typical | about -1 to -3 ms on the critical path (encode + decode), invisible under the panel's tick quantum unless it crosses a tick | the arrival-margin finding of 2026-10-17 |
 
@@ -296,5 +296,11 @@ The mock client flag and the `live.py` edits are lab tooling, not the engine.
   `ui_matrix.py --only advanced-switches` and `--only performance` (the fit tick row and the Game statistics strip among them): 0 FAIL, 0 warnings.
   `fov_profile_check.py` and `performance_check.py`: PASS. So S2, S3, S3b, S8 and S9 are **built and lab-checked**; what the lab cannot judge (the picture on a
   headset, the compose saving on the 5090, the split strips at the shrunk size) stays owed to S5.
-- Not done: anything on a headset or on the 5090; the client build (S4, now the ceiling of `docs/FOV_CLIENT_CEILING.md`); S6 (the declare channel) and S10
-  (the visible-shape warp), both gated on the headset A/B of S5.
+- 2026-10-29 night, 5090 + Vision Pro, 1.2.0-pre, the ceiling client, full-frame profile, override on (`private/logs/5090-2026-10-29-fovgrid`): the run record's
+  `pipeline` block in the field: declared box 1.045 / 0.800 / 0.759 / 0.871, scale 92 / 89 / 91 / 70 %, game render 3212 x 2550 (the probe reported 3212 x 2552:
+  VDXR's own rounding of the recommended size, 2 px), stream 3552 x 3200, encoded 7104 x 3200, **3 strips expected and 3.0 seen** (3 engines, forced), encode p50 / p95
+  **7.55 / 7.6 ms**, **compose 0.34-0.52 ms**, headset decode 6.9 ms p50, total latency 66.7 ms (vsync queue 22 ms, decoder queue 7.9 ms), 99 fps streamed at 100 Hz,
+  headset repeated 6-7 % typical. So the compose saving of the fit is worth about 0.1-0.15 ms on the 5090 (section 7's row), and the 30 % encode + decode saving
+  (about 2.3 + 2.1 ms at these numbers) is the whole prize of the fitted stream. The fit tick was not used tonight; the stream stayed 3552 x 3200.
+- Not done: the fit tick and the band presets on the headset (S5 proper, the live variants); the split-rule scenarios on the 5090; S6 (the declare channel) and S10
+  (the visible-shape warp), both gated on S5.

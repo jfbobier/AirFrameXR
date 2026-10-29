@@ -32,7 +32,7 @@ lib.b_run(f"_tmp\\uitest\\run\\uitest.exe --fov-other-headset-selftest 1 --out r
 lib.b_get(f"runs/{rid}/fovother.txt", loc / "fovother.txt")
 lines2 = (loc / "fovother.txt").read_text(errors="replace").splitlines() if (loc / "fovother.txt").exists() else []
 print("\n".join(lines2))
-ok2 = (len(lines2) == 3 and lines2[0] == "fits_avp=True fits_quest=False fits_unknown=True fits_avp_scaled=True fits_same_name_new_shape=True" and lines2[1].startswith("tick_on_quest=False lower_shown=1.43")
+ok2 = (len(lines2) == 3 and lines2[0] == "fits_avp=True fits_quest=False fits_unknown=True fits_avp_scaled=True fits_same_name_new_shape=True fits_unnamed_first_box_to_ceiling=True fits_unnamed_first_box_on_quest=False" and lines2[1].startswith("tick_on_quest=False lower_shown=1.43")
        and lines2[2] == "after_tick: override=True lower=1.43 fits_quest=True")
 print("CHECK", "PASS" if ok2 else "FAIL", "an override saved for the Vision Pro stays on the Vision Pro whatever box its app declares (the client's ceiling), is off on a Quest (the fields show the Quest's own values) and ticking starts from the Quest's values")
 sys.exit(0 if ok and ok_doc and ok2 else 1)

@@ -1,6 +1,6 @@
 # FoV client ceiling: plan
 
-Status 2026-10-29 evening: **client constants set on the fork branch (local commit `acf3de9` on `fov-calibration`, not pushed, not built); PC-side tests prepared (below); nothing on a headset.** Was: plan only. Follows `docs/FOV_CALIBRATION.md` and the release 1.1.1 (`docs/AVP_FOV.md`).
+Status 2026-10-29 night: **the ceiling client ran on the author's Vision Pro.** `config\airframexr_views.json` on the 5090 shows the declared box **1.045 / 0.800 / 0.759 / 0.871** (left eye; right 0.802 / 1.048 / 0.761 / 0.873), the predicted 1.05 / 0.80 / 0.76 / 0.87 within 0.005: the circumscribing factor holds. The 1.1.1 override applied against it (92 / 89 / 91 / 70 % per edge), the game was told 0.959 / 0.709 / 0.689 / 0.609 exactly and rendered 3212 x 2552. Logs: `private/logs/5090-2026-10-29-fovgrid`. Client constants: fork branch `fov-calibration` `acf3de9`. Follows `docs/FOV_CALIBRATION.md` and the release 1.1.1 (`docs/AVP_FOV.md`).
 
 ## Problem
 
@@ -101,3 +101,18 @@ following-only box plus about 2 degrees (no fixed-gaze data): 0.96 / 0.74 / 0.74
 | `harness/fov_stream_geometry.py` defaults and `docs/FOV_PIPELINE_OPTIM.md` numbers | the declared box D changes: R is 72 % of the ceiling box (3.02 tan2) instead of 70 % of today's (3.10); the fit at today's density becomes 3200 x 2528 per eye | update the default `DECLARED` and the two tables once `airframexr_views.json` shows the new box |
 | The "Fit the stream" tick (branch `fov-restriction-aware-engine`) | it fits the stream to whatever box is declared: with the ceiling it gives about 6 % fewer pixels than today, **not** the 30 % of the rectangle itself; the 30 % needs the client to declare the per-wearer rectangle (the host-to-client declare channel, S6 of that plan) | expected, say so in the Advanced window's preview |
 | Headset (hands-on) | `airframexr_views.json` shows about 1.05 / 0.80 / 0.76 / 0.87; `fovgrid.exe` outline beyond the visible edge on all four sides; the 1.1.1 fields accept values up to the ceiling; the second wearer raises the lower edge to about 0.80-0.85 and the black strip is gone | the write-up in `docs/progress.md` and `docs/AVP_FOV.md` |
+
+## First night with the ceiling client (2026-10-29, 5090, 1.2.0-pre)
+
+- The wearer ran `fovgrid.exe` with the 1.1.1 override **on**, so the grid showed the game's own rectangle (43.8 / 35.4 / 34.6 / 31.4 degrees), not the headset's
+  window: the 40-degree green line plus part of the next 5-degree band on the outer sides, the 30-degree yellow line plus a partial band above and below. The wearer's
+  report ("the limit right at the top; a square more to the left and right of the green edge; at the bottom no green and a full square missing") matches that geometry
+  and says one useful thing: **the top edge of the rectangle is visible** (there is black above it), so the upper value can go above 0.69; the fixed-gaze sweep said
+  0.71 (35.4 degrees). The bottom edge was not seen as a limit: 0.61 reaches the visible edge there. To measure the headset's window itself, run the grid with the
+  override **off**; to check a candidate rectangle, `fovgrid.bat outer,inner,upper,lower` draws it on the grid.
+- Pinch as a click (hands as controllers) reached the host "sometimes, unreliably" (the wearer). The host records input only as packet counters (41 600 input packets
+  over the session, about 170 a second: hand tracking was streaming), not per press, so the lab cannot say how many pinches became trigger presses; the sweep
+  (`run_sweep.bat`) depends on it. The fallback of `docs/FOV_CALIBRATION.md` (the sweep drawn by the client, pinch read from hand tracking) is the robust path.
+- The guard: the author's config had no `fov_for` (it came from the personal zip), so nothing to migrate. For users whose 1.1.x config carries `fov_for` with the
+  first client box and no headset name, `FovFits` now recognises that one transition (first box -> ceiling, both within 3 %) and keeps the override; a Quest's box
+  still does not fit (`fov_profile_check.py`).

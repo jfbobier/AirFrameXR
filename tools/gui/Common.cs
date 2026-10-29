@@ -400,8 +400,14 @@ namespace AirFrameXR
             var f = FovFor; if (f == null || current == null) return true;
             var made = FovForHeadset; var now = HeadsetName;
             if (made.Length > 0 && now.Length > 0) return made == now;
-            var r = Enumerable.Range(0, 4).Select(i => current[i] / f[i]).ToList(); return r.Max() <= 1.05 * r.Min();
+            var r = Enumerable.Range(0, 4).Select(i => current[i] / f[i]).ToList();
+            if (r.Max() <= 1.05 * r.Min()) return true;
+            // an override saved by 1.1.x (no name recorded) on the AirFrameXR client's first box, seen now with that client's ceiling (another shape, the same headset;
+            // docs/FOV_CLIENT_CEILING.md): the one known transition, so it fits; everything else that changed shape is treated as another headset
+            return Near(f, FirstClientBox) && Near(current, ClientCeiling);
         }
+        static readonly double[] FirstClientBox = { 0.956, 0.946, 0.915, 0.772 }, ClientCeiling = { 1.045, 0.800, 0.759, 0.871 };
+        static bool Near(double[] a, double[] b) => Enumerable.Range(0, 4).All(i => Math.Abs(a[i] - b[i]) <= 0.03 * b[i]);
         /// 0..1: where the game's render size sits between the floor (the stream's pixel density over the restricted view) and the stream's eye size; 0 = the floor
         public double FovRenderQuality => Math.Max(0, Math.Min(1, Json.Num(Root, "video.fov_render_quality", 0)));
         public double FrameGenCapFps { get => Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }

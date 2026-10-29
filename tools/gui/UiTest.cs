@@ -347,7 +347,11 @@ namespace AirFrameXR
                 var ceiling = new[] { 1.05, 0.80, 0.76, 0.87 };   // the AirFrameXR client's ceiling (docs/FOV_CLIENT_CEILING.md): another shape, the same headset
                 var fitsAvp = new AppSettings().FovFits(avp); var fitsUnknown = new AppSettings().FovFits(null); var fitsScaled = new AppSettings().FovFits(avp.Select(x => x * 0.8).ToArray()); var fitsCeiling = new AppSettings().FovFits(ceiling);
                 var st1 = new AppSettings(); global::AirFrameXR.Json.Set(st1.Root, "headset.name", "Meta Quest 3"); st1.Save();   // a Quest paired: another headset
-                lines.Add("fits_avp=" + fitsAvp + " fits_quest=" + new AppSettings().FovFits(quest) + " fits_unknown=" + fitsUnknown + " fits_avp_scaled=" + fitsScaled + " fits_same_name_new_shape=" + fitsCeiling);   // the visionOS app's FoV Scale 0.8 is a uniform factor and the client's ceiling another shape: the override stays on the same headset
+                // an override saved by 1.1.x (no name) on the first client box, seen with the client's ceiling: the known transition fits; a Quest's box does not
+                var st2 = new AppSettings(); global::AirFrameXR.Json.Set(st2.Root, "video.fov_for", new[] { 0.956, 0.946, 0.915, 0.772 }.Select(x => (object)x).ToList()); global::AirFrameXR.Json.Remove(st2.Root, "video.fov_for_headset"); st2.Save();
+                var fitsMigrated = new AppSettings().FovFits(ceiling); var fitsMigratedQuest = new AppSettings().FovFits(quest);
+                global::AirFrameXR.Json.Set(st2.Root, "video.fov_for_headset", "Apple Vision Pro"); st2.Save();
+                lines.Add("fits_avp=" + fitsAvp + " fits_quest=" + new AppSettings().FovFits(quest) + " fits_unknown=" + fitsUnknown + " fits_avp_scaled=" + fitsScaled + " fits_same_name_new_shape=" + fitsCeiling + " fits_unnamed_first_box_to_ceiling=" + fitsMigrated + " fits_unnamed_first_box_on_quest=" + fitsMigratedQuest);   // the visionOS app's FoV Scale 0.8 is a uniform factor and the client's ceiling another shape: the override stays on the same headset
                 using (var f = new AdvancedForm(quest, false, null, null))
                 {
                     f.Opacity = 0; f.ShowInTaskbar = false; f.StartPosition = FormStartPosition.Manual; f.Location = new Point(-4000, -4000);
