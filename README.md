@@ -5,7 +5,12 @@
 <!-- AirFrameXR overview: editorial refresh -->
 # AirFrameXR
 
-**Wireless PCVR, re-engineered for NVIDIA. No SteamVR required. Optional integrated frame generation.**
+**Wireless PCVR for people who want high performance and simplicity. Re-engineered for NVIDIA. No SteamVR required. Optional integrated frame generation.**
+
+<p align="center">
+  <a href="https://youtu.be/Pca1KdtRIqE"><img src="https://img.youtube.com/vi/Pca1KdtRIqE/maxresdefault.jpg" alt="Watch the 2-minute AirFrameXR overview on YouTube" width="640"></a><br>
+  <sub>Watch the 2-minute overview (YouTube). Narration is synthetic; charts use the maintainer's measurements.</sub>
+</p>
 
 AirFrameXR replaces the **SteamVR + traditional ALVR PC streamer** with a **lean, NVIDIA-optimized OpenXR runtime and streaming pipeline**. It handles frame pacing, optional frame generation, NVENC encoding, and wireless delivery together, instead of layering those components on top of SteamVR.
 
@@ -28,9 +33,17 @@ AirFrameXR replaces the **SteamVR + traditional ALVR PC streamer** with a **lean
 
 ### Why build it this way?
 
-- **Remove SteamVR from the PC streaming path.** OpenXR games use a small runtime without the SteamVR compositor or extra inter-process frame copies.
-- **Optimize end to end for NVIDIA.** A shared-GPU-memory path, low-latency frame pacing, NVENC HEVC 10-bit encoding, and ALVR-compatible networking are tuned together.
-- **Make frame generation native to the streamer.** Optional GPU optical-flow interpolation and edge-aware synthesis can improve displayed smoothness when a game cannot sustain the headset's refresh rate. This feature is experimental and **can add interpolation latency**; it is not a free FPS boost.
+AirFrameXR is built for people with a wireless headset and an NVIDIA GPU who want their games to run fast, without a pile of settings to learn.
+
+- **A leaner engine.** Games talk to [VDXR](https://github.com/mbucchia/VirtualDesktop-OpenXR), a fast, small OpenXR runtime, instead of the SteamVR runtime and compositor.
+- **One runtime, minimal copies.** Composition, frame pacing and encoding run in one pipeline that passes frames in shared GPU memory, with no extra copies between programs.
+- **A proven network layer.** [ALVR](https://github.com/alvr-org/ALVR) provides the networking, encoding and decoding that a large community has stabilised, and the headset only needs the ALVR app. **Meta Quest** and **Apple Vision Pro** are the tested headsets.
+- **Made for NVIDIA.** NVENC HEVC 10-bit encoding, and **split encoding** that uses all of the GPU's NVENC units instead of one (the RTX 5090 has three), tuned with the pacing and the network.
+- **The game renders only what you see.** Built-in field-of-view restriction and calibration tell the game the field of view the headset actually shows: about 30 % fewer pixels rendered on the Vision Pro profile (computed from the field of view, not yet a measured frame-time gain). See [How FOV restriction works](#how-fov-restriction-works).
+- **Frame generation in the pipeline.** Optional GPU optical-flow interpolation with an edge-aware synthesis (the edge technique comes from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented) can improve displayed smoothness when a game cannot sustain the headset's refresh rate. It is experimental, off by default and **can add interpolation latency**; it is not a free FPS boost.
+- **Measure per game.** Game statistics record fps, latency, network and GPU for each game you play.
+- **Less guesswork.** The setup wizard reads what your headset supports, offers a community profile (shareable as a JSON file) and tests the result on your PC and network.
+- **Native Windows tools.** One launcher and native windows for the streamer, statistics, diagnosis and setup, plus an optional desktop mirror you can use from inside the headset.
 - **Keep it simple.** Portable distribution, readable settings, targeted tools, and no attempt to be a general-purpose SteamVR replacement.
 
 ### Performance: measurements, not promises
