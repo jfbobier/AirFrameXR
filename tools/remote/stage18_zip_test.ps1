@@ -3,7 +3,8 @@
 # folder per run with debug on, config seeded, the quality benchmark finding its scene. Never touches the registry.
 $ErrorActionPreference = 'Continue'
 $root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
-$zip = Get-ChildItem "$root\out\dist\AirFrameXR-*.zip" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+# the generic zip (what is published): a personal zip ships a ready config (debug on, for instance) and a debug zip another flavour; both would fail the layout checks for the wrong reason
+$zip = Get-ChildItem "$root\out\dist\AirFrameXR-*.zip" | Where-Object { $_.Name -notmatch '-personal|-debug' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $t = "$root\runs\ziptest\$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
 New-Item -ItemType Directory -Force $t | Out-Null
 Expand-Archive -Path $zip.FullName -DestinationPath $t
@@ -14,7 +15,11 @@ $top = (Get-ChildItem $t | ForEach-Object Name) -join ','
 Check 'single_top_folder' ($top -eq 'AirFrameXR') $top
 $rootFiles = @(Get-ChildItem $d -File | ForEach-Object Name)
 Check 'root_holds_only_the_launcher' ($rootFiles.Count -eq 1 -and $rootFiles[0] -eq 'AirFrameXR.exe') ($rootFiles -join ',')
-Check 'no_bat_files' (@(Get-ChildItem $d -Recurse -Filter *.bat).Count -eq 0) ''
+# no script ships except the FoV grid's launcher (bench\fovgrid.bat, docs/FOV_GRID.md): the personal start-up bat of the early builds must never come back
+$bats = @(Get-ChildItem $d -Recurse -Filter *.bat | Where-Object { $_.FullName -notlike '*\bench\fovgrid.bat' })
+Check 'no_bat_files' ($bats.Count -eq 0) (($bats | ForEach-Object Name) -join ',')
+Check 'fovgrid_ships' ((Test-Path "$d\bench\fovgrid.exe") -and (Test-Path "$d\bench\fovgrid.bat")) ''
+
 Check 'no_logs_before_first_run' (-not (Test-Path "$d\logs")) ''
 Check 'no_user_config_shipped' (-not (Test-Path "$d\config\session.json")) ''
 $runs = @('--debug', '', '--debug')

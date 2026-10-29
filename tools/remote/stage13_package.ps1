@@ -36,6 +36,9 @@ if (Test-Path "$root\bench\littlest_tokyo.vab") { Copy-Item "$root\bench\littles
 if (Test-Path "$root\bench\sakura_breeze.mp3") { Copy-Item "$root\bench\sakura_breeze.mp3" "$pkg\bench\sakura_breeze.mp3" -Force }   # the scene's music (credits in THIRD_PARTY_NOTICES.md)
 # the OpenXR scene app of the wizard's scene test (renders that scene through the real shim path with the headset's head pose)
 if (Test-Path "$root\build\probe\xr_probe.exe") { Copy-Item "$root\build\probe\xr_probe.exe" "$pkg\bench\xr_probe.exe" -Force }
+# the FoV grid (docs/FOV_GRID.md): the same probe under the name that starts it in the grid scene, and its launcher (points it at this package's runtime)
+if (Test-Path "$root\build\probe\xr_probe.exe") { Copy-Item "$root\build\probe\xr_probe.exe" "$pkg\bench\fovgrid.exe" -Force }
+if (Test-Path "$root\_tmp\install\fovgrid.bat") { Copy-Item "$root\_tmp\install\fovgrid.bat" "$pkg\bench\fovgrid.bat" -Force }
 # the wizard's community headset profiles
 New-Item -ItemType Directory -Force "$pkg\profiles" | Out-Null
 if (Test-Path "$root\_tmp\install\profiles") { Copy-Item "$root\_tmp\install\profiles\*.json" "$pkg\profiles" -Force }
@@ -62,7 +65,7 @@ $zip = "$root\out\dist\AirFrameXR-$version.zip"
 # everything sits under AirFrameXR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
 $ship = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\mirrordesktop.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
           'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json',
-          'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\sakura_breeze.mp3', 'bench\xr_probe.exe', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
+          'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\sakura_breeze.mp3', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
 $ship += $persShip
 $ship += $persFiles
 $ship += Get-ChildItem "$pkg\profiles" -File -Filter *.json | ForEach-Object { "profiles\$($_.Name)" }
@@ -75,7 +78,7 @@ foreach ($f in $ship) {
 }
 $za.Dispose(); $fs.Dispose()
 Get-ChildItem $pkg -Recurse -File | Select-Object @{n='file';e={$_.FullName.Substring($pkg.Length + 1)}}, Length | Format-Table -AutoSize | Out-String -Width 200
-$missing = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\launcher.exe.config', 'bin\streamer.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'docs\THIRD_PARTY_NOTICES.md', 'docs\licenses\ALVR-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
+$missing = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\launcher.exe.config', 'bin\streamer.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\THIRD_PARTY_NOTICES.md', 'docs\licenses\ALVR-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
 $rootFiles = @(Get-ChildItem $pkg -File | ForEach-Object { $_.Name })
 if ($rootFiles.Count -ne 1 -or $rootFiles[0] -ne 'AirFrameXR.exe') { Write-Host "RESULT: FAILED the root must hold only AirFrameXR.exe, found: $($rootFiles -join ', ')"; exit 1 }
 if ($missing) { Write-Host "RESULT: FAILED missing $($missing -join ', ')" } else { Write-Host "RESULT: OK $pkg ($zip)" }

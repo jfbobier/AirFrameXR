@@ -17,6 +17,9 @@ may connect (same protocol) but are not tested or supported: use ALVR itself for
 5. Click Launch on "Streamer" and keep it open while you play. It connects to the headset by itself; start any OpenXR game.
    Close SteamVR and ALVR's own launcher/dashboard first: they use the same network ports.
 "Diagnose" re-checks your setup when something feels wrong; "Logs and performance" shows how each game went.
+Field of view: bench\fovgrid.bat shows a head-locked grid in true angles (a line every 5 degrees, the colour gives the angle,
+a white border at the edge the headset declares), so you can see how much of the picture your headset really shows and tune the
+field-of-view fields of the Advanced window; "bench\fovgrid.bat 0.96,0.71,0.69,0.61" draws that rectangle on the grid (docs\FOV_GRID.md).
 
 Logs: logs\AirFrameXR.log (always), logs\debug\<date-time>\ (when debug logging is on). Send both when reporting a problem.
 
