@@ -7,7 +7,7 @@ Legend: **source-verified** (read only) | **built** (compiles) | **tested-pass**
 
 ## State at 1.1.1 (2026-10-29, main)
 
-- Released: 1.0.0, 1.1.0-pre, 1.1.1-pre, 1.1.0, 1.1.1 (profile-only on the 1.1.0 binaries; notes in `docs/releases/`). Built on the branch, not published: 1.2.0-pre (`docs/releases/v1.2.0-pre.md`: the FoV grid in the package, the stream fit, the pipeline model and strip). IPC version 35 in 1.1.1 (36 on the `fov-restriction-aware-engine` branch): host, shim and package come from the same build.
+- Released: 1.0.0, 1.1.0-pre, 1.1.1-pre, 1.1.0, 1.1.1 (profile-only on the 1.1.0 binaries; notes in `docs/releases/`). 1.2.0-pre published 2026-10-29 as a GitHub pre-release from the branch `fov-restriction-aware-engine` (`docs/releases/v1.2.0-pre.md`: the FoV grid in the package, the stream fit, the pipeline model and strip; nothing of it on a headset yet). IPC version 35 in 1.1.1 (36 on the `fov-restriction-aware-engine` branch): host, shim and package come from the same build.
 - Chain: game (OpenXR/UEVR via VDXR + our shim) -> host (frame generation, foveation, NVENC) -> ALVR streaming -> visionOS client (Apple Vision Pro), Quest 3 also works. See `docs/ARCHITECTURE.md`, `docs/FRAME_GENERATION.md`, `docs/PERFORMANCE_FINDINGS.md`.
 - Lab: `harness/` (see `harness/README.md`); whole suite on the build PC with the pacing fix forced on: 43 of 46 passed, the other three explained.
 
