@@ -139,5 +139,53 @@
   },
   "probe_cpu_ms": 0,
   "probe_load": "steady"
+ },
+ {
+  "name": "fov_stream_d",
+  "game": "probe",
+  "seconds": 90,
+  "settings": {},
+  "session": {
+   "bitrate_mbps": 300,
+   "eye": [
+    3552,
+    3200
+   ]
+  },
+  "note": "S5 A/B reference (docs/FOV_PIPELINE_OPTIM.md): the stream over the box the headset declares at 3552x3200 per eye, the session's foveation; read encode p50/p95, compose_ms, ffr_ms, gen.flow_ms in encoder_stats and decode / latency / repeated in client_frames.csv. Untested (needs the 5090 + headset)."
+ },
+ {
+  "name": "fov_stream_r_fractions",
+  "game": "probe",
+  "seconds": 90,
+  "settings": {},
+  "session": {
+   "bitrate_mbps": 300,
+   "eye": [
+    3168,
+    2496
+   ]
+  },
+  "note": "S5 A/B: the stream fitted to the calibrated window at the same density (3168x2496) with the session's foveation fractions (the full-density band narrows to -18..+24 deg). With the AirFrameXR client declaring the window. Untested."
+ },
+ {
+  "name": "fov_stream_r_band",
+  "game": "probe",
+  "seconds": 90,
+  "settings": {},
+  "session": {
+   "bitrate_mbps": 300,
+   "eye": [
+    3168,
+    2496
+   ],
+   "foveation": {
+    "center_size_x": 0.502,
+    "center_size_y": 0.511,
+    "center_shift_x": 0.784,
+    "center_shift_y": 0.069
+   }
+  },
+  "note": "S5 A/B: the fitted stream with the foveation re-anchored so the full-density band keeps today's degrees (-12..+32 x -17..+19; harness/fov_stream_geometry.py same_band). Untested."
  }
 ]

@@ -81,6 +81,8 @@ struct Args {
     replay: Option<String>,
     /// the Vision Pro's real view geometry (eye offsets +-31 mm, asymmetric FoV) instead of zero offsets and a symmetric 1 rad FoV
     real_views: bool,
+    /// the box the headset declares per edge (outer, inner, upper, lower tangents; the right eye mirrored), e.g. the calibrated Vision Pro window: `--views-tan 0.96,0.71,0.69,0.61`
+    views_tan: Option<[f32; 4]>,
     /// replay waits for this file to exist (a hold pose is sent meanwhile): lets the harness start the game first
     replay_start_file: Option<String>,
     /// finish (and write the reports) when this file appears
@@ -124,6 +126,7 @@ fn parse_args() -> Result<Args, String> {
         poses_csv: None,
         replay: None,
         real_views: false,
+        views_tan: None,
         replay_start_file: None,
         stop_file: None,
         encoding_gamma: 1.0,
@@ -171,6 +174,13 @@ fn parse_args() -> Result<Args, String> {
             "--stop-file" => a.stop_file = Some(v()?),
             "--replay-start-file" => a.replay_start_file = Some(v()?),
             "--real-views" => a.real_views = true,
+            "--views-tan" => {
+                let p: Vec<f32> = v()?.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?;
+                if p.len() != 4 || p.iter().any(|x| !(*x > 0.0)) {
+                    return Err("--views-tan outer,inner,upper,lower (positive tangents)".into());
+                }
+                a.views_tan = Some([p[0], p[1], p[2], p[3]]);
+            }
             "--replay" => a.replay = Some(v()?),
             "--poses-csv" => a.poses_csv = Some(v()?),
             "--no-10bit" => a.prefer_10bit = false,
@@ -298,14 +308,15 @@ fn main() {
                     if args.display_sim {
                         let (poll, bunch) = (args.poll_ms, args.bunch);
                         let replay_samples: Arc<Vec<ReplaySample>> = Arc::new(args.replay.as_deref().map(load_replay).unwrap_or_default());
-                        let (replay_gate_arg, real_views_arg) = (args.replay_start_file.clone(), args.real_views);
+                        let (replay_gate_arg, real_views_arg, views_tan_arg) = (args.replay_start_file.clone(), args.real_views, args.views_tan);
                         let late: (f64, f64) = args.track_late.split_once(':').map(|(p, m)| (p.parse().unwrap_or(0.0), m.parse().unwrap_or(0.0))).unwrap_or((0.0, 0.0));
                         let blackouts = parse_blackouts(&args.track_blackout);
                         let after_frame = args.track_after_frame;
                         let need = args.track_frames_needed.max(1);
-                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, replay_gate_arg, real_views_arg, late_views, blackouts, after_frame, need)));
+                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, replay_gate_arg, real_views_arg, views_tan_arg, late_views, blackouts, after_frame, need)));
                     } else {
-                        tracking_thread = Some(thread::spawn(move || tracking(c, s, sh, origin, fps, motion, controllers, late_views)));
+                        let views_tan_arg = args.views_tan;
+                        tracking_thread = Some(thread::spawn(move || tracking(c, s, sh, origin, fps, motion, controllers, late_views, views_tan_arg)));
                     }
                 }
                 ClientCoreEvent::StreamingStopped => {
@@ -618,6 +629,7 @@ fn display(
     replay: Arc<Vec<ReplaySample>>,
     replay_gate: Option<String>,
     real_views: bool,
+    views_tan: Option<[f32; 4]>,
     late_views: bool,
     blackouts: Vec<Blackout>,
     after_frame: bool,
@@ -629,12 +641,15 @@ fn display(
     let mut done = vec![false; blackouts.len()];
     let period = Duration::from_secs_f64(1.0 / fps as f64);
     let vp = ViewParams { pose: Pose::default(), fov: Fov { left: -1.0, right: 1.0, up: 1.0, down: -1.0 } };
-    let vps: [ViewParams; 2] = if real_views {
-        // what the Vision Pro client reports (host_events views_config of a real session): +-31.06 mm, asymmetric FoV (tangents l r u d)
-        let mk = |x: f32, t: [f32; 4]| ViewParams {
-            pose: Pose { orientation: Quat::IDENTITY, position: Vec3::new(x, 0.0, 0.0) },
-            fov: Fov { left: -t[0].atan(), right: t[1].atan(), up: t[2].atan(), down: -t[3].atan() },
-        };
+    // what the Vision Pro client reports (host_events views_config of a real session): +-31.06 mm, asymmetric FoV (tangents l r u d)
+    let mk = |x: f32, t: [f32; 4]| ViewParams {
+        pose: Pose { orientation: Quat::IDENTITY, position: Vec3::new(x, 0.0, 0.0) },
+        fov: Fov { left: -t[0].atan(), right: t[1].atan(), up: t[2].atan(), down: -t[3].atan() },
+    };
+    let vps: [ViewParams; 2] = if let Some(t) = views_tan {
+        // a headset that declares a given box per eye (outer, inner, upper, lower; the right eye mirrored): the AirFrameXR client declaring the calibrated window
+        [mk(-0.031057563, [t[0], t[1], t[2], t[3]]), mk(0.031057563, [t[1], t[0], t[2], t[3]])]
+    } else if real_views {
         [mk(-0.031057563, [1.7873597, 1.0204625, 1.2193560, 1.0204629]), mk(0.031057563, [1.0250684, 1.8000171, 1.2255949, 1.0250684])]
     } else {
         [vp, vp]
@@ -832,6 +847,7 @@ fn tracking(
     motion: Motion,
     controllers: bool,
     late_views: bool,
+    views_tan: Option<[f32; 4]>,
 ) {
     if controllers {
         // Announce the Quest/Touch profile (what ALVR emulates) for both hands.
@@ -840,11 +856,22 @@ fn tracking(
     }
     let mut last_buttons: [Option<ButtonValue>; 4] = [None, None, None, None];
     let vp = ViewParams { pose: Pose::default(), fov: Fov { left: -1.0, right: 1.0, up: 1.0, down: -1.0 } };
+    // --views-tan: a headset declaring a given box per eye (outer, inner, upper, lower; the right eye mirrored), +-31 mm like the Vision Pro client
+    let vps: [ViewParams; 2] = match views_tan {
+        Some(t) => {
+            let mk = |x: f32, t: [f32; 4]| ViewParams {
+                pose: Pose { orientation: Quat::IDENTITY, position: Vec3::new(x, 0.0, 0.0) },
+                fov: Fov { left: -t[0].atan(), right: t[1].atan(), up: t[2].atan(), down: -t[3].atan() },
+            };
+            [mk(-0.031057563, [t[0], t[1], t[2], t[3]]), mk(0.031057563, [t[1], t[0], t[2], t[3]])]
+        }
+        None => [vp, vp],
+    };
     let mut views_sent = false;
     let mut next = Instant::now();
     while streaming.value() {
         if !views_sent && (!late_views || !shared.lock().frames.is_empty()) {
-            ctx.send_view_params([vp, vp]);
+            ctx.send_view_params(vps);
             views_sent = true;
             shared.lock().views_sent_at_ms = Some(origin.elapsed().as_secs_f64() * 1000.0);
         }

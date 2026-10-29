@@ -66,7 +66,9 @@ namespace AirFrameXR
             yield return new Case { Name = "advanced-switches-fov-profile", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, false, new[] { 3552, 3200 }, UiTestProfiles.WithMeasuredFov()) };   // the profile button, override off
             yield return new Case { Name = "advanced-switches-fov-quality", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true, new[] { 3552, 3200 }) };   // the same, restricted, with the render quality row
             yield return new Case { Name = "advanced-switches-fov", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true) };   // a pretend Vision Pro, the override ticked
+            yield return new Case { Name = "advanced-switches-fit", Make = () => new AdvancedForm(new[] { 0.94, 0.93, 0.90, 0.76 }, false, new[] { 3552, 3200 }, null, true) };   // the AirFrameXR client's box, the stream fit on: the preview block and the quality row from the fit
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
+            yield return new Case { Name = "performance-pipeline", Make = () => new PerformanceForm("LiesOfP-Win64-Shipping.exe") };   // a record whose pipeline block says split encoding did not engage
             for (int p = 0; p <= 6; p++)
             {
                 int page = p;
@@ -283,6 +285,33 @@ namespace AirFrameXR
                     fov.Checked = true; lines.Add($"fov_then: fov={fov.Checked} full={full.Checked}");
                 }
                 File.WriteAllLines(Path.Combine(outDir, "encoding.txt"), lines);
+                return 0;
+            }
+            var pmCases = Arg("--pipeline-model-selftest");   // harness/pipeline_model_check.py: the C# pipeline model against the Python oracle, case by case
+            if (pmCases != null)
+            {
+                var lines = new List<string>();
+                var root = global::AirFrameXR.Json.Parse(File.ReadAllText(pmCases));
+                var cases = root.TryGetValue("cases", out var co) ? co as object[] ?? new object[0] : new object[0];
+                double[] Arr(Dictionary<string, object> d, string k) { return d.TryGetValue(k, out var v) && v is object[] a ? a.Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray() : null; }
+                int[] IArr(Dictionary<string, object> d, string k) { var a = Arr(d, k); return a == null ? null : a.Select(x => (int)x).ToArray(); }
+                var ic = CultureInfo.InvariantCulture;
+                foreach (var o in cases)
+                {
+                    if (!(o is Dictionary<string, object> c)) continue;
+                    var i = new PipelineModel.Inputs
+                    {
+                        Declared = Arr(c, "declared"), Rect = Arr(c, "rect"), Eye = IArr(c, "eye"), ReferenceEye = IArr(c, "reference_eye"), ReferenceFov = Arr(c, "reference_fov"),
+                        Fit = c.TryGetValue("fit", out var fv) && fv is bool fb && fb, Quality = Convert.ToDouble(c["quality"], ic),
+                        Foveated = !(c.TryGetValue("foveated", out var fo) && fo is bool fob) || fob, Geometry = Arr(c, "geometry") ?? new[] { 0.45, 0.4, 0.4, 0.1, 4.0, 5.0 },
+                        SplitMode = Convert.ToInt32(c["split_mode"], ic), Preset = Convert.ToInt32(c["preset"], ic), Tuning = Convert.ToString(c["tuning"]), Engines = Convert.ToInt32(c["engines"], ic),
+                    };
+                    var r = PipelineModel.Compute(i);
+                    string X(int[] v) => v == null ? "-" : v[0] + "x" + v[1];
+                    string B(double[] v) => v == null ? "-" : v[0].ToString("0.0", ic) + ".." + v[1].ToString("0.0", ic);
+                    lines.Add($"{c["name"]}|fit_eye={X(r.FitEye)}|game={X(r.Game)}|encoded={X(r.Encoded)}|band_x={B(r.BandX)}|band_y={B(r.BandY)}|strips={r.Strips}|warnings={r.Warnings.Count}|info={r.Info.Count}|{string.Join(";", r.Warnings)}");
+                }
+                File.WriteAllLines(Path.Combine(outDir, "pipeline_model.txt"), lines);
                 return 0;
             }
             if (Arg("--fov-profile-selftest") != null)   // harness/fov_profile_check.py: the profile button fills the fields and the slider and saves (into this folder's own config)

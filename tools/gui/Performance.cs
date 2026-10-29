@@ -181,6 +181,12 @@ namespace AirFrameXR
             }
             var all = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
             all.Controls.Add(main);
+            var pipe = O(s, "pipeline");
+            if (pipe != null)
+            {
+                all.Controls.Add(new Label { Text = "Frame pipeline (what happened to each frame, stage by stage)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 6, 3, 2) });
+                all.Controls.Add(PipelineRow(pipe, net, maxW, rep));
+            }
             if (net != null)
             {
                 // ALVR's own stats line, to tell a slow encoder or decoder from a slow network: streamer latency = encoder + transport + decoder
@@ -190,6 +196,41 @@ namespace AirFrameXR
                     Text = st == null ? "Streamer latency: n/a" : $"Streamer latency {N(st.Value, "0")} ms = encoder {N(enc, "0")} + transport {N(tr, "0")} + decoder {N(dec, "0")}" });
             } all.Controls.Add(Ui.Expander("More numbers", more));
             return all;
+        }
+
+        static int[] I2(Dictionary<string, object> d, string k)
+        {
+            try { return d != null && d.TryGetValue(k, out var v) && v is object[] a && a.Length >= 2 ? new[] { Convert.ToInt32(a[0], CultureInfo.InvariantCulture), Convert.ToInt32(a[1], CultureInfo.InvariantCulture) } : null; } catch { return null; }
+        }
+        static string X(int[] v) => v == null ? "-" : v[0] + " \u00D7 " + v[1];
+
+        /// the record's `pipeline` block (written by the streamer at the end of a run): one tile per stage, in the order the frame goes through them
+        Control PipelineRow(Dictionary<string, object> p, Dictionary<string, object> net, int maxW, double repeatedPct)
+        {
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(maxW, 0), Margin = new Padding(0) };
+            var q = D(p, "render_quality");
+            row.Controls.Add(Ui.MakeTile("Game", X(I2(p, "game_render")), "per eye" + (double.IsNaN(q) ? "" : ", quality " + N(q * 100, "0") + " %")));
+            var eye = I2(p, "stream_eye");
+            row.Controls.Add(Ui.MakeTile("Frame", eye == null ? "-" : X(new[] { 2 * eye[0], eye[1] }), "stream over the headset's box"));
+            var fg = O(p, "frame_gen");
+            bool fgOn = fg != null && fg.TryGetValue("on", out var fo) && fo is bool fb && fb;
+            row.Controls.Add(Ui.MakeTile("Generation", fgOn ? "on" : "off", fgOn ? "flow " + X(I2(fg, "flow_size")) + ", " + N(D(fg, "flow_ms")) + " ms" : ""));
+            bool fov = p.TryGetValue("foveated", out var fv) && fv is bool fvb && fvb;
+            var bx = p.TryGetValue("band_x", out var bxo) && bxo is object[] bxa && bxa.Length >= 2 ? bxa : null;
+            row.Controls.Add(Ui.MakeTile("Foveation", fov ? X(I2(p, "encoded")) : "full frame", fov && bx != null ? "band x " + N(Math.Abs(Convert.ToDouble(bx[0], CultureInfo.InvariantCulture)), "0") + ".." + N(Convert.ToDouble(bx[1], CultureInfo.InvariantCulture), "0") + "\u00B0" : ""));
+            var nv = O(p, "nvenc");
+            double seen = D(nv, "slices_seen"), want = D(nv, "expected_strips");
+            bool bad = !double.IsNaN(seen) && !double.IsNaN(want) && want > 0 && seen + 0.05 < want;
+            var preset = D(nv, "preset");
+            row.Controls.Add(Ui.MakeTile("Encoder", N(D(nv, "encode_p50_ms")) + " ms", $"p95 {N(D(nv, "encode_p95_ms"))} ms, {N(seen)} strip(s) seen, {N(want, "0")} expected" + (double.IsNaN(preset) ? "" : ", P" + N(preset, "0")), bad ? Color.Firebrick : (Color?)null));
+            row.Controls.Add(Ui.MakeTile("Network", net != null ? N(D(net, "bitrate_mbps"), "0") + " Mbps" : "-", ""));
+            row.Controls.Add(Ui.MakeTile("Headset", net != null ? "decode " + N(D(net, "decode_ms"), "0") + " ms" : "-", "repeated " + N(repeatedPct) + " %"));
+            if (!bad) return row;
+            var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+            col.Controls.Add(row);
+            var eng = D(nv, "engines");
+            col.Controls.Add(new Label { Text = $"Split encoding did not engage: {N(seen)} strip(s) for {N(want, "0")} expected ({N(eng, "0")} NVENC engines).", AutoSize = true, ForeColor = Color.Firebrick, Font = Ui.Body, Margin = new Padding(3, 0, 3, 4), MaximumSize = new Size(maxW, 0) });
+            return col;
         }
 
         Control SessionList(List<Dictionary<string, object>> sessions)

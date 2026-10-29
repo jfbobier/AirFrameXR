@@ -183,6 +183,76 @@ def compute(declared=DECLARED, rect=RECT, eye=EYE, fov=FOVEATION, foveated=True,
     return out
 
 
+# ---- the launcher's pipeline model (tools/gui/PipelineModel.cs is a port of this function; harness/pipeline_model_check.py compares them) ----------
+NVENC_MAX_EYE = (4096, 8192)
+
+
+def model(declared, rect=None, eye=EYE, reference_eye=None, reference_fov=None, fit=False, quality=0.0, foveated=True,
+          geometry=(0.45, 0.4, 0.4, 0.1, 4.0, 5.0), split_mode=3, preset=3, tuning="ll", engines=3):
+    """What the pipeline will do with these settings: the stream's per-eye size (the fit keeps the reference density over whatever box the
+    headset declares), the game's render size (floor = the stream's density over the rectangle, ceiling = the reference eye size when the fit
+    is on and larger), the frame, the encoded frame, the full-density band in degrees, the foveation parameters that keep the reference
+    frame's band, the strips NVENC is expected to use, and the warnings the UI shows. `rect` None = the game renders the declared box."""
+    dspan = (declared[0] + declared[1], declared[2] + declared[3])
+    rect = tuple(rect) if rect else tuple(declared)
+    rect = tuple(min(r, d) for r, d in zip(rect, declared))
+    rspan = (rect[0] + rect[1], rect[2] + rect[3])
+    warnings, info = [], []
+    use_fit = fit and reference_eye is not None and reference_fov is not None
+    if use_fit:
+        fspan = (reference_fov[0] + reference_fov[1], reference_fov[2] + reference_fov[3])
+        # the ratio first, plus a hair, so the same box gives back the same size (3200 x 1.66 / 1.66 lands under 3200 in floating point)
+        raw = (align32(reference_eye[0] * (dspan[0] / fspan[0]) + 1e-6), align32(reference_eye[1] * (dspan[1] / fspan[1]) + 1e-6))
+        if raw[0] > NVENC_MAX_EYE[0] or raw[1] > NVENC_MAX_EYE[1]:
+            warnings.append(f"The stream's {raw[0]} x {raw[1]} per eye exceeds what NVENC encodes ({2 * NVENC_MAX_EYE[0]} across side by side, {NVENC_MAX_EYE[1]} high): capped.")
+        fit_eye = (min(raw[0], NVENC_MAX_EYE[0]), min(raw[1], NVENC_MAX_EYE[1]))
+    else:
+        fit_eye = (int(eye[0]), int(eye[1]))
+        if fit_eye[0] > NVENC_MAX_EYE[0] or fit_eye[1] > NVENC_MAX_EYE[1]:
+            warnings.append(f"The stream's {fit_eye[0]} x {fit_eye[1]} per eye exceeds what NVENC encodes ({2 * NVENC_MAX_EYE[0]} across side by side, {NVENC_MAX_EYE[1]} high).")
+    # the shim's floor and ceiling (ovrshim/render_size.h): floor = eye x the rectangle's share of the declared span, ceiling = the reference eye when the fit is on and larger
+    wr, hr = rspan[0] / dspan[0], rspan[1] / dspan[1]
+    floor = (fit_eye[0] * wr, fit_eye[1] * hr)
+    ceiling = (max(reference_eye[0], fit_eye[0]), max(reference_eye[1], fit_eye[1])) if use_fit else fit_eye
+    game = game_render_size(floor, ceiling, quality)
+    floor_even = (even_at_least_64(floor[0]), even_at_least_64(floor[1]))
+    cs = {"foveation_center_size_x": geometry[0], "foveation_center_size_y": geometry[1], "foveation_center_shift_x": geometry[2],
+          "foveation_center_shift_y": geometry[3], "foveation_edge_ratio_x": geometry[4], "foveation_edge_ratio_y": geometry[5]}
+    out = {"fit_eye": list(fit_eye), "floor": list(floor_even), "ceiling": [int(ceiling[0]), int(ceiling[1])], "game": list(game), "frame": [2 * fit_eye[0], fit_eye[1]],
+           "rect": list(rect), "foveated": foveated, "reanchored": None, "band_x": None, "band_y": None}
+    if foveated:
+        v = lib.fov_vars(fit_eye[0], fit_eye[1], cs)
+        out["encoded"] = [2 * v["opt_w"], v["opt_h"]]
+        bx = tan_band(band_src(v["center"][0], v["shift"][0]), declared[0], declared[1])
+        byu = band_src(v["center"][1], v["shift"][1])
+        by = (declared[2] - byu[1] * dspan[1], declared[2] - byu[0] * dspan[1])   # down (negative) .. up
+        out["band_x"] = [round(deg(bx[0]), 1), round(deg(bx[1]), 1)]
+        out["band_y"] = [round(deg(by[0]), 1), round(deg(by[1]), 1)]
+        if use_fit:
+            # the band of the reference frame (its geometry over the reference box), kept in degrees on this frame
+            vr = lib.fov_vars(reference_eye[0], reference_eye[1], cs)
+            rbx = tan_band(band_src(vr["center"][0], vr["shift"][0]), reference_fov[0], reference_fov[1])
+            rbyu = band_src(vr["center"][1], vr["shift"][1])
+            rby = (reference_fov[2] - rbyu[0] * fspan[1], reference_fov[2] - rbyu[1] * fspan[1])   # up .. down in tan
+            ux = (max(0.0, (rbx[0] + declared[0]) / dspan[0]), min(1.0, (rbx[1] + declared[0]) / dspan[0]))
+            uy = (max(0.0, (declared[2] - rby[0]) / dspan[1]), min(1.0, (declared[2] - rby[1]) / dspan[1]))
+            csx, shx = band_params(ux[0], ux[1] - ux[0])
+            csy, shy = band_params(uy[0], uy[1] - uy[0])
+            out["reanchored"] = [round(csx, 3), round(csy, 3), round(shx, 3), round(shy, 3)]
+    else:
+        out["encoded"] = [2 * fit_eye[0], fit_eye[1]]
+    strips, why = split_strips(out["encoded"][1], split_mode, engines if engines is not None and engines >= 0 else 0, preset, tuning)
+    if engines is None or engines < 0:
+        strips, why = 0, "the GPU's NVENC engine count is not known yet"
+        info.append("The GPU's NVENC engine count is not known yet: run the streamer once.")
+    elif engines >= 2 and strips < min(engines, 3):
+        warnings.append(f"Split encoding: {strips} strip(s) expected ({why}). A forced mode splits at any size.")
+    if quality > 0 and tuple(game) == floor_even and ceiling[0] <= floor[0] + 1e-9 and ceiling[1] <= floor[1] + 1e-9:
+        warnings.append("The render quality slider has no room: the game's size and its ceiling are the same (tick the stream fit or set a larger resolution).")
+    out.update({"strips": strips, "strips_why": why, "warnings": warnings, "info": info})
+    return out
+
+
 def selftest():
     bad = 0
     for cs in (0.3, 0.45, 0.6):
@@ -206,7 +276,17 @@ def selftest():
             bad2 += 1
             print("SPLIT MISMATCH", h, mode, eng, p, t, "got", got, "want", want)
     print("CHECK", "PASS" if bad2 == 0 else "FAIL", "split-encode strip rules (SDK 13.0 guide 8.14: 2112 rows, preset table, forced modes, engine cap)")
-    return 0 if bad == 0 and bad2 == 0 else 1
+    # the model: the fork client declaring R with the reference saved over the old box gives the sizes of this document
+    m = model(RECT, None, EYE, reference_eye=EYE, reference_fov=DECLARED, fit=True, quality=0.0)
+    m2 = model(DECLARED, RECT, EYE, fit=False, quality=1.0)
+    m3 = model(DECLARED, None, EYE, fit=False, quality=0.5, engines=-1)
+    ok3 = (m["fit_eye"] == [3168, 2496] and m["game"] == [3168, 2496] and m["encoded"] == [3776, 1312] and m["ceiling"] == [3552, 3200] and m["strips"] == 3
+           and m2["game"] == [3552, 3200] and m2["floor"] == [3134, 2506] and not m2["warnings"]
+           and m3["strips"] == 0 and len(m3["info"]) == 1 and len(m3["warnings"]) == 1)
+    if not ok3:
+        print("MODEL", m, m2, m3)
+    print("CHECK", "PASS" if ok3 else "FAIL", "pipeline model: the fit over R, the quality ceiling, the no-room and unknown-engines lines")
+    return 0 if bad == 0 and bad2 == 0 and ok3 else 1
 
 
 def main(argv):

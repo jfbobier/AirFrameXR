@@ -9,7 +9,7 @@ T="/mnt/c/Users/$WUSER/AppData/Local/Temp/airframexr_gui"; mkdir -p "$T" || exit
 FW='C:\Windows\Microsoft.NET\Framework64\v4.0.30319'; SRC=$(wslpath -w "$R/tools/gui"); OUT=$(wslpath -w "$T")
 REFS=(); for r in System.dll System.Core.dll System.Drawing.dll System.Windows.Forms.dll System.Web.Extensions.dll System.IO.Compression.dll System.IO.Compression.FileSystem.dll; do REFS+=("/r:$FW\\$r"); done
 rc=0
-for t in "streamer.exe:AirFrameXR.cs FindHeadset.cs AudioRoute.cs" "configure.exe:AudioRoute.cs Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs" "launcher.exe:Launcher.cs" "AirFrameXR.exe:Stub.cs" "performance.exe:Performance.cs" "uitest.exe:Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs FindHeadset.cs AudioRoute.cs AirFrameXR.cs Launcher.cs Performance.cs UiTest.cs"; do
+for t in "streamer.exe:PipelineModel.cs AirFrameXR.cs FindHeadset.cs AudioRoute.cs" "configure.exe:PipelineModel.cs AudioRoute.cs Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs" "launcher.exe:Launcher.cs" "AirFrameXR.exe:Stub.cs" "performance.exe:PipelineModel.cs Performance.cs" "uitest.exe:PipelineModel.cs Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs FindHeadset.cs AudioRoute.cs AirFrameXR.cs Launcher.cs Performance.cs UiTest.cs"; do
   exe=${t%%:*}; src=${t##*:}; echo "== $exe"
   FILES=(); [ "$exe" = AirFrameXR.exe ] || FILES+=("$SRC\\Common.cs"); for f in $src; do FILES+=("$SRC\\$f"); done
   out=$(cd "$T" && "$CSC" /nologo /noconfig /target:winexe /platform:x64 /langversion:latest /nowarn:1701,1702 "${REFS[@]}" \

@@ -220,12 +220,23 @@ namespace AirFrameXR
             error = Nvenc.CheckEye(w, h);
             if (error != null) return false;
             var rate = double.Parse((string)Fps.SelectedItem, CultureInfo.InvariantCulture);
+            // the size the user chose is the density reference of the stream fit (docs/FOV_PIPELINE_OPTIM.md); with the fit on, the session gets the size over the box the headset declares
+            settings.StreamReferenceEye = new[] { w, h };
+            var clientFov = AppSettings.ReadClientFov();
+            if (clientFov != null) settings.StreamReferenceFov = clientFov;
+            int sw = w, sh = h;
+            if (settings.StreamFitWindow && clientFov != null && settings.StreamReferenceFov != null)
+            {
+                var fe = PipelineModel.FitEye(new[] { w, h }, settings.StreamReferenceFov, clientFov);
+                sw = Math.Min(fe[0], PipelineModel.MaxEyeWidth); sh = Math.Min(fe[1], PipelineModel.MaxEyeHeight);
+                settings.StreamFitEye = new[] { sw, sh };
+            }
             foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
             {
                 Json.Set(s, V + k + ".variant", "Absolute");
-                Json.Set(s, V + k + ".Absolute.width", w);
+                Json.Set(s, V + k + ".Absolute.width", sw);
                 Json.Set(s, V + k + ".Absolute.height.set", true);
-                Json.Set(s, V + k + ".Absolute.height.content", h);
+                Json.Set(s, V + k + ".Absolute.height.content", sh);
             }
             Json.Set(s, V + "preferred_fps", rate);
             Json.Set(s, V + "bitrate.mode.variant", "ConstantMbps");
@@ -238,10 +249,10 @@ namespace AirFrameXR
             Json.Set(s, V + "foveated_encoding.content.edge_ratio_x", (double)Frx.Value);
             Json.Set(s, V + "foveated_encoding.content.edge_ratio_y", (double)Fry.Value);
             // ALVR's negotiated-stream cache: rewritten at every connection, but the encoder tests (no headset) read it as it is
-            Json.Set(s, "openvr_config.eye_resolution_width", w);
-            Json.Set(s, "openvr_config.eye_resolution_height", h);
-            Json.Set(s, "openvr_config.target_eye_resolution_width", w);
-            Json.Set(s, "openvr_config.target_eye_resolution_height", h);
+            Json.Set(s, "openvr_config.eye_resolution_width", sw);
+            Json.Set(s, "openvr_config.eye_resolution_height", sh);
+            Json.Set(s, "openvr_config.target_eye_resolution_width", sw);
+            Json.Set(s, "openvr_config.target_eye_resolution_height", sh);
             Json.Set(s, "openvr_config.refresh_rate", (int)rate);
             Json.Set(s, "openvr_config.enable_foveated_encoding", ProfFov.Checked);
             Json.Set(s, "session_settings.audio.game_audio.enabled", Audio.Checked);

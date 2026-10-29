@@ -31,7 +31,7 @@ CLIENT_FLAGS = {"seconds": "--seconds", "connect_timeout": "--connect-timeout", 
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "track_blackout": "--track-blackout", "track_after_frame": "--track-after-frame", "track_frames_needed": "--track-frames-needed", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views", "height": "--height"}
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "track_blackout": "--track-blackout", "track_after_frame": "--track-after-frame", "track_frames_needed": "--track-frames-needed", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views", "views_tan": "--views-tan", "height": "--height"}
 
 
 class Blocked(Exception):
@@ -482,7 +482,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
-                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override", "fov_quality": "--fov-quality"})
+                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override", "fov_quality": "--fov-quality", "fov_ceiling": "--fov-ceiling"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -1037,8 +1037,13 @@ def analyse_fov_restrict(sc, outdir):
     wr = sum((exp[e][0] + exp[e][1]) / (headset[4 * e] + headset[4 * e + 1]) for e in range(2)) / 2
     hr = sum((exp[e][2] + exp[e][3]) / (headset[4 * e + 2] + headset[4 * e + 3]) for e in range(2)) / 2
     even = lambda v: max(64, (int(v + 0.5) + 1) // 2 * 2)   # std::lround: half away from zero
-    q = min(1.0, max(0.0, float(cfgk.get("quality", 0.0))))   # render quality: from the floor (the stream's density over the smaller view) to the stream's eye size
-    out["expected_recommended"] = (even(ew * wr + (ew - ew * wr) * q), even(eh * hr + (eh - eh * hr) * q))
+    q = min(1.0, max(0.0, float(cfgk.get("quality", 0.0))))   # render quality: from the floor (the stream's density over the smaller view) to the ceiling
+    # the ceiling: the stream's eye size, or the panel reference the host passes (`--fov-ceiling`, ipc renderCeiling: the stream fitted to the headset's window), never below the floor (render_size.h)
+    cw, ch = (cfgk.get("ceiling") or (ew, eh))
+    fw, fh = ew * wr, eh * hr
+    cw, ch = max(fw, cw), max(fh, ch)
+    out["ceiling"] = (cw, ch)
+    out["expected_recommended"] = (even(fw + (cw - fw) * q), even(fh + (ch - fh) * q))
     out["stream_eye"] = (ew, eh)
     # the stream frame: side by side, each eye covers the headset's view; the game's view sits inside it, the rest is black
     pts, want = [], []
@@ -1058,11 +1063,13 @@ def analyse_fov_restrict(sc, outdir):
         for side, c in enumerate(cut):
             if c < 0.03:
                 continue
-            m_, i_ = c / 2, c + 0.02    # the middle of the margin (black), just inside the game's view (content)
-            if side == 0: pts += [(x0 + int(m_ * ew), eh // 2), (x0 + int(i_ * ew), eh // 2)]
-            elif side == 1: pts += [(x0 + ew - 1 - int(m_ * ew), eh // 2), (x0 + ew - 1 - int(i_ * ew), eh // 2)]
-            elif side == 2: pts += [(x0 + int(col * ew), int(m_ * eh)), (x0 + int(col * ew), int(i_ * eh))]
-            else: pts += [(x0 + int(col * ew), eh - 1 - int(m_ * eh)), (x0 + int(col * ew), eh - 1 - int(i_ * eh))]
+            # the middle of the margin (black), and two depths just inside the game's view (content: the probe's picture is not bright everywhere at its very edge,
+            # an asymmetric rectangle read 93 % with one depth at 2 %, so a point counts as content when either depth is lit)
+            m_, i_, j_ = c / 2, c + 0.02, c + 0.05
+            if side == 0: pts += [(x0 + int(m_ * ew), eh // 2), (x0 + int(i_ * ew), eh // 2), (x0 + int(j_ * ew), eh // 2)]
+            elif side == 1: pts += [(x0 + ew - 1 - int(m_ * ew), eh // 2), (x0 + ew - 1 - int(i_ * ew), eh // 2), (x0 + ew - 1 - int(j_ * ew), eh // 2)]
+            elif side == 2: pts += [(x0 + int(col * ew), int(m_ * eh)), (x0 + int(col * ew), int(i_ * eh)), (x0 + int(col * ew), int(j_ * eh))]
+            else: pts += [(x0 + int(col * ew), eh - 1 - int(m_ * eh)), (x0 + int(col * ew), eh - 1 - int(i_ * eh)), (x0 + int(col * ew), eh - 1 - int(j_ * eh))]
             want.append((e, side, round(c, 3)))
     out["margins"] = want
     if pts:
@@ -1070,8 +1077,8 @@ def analyse_fov_restrict(sc, outdir):
         lum = lambda px: 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]
         black_ok = content_ok = 0
         for fr in frames:
-            black_ok += sum(1 for k in range(0, len(pts), 2) if lum(fr[k]) < 16)
-            content_ok += sum(1 for k in range(1, len(pts), 2) if lum(fr[k]) >= 16)
+            black_ok += sum(1 for k in range(0, len(pts), 3) if lum(fr[k]) < 16)
+            content_ok += sum(1 for k in range(1, len(pts), 3) if lum(fr[k]) >= 16 or lum(fr[k + 1]) >= 16)
         n = max(1, len(frames) * len(want))
         out["margin_black_frac"], out["inside_content_frac"], out["frames"] = round(black_ok / n, 3), round(content_ok / n, 3), len(frames)
     return out
@@ -1901,8 +1908,8 @@ def evaluate(sc, a):
             chk("fov_restrict_app_fov", fa["fov_max_err"] <= tol, {"max_err": round(fa["fov_max_err"], 4), "got": fa["app_fov"], "expected": fa["expected_fov"]},
                 f"the four tangents per eye the app got from xrLocateViews are the headset's scaled per edge (outer, inner, upper, lower = {[round(x, 3) for x in fa['scale']]} of it), within {tol}")
             er, rr = fa["expected_recommended"], fa["recommended"]
-            chk("fov_restrict_recommended_size", abs(er[0] - rr[0]) <= 2 and abs(er[1] - rr[1]) <= 2, {"app": rr, "expected": er, "stream_eye": fa["stream_eye"]},
-                "the recommended image size follows the area of the restricted view (the game renders fewer pixels, not the same pixels over less angle)")
+            chk("fov_restrict_recommended_size", abs(er[0] - rr[0]) <= 2 and abs(er[1] - rr[1]) <= 2, {"app": rr, "expected": er, "stream_eye": fa["stream_eye"], "ceiling": fa.get("ceiling")},
+                "the recommended image size follows the area of the restricted view and the render quality between the floor and the ceiling (the stream's eye size, or the panel reference when the stream is fitted to the headset's window)")
             if fa.get("margins"):
                 chk("fov_restrict_margin_black", fa.get("margin_black_frac", 0) >= 0.95, {"margin_black": fa.get("margin_black_frac"), "margins": fa["margins"]},
                     ">= 95 % of the samples in the middle of each trimmed margin of the decoded stream are black: the stream still covers the headset's view")
@@ -1959,6 +1966,21 @@ def evaluate(sc, a):
         if runs:
             chk("game_run_latency_ms", 0 < net.get("latency_ms", 0) < g.get("max_latency_ms", 200), net.get("latency_ms"), f"0 < x < {g.get('max_latency_ms', 200)}")
             chk("game_run_latency_outliers", net.get("latency_outliers", 99) <= g.get("max_latency_outliers", 0), net.get("latency_outliers"), f"<= {g.get('max_latency_outliers', 0)}")
+            if g.get("pipeline"):   # the frame pipeline block the Game statistics app draws (docs/FOV_PIPELINE_OPTIM.md S8): every stage present and plausible
+                pb = runs[-1].get("pipeline") or {}
+                want = g["pipeline"] if isinstance(g["pipeline"], dict) else {}
+                nv = pb.get("nvenc") or {}
+                ok_fields = all(isinstance(pb.get(k), list) and len(pb[k]) == 2 and all(v > 0 for v in pb[k]) for k in ("game_render", "stream_eye", "encoded")) and isinstance(pb.get("declared_fov"), list) and len(pb["declared_fov"]) == 8
+                chk("game_run_pipeline_block", ok_fields, {k: pb.get(k) for k in ("game_render", "stream_eye", "encoded", "foveated")}, "game render, stream eye, encoded sizes and the declared box recorded")
+                chk("game_run_pipeline_nvenc", nv.get("encode_p50_ms", 0) > 0 and nv.get("encode_p95_ms", 0) >= nv.get("encode_p50_ms", 0) and nv.get("expected_strips", 0) >= 1 and nv.get("slices_seen", 0) >= 0.9,
+                    nv, "encode p50 / p95 recorded, strips expected >= 1, slices seen >= 0.9 per frame")
+                for k, v in want.items():
+                    got = pb.get(k) if k != "nvenc" else None
+                    if k == "nvenc":
+                        for k2, v2 in v.items():
+                            chk(f"game_run_pipeline_nvenc_{k2}", nv.get(k2) == v2, nv.get(k2), v2)
+                    else:
+                        chk(f"game_run_pipeline_{k}", got == v, got, v)
     if "app_timing" in ck:
         at, ak = ck["app_timing"], a.get("app_timing")
         chk("app_timing_measured", ak is not None, ak is not None, "xr_probe per-frame timing")
@@ -2013,6 +2035,11 @@ def evaluate(sc, a):
         lens_ok = len(runs) == len(fc["expect"]) and all(r[1] >= m for r, m in zip(runs, fc["min_len"]))
         chk("frame_sequence", seq == fc["expect"] and lens_ok and k.get("stray_frames", 99) <= fc.get("max_stray", 5),
             {"runs": runs, "stray": k.get("stray_frames")}, f"{'->'.join(fc['expect'])} with run lengths >= {fc['min_len']} (G = pure green, A = app) and <= {fc.get('max_stray', 5)} stray frames")
+    if "min_nvenc_engines" in ck and h and h.get("encoder") and (h["encoder"].get("nvenc_engines") or 0) < ck["min_nvenc_engines"]:
+        raise Blocked(f"this GPU has {h['encoder'].get('nvenc_engines')} NVENC engine(s); the scenario needs {ck['min_nvenc_engines']} (the 5090)")
+    if "max_slices_per_frame" in ck and h and h.get("encoder"):
+        v = h["encoder"].get("slices_per_frame") or 0
+        chk("split_encode_slices_at_most", v <= ck["max_slices_per_frame"] + 0.05, {"slices_per_frame": round(v, 2), "nvenc_engines": h["encoder"].get("nvenc_engines")}, f"<= {ck['max_slices_per_frame']} (the split rule says the driver does not split here)")
     if "min_slices_per_frame" in ck and h and h.get("encoder"):
         v = h["encoder"].get("slices_per_frame") or 0
         chk("split_encode_slices_per_frame", v >= ck["min_slices_per_frame"],

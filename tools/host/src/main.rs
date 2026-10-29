@@ -85,6 +85,11 @@ struct Args {
     fov_quality: f32,   // 0..1, see vision::render_quality
     /// the streamer's override (settings, `fov_override` command, `--fov-override`): the tangents the game is told per edge (outer, inner, upper, lower); None = not overridden
     fov_override: Option<[f32; 4]>,
+    /// the render quality slider's ceiling per eye above the stream's eye size (lab `--fov-ceiling WxH`; else the settings' stream_reference_eye when stream_fit_window is on): None = the stream's eye size
+    fov_ceiling: Option<(i32, i32)>,
+    fov_quality_explicit: bool,
+    stream_fit_window: bool,
+    stream_reference_eye: Option<(i32, i32)>,
     fg_grid: i32,
     /// 1 = edge-aware synthesis (default), 2 = edge-aware without the photometric gate, 0 = classic, the crossfade recipe (the predictable
     /// fallback) (`video.frame_gen_synthesis`, `--frame-gen-synthesis`, env AIRFRAMEXR_FG_SYNTH)
@@ -184,6 +189,10 @@ fn parse_args() -> Result<Args, String> {
         fov_scale_explicit: false,
         fov_quality: 0.0,
         fov_override: None,
+        fov_ceiling: None,
+        fov_quality_explicit: false,
+        stream_fit_window: false,
+        stream_reference_eye: None,
         fg_grid: 4,
         fg_synth: 1,
         auto_input: vec![],
@@ -336,7 +345,16 @@ fn parse_args() -> Result<Args, String> {
                 }
                 a.fov_scale_explicit = true;
             }
-            "--fov-quality" => a.fov_quality = vision::render_quality(v()?.parse::<f64>().map_err(|e| format!("{e}"))?),   // lab: where the game's render size sits between the floor and the stream's eye size, 0..1
+            "--fov-quality" => {   // lab: where the game's render size sits between the floor and the ceiling, 0..1
+                a.fov_quality = vision::render_quality(v()?.parse::<f64>().map_err(|e| format!("{e}"))?);
+                a.fov_quality_explicit = true;
+            }
+            "--fov-ceiling" => {
+                // lab: the render quality slider's ceiling per eye, "WxH" (the panel reference when the stream is fitted to the headset's window; the settings give it as stream_reference_eye)
+                let t = v()?;
+                let (w, h) = t.split_once('x').ok_or("--fov-ceiling WxH")?;
+                a.fov_ceiling = Some((w.parse::<i32>().map_err(|e| format!("{e}"))?, h.parse::<i32>().map_err(|e| format!("{e}"))?));
+            }
             "--fov-override" => {
                 // lab: the tangents the game is told, "outer,inner,upper,lower"
                 let p: Vec<f32> = v()?.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?;
@@ -497,8 +515,15 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if let (Some(true), Some(o), Some(i), Some(u), Some(l), false) = (st.fov_override, st.fov_outer, st.fov_inner, st.fov_upper, st.fov_lower, a.fov_scale_explicit) {
         a.fov_override = Some([o as f32, i as f32, u as f32, l as f32]);
-        a.fov_quality = vision::render_quality(st.fov_render_quality.unwrap_or(0.0));
     }
+    if !a.fov_quality_explicit {
+        // the slider counts with a restriction or with a ceiling above the stream (the stream fitted to the headset's window), so it is read whatever the override
+        if let Some(q) = st.fov_render_quality {
+            a.fov_quality = vision::render_quality(q);
+        }
+    }
+    a.stream_fit_window = st.stream_fit_window.unwrap_or(false);
+    a.stream_reference_eye = st.stream_reference_eye.map(|r| (r[0] as i32, r[1] as i32)).filter(|r| r.0 > 0 && r.1 > 0);
     if let Some(v) = st.frame_gen_synthesis.as_deref().and_then(|v| parse_fg_synth(v).ok()) {
         a.fg_synth = v;
     }
@@ -614,6 +639,8 @@ static SEND_PHASE_MS: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::ne
 static HOLD_MS: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
 /// spacing of the headset's tracking packets arriving at the host
 static TRACKING_GAP_MS: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
+/// the encoder windows (p50, p95, slices per packet, foveation-pass ms) since the status tick last took them: the run record's pipeline block
+static ENC_WINDOWS: std::sync::Mutex<Vec<serde_json::Value>> = std::sync::Mutex::new(Vec::new());
 /// the last statistics window's tracking spacing (p95 ms, max ms, gaps over 15 ms, gaps) for the frame generation perf line
 /// the client's tracking cadence was judged not to be a display rate (logged once per connection)
 static RATE_IGNORED: AtomicBool = AtomicBool::new(false);
@@ -658,12 +685,14 @@ impl StatsWindow {
         let q = |p: f64| w.get(((w.len() as f64) * p) as usize).copied().unwrap_or(0.0);
         let (samples, slices) = slices.unwrap_or((0, 0));
         let (submit_mode, matched, fallback) = shim.unwrap_or((0, 0, 0));
+        let slices_per_packet = (slices - self.slices0) as f64 / (samples - self.samples0).max(1) as f64;
         let mut e = json!({
             "frames": w.len(), "fps": w.len() as f64 / secs, "encode_ms_avg": w.iter().sum::<f64>() / w.len().max(1) as f64,
-            "encode_ms_p95": q(0.95), "encode_ms_max": w.last().copied().unwrap_or(0.0),
+            "encode_ms_p50": q(0.5), "encode_ms_p95": q(0.95), "encode_ms_max": w.last().copied().unwrap_or(0.0),
             "mbps": (bytes - self.bytes0) as f64 * 8.0 / secs / 1e6,
-            "slices_per_packet": (slices - self.slices0) as f64 / (samples - self.samples0).max(1) as f64,
+            "slices_per_packet": slices_per_packet,
         });
+        let mut ffr_avg: Option<f64> = None;
         if ffr_wait_ms.len() >= w.len() && !w.is_empty() {
             // encode time split: queued foveation pass done on the GPU (waits behind the game's GPU work) vs. copy + NVENC
             let n = w.len();
@@ -674,7 +703,8 @@ impl StatsWindow {
             rs.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let p = |v: &Vec<f64>, q: f64| v.get(((v.len() as f64) * q) as usize).copied().unwrap_or(0.0);
             // GPU time of ALVR's foveation pass (timestamp queries); the rest of the encode time is queueing + copy + NVENC
-            e["ffr_gpu_ms"] = json!({ "avg": fw.iter().sum::<f64>() / n as f64, "p95": p(&fw, 0.95) });
+            ffr_avg = Some(fw.iter().sum::<f64>() / n as f64);
+            e["ffr_gpu_ms"] = json!({ "avg": ffr_avg, "p95": p(&fw, 0.95) });
             e["encode_minus_ffr_ms"] = json!({ "avg": rs.iter().sum::<f64>() / n as f64, "p95": p(&rs, 0.95) });
         }
         if !intake_ms.is_empty() {
@@ -720,6 +750,11 @@ impl StatsWindow {
         }
         if let Some(x) = extra {
             e["pipeline"] = x;
+        }
+        if !w.is_empty() {
+            if let Ok(mut g) = ENC_WINDOWS.lock() {
+                if g.len() < 4096 { g.push(json!({ "p50": q(0.5), "p95": q(0.95), "slices": slices_per_packet, "ffr": ffr_avg })); }
+            }
         }
         event(origin, "encoder_stats", e);
         *self = Self { start: Instant::now(), first_idx: encode_ms.len(), bytes0: bytes, samples0: samples, slices0: slices, matched0: matched, fallback0: fallback, ticks0: VSYNC_TICKS.load(Ordering::Relaxed) };
@@ -902,7 +937,8 @@ mod nvh {
         pub fn nvh_ipc_last_compose_ms(ipc: *mut c_void) -> f32;
         pub fn nvh_last_ffr_gpu_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_open() -> *mut c_void;
-        pub fn nvh_ipc_config(ipc: *mut c_void, nvh: *mut c_void, rate_hz: f64, eye_w: i32, eye_h: i32, fov8: *const f32, off6: *const f32, bits: i32, encoding_gamma: f32, fov_scale4: *const f32, render_quality: f32);
+        pub fn nvh_ipc_config(ipc: *mut c_void, nvh: *mut c_void, rate_hz: f64, eye_w: i32, eye_h: i32, fov8: *const f32, off6: *const f32, bits: i32, encoding_gamma: f32, fov_scale4: *const f32, render_quality: f32, ceil_w: i32, ceil_h: i32);
+        pub fn nvh_ipc_shim_recommended(ipc: *mut c_void, w: *mut i32, h: *mut i32);
         pub fn nvh_last_ffr_wait_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_set_connected(ipc: *mut c_void, connected: i32);
         pub fn nvh_ipc_publish_head(ipc: *mut c_void, ts: u64, q: *const f32, p: *const f32, lv: *const f32, av: *const f32);
@@ -1433,10 +1469,66 @@ fn effective_fov_scale(a: &Args, fov8: &[f32; 8]) -> [f32; 4] {
     }
 }
 
-fn log_fov_restriction(origin: Instant, s: &[f32; 4], quality: f32, why: &str) {
+fn log_fov_restriction(origin: Instant, s: &[f32; 4], quality: f32, ceiling: (i32, i32), why: &str) {
     let p = s.map(|v| (v * 100.0).round());
-    logs::general("INFO", &format!("field of view the game is told ({why}): outer {} %, inner {} %, upper {} %, lower {} % of the headset's, render quality {:.2}; a game takes it when it starts", p[0], p[1], p[2], p[3], quality));
-    event(origin, "fov_restrict", json!({ "why": why, "outer": s[0], "inner": s[1], "upper": s[2], "lower": s[3], "render_quality": quality }));
+    let c = if ceiling.0 > 0 { format!(", render ceiling {} x {}", ceiling.0, ceiling.1) } else { String::new() };
+    logs::general("INFO", &format!("field of view the game is told ({why}): outer {} %, inner {} %, upper {} %, lower {} % of the headset's, render quality {:.2}{c}; a game takes it when it starts", p[0], p[1], p[2], p[3], quality));
+    event(origin, "fov_restrict", json!({ "why": why, "outer": s[0], "inner": s[1], "upper": s[2], "lower": s[3], "render_quality": quality, "ceiling": [ceiling.0, ceiling.1] }));
+}
+
+/// The render quality slider's ceiling per eye (ipc renderCeiling): the lab flag, else the user's reference size when the stream is fitted to the headset's window
+/// and the reference is above the stream's eye size; (0, 0) = the stream's eye size, the way it was.
+fn render_ceiling(a: &Args, eye: (i32, i32)) -> (i32, i32) {
+    if let Some(c) = a.fov_ceiling {
+        return if c.0 > 0 && c.1 > 0 { c } else { (0, 0) };
+    }
+    match (a.stream_fit_window, a.stream_reference_eye) {
+        (true, Some(r)) if r.0 > eye.0 || r.1 > eye.1 => r,
+        _ => (0, 0),
+    }
+}
+
+/// The GPU facts the launcher's pipeline model needs before a run (config/airframexr_gpu.json): name, driver, NVENC engines, the split conditions.
+fn save_gpu_info(path: &std::path::Path, gpu: &serde_json::Value, nvenc_cfg: &serde_json::Value) {
+    let v = json!({ "name": gpu["name"], "driver": gpu["driver"], "nvenc_engines": nvenc_cfg["nvenc"]["split"]["engines"], "split": nvenc_cfg["nvenc"]["split"],
+        "caps": nvenc_cfg["nvenc"]["caps"], "updated": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) });
+    let _ = fs::write(path, v.to_string());
+}
+
+/// The run record's `pipeline` block (docs/FOV_PIPELINE_OPTIM.md S8): what each stage of the frame path did in this run, for the Game statistics app's strip.
+#[allow(clippy::too_many_arguments)]
+fn pipeline_facts(views: Option<&([f32; 8], [f32; 6])>, args: &Args, ipc: *mut std::ffi::c_void, eye: (i32, i32), enc: (i32, i32), cfg: &StreamCfg, fg_active: bool,
+                  fg_stats: Option<String>, nvenc_cfg: &serde_json::Value, enc_windows: &[serde_json::Value], compose_ms: &[f64]) -> serde_json::Value {
+    let fov8 = views.map(|v| v.0).unwrap_or([0.0; 8]);
+    let scale = views.map(|v| effective_fov_scale(args, &v.0)).unwrap_or([1.0; 4]);
+    let ceiling = render_ceiling(args, eye);
+    let (mut rw, mut rh) = (0i32, 0i32);
+    if !ipc.is_null() {
+        unsafe { nvh::nvh_ipc_shim_recommended(ipc, &mut rw, &mut rh) };
+    }
+    let med = |k: &str| -> f64 {
+        let mut v: Vec<f64> = enc_windows.iter().filter_map(|w| w[k].as_f64()).filter(|x| *x > 0.0).collect();
+        if v.is_empty() { return 0.0; }
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v[v.len() / 2]
+    };
+    let mean = |k: &str| -> f64 {
+        let v: Vec<f64> = enc_windows.iter().filter_map(|w| w[k].as_f64()).collect();
+        if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 }
+    };
+    let gen: serde_json::Value = fg_stats.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+    let split = &nvenc_cfg["nvenc"]["split"];
+    let preset = nvidia_profile::NVH_KEYS.iter().find(|(k, _)| *k == "nvenc_quality_preset").map(|(_, v)| *v).unwrap_or(3);
+    let round2 = |x: f64| (x * 100.0).round() / 100.0;
+    json!({
+        "declared_fov": fov8, "fov_scale": scale, "render_quality": args.fov_quality, "ceiling": [ceiling.0, ceiling.1],
+        "game_render": [rw, rh], "stream_eye": [eye.0, eye.1], "encoded": [enc.0, enc.1], "foveated": cfg.foveated,
+        "foveation": { "center_size": [cfg.geom[0], cfg.geom[1]], "center_shift": [cfg.geom[2], cfg.geom[3]], "edge_ratio": [cfg.geom[4], cfg.geom[5]] },
+        "frame_gen": { "on": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "flow_size": gen["flow_size"], "flow_ms": gen["flow_ms_avg"], "synth_ms": gen["synth_ms_avg"] },
+        "nvenc": { "preset": preset, "split_mode": args.split_encode, "engines": split["engines"], "expected_strips": split["expected_strips"], "conditions_met": split["conditions_met"],
+                   "slices_seen": round2(mean("slices")), "encode_p50_ms": round2(med("p50")), "encode_p95_ms": round2(med("p95")), "ffr_ms": round2(mean("ffr")), "windows": enc_windows.len() },
+        "compose_ms": round2(if compose_ms.is_empty() { 0.0 } else { compose_ms.iter().sum::<f64>() / compose_ms.len() as f64 }),
+    })
 }
 
 /// Every frame-generation choice, logged whenever one changes (the night's tests are read back from these lines).
@@ -1454,6 +1546,8 @@ fn log_fg_config(origin: Instant, args: &Args, fg_active: bool, why: &str) {
 #[derive(Default)]
 struct RunStats {
     net: Vec<serde_json::Value>,
+    /// the encoder's 2-second windows during the run (ENC_WINDOWS: encode p50 / p95, slices per packet, foveation-pass ms)
+    enc: Vec<serde_json::Value>,
     lost: u64,
     meta: Option<games::Meta>,
 }
@@ -1461,6 +1555,7 @@ struct RunStats {
 impl RunStats {
     fn restart(&mut self) {
         self.net.clear();
+        self.enc.clear();
         self.lost = 0;
     }
     /// Rates: mean over the windows. Latencies: median and 95th percentile of the windows' medians (a window with no sane sample gives none);
@@ -1494,7 +1589,8 @@ fn net_summary_of(net: &[serde_json::Value], lost: u64) -> serde_json::Value {
 /// launcher reads the file and proposes. A run shorter than 20 s is not recorded. The headset's repeated-period share is given as the median
 /// 10-second window of the run (what the game is like most of the time) and its 90th percentile (its heavy parts): the proposal is made on the
 /// typical window, hiccups being a fact of life in VR (user, 2026-10-17).
-fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64, f64)], skipped: f64, run: &RunStats, gpu: &serde_json::Value, recorded: bool) {
+#[allow(clippy::too_many_arguments)]
+fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: f64, level: &str, secs: f64, rendered_fps: f64, streamed_fps: f64, windows: &[(f64, f64, f64)], skipped: f64, run: &RunStats, gpu: &serde_json::Value, pipeline: serde_json::Value, recorded: bool) {
     let pct = |v: &mut Vec<f64>, q: f64| -> f64 {
         if v.is_empty() { return 0.0; }
         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1515,6 +1611,7 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
         ses["level"] = json!(level);
         ses["net"] = run.net_summary();
         ses["gpu"] = json!({ "name": gpu["name"], "driver": gpu["driver"] });
+        ses["pipeline"] = pipeline.clone();   // the frame pipeline strip of the Game statistics app (docs/FOV_PIPELINE_OPTIM.md S8)
         ses
     };
     // a run too short to keep still reports its numbers (the streamer's tiles show the last session), flagged recorded:false; the file is not touched
@@ -1524,6 +1621,7 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
             rec["rendered_fps_low"].as_f64().unwrap_or(0.0), rec["headset_repeated_typ"].as_f64().unwrap_or(0.0) * 100.0, rec["headset_repeated_p90"].as_f64().unwrap_or(0.0) * 100.0));
     }
     rec["recorded"] = json!(recorded);
+    rec["pipeline"] = pipeline;
     rec["net"] = run.net_summary();
     rec["exe"] = json!(exe);
     rec["headset"] = json!(headset);
@@ -1805,6 +1903,7 @@ fn main() {
         }
         event(origin, "encoder", json!({ "width": w, "height": h, "noise": args.noise, "gpu_keepalive_duty_pct": args.gpu_keepalive }));
         nvenc_cfg = describe_encoder(origin, enc_handle, &args.dump_qpmap);
+        save_gpu_info(&args.config_dir.join("airframexr_gpu.json"), &gpu_info, &nvenc_cfg);
         live = Some(l);
     }
     let mut ipc: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -2305,7 +2404,7 @@ fn main() {
     let mut sent_ts: Vec<u64> = vec![];
     let views_path = args.config_dir.join("airframexr_views.json");
     let mut last_views = load_views(&views_path);
-    let mut logged_fov = ([1.0f32; 4], 0.0f32);   // the field-of-view restriction last logged (a change, or the first publish with one, is logged once)
+    let mut logged_fov = ([1.0f32; 4], 0.0f32, (0i32, 0i32));   // the field-of-view restriction last logged (a change, or the first publish with one, is logged once)
     let mut views_published = false;
     let mut deferred_reconfig = false;
     let (mut encode_errors, consecutive_errors) = (0usize, 0usize);
@@ -2352,7 +2451,7 @@ fn main() {
     };
     // the level changed during a run (the launcher, or the user): the segment played so far is recorded under the level it ran at (20 s or
     // more; the 2/3 segment of a Gears of War run was lost without this, 2026-10-17) and the record restarts here: a record belongs to one level
-    let restart_segment = |game: &mut Option<GameRun>, pipeline: &Option<std::sync::Arc<pipeline::Pipeline>>, ipc: *mut std::ffi::c_void, windows: &mut Vec<(f64, f64, f64)>, client0: &mut (u64, u64), rep0: &mut (u64, u64), old_level: &str, args: &Args, stats: &mut RunStats| {
+    let restart_segment = |game: &mut Option<GameRun>, pipeline: &Option<std::sync::Arc<pipeline::Pipeline>>, ipc: *mut std::ffi::c_void, windows: &mut Vec<(f64, f64, f64)>, client0: &mut (u64, u64), rep0: &mut (u64, u64), old_level: &str, args: &Args, stats: &mut RunStats, facts: serde_json::Value| {
         if let Some(g) = game.as_mut() {
             let (s, o) = fg_counts(pipeline);
             let seg_secs = g.seg_start.elapsed().as_secs_f64();
@@ -2363,7 +2462,7 @@ fn main() {
                 let seg_submitted = shim_submitted(ipc).wrapping_sub(g.seg_submitted0);
                 let headset = shared.headset.lock().clone().map(|(_, n, _)| n).unwrap_or_default();
                 let hz = pipeline.as_ref().map(|p| 1.0 / p.period().as_secs_f64()).unwrap_or(args.fps);
-                games_record_run(args, origin, &g.exe, &headset, hz, old_level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, windows, skipped, stats, &gpu_info, true);
+                games_record_run(args, origin, &g.exe, &headset, hz, old_level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, windows, skipped, stats, &gpu_info, facts, true);
             }
             g.seg_start = Instant::now();
             g.seg_frames0 = shared.frames_sent.load(Ordering::Relaxed);
@@ -2428,7 +2527,10 @@ fn main() {
                 if let Some(p) = pipeline.as_ref() {
                     set_frame_gen_live(origin, p.as_ref(), &args, want, &mut fg_active, ipc, "frame_gen");
                 }
-                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args, &mut run_stats);
+                {
+                    let facts = pipeline_facts(last_views.as_ref(), &args, ipc, eye_size, enc_size, &cur_cfg, fg_active, pipeline.as_ref().map(|p| p.fg_stats_json()), &nvenc_cfg, &run_stats.enc, &compose_ms);
+                    restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args, &mut run_stats, facts);
+                }
             }
             // frame generation rate, the fps cap and the content lag from AirFrameXR.exe (live; the settings are read at start too)
             let rate = vision::FG_RATE_REQ.swap(-1, Ordering::SeqCst);
@@ -2441,7 +2543,10 @@ fn main() {
                 }
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_rate");
-                restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args, &mut run_stats);
+                {
+                    let facts = pipeline_facts(last_views.as_ref(), &args, ipc, eye_size, enc_size, &cur_cfg, fg_active, pipeline.as_ref().map(|p| p.fg_stats_json()), &nvenc_cfg, &run_stats.enc, &compose_ms);
+                    restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args, &mut run_stats, facts);
+                }
             }
             let cap = vision::FG_CAP_REQ.swap(-1, Ordering::SeqCst);
             if cap >= 0 {
@@ -2468,6 +2573,7 @@ fn main() {
                 vision::RECENTER_REQ.store(true, Ordering::SeqCst);   // the player's forward and position at game start are the game's forward and origin, on every headset, with or without the launcher
                 run_windows.clear();
                 run_stats = RunStats::default();
+                if let Ok(mut g) = ENC_WINDOWS.lock() { g.clear(); }   // the run's encoder windows start with the game
                 run_client0 = logs::client_stats::client_frames_missed();
                 run_rep0 = pipeline.as_ref().map(|p| (p.fg_repeats.load(Ordering::Relaxed), p.fg_synths.load(Ordering::Relaxed) + p.fg_reals.load(Ordering::Relaxed))).unwrap_or((0, 0));
                 let (skips0, outputs0) = fg_counts(&pipeline);
@@ -2492,7 +2598,8 @@ fn main() {
                     let level = if fg_active { args.fg_rate.unwrap_or(FgRate::Half).name() } else { "off" };
                     let headset = shared.headset.lock().clone().map(|(_, n, _)| n).unwrap_or_default();
                     let hz = pipeline.as_ref().map(|p| 1.0 / p.period().as_secs_f64()).unwrap_or(args.fps);
-                    games_record_run(&args, origin, &g.exe, &headset, hz, level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, &run_windows, skipped, &run_stats, &gpu_info, seg_secs > 20.0);
+                    let facts = pipeline_facts(last_views.as_ref(), &args, ipc, eye_size, enc_size, &cur_cfg, fg_active, pipeline.as_ref().map(|p| p.fg_stats_json()), &nvenc_cfg, &run_stats.enc, &compose_ms);
+                    games_record_run(&args, origin, &g.exe, &headset, hz, level, seg_secs, seg_submitted as f64 / seg_secs, seg_frames as f64 / seg_secs, &run_windows, skipped, &run_stats, &gpu_info, facts, seg_secs > 20.0);
                 }
             }
             if let Some(g) = &game {
@@ -2537,6 +2644,7 @@ fn main() {
             if let Some(g) = game.as_ref() {
                 if let Some(w) = client_window.clone() { run_stats.net.push(w); }
                 run_stats.lost += lost_delta as u64;
+                if let Ok(mut g) = ENC_WINDOWS.lock() { run_stats.enc.extend(std::mem::take(&mut *g)); }
                 if run_stats.meta.as_ref().map(|m| m.title.is_empty()).unwrap_or(true) { run_stats.meta = games::find_meta(&g.exe).or(run_stats.meta.take()); }
             }
             if game.is_some() {
@@ -2642,6 +2750,7 @@ fn main() {
                         apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
                     }
                     nvenc_cfg = describe_encoder(origin, g.handle, &args.dump_qpmap);
+                    save_gpu_info(&args.config_dir.join("airframexr_gpu.json"), &gpu_info, &nvenc_cfg);
                     logs::general("INFO", &format!("encoder rebuilt for the negotiated stream: {ew}x{eh} (was {}x{})", enc_size.0, enc_size.1));
                     event(origin, "reconfigured", json!({
                         "from": format!("{cur_cfg:?}"), "to": format!("{want:?}"),
@@ -2677,13 +2786,14 @@ fn main() {
                 // the same headset sent last time (they arrive again right after the first decoded frame)
                 if let Some((fov8, off6)) = last_views {
                     let fov_scale = effective_fov_scale(&args, &fov8);
-                    let fov_quality = if fov_scale.iter().any(|v| *v < 1.0) { args.fov_quality } else { 0.0 };   // nothing to choose without a restriction
-                    if (fov_scale, fov_quality) != logged_fov {
-                        log_fov_restriction(origin, &fov_scale, fov_quality, if args.fov_override.is_some() { "override" } else { "none" });
-                        logged_fov = (fov_scale, fov_quality);
+                    let ceiling = render_ceiling(&args, eye_size);
+                    let fov_quality = if fov_scale.iter().any(|v| *v < 1.0) || ceiling.0 > 0 { args.fov_quality } else { 0.0 };   // nothing to choose without a restriction or a ceiling
+                    if (fov_scale, fov_quality, ceiling) != logged_fov {
+                        log_fov_restriction(origin, &fov_scale, fov_quality, ceiling, if args.fov_override.is_some() { "override" } else { "none" });
+                        logged_fov = (fov_scale, fov_quality, ceiling);
                     }
                     unsafe {
-                        nvh::nvh_ipc_config(ipc, pipeline.as_ref().map(|p| p.enc.lock().handle).unwrap_or(enc_handle), args.fps, eye_size.0, eye_size.1, fov8.as_ptr(), off6.as_ptr(), 10, read_encoding_gamma(&layout.session()), fov_scale.as_ptr(), fov_quality);
+                        nvh::nvh_ipc_config(ipc, pipeline.as_ref().map(|p| p.enc.lock().handle).unwrap_or(enc_handle), args.fps, eye_size.0, eye_size.1, fov8.as_ptr(), off6.as_ptr(), 10, read_encoding_gamma(&layout.session()), fov_scale.as_ptr(), fov_quality, ceiling.0, ceiling.1);
                         nvh::nvh_ipc_set_connected(ipc, 1); // after the config: the shim waits for this flag
                     }
                     views_published = true;

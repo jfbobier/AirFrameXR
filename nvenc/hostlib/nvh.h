@@ -38,7 +38,11 @@ void nvh_keepalive_stop(void* keepalive);
 void* nvh_ipc_open(void);
 // Writes the static device description the shim exposes to the OpenXR runtime. fov: per eye {left,right,up,down} tangents.
 // encoding_gamma: the negotiated ALVR encoding gamma (openvr_config.encoding_gamma); the shim sends frames as pow(v, 1/gamma).
-void nvh_ipc_config(void* ipc, void* nvh, double rate_hz, int eye_w, int eye_h, const float* fov8, const float* eye_offset6, int bits, float encoding_gamma, const float* fov_scale4, float render_quality);   // fov_scale4: outer, inner, upper, lower (fractions of the headset's tangents the game is told)
+// fov_scale4: outer, inner, upper, lower (fractions of the headset's tangents the game is told); ceil_w / ceil_h: the render quality slider's ceiling per eye
+// above the stream's eye size (the panel reference when the stream is fitted to the headset's visible window), 0 = the stream's eye size.
+void nvh_ipc_config(void* ipc, void* nvh, double rate_hz, int eye_w, int eye_h, const float* fov8, const float* eye_offset6, int bits, float encoding_gamma, const float* fov_scale4, float render_quality, int ceil_w, int ceil_h);
+// The per-eye render size the shim told the app (ipc.h ShimToHost::recommendedW/H; 0 before an app started).
+void nvh_ipc_shim_recommended(void* ipc, int* w, int* h);
 void nvh_ipc_set_connected(void* ipc, int connected);
 void nvh_ipc_publish_head(void* ipc, uint64_t client_ts_ns, const float* quat_xyzw, const float* pos, const float* lin_vel, const float* ang_vel);
 void nvh_ipc_publish_hand(void* ipc, int side, int valid, const float* quat_xyzw, const float* pos, const float* lin_vel, const float* ang_vel);

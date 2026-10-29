@@ -625,6 +625,7 @@ namespace AirFrameXR
             if (!linkTimer.Enabled) { linkTimer.Tick += (s, e) => LinkTick(); linkTimer.Start(); }
             NeedFind(true);
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
+            ApplyStreamFit(AppSettings.ReadClientFov(), false);   // the fit size into session.json before the host reads it (ALVR may have rewritten the file since)
             StartAudioRoute();
             var err = host.Start(args);
             if (err != null)
@@ -635,6 +636,29 @@ namespace AirFrameXR
             }
             footer.Text = "Streamer running. Open ALVR on the headset.";
             Log.Write("INFO", "streamer started: alvr_host " + args);
+        }
+
+        /// The stream fit (docs/FOV_PIPELINE_OPTIM.md, Advanced window): the stream's per-eye size = the saved density over the box the headset declares. Writes
+        /// session.json when the size differs from what it holds; the running host keeps its negotiated stream, the next streamer start takes the new one.
+        void ApplyStreamFit(double[] declared, bool fromHeadset)
+        {
+            try
+            {
+                var st = new AppSettings();
+                if (!st.StreamFitWindow || declared == null || st.StreamReferenceEye == null || st.StreamReferenceFov == null) return;
+                var fe = PipelineModel.FitEye(st.StreamReferenceEye, st.StreamReferenceFov, declared);
+                int w = Math.Min(fe[0], PipelineModel.MaxEyeWidth), h = Math.Min(fe[1], PipelineModel.MaxEyeHeight);
+                var s = Session.Load();
+                var cur = PipelineModel.SessionEye(s);
+                if (cur != null && cur[0] == w && cur[1] == h) return;
+                PipelineModel.WriteStreamEye(s, w, h);
+                Json.Save(Paths.Session, s);
+                st.StreamFitEye = new[] { w, h };
+                st.Save();
+                Log.Write("INFO", $"stream fit: {w} x {h} per eye over the headset's window (was {(cur == null ? "?" : cur[0] + " x " + cur[1])}), applies at the next streamer start");
+                if (fromHeadset) { footer.Text = $"Stream fit: {w} \u00D7 {h} per eye over the headset's window. Restart the streamer to apply it."; footer.ForeColor = Color.DarkGoldenrod; }
+            }
+            catch (Exception ex) { Log.Write("WARN", "stream fit: cannot write session.json: " + ex.Message); }
         }
 
         /// The streamer owns UDP 9943 (headset discovery), so it stops while the dialog searches; a chosen headset is paired (saved address) and
@@ -714,6 +738,17 @@ namespace AirFrameXR
                     NeedFind(false);
                     headsetConnected = true; MirrorSync();
                     if (ip.Length > 0 && ip != settings.HeadsetIp) { settings.HeadsetIp = ip; settings.Save(); }
+                    break;
+                case "views_config":   // the box the headset declares (8 tangents): with the stream fit on, the session's stream size follows the saved density
+                    if (d != null && d.TryGetValue("fov_tan", out var ft) && ft is object[] fa && fa.Length >= 8)
+                    {
+                        try
+                        {
+                            var f = fa.Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
+                            ApplyStreamFit(new[] { (f[0] + f[5]) / 2, (f[1] + f[4]) / 2, (f[2] + f[6]) / 2, (f[3] + f[7]) / 2 }, true);
+                        }
+                        catch (Exception ex) { Log.Write("WARN", "stream fit: " + ex.Message); }
+                    }
                     break;
                 case "client_disconnected":
                     headsetConnected = false; MirrorSync();

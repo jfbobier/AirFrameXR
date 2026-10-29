@@ -1,0 +1,116 @@
+{
+  "description": "The stream fitted to the calibrated window (3168x2496 per eye, foveation on) with the render quality slider's ceiling at the panel reference (--fov-ceiling 3552x3200, ipc renderCeiling) and the slider at 1: with no restriction the game must be told 3552x3200 per eye (the floor is the stream's 3168x2496, the ceiling the reference); at 0.5 it would be halfway. The rest of the chain as in e2e_fov_stream_r; the counter and gray-patch checks still read the stream. The counter and gray-patch readbacks are left out: the game renders 3552x3200 and composition filters it down to the 3168x2496 stream, so the probe's 64-px counter blocks are not 64 px in the stream (the fov_restrict checks carry the verdict: the recommended size equals the ceiling).",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "openvr_config.eye_resolution_width": 3168,
+    "openvr_config.eye_resolution_height": 2496,
+    "openvr_config.target_eye_resolution_width": 3168,
+    "openvr_config.target_eye_resolution_height": 2496,
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 3168,
+        "height": {
+          "set": true,
+          "content": 2496
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 3168,
+        "height": {
+          "set": true,
+          "content": 2496
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 420,
+    "fov_ceiling": "3552x3200",
+    "fov_quality": 1.0
+  },
+  "client": {
+    "seconds": 55,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "views_tan": "0.96,0.71,0.69,0.61"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 420,
+    "timeout_s": 60
+  },
+  "gpu_sample": true,
+  "timeout_s": 200,
+  "checks": {
+    "host_min_frames": 250,
+    "client_min_frames": 200,
+    "timestamps_monotonic": true,
+    "max_duplicate_timestamps": 400,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "color_range": "pc"
+    },
+    "decode": true,
+    "decode_frame_slack": 60,
+    "app_min_frames": 300,
+    "pose_roundtrip_max_rad": 0.06,
+    "min_yaw_range_rad": 0.3,
+    "refresh_hz": 90,
+    "max_pipeline_latency_ms": 150,
+    "negotiated": {
+      "view_resolution": [
+        3168,
+        2496
+      ],
+      "use_full_range": true,
+      "enable_foveated_encoding": true
+    },
+    "foveation": true,
+    "max_encode_ms_p95": 16,
+    "fov_restrict": {
+      "scale": [
+        100,
+        100,
+        100,
+        100
+      ],
+      "quality": 1.0,
+      "ceiling": [
+        3552,
+        3200
+      ],
+      "tol": 0.002
+    }
+  }
+}

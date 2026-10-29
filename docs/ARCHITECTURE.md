@@ -19,8 +19,8 @@ VR stack does (SteamVR's running start, Meta's Phase Sync, the OpenXR `xrWaitFra
 | `alvr_host.exe` | the streamer (`tools/host`): compositor boundary clock, encoder (ALVR's foveation pass + NVENC), ALVR's `server_core` for the connection, tracking, audio and the network |
 | `AirFrameXR.exe` / `configure.exe` | GUIs (C#): launch, status, pairing; discovery is done by the host (`--discover`) |
 
-Shim and host share one memory block (`ovrshim/ipc.h`, IPC v12): host → shim config, poses, display ticks, compositor
-pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock), heartbeat, haptics, diagnostics.
+Shim and host share one memory block (`ovrshim/ipc.h`, IPC v36): host → shim config (eye size, FoV, the game's restricted FoV and render quality with its ceiling), poses, display ticks, compositor
+pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock), heartbeat, haptics, diagnostics, the render size it told the app.
 
 ## Threads (v0.2)
 

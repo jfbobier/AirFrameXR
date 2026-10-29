@@ -394,6 +394,25 @@ namespace AirFrameXR
         /// 0..1: where the game's render size sits between the floor (the stream's pixel density over the restricted view) and the stream's eye size; 0 = the floor
         public double FovRenderQuality => Math.Max(0, Math.Min(1, Json.Num(Root, "video.fov_render_quality", 0)));
         public double FrameGenCapFps { get => Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }
+        /// the stream fit (docs/FOV_PIPELINE_OPTIM.md): size the stream from the saved density over whatever box the headset declares (a client that declares the
+        /// calibrated window then gets a smaller frame at the same pixels per degree); the reference is the eye size the user chose and the box the headset declared then
+        public bool StreamFitWindow { get => Json.Bool(Root, "video.stream_fit_window", false); set { if (value) Json.Set(Root, "video.stream_fit_window", true); else Json.Remove(Root, "video.stream_fit_window"); } }
+        public int[] StreamReferenceEye
+        {
+            get { var a = Json.Get(Root, "video.stream_reference_eye") as System.Collections.IList; if (a == null || a.Count < 2) return null; try { var v = new[] { Convert.ToInt32(a[0], CultureInfo.InvariantCulture), Convert.ToInt32(a[1], CultureInfo.InvariantCulture) }; return v[0] > 0 && v[1] > 0 ? v : null; } catch { return null; } }
+            set { if (value == null) Json.Remove(Root, "video.stream_reference_eye"); else Json.Set(Root, "video.stream_reference_eye", value.Select(x => (object)(double)x).ToList()); }
+        }
+        public double[] StreamReferenceFov
+        {
+            get { var a = Json.Get(Root, "video.stream_reference_fov") as System.Collections.IList; if (a == null || a.Count < 4) return null; try { var v = new[] { 0, 1, 2, 3 }.Select(i => Convert.ToDouble(a[i], CultureInfo.InvariantCulture)).ToArray(); return v.All(x => x > 0) ? v : null; } catch { return null; } }
+            set { if (value == null) Json.Remove(Root, "video.stream_reference_fov"); else Json.Set(Root, "video.stream_reference_fov", value.Select(x => (object)Math.Round(x, 4)).ToList()); }
+        }
+        /// the fit size the streamer last wrote into session.json (re-applied before each streamer start, in case ALVR rewrote the file)
+        public int[] StreamFitEye
+        {
+            get { var a = Json.Get(Root, "video.stream_fit_eye") as System.Collections.IList; if (a == null || a.Count < 2) return null; try { var v = new[] { Convert.ToInt32(a[0], CultureInfo.InvariantCulture), Convert.ToInt32(a[1], CultureInfo.InvariantCulture) }; return v[0] > 0 && v[1] > 0 ? v : null; } catch { return null; } }
+            set { if (value == null) Json.Remove(Root, "video.stream_fit_eye"); else Json.Set(Root, "video.stream_fit_eye", value.Select(x => (object)(double)x).ToList()); }
+        }
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
         public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", true); set => Json.Set(Root, "video.frame_gen_recommended", value); }
         /// arrival margin of the phase lock in ms (host default 7; the host reads it at start) and the GPU keepalive duty in % (0 = off); 0 = not set

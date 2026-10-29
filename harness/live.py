@@ -192,7 +192,17 @@ def write_settings(video_overrides, session_overrides):
             edits.append(("max_prediction_ms", int(session_overrides["max_prediction_ms"])))
         if "bitrate_mbps" in session_overrides:
             edits.append(("ConstantMbps", int(session_overrides["bitrate_mbps"])))
+        # the stream's per-eye size (the fitted-window A/B of docs/FOV_PIPELINE_OPTIM.md S5): the two Absolute resolution blocks and ALVR's openvr_config cache
+        if "eye" in session_overrides:
+            w, h = (int(x) for x in session_overrides["eye"])
+            edits += [("width", w), ("eye_resolution_width", w), ("target_eye_resolution_width", w), ("eye_resolution_height", h), ("target_eye_resolution_height", h)]
+        # the foveation geometry (session_settings names and openvr_config's foveation_* copies): {"center_size_x": .., "center_size_y": .., "center_shift_x": .., "center_shift_y": .., "edge_ratio_x": .., "edge_ratio_y": ..}
+        for k, v in (session_overrides.get("foveation") or {}).items():
+            edits += [(k, float(v)), ("foveation_" + k, float(v))]
         body = "\n".join(f"$t = [regex]::Replace($t, '\"{k}\":\\s*[0-9.]+', '\"{k}\": {v}')" for k, v in edits)
+        if "eye" in session_overrides:
+            h = int(session_overrides["eye"][1])
+            body += f"\n$t = [regex]::Replace($t, '(\"height\":\\s*\\{{\\s*\"set\":\\s*true,\\s*\"content\":\\s*)[0-9]+', ('${{1}}' + '{h}'))"
         ps(f"""
 $p = '{INSTALL}\\config\\session.json'
 Copy-Item $p "$p.bak-live" -Force

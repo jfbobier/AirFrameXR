@@ -395,7 +395,7 @@ void* nvh_ipc_open(void) {
     return ipc;
 }
 
-void nvh_ipc_config(void* i, void* hh, double rate, int ew, int eh, const float* fov8, const float* off6, int bits, float encoding_gamma, const float* fov_scale4, float render_quality) {
+void nvh_ipc_config(void* i, void* hh, double rate, int ew, int eh, const float* fov8, const float* off6, int bits, float encoding_gamma, const float* fov_scale4, float render_quality, int ceil_w, int ceil_h) {
     auto* ipc = (Ipc*)i; auto* n = (Nvh*)hh;
     auto& h = ipc->state->host;
     h.displayRateHz = rate; h.eyeWidth = ew; h.eyeHeight = eh; h.encodeBits = bits; h.encodingGamma = encoding_gamma;
@@ -405,6 +405,7 @@ void nvh_ipc_config(void* i, void* hh, double rate, int ew, int eh, const float*
     }
     for (int k = 0; k < 4; k++) h.fovScale[k] = fov_scale4 && fov_scale4[k] > 0.f ? fov_scale4[k] : 1.f;   // the game's field of view (outer, inner, upper, lower)
     h.renderQuality = render_quality >= 0.f && render_quality <= 1.f ? render_quality : 0.f;   // where the game's render size sits between the floor and the stream's eye size
+    h.renderCeilingW = ceil_w > 0 && ceil_h > 0 ? ceil_w : 0; h.renderCeilingH = ceil_w > 0 && ceil_h > 0 ? ceil_h : 0;   // the slider's ceiling above the stream's eye size (0 = none)
     if (n) { h.adapterLuidLow = n->luid.LowPart; h.adapterLuidHigh = n->luid.HighPart; }
     MemoryBarrier();
     h.configSeq++;
@@ -692,6 +693,11 @@ void nvh_release_shared(void* hh) {
     n->fgLast = false;
     for (auto& f : n->ffr) f.reset();
     for (int k = 0; k < airframexr_ipc::kSlots; k++) { if (n->shared[k]) { n->shared[k]->Release(); n->shared[k] = nullptr; } n->sharedHandle[k] = 0; }
+}
+
+void nvh_ipc_shim_recommended(void* i, int* w, int* h) {
+    const auto& s = ((Ipc*)i)->state->shim;
+    *w = s.recommendedW; *h = s.recommendedH;
 }
 
 void nvh_ipc_shim_stats(void* i, uint32_t* submit_mode, uint32_t* ts_matched, uint32_t* ts_fallback) {
