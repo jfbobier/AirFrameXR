@@ -546,6 +546,7 @@ namespace AirFrameXR
                 for (int k = 0; k < 4; k++) Json.Set(st.Root, V + FovKeys[k], Math.Round(v[k], 4));
                 Json.Set(st.Root, V + "fov_render_quality", Math.Round(fovQ.Value / 100.0, 2));
                 Json.Set(st.Root, V + "fov_for", clientFov.Select(x => (object)Math.Round(x, 4)).ToList());   // the headset these values were made for (they are absolute tangents)
+                Json.Set(st.Root, V + "fov_for_headset", st.HeadsetName);   // its name: the same headset keeps the values when its app declares another box
             }
             else Json.Remove(st.Root, V + "fov_override");   // the saved values stay: ticking again brings them back
         }
@@ -689,6 +690,7 @@ namespace AirFrameXR
             foreach (var fk in FovKeys) Json.Remove(st.Root, V + fk);
             Json.Remove(st.Root, V + "fov_render_quality");
             Json.Remove(st.Root, V + "fov_for");
+            Json.Remove(st.Root, V + "fov_for_headset");
             if (st.StreamFitWindow && st.StreamReferenceEye != null) WriteSessionEye(st.StreamReferenceEye);
             st.StreamFitWindow = false; st.StreamFitEye = null;
             if (st.FrameGenRate == "uncapped") st.FrameGenRate = Back(st);

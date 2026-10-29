@@ -341,8 +341,13 @@ namespace AirFrameXR
                 var vals = new[] { 0.94, 0.93, 0.90, 0.76 }; var keys = new[] { "video.fov_outer", "video.fov_inner", "video.fov_upper", "video.fov_lower" };
                 for (int k = 0; k < 4; k++) global::AirFrameXR.Json.Set(st0.Root, keys[k], vals[k]);
                 global::AirFrameXR.Json.Set(st0.Root, "video.fov_for", avp.Select(x => (object)x).ToList());
+                global::AirFrameXR.Json.Set(st0.Root, "video.fov_for_headset", "Apple Vision Pro");
+                global::AirFrameXR.Json.Set(st0.Root, "headset.name", "Apple Vision Pro");
                 st0.Save();
-                lines.Add("fits_avp=" + new AppSettings().FovFits(avp) + " fits_quest=" + new AppSettings().FovFits(quest) + " fits_unknown=" + new AppSettings().FovFits(null) + " fits_avp_scaled=" + new AppSettings().FovFits(avp.Select(x => x * 0.8).ToArray()));   // the visionOS app's FoV Scale 0.8 is a uniform factor: the override stays
+                var ceiling = new[] { 1.05, 0.80, 0.76, 0.87 };   // the AirFrameXR client's ceiling (docs/FOV_CLIENT_CEILING.md): another shape, the same headset
+                var fitsAvp = new AppSettings().FovFits(avp); var fitsUnknown = new AppSettings().FovFits(null); var fitsScaled = new AppSettings().FovFits(avp.Select(x => x * 0.8).ToArray()); var fitsCeiling = new AppSettings().FovFits(ceiling);
+                var st1 = new AppSettings(); global::AirFrameXR.Json.Set(st1.Root, "headset.name", "Meta Quest 3"); st1.Save();   // a Quest paired: another headset
+                lines.Add("fits_avp=" + fitsAvp + " fits_quest=" + new AppSettings().FovFits(quest) + " fits_unknown=" + fitsUnknown + " fits_avp_scaled=" + fitsScaled + " fits_same_name_new_shape=" + fitsCeiling);   // the visionOS app's FoV Scale 0.8 is a uniform factor and the client's ceiling another shape: the override stays on the same headset
                 using (var f = new AdvancedForm(quest, false, null, null))
                 {
                     f.Opacity = 0; f.ShowInTaskbar = false; f.StartPosition = FormStartPosition.Manual; f.Location = new Point(-4000, -4000);

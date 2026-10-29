@@ -289,5 +289,12 @@ The mock client flag and the `live.py` edits are lab tooling, not the engine.
   `e2e_fov_restrict_quality_half`, `e2e_openxr_probe` on the new IPC), the GUI build and its checks (`pipeline_model_check.py`, `ui_matrix.py --only
   advanced-switches` and `--only performance`, `fov_profile_check.py`, `performance_check.py`) are **owed**. The GUI compiles in WSL (`tools/wsl/check_gui.sh`),
   the host and the mock pass `cargo check`, the shim and the host library pass `check_cpp.sh`.
-- Not done: anything on a headset or on the 5090 (split strips at the shrunk size, the compose saving, the band judgement); the client build (S4); S6 (the
-  declare channel) and S10 (the visible-shape warp), both gated on the headset A/B of S5.
+- 2026-10-29, after the laptop's Windows update: the owed round, all green. `e2e_fov_declared_r`, `e2e_fov_declared_r_tighter` (the mock declaring the
+  rectangle, patched), `e2e_fov_stream_r_quality_full` (the ceiling: the app told 3552 x 3200 over the 3168 x 2496 stream), the FoV regressions
+  `e2e_fov_override`, `e2e_fov_restrict_none`, `e2e_fov_restrict_quality_half` and `e2e_openxr_probe` on the new IPC: **7 of 7 PASS**.
+  `pipeline_model_check.py`: **148 of 148 cases, 0 mismatches** between the launcher's `PipelineModel` and the Python oracle (sizes, bands, strips, warnings).
+  `ui_matrix.py --only advanced-switches` and `--only performance` (the fit tick row and the Game statistics strip among them): 0 FAIL, 0 warnings.
+  `fov_profile_check.py` and `performance_check.py`: PASS. So S2, S3, S3b, S8 and S9 are **built and lab-checked**; what the lab cannot judge (the picture on a
+  headset, the compose saving on the 5090, the split strips at the shrunk size) stays owed to S5.
+- Not done: anything on a headset or on the 5090; the client build (S4, now the ceiling of `docs/FOV_CLIENT_CEILING.md`); S6 (the declare channel) and S10
+  (the visible-shape warp), both gated on the headset A/B of S5.
