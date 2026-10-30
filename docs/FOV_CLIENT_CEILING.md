@@ -124,3 +124,17 @@ ceiling; the app that opened on the headset was still the ceiling one. The measu
 0.86 / 0.70 / 0.63 / 0.66 (following gaze; `docs/AVP_FOV.md`, fit 3). The lower edge measured 0.66 against the shipped 0.61 and the ceiling's 0.87: the ceiling leaves room for it, and the profile moved to 0.66 the same night (`docs/AVP_FOV.md`).
 The sweep only ran the following pass (the fixed-gaze pass of `run_sweep.bat` was not started). The first attempt of the evening failed because the probe was launched before the
 streamer (the probe binds to the host at its start and goes headless after 20 s); the order is streamer, headset connected, then `run_sweep.bat`.
+
+## The margins with a chroma key on (client 1.2.1)
+
+Only while the streamer's chroma key (`video.passthrough`, the wizard's "transparent background") is on; with it off the margins are the opaque black described above and nothing below applies.
+
+The restricted frame covers the declared box; what lies between it and the edge of the visible window is the margin. The rule is "the margin looks like the frame's own edge, but black if that edge is picture":
+
+- The client clears the render target **transparent** and draws a ring around the frame (`videoFrameBorderVertexShader` in the fork's `Shaders.metal`): 4 thin quads, inner vertices on the frame quad's corners, outer ones far outside, both carrying the corner's texture coordinate (clamp to edge, no overdraw of the picture).
+- Its fragment runs the same key mask on that edge texel and writes **black with the mask as alpha**. A game's edge is picture: mask 1, opaque black margin (the FOV restriction as before). The idle frame and the desktop mirror's background are the key colour (`00FF00` everywhere): mask 0, transparent margin, so the room shows to the edge of the window with no black frame around it.
+- It is decided on the GPU from the decoded frame, so the margin changes on the same frame as the picture: no game-start signal, no host state, no ALVR change. `RealTimeConfig` (live `video.passthrough`) was considered and set aside: the v20 client drops it in `c_api.rs`, the server sends it once a second, and it races the video.
+- Cost, by construction: one texture sample per ring pixel (the ring is the gap between the declared box and the window, about 1 % or less of the pixels at the 99 % rectangle), same render pass, no extra load or store. **Not measured**; the check owed is the command buffer's GPU time with and without the ring on the headset.
+- Consequence for the streamer: nothing to do, as long as the idle colour fills the whole frame including its outermost texels (a border of another colour would make the margin opaque). A game whose edge pixels sit near the key colour gets a partly transparent margin (the ramp makes this unlikely; untested).
+
+Status: built (TestFlight run 41041671109 on the `kteque` fork, version 1.2.1, branch `airframexr-client` `576577f`); **not tried on a headset**. To check: between games the room shows with no black frame; in a game the margin is black as in 1.2.0; the desktop mirror floats on the room with no black frame.
