@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SHOTS = {   # harness case -> README image
     "launcher-ready": "ui_launcher", "streamer-clean": "ui_streamer", "performance": "ui_performance", "wizard-page3": "ui_wizard",
     "suggestions": "ui_suggestions", "firewall-rules": "ui_firewall",
+    "rec-recording": "ui_blackbox_recorder", "analyze-problem": "ui_blackbox_analyzer",   # the Black Box (docs/BENCH_UI.md)
 }
 p = subprocess.run([sys.executable, str(ROOT / "harness/ui_matrix.py"), "--matrix", "1920x1080@125"], capture_output=True, text=True)
 m = re.search(r"PNGs in (\S+)", p.stdout)

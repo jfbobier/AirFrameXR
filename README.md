@@ -147,12 +147,44 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <!-- End desktop mirror illustration -->
 
-**Black Box: when a game does not run well.** A separate package (the telemetry build) holds two more programs, the **Black Box Recorder** and the **Black Box Analyzer**. The recorder is the streamer window with a
-recording panel: press F8 (configurable) in the headset session, or tick *Full session* to record from the game's start to its close; it copies your normal streamer settings and never changes them. The analyzer
-(separate, run afterwards) reads the recording and says where the time went: the game, the encoder, the sender or the GPU, with the worst 10-second windows for a long session. Nothing in it needs administrator
-rights except one optional *Deep trace* button. See [docs/TELEMETRY_PLAN.md](docs/TELEMETRY_PLAN.md) and [docs/BENCH_UI.md](docs/BENCH_UI.md) (status: tested on the lab rig and the UI matrix, not yet in a headset session).
+## Black Box: the performance suite
 
-<p align="center"><img src="branding/blackbox/banner/blackbox-banner.png" width="640" alt="AirFrameXR Black Box, performance flight recorder"></p>
+![AirFrameXR Black Box, performance flight recorder](branding/blackbox/banner/blackbox-banner.png)
+
+When a game stutters, the first question is *where does the time go*: the game, the encoder, the network, the GPU? The **Black Box** answers it without touching how you normally stream.
+It is a **performance flight recorder** and an analyzer, in a separate install that ships inside the download (`bench\telemetry\`). Most late frames come from the game itself (DLSS quality,
+ray tracing, resolution), so the report says so when the stream waited for the game and the GPU was busy.
+
+**Black Box Recorder** (`blackbox_recorder.exe`) is the streamer window with a recording panel. It copies your normal streamer's settings and headset pairing when it starts (one way: your normal
+folder is never written), then records:
+
+- on a key, **F8** by default (configurable; the game never sees the key), or
+- for a **full session** (tick it once): from the game's start to its close, for games where the problem shows up an hour in.
+
+While it records it samples the GPU (utilisation, clocks, power, temperature, VRAM, power limiter, encoder), the Windows counters (CPU, memory, network, the GPU engines of the game and the
+streamer), and keeps the streamer's per-frame files, into `logs\performance\<time>_<scene>\`. An optional **Deep trace (admin)** button records GPU and CPU scheduling for 20 s with Windows' own
+recorder; it is the only thing in the suite that can ask for administrator rights, and declining changes nothing.
+
+<p align="center"><img src="docs/images/ui_blackbox_recorder.png" width="640" alt="The Black Box Recorder: the streamer window with the Black Box header, a red REC lamp and the recording panel"></p>
+
+**Black Box Analyzer** (`blackbox_analyzer.exe`) is a separate program you run afterwards. Nothing is analyzed until you click. It names the stage that made the frames late, shows the worst
+10-second windows of a long session (when it went bad), lists the worst late frames, replays old recordings, exports a recording as a zip, deletes old ones, and opens a recording from another PC.
+It refuses to analyze while a recording is running, so it never competes with your game for the CPU.
+
+<p align="center"><img src="docs/images/ui_blackbox_analyzer.png" width="640" alt="The Black Box Analyzer: recordings on the left, the verdict, the findings with a suggested test each, and the worst 10-second windows"></p>
+
+*(The windows above are rendered by the project's UI harness with made-up demo data, not a real recording.)*
+
+**How to use it.** Close the normal streamer (one headset, one port), start `bench\telemetry\AirFrameXR.exe` and open the Black Box Recorder, connect the headset and start the game, press F8 (or tick
+*Full session* first), play the scene that stutters, press F8 again, then open the Analyzer and click *Analyze*. To test other streamer settings, change them in the normal streamer, then come back.
+
+**Why it is a separate install.** Per-frame logging costs CPU, so the normal streamer is built without it: it never writes a per-frame record and never asks for administrator rights. The Black Box is
+the same code built with the telemetry on, so a diagnosis never changes the numbers of everyday streaming ([how it is built](docs/ARCHITECTURE.md#telemetry-and-the-black-box)).
+
+**What has been tested.** On the lab rig (RTX 3080 Ti laptop): the probe and the report against generated sessions with known faults and known non-faults, the recorder's file handling, and the windows at
+1080p, 1440p and 4K at 100-200 % scale. The probe's own cost against the pacing lab: invisible at 1 Hz, +0.25 ms at the 95th percentile at 5 Hz. **Not yet tested: a recording in a real headset session**
+(F8 in real games, a full session, the Deep trace). Treat the first verdicts as a first reading and tell us what you see. Design, measurements and the test matrix: [docs/TELEMETRY_PLAN.md](docs/TELEMETRY_PLAN.md),
+[docs/BENCH_UI.md](docs/BENCH_UI.md).
 
 ## Features
 - **Setup wizard** (`configure.exe`): reads what the headset supports, offers a community profile, a pre-filled manual configuration or your existing ALVR settings, then
@@ -174,7 +206,7 @@ rights except one optional *Deep trace* button. See [docs/TELEMETRY_PLAN.md](doc
 - **Desktop mirror** (optional): see above; it works with either hand.
 - **Advanced picture and FOV settings**: the switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect and what we
   measured; a switch at its default is removed from the settings file. The HEVC QP map stays on by default and its trade-off is written next to it.
-- **Black Box** (own package): a performance flight recorder and analyzer for one game, see above.
+- **Black Box** (a separate install inside the download): a performance flight recorder and analyzer for one game, [see above](#black-box-the-performance-suite).
 - **Lab tools**: the test harness below, including a frame generation judge ([docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md)) and the QP map A/B.
 
 What changed in each version: [docs/releases/](docs/releases/) (1.0 onward; earlier notes are in the GitHub releases and the archive). `docs/progress.md` is the current status: what is built, what is tested (and how), what is not. Older history: [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md).
