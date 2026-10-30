@@ -6,15 +6,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 import lib
 
 ROOT = lib.ROOT
-SOURCES = "Common.cs PipelineModel.cs Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs FindHeadset.cs AudioRoute.cs AirFrameXR.cs Launcher.cs Performance.cs UiTest.cs Bench.cs PerfCore.cs PerfReport.cs"
+SOURCES = "Common.cs PipelineModel.cs Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs FindHeadset.cs AudioRoute.cs AirFrameXR.cs Launcher.cs Performance.cs UiTest.cs BlackBoxBrand.cs BenchRecorder.cs PerfAnalyze.cs PerfCore.cs PerfReport.cs"
 
 
 def build(rid):
     for d in ("_tmp\\uitest\\src\\res", f"runs\\{rid}", "_tmp\\uitest\\run"):
         lib.b_run(f"if not exist {d} mkdir {d}")
-    for f in sorted((ROOT / "tools/gui").glob("*.cs")) + sorted((ROOT / "tools/bench").glob("Perf[CR]*.cs")) + [ROOT / "tools/gui/app.manifest"]:   # the Bench window compiles with perfcore's two sources
+    for f in sorted((ROOT / "tools/gui").glob("*.cs")) + sorted((ROOT / "tools/bench").glob("Perf[CR]*.cs")) + [ROOT / "tools/gui/app.manifest"]:   # the Bench recorder and analyzer compile with perfcore's two sources
         lib.b_put(f, f"_tmp/uitest/src/{f.name}")
-    for f in ("airframexr.ico", "logo_640.png", "chroma_passthrough.png"):
+    for f in ("airframexr.ico", "logo_640.png", "chroma_passthrough.png", "blackbox_128.png"):
         lib.b_put(ROOT / "tools/gui/res" / f, f"_tmp/uitest/src/res/{f}")
     lib.b_put(ROOT / "harness/fixtures/ui_matrix/config", "_tmp/uitest/run/")
     lib.b_put(ROOT / "harness/fixtures/ui_matrix/logs", "_tmp/uitest/run/")   # a debug session of a noisy laptop: the results page then shows a full list of suggestions
@@ -28,7 +28,7 @@ def build(rid):
     csc = "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Current\\Bin\\Roslyn\\csc.exe"
     bat = ("@echo off\r\n"
            f"\"{csc}\" /nologo /noconfig /target:winexe /platform:x64 /langversion:latest /nowarn:1701,1702 /main:AirFrameXR.UiTest {refs} "
-           f"\"/win32manifest:{src}\\app.manifest\" \"/resource:{src}\\res\\logo_640.png,logo_640.png\" \"/resource:{src}\\res\\chroma_passthrough.png,chroma_passthrough.png\" "
+           f"\"/win32manifest:{src}\\app.manifest\" \"/resource:{src}\\res\\logo_640.png,logo_640.png\" \"/resource:{src}\\res\\chroma_passthrough.png,chroma_passthrough.png\" \"/resource:{src}\\res\\blackbox_128.png,blackbox_128.png\" "
            f"\"/out:{base}\\_tmp\\uitest\\run\\uitest.exe\" {files}\r\n")
     lib.CACHE.mkdir(parents=True, exist_ok=True)
     (lib.CACHE / "uitest_build.bat").write_text(bat)

@@ -53,10 +53,12 @@ namespace AirFrameXR
             BackColor = Color.White;
 
             var body = new TableLayoutPanel { Dock = DockStyle.None, Location = Point.Empty, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
-            foreach (var t in Tools) body.Controls.Add(MakeCard(t));
-            // the Bench package (telemetry build, docs/TELEMETRY_PLAN.md) carries bin\bench.exe: one more card; the stock package does not, so nothing shows there
-            if (File.Exists(Path.Combine(Paths.Bin, "bench.exe")))
-                body.Controls.Add(MakeCard(new Tool { Title = "Bench (performance diagnosis)", Exe = @"bin\bench.exe", What = "Find where the time goes in one game: record a scene, read the verdict." }));
+            // the Black Box package (docs/TELEMETRY_PLAN.md) carries bin\blackbox_analyzer.exe: two cards only (settings are copied from the normal install, so editing them here would be lost); the stock package has none of it
+            var tools = File.Exists(Path.Combine(Paths.Bin, "blackbox_analyzer.exe"))
+                ? new[] { new Tool { Title = "Black Box Recorder", Exe = @"bin\blackbox_recorder.exe", Primary = true, What = "Start the streamer with recording: it copies your normal settings, then records a scene or a whole game session." },
+                          new Tool { Title = "Black Box Analyzer", Exe = @"bin\blackbox_analyzer.exe", What = "Analyze, replay, export or delete recordings." } }
+                : Tools;
+            foreach (var t in tools) body.Controls.Add(MakeCard(t));
             body.Controls.Add(sys);
             // quiet links: the full ALVR settings, and the help
             var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
@@ -156,7 +158,7 @@ namespace AirFrameXR
 
         // The launcher steps aside while a tool is open and comes back when the last one is closed (the wizard hands over to the streamer: the launcher
         // waits for every tool, not for the one it started).
-        static readonly string[] ToolProcesses = { "streamer", "configure", "performance" };
+        static readonly string[] ToolProcesses = { "streamer", "configure", "performance", "blackbox_recorder", "blackbox_analyzer" };
         readonly Timer watch = new Timer { Interval = 500 };
         Process launched;
         static bool AnyToolOpen() => ToolProcesses.Any(n => Process.GetProcessesByName(n).Length > 0);

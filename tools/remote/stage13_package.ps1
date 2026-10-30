@@ -51,10 +51,15 @@ if (Test-Path $suffixFile) { $version += (Get-Content $suffixFile -Raw).Trim() }
 $flavour = if (Test-Path "$root\_tmp\flavour.txt") { (Get-Content "$root\_tmp\flavour.txt" -Raw).Trim() } else { 'debug' }
 Set-Content -Path "$pkg\bin\flavour.txt" -Value $flavour -NoNewline
 if ($flavour -ne 'release') { $version += '-debug' }
-# the Bench tools (docs/TELEMETRY_PLAN.md, tools/bench/, tools/gui/Bench.cs) ship only in the telemetry (debug) package: the stock package has no bench file at all
-$benchFiles = @('bench.exe', 'bench.exe.config', 'perfcore.dll', 'perfreport.exe')
-foreach ($f in $benchFiles) {
-    if ($flavour -ne 'release' -and (Test-Path "$root\out\bench\$f")) { Copy-Item "$root\out\bench\$f" "$pkg\bin" -Force }
+# the Black Box package (docs/TELEMETRY_PLAN.md): the debug (telemetry) package is a complete install that also carries the two Black Box programs, the recorder (the stock streamer sources + tools/gui/BenchRecorder.cs,
+# under its own name next to the normal streamer.exe) and the analyzer; the stock (release) package has none of it and never gets one of these files (moved out if an earlier debug package left it)
+$benchFiles = @('blackbox_recorder.exe', 'blackbox_recorder.exe.config', 'blackbox_analyzer.exe', 'blackbox_analyzer.exe.config', 'perfcore.dll', 'perfreport.exe')
+if ($flavour -ne 'release') {
+    foreach ($f in $benchFiles) { if (Test-Path "$root\out\bench\$f") { Copy-Item "$root\out\bench\$f" "$pkg\bin" -Force } }
+} else {
+    foreach ($f in $benchFiles + @('bench.exe', 'bench.exe.config', 'perfanalyze.exe', 'perfanalyze.exe.config')) { if (Test-Path "$pkg\bin\$f") { Move-Item "$pkg\bin\$f" "$root\_tmp\stale_$f" -Force } }
+}
+}
     elseif ($flavour -eq 'release' -and (Test-Path "$pkg\bin\$f")) { Move-Item "$pkg\bin\$f" "$root\_tmp\stale_$f" -Force }   # left by an earlier debug package: moved out, never shipped
 }
 $persFile = "$root\_tmp\install\airframexr.personal.json"

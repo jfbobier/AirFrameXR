@@ -29,6 +29,7 @@ namespace AirFrameXR.Perf
         public string VerdictStatus = "INSUFFICIENT", Verdict = "";
         public readonly List<Finding> Findings = new List<Finding>();
         public readonly List<WorstFrame> Worst = new List<WorstFrame>();
+        public readonly List<string> Hotspots = new List<string>();   // the worst 10 s windows: "when did it go bad" for a long recording
         public readonly List<KeyValuePair<string, string>> Tiles = new List<KeyValuePair<string, string>>();
         public string Markdown = "";
     }
@@ -87,13 +88,15 @@ namespace AirFrameXR.Perf
         static string N(double v, string f = "F1") { return double.IsNaN(v) ? "n/a" : v.ToString(f, C); }
         static string Pct(double v) { return double.IsNaN(v) ? "n/a" : (v * 100).ToString("F2", C) + " %"; }
 
-        static double StartQpc(string dir)
+        static double StartQpc(string dir) { return SessionNum(dir, "started_qpc_s"); }
+        static double EndQpc(string dir) { return SessionNum(dir, "ended_qpc_s"); }
+        static double SessionNum(string dir, string key)
         {
             try
             {
                 var s = File.ReadAllText(Path.Combine(dir, "session.json"));
-                int i = s.IndexOf("\"started_qpc_s\":"); if (i < 0) return double.NaN;
-                i += 16; int j = s.IndexOfAny(new[] { ',', '\n' }, i);
+                int i = s.IndexOf("\"" + key + "\":"); if (i < 0) return double.NaN;
+                i += key.Length + 3; int j = s.IndexOfAny(new[] { ',', '\n' }, i);
                 double v; return double.TryParse(s.Substring(i, j - i).Trim(), NumberStyles.Float, C, out v) ? v : double.NaN;
             }
             catch { return double.NaN; }
@@ -120,6 +123,7 @@ namespace AirFrameXR.Perf
             var health = Read(Path.Combine(dir, "logger_health.csv"));
             double t0 = StartQpc(dir);
             double from = double.IsNaN(t0) ? double.NaN : t0 + warmupSeconds;
+            double to = EndQpc(dir);     // the engine's files can hold more than this recording (a whole streamer run): the window is cut here
 
             // ---- host frames in the window
             var rows = new List<int>();
@@ -127,7 +131,7 @@ namespace AirFrameXR.Perf
             {
                 var ts = hf.Get("t_send");
                 var sl = hf.Has("slot") ? hf.Get("slot") : null;
-                for (int i = 0; i < ts.Count; i++) if (!double.IsNaN(ts[i]) && (double.IsNaN(from) || ts[i] >= from) && (sl == null || sl[i] != -1)) rows.Add(i);   // the idle (green) frames are not the game's stream
+                for (int i = 0; i < ts.Count; i++) if (!double.IsNaN(ts[i]) && (double.IsNaN(from) || ts[i] >= from) && (double.IsNaN(to) || ts[i] <= to) && (sl == null || sl[i] != -1)) rows.Add(i);   // the idle (green) frames are not the game's stream
                 rows = rows.OrderBy(i => ts[i]).ToList();
                 if (double.IsNaN(from) && rows.Count > 0) { double first = ts[rows[0]] + warmupSeconds; rows = rows.Where(i => ts[i] >= first).ToList(); }
             }
@@ -194,6 +198,23 @@ namespace AirFrameXR.Perf
                 R.Worst.AddRange(worst.OrderByDescending(w => w.GapMs).Take(10));
             }
 
+            double gpuP95 = double.NaN;
+            if (gpu != null && gpu.Rows >= 3 && gpu.Has("gpu_util_pct")) { var gu = gpu.Get("gpu_util_pct"); var gq = gpu.Get("sample_qpc"); gpuP95 = P(Enumerable.Range(0, gu.Count).Where(i => (double.IsNaN(from) || gq[i] >= from) && (double.IsNaN(to) || gq[i] <= to)).Select(i => gu[i]).ToList(), 0.95); }
+
+            // the worst 10 s windows of the recording: for a long one, WHEN it went bad
+            if (haveHost)
+            {
+                var wt = hf.Get("t_send"); var wins = new Dictionary<int, int[]>();
+                var gapAt = new List<double>(); for (int k = 1; k < rows.Count; k++) { double gg = (wt[rows[k]] - wt[rows[k - 1]]) * 1000.0; if (gg <= PauseMs) gapAt.Add(wt[rows[k]]); }
+                for (int g = 0; g < gaps.Count && g < gapAt.Count; g++)
+                {
+                    int w = (int)((gapAt[g] - wStart) / 10.0); int[] c; if (!wins.TryGetValue(w, out c)) wins[w] = c = new int[2];
+                    c[0]++; if (gaps[g] > LateFactor * period) c[1]++;
+                }
+                foreach (var kv in wins.Where(kv => kv.Value[0] >= 100 && kv.Value[1] > 0).OrderByDescending(kv => (double)kv.Value[1] / kv.Value[0]).Take(5).OrderBy(kv => kv.Key))
+                    R.Hotspots.Add(TimeSpan.FromSeconds(kv.Key * 10.0 + (double.IsNaN(t0) ? 0 : wStart - t0)).ToString(@"h\:mm\:ss") + " in: " + Pct((double)kv.Value[1] / kv.Value[0]) + " late (" + kv.Value[1] + " of " + kv.Value[0] + " frames)");
+            }
+
             // ---- findings
             Func<string, string, string, string, string, Finding> add = (id, st, title, detail, test) => { var f = new Finding { Id = id, Status = st, Title = title, Detail = detail, Test = test }; R.Findings.Add(f); return f; };
 
@@ -219,7 +240,7 @@ namespace AirFrameXR.Perf
                     var top = classCount.OrderByDescending(kv => kv.Value).First();
                     double share = (double)top.Value / late;
                     string parts = string.Join("; ", classCount.Where(kv => kv.Value > 0).OrderByDescending(kv => kv.Value).Select(kv => kv.Key + ": " + kv.Value));
-                    string test = top.Key.StartsWith("Upstream") ? "Lower the game's settings or cap its fps, then capture again: the stream waited for the game." :
+                    string test = top.Key.StartsWith("Upstream") ? (!double.IsNaN(gpuP95) && gpuP95 >= 95 ? "The GPU was at " + N(gpuP95, "F0") + " % (p95) and the stream waited for the game: the game is GPU-bound. Lower its settings (DLSS quality, ray tracing, resolution), then record again." : "The stream waited for the game: lower its settings or cap its fps, then record again.") :
                                   top.Key.StartsWith("Waiting") ? "The encoder was busy when the frame arrived: try a faster preset or a lower resolution scale and capture again." :
                                   top.Key.StartsWith("Encode") ? "Try a faster preset, lower bitrate or resolution scale, and capture again." :
                                   top.Key.StartsWith("Release") ? "The deliberate hold before the send was long: check the pacing settings." :
@@ -246,7 +267,7 @@ namespace AirFrameXR.Perf
             if (cg != null && cg.Rows >= 100 && cg.Has("total_ms"))
             {
                 var tr = cg.Get("t_recv");
-                var idx = Enumerable.Range(0, cg.Rows).Where(i => double.IsNaN(from) || tr[i] >= from).ToList();
+                var idx = Enumerable.Range(0, cg.Rows).Where(i => (double.IsNaN(from) || tr[i] >= from) && (double.IsNaN(to) || tr[i] <= to)).ToList();
                 Func<string, List<double>> g = c => idx.Select(i => cg.Get(c)[i]).ToList();
                 double dec95 = P(g("decode_ms"), 0.95), net95 = P(g("network_ms"), 0.95), q95 = P(g("decoder_queue_ms"), 0.95), tot95 = P(g("total_ms"), 0.95);
                 string d = "pipeline latency p50 " + N(P(g("total_ms"), 0.5)) + " / p95 " + N(tot95) + " ms; encode p95 " + N(P(g("encode_ms"), 0.95)) + ", network p95 " + N(net95) + ", decode p95 " + N(dec95) + ", decoder queue p95 " + N(q95) + ", vsync queue p95 " + N(P(g("vsync_queue_ms"), 0.95)) + " ms; headset fps median " + N(P(g("client_fps"), 0.5)) + ", bitrate mean " + N(Mean(g("bitrate_mbps"))) + " Mbps (headset's own statistics).";
@@ -258,7 +279,7 @@ namespace AirFrameXR.Perf
             // ---- hardware context
             if (gpu != null && gpu.Rows >= 3)
             {
-                var gi = Enumerable.Range(0, gpu.Rows).Where(i => double.IsNaN(from) || gpu.Get("sample_qpc")[i] >= from).ToList();
+                var gi = Enumerable.Range(0, gpu.Rows).Where(i => (double.IsNaN(from) || gpu.Get("sample_qpc")[i] >= from) && (double.IsNaN(to) || gpu.Get("sample_qpc")[i] <= to)).ToList();
                 if (gi.Count < 3) gi = Enumerable.Range(0, gpu.Rows).ToList();
                 Func<string, List<double>> G = c => gi.Select(i => gpu.Get(c)[i]).ToList();
                 var thr = gpu.Raw["throttle_reasons"]; int active = 0, counted = 0; ulong seen = 0;
@@ -341,6 +362,12 @@ namespace AirFrameXR.Perf
                 row("arrival to encode start (queue age)", queue);
                 row("encode", enc);
                 row("release hold (deliberate)", hold);
+            }
+            if (R.Hotspots.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("## Worst 10 s windows (time since the recording started)");
+                foreach (var h in R.Hotspots) sb.AppendLine("- " + h);
             }
             if (R.Worst.Count > 0)
             {

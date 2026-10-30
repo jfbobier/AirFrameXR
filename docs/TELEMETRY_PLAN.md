@@ -1,43 +1,43 @@
-# Performance logging for 1.3: the Bench flavour (plan, 2026-10-30)
+# Performance logging for 1.3: Black Box (plan, 2026-10-30)
 
 Status: plan with a measured prototype (`tools/perfprobe/PerfProbe.cs`, tested on the 3080 Ti laptop only). Steps 1-3 of the order of work exist in a first version (2026-10-30):
 `tools/bench/PerfCore.cs` (`perfcore.dll`) and `PerfProbeCli.cs` (`perfprobe.exe`), built by `python3 harness/run.py build bench`, checked by `python3 harness/perfcore_check.py`
 `PerfReport.cs` (the report, inside `perfcore.dll`; `perfreport.exe` over it, checked by `python3 harness/perfreport_check.py` against 9 generated fixtures with known faults and known non-faults),
-and `tools/gui/Bench.cs` (`bench.exe`, matrix cases `bench-*` in `harness/ui_matrix.py`).
+`tools/gui/BenchRecorder.cs` + `tools/gui/PerfAnalyze.cs` (`blackbox_recorder.exe`, `blackbox_analyzer.exe`, `tools/gui/BlackBoxBrand.cs`; matrix cases `rec-*` and `analyze-*` in `harness/ui_matrix.py`) and `harness/recorder_check.py`.
 Tested on the 3080 Ti laptop: probe L0 / L1 captures, the report on fixtures and (structure only) on one real 2026-10-11 Cyberpunk session, the window in the UI matrix.
-**Not tested:** a capture with a real headset and game through `bench.exe`, UAC and the Deep trace (`wpr` profile names), the 5090, the report's numbers against `harness/frames.py` on the same window
+**Not tested:** a capture with a real headset and game through the recorder, UAC and the Deep trace (`wpr` profile names), the 5090, the report's numbers against `harness/frames.py` on the same window
 (the first real run flagged 1.72 % late frames while `frames.py` counts 17 of 9412 on its own subset: the windows differ and the comparison is owed), accuracy of the stage attribution on real data.
 Nothing is in a release yet.
 
-First package (tonight's): the Bench tools sit in `bin\` of the **debug (telemetry) package** (`bench.exe`, `bench.exe.config`, `perfcore.dll`, `perfreport.exe`;
+First package (tonight's): the Black Box programs sit in `bin\` of the **debug (telemetry) package** (`blackbox_recorder.exe`, `blackbox_analyzer.exe`, `perfcore.dll`, `perfreport.exe`;
 `stage13_package.ps1` ships them only when the flavour is debug and moves them out of a release package). The debug package *is* the Bench install described in Architecture (unzip it anywhere, or into `bench\telemetry\` of a Stock install); the dual-flavour packaging that produces both from one command comes next.
 Legend as in [progress.md](progress.md): "measured" means run on the builder with the numbers given, "untested" means not run.
 
 ## Decision
 
-Two flavours of the same code, not one app with logging levels:
+Two builds of the same code, not one app with logging levels. The Black Box is the telemetry build plus two programs of its own, the **Black Box Recorder** (`blackbox_recorder.exe`) and the **Black Box Analyzer** (`blackbox_analyzer.exe`), see [BENCH_UI.md](BENCH_UI.md):
 
-| | **Stock** (what users run) | **Bench** (separate folder, for diagnosing one game) |
+| | **Stock** (what users run) | **Black Box** (separate install, for diagnosing one game) |
 |---|---|---|
 | Build | release: telemetry compiled out | the existing `telemetry` flavour (cargo feature `telemetry`, `AIRFRAMEXR_TELEMETRY`) |
 | Rights | user, never a UAC prompt | user; **one** action asks for UAC (deep trace) |
 | Logging | what it logs today (`encoder_stats`, the pacing line) | per-frame CSVs, system probe, report |
-| UI | the simple one | a diagnostics UI built for the task |
+| UI | the simple one | the streamer window as the recorder, plus a separate analyzer |
 
 Why: a performance analysis is done once or twice per game, so it is a different task and gets a different tool. Stock stays free of cost
 and of prompts, and there is no `perf_level` setting to add (DEVELOPMENT_PHILOSOPHY: no setting without a measurement).
 
-Architecture (2026-10-30, decided with the user: clean by design): the Bench flavour is a **complete, separate portable install** of its own, built entirely from the
+Architecture (2026-10-30, decided with the user: clean by design): the Black Box is a **complete, separate portable install** of its own, built entirely from the
 telemetry (debug) build, with every dependency in its own folder. It shares nothing with Stock at run time. Nothing is added to the engine for this feature.
 
 ```
 <stock install>\                       Stock: release build, unchanged, no bench code anywhere in it
     AirFrameXR.exe, bin\, config\, profiles\, docs\, logs\, bench\ (the wizard's scene assets: littlest_tokyo.vab, xr_probe.exe, fovgrid.*)
-    bench\telemetry\                   the Bench flavour: a whole install, the same layout as Stock (Paths.Dir = the parent of bin\, so every exe finds its own files)
-        AirFrameXR.exe                  the stub, starts bin\launcher.exe (its launcher shows a Bench card because bin\bench.exe exists)
+    bench\telemetry\                   the Black Box: a whole install, the same layout as Stock (Paths.Dir = the parent of bin\, so every exe finds its own files)
+        AirFrameXR.exe                  the stub, starts bin\launcher.exe (its launcher shows the two Black Box cards because bin\blackbox_analyzer.exe exists)
         bin\  alvr_host.exe, LibOVRRT64_1.dll (shim), virtualdesktop-openxr.dll/.json (VDXR), streamer.exe, configure.exe, performance.exe,
               launcher.exe, mirrordesktop.exe, register_openxr_runtime.ps1, flavour.txt = debug   <- all from the debug build, none copied from Stock
-              bench.exe, bench.exe.config, perfcore.dll, perfreport.exe                             <- the Bench tools (new)
+              blackbox_recorder.exe, blackbox_analyzer.exe (+ .config), perfcore.dll, perfreport.exe <- the Black Box programs (new)
         bench\ (assets), profiles\, docs\, config\ (its OWN session.json and airframexr.json), logs\ (its own, incl. logs\bench\<session>\)
         (optional, later) bin\afxr_trace.dll   OpenXR API layer DLL for the frame-cycle spans (see below)
 ```
@@ -47,9 +47,9 @@ Consequences of "separate install": its own `config\` means the headset has to b
 folder's `virtualdesktop-openxr.json` while a Bench session runs (the launcher's runtime row switches it and switches back); only one streamer runs at a time (ALVR port 9943).
 The same folder is also what the `-debug` zip is today, so it can be unzipped anywhere, nested in a Stock install or on its own.
 
-The engine's own per-frame CSVs are the existing telemetry-flavour output and keep their formats: `bench.exe` joins them by frame timestamp
+The engine's own per-frame CSVs are the existing telemetry-flavour output and keep their formats: the analyzer joins them by frame timestamp
 exactly as `harness/frames.py` does today, and writes the session metadata itself. So the engine work list of the first version of this plan
-(stable IDs, `session.json`, `state_events.csv`, `logger_health.csv`) is **dropped from the engine**: `bench.exe` writes `session.json` (versions,
+(stable IDs, `session.json`, `state_events.csv`, `logger_health.csv`) is **dropped from the engine**: the recorder (perfcore.dll) writes `session.json` (versions,
 flavour, settings hash from `airframexr.json` and `session.json`, refresh rate, GPU and driver), `state_events.csv` (it watches those files while
 capturing) and `logger_health.csv` (its own writer). If a later measurement shows that a join by timestamp is not enough, an engine change would be
 proposed then, telemetry flavour only.
@@ -58,7 +58,7 @@ Rule for any engine edit that does turn out to be needed (approved 2026-10-30): 
 compiled out of the release flavour. Proof for every such change: `tools/wsl/check_host.sh --no-default-features` and
 `EXTRA_DEFS="/D AIRFRAMEXR_RELEASE" bash tools/wsl/check_cpp.sh` still compile, and the release package is unchanged in behaviour.
 
-## What the Bench flavour records
+## What the Black Box records
 
 Everything below needs **no admin rights** except the last row.
 
@@ -134,7 +134,7 @@ Today both flavours write to the same output paths (`target\release\alvr_host.ex
 **build release, package Stock; build debug, package Bench; assemble**, with each package kept in its own `out\dist\<flavour>` folder. Steps, all in build scripts and `harness/run.py`, none in engine source:
 1. `run.py package` takes the flavour of the last build and writes `out\dist\AirFrameXR` (release) or `out\dist\AirFrameXR-bench` (debug), never overwriting the other.
 2. The Stock zip optionally embeds the Bench package under `bench\telemetry\` (a release decision: one download that holds both, or the Bench zip separately; the build is the same).
-3. `stage13_package.ps1` already ships `bench.exe`, `bench.exe.config`, `perfcore.dll`, `perfreport.exe` in `bin\` of the debug package only (done 2026-10-30) and moves them out of a release package.
+3. `stage13_package.ps1` already ships `blackbox_recorder.exe`, `blackbox_analyzer.exe` (+ `.config`), `perfcore.dll`, `perfreport.exe` in `bin\` of the debug package only (done 2026-10-30) and moves them out of a release package.
 4. The package test checks the flavours by content: the Stock host and shim contain none of the telemetry names (`host_frames.csv`; wide string `shim_frames_`), the Bench ones do, Stock has no `perfcore.dll`, the Bench
    registration JSON points at the Bench folder, and `flavour.txt` agrees with the binaries (the first check on 2026-10-30 found a package labelled debug whose host had no telemetry).
 
@@ -158,7 +158,7 @@ A .NET `perfreport` (offline, reads one session folder, writes `report.md`; same
 
 ## Engine work: none planned
 
-The three items of the first draft (stable frame IDs, `session.json` / `state_events.csv`, `logger_health.csv`) move into `perfcore.dll` / `bench.exe`
+The three items of the first draft (stable frame IDs, `session.json` / `state_events.csv`, `logger_health.csv`) move into `perfcore.dll` (the recorder)
 (see Architecture). The existing telemetry-flavour CSVs are read as they are. No lineage graph, no GPU pass timestamps, no game-side producer IDs in 1.3.
 
 Optional, only if the report cannot name the late stage from today's CSVs: `afxr_trace.dll`, an **OpenXR API layer** (a separate DLL in `bench\`, enabled
@@ -170,7 +170,7 @@ existing "OpenXR layers that may take the controllers" review must treat it as o
 
 1. `perfcore.dll`: NVML + counters probe (1-2 Hz engine-counter rule), session folder, health. Prototype exists (`tools/perfprobe/`). No engine change.
 2. `perfreport.exe` over `perfcore.dll`, on today's CSVs, with fixtures. A useful 1.3 on its own.
-3. `bench.exe` static form with every demo state and the `ui_matrix` cases ([BENCH_UI.md](BENCH_UI.md)), then wired to the probe and the report.
+3. The two Black Box programs with the `ui_matrix` cases ([BENCH_UI.md](BENCH_UI.md)), wired to the probe and the report (built 2026-10-30).
 4. `bench\` packaging (`-bench` zip, own launcher entry, own logs folder), Deep trace button, elevation-boundary package test.
 5. Overhead table completed: release against telemetry build, 5090, a real headset run; decide on `afxr_trace.dll` from what the report cannot yet explain.
 

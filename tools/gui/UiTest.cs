@@ -45,6 +45,46 @@ namespace AirFrameXR
 
     static class UiTest
     {
+        // harness/recorder_check.py: the recorder's pieces that need no headset: the engine files are cut to the recording, the hotkeys register (F8 registered, F12 polled), the
+        // recorder's own settings survive, the analyzer's recording folder test
+        static int RecorderSelfTest(string outDir)
+        {
+            var lines = new List<string>();
+            Action<bool, string> check = (ok, what) => lines.Add("CHECK " + (ok ? "PASS " : "FAIL ") + what);
+            var tmp = Path.Combine(Path.GetTempPath(), "recorder_selftest_" + Guid.NewGuid().ToString("N").Substring(0, 6));
+            var dbg = Path.Combine(tmp, "debug"); var rec = Path.Combine(tmp, "rec");
+            Directory.CreateDirectory(dbg); Directory.CreateDirectory(rec);
+            var hf = new List<string> { "frame,ts_ns,slot,t_boundary,t_arrival,t_encode_start,encode_ms,t_send,hold_ms,bytes,idr" };
+            for (int i = 0; i < 6000; i++) { double t = 1000.0 + i / 90.0; hf.Add(i + ",0,0," + t.ToString("F6", CultureInfo.InvariantCulture) + "," + t.ToString("F6", CultureInfo.InvariantCulture) + "," + t.ToString("F6", CultureInfo.InvariantCulture) + ",3.000," + t.ToString("F6", CultureInfo.InvariantCulture) + ",1.000,100,0"); }
+            File.WriteAllLines(Path.Combine(dbg, "host_frames.csv"), hf);
+            File.WriteAllLines(Path.Combine(dbg, "client_graph.csv"), new[] { "t_recv,total_ms", "1010.000000,50", "1020.000000,51", "1090.000000,52" });
+            File.WriteAllText(Path.Combine(dbg, "notes.txt"), "not copied");
+            File.WriteAllText(Path.Combine(rec, "session.json"), "{\n  \"started_qpc_s\": 1010.000000,\n  \"ended_qpc_s\": 1030.000000,\n  \"complete\": true\n}\n");
+            long frames = RuntimeForm.BenchCopyEngineFiles(dbg, rec);
+            check(frames > 1700 && frames < 1900, "the copy keeps the frames inside the recording (20 s at 90 Hz +- the 0.5 s margins): " + frames);
+            check(File.ReadAllLines(Path.Combine(rec, "host_frames.csv"))[0].StartsWith("frame,ts_ns"), "the header is kept");
+            var cg = File.ReadAllLines(Path.Combine(rec, "client_graph.csv"));
+            check(cg.Length == 3, "client_graph.csv is cut to the window: " + (cg.Length - 1) + " rows");
+            check(!File.Exists(Path.Combine(rec, "notes.txt")), "files that are not per-frame records are not copied");
+            using (var h = new BenchHotkey())
+            {
+                bool f8 = h.Set(8, false); int err = h.LastError;
+                if (!f8 && err == 1459) lines.Add("CHECK SKIP hotkey registration: this session has no interactive desktop (win32 error 1459, ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION); not tested here");
+                else
+                {
+                    check(f8, "F8 registers as a global hotkey (win32 error " + h.LastError + ")");
+                    check(h.Set(8, true), "Ctrl+F8 registers (win32 error " + h.LastError + ")");
+                    check(h.Set(7, false), "F7 registers (win32 error " + h.LastError + ")");
+                }
+                check(h.Set(12, false), "F12 is accepted (polled: a reserved key cannot be registered)");
+            }
+            var own = BenchRecorder.Own(); global::AirFrameXR.Json.Set(own, "scene", "selftest"); BenchRecorder.SaveOwn(own);
+            check(global::AirFrameXR.Json.Str(BenchRecorder.Own(), "scene", "") == "selftest", "the recorder's own settings file round-trips (config\\bench.json)");
+            try { Directory.Delete(tmp, true); } catch { }
+            File.WriteAllLines(Path.Combine(outDir, "recorder.txt"), lines);
+            return lines.Any(l => l.StartsWith("CHECK FAIL")) ? 1 : 0;
+        }
+
         class Case { public string Name; public Func<Form> Make; public Action<Form> Prepare; }
         static readonly List<string> Json = new List<string>();
 
@@ -67,13 +107,18 @@ namespace AirFrameXR
             yield return new Case { Name = "advanced-switches-fov-quality", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true, new[] { 3552, 3200 }) };   // the same, restricted, with the render quality row
             yield return new Case { Name = "advanced-switches-fov", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true) };   // a pretend Vision Pro, the override ticked
             yield return new Case { Name = "advanced-switches-fit", Make = () => new AdvancedForm(new[] { 0.94, 0.93, 0.90, 0.76 }, false, new[] { 3552, 3200 }, null, true) };   // the AirFrameXR client's box, the stream fit on: the preview block and the quality row from the fit
-            yield return new Case { Name = "bench-idle", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("idle") };
-            yield return new Case { Name = "bench-ready", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("ready") };
-            yield return new Case { Name = "bench-capture", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("capture") };
-            yield return new Case { Name = "bench-read-smooth", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("read-smooth") };
-            yield return new Case { Name = "bench-read-problem", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("read-problem") };
-            yield return new Case { Name = "bench-read-insufficient", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("read-insufficient") };
-            yield return new Case { Name = "bench-long", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("long") };
+            yield return new Case { Name = "rec-idle", Make = () => { BenchRecorder.Enabled = true; try { return new RuntimeForm(null); } finally { BenchRecorder.Enabled = false; } }, Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).BenchDemoState("idle"); } };
+            yield return new Case { Name = "rec-full-waiting", Make = () => { BenchRecorder.Enabled = true; try { return new RuntimeForm(null); } finally { BenchRecorder.Enabled = false; } }, Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).BenchDemoState("full-waiting"); } };
+            yield return new Case { Name = "rec-recording", Make = () => { BenchRecorder.Enabled = true; try { return new RuntimeForm(null); } finally { BenchRecorder.Enabled = false; } }, Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).BenchDemoState("recording"); } };
+            yield return new Case { Name = "rec-saved", Make = () => { BenchRecorder.Enabled = true; try { return new RuntimeForm(null); } finally { BenchRecorder.Enabled = false; } }, Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).BenchDemoState("saved"); } };
+            yield return new Case { Name = "rec-key-taken", Make = () => { BenchRecorder.Enabled = true; try { return new RuntimeForm(null); } finally { BenchRecorder.Enabled = false; } }, Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).BenchDemoState("key-taken"); } };
+            yield return new Case { Name = "analyze-empty", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("empty") };
+            yield return new Case { Name = "analyze-unanalyzed", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("unanalyzed") };
+            yield return new Case { Name = "analyze-busy", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("busy") };
+            yield return new Case { Name = "analyze-smooth", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("smooth") };
+            yield return new Case { Name = "analyze-problem", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("problem") };
+            yield return new Case { Name = "analyze-insufficient", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("insufficient") };
+            yield return new Case { Name = "analyze-long", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("long") };
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             yield return new Case { Name = "performance-pipeline", Make = () => new PerformanceForm("LiesOfP-Win64-Shipping.exe") };   // a record whose pipeline block says split encoding did not engage
             for (int p = 0; p <= 6; p++)
@@ -265,6 +310,7 @@ namespace AirFrameXR
             Directory.CreateDirectory(outDir);
             var only = Arg("--only");
             if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);
+            if (args.Contains("--recorder-selftest")) return RecorderSelfTest(outDir);
             if (args.Contains("--center-selftest")) return CenterSelfTest(outDir);
             var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
             if (replay != null) return Replay(replay, outDir);

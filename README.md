@@ -147,6 +147,13 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <!-- End desktop mirror illustration -->
 
+**Black Box: when a game does not run well.** A separate package (the telemetry build) holds two more programs, the **Black Box Recorder** and the **Black Box Analyzer**. The recorder is the streamer window with a
+recording panel: press F8 (configurable) in the headset session, or tick *Full session* to record from the game's start to its close; it copies your normal streamer settings and never changes them. The analyzer
+(separate, run afterwards) reads the recording and says where the time went: the game, the encoder, the sender or the GPU, with the worst 10-second windows for a long session. Nothing in it needs administrator
+rights except one optional *Deep trace* button. See [docs/TELEMETRY_PLAN.md](docs/TELEMETRY_PLAN.md) and [docs/BENCH_UI.md](docs/BENCH_UI.md) (status: tested on the lab rig and the UI matrix, not yet in a headset session).
+
+<p align="center"><img src="branding/blackbox/banner/blackbox-banner.png" width="640" alt="AirFrameXR Black Box, performance flight recorder"></p>
+
 ## Features
 - **Setup wizard** (`configure.exe`): reads what the headset supports, offers a community profile, a pre-filled manual configuration or your existing ALVR settings, then
   tests the result (system and NVENC, encoder speed, network at the configured bitrate, a real scene streamed through the pipeline with the headset's own head pose, audio).
@@ -167,6 +174,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
 - **Desktop mirror** (optional): see above; it works with either hand.
 - **Advanced picture and FOV settings**: the switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect and what we
   measured; a switch at its default is removed from the settings file. The HEVC QP map stays on by default and its trade-off is written next to it.
+- **Black Box** (own package): a performance flight recorder and analyzer for one game, see above.
 - **Lab tools**: the test harness below, including a frame generation judge ([docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md)) and the QP map A/B.
 
 What changed in each version: [docs/releases/](docs/releases/) (1.0 onward; earlier notes are in the GitHub releases and the archive). `docs/progress.md` is the current status: what is built, what is tested (and how), what is not. Older history: [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md).

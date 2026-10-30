@@ -1,4 +1,4 @@
-# Builds the Bench flavour's own binaries (docs/TELEMETRY_PLAN.md): perfcore.dll (managed library), perfreport.exe and perfprobe.exe (command lines over it), bench.exe (the diagnostics window, tools/gui/Bench.cs + Common.cs).
+# Builds the Bench flavour's own binaries (docs/TELEMETRY_PLAN.md): perfcore.dll (managed library), perfreport.exe and perfprobe.exe (command lines over it), blackbox_recorder.exe (the Black Box Recorder: the stock streamer sources + tools/gui/BenchRecorder.cs) and blackbox_analyzer.exe (tools/gui/PerfAnalyze.cs), both with tools/gui/BlackBoxBrand.cs.
 # Sources: _tmp\bench (uploaded by `run.py build bench`). Output: out\bench.
 $ErrorActionPreference = 'Continue'
 $root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
@@ -16,7 +16,8 @@ $guiRefs = 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Window
 $steps = @(
     @{ name = 'perfcore.dll'; args = @('/target:library') + $refs + @("/out:$out\perfcore.dll", "$src\PerfCore.cs", "$src\PerfReport.cs") },
     @{ name = 'perfreport.exe'; args = @('/target:exe') + $refs + @("/reference:$out\perfcore.dll", "/out:$out\perfreport.exe", "$src\PerfReportCli.cs") },
-    @{ name = 'bench.exe'; args = @('/target:winexe') + $guiRefs + @("/reference:$out\perfcore.dll", "/win32icon:$gui\res\airframexr.ico", "/win32manifest:$gui\app.manifest", "/resource:$gui\res\logo_640.png,logo_640.png", "/resource:$gui\res\chroma_passthrough.png,chroma_passthrough.png", "/out:$out\bench.exe", "$gui\Common.cs", "$gui\Bench.cs") },
+    @{ name = 'blackbox_recorder.exe'; args = @('/target:winexe') + $guiRefs + @("/reference:$out\perfcore.dll", "/win32icon:$gui\res\blackbox-windows.ico", "/win32manifest:$gui\app.manifest", "/resource:$gui\res\logo_640.png,logo_640.png", "/resource:$gui\res\chroma_passthrough.png,chroma_passthrough.png", "/resource:$gui\res\blackbox_128.png,blackbox_128.png", "/out:$out\blackbox_recorder.exe", "$gui\Common.cs", "$gui\PipelineModel.cs", "$gui\AirFrameXR.cs", "$gui\FindHeadset.cs", "$gui\AudioRoute.cs", "$gui\BlackBoxBrand.cs", "$gui\BenchRecorder.cs") },
+    @{ name = 'blackbox_analyzer.exe'; args = @('/target:winexe') + $guiRefs + @("/reference:$out\perfcore.dll", "/win32icon:$gui\res\blackbox-windows.ico", "/win32manifest:$gui\app.manifest", "/resource:$gui\res\logo_640.png,logo_640.png", "/resource:$gui\res\chroma_passthrough.png,chroma_passthrough.png", "/resource:$gui\res\blackbox_128.png,blackbox_128.png", "/out:$out\blackbox_analyzer.exe", "$gui\Common.cs", "$gui\BlackBoxBrand.cs", "$gui\PerfAnalyze.cs") },
     @{ name = 'perfprobe.exe'; args = @('/target:exe') + $refs + @("/reference:$out\perfcore.dll", "/out:$out\perfprobe.exe", "$src\PerfProbeCli.cs") }
 )
 foreach ($s in $steps) {
@@ -26,4 +27,4 @@ foreach ($s in $steps) {
     if ($LASTEXITCODE -ne 0) { $ok = $false; Write-Host "FAILED: $($s.name)" } else { Write-Host "built $out\$($s.name)" }
 }
 if ($ok) { Write-Host 'RESULT: OK' } else { Write-Host 'RESULT: FAILED' }
-Copy-Item "$gui\app.exe.config" "$out\bench.exe.config" -Force   # WinForms' per-monitor DPI mode, like the other tools
+foreach ($e in 'blackbox_recorder.exe', 'blackbox_analyzer.exe') { Copy-Item "$gui\app.exe.config" "$out\$e.config" -Force }   # WinForms' per-monitor DPI mode, like the other tools

@@ -365,7 +365,7 @@ namespace AirFrameXR.Perf
             kv("schema_version", SchemaVersion.ToString(), true);
             kv("session_id", SessionId, false);
             kv("started_utc", startedUtc.ToString("o", CultureInfo.InvariantCulture), false);
-            if (ended) kv("ended_utc", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture), false);
+            if (ended) { kv("ended_utc", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture), false); kv("ended_qpc_s", Clock.S(Clock.Now()), true); }
             kv("clock_domain", "pc_qpc_seconds (same as the host's CSVs)", false);
             kv("qpc_frequency_hz", F.N((long)Clock.Frequency), true);
             kv("started_qpc_s", Clock.S(startedQpc), true);

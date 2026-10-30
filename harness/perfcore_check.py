@@ -45,7 +45,7 @@ HEAD = {
 codes = (loc / "codes.txt").read_text(errors="replace") if (loc / "codes.txt").exists() else ""
 print("== runs"); check("exit codes: 0 0 0" in codes.replace("\x00", ""), "all three captures exit 0", codes.strip())
 
-for d, secs, hz, files in (("l0", 6, 1, ["hardware_gpu.csv", "hardware_system.csv", "logger_health.csv", "state_events.csv", "capabilities.csv"]),
+for d, secs, hz, files in (("l0", 10, 1, ["hardware_gpu.csv", "hardware_system.csv", "logger_health.csv", "state_events.csv", "capabilities.csv"]),
                            ("l1", 12, 5, list(HEAD))):
     print(f"== {d} ({secs} s)")
     for f in files:
@@ -59,7 +59,7 @@ for d, secs, hz, files in (("l0", 6, 1, ["hardware_gpu.csv", "hardware_system.cs
     t = [float(r["sample_qpc"]) for r in g]
     check(all(b > a for a, b in zip(t, t[1:])) and (not t or t[0] > 1), "QPC seconds increase")
     s = rows(d, "hardware_system.csv") or []
-    check(0.4 * expect <= len(s) <= 1.1 * expect, "hardware_system.csv rows", f"{len(s)} rows")
+    check(0.25 * expect <= len(s) <= 1.1 * expect, "hardware_system.csv rows (the Windows counters take a few seconds to start)", f"{len(s)} rows")
     # a stand-in 0 for a reading that is not available would show as 0 in every row of a column the capabilities mark unsupported
     caps = {r["capability"]: r for r in rows(d, "capabilities.csv") or []}
     unsupported = [k for k, v in caps.items() if v["supported"] == "0"]

@@ -6,7 +6,7 @@ $r = "$env:AIRFRAMEXR_ROOT\runs\$rid"
 New-Item -ItemType Directory -Force "$r\cfg" | Out-Null
 Set-Content "$r\cfg\airframexr.json" '{"a":1}'
 Set-Content "$r\cfg\session.json" '{"b":2}'
-$p0 = Start-Process "$b\perfprobe.exe" -ArgumentList @('capture', "$r\l0", 'L0', '6') -PassThru -WindowStyle Hidden
+$p0 = Start-Process "$b\perfprobe.exe" -ArgumentList @('capture', "$r\l0", 'L0', '10') -PassThru -WindowStyle Hidden
 $p0.WaitForExit()
 $p1 = Start-Process "$b\perfprobe.exe" -ArgumentList @('capture', "$r\l1", 'L1', '12', 'explorer,dwm', "$r\cfg") -PassThru -WindowStyle Hidden
 Start-Sleep 8

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640"><defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#12365D"/><stop offset=".44" stop-color="#071831"/><stop offset="1" stop-color="#020814"/></linearGradient>
+<radialGradient id="spot" cx=".27" cy=".18" r=".8"><stop stop-color="#157DB7" stop-opacity=".23"/><stop offset="1" stop-color="#00080F" stop-opacity="0"/></radialGradient>
+<linearGradient id="topside" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#1F5E8D"/><stop offset=".35" stop-color="#163451"/><stop offset="1" stop-color="#061421"/></linearGradient>
+<linearGradient id="rightside" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0D2F4A"/><stop offset=".8" stop-color="#040B17"/></linearGradient>
+<linearGradient id="face" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1B3A50"/><stop offset=".18" stop-color="#0B1B2B"/><stop offset=".55" stop-color="#060F20"/><stop offset="1" stop-color="#030814"/></linearGradient>
+<linearGradient id="rim" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#59FAFF"/><stop offset=".24" stop-color="#00CDF6"/><stop offset=".48" stop-color="#126EDC"/><stop offset="1" stop-color="#183B76"/></linearGradient>
+<linearGradient id="wave" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#0673B6"/><stop offset=".23" stop-color="#04D9FF"/><stop offset=".52" stop-color="#A0FFFF"/><stop offset=".83" stop-color="#01A6F6"/><stop offset="1" stop-color="#1460F7"/></linearGradient>
+<radialGradient id="redGlow"><stop stop-color="#FF5B47" stop-opacity=".62"/><stop offset=".5" stop-color="#F22735" stop-opacity=".18"/><stop offset="1" stop-color="#D00C2C" stop-opacity="0"/></radialGradient>
+<filter id="soft" x="-.35" y="-.35" width="1.7" height="1.7"><feGaussianBlur stdDeviation="12"/></filter>
+<filter id="waveGlow" x="-.5" y="-.5" width="2" height="2"><feGaussianBlur stdDeviation="9"/></filter>
+
+<linearGradient id="bannerBg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#051327"/><stop offset=".5" stop-color="#031022"/><stop offset="1" stop-color="#020912"/></linearGradient>
+<linearGradient id="textXR" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#00E7F4"/><stop offset="1" stop-color="#1476FC"/></linearGradient>
+<linearGradient id="bWave" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#014976" stop-opacity="0"/><stop offset=".4" stop-color="#008FF2" stop-opacity=".5"/><stop offset="1" stop-color="#00DDFB" stop-opacity=".1"/></linearGradient>
+<radialGradient id="blueFog" cx=".3" cy=".5" r=".75"><stop stop-color="#026AC6" stop-opacity=".26"/><stop offset="1" stop-color="#001124" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="1280" height="640" fill="url(#bannerBg)"/>
+<rect width="1280" height="640" fill="url(#blueFog)"/>
+<g transform="translate(40 52) scale(.53)">
+<rect x="30" y="30" width="964" height="964" rx="202" fill="url(#bg)"/>
+<rect x="30" y="30" width="964" height="964" rx="202" fill="url(#spot)"/>
+<rect x="32" y="32" width="960" height="960" rx="201" fill="none" stroke="#3476AD" stroke-width="4" opacity=".68"/>
+<path d="M132 737 C260 777 420 791 586 765 S832 704 920 752" fill="none" stroke="#035C99" stroke-width="3" opacity=".23"/>
+<ellipse cx="504" cy="796" rx="353" ry="82" fill="#000000" opacity=".7" filter="url(#soft)"/>
+<!-- raised top and side of recording device -->
+<path d="M205 295 L277 229 Q297 213 332 213 L706 213 Q737 213 756 238 L808 302 L770 340 L235 339 Z" fill="url(#topside)" stroke="#277CA7" stroke-width="6"/>
+<path d="M759 247 L823 313 Q836 326 836 351 L836 708 Q832 751 787 782 L752 809 L731 759 L772 326 Z" fill="url(#rightside)" stroke="#176296" stroke-width="5"/>
+<rect x="170" y="268" width="627" height="512" rx="101" fill="#020712" stroke="#066EC8" stroke-width="11"/>
+<rect x="181" y="278" width="605" height="490" rx="93" fill="url(#face)" stroke="url(#rim)" stroke-width="8"/>
+<path d="M207 388 L207 357 Q207 301 274 301 L707 301" fill="none" stroke="#65E6FF" stroke-width="9" opacity=".8" stroke-linecap="round"/>
+<path d="M208 672 L208 702 Q208 744 259 747 L667 747" fill="none" stroke="#0096EC" stroke-width="6" opacity=".35" stroke-linecap="round"/>
+<rect x="235" y="354" width="508" height="326" rx="62" fill="#020C1A" stroke="#23506C" stroke-width="6"/>
+<rect x="252" y="370" width="475" height="296" rx="51" fill="#03152A" stroke="#08283F" stroke-width="3"/>
+<path d="M259 517 H715" fill="none" stroke="#084064" stroke-width="4" opacity=".7"/>
+<path d="M268 519 L334 519 L355 505 L381 544 L419 456 L464 621 L507 404 L544 566 L572 481 L603 526 L633 515 L706 515" fill="none" stroke="#13BAFF" stroke-width="30" opacity=".28" filter="url(#waveGlow)" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M268 519 L334 519 L355 505 L381 544 L419 456 L464 621 L507 404 L544 566 L572 481 L603 526 L633 515 L706 515" fill="none" stroke="url(#wave)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M468 591 L506 425 L540 547" fill="none" stroke="#E3FFFF" stroke-width="4" opacity=".72" stroke-linecap="round" stroke-linejoin="round"/>
+<!-- recording indicator -->
+<circle cx="694" cy="333" r="67" fill="url(#redGlow)"/>
+<circle cx="694" cy="333" r="26" fill="#440B15" stroke="#FF3E46" stroke-width="8"/>
+<circle cx="694" cy="333" r="13" fill="#FF735D"/>
+<path d="M299 261 H678" stroke="#85F7FF" stroke-width="4" opacity=".25" stroke-linecap="round"/>
+</g>
+<text x="623" y="196" font-family="Inter Display, Inter, sans-serif" font-weight="700" font-size="57" fill="#F6FBFF">AirFrame<tspan fill="url(#textXR)">XR</tspan></text>
+<text x="615" y="313" font-family="Inter Display, Inter, sans-serif" font-weight="800" font-size="86" letter-spacing="1" fill="#FFFFFF">BLACK BOX</text>
+<text x="620" y="365" font-family="Inter, sans-serif" font-weight="600" font-size="21" letter-spacing="4" fill="#A0C4E0">PERFORMANCE FLIGHT RECORDER</text>
+<line x1="622" y1="404" x2="1130" y2="404" stroke="#04A5E5" stroke-width="3"/>
+<text x="621" y="464" font-family="Inter, sans-serif" font-size="26" fill="#D2E5F0">Capture the moments that matter.</text>
+<circle cx="628" cy="535" r="9" fill="#FF5154"/>
+<text x="648" y="544" font-family="Inter, sans-serif" font-size="19" letter-spacing="3" font-weight="700" fill="#F6A0A8">REC</text>
+<text x="738" y="543" font-family="Inter, sans-serif" font-size="17" fill="#8EB3CE">Frames   /   Latency   /   GPU</text>
+<rect width="1278" height="638" x="1" y="1" fill="none" stroke="#1B5277" stroke-width="2" opacity=".65"/>
+</svg>

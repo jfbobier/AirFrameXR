@@ -18,7 +18,7 @@ HEALTH_HEAD = "sample_qpc,rows_gpu,rows_system,rows_pcie,rows_engines,write_erro
 SESSION = '{\n  "schema_version": 1,\n  "started_qpc_s": %.6f,\n  "complete": true\n}\n' % T0
 
 
-def host(seconds, late_every=0, late_ms=9.0, kind="encode", slow_enc_ms=14.0):
+def host(seconds, late_every=0, late_ms=9.0, kind="encode", slow_enc_ms=14.0, late_from=0.0, late_to=1e9):
     rows = [HOST_HEAD]
     n = int(seconds / P)
     rnd = random.Random(7)
@@ -27,7 +27,7 @@ def host(seconds, late_every=0, late_ms=9.0, kind="encode", slow_enc_ms=14.0):
         arr = b - 0.003
         enc = 3.0 + rnd.random() * 0.4
         delay = 0.0
-        if late_every and k > 100 and k % late_every == 0:
+        if late_every and k > 100 and k % late_every == 0 and late_from <= k * P <= late_to:
             delay = late_ms / 1000.0
             if kind == "encode": enc = slow_enc_ms
             if kind == "upstream": arr += delay
@@ -57,8 +57,8 @@ def health(seconds, werr=0, nvml_ms=3.0):
     return "\n".join(rows) + "\n"
 
 
-def session(name, hostcsv, gpucsv=None, healthcsv=None, torn=False):
-    d = {"session.json": SESSION}
+def session(name, hostcsv, gpucsv=None, healthcsv=None, torn=False, ended=None):
+    d = {"session.json": SESSION if ended is None else SESSION.replace('"complete": true', '"ended_qpc_s": %.6f,\n  "complete": true' % (T0 + ended))}
     if hostcsv is not None: d["host_frames.csv"] = hostcsv + ("90,12,0,0.0" if torn else "")
     if gpucsv is not None: d["hardware_gpu.csv"] = gpucsv
     if healthcsv is not None: d["logger_health.csv"] = healthcsv
@@ -75,6 +75,8 @@ FIX = [
     session("recorder_lost", host(40), gpu(40), health(40, werr=3)),
     session("nvml_stall", host(40), gpu(40), health(40, nvml_ms=1250.0)),
     session("torn_last_line", host(40), gpu(40), health(40), torn=True),
+    session("cut_window", host(60), gpu(60), health(60), ended=25),
+    session("hotspot", host(60, 4, kind="encode", late_from=30, late_to=42), gpu(60), health(60)),
 ]
 
 # name -> [(finding id, expected status)], verdict status
@@ -88,6 +90,8 @@ EXPECT = {
     "recorder_lost": ([("T10", "PROBLEM")], "PROBLEM"),
     "nvml_stall": ([("T10", "WATCH")], "WATCH"),
     "torn_last_line": ([("T01", "OK"), ("T02", "OK")], "OK"),
+    "cut_window": ([("T01", "OK"), ("T02", "OK")], "OK"),
+    "hotspot": ([("T02", "PROBLEM")], "PROBLEM"),
 }
 CLASS = {"slow_encode": "Encode took long", "upstream_late": "Upstream", "after_send_late": "After the send"}
 
@@ -140,6 +144,15 @@ for name, _ in FIX:
         t03 = [l for l in md.splitlines() if "T03" in l or "Late gaps: mostly" in l or "Each late gap" in l]
         check(CLASS[name].lower() in " ".join(t03).lower(), f"the late frames are attributed to: {CLASS[name]}", (t03[0][:100] if t03 else ""))
     check(any(l.strip() == "deterministic: True" for l in b), "report is byte-identical on a second run")
+    md = (loc / f"{name}.md").read_text(errors="replace") if (loc / f"{name}.md").exists() else ""
+    if name == "cut_window":
+        m = re.search(r"(\d+) sent frames in ([\d.]+) s", md)
+        check(bool(m) and abs(float(m.group(2)) - 20.0) < 1.0, "the report window ends where the recording ended (frames after it are not counted)", m.group(0) if m else "no T01 line")
+    if name == "hotspot":
+        hs = [l for l in md.splitlines() if " in: " in l and "late" in l]
+        check(len(hs) >= 1 and any(l.startswith(("- 0:00:2", "- 0:00:3", "- 0:00:4")) for l in hs), "the worst 10 s windows point at the bad stretch (about 30-42 s)", hs[0] if hs else "no hotspot lines")
+    if name == "upstream_late":
+        check("game is GPU-bound" not in md, "no GPU-bound advice when the GPU was not busy (fixture GPU util is 55 %)")
 
 print("CHECK", "PASS" if not fails else "FAIL", "perfreport fixtures", ("- " + ", ".join(fails)) if fails else "")
 sys.exit(0 if not fails else 1)

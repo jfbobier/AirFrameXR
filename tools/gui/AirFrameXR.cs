@@ -12,7 +12,7 @@ using System.Windows.Forms;
 
 namespace AirFrameXR
 {
-    public class RuntimeForm : DpiForm
+    public partial class RuntimeForm : DpiForm
     {
         readonly AppSettings settings = new AppSettings();
         readonly HostProcess host = new HostProcess();
@@ -37,6 +37,12 @@ namespace AirFrameXR
         // display controls: (label, min, max, default, settings getter/setter), values x100 on the track bars
         class Knob { public string Name; public TrackBar Bar; public Label Value; public double Def; public Func<double> Get; public Action<double> Set; }
         readonly List<Knob> knobs = new List<Knob>();
+        // hooks of the Bench package (docs/BENCH_UI.md): partial methods without an implementation are removed by the compiler, so the stock streamer carries nothing of it
+        partial void BenchBuild(TableLayoutPanel body);
+        partial void BenchHostEvent(string name, Dictionary<string, object> d);
+        partial void BenchClosing();
+        partial void BenchHeader(ref Control hdr);
+        static partial void BenchPrepare();
         readonly CheckBox debug = new CheckBox { Text = "Debug logging", AutoSize = true, Font = Ui.Body };
         readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Frame generation" };
         readonly ToggleSwitch mirror = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Mirror the Windows desktop between sessions" };
@@ -209,6 +215,7 @@ namespace AirFrameXR
             };
             tips.SetToolTip(mainMenu, "Open the main window (settings, game statistics, restart headset setup). The streamer keeps running.");
             dbgRow.Controls.Add(debug); dbgRow.Controls.Add(exportBtn); dbgRow.Controls.Add(openLogs); dbgRow.Controls.Add(mainMenu);
+            BenchBuild(body);   // the Bench package's recording panel (tools/gui/BenchRecorder.cs); not compiled into the stock streamer: the call vanishes
             body.Controls.Add(dbgRow);
             var exportRow = Row();
             exportRow.Controls.Add(exportStatus); exportRow.Controls.Add(exportLink);
@@ -222,6 +229,7 @@ namespace AirFrameXR
             scroller.Controls.Add(body);
             Controls.Add(scroller);
             var hdr = Ui.CompactHeader("Integrated OpenXR renderer + streamer for ALVR client VR headsets");
+            BenchHeader(ref hdr);   // the Black Box recorder swaps in its own header; not compiled into the stock streamer: the call vanishes
             Controls.Add(hdr);
             Ui.AutoFitWindow(this, hdr, body, false, WithWorstCase);   // fixed size: only Advanced changes it
 
@@ -310,7 +318,7 @@ namespace AirFrameXR
                 if (autoFind) { var t = new Timer { Interval = 3000 }; t.Tick += (a, b) => { t.Stop(); FindHeadset(true); }; t.Start(); }
             };
             Ui.ScreenshotWhenShown(this, 12000);
-            FormClosing += (s, e) => { closing = true; MirrorSync(); footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); audio.Stop(); { var m = PowerPlan.Restore(); if (m != null) Log.Write("INFO", m); } Log.Write("INFO", "streamer.exe closed"); };
+            FormClosing += (s, e) => { BenchClosing(); closing = true; MirrorSync(); footer.Text = "Stopping the streamer..."; Refresh(); host.Stop(); audio.Stop(); { var m = PowerPlan.Restore(); if (m != null) Log.Write("INFO", m); } Log.Write("INFO", "streamer.exe closed"); };
         }
 
         // The Advanced settings window is a separate process: it writes config\airframexr.json, and this timer hands the switches that act live to the running streamer
@@ -725,6 +733,7 @@ namespace AirFrameXR
 
         internal void HostEvent(string name, Dictionary<string, object> d)
         {
+            BenchHostEvent(name, d);
             switch (name)
             {
                 case "setup_error":
@@ -972,6 +981,7 @@ namespace AirFrameXR
         static void Main()
         {
             Log.Component = "gui";
+            BenchPrepare();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             using (new System.Threading.Mutex(true, "AirFrameXR_Runtime_Window", out bool first))
