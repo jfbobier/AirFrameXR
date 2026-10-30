@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The bundle: the stock (release) package with the Black Box (the telemetry package) nested in it as bench\\telemetry\\, as a folder and a zip on the builder, public and personal.
+"""The bundle: the stock (release) package with the Black Box (the telemetry package) nested in it as blackbox\\ (blackbox_perf.exe in the root starts it), as a folder and a zip on the builder, public and personal.
 
     python3 harness/bundle.py            # builds both flavours (about 20 minutes), stashes them, assembles out\\bundle\\<stamp>-public and -personal, fetches both zips to build/bundle/
 

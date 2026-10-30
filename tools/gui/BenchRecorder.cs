@@ -34,7 +34,9 @@ namespace AirFrameXR
             var saved = Json.Str(own, "stock_dir", "");
             Func<string, bool> ok = d => d.Length > 0 && Directory.Exists(Path.Combine(d, "config")) && !string.Equals(Path.GetFullPath(d).TrimEnd('\\'), Path.GetFullPath(Paths.Dir).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
             if (ok(saved)) return saved;
-            try { var up = Path.GetFullPath(Path.Combine(Paths.Dir, "..", "..")); if (ok(up) && File.Exists(Path.Combine(up, "bin", "streamer.exe"))) { Json.Set(own, "stock_dir", up); SaveOwn(own); return up; } } catch { }
+            // nested in the bundle as <stock>\blackbox\ (one level up), or in the first layout <stock>\bench\telemetry\ (two levels up)
+            foreach (var rel in new[] { "..", Path.Combine("..", "..") })
+                try { var up = Path.GetFullPath(Path.Combine(Paths.Dir, rel)); if (ok(up) && File.Exists(Path.Combine(up, "bin", "streamer.exe"))) { Json.Set(own, "stock_dir", up); SaveOwn(own); return up; } } catch { }
             if (Environment.GetCommandLineArgs().Contains("--test")) return null;
             using (var f = new FolderBrowserDialog { Description = "Where is your normal AirFrameXR folder? The Black Box Recorder copies your settings and headset pairing from it (it never changes that folder).", ShowNewFolderButton = false })
             {
@@ -71,6 +73,72 @@ namespace AirFrameXR
                 Log.Write("INFO", "bench: " + SnapshotNote);
             }
             catch (Exception e) { SnapshotNote = "Could not copy the settings: " + e.Message; Log.Write("WARN", "bench: " + SnapshotNote); }
+        }
+    }
+
+    /// The OpenXR runtime during a recording. Windows has ONE active OpenXR runtime and a game loads it, so to record a game the Black Box has to be that runtime while you record. This is NOT the normal
+    /// register script (that one also moves the firewall rule and forgets the runtime before it): it sets exactly one registry value, remembers what it was in config\bench.json, and puts back exactly that.
+    /// Each switch asks Windows for administrator rights (the registry key is machine-wide).
+    public static class BenchRuntime
+    {
+        const string Key = @"HKLM:\SOFTWARE\Khronos\OpenXR\1";
+        public static string Before => Json.Str(BenchRecorder.Own(), "runtime_before", "");
+        public static bool Switched => Json.Bool(BenchRecorder.Own(), "runtime_switched", false);
+        public static string BeforeName => Switched ? (Before.Length > 0 ? OpenXr.Name(Before) : "no runtime") : "";
+
+        static bool Elevated(string script)
+        {
+            try
+            {
+                var enc = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+                var psi = new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -EncodedCommand " + enc) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden };
+                using (var p = Process.Start(psi)) p.WaitForExit(60000);
+                return true;
+            }
+            catch (Win32Exception) { return false; }   // permission declined
+        }
+        static string Q(string v) { return "'" + v.Replace("'", "''") + "'"; }
+
+        /// switch to this folder's runtime; remembers the one that was active. True when this folder is the active runtime afterwards.
+        public static bool UseBlackBox()
+        {
+            var active = OpenXr.ActiveRuntime();
+            if (OpenXr.IsOurs()) return true;
+            if (!Elevated("$k = '" + Key + "'; if (-not (Test-Path $k)) { New-Item -Path $k -Force | Out-Null }; Set-ItemProperty -Path $k -Name ActiveRuntime -Value " + Q(Paths.Manifest) + " -Type String")) return false;
+            bool ok = OpenXr.IsOurs();
+            if (ok)
+            {
+                var own = BenchRecorder.Own(); Json.Set(own, "runtime_before", active); Json.Set(own, "runtime_switched", true); BenchRecorder.SaveOwn(own);
+                Log.Write("INFO", "bench: OpenXR runtime now the Black Box's; before: '" + active + "'");
+            }
+            return ok;
+        }
+
+        /// put back exactly what was active before (only if the Black Box's runtime is still the active one). True when the Black Box is no longer the active runtime.
+        public static bool PutBack()
+        {
+            if (!OpenXr.IsOurs()) { Forget(); return true; }
+            if (!Switched) return false;   // not ours to undo: the normal launcher's OpenXR runtime button does it
+            string before = Before;
+            var script = "$k = '" + Key + "'; if ((Get-ItemProperty -Path $k -Name ActiveRuntime -ErrorAction SilentlyContinue).ActiveRuntime -ieq " + Q(Paths.Manifest) + ") { " +
+                (before.Length > 0 ? "Set-ItemProperty -Path $k -Name ActiveRuntime -Value " + Q(before) + " -Type String" : "Remove-ItemProperty -Path $k -Name ActiveRuntime -ErrorAction SilentlyContinue") + " }";
+            if (!Elevated(script)) return false;
+            bool ok = !OpenXr.IsOurs();
+            if (ok) { Forget(); Log.Write("INFO", "bench: OpenXR runtime put back: '" + before + "'"); }
+            return ok;
+        }
+        static void Forget() { var own = BenchRecorder.Own(); Json.Set(own, "runtime_switched", false); Json.Set(own, "runtime_before", ""); BenchRecorder.SaveOwn(own); }
+
+        public const string Why = "Windows has one active OpenXR runtime, and a game loads it. To record a game, the Black Box has to be that runtime while you record (it is the telemetry build). ";
+
+        /// at the start of the recorder: explain, and offer the switch
+        public static void StartupPrompt()
+        {
+            if (OpenXr.IsOurs() || Environment.GetCommandLineArgs().Contains("--test") || Ui.ScreenshotPath() != null) return;
+            var cur = OpenXr.ActiveRuntime(); string name = OpenXr.Name(cur);
+            var q = MessageBox.Show(Why + "\n\nActive now: " + name + (cur.Length > 0 ? " (" + cur + ")" : "") + ".\n\nSwitch to the Black Box now? It remembers " + name + " and puts it back with one click (a button in the recorder window; it also asks when you close it). Each switch asks Windows for administrator rights.\n\nChoose No to look around: games will not be recorded until you use the button in the window.",
+                "AirFrameXR Black Box", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (q == DialogResult.Yes && !UseBlackBox()) MessageBox.Show("The switch did not take effect (the permission prompt was declined?). Use the button in the recorder window.", "AirFrameXR Black Box", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
@@ -114,6 +182,9 @@ namespace AirFrameXR
         readonly Button benchAnalyze = new Button { Text = "Analyze recordings...", AutoSize = true };
         readonly Button benchFolderBtn = new Button { Text = "Recordings folder", AutoSize = true };
         readonly Label benchState = new Label { AutoSize = false, Font = Ui.Body, Width = 600, Height = 48, Margin = new Padding(3, 6, 3, 0) };
+        readonly Label benchRt = new Label { AutoSize = false, Font = Ui.Body, Width = 600, Height = 54, Margin = new Padding(3, 8, 3, 0) };
+        readonly Button benchRtUse = new Button { Text = "Use Black Box for recording...", AutoSize = true };
+        readonly Button benchRtBack = new Button { Text = "Put back", AutoSize = true };
         readonly Label benchSaved = new Label { AutoSize = false, Font = Ui.Body, ForeColor = Color.DimGray, Width = 560, Height = 20, Margin = new Padding(3, 0, 3, 0) };
         readonly Label benchBanner = new Label { AutoSize = true, Font = Ui.Body, ForeColor = Color.DimGray, Margin = new Padding(3, 0, 0, 8) };
         BlackBoxHeader benchHeader;
@@ -122,6 +193,7 @@ namespace AirFrameXR
         bool benchDemo;
 
         static partial void BenchPrepare() { BenchRecorder.Prepare(); }
+        static partial void BenchRuntimeCheck(ref bool handled) { if (!BenchRecorder.Enabled) return; handled = true; BenchRuntime.StartupPrompt(); }
 
         partial void BenchHeader(ref Control hdr) { if (!BenchRecorder.Enabled) return; benchHeader = new BlackBoxHeader("Recorder"); hdr = benchHeader; }
 
@@ -147,8 +219,10 @@ namespace AirFrameXR
             line2.Controls.Add(new Label { Text = "Start / stop key", AutoSize = true, Margin = new Padding(3, 7, 4, 0) }); line2.Controls.Add(benchCtrl); line2.Controls.Add(benchKey); line2.Controls.Add(benchBeep); line2.Controls.Add(benchBtn);
             var line3 = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
             line3.Controls.Add(benchAnalyze); line3.Controls.Add(benchFolderBtn); line3.Controls.Add(benchDeep);
+            var rtRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 0) };
+            rtRow.Controls.Add(benchRtUse); rtRow.Controls.Add(benchRtBack);
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
-            col.Controls.Add(line1); col.Controls.Add(line2); col.Controls.Add(benchState); col.Controls.Add(benchSaved); col.Controls.Add(line3);
+            col.Controls.Add(benchRt); col.Controls.Add(rtRow); col.Controls.Add(line1); col.Controls.Add(line2); col.Controls.Add(benchState); col.Controls.Add(benchSaved); col.Controls.Add(line3);
             var grp = new GroupBox { Text = "Recording", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
             col.Font = Ui.Body; col.Dock = DockStyle.Fill; grp.Controls.Add(col);
             body.Controls.Add(grp);
@@ -156,6 +230,10 @@ namespace AirFrameXR
             tips.SetToolTip(benchDeep, "GPU and CPU scheduling for 20 s with Windows' own recorder (wpr). Windows asks for permission once; the stream keeps running. Declining changes nothing.");
             tips.SetToolTip(benchFull, "Starts when a game starts and stops when it closes: for games where the problem comes late. The key still stops it early.");
 
+            tips.SetToolTip(benchRtUse, BenchRuntime.Why + "The Black Box remembers the runtime that was active and puts it back exactly. Windows asks for administrator rights.");
+            benchRtUse.Click += (s, e) => { if (BenchRuntime.UseBlackBox()) BenchRuntimeRefresh(); else benchRt.Text = "The switch did not take effect (the permission prompt was declined?)."; };
+            benchRtBack.Click += (s, e) => { if (BenchRuntime.PutBack()) BenchRuntimeRefresh(); else benchRt.Text = "Nothing was put back (the permission prompt was declined?). The normal launcher's OpenXR runtime button also switches back."; };
+            BenchRuntimeRefresh();
             benchBtn.Click += (s, e) => BenchToggle();
             benchAnalyze.Click += (s, e) => BenchOpenAnalyzer(benchLastDir);
             benchFolderBtn.Click += (s, e) => { try { Directory.CreateDirectory(BenchRecorder.RecordingsDir); Process.Start("explorer.exe", "\"" + BenchRecorder.RecordingsDir + "\""); } catch { } };
@@ -287,8 +365,27 @@ namespace AirFrameXR
             return frames;
         }
 
+        // the OpenXR runtime line: who is active, why it matters, and the one click that puts the previous one back
+        void BenchRuntimeRefresh()
+        {
+            if (benchDemo) return;
+            bool ours = OpenXr.IsOurs(); string before = BenchRuntime.BeforeName;
+            if (ours)
+            {
+                benchRt.Text = "OpenXR runtime: Black Box (this folder). Games started now load the telemetry build and are recorded." + (BenchRuntime.Switched ? "\nWhen you are done, put back " + before + "." : "\nNot switched from here: the normal launcher's OpenXR runtime button switches back.");
+                benchRt.ForeColor = Color.SeaGreen; benchRtUse.Visible = false; benchRtBack.Visible = BenchRuntime.Switched; benchRtBack.Text = "Put back " + before;
+            }
+            else
+            {
+                var name = OpenXr.Name(OpenXr.ActiveRuntime());
+                benchRt.Text = "OpenXR runtime: " + name + ". A game started now would NOT be recorded: Windows has one active runtime and games load it, so the Black Box must be it while you record.";
+                benchRt.ForeColor = Color.DarkOrange; benchRtUse.Visible = true; benchRtBack.Visible = false;
+            }
+        }
+
         void BenchTick()
         {
+            BenchRuntimeRefresh();
             if (benchDemo) return;
             if (benchProbe == null) { return; }
             var el = (DateTime.UtcNow - benchStart).TotalSeconds; var p = benchProbe;
@@ -309,6 +406,12 @@ namespace AirFrameXR
         {
             if (!BenchRecorder.Enabled || benchDemo) return;
             try { benchTimer.Stop(); if (benchHot != null) benchHot.Dispose(); } catch { }
+            try
+            {
+                if (OpenXr.IsOurs() && BenchRuntime.Switched && MessageBox.Show("Put back " + BenchRuntime.BeforeName + " as the OpenXR runtime now? (Windows asks for permission.)\n\nIf you keep the Black Box as the runtime, games you start later still load the telemetry build and the normal streamer will not be recorded or used until you switch back (the normal launcher's OpenXR runtime button does it).",
+                    "AirFrameXR Black Box", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) BenchRuntime.PutBack();
+            }
+            catch { }
             var p = benchProbe;
             if (p != null)
             {
@@ -349,6 +452,8 @@ namespace AirFrameXR
         public void BenchDemoState(string st)
         {
             benchDemo = true; try { benchTimer.Stop(); } catch { }
+            if (st == "recording" || st == "saved" || st == "full-waiting") { benchRt.Text = "OpenXR runtime: Black Box (this folder). Games started now load the telemetry build and are recorded.\nWhen you are done, put back Virtual Desktop OpenXR."; benchRt.ForeColor = Color.SeaGreen; benchRtUse.Visible = false; benchRtBack.Visible = true; benchRtBack.Text = "Put back Virtual Desktop OpenXR"; }
+            else { benchRt.Text = "OpenXR runtime: AirFrameXR. A game started now would NOT be recorded: Windows has one active runtime and games load it, so the Black Box must be it while you record."; benchRt.ForeColor = Color.DarkOrange; benchRtUse.Visible = true; benchRtBack.Visible = false; }
             benchSceneBox.Text = "Lies of P corridor";
             if (st == "full-waiting") { benchFull.Checked = true; BenchSetState("Full session: waiting for a game to start.", Color.DarkOrange); }
             else if (st == "recording") { if (benchHeader != null) benchHeader.Recording = true; benchBtn.Text = "Stop recording"; BenchSetState("Recording 0:42:17 (full session) \u00B7 GPU 78 % \u00B7 1905 MHz \u00B7 231.4 W \u00B7 recorder OK\nPress F8 or the button to stop.", Color.SeaGreen); }

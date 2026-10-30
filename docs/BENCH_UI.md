@@ -15,7 +15,7 @@ The stock streamer carries none of it: partial methods without an implementation
 ## Conventions (settled with the user, 2026-10-30)
 
 - The recorder reads the normal streamer's settings and **never changes them**: at every start it copies Stock's `config\airframexr.json` and `session.json` (headset pairing included) into its own `config\`, one way,
-  then switches debug logging on in its copy. Stock's folder is found two levels up when the install is nested as `<stock>\bench\telemetry`, else asked once (`config\bench.json`).
+  then switches debug logging on in its copy. Stock's folder is found one level up when the install is nested as `<stock>\blackbox` (two levels up in the first layout `<stock>\bench\telemetry`), else asked once (`config\bench.json`).
 - To test other streamer settings: set them in the normal UI, close it, come back (one streamer at a time: one runtime, one port). Most late frames come from the game (DLSS quality, ray tracing, resolution), so the report
   says so when the stream waited for the game and the GPU was busy.
 - Recording: the key **F8** by default (configurable, with Ctrl; F9 is "quick load" in some games). A registered hotkey is swallowed, so the game does not see it; F12 is reserved by Windows for debuggers, so it is read instead
@@ -23,7 +23,9 @@ The stock streamer carries none of it: partial methods without an implementation
 - Recordings are written to `logs\performance\<time>_<scene>\` (probe files + the engine's per-frame files of the run cut to the recording). Recording never analyzes: **Analyze** is a click in the analyzer.
 - The analyzer lists recordings with their size, replays an analyzed one without a click, exports a zip, deletes one (confirmation) or the ones older than N days, and opens a recording folder or zip from another PC.
   It refuses to analyze while a recording runs (the analysis would compete with the game for the CPU).
-- The only elevated action is **Deep trace (admin)** in the recorder: Windows' own `wpr` for 20 s, one UAC prompt, declining changes nothing.
+- **The OpenXR runtime** (a game loads the active runtime, so the Black Box must be it while recording): the recorder explains this at start, shows who is active and offers **Use Black Box for recording...**; it remembers the runtime it replaced and
+  **Put back <name>** restores exactly that (also offered when the window is closed). One registry value, one permission prompt each way; not the normal register script (see TELEMETRY_PLAN.md).
+- Two actions ask for administrator rights, each declinable: that switch and **Deep trace (admin)** (Windows' own `wpr` for 20 s).
 
 ## The recorder window
 
@@ -53,8 +55,8 @@ The recorder's own health comes first when it failed (lost rows). Under frame ge
 
 Under the table: the details (the stage that made each late frame, the suggested test), the worst 10-second windows (when it went bad, for a long recording) and the worst late frames.
 
-**Planned: a time series per category** (the unit is the difficulty). Proposal: one small chart per category on a shared time axis with the late-frame density on top; every series drawn as a **percentage of its limit** so different units sit on one scale
-(loads in %, the encode window in % of the frame period, network latency in % of the frame period, free RAM as % used), with the real value in the tooltip; at most three lines per chart; custom-drawn, no chart library. Not built.
+**A time series per category** (the unit was the difficulty; built 2026-10-31): one small chart per category on a shared time axis with the late-frame density on top; every series drawn as a **percentage of its limit** so different units sit on one scale
+(loads in %, the encode window in % of the frame period, network latency in % of the frame period, free RAM as % used), with the real value in the tooltip; at most three lines per chart; custom-drawn (`tools/gui/BlackBoxChart.cs`, no chart library); the late-frame strip sits above the first chart; hovering one chart shows the real values at that second in all of them.
 
 ## Test matrix
 

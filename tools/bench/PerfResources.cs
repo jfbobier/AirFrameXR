@@ -56,7 +56,6 @@ namespace AirFrameXR.Perf
 
         static string Max2(string a, string b) { return string.CompareOrdinal(a, b) >= 0 ? a : b; }
 
-        static readonly string[] GameFilter = { "alvr_host" };
 
         static void BuildCategories(ReportData R, Ctx c)
         {
@@ -255,6 +254,86 @@ namespace AirFrameXR.Perf
             else if (headsetSlow) { V.Status = "WATCH"; V.Summary = "the headset is slow at the tail (decode p95 " + F1(dec95) + " ms, decoder queue p95 " + F1(dq95) + " ms)"; }
             else { V.Status = "OK"; V.Summary = "late frames " + Pct(c.LateShare) + (!double.IsNaN(gameFps) ? ", game " + F1(gameFps) + " fps, headset " + (double.IsNaN(headsetShows) ? "n/a" : F1(headsetShows)) + " fps" : ""); }
             R.Categories.Add(V);
+        }
+
+
+        // ---------------------------------------------------------------- the time series: one chart per category, every line as a percentage of its limit, one value per second
+        static double[] BinMean(List<double> t, List<double> v, double origin, int n)
+        {
+            var sum = new double[n]; var cnt = new int[n]; var o = new double[n];
+            for (int i = 0; i < t.Count && i < v.Count; i++) { if (double.IsNaN(v[i])) continue; int b = (int)Math.Floor(t[i] - origin); if (b < 0 || b >= n) continue; sum[b] += v[i]; cnt[b]++; }
+            for (int b = 0; b < n; b++) o[b] = cnt[b] > 0 ? sum[b] / cnt[b] : double.NaN;
+            return o;
+        }
+        static double[] Scale(double[] v, double k) { return v.Select(x => double.IsNaN(x) ? x : x * k).ToArray(); }
+
+        // a column of a table with its time column, restricted to rows whose time is in range (for the binning above)
+        static void Col(Table t, string col, string timeCol, out List<double> tm, out List<double> v)
+        {
+            tm = new List<double>(); v = new List<double>(); if (t == null || !t.Has(col) || !t.Has(timeCol)) return;
+            tm = t.Get(timeCol); v = t.Get(col);
+        }
+
+        static void BuildSeries(ReportData R, Ctx c, double wStart, double wEnd, double t0)
+        {
+            if (!c.HaveHost || double.IsNaN(wStart) || double.IsNaN(wEnd) || wEnd - wStart < 5) return;
+            var hf = (Table)c.Hf; var cg = (Table)c.Cg; var gpu = (Table)c.Gpu; var sys = (Table)c.Sys; var eng = (Table)c.Eng; var proc = (Table)c.Proc;
+            int n = (int)Math.Min(20000, Math.Ceiling(wEnd - wStart) + 1);
+            R.OriginSeconds = double.IsNaN(t0) ? 0 : wStart - t0;
+            double period = c.Period;
+            List<double> tm, v;
+
+            // late frames per second against the 1 % budget, and the streamed frames per second, from the host's own record
+            var ts = hf.Get("t_send"); var enc = hf.Get("encode_ms");
+            var late = new double[n]; var tot = new double[n]; var fps = new double[n]; var encT = new List<double>(); var encV = new List<double>();
+            for (int k = 0; k < c.Rows.Count; k++)
+            {
+                int i = c.Rows[k]; int b = (int)Math.Floor(ts[i] - wStart); if (b < 0 || b >= n) continue;
+                fps[b]++; if (hf.Has("encode_ms")) { encT.Add(ts[i]); encV.Add(enc[i]); }
+                if (k == 0) continue;
+                double gp = (ts[i] - ts[c.Rows[k - 1]]) * 1000.0; if (gp > PauseMs) continue;
+                tot[b]++; if (gp > LateFactor * period) late[b]++;
+            }
+            R.LateBudgetPercent = Enumerable.Range(0, n).Select(b => tot[b] > 0 ? late[b] / tot[b] / MaxLateShare * 100.0 : double.NaN).ToArray();
+
+            Func<string, string, double[], double, string, string, object, TimeSeries> mk = (name, unit, vals, limit, limitText, fmt, _) => new TimeSeries { Name = name, Unit = unit, V = vals, Limit = limit, LimitText = limitText, Fmt = fmt };
+            Func<TimeSeries, bool> has = x => x.V.Any(y => !double.IsNaN(y));
+
+            // game and host process names, as the table builder found them
+            string host = "alvr_host", game = null;
+            try { var sj = File.ReadAllText(Path.Combine(c.Dir, "session.json")); var m = Regex.Match(sj, "\"processes\": \"([^\"]*)\""); if (m.Success) game = m.Groups[1].Value.Split('+').FirstOrDefault(x => x.Length > 0 && !string.Equals(x, host, StringComparison.OrdinalIgnoreCase)); } catch { }
+            double logical = 0, ramTotal = 0;
+            try { var sj = File.ReadAllText(Path.Combine(c.Dir, "session.json")); var m = Regex.Match(sj, "\"logical_cpus\": (\\d+)"); if (m.Success) logical = double.Parse(m.Groups[1].Value, C); var m2 = Regex.Match(sj, "\"ram_total_bytes\": (\\d+)"); if (m2.Success) ramTotal = double.Parse(m2.Groups[1].Value, C); } catch { }
+
+            // GPU
+            var gg = new SeriesGroup { Category = "GPU" };
+            Col(gpu, "gpu_util_pct", "sample_qpc", out tm, out v); gg.Series.Add(mk("GPU utilisation", "%", BinMean(tm, v, wStart, n), 100, "100 %", "F0", null));
+            gg.Series.Add(mk("Encode time per frame", "ms", BinMean(encT, encV, wStart, n), period, N(period, "F1") + " ms = the frame period", "F1", null));
+            if (game != null) { tm = new List<double>(); v = new List<double>(); if (eng != null && eng.Has("process") && eng.Has("engine")) { var tq = eng.Get("sample_qpc"); var uv = eng.Get("util_pct"); for (int i = 0; i < uv.Count; i++) if (eng.Raw["process"][i] == game && eng.Raw["engine"][i] == "3D") { tm.Add(tq[i]); v.Add(uv[i]); } } gg.Series.Add(mk("Game: 3D engine", "%", BinMean(tm, v, wStart, n), 100, "100 %", "F0", null)); }
+            gg.Series.RemoveAll(x => !has(x)); if (gg.Series.Count > 0) R.Charts.Add(gg);
+            // CPU
+            var cp = new SeriesGroup { Category = "CPU" };
+            Col(sys, "cpu_total_pct", "sample_qpc", out tm, out v); cp.Series.Add(mk("CPU total", "%", BinMean(tm, v, wStart, n), 100, "100 %", "F0", null));
+            if (game != null && proc != null && proc.Has("process") && logical > 0) { tm = new List<double>(); v = new List<double>(); var tq = proc.Get("sample_qpc"); var cv = proc.Get("cpu_cores"); for (int i = 0; i < cv.Count; i++) if (proc.Raw["process"][i] == game) { tm.Add(tq[i]); v.Add(cv[i]); } cp.Series.Add(mk("Game process", "cores", BinMean(tm, v, wStart, n), logical, N(logical, "F0") + " cores = all of them", "F1", null)); }
+            cp.Series.RemoveAll(x => !has(x)); if (cp.Series.Count > 0) R.Charts.Add(cp);
+            // Memory and I/O
+            var mm = new SeriesGroup { Category = "Memory and I/O" };
+            if (ramTotal > 0) { Col(sys, "ram_available_bytes", "sample_qpc", out tm, out v); mm.Series.Add(mk("RAM used", "GiB", Scale(BinMean(tm, v.Select(x => ramTotal - x).ToList(), wStart, n), 1.0 / 1073741824.0), ramTotal / 1073741824.0, N(ramTotal / 1073741824.0, "F0") + " GiB = all of it", "F1", null)); }
+            Col(sys, "disk_busy_pct", "sample_qpc", out tm, out v); mm.Series.Add(mk("Disk busy", "%", BinMean(tm, v, wStart, n), 100, "100 %", "F0", null));
+            mm.Series.RemoveAll(x => !has(x)); if (mm.Series.Count > 0) R.Charts.Add(mm);
+            // Network
+            var nw = new SeriesGroup { Category = "Network" };
+            Col(cg, "network_ms", "t_recv", out tm, out v); nw.Series.Add(mk("Network latency", "ms", BinMean(tm, v, wStart, n), period, N(period, "F1") + " ms = the frame period", "F1", null));
+            Col(cg, "bitrate_mbps", "t_recv", out tm, out v); var br = BinMean(tm, v, wStart, n); double brMax = br.Where(x => !double.IsNaN(x)).DefaultIfEmpty(0).Max();
+            if (brMax > 0) nw.Series.Add(mk("Stream bitrate", "Mbps", br, brMax, N(brMax, "F0") + " Mbps = the recording's peak", "F0", null));
+            nw.Series.RemoveAll(x => !has(x)); if (nw.Series.Count > 0) R.Charts.Add(nw);
+            // VR rendering
+            var vr = new SeriesGroup { Category = "VR rendering" };
+            vr.Series.Add(mk("Late frames", "%", Scale(R.LateBudgetPercent, MaxLateShare), MaxLateShare * 100, "1 % of the frames = the budget", "F1", null));
+            double hz = 1000.0 / period;
+            vr.Series.Add(mk("Streamed fps", "fps", fps, hz, N(hz, "F0") + " fps = the display rate", "F0", null));
+            Col(cg, "client_fps", "t_recv", out tm, out v); vr.Series.Add(mk("Headset shows", "fps", BinMean(tm, v, wStart, n), hz, N(hz, "F0") + " fps = the display rate", "F0", null));
+            vr.Series.RemoveAll(x => !has(x)); if (vr.Series.Count > 0) R.Charts.Add(vr);
         }
 
         static string HotShare(ReportData R) { var h = R.Hotspots.OrderByDescending(x => { var m = Regex.Match(x, @"in: ([\d.]+) %"); return m.Success ? double.Parse(m.Groups[1].Value, C) : 0; }).First(); var mm = Regex.Match(h, @"in: ([\d.]+) %"); return mm.Success ? mm.Groups[1].Value + " %" : "-"; }

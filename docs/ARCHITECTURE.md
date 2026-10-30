@@ -74,7 +74,7 @@ cargo feature `telemetry`, the shim with `AIRFRAMEXR_RELEASE`, and the GUIs with
 Nothing in the frame path writes a per-frame record, so the telemetry costs the stock streamer nothing. The *telemetry* build keeps all of it.
 
 Until 1.3 the telemetry build was a developer tool: the lab, `harness/frames.py` and debugging a judder used it. **Since 1.3 it ships, as the Black Box suite**
-([TELEMETRY_PLAN.md](TELEMETRY_PLAN.md), [BENCH_UI.md](BENCH_UI.md)): a complete second install, nested in the bundle as `bench\telemetry\`, made only of the telemetry build plus two programs of its own,
+([TELEMETRY_PLAN.md](TELEMETRY_PLAN.md), [BENCH_UI.md](BENCH_UI.md)): a complete second install, nested in the bundle as `blackbox\` (started by `blackbox_perf.exe` in the folder's root; `bench\` keeps only the small benches), made only of the telemetry build plus two programs of its own,
 the **Black Box Recorder** (`blackbox_recorder.exe`: the streamer window with a recording panel; it copies the normal streamer's settings at start and never writes to them) and the
 **Black Box Analyzer** (`blackbox_analyzer.exe`: reads a recording, says where the time went; separate, run afterwards). `perfcore.dll` holds the shared probe (NVML and Windows counters, one thread per
 source, an unavailable reading is blank and never 0) and the report. The engine is not edited for any of this: the recorder joins the engine's existing per-frame files by timestamp.

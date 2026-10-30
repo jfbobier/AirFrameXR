@@ -430,6 +430,7 @@ namespace AirFrameXR.Perf
             kv("flavour_file", flavour, false);
             kv("os", Environment.OSVersion.VersionString, false);
             kv("logical_cpus", Environment.ProcessorCount.ToString(), true);
+            kv("ram_total_bytes", TotalRam().ToString(CultureInfo.InvariantCulture), true);
             kv("gpu", gpuName, false); kv("gpu_driver", driver, false); kv("nvml_version", nvmlVersion, false);
             kv("processes", string.Join("+", o.ProcessNames), false);
             if (!string.IsNullOrEmpty(o.SettingsDir)) { kv("airframexr_json_hash", HashFile(Path.Combine(o.SettingsDir, "airframexr.json")), false); kv("session_json_hash", HashFile(Path.Combine(o.SettingsDir, "session.json")), false); }
@@ -437,6 +438,10 @@ namespace AirFrameXR.Perf
             sb.Append("  \"complete\": ").Append(ended ? "true" : "false").Append("\n}\n");
             try { File.WriteAllText(Path.Combine(o.Dir, "session.json"), sb.ToString(), new UTF8Encoding(false)); } catch { }
         }
+
+        [StructLayout(LayoutKind.Sequential)] struct MemStatus { public uint Length, Load; public ulong TotalPhys, AvailPhys, TotalPageFile, AvailPageFile, TotalVirtual, AvailVirtual, AvailExtendedVirtual; }
+        [DllImport("kernel32.dll")] static extern bool GlobalMemoryStatusEx(ref MemStatus m);
+        static ulong TotalRam() { var m = new MemStatus(); m.Length = (uint)Marshal.SizeOf(typeof(MemStatus)); return GlobalMemoryStatusEx(ref m) ? m.TotalPhys : 0; }
 
         void Pace(ref long n, double period, Stopwatch wall)
         {

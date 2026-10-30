@@ -8,21 +8,27 @@ using System.Windows.Forms;
 
 static class Stub
 {
+#if BLACKBOX
+    // blackbox_perf.exe in the package root (the bundle): starts blackbox\bin\launcher.exe, the Black Box's own two-card launcher
+    const string Rel = @"blackbox\bin\launcher.exe", Title = "AirFrameXR Black Box", Self = "blackbox_perf.exe", Folder = "blackbox";
+#else
+    const string Rel = @"bin\launcher.exe", Title = "AirFrameXR", Self = "AirFrameXR.exe", Folder = "bin";
+#endif
     [STAThread]
     static int Main(string[] args)
     {
         var dir = AppDomain.CurrentDomain.BaseDirectory;
-        var exe = Path.Combine(dir, "bin", "launcher.exe");
+        var exe = Path.Combine(dir, Rel);
         // started from inside the zip viewer (Windows unpacks one file to a temp folder): the rest of the package is not there
         if (!File.Exists(exe))
         {
             var inZip = dir.IndexOf(".zip", StringComparison.OrdinalIgnoreCase) >= 0 || dir.IndexOf("\\Temp1_", StringComparison.OrdinalIgnoreCase) >= 0;
-            MessageBox.Show(inZip ? "Extract the whole zip first (right-click it, Extract All), then start AirFrameXR.exe from the extracted folder."
-                                  : "AirFrameXR cannot start: bin\\launcher.exe is missing. Unzip the whole AirFrameXR folder, keeping its folders, and start AirFrameXR.exe from it.",
-                "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(inZip ? "Extract the whole zip first (right-click it, Extract All), then start " + Self + " from the extracted folder."
+                                  : Title + " cannot start: " + Rel + " is missing. Unzip the whole AirFrameXR folder, keeping its folders, and start " + Self + " from it.",
+                Title, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 1;
         }
         try { Process.Start(new ProcessStartInfo(exe, string.Join(" ", args.Select(a => a.Contains(" ") ? "\"" + a + "\"" : a))) { WorkingDirectory = Path.GetDirectoryName(exe), UseShellExecute = false }); return 0; }
-        catch (Exception e) { MessageBox.Show("AirFrameXR cannot start: " + e.Message, "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
+        catch (Exception e) { MessageBox.Show(Title + " cannot start: " + e.Message, Title, MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
     }
 }

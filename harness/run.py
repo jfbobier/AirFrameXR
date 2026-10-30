@@ -134,7 +134,7 @@ def build(what):
             for src in sorted((lib.ROOT / "tools/bench").glob("*.cs")):
                 lib.b_put(src, f"_tmp/bench/{src.name}")
             lib.b_run("if not exist _tmp\\bench\\gui\\res mkdir _tmp\\bench\\gui\\res")
-            for g in ("Common.cs", "PipelineModel.cs", "AirFrameXR.cs", "FindHeadset.cs", "AudioRoute.cs", "BenchRecorder.cs", "PerfAnalyze.cs", "BlackBoxBrand.cs", "app.manifest", "app.exe.config"):
+            for g in ("Common.cs", "PipelineModel.cs", "AirFrameXR.cs", "FindHeadset.cs", "AudioRoute.cs", "BenchRecorder.cs", "PerfAnalyze.cs", "BlackBoxBrand.cs", "BlackBoxChart.cs", "Stub.cs", "app.stub.manifest", "app.manifest", "app.exe.config"):
                 lib.b_put(lib.ROOT / "tools/gui" / g, f"_tmp/bench/gui/{g}")
             for g in ("airframexr.ico", "blackbox-windows.ico", "blackbox_128.png", "logo_640.png", "chroma_passthrough.png"):
                 lib.b_put(lib.ROOT / "tools/gui/res" / g, f"_tmp/bench/gui/res/{g}")

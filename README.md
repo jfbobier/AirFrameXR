@@ -152,7 +152,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
 ![AirFrameXR Black Box, performance flight recorder](branding/blackbox/banner/blackbox-banner.png)
 
 When a game stutters, the first question is *where does the time go*: the game, the encoder, the network, the GPU? The **Black Box** answers it without touching how you normally stream.
-It is a **performance flight recorder** and an analyzer, in a separate install that ships inside the download (`bench\telemetry\`). Most late frames come from the game itself (DLSS quality,
+It is a **performance flight recorder** and an analyzer, in a separate install that ships inside the download (the `blackbox\` folder, started by `blackbox_perf.exe` in the root). Most late frames come from the game itself (DLSS quality,
 ray tracing, resolution), so the report says so when the stream waited for the game and the GPU was busy.
 
 **Black Box Recorder** (`blackbox_recorder.exe`) is the streamer window with a recording panel. It copies your normal streamer's settings and headset pairing when it starts (one way: your normal
@@ -162,8 +162,10 @@ folder is never written), then records:
 - for a **full session** (tick it once): from the game's start to its close, for games where the problem shows up an hour in.
 
 While it records it samples the GPU (utilisation, clocks, power, temperature, VRAM, power limiter, encoder), the Windows counters (CPU, memory, network, the GPU engines of the game and the
-streamer), and keeps the streamer's per-frame files, into `logs\performance\<time>_<scene>\`. An optional **Deep trace (admin)** button records GPU and CPU scheduling for 20 s with Windows' own
-recorder; it is the only thing in the suite that can ask for administrator rights, and declining changes nothing.
+streamer), and keeps the streamer's per-frame files, into `logs\performance\<time>_<scene>\`. **The OpenXR runtime.** Windows has one active OpenXR runtime and a game loads it, so to record a game the Black Box must be that runtime while you record (it is the telemetry build).
+The recorder explains this when it starts and offers the switch; it remembers the runtime that was active and a button (**Put back ...**, also offered when you close the window) puts that exact
+one back. Each switch asks Windows for administrator rights, because the setting is machine-wide. An optional **Deep trace (admin)** button records GPU and CPU scheduling for 20 s with Windows'
+own recorder (one more permission prompt; declining changes nothing).
 
 <p align="center"><img src="docs/images/ui_blackbox_recorder.png" width="640" alt="The Black Box Recorder: the streamer window with the Black Box header, a red REC lamp and the recording panel"></p>
 
@@ -175,7 +177,7 @@ It refuses to analyze while a recording is running, so it never competes with yo
 
 *(The windows above are rendered by the project's UI harness with made-up demo data, not a real recording.)*
 
-**How to use it.** Close the normal streamer (one headset, one port), start `bench\telemetry\AirFrameXR.exe` and open the Black Box Recorder, connect the headset and start the game, press F8 (or tick
+**How to use it.** Close the normal streamer (one headset, one port), start `blackbox_perf.exe` (in the root of the folder) and open the Black Box Recorder, which asks to become the OpenXR runtime for the recording (see below), connect the headset and start the game, press F8 (or tick
 *Full session* first), play the scene that stutters, press F8 again, then open the Analyzer and click *Analyze*. To test other streamer settings, change them in the normal streamer, then come back.
 
 **Why it is a separate install.** Per-frame logging costs CPU, so the normal streamer is built without it: it never writes a per-frame record and never asks for administrator rights. The Black Box is

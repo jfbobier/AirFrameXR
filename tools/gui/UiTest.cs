@@ -78,6 +78,11 @@ namespace AirFrameXR
                 }
                 check(h.Set(12, false), "F12 is accepted (polled: a reserved key cannot be registered)");
             }
+            { // the runtime switch: when the Black Box is not the active runtime there is nothing to put back, and the remembered state is cleared (no elevation needed)
+                var o2 = BenchRecorder.Own(); global::AirFrameXR.Json.Set(o2, "runtime_switched", true); global::AirFrameXR.Json.Set(o2, "runtime_before", "C:\\x\\other.json"); BenchRecorder.SaveOwn(o2);
+                bool before = BenchRuntime.Switched; bool ok = BenchRuntime.PutBack();
+                check(!OpenXr.IsOurs() && before && ok && !BenchRuntime.Switched && BenchRuntime.Before.Length == 0, "put back with nothing to undo clears the remembered runtime without asking Windows for anything");
+            }
             var own = BenchRecorder.Own(); global::AirFrameXR.Json.Set(own, "scene", "selftest"); BenchRecorder.SaveOwn(own);
             check(global::AirFrameXR.Json.Str(BenchRecorder.Own(), "scene", "") == "selftest", "the recorder's own settings file round-trips (config\\bench.json)");
             try { Directory.Delete(tmp, true); } catch { }

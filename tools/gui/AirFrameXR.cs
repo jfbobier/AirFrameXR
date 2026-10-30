@@ -42,6 +42,7 @@ namespace AirFrameXR
         partial void BenchHostEvent(string name, Dictionary<string, object> d);
         partial void BenchClosing();
         partial void BenchHeader(ref Control hdr);
+        static partial void BenchRuntimeCheck(ref bool handled);
         static partial void BenchPrepare();
         readonly CheckBox debug = new CheckBox { Text = "Debug logging", AutoSize = true, Font = Ui.Body };
         readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Frame generation" };
@@ -1002,7 +1003,8 @@ namespace AirFrameXR
                     return;
                 }
                 var testing = Ui.ScreenshotPath() != null || Environment.GetCommandLineArgs().Contains("--test");   // --test: no prompts (harness)
-                if (!OpenXr.IsOurs() && !testing)
+                bool bbHandled = false; BenchRuntimeCheck(ref bbHandled);   // the Black Box recorder asks about the runtime in its own words (tools/gui/BenchRecorder.cs); vanishes in the stock streamer
+                if (!bbHandled && !OpenXr.IsOurs() && !testing)
                 {
                     var cur = OpenXr.ActiveRuntime();
                     var q = MessageBox.Show($"AirFrameXR is not the Windows OpenXR runtime (currently: {(cur.Length > 0 ? cur : "none")}).\n\n" +

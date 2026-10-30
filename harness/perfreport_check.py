@@ -177,6 +177,14 @@ for name, _ in FIX:
     if name == "hotspot":
         hs = [l for l in md.splitlines() if " in: " in l and "late" in l]
         check(len(hs) >= 1 and any(l.startswith(("- 0:00:2", "- 0:00:3", "- 0:00:4")) for l in hs), "the worst 10 s windows point at the bad stretch (about 30-42 s)", hs[0] if hs else "no hotspot lines")
+    charts = {m.group(1): (m.group(2), int(m.group(3))) for l in b for m in [re.match(r"\s+CHART (.+?) \| (.*?) \| (\d+) points", l)] if m}
+    strip = next((re.match(r"\s+LATE_STRIP points=(\d+) max=(\d+)", l) for l in b if "LATE_STRIP" in l), None)
+    if name == "clean":
+        check("GPU" in charts and "Encode time per frame" in charts["GPU"][0] and "GPU utilisation" in charts["GPU"][0], "the GPU chart has its lines (utilisation, encode time)", str(charts.get("GPU")))
+        check("VR rendering" in charts and "Late frames" in charts["VR rendering"][0], "the VR rendering chart has the late-frame line", str(charts.get("VR rendering")))
+        check(strip is not None and 30 <= int(strip.group(1)) <= 40 and int(strip.group(2)) == 0, "the late-frame strip has one value a second for the window and nothing over budget", strip.group(0) if strip else "none")
+    if name == "hotspot":
+        check(strip is not None and int(strip.group(2)) > 100, "the late-frame strip goes over the budget in the bad stretch", strip.group(0) if strip else "none")
     if name == "fg_encode_jitter":
         check("mostly upstream" not in md.lower().split("t03")[1].split("\n")[0] if "t03" in md.lower() else False, "frame generation: source-frame arrival gaps are not read as the game being late")
     if name == "gpu_unknown_bit":

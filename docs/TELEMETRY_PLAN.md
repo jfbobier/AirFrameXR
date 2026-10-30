@@ -10,7 +10,7 @@ Tested on the 3080 Ti laptop: probe L0 / L1 captures, the report on fixtures and
 Nothing is in a release yet.
 
 First package (tonight's): the Black Box programs sit in `bin\` of the **debug (telemetry) package** (`blackbox_recorder.exe`, `blackbox_analyzer.exe`, `perfcore.dll`, `perfreport.exe`;
-`stage13_package.ps1` ships them only when the flavour is debug and moves them out of a release package). The debug package *is* the Bench install described in Architecture (unzip it anywhere, or into `bench\telemetry\` of a Stock install); the dual-flavour packaging that produces both from one command comes next.
+`stage13_package.ps1` ships them only when the flavour is debug and moves them out of a release package). The debug package *is* the Bench install described in Architecture (unzip it anywhere, or into `blackbox\` of a Stock install); the dual-flavour packaging that produces both from one command comes next.
 Legend as in [progress.md](progress.md): "measured" means run on the builder with the numbers given, "untested" means not run.
 
 ## Decision
@@ -31,14 +31,15 @@ Architecture (2026-10-30, decided with the user: clean by design): the Black Box
 telemetry (debug) build, with every dependency in its own folder. It shares nothing with Stock at run time. Nothing is added to the engine for this feature.
 
 ```
-<stock install>\                       Stock: release build, unchanged, no bench code anywhere in it
-    AirFrameXR.exe, bin\, config\, profiles\, docs\, logs\, bench\ (the wizard's scene assets: littlest_tokyo.vab, xr_probe.exe, fovgrid.*)
-    bench\telemetry\                   the Black Box: a whole install, the same layout as Stock (Paths.Dir = the parent of bin\, so every exe finds its own files)
-        AirFrameXR.exe                  the stub, starts bin\launcher.exe (its launcher shows the two Black Box cards because bin\blackbox_analyzer.exe exists)
+<stock install>\                       Stock: release build, unchanged, no bench code in it
+    AirFrameXR.exe, bin\, config\, profiles\, docs\, logs\
+    bench\                              only the small benches (the wizard's scene, fovgrid, xr_probe): not touched
+    blackbox_perf.exe                   the Black Box's entry point (a stub like AirFrameXR.exe): starts blackbox\bin\launcher.exe
+    blackbox\                           the Black Box: a whole install, the same layout as Stock (Paths.Dir = the parent of bin\, so every exe finds its own files)
         bin\  alvr_host.exe, LibOVRRT64_1.dll (shim), virtualdesktop-openxr.dll/.json (VDXR), streamer.exe, configure.exe, performance.exe,
-              launcher.exe, mirrordesktop.exe, register_openxr_runtime.ps1, flavour.txt = debug   <- all from the debug build, none copied from Stock
-              blackbox_recorder.exe, blackbox_analyzer.exe (+ .config), perfcore.dll, perfreport.exe <- the Black Box programs (new)
-        bench\ (assets), profiles\, docs\, config\ (its OWN session.json and airframexr.json), logs\ (its own, incl. logs\bench\<session>\)
+              launcher.exe (two cards: recorder, analyzer), mirrordesktop.exe, register_openxr_runtime.ps1, flavour.txt = debug   <- all from the debug build, none copied from Stock
+              blackbox_recorder.exe, blackbox_analyzer.exe (+ .config), perfcore.dll, perfreport.exe                              <- the Black Box programs (new)
+        docs\, config\ (its OWN session.json and airframexr.json: a copy of Stock's, refreshed at every start), logs\ (its own, incl. logs\performance\<recording>\)
         (optional, later) bin\afxr_trace.dll   OpenXR API layer DLL for the frame-cycle spans (see below)
 ```
 
@@ -115,8 +116,9 @@ Reading (practical effect threshold from the plan: p99 +5 % or late frames +0.5 
 - Not measured yet: the telemetry build against the release build on the same scenario (the engine's own per-frame CSVs cost), the 5090, a real headset.
   Run `python3 harness/run.py build host shim --release` then the scenario, to be added to this table.
 
-## Deep trace (the only elevated action)
+## Administrator rights: the OpenXR runtime switch and the Deep trace
 
+- The Black Box programs run unelevated. Two actions ask Windows for administrator rights, each for one command and each declinable: the **OpenXR runtime switch** (below) and the **Deep trace**.
 - The Bench UI runs unelevated. The **Deep trace** button starts `wpr.exe` (GPU + CPU profiles) and/or PresentMon filtered to the game process
   with `runas`; declining UAC just leaves the L1 session as it is.
 - The whole streamer is **not** elevated: its child processes (the game) would inherit it and the numbers would no longer describe how users run
@@ -128,17 +130,25 @@ Reading (practical effect threshold from the plan: p99 +5 % or late frames +0.5 
 
 ## Build and package (what has to be rebuilt)
 
-Everything in `bench\telemetry\` comes from one **debug build tree** (`run.py build ...` with the default flavour); nothing is copied from the release build. Only two binaries differ by
+Everything in `blackbox\` comes from one **debug build tree** (`run.py build ...` with the default flavour); nothing is copied from the release build. Only two binaries differ by
 a compile flag (`alvr_host.exe`, `tools/remote/stage8_host.ps1` `--no-default-features` for release; the shim, `tools/remote/stage11_ovrshim.ps1` `/DAIRFRAMEXR_RELEASE`); `nvenc/`, `tools/mirrordesktop/`, VDXR and
 the GUIs have no flavour switch, but they are rebuilt and packaged from the same tree anyway so that the folder is one build, not a mix.
 
 Today both flavours write to the same output paths (`target\release\alvr_host.exe`, `out\vdxr-shim`, `out\dist\AirFrameXR`), so a distribution holding both needs the order
 **build release, package Stock; build debug, package Bench; assemble**, with each package kept in its own `out\dist\<flavour>` folder. Steps, all in build scripts and `harness/run.py`, none in engine source:
 1. `run.py package` takes the flavour of the last build and writes `out\dist\AirFrameXR` (release) or `out\dist\AirFrameXR-bench` (debug), never overwriting the other.
-2. The Stock zip optionally embeds the Bench package under `bench\telemetry\` (a release decision: one download that holds both, or the Bench zip separately; the build is the same).
+2. The Stock zip embeds the Black Box under `blackbox\` with `blackbox_perf.exe` in the root (a release decision: one download that holds both, or the Bench zip separately; the build is the same).
 3. `stage13_package.ps1` already ships `blackbox_recorder.exe`, `blackbox_analyzer.exe` (+ `.config`), `perfcore.dll`, `perfreport.exe` in `bin\` of the debug package only (done 2026-10-30) and moves them out of a release package.
 4. The package test checks the flavours by content: the Stock host and shim contain none of the telemetry names (`host_frames.csv`; wide string `shim_frames_`), the Bench ones do, Stock has no `perfcore.dll`, the Bench
    registration JSON points at the Bench folder, and `flavour.txt` agrees with the binaries (the first check on 2026-10-30 found a package labelled debug whose host had no telemetry).
+
+## The OpenXR runtime during a recording
+
+Windows has one active OpenXR runtime (`HKLM\SOFTWARE\Khronos\OpenXR\1\ActiveRuntime`) and a game loads it, so to record a game the Black Box must be that runtime while you record: its own VDXR and shim are the telemetry build.
+The recorder explains this at start and offers the switch. It does **not** use the normal `register_openxr_runtime.ps1`: that script also replaces the firewall rule of the normal install and forgets the runtime it replaced, which would
+damage the normal install's state. The Black Box sets exactly one registry value (one elevated PowerShell command, permission prompt included), writes the value it replaced into `config\bench.json`, and puts back exactly that
+(a button "Put back <name>", also offered when the window is closed; if the Black Box is no longer the active runtime, it leaves the registry alone). If the normal AirFrameXR was the active runtime, that is what comes back.
+The firewall rule for the Black Box's own `alvr_host.exe` is the streamer window's existing "Fix" button (a rule per exe path; the normal install's rule is untouched).
 
 ## Bench and Stock side by side
 
@@ -187,7 +197,7 @@ Candidates for 1.4 from that draft, in order: source-view provenance for frame g
 
 - Does the 5090 return more NVML data (encoder sessions under load, process utilization)? The notes say Blackwell lacks OFA but nothing about NVML.
 - Do the `GPU Engine` counters list the 5090's three NVENC engines separately?
-- Distribution: one Stock zip that embeds `bench\telemetry\`, or two zips (Stock, Bench). Layout and build are the same either way; embedding keeps one download, a separate zip keeps Stock's zip free of any bench file.
+- Distribution: one Stock zip that embeds `blackbox\` (done in 1.3.0; layout changed in 1.3.1 from `bench\telemetry\`), or two zips. Embedding keeps one download; a separate zip would keep Stock's zip free of any Black Box file.
 - Is the join by timestamp between `host_frames.csv`, `client_frames.csv` and `shim_frames.csv` enough for the report, or does it need IDs? (`harness/frames.py` joins them today; check on a real session first.)
 - The first draft of this idea lives outside the repo (`AirFrameXR_Performance_Telemetry_Implementation_Plan.md`); its assertion registry and fault-injection
   table are the source for the report's verdicts and fixtures.

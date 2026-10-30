@@ -34,8 +34,23 @@ namespace AirFrameXR.Perf
         public readonly List<ResourceRow> Rows = new List<ResourceRow>();
     }
 
+    /// One line of a time series chart: a value per second of the recording, drawn as a percentage of its limit so that different units share a scale (100 % = the limit or budget)
+    public sealed class TimeSeries
+    {
+        public string Name, Unit, Fmt = "F1", LimitText;
+        public double Limit;                 // the real value that is drawn as 100 %
+        public double[] V;                   // real values, one per second of the window (NaN: no reading)
+        public double Percent(int i) { return double.IsNaN(V[i]) || Limit <= 0 ? double.NaN : V[i] / Limit * 100.0; }
+    }
+
+    /// the charts of one category (at most three lines each)
+    public sealed class SeriesGroup { public string Category; public readonly List<TimeSeries> Series = new List<TimeSeries>(); }
+
     public sealed class ReportData
     {
+        public double OriginSeconds;                                     // seconds from the recording's start to the first second of the charts
+        public double[] LateBudgetPercent;                               // late frames per second as a percentage of the 1 % budget (NaN: no frames), the strip above the charts
+        public readonly List<SeriesGroup> Charts = new List<SeriesGroup>();
         public readonly List<ResourceCategory> Categories = new List<ResourceCategory>();
         public string VerdictStatus = "INSUFFICIENT", Verdict = "";
         public readonly List<Finding> Findings = new List<Finding>();
@@ -281,6 +296,7 @@ namespace AirFrameXR.Perf
             var cx = new Ctx { Dir = dir, Hf = hf, Cg = cg, Gpu = gpu, Sys = sys, Eng = eng, Proc = proc, Rows = rows, HaveHost = haveHost, Period = period, LateShare = lateShare, Late = late, Gaps = gaps,
                 Enc = enc, Qb = qb, From = from, To = to, App = app, Gen = gen, Restamp = restamp, Green = green, ClassCount = classCount, GpuP95 = gpuP95, Pauses = pauses, StartQpc = t0 };
             BuildCategories(R, cx);
+            BuildSeries(R, cx, wStart, wEnd, t0);
 
 
             // ---- the recorder's own health

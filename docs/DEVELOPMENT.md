@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1 host gui     # only some part
 ## Telemetry flag (debug vs release builds)
 
 The advanced per-frame telemetry costs CPU on every frame, so it is a compile-time flag. Release builds (what the stock package ships) drop it; the debug (telemetry) build keeps it and,
-since 1.3, ships as the Black Box suite in its own install (`bench\telemetry\` of the bundle, `python3 harness/bundle.py`; see ARCHITECTURE.md, "Telemetry and the Black Box"):
+since 1.3, ships as the Black Box suite in its own install (`blackbox\` of the bundle, started by `blackbox_perf.exe`, `python3 harness/bundle.py`; see ARCHITECTURE.md, "Telemetry and the Black Box"):
 
 | | debug (default) | release |
 |---|---|---|

@@ -2,6 +2,7 @@
 //   perfreport.exe <session dir> [--warmup <seconds>] [--stdout]
 using System;
 using System.IO;
+using System.Linq;
 using AirFrameXR.Perf;
 
 static class PerfReportCli
@@ -17,6 +18,8 @@ static class PerfReportCli
         else File.WriteAllText(Path.Combine(a[0], "report.md"), r.Markdown, new System.Text.UTF8Encoding(false));
         Console.WriteLine(r.VerdictStatus + ": " + r.Verdict);
         foreach (var c in r.Categories) Console.WriteLine("  CAT " + c.Name + " | " + c.Status + " | " + c.Summary);
+        foreach (var ch in r.Charts) Console.WriteLine("  CHART " + ch.Category + " | " + string.Join("; ", ch.Series.Select(x => x.Name)) + " | " + ch.Series.Max(x => x.V.Length) + " points");
+        if (r.LateBudgetPercent != null) Console.WriteLine("  LATE_STRIP points=" + r.LateBudgetPercent.Length + " max=" + r.LateBudgetPercent.Where(x => !double.IsNaN(x)).DefaultIfEmpty(0).Max().ToString("F0", System.Globalization.CultureInfo.InvariantCulture));
         foreach (var f in r.Findings) Console.WriteLine("  " + f.Id + " " + f.Status + " " + f.Title);
         return r.VerdictStatus == "PROBLEM" ? 1 : 0;
     }
