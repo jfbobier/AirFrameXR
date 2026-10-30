@@ -27,7 +27,7 @@ namespace AirFrameXR
                         btnFolder = new Button { Text = "Open folder", AutoSize = true }, btnExport = new Button { Text = "Export...", AutoSize = true }, btnDelete = new Button { Text = "Delete...", AutoSize = true };
         readonly Label verdict = new Label { AutoSize = true, Font = new Font("Segoe UI", 12f, FontStyle.Bold), Margin = new Padding(0, 6, 0, 6) };
         readonly Label resTitle = new Label { Text = "Resources, in bottleneck order (each chart: every line as a percentage of its limit; hover for the real values)", Font = Ui.Bold, AutoSize = true, Margin = new Padding(0, 6, 0, 2) };
-        readonly TableLayoutPanel resTable = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Margin = new Padding(0), Dock = DockStyle.None };
+        readonly TableLayoutPanel resTable = new TableLayoutPanel { AutoSize = true, ColumnCount = 4, Margin = new Padding(0), Dock = DockStyle.None };   // metric, average, worst, and a filler that takes the rest of the width (the numbers sit next to their names)
         readonly Label findTitle = new Label { Text = "Details", Font = Ui.Bold, AutoSize = true, Margin = new Padding(0, 10, 0, 0) };
         readonly FlowLayoutPanel findings = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
         readonly Label hotTitle = new Label { Text = "Worst 10-second windows", Font = Ui.Bold, AutoSize = true, Margin = new Padding(0, 10, 0, 2) };
@@ -194,32 +194,32 @@ namespace AirFrameXR
             resTitle.Visible = resTable.Visible = rep.Categories.Count > 0;
             if (rep.Categories.Count == 0) { resTable.ResumeLayout(); return; }
             resTable.ColumnStyles.Clear();
-            resTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); resTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); resTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            resTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); resTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); resTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); resTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             int row = 0;
             Action<Control, int, int, int> put = (c, col, r, span) => { resTable.Controls.Add(c, col, r); if (span > 1) resTable.SetColumnSpan(c, span); };
             foreach (var cat in rep.Categories)
             {
                 var head = new Label { Text = cat.Name + "   " + cat.Status + (cat.Summary.Length > 0 ? "   " + cat.Summary : ""), AutoSize = true, Font = Ui.Bold, ForeColor = StatusColor(cat.Status), Margin = new Padding(0, 10, 0, 2), Tag = "wide", MaximumSize = new Size(Wd() - 6, 0) };
-                put(head, 0, row++, 3);
+                put(head, 0, row++, 4);
                 if (cat.Rows.Count > 0)
                 {
                     put(new Label { Text = "metric", AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(12, 0, 24, 2) }, 0, row, 1);
-                    put(new Label { Text = "average", AutoSize = true, ForeColor = Color.DimGray, Anchor = AnchorStyles.Right, Margin = new Padding(0, 0, 24, 2) }, 1, row, 1);
+                    put(new Label { Text = "average", AutoSize = true, ForeColor = Color.DimGray, Anchor = AnchorStyles.Right, Margin = new Padding(0, 0, 36, 2) }, 1, row, 1);
                     put(new Label { Text = "worst", AutoSize = true, ForeColor = Color.DimGray, Anchor = AnchorStyles.Right, Margin = new Padding(0, 0, 0, 2) }, 2, row++, 1);
                 }
                 foreach (var r in cat.Rows)
                 {
                     put(new Label { Text = r.Name, AutoSize = true, Margin = new Padding(12, 1, 24, 0) }, 0, row, 1);
-                    put(new Label { Text = r.Average, AutoSize = true, Anchor = AnchorStyles.Right, Margin = new Padding(0, 1, 24, 0) }, 1, row, 1);
+                    put(new Label { Text = r.Average, AutoSize = true, Anchor = AnchorStyles.Right, Margin = new Padding(0, 1, 36, 0) }, 1, row, 1);
                     put(new Label { Text = r.Worst, AutoSize = true, Anchor = AnchorStyles.Right, Margin = new Padding(0, 1, 0, 0) }, 2, row++, 1);
-                    if (!string.IsNullOrEmpty(r.Note)) put(new Label { Text = r.Note, AutoSize = true, ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(24, 0, 0, 0), Tag = "wide", MaximumSize = new Size(Wd() - 30, 0) }, 0, row++, 3);
+                    if (!string.IsNullOrEmpty(r.Note)) put(new Label { Text = r.Note, AutoSize = true, ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(24, 0, 0, 0), Tag = "wide", MaximumSize = new Size(Wd() - 30, 0) }, 0, row++, 4);
                 }
                 var grp = rep.Charts.FirstOrDefault(x => x.Category == cat.Name);
                 if (grp != null)
                 {
                     var chart = new TimelineChart(cat.Name, grp.Series, rep.OriginSeconds, rep.Charts.IndexOf(grp) == 0 ? rep.LateBudgetPercent : null) { Tag = "chart", Font = Ui.Body };
                     chart.Height = Ui.Px(this, rep.Charts.IndexOf(grp) == 0 ? 120 : 104); chart.Width = Math.Max(Ui.Px(this, 280), Wd() - 6);
-                    put(chart, 0, row++, 3);
+                    put(chart, 0, row++, 4);
                 }
             }
             resTable.ResumeLayout();
@@ -360,8 +360,8 @@ namespace AirFrameXR
             Func<string, string, double[], double, string, string, TimeSeries> ts = (nm, un, vals, lim, lt, fm) => new TimeSeries { Name = nm, Unit = un, V = vals, Limit = lim, LimitText = lt, Fmt = fm };
             rep.LateBudgetPercent = Enumerable.Range(0, N).Select(i => (i > 300 && i < 360) || (i > 640 && i < 700) ? 150 + rnd.NextDouble() * 250 : (rnd.NextDouble() < 0.05 ? 100 : 0.0)).ToArray();
             var gg = new SeriesGroup { Category = "GPU" }; gg.Series.Add(ts("GPU utilisation", "%", wave(54, 6, 40, 4), 100, "100 %", "F0")); gg.Series.Add(ts("Encode time per frame", "ms", wave(bad ? 8.4 : 4.1, 1.2, 25, 0.8), 10, "10.0 ms = the frame period", "F1")); gg.Series.Add(ts("Game: 3D engine", "%", wave(41, 5, 55, 4), 100, "100 %", "F0"));
-            var cc = new SeriesGroup { Category = "CPU" }; cc.Series.Add(ts("CPU total", "%", wave(18, 6, 30, 5), 100, "100 %", "F0")); cc.Series.Add(ts("Game process", "cores", wave(3.1, 0.6, 35, 0.3), 16, "16 cores = all of them", "F1"));
-            var mc = new SeriesGroup { Category = "Memory and I/O" }; mc.Series.Add(ts("RAM used", "GiB", wave(14, 0.5, 200, 0.2), 64, "64 GiB = all of it", "F1")); mc.Series.Add(ts("Disk busy", "%", wave(4, 3, 60, 6), 100, "100 %", "F0"));
+            var cc = new SeriesGroup { Category = "CPU" }; cc.Series.Add(ts("CPU total", "%", wave(18, 7, 30, 6), 100, "100 %", "F0")); cc.Series.Add(ts("Game process", "cores", wave(3.1, 0.6, 35, 0.3), 16, "16 cores = all of them", "F1"));
+            var mc = new SeriesGroup { Category = "Memory and I/O" }; mc.Series.Add(ts("RAM used", "GiB", wave(14.5, 1.0, 120, 0.3), 64, "64 GiB = all of it", "F1")); mc.Series.Add(ts("Disk busy", "%", wave(3, 2, 45, 3), 100, "100 %", "F0"));
             var nc = new SeriesGroup { Category = "Network" }; nc.Series.Add(ts("Network latency", "ms", wave(8, 2, 22, 2), 10, "10.0 ms = the frame period", "F1")); nc.Series.Add(ts("Stream bitrate", "Mbps", wave(215, 20, 50, 15), 432, "432 Mbps = the recording's peak", "F0"));
             var vc = new SeriesGroup { Category = "VR rendering" }; vc.Series.Add(ts("Late frames", "%", rep.LateBudgetPercent.Select(x => x * 0.01).ToArray(), 1, "1 % of the frames = the budget", "F1")); vc.Series.Add(ts("Streamed fps", "fps", wave(99.5, 0.5, 20, 1), 100, "100 fps = the display rate", "F0")); vc.Series.Add(ts("Headset shows", "fps", wave(99, 0.8, 30, 1.5), 100, "100 fps = the display rate", "F0"));
             rep.Charts.Add(gg); rep.Charts.Add(cc); rep.Charts.Add(mc); rep.Charts.Add(nc); rep.Charts.Add(vc);

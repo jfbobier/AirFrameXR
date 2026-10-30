@@ -169,11 +169,14 @@ own recorder (one more permission prompt; declining changes nothing).
 
 <p align="center"><img src="docs/images/ui_blackbox_recorder.png" width="640" alt="The Black Box Recorder: the streamer window with the Black Box header, a red REC lamp and the recording panel"></p>
 
-**Black Box Analyzer** (`blackbox_analyzer.exe`) is a separate program you run afterwards. Nothing is analyzed until you click. It names the stage that made the frames late, shows the worst
-10-second windows of a long session (when it went bad), lists the worst late frames, replays old recordings, exports a recording as a zip, deletes old ones, and opens a recording from another PC.
-It refuses to analyze while a recording is running, so it never competes with your game for the CPU.
+**Black Box Analyzer** (`blackbox_analyzer.exe`) is a separate program you run afterwards. Nothing is analyzed until you click. It gives one **verdict** that names the resource at fault, then lists the
+results **by resource, in the order a bottleneck is looked for: GPU, CPU, memory and I/O, network, VR rendering**. Each metric has an **average** and a **worst** value (the 99th percentile of a load, the lowest
+value of a clock or of free memory), and each category has a status and a **time series** on a shared time axis, with the late frames marked above the first chart. Every line is drawn as a percentage of its own
+limit (the frame period, 100 % load, all the cores, all the RAM, the display rate), so a GPU load and a network latency in milliseconds share one scale; hover to read the real values at that second in every chart.
+It also shows the worst 10-second windows of a long session (when it went bad) and the worst late frames, replays old recordings, exports a recording as a zip, deletes old ones, and opens a recording from
+another PC. It refuses to analyze while a recording is running, so it never competes with your game for the CPU.
 
-<p align="center"><img src="docs/images/ui_blackbox_analyzer.png" width="640" alt="The Black Box Analyzer: recordings on the left, the verdict, the findings with a suggested test each, and the worst 10-second windows"></p>
+<p align="center"><img src="docs/images/ui_blackbox_analyzer.png" width="760" alt="The Black Box Analyzer: recordings on the left, the verdict, then the resources in bottleneck order with average and worst columns and a time series chart per category, the late frames marked above the first chart"></p>
 
 *(The windows above are rendered by the project's UI harness with made-up demo data, not a real recording.)*
 
