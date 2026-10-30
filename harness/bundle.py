@@ -40,6 +40,7 @@ def need(p, what):
         sys.exit(f"{what} failed:\n" + p.stdout[-800:])
 
 
+TAG = sys.argv[sys.argv.index("--tag") + 1] if "--tag" in sys.argv else ""   # appended to the zip names (a candidate must not share its name with a published asset)
 stamp = time.strftime("%Y%m%d-%H%M%S")
 p = run(["build", "host", "shim", "gui", "bench", "package", "--release"]); need(p, "release build")
 stash(f"public_{stamp}")
@@ -51,7 +52,7 @@ dest = lib.ROOT / "build" / "bundle"
 dest.mkdir(parents=True, exist_ok=True)
 for kind, suffix in (("public", ""), ("personal", "-personal")):
     name = f"{stamp}-{kind}"
-    zipname = f"AirFrameXR-{VERSION}-bundle{suffix}.zip"
+    zipname = f"AirFrameXR-{VERSION}-bundle{suffix}{'-' + TAG if TAG else ''}.zip"
     out = ps_text(open(lib.ROOT / "tools/remote/stage24_bundle.ps1").read(), "stage24_bundle.ps1", f"{kind}_{stamp}", f"debug_{stamp}", name, zipname)
     print(out.strip()[-400:])
     if "RESULT: OK" not in out:
