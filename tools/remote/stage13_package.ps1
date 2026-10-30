@@ -59,9 +59,6 @@ if ($flavour -ne 'release') {
 } else {
     foreach ($f in $benchFiles + @('bench.exe', 'bench.exe.config', 'perfanalyze.exe', 'perfanalyze.exe.config')) { if (Test-Path "$pkg\bin\$f") { Move-Item "$pkg\bin\$f" "$root\_tmp\stale_$f" -Force } }
 }
-}
-    elseif ($flavour -eq 'release' -and (Test-Path "$pkg\bin\$f")) { Move-Item "$pkg\bin\$f" "$root\_tmp\stale_$f" -Force }   # left by an earlier debug package: moved out, never shipped
-}
 $persFile = "$root\_tmp\install\airframexr.personal.json"
 $persShip = @()
 # a generic build ships no config\airframexr.json: one left in the folder by an earlier personal build is moved out of the package, not shipped
