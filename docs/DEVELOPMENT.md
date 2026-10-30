@@ -41,8 +41,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1 host gui     # only some part
 
 ## Telemetry flag (debug vs release builds)
 
-The advanced per-frame telemetry costs CPU on every frame, so it is a compile-time flag. Debug builds (the default while we hunt
-judder) keep it, release builds drop it:
+The advanced per-frame telemetry costs CPU on every frame, so it is a compile-time flag. Release builds (what the stock package ships) drop it; the debug (telemetry) build keeps it and,
+since 1.3, ships as the Black Box suite in its own install (`bench\telemetry\` of the bundle, `python3 harness/bundle.py`; see ARCHITECTURE.md, "Telemetry and the Black Box"):
 
 | | debug (default) | release |
 |---|---|---|
@@ -55,7 +55,7 @@ the pose-match diagnostics behind the 900-frame log line; the host's frame fates
 `host_frames.csv`). New per-frame telemetry must sit behind it (`#ifdef AIRFRAMEXR_TELEMETRY` / `#[cfg(feature = "telemetry")]`);
 counters that are a single add per frame and the periodic stats lines stay in both. `tools/wsl/check_cpp.sh` and `check_host.sh
 --no-default-features` compile the release flavour (`EXTRA_DEFS="/D AIRFRAMEXR_RELEASE" bash tools/wsl/check_cpp.sh`). The follow-the-frames
-analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin\flavour.txt`, its zip name ends in `-debug` and the windows show "(debug build)" after the version.
+analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin\flavour.txt`, its zip name ends in `-debug` and the windows show "(debug build)" after the version. The debug package also carries the Black Box programs (`blackbox_recorder.exe`, `blackbox_analyzer.exe`, `perfcore.dll`, `perfreport.exe`); the release package never does, and the package test must keep checking that (the host and shim of a release package contain no telemetry file name).
 
 ## How the build fits together
 - `alvr_host` is a member of ALVR's own Rust workspace (`tools/remote/stage8_host.ps1` copies `tools/host` to

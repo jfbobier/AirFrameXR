@@ -67,10 +67,21 @@ the one SteamVR's compositor runs with, so the encoder's copy never queues behin
   A frame superseded before a boundary (`superseded`) means the game ran faster than the display; an encoder overrun means an
   encode took longer than a period.
 
-## Telemetry
+## Telemetry and the Black Box
 
-`host_events.jsonl` (`encoder_stats` every 2 s with a `pipeline` block: slots filled/empty, superseded, overruns, send_late,
+**Two builds of the same code, and the split is the performance guarantee.** The *stock* build (what people stream with) is compiled without the per-frame telemetry: the host without the
+cargo feature `telemetry`, the shim with `AIRFRAMEXR_RELEASE`, and the GUIs without any of the Black Box code (the streamer window carries four empty partial methods that the compiler removes).
+Nothing in the frame path writes a per-frame record, so the telemetry costs the stock streamer nothing. The *telemetry* build keeps all of it.
+
+Until 1.3 the telemetry build was a developer tool: the lab, `harness/frames.py` and debugging a judder used it. **Since 1.3 it ships, as the Black Box suite**
+([TELEMETRY_PLAN.md](TELEMETRY_PLAN.md), [BENCH_UI.md](BENCH_UI.md)): a complete second install, nested in the bundle as `bench\telemetry\`, made only of the telemetry build plus two programs of its own,
+the **Black Box Recorder** (`blackbox_recorder.exe`: the streamer window with a recording panel; it copies the normal streamer's settings at start and never writes to them) and the
+**Black Box Analyzer** (`blackbox_analyzer.exe`: reads a recording, says where the time went; separate, run afterwards). `perfcore.dll` holds the shared probe (NVML and Windows counters, one thread per
+source, an unavailable reading is blank and never 0) and the report. The engine is not edited for any of this: the recorder joins the engine's existing per-frame files by timestamp.
+A user who never opens the Black Box never has the telemetry on; one who does opens a separate install, so the two cannot affect each other's numbers.
+
+What the telemetry build writes (the engine's own files): `host_events.jsonl` (`encoder_stats` every 2 s with a `pipeline` block: slots filled/empty, superseded, overruns, send_late,
 encode envelope, shim running-start envelope and late releases, GPU class), `host_frames.csv` per frame (boundary, arrival,
 encode start, encode ms, send time, hold), `tracking.csv`, the shim log (`pacing:` line every 900 frames), and with the
-client-statistics patch `client_frames.csv` (the headset's per-frame report). The pacing lab (`harness/run.py pacing`) measures
+client-statistics patch `client_frames.csv` / `client_graph.csv` (the headset's per-frame report). The pacing lab (`harness/run.py pacing`) measures
 the same things against an emulated Vision Pro display without the headset; `harness/live.py` drives real headset runs.
