@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import lib
 
 ROOT = lib.ROOT
-SOURCES = "Common.cs PipelineModel.cs Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs FindHeadset.cs AudioRoute.cs AirFrameXR.cs Launcher.cs Performance.cs UiTest.cs BlackBoxBrand.cs BenchRecorder.cs PerfAnalyze.cs PerfCore.cs PerfReport.cs"
+SOURCES = "Common.cs PipelineModel.cs Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs FindHeadset.cs AudioRoute.cs AirFrameXR.cs Launcher.cs Performance.cs UiTest.cs BlackBoxBrand.cs BenchRecorder.cs PerfAnalyze.cs PerfCore.cs PerfReport.cs PerfResources.cs"
 
 
 def build(rid):

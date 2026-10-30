@@ -35,9 +35,10 @@ def rows(d, name):
 
 HEAD = {
     "hardware_gpu.csv": "sample_qpc,gpu_util_pct,memory_util_pct,core_clock_mhz,memory_clock_mhz,board_power_w,temp_c,vram_used_bytes,vram_total_bytes,pstate,throttle_reasons,nvenc_util_pct,nvdec_util_pct,nvenc_sessions,nvenc_avg_fps,nvenc_avg_latency_us,tick_us",
-    "hardware_system.csv": "sample_qpc,cpu_total_pct,ram_available_bytes,page_faults_per_s,nic_bytes_per_s,disk_busy_pct,tick_us",
+    "hardware_system.csv": "sample_qpc,cpu_total_pct,ram_available_bytes,page_faults_per_s,nic_bytes_per_s,disk_busy_pct,tick_us,disk_read_bytes_per_s,disk_write_bytes_per_s,disk_read_latency_ms,pages_input_per_s",
+    "hardware_process.csv": "sample_qpc,process,cpu_cores,private_bytes,io_read_bytes_per_s,io_write_bytes_per_s,instances",
     "hardware_pcie.csv": "sample_qpc,pcie_tx_kbps,pcie_rx_kbps,call_ms",
-    "hardware_engines.csv": "sample_qpc,pid,process,engine,util_pct",
+    "hardware_engines.csv": "sample_qpc,pid,process,engine,util_pct,instances",
     "logger_health.csv": "sample_qpc,rows_gpu,rows_system,rows_pcie,rows_engines,write_errors,sample_errors,max_tick_ms_gpu,max_tick_ms_system,max_tick_ms_pcie,max_tick_ms_engines,probe_process_cpu_pct",
     "state_events.csv": "event_qpc,event_type,old_value,new_value,scope,config_hash,reason",
     "capabilities.csv": "provider,capability,supported,measurement_quality,reason,provider_version",
@@ -76,6 +77,10 @@ for d, secs, hz, files in (("l0", 10, 1, ["hardware_gpu.csv", "hardware_system.c
 print("== L1 specifics")
 e = rows("l1", "hardware_engines.csv") or []
 check(len(e) > 0 and {r["process"] for r in e} <= {"explorer", "dwm"}, "engine rows only for the named processes", f"{len(e)} rows, processes {sorted({r['process'] for r in e})}")
+pr = rows("l1", "hardware_process.csv") or []
+check(len(pr) > 0 and {r["process"] for r in pr} <= {"explorer", "dwm"} and all(float(r["private_bytes"]) > 0 for r in pr), "process rows (CPU in cores, private memory, file I/O) only for the named processes", f"{len(pr)} rows, processes {sorted({r['process'] for r in pr})}")
+sysr = rows("l1", "hardware_system.csv") or []
+check(any(r["disk_read_latency_ms"] != "" for r in sysr) and any(r["pages_input_per_s"] != "" for r in sysr), "the disk and hard-fault columns are filled")
 p = rows("l1", "hardware_pcie.csv") or []
 check(len(p) >= 8, "PCIe sampled on its own thread at about 1 Hz", f"{len(p)} rows")
 ev = rows("l1", "state_events.csv") or []

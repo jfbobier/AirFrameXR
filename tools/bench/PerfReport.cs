@@ -24,8 +24,19 @@ namespace AirFrameXR.Perf
         public long Frame; public double T, GapMs, QueueMs, EncodeMs, HoldMs; public string Class;
     }
 
+    /// one line of the resource table: a metric with its average and its worst value (the worst is defined per row: the 99th percentile of a load, the lowest value of a clock or of free memory)
+    public sealed class ResourceRow { public string Name, Average, Worst, Note; }
+
+    /// GPU, CPU, memory and I/O, network or VR rendering: a status, a one-line reading, and the rows behind it
+    public sealed class ResourceCategory
+    {
+        public string Name, Status = "OK", Summary = "";
+        public readonly List<ResourceRow> Rows = new List<ResourceRow>();
+    }
+
     public sealed class ReportData
     {
+        public readonly List<ResourceCategory> Categories = new List<ResourceCategory>();
         public string VerdictStatus = "INSUFFICIENT", Verdict = "";
         public readonly List<Finding> Findings = new List<Finding>();
         public readonly List<WorstFrame> Worst = new List<WorstFrame>();
@@ -34,7 +45,7 @@ namespace AirFrameXR.Perf
         public string Markdown = "";
     }
 
-    public static class Report
+    public static partial class Report
     {
         static readonly CultureInfo C = CultureInfo.InvariantCulture;
         public const double LateFactor = 1.5;     // a gap longer than this many periods is a late frame (the lab's rule, harness/README.md)
@@ -120,6 +131,7 @@ namespace AirFrameXR.Perf
             var gpu = Read(Path.Combine(dir, "hardware_gpu.csv"));
             var sys = Read(Path.Combine(dir, "hardware_system.csv"));
             var eng = Read(Path.Combine(dir, "hardware_engines.csv"));
+            var proc = Read(Path.Combine(dir, "hardware_process.csv"));
             var health = Read(Path.Combine(dir, "logger_health.csv"));
             double t0 = StartQpc(dir);
             double from = double.IsNaN(t0) ? double.NaN : t0 + warmupSeconds;
@@ -159,41 +171,53 @@ namespace AirFrameXR.Perf
             double lateShare = haveHost ? (double)late / Math.Max(1, gaps.Count) : double.NaN;
 
             // ---- per-stage times and the stage that made each late gap
-            List<double> queue = new List<double>(), enc = new List<double>(), hold = new List<double>(), arrGap = new List<double>();
-            double qMed = 0, eMed = 0, hMed = 0;
+            // The wait for the encoder is measured from the host's boundary (when it picks the frame) for EVERY frame: a generated or re-stamped frame has the arrival of its SOURCE frame in t_arrival
+            // (game cadence, not lateness), and for a game frame the time from arrival to the boundary is the deliberate wait for the display clock. "Upstream" is the game's own arrival gap for a
+            // game frame and the host's boundary slip for a generated or re-stamped one.
+            List<double> queue = new List<double>(), qb = new List<double>(), enc = new List<double>(), hold = new List<double>(), tail = new List<double>();
+            double qbMed = 0, eMed = 0, hMed = 0, tMed = 0;
             int app = 0, gen = 0, restamp = 0, green = 0;
             if (haveHost)
             {
-                var ta = hf.Get("t_arrival"); var tes = hf.Get("t_encode_start"); var em = hf.Get("encode_ms"); var hm = hf.Get("hold_ms"); var slot = hf.Get("slot");
+                var ta = hf.Get("t_arrival"); var tb = hf.Get("t_boundary"); var tes = hf.Get("t_encode_start"); var em = hf.Get("encode_ms"); var hm = hf.Get("hold_ms"); var slot = hf.Get("slot"); var tsd = hf.Get("t_send");
+                bool hasB = hf.Has("t_boundary") && hf.Has("t_encode_start");
                 foreach (var i in rows)
                 {
-                    if (hf.Has("t_arrival") && hf.Has("t_encode_start") && ta[i] > 0) queue.Add((tes[i] - ta[i]) * 1000.0);
+                    bool isApp = !hf.Has("slot") || slot[i] >= 0;
+                    if (hf.Has("t_arrival") && hf.Has("t_encode_start") && isApp && ta[i] > 0) queue.Add((tes[i] - ta[i]) * 1000.0);
+                    if (hasB) qb.Add((tes[i] - tb[i]) * 1000.0);
                     if (hf.Has("encode_ms")) enc.Add(em[i]);
                     if (hf.Has("hold_ms")) hold.Add(hm[i]);
-                    if (hf.Has("slot")) { double s = slot[i]; if (s >= 0) app++; else if (s == -2) gen++; else if (s == -3) restamp++; else green++; }
+                    if (hasB && hf.Has("encode_ms")) tail.Add((tsd[i] - tes[i]) * 1000.0 - em[i]);
+                    if (hf.Has("slot")) { double sl = slot[i]; if (sl >= 0) app++; else if (sl == -2) gen++; else if (sl == -3) restamp++; else green++; }
                 }
-                qMed = P(queue, 0.5); eMed = P(enc, 0.5); hMed = P(hold, 0.5);
-                if (double.IsNaN(qMed)) qMed = 0; if (double.IsNaN(eMed)) eMed = 0; if (double.IsNaN(hMed)) hMed = 0;
+                qbMed = P(qb, 0.5); eMed = P(enc, 0.5); hMed = P(hold, 0.5); tMed = P(tail, 0.5);
+                if (double.IsNaN(qbMed)) qbMed = 0; if (double.IsNaN(eMed)) eMed = 0; if (double.IsNaN(hMed)) hMed = 0; if (double.IsNaN(tMed)) tMed = 0;
             }
-            var classCount = new Dictionary<string, int> { { "Upstream (the game or runtime delivered late)", 0 }, { "Waiting for the encoder (queue)", 0 }, { "Encode took long", 0 }, { "Release hold", 0 }, { "After the send (sender, socket, unattributed)", 0 } };
+            var classCount = new Dictionary<string, int> { { "Upstream (the game or runtime delivered late)", 0 }, { "Waiting for the encoder (queue)", 0 }, { "Encode took long", 0 }, { "Release hold", 0 }, { "After the encode (sender, socket)", 0 }, { "Unattributed", 0 } };
             var keys = classCount.Keys.ToList();
             var worst = new List<WorstFrame>();
             if (haveHost)
             {
-                var t = hf.Get("t_send"); var ta = hf.Get("t_arrival"); var tes = hf.Get("t_encode_start"); var em = hf.Get("encode_ms"); var hm = hf.Get("hold_ms"); var fr = hf.Get("frame");
+                var t = hf.Get("t_send"); var ta = hf.Get("t_arrival"); var tb = hf.Get("t_boundary"); var tes = hf.Get("t_encode_start"); var em = hf.Get("encode_ms"); var hm = hf.Get("hold_ms"); var fr = hf.Get("frame"); var slot = hf.Get("slot");
+                bool hasB = hf.Has("t_boundary") && hf.Has("t_encode_start");
                 foreach (var k in lateIdx)
                 {
                     int i = rows[k], p = rows[k - 1];
                     double gap = (t[i] - t[p]) * 1000.0, over = gap - period;
-                    double eu = (ta.Count > 0 && ta[i] > 0 && ta[p] > 0) ? (ta[i] - ta[p]) * 1000.0 - period : 0;
-                    double eq = (ta.Count > 0 && ta[i] > 0) ? (tes[i] - ta[i]) * 1000.0 - qMed : 0;
+                    bool appPair = !hf.Has("slot") || (slot[i] >= 0 && slot[p] >= 0);
+                    double eu = 0;
+                    if (appPair) { if (ta.Count > 0 && ta[i] > 0 && ta[p] > 0) eu = (ta[i] - ta[p]) * 1000.0 - period; }
+                    else if (hf.Has("t_boundary")) eu = (tb[i] - tb[p]) * 1000.0 - period;
+                    double eq = hasB ? (tes[i] - tb[i]) * 1000.0 - qbMed : 0;
                     double ee = em.Count > 0 ? em[i] - eMed : 0;
                     double eh = hm.Count > 0 ? hm[i] - hMed : 0;
-                    var ex = new[] { eu, eq, ee, eh };
-                    int best = 0; for (int x = 1; x < 4; x++) if (ex[x] > ex[best]) best = x;
-                    int cls = ex[best] >= 0.25 * over ? best : 4;
+                    double et = hasB && em.Count > 0 ? (t[i] - tes[i]) * 1000.0 - em[i] - tMed : 0;
+                    var ex = new[] { eu, eq, ee, eh, et };
+                    int best = 0; for (int x = 1; x < 5; x++) if (ex[x] > ex[best]) best = x;
+                    int cls = ex[best] >= 0.25 * over ? best : 5;
                     classCount[keys[cls]]++;
-                    worst.Add(new WorstFrame { Frame = fr.Count > i ? (long)fr[i] : -1, T = t[i], GapMs = gap, QueueMs = ta.Count > 0 && ta[i] > 0 ? (tes[i] - ta[i]) * 1000.0 : double.NaN, EncodeMs = em.Count > 0 ? em[i] : double.NaN, HoldMs = hm.Count > 0 ? hm[i] : double.NaN, Class = keys[cls] });
+                    worst.Add(new WorstFrame { Frame = fr.Count > i ? (long)fr[i] : -1, T = t[i], GapMs = gap, QueueMs = hasB ? (tes[i] - tb[i]) * 1000.0 : double.NaN, EncodeMs = em.Count > 0 ? em[i] : double.NaN, HoldMs = hm.Count > 0 ? hm[i] : double.NaN, Class = keys[cls] });
                 }
                 R.Worst.AddRange(worst.OrderByDescending(w => w.GapMs).Take(10));
             }
@@ -240,71 +264,24 @@ namespace AirFrameXR.Perf
                     var top = classCount.OrderByDescending(kv => kv.Value).First();
                     double share = (double)top.Value / late;
                     string parts = string.Join("; ", classCount.Where(kv => kv.Value > 0).OrderByDescending(kv => kv.Value).Select(kv => kv.Key + ": " + kv.Value));
+                    string fgNote = (gen + restamp) > 0 && app == 0 ? " (frame generation was on: here upstream is the host's own display-clock slip, not the game)" : "";
                     string test = top.Key.StartsWith("Upstream") ? (!double.IsNaN(gpuP95) && gpuP95 >= 95 ? "The GPU was at " + N(gpuP95, "F0") + " % (p95) and the stream waited for the game: the game is GPU-bound. Lower its settings (DLSS quality, ray tracing, resolution), then record again." : "The stream waited for the game: lower its settings or cap its fps, then record again.") :
                                   top.Key.StartsWith("Waiting") ? "The encoder was busy when the frame arrived: try a faster preset or a lower resolution scale and capture again." :
                                   top.Key.StartsWith("Encode") ? "Try a faster preset, lower bitrate or resolution scale, and capture again." :
                                   top.Key.StartsWith("Release") ? "The deliberate hold before the send was long: check the pacing settings." :
-                                  "The host sent late after the encode: look at the network and the sender (a capture with the headset on Ethernet).";
-                    add("T03", share >= 0.5 ? "PROBLEM" : "WATCH", "Late gaps: mostly " + top.Key.ToLowerInvariant(), parts + ". Each late gap is attributed to the stage whose time exceeded its own median by the most (and by at least a quarter of the lateness).", test);
+                                  top.Key.StartsWith("After the encode") ? "The send itself was late after a finished encode: look at the network and the sender (a recording with the headset on Ethernet)." :
+                                  "No stage stands out: the lateness is spread over the stages.";
+                    add("T03", share >= 0.5 ? "PROBLEM" : "WATCH", "Late gaps: mostly " + top.Key.ToLowerInvariant(), parts + fgNote + ". Each late gap is attributed to the stage whose time exceeded its own median by the most (and by at least a quarter of the lateness).", test);
                 }
                 else add("T03", "OK", "Too few late frames to attribute", late + " late gap(s).", "");
 
-                // encoder budget
-                if (enc.Count > 0)
-                {
-                    double e99 = P(enc, 0.99), e50 = P(enc, 0.5);
-                    string d = "encode ms p50 " + N(e50, "F2") + ", p95 " + N(P(enc, 0.95), "F2") + ", p99 " + N(e99, "F2") + ", max " + N(Max(enc), "F2") + " (period " + N(period, "F2") + " ms, budget " + N(EncodeBudget * 100, "F0") + " % of it).";
-                    if (e99 > EncodeBudget * period) add("T04", "PROBLEM", "The encoder uses most of the frame period", d, "Try a faster NVENC preset or a lower resolution scale.");
-                    else add("T04", "OK", "Encode fits the period", d, "");
-                }
-
-                // generated / repeated content (context, never a verdict)
-                if (hf.Has("slot") && rows.Count > 0)
-                    add("T05", "OK", "What the stream carried", "game frames " + app + " (" + Pct((double)app / rows.Count) + "), generated " + gen + ", re-stamped " + restamp + ", idle " + green + ". These are STREAMED frames: this does not say how often the game rendered new content.", "");
             }
 
-            // ---- client
-            if (cg != null && cg.Rows >= 100 && cg.Has("total_ms"))
-            {
-                var tr = cg.Get("t_recv");
-                var idx = Enumerable.Range(0, cg.Rows).Where(i => (double.IsNaN(from) || tr[i] >= from) && (double.IsNaN(to) || tr[i] <= to)).ToList();
-                Func<string, List<double>> g = c => idx.Select(i => cg.Get(c)[i]).ToList();
-                double dec95 = P(g("decode_ms"), 0.95), net95 = P(g("network_ms"), 0.95), q95 = P(g("decoder_queue_ms"), 0.95), tot95 = P(g("total_ms"), 0.95);
-                string d = "pipeline latency p50 " + N(P(g("total_ms"), 0.5)) + " / p95 " + N(tot95) + " ms; encode p95 " + N(P(g("encode_ms"), 0.95)) + ", network p95 " + N(net95) + ", decode p95 " + N(dec95) + ", decoder queue p95 " + N(q95) + ", vsync queue p95 " + N(P(g("vsync_queue_ms"), 0.95)) + " ms; headset fps median " + N(P(g("client_fps"), 0.5)) + ", bitrate mean " + N(Mean(g("bitrate_mbps"))) + " Mbps (headset's own statistics).";
-                bool bad = !double.IsNaN(period) && (dec95 > period || net95 > 2 * period || q95 > period);
-                add("T06", bad ? "WATCH" : "OK", bad ? "The headset side is slow at the tail" : "Headset side keeps up", d, bad ? "Decode over one period or network over two: check the bitrate, the Wi-Fi band and the headset's load." : "");
-            }
-            else add("T06", "INSUFFICIENT", "No headset report", cg == null ? "client_graph.csv is missing (no headset connected during the capture, or the telemetry build was not used)." : "fewer than 100 headset reports.", "");
+            // ---- the resources, in bottleneck order (GPU, CPU, memory and I/O, network, VR rendering): rows with an average and a worst value, a status per category
+            var cx = new Ctx { Dir = dir, Hf = hf, Cg = cg, Gpu = gpu, Sys = sys, Eng = eng, Proc = proc, Rows = rows, HaveHost = haveHost, Period = period, LateShare = lateShare, Late = late, Gaps = gaps,
+                Enc = enc, Qb = qb, From = from, To = to, App = app, Gen = gen, Restamp = restamp, Green = green, ClassCount = classCount, GpuP95 = gpuP95, Pauses = pauses, StartQpc = t0 };
+            BuildCategories(R, cx);
 
-            // ---- hardware context
-            if (gpu != null && gpu.Rows >= 3)
-            {
-                var gi = Enumerable.Range(0, gpu.Rows).Where(i => (double.IsNaN(from) || gpu.Get("sample_qpc")[i] >= from) && (double.IsNaN(to) || gpu.Get("sample_qpc")[i] <= to)).ToList();
-                if (gi.Count < 3) gi = Enumerable.Range(0, gpu.Rows).ToList();
-                Func<string, List<double>> G = c => gi.Select(i => gpu.Get(c)[i]).ToList();
-                var thr = gpu.Raw["throttle_reasons"]; int active = 0, counted = 0; ulong seen = 0;
-                foreach (var i in gi) { var s = thr[i]; if (s.StartsWith("0x")) { ulong b; if (ulong.TryParse(s.Substring(2), NumberStyles.HexNumber, C, out b)) { counted++; ulong lim = b & ~0x1UL & ~0x4000000000000000UL; if ((lim & ~0x1UL) != 0) { active++; seen |= lim; } } } }
-                double clkMax = Max(G("core_clock_mhz")), clkMin = G("core_clock_mhz").Where(x => !double.IsNaN(x)).DefaultIfEmpty(double.NaN).Min();
-                string d = "GPU util p50 " + N(P(G("gpu_util_pct"), 0.5), "F0") + " / p95 " + N(P(G("gpu_util_pct"), 0.95), "F0") + " %; core clock " + N(clkMin, "F0") + "-" + N(clkMax, "F0") + " MHz (p50 " + N(P(G("core_clock_mhz"), 0.5), "F0") + "); power max " + N(Max(G("board_power_w"))) + " W; temp max " + N(Max(G("temp_c")), "F0") + " C; VRAM max " + N(Max(G("vram_used_bytes")) / 1073741824.0, "F1") + " of " + N(Max(G("vram_total_bytes")) / 1073741824.0, "F0") + " GiB; NVENC util p95 " + N(P(G("nvenc_util_pct"), 0.95), "F0") + " %, sessions max " + N(Max(G("nvenc_sessions")), "F0") + ".";
-                double activeShare = counted > 0 ? (double)active / counted : double.NaN;
-                if (counted > 0 && activeShare >= 0.10)
-                    add("T07", "WATCH", "A GPU limiter was active " + Pct(activeShare) + " of the time", d + " Limiter: " + Name(seen) + ". A 1 Hz sensor says the limiter was on, not that it caused a late frame.", "Capture again with the limiter removed (power or cooling) to see whether the late frames follow it.");
-                else add("T07", "OK", "No sustained GPU limiter", d, "");
-            }
-            else add("T07", "INSUFFICIENT", "No GPU sensor data", "hardware_gpu.csv is missing or empty (NVML not available).", "");
-
-            if (sys != null && sys.Rows >= 3)
-            {
-                Func<string, List<double>> S = c => sys.Get(c);
-                add("T08", "OK", "System context", "CPU total p50 " + N(P(S("cpu_total_pct"), 0.5), "F0") + " / p95 " + N(P(S("cpu_total_pct"), 0.95), "F0") + " %; RAM available min " + N(Min(S("ram_available_bytes")) / 1073741824.0, "F1") + " GiB; page faults p95 " + N(P(S("page_faults_per_s"), 0.95), "F0") + "/s; NIC (all adapters, not the stream's own traffic) peak " + N(Max(S("nic_bytes_per_s")) * 8 / 1e6, "F0") + " Mbps; disk busy p95 " + N(P(S("disk_busy_pct"), 0.95), "F0") + " %.", "");
-            }
-            if (eng != null && eng.Rows > 0 && eng.Has("util_pct"))
-            {
-                var by = new Dictionary<string, List<double>>();
-                for (int i = 0; i < eng.Rows; i++) { string key = eng.Raw["process"][i] + " " + eng.Raw["engine"][i]; List<double> l; if (!by.TryGetValue(key, out l)) by[key] = l = new List<double>(); l.Add(eng.Get("util_pct")[i]); }
-                var show = by.Where(kv => Mean(kv.Value) >= 0.5).OrderByDescending(kv => Mean(kv.Value)).Take(8).Select(kv => kv.Key + " mean " + N(Mean(kv.Value)) + " / p95 " + N(P(kv.Value, 0.95)) + " %");
-                add("T09", "OK", "GPU engines per process", show.Any() ? string.Join("; ", show) : "no engine above 0.5 % mean for the named processes.", "");
-            }
 
             // ---- the recorder's own health
             if (probeOk)
@@ -317,25 +294,43 @@ namespace AirFrameXR.Perf
 
             add("T11", "OK", "How to read the counters", "Streamed fps is not game fps; the NIC figure is all adapters, not the stream; GPU util is a window average, not what one frame saw; a limiter flag says the limiter was on, not that it caused a late frame.", "");
 
-            // ---- verdict
-            var prob = R.Findings.FirstOrDefault(f => f.Status == "PROBLEM");
-            var watch = R.Findings.FirstOrDefault(f => f.Status == "WATCH");
+            // ---- verdict: the first category, in bottleneck order, that has evidence; "smooth" when the stream is smooth whatever the sensors say
             if (!haveHost) { R.VerdictStatus = "INSUFFICIENT"; R.Verdict = "Not enough data: " + R.Findings.First().Detail; }
-            else if (prob != null) { R.VerdictStatus = "PROBLEM"; R.Verdict = prob.Title + (R.Findings.Any(f => f.Id == "T03" && f.Status != "OK") ? " - " + R.Findings.First(f => f.Id == "T03").Title : ""); }
-            else if (watch != null) { R.VerdictStatus = "WATCH"; R.Verdict = "Smooth enough (" + Pct(lateShare) + " late frames), one thing to watch: " + watch.Title; }
-            else { R.VerdictStatus = "OK"; R.Verdict = "Smooth: " + Pct(lateShare) + " late frames, encode p99 " + N(P(enc, 0.99), "F1") + " ms"; }
+            else
+            {
+                var cause = R.Categories.Where(c => c.Name != "VR rendering").FirstOrDefault(c => c.Status == "PROBLEM");
+                var closest = R.Categories.Where(c => c.Name != "VR rendering").FirstOrDefault(c => c.Status == "WATCH");
+                bool lateIssue = lateShare > MaxLateShare;
+                if (!lateIssue)
+                {
+                    R.VerdictStatus = closest != null ? "WATCH" : "OK";
+                    R.Verdict = "Smooth: " + Pct(lateShare) + " late frames" + (closest != null ? ". Closest to a limit: " + closest.Name + " (" + closest.Summary + ")" : "");
+                }
+                else if (cause != null) { R.VerdictStatus = "PROBLEM"; R.Verdict = "Late frames " + Pct(lateShare) + ". " + cause.Name + ": " + cause.Summary; }
+                else if (closest != null) { R.VerdictStatus = "PROBLEM"; R.Verdict = "Late frames " + Pct(lateShare) + ". No resource is saturated; closest: " + closest.Name + " (" + closest.Summary + ")"; }
+                else
+                {
+                    var t3 = R.Findings.FirstOrDefault(f => f.Id == "T03");
+                    R.VerdictStatus = "PROBLEM"; R.Verdict = "Late frames " + Pct(lateShare) + ". No resource stands out" + (t3 != null ? "; " + t3.Title.ToLowerInvariant() : "") + ".";
+                }
+            }
+
+            // the recorder's own health outranks a good reading: hardware rows that are incomplete or have a gap are said first
+            var t10 = R.Findings.FirstOrDefault(f => f.Id == "T10");
+            if (t10 != null && t10.Status == "PROBLEM") { R.VerdictStatus = "PROBLEM"; R.Verdict = t10.Title + ": " + t10.Detail + " (" + R.Verdict + ")"; }
+            else if (t10 != null && t10.Status == "WATCH" && R.VerdictStatus == "OK") { R.VerdictStatus = "WATCH"; R.Verdict += " (" + t10.Title + ": the hardware rows have a gap there)"; }
 
             R.Tiles.Add(new KeyValuePair<string, string>("Streamed fps", haveHost ? N(1000.0 / period, "F1") : "n/a"));
             R.Tiles.Add(new KeyValuePair<string, string>("Late frames", Pct(lateShare)));
             R.Tiles.Add(new KeyValuePair<string, string>("Encode p99", haveHost ? N(P(enc, 0.99), "F1") + " ms" : "n/a"));
             R.Tiles.Add(new KeyValuePair<string, string>("Worst gap", haveHost ? N(Max(gaps), "F1") + " ms" : "n/a"));
-            R.Markdown = Render(R, dir, rows.Count, period, warmupSeconds, queue, enc, hold, gaps);
+            R.Markdown = Render(R, dir, rows.Count, period, warmupSeconds, queue, qb, enc, hold, tail, gaps);
             return R;
         }
 
         static double Min(List<double> v) { var s = v.Where(x => !double.IsNaN(x)).ToList(); return s.Count == 0 ? double.NaN : s.Min(); }
 
-        static string Render(ReportData R, string dir, int frames, double period, double warmup, List<double> queue, List<double> enc, List<double> hold, List<double> gaps)
+        static string Render(ReportData R, string dir, int frames, double period, double warmup, List<double> queue, List<double> qb, List<double> enc, List<double> hold, List<double> tail, List<double> gaps)
         {
             var sb = new StringBuilder();
             sb.AppendLine("# AirFrameXR Bench report");
@@ -343,6 +338,20 @@ namespace AirFrameXR.Perf
             sb.AppendLine("**" + R.VerdictStatus + "**: " + R.Verdict);
             sb.AppendLine();
             sb.AppendLine("Session: `" + Path.GetFileName(dir.TrimEnd('\\', '/')) + "`, warm-up excluded: " + warmup.ToString("F0", C) + " s. Percentiles: nearest rank. Thresholds are heuristics named in each finding.");
+            sb.AppendLine();
+            sb.AppendLine("## Resources, in bottleneck order");
+            sb.AppendLine("The worst value is defined per row: the 99th percentile of a load, the lowest value of a clock or of free memory.");
+            foreach (var c in R.Categories)
+            {
+                sb.AppendLine();
+                sb.AppendLine("### " + c.Name + " - " + c.Status + (c.Summary.Length > 0 ? ": " + c.Summary : ""));
+                if (c.Rows.Count > 0)
+                {
+                    sb.AppendLine("| metric | average | worst | note |");
+                    sb.AppendLine("|---|---:|---:|---|");
+                    foreach (var r in c.Rows) sb.AppendLine("| " + r.Name + " | " + r.Average + " | " + r.Worst + " | " + (r.Note ?? "") + " |");
+                }
+            }
             sb.AppendLine();
             sb.AppendLine("## Findings");
             foreach (var f in R.Findings)
@@ -359,9 +368,11 @@ namespace AirFrameXR.Perf
                 sb.AppendLine("|---|---:|---:|---:|---:|");
                 Action<string, List<double>> row = (n, v) => { if (v.Count > 0) sb.AppendLine("| " + n + " | " + N(P(v, 0.5), "F2") + " | " + N(P(v, 0.95), "F2") + " | " + N(P(v, 0.99), "F2") + " | " + N(Max(v), "F2") + " |"); };
                 row("gap between sent frames", gaps);
-                row("arrival to encode start (queue age)", queue);
+                row("boundary to encode start (waiting for the encoder, all frames)", qb);
                 row("encode", enc);
                 row("release hold (deliberate)", hold);
+                row("encode end to send (sender)", tail);
+                row("arrival to encode start (game frames only; includes the wait for the display clock)", queue);
             }
             if (R.Hotspots.Count > 0)
             {

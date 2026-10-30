@@ -93,7 +93,7 @@ namespace AirFrameXR.Perf
         readonly ProbeOptions o;
         readonly List<Thread> threads = new List<Thread>();
         volatile bool stop;
-        CsvOut gpuCsv, sysCsv, pcieCsv, engCsv, capCsv, stateCsv, healthCsv;
+        CsvOut gpuCsv, sysCsv, pcieCsv, engCsv, procCsv, capCsv, stateCsv, healthCsv;
         IntPtr dev; bool nvmlOk; string nvmlVersion = "", driver = "", gpuName = "";
         readonly Dictionary<string, double> maxTickMs = new Dictionary<string, double>();
         readonly object tickGate = new object();
@@ -101,7 +101,7 @@ namespace AirFrameXR.Perf
         /// the newest reading of each live value (for a window's tiles): empty until the first sample, empty when the reading is unavailable
         public volatile string LiveGpuUtil = "", LiveClock = "", LivePower = "", LiveTemp = "", LiveNvenc = "", LiveLimiter = "";
         public long RowsGpu { get { return gpuCsv == null ? 0 : gpuCsv.Rows; } }
-        public long LostRows { get { long e = 0; foreach (var c in new[] { gpuCsv, sysCsv, pcieCsv, engCsv, stateCsv }) if (c != null) e += c.Errors; return e; } }
+        public long LostRows { get { long e = 0; foreach (var c in new[] { gpuCsv, sysCsv, pcieCsv, engCsv, procCsv, stateCsv }) if (c != null) e += c.Errors; return e; } }
         public readonly string SessionId = Guid.NewGuid().ToString();
         double startedQpc; DateTime startedUtc;
 
@@ -118,15 +118,20 @@ namespace AirFrameXR.Perf
             bool l1 = o.Level == Level.L1;
             double hz = l1 ? 5.0 : 1.0;
             gpuCsv = new CsvOut(Path.Combine(o.Dir, "hardware_gpu.csv"), "sample_qpc,gpu_util_pct,memory_util_pct,core_clock_mhz,memory_clock_mhz,board_power_w,temp_c,vram_used_bytes,vram_total_bytes,pstate,throttle_reasons,nvenc_util_pct,nvdec_util_pct,nvenc_sessions,nvenc_avg_fps,nvenc_avg_latency_us,tick_us");
-            sysCsv = new CsvOut(Path.Combine(o.Dir, "hardware_system.csv"), "sample_qpc,cpu_total_pct,ram_available_bytes,page_faults_per_s,nic_bytes_per_s,disk_busy_pct,tick_us");
+            sysCsv = new CsvOut(Path.Combine(o.Dir, "hardware_system.csv"), "sample_qpc,cpu_total_pct,ram_available_bytes,page_faults_per_s,nic_bytes_per_s,disk_busy_pct,tick_us,disk_read_bytes_per_s,disk_write_bytes_per_s,disk_read_latency_ms,pages_input_per_s");
             Spawn("gpu", () => GpuLoop(hz));
             Spawn("system", () => SystemLoop(hz));
             if (l1)
             {
                 pcieCsv = new CsvOut(Path.Combine(o.Dir, "hardware_pcie.csv"), "sample_qpc,pcie_tx_kbps,pcie_rx_kbps,call_ms");
                 Spawn("pcie", PcieLoop);
-                engCsv = new CsvOut(Path.Combine(o.Dir, "hardware_engines.csv"), "sample_qpc,pid,process,engine,util_pct");
-                if (o.ProcessNames.Length > 0) Spawn("engines", EngineLoop);
+                engCsv = new CsvOut(Path.Combine(o.Dir, "hardware_engines.csv"), "sample_qpc,pid,process,engine,util_pct,instances");
+                if (o.ProcessNames.Length > 0)
+                {
+                    Spawn("engines", EngineLoop);
+                    procCsv = new CsvOut(Path.Combine(o.Dir, "hardware_process.csv"), "sample_qpc,process,cpu_cores,private_bytes,io_read_bytes_per_s,io_write_bytes_per_s,instances");
+                    Spawn("process", ProcessLoop);
+                }
                 else Cap("windows", "gpu_engine_per_process", false, "exact", "no process names given", "");
             }
             if (!string.IsNullOrEmpty(o.SettingsDir)) Spawn("state", StateLoop);
@@ -138,7 +143,7 @@ namespace AirFrameXR.Perf
         {
             stop = true;
             foreach (var t in threads) t.Join(2500);     // a thread stuck in an NVML call is abandoned (background): never wait for it longer
-            foreach (var c in new[] { gpuCsv, sysCsv, pcieCsv, engCsv, capCsv, stateCsv, healthCsv }) if (c != null) c.Close();
+            foreach (var c in new[] { gpuCsv, sysCsv, pcieCsv, engCsv, procCsv, capCsv, stateCsv, healthCsv }) if (c != null) c.Close();
             WriteSession(true);
             try { if (nvmlOk) Nvml.nvmlShutdown(); } catch { }
         }
@@ -242,24 +247,29 @@ namespace AirFrameXR.Perf
         // ---- Windows counters ----------------------------------------------------------------------------------------------------
         void SystemLoop(double hz)
         {
-            PerformanceCounter cpu = null, ram = null, faults = null, disk = null; PerformanceCounter[] nic = new PerformanceCounter[0];
+            PerformanceCounter cpu = null, ram = null, faults = null, disk = null, dRead = null, dWrite = null, dLat = null, pin = null; PerformanceCounter[] nic = new PerformanceCounter[0];
             cpu = Make("Processor Information", "% Processor Utility", "_Total", "cpu_total");
             if (cpu == null) cpu = Make("Processor", "% Processor Time", "_Total", "cpu_total");
             ram = Make("Memory", "Available Bytes", null, "ram_available");
             faults = Make("Memory", "Page Faults/sec", null, "page_faults");
             disk = Make("PhysicalDisk", "% Disk Time", "_Total", "disk_busy");
+            dRead = Make("PhysicalDisk", "Disk Read Bytes/sec", "_Total", "disk_read_bytes");
+            dWrite = Make("PhysicalDisk", "Disk Write Bytes/sec", "_Total", "disk_write_bytes");
+            dLat = Make("PhysicalDisk", "Avg. Disk sec/Read", "_Total", "disk_read_latency");
+            pin = Make("Memory", "Pages Input/sec", null, "hard_faults");
             try { nic = new PerformanceCounterCategory("Network Interface").GetInstanceNames().Select(n => new PerformanceCounter("Network Interface", "Bytes Total/sec", n)).ToArray(); Cap("windows", "nic_bytes", true, "sampled", "all adapters summed (not the stream's own traffic)", ""); }
             catch (Exception e) { Cap("windows", "nic_bytes", false, "exact", e.GetType().Name, ""); }
-            Prime(cpu, ram, faults, disk); foreach (var c in nic) Prime(c);
+            Prime(cpu, ram, faults, disk, dRead, dWrite, dLat, pin); foreach (var c in nic) Prime(c);
             SleepStop(200);
             double period = 1.0 / hz; long n = 0; var wall = Stopwatch.StartNew();
             while (!stop)
             {
                 var sw = Stopwatch.StartNew(); double t = Clock.Now();
                 string cpuV = Read(cpu, "F1"), ramV = Read(ram, "F0"), faultV = Read(faults, "F0"), diskV = Read(disk, "F1");
+                string drV = Read(dRead, "F0"), dwV = Read(dWrite, "F0"), dlV = dLat == null ? "" : ReadScaled(dLat, 1000.0, "F2"), piV = Read(pin, "F0");
                 string nicV = ""; if (nic.Length > 0) { double s = 0; bool ok = true; foreach (var c in nic) { try { s += c.NextValue(); } catch { ok = false; } } nicV = ok ? F.N(s, "F0") : ""; if (!ok) Interlocked.Increment(ref sampleErrors); }
                 double ms = sw.Elapsed.TotalMilliseconds;
-                sysCsv.Row(string.Join(",", Clock.S(t), cpuV, ramV, faultV, nicV, diskV, F.N((long)(ms * 1000)))); Tick("system", ms);
+                sysCsv.Row(string.Join(",", Clock.S(t), cpuV, ramV, faultV, nicV, diskV, F.N((long)(ms * 1000)), drV, dwV, dlV, piV)); Tick("system", ms);
                 Pace(ref n, period, wall);
             }
         }
@@ -270,6 +280,7 @@ namespace AirFrameXR.Perf
             catch (Exception e) { Cap("windows", cap, false, "exact", cat + " / " + name + ": " + e.GetType().Name, ""); return null; }
         }
         static void Prime(params PerformanceCounter[] cs) { foreach (var c in cs) { try { if (c != null) c.NextValue(); } catch { } } }
+        string ReadScaled(PerformanceCounter c, double scale, string fmt) { try { return F.N(c.NextValue() * scale, fmt); } catch { Interlocked.Increment(ref sampleErrors); return ""; } }
         string Read(PerformanceCounter c, string fmt) { if (c == null) return ""; try { return F.N(c.NextValue(), fmt); } catch { Interlocked.Increment(ref sampleErrors); return ""; } }
 
         // GPU Engine counters: only the named processes, instance list refreshed every 10 s (processes come and go)
@@ -294,17 +305,18 @@ namespace AirFrameXR.Perf
                         if (!capDone) { Cap("windows", "gpu_engine_per_process", true, "sampled", "instances for " + string.Join("+", names), ""); capDone = true; }
                         lastPids = pids;
                     }
-                    var sums = new Dictionary<string, double>();
+                    var sums = new Dictionary<string, double>(); var counts = new Dictionary<string, int>();
                     foreach (var kv in counters)
                     {
                         float v; try { v = kv.Value.NextValue(); } catch { Interlocked.Increment(ref sampleErrors); continue; }
                         string key = PidOf(kv.Key) + "|" + EngineOf(kv.Key);
                         double s; sums.TryGetValue(key, out s); sums[key] = s + v;
+                        int c; counts.TryGetValue(key, out c); counts[key] = c + 1;   // how many PDH instances this row sums (a GPU with 3 NVENC engines shows 3 for VideoEncode)
                     }
                     foreach (var kv in sums)
                     {
                         var parts = kv.Key.Split('|'); int pid = int.Parse(parts[0], CultureInfo.InvariantCulture); string pn; lastPids.TryGetValue(pid, out pn);
-                        engCsv.Row(Clock.S(t) + "," + pid + "," + F.Q(pn) + "," + parts[1] + "," + F.N(kv.Value, "F1"));
+                        engCsv.Row(Clock.S(t) + "," + pid + "," + F.Q(pn) + "," + parts[1] + "," + F.N(kv.Value, "F1") + "," + counts[kv.Key]);
                     }
                 }
                 catch (Exception) { Interlocked.Increment(ref sampleErrors); }
@@ -313,6 +325,50 @@ namespace AirFrameXR.Perf
             }
             foreach (var c in counters.Values) c.Dispose();
         }
+        // the named processes: CPU (in cores), private memory and file I/O, summed over the instances of a name (a game can have several processes); the instance list is refreshed every 10 s
+        void ProcessLoop()
+        {
+            var inst = new Dictionary<string, PerformanceCounter[]>();   // process name -> its counters (cpu, private, read, write) per instance, flattened
+            var perName = new Dictionary<string, List<PerformanceCounter[]>>();
+            double nextRefresh = 0; bool capDone = false; double cores = Environment.ProcessorCount;
+            while (!stop)
+            {
+                var sw = Stopwatch.StartNew(); double t = Clock.Now();
+                try
+                {
+                    if (t >= nextRefresh)
+                    {
+                        nextRefresh = t + 10;
+                        var all = new PerformanceCounterCategory("Process").GetInstanceNames();
+                        foreach (var nm0 in o.ProcessNames)
+                        {
+                            string nm = nm0.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? nm0.Substring(0, nm0.Length - 4) : nm0;
+                            var mine = all.Where(i => string.Equals(i, nm, StringComparison.OrdinalIgnoreCase) || i.StartsWith(nm + "#", StringComparison.OrdinalIgnoreCase)).ToList();
+                            List<PerformanceCounter[]> cur; if (!perName.TryGetValue(nm, out cur)) perName[nm] = cur = new List<PerformanceCounter[]>();
+                            cur.Clear();
+                            foreach (var i in mine)
+                            {
+                                var set = new[] { new PerformanceCounter("Process", "% Processor Time", i, true), new PerformanceCounter("Process", "Working Set - Private", i, true), new PerformanceCounter("Process", "IO Read Bytes/sec", i, true), new PerformanceCounter("Process", "IO Write Bytes/sec", i, true) };
+                                foreach (var c in set) c.NextValue();
+                                cur.Add(set);
+                            }
+                        }
+                        if (!capDone) { Cap("windows", "process_cpu_memory_io", true, "sampled", "per process: " + string.Join("+", o.ProcessNames), ""); capDone = true; }
+                    }
+                    foreach (var kv in perName)
+                    {
+                        double cpu = 0, mem = 0, rd = 0, wr = 0; int n = 0;
+                        foreach (var set in kv.Value) { try { cpu += set[0].NextValue(); mem += set[1].NextValue(); rd += set[2].NextValue(); wr += set[3].NextValue(); n++; } catch { Interlocked.Increment(ref sampleErrors); } }
+                        if (n == 0) continue;
+                        procCsv.Row(Clock.S(t) + "," + F.Q(kv.Key) + "," + F.N(cpu / 100.0, "F2") + "," + F.N(mem, "F0") + "," + F.N(rd, "F0") + "," + F.N(wr, "F0") + "," + n);
+                    }
+                }
+                catch (Exception) { Interlocked.Increment(ref sampleErrors); }
+                Tick("process", sw.Elapsed.TotalMilliseconds);
+                SleepStop(1000);
+            }
+        }
+
         Dictionary<int, string> lastPids = new Dictionary<int, string>();
         static int PidOf(string inst) { try { int a = inst.IndexOf("pid_") + 4, b = inst.IndexOf('_', a); return int.Parse(inst.Substring(a, b - a), CultureInfo.InvariantCulture); } catch { return -1; } }
         static string EngineOf(string inst) { int k = inst.IndexOf("engtype_"); return k < 0 ? "?" : inst.Substring(k + 8); }
@@ -348,7 +404,7 @@ namespace AirFrameXR.Perf
                 self.Refresh(); var cpuNow = self.TotalProcessorTime;
                 double cpu = (cpuNow - last).TotalMilliseconds / Math.Max(1.0, lastT.Elapsed.TotalMilliseconds) * 100.0;   // % of one core
                 last = cpuNow; lastT.Restart();
-                long werr = 0; foreach (var c in new[] { gpuCsv, sysCsv, pcieCsv, engCsv, stateCsv }) if (c != null) { c.Flush(); werr += c.Errors; }
+                long werr = 0; foreach (var c in new[] { gpuCsv, sysCsv, pcieCsv, engCsv, procCsv, stateCsv }) if (c != null) { c.Flush(); werr += c.Errors; }
                 Func<CsvOut, string> rows = c => c == null ? "" : F.N(c.Rows);
                 Func<string, string> mx = n => { lock (tickGate) { if (!maxTickMs.ContainsKey(n)) return ""; } return F.N(TakeMax(n), "F1"); };
                 healthCsv.Row(string.Join(",", Clock.S(Clock.Now()), rows(gpuCsv), rows(sysCsv), rows(pcieCsv), rows(engCsv), F.N(werr), F.N(Interlocked.Read(ref sampleErrors)), mx("gpu"), mx("system"), mx("pcie"), mx("engines"), F.N(cpu, "F2")));

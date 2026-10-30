@@ -16,6 +16,7 @@ static class PerfReportCli
         if (Array.IndexOf(a, "--stdout") >= 0) Console.Write(r.Markdown);
         else File.WriteAllText(Path.Combine(a[0], "report.md"), r.Markdown, new System.Text.UTF8Encoding(false));
         Console.WriteLine(r.VerdictStatus + ": " + r.Verdict);
+        foreach (var c in r.Categories) Console.WriteLine("  CAT " + c.Name + " | " + c.Status + " | " + c.Summary);
         foreach (var f in r.Findings) Console.WriteLine("  " + f.Id + " " + f.Status + " " + f.Title);
         return r.VerdictStatus == "PROBLEM" ? 1 : 0;
     }

@@ -14,7 +14,7 @@ $ok = $true
 $gui = "$src\gui"
 $guiRefs = 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Web.Extensions.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll' | ForEach-Object { "/reference:$fw\$_" }
 $steps = @(
-    @{ name = 'perfcore.dll'; args = @('/target:library') + $refs + @("/out:$out\perfcore.dll", "$src\PerfCore.cs", "$src\PerfReport.cs") },
+    @{ name = 'perfcore.dll'; args = @('/target:library') + $refs + @("/out:$out\perfcore.dll", "$src\PerfCore.cs", "$src\PerfReport.cs", "$src\PerfResources.cs") },
     @{ name = 'perfreport.exe'; args = @('/target:exe') + $refs + @("/reference:$out\perfcore.dll", "/out:$out\perfreport.exe", "$src\PerfReportCli.cs") },
     @{ name = 'blackbox_recorder.exe'; args = @('/target:winexe') + $guiRefs + @("/reference:$out\perfcore.dll", "/win32icon:$gui\res\blackbox-windows.ico", "/win32manifest:$gui\app.manifest", "/resource:$gui\res\logo_640.png,logo_640.png", "/resource:$gui\res\chroma_passthrough.png,chroma_passthrough.png", "/resource:$gui\res\blackbox_128.png,blackbox_128.png", "/out:$out\blackbox_recorder.exe", "$gui\Common.cs", "$gui\PipelineModel.cs", "$gui\AirFrameXR.cs", "$gui\FindHeadset.cs", "$gui\AudioRoute.cs", "$gui\BlackBoxBrand.cs", "$gui\BenchRecorder.cs") },
     @{ name = 'blackbox_analyzer.exe'; args = @('/target:winexe') + $guiRefs + @("/reference:$out\perfcore.dll", "/win32icon:$gui\res\blackbox-windows.ico", "/win32manifest:$gui\app.manifest", "/resource:$gui\res\logo_640.png,logo_640.png", "/resource:$gui\res\chroma_passthrough.png,chroma_passthrough.png", "/resource:$gui\res\blackbox_128.png,blackbox_128.png", "/out:$out\blackbox_analyzer.exe", "$gui\Common.cs", "$gui\BlackBoxBrand.cs", "$gui\PerfAnalyze.cs") },

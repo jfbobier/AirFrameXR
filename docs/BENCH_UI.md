@@ -34,8 +34,27 @@ scene name, Full session tick, start/stop key, Beep, **Start/Stop recording**, a
 ## The analyzer window
 
 Left: the recordings (status first: `[PROBLEM]`, `[OK]`, `[not analyzed]`), **Delete old recordings...**, **Open a recording (folder or zip)...**. Right: the recording's name and facts, **Analyze this recording**, Open report.md,
-Open folder, Export..., Delete...; then the verdict (colour + one sentence), the findings (PROBLEM, WATCH, INSUFFICIENT, OK, each with its measured reason and a suggested test), the worst 10-second windows
-(when it went bad, for a long recording) and the worst late frames with the stage that made them late.
+Open folder, Export..., Delete...; then the **verdict**, then the **resources in bottleneck order** (the order a limit is looked for, settled with the user 2026-10-30):
+
+| Category | Rows (average, worst) |
+|---|---|
+| **GPU** | utilisation, the game's and the streamer's 3D engine, optical-flow engine, NVENC (driver and engines), encode time and the **encode window used** (encode / frame period), compose pass, clocks, power, temperature, VRAM, clock limiter |
+| **CPU** | total, the game process and the streamer in cores (1.0 = one whole core) |
+| **Memory and I/O** | free RAM, the game's private memory, page faults, hard faults, disk busy, read throughput and latency, the game's file reads |
+| **Network** | throughput (all adapters), stream bitrate, headset-reported network latency, packets lost |
+| **VR rendering** | game fps, streamed fps, what the headset shows, late frames (and the worst 10 s), frames made by frame generation, headset latency, decode, decoder queue, vsync queue |
+
+"Worst" is defined per row: the 99th percentile of a load, the lowest value of a clock, of free memory or of an fps. Each category has a status and a one-line reading; a category is a **PROBLEM** only when the stream really had late frames
+(more than 1 % of the gaps) and that resource shows the evidence for them, otherwise a near-limit resource is a WATCH. **VR rendering is the symptom**: it is never named as the cause.
+
+**The verdict** (fixed after the first real recording): "Smooth" when the late frames are under 1 %, whatever the sensors say (a category near a limit is named as the closest); otherwise the first category in the order above with a PROBLEM,
+with its one-line reading ("Late frames 2.98 %. GPU: the encoder uses 105 % of the frame period at the 99th percentile ..."); if none is saturated, the closest WATCH; if none, "no resource stands out" and the stage that made the late frames.
+The recorder's own health comes first when it failed (lost rows). Under frame generation the stream's frames are generated or re-stamped, so "upstream" is the host's display-clock slip, never the source frame's arrival gap.
+
+Under the table: the details (the stage that made each late frame, the suggested test), the worst 10-second windows (when it went bad, for a long recording) and the worst late frames.
+
+**Planned: a time series per category** (the unit is the difficulty). Proposal: one small chart per category on a shared time axis with the late-frame density on top; every series drawn as a **percentage of its limit** so different units sit on one scale
+(loads in %, the encode window in % of the frame period, network latency in % of the frame period, free RAM as % used), with the real value in the tooltip; at most three lines per chart; custom-drawn, no chart library. Not built.
 
 ## Test matrix
 

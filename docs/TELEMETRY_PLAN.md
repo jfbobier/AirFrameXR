@@ -68,7 +68,9 @@ Everything below needs **no admin rights** except the last row.
 | NVML (`nvml.dll`, installed with the driver) | util, clocks, power, temperature, VRAM, clock-event reasons, encoder util, `nvmlDeviceGetEncoderStats` (sessions, fps, latency) | 1-5 Hz | probe |
 | NVML PCIe throughput | tx / rx KB/s | 1 Hz, own thread | probe |
 | Windows counters (PDH through `System.Diagnostics`) | CPU, RAM available, page faults, NIC bytes, disk | 1-5 Hz | probe |
-| Windows `GPU Engine` counters | 3D / Copy / VideoEncode / VideoDecode per process | 1-2 Hz, filtered to named processes | probe |
+| Windows `GPU Engine` counters | 3D / Copy / VideoEncode / VideoDecode per process (rows carry the number of engine instances summed) | 1-2 Hz, filtered to named processes | probe |
+| Windows `Process` counters (added after the first 5090 recording) | CPU in cores, private memory and file I/O of the game and the streamer | 1 Hz, named processes | probe |
+| Windows disk and memory counters (same) | disk read / write throughput, read latency, hard faults (pages read from disk) | 1-5 Hz | probe |
 | **Deep trace (UAC)** | `wpr.exe` GPU + CPU profile (10-30 s) and PresentMon (MIT licence, unmodified binary) on the game process | on demand | elevated helper |
 
 Rules kept from the first draft of this idea: a counter that is unavailable is **blank, never 0** (`capabilities.csv` says why); event times
