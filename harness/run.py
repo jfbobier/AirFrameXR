@@ -129,6 +129,22 @@ def build(what):
                 print(o[-1500:])
                 return 2
             continue
+        if w == "bench":     # the Bench flavour's own binaries: perfcore.dll, perfreport.exe, perfprobe.exe, bench.exe (tools/bench/, tools/gui/Bench.cs, docs/TELEMETRY_PLAN.md)
+            lib.b_run("if not exist _tmp\\bench mkdir _tmp\\bench")
+            for src in sorted((lib.ROOT / "tools/bench").glob("*.cs")):
+                lib.b_put(src, f"_tmp/bench/{src.name}")
+            lib.b_run("if not exist _tmp\\bench\\gui\\res mkdir _tmp\\bench\\gui\\res")
+            for g in ("Common.cs", "Bench.cs", "app.manifest", "app.exe.config"):
+                lib.b_put(lib.ROOT / "tools/gui" / g, f"_tmp/bench/gui/{g}")
+            for g in ("airframexr.ico", "logo_640.png", "chroma_passthrough.png"):
+                lib.b_put(lib.ROOT / "tools/gui/res" / g, f"_tmp/bench/gui/res/{g}")
+            r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage23_bench.ps1"], cwd=lib.ROOT, capture_output=True)
+            o = r.stdout.decode(errors="replace").replace("\x00", "")
+            print(f"build bench: {'ok' if 'RESULT: OK' in o else 'FAILED'}")
+            if "RESULT: OK" not in o:
+                print(o[-3000:])
+                return 2
+            continue
         if w == "gui":       # AirFrameXR.exe + configure.exe (C# WinForms, .NET Framework 4.8)
             lib.b_run("if not exist _tmp\\gui\\res mkdir _tmp\\gui\\res")
             for src in sorted((lib.ROOT / "tools/gui").glob("*.cs")) + [lib.ROOT / "tools/gui/app.manifest", lib.ROOT / "tools/gui/app.stub.manifest", lib.ROOT / "tools/gui/app.exe.config"]:

@@ -6,13 +6,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 import lib
 
 ROOT = lib.ROOT
-SOURCES = "Common.cs PipelineModel.cs Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs FindHeadset.cs AudioRoute.cs AirFrameXR.cs Launcher.cs Performance.cs UiTest.cs"
+SOURCES = "Common.cs PipelineModel.cs Advanced.cs Configure.cs SettingsPanel.cs Reference.cs TestRunner.cs Wizard.cs Profiles.cs Verdict.cs Advice.cs FindHeadset.cs AudioRoute.cs AirFrameXR.cs Launcher.cs Performance.cs UiTest.cs Bench.cs PerfCore.cs PerfReport.cs"
 
 
 def build(rid):
     for d in ("_tmp\\uitest\\src\\res", f"runs\\{rid}", "_tmp\\uitest\\run"):
         lib.b_run(f"if not exist {d} mkdir {d}")
-    for f in sorted((ROOT / "tools/gui").glob("*.cs")) + [ROOT / "tools/gui/app.manifest"]:
+    for f in sorted((ROOT / "tools/gui").glob("*.cs")) + sorted((ROOT / "tools/bench").glob("Perf[CR]*.cs")) + [ROOT / "tools/gui/app.manifest"]:   # the Bench window compiles with perfcore's two sources
         lib.b_put(f, f"_tmp/uitest/src/{f.name}")
     for f in ("airframexr.ico", "logo_640.png", "chroma_passthrough.png"):
         lib.b_put(ROOT / "tools/gui/res" / f, f"_tmp/uitest/src/res/{f}")

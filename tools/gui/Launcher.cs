@@ -54,6 +54,9 @@ namespace AirFrameXR
 
             var body = new TableLayoutPanel { Dock = DockStyle.None, Location = Point.Empty, AutoSize = true, ColumnCount = 1, Padding = new Padding(12, 4, 12, 12) };
             foreach (var t in Tools) body.Controls.Add(MakeCard(t));
+            // the Bench package (telemetry build, docs/TELEMETRY_PLAN.md) carries bin\bench.exe: one more card; the stock package does not, so nothing shows there
+            if (File.Exists(Path.Combine(Paths.Bin, "bench.exe")))
+                body.Controls.Add(MakeCard(new Tool { Title = "Bench (performance diagnosis)", Exe = @"bin\bench.exe", What = "Find where the time goes in one game: record a scene, read the verdict." }));
             body.Controls.Add(sys);
             // quiet links: the full ALVR settings, and the help
             var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };

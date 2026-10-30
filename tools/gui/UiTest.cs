@@ -67,6 +67,13 @@ namespace AirFrameXR
             yield return new Case { Name = "advanced-switches-fov-quality", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true, new[] { 3552, 3200 }) };   // the same, restricted, with the render quality row
             yield return new Case { Name = "advanced-switches-fov", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true) };   // a pretend Vision Pro, the override ticked
             yield return new Case { Name = "advanced-switches-fit", Make = () => new AdvancedForm(new[] { 0.94, 0.93, 0.90, 0.76 }, false, new[] { 3552, 3200 }, null, true) };   // the AirFrameXR client's box, the stream fit on: the preview block and the quality row from the fit
+            yield return new Case { Name = "bench-idle", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("idle") };
+            yield return new Case { Name = "bench-ready", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("ready") };
+            yield return new Case { Name = "bench-capture", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("capture") };
+            yield return new Case { Name = "bench-read-smooth", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("read-smooth") };
+            yield return new Case { Name = "bench-read-problem", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("read-problem") };
+            yield return new Case { Name = "bench-read-insufficient", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("read-insufficient") };
+            yield return new Case { Name = "bench-long", Make = () => new BenchForm(), Prepare = f => ((BenchForm)f).ApplyDemoState("long") };
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             yield return new Case { Name = "performance-pipeline", Make = () => new PerformanceForm("LiesOfP-Win64-Shipping.exe") };   // a record whose pipeline block says split encoding did not engage
             for (int p = 0; p <= 6; p++)

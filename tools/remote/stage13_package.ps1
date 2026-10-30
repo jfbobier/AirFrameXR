@@ -51,6 +51,12 @@ if (Test-Path $suffixFile) { $version += (Get-Content $suffixFile -Raw).Trim() }
 $flavour = if (Test-Path "$root\_tmp\flavour.txt") { (Get-Content "$root\_tmp\flavour.txt" -Raw).Trim() } else { 'debug' }
 Set-Content -Path "$pkg\bin\flavour.txt" -Value $flavour -NoNewline
 if ($flavour -ne 'release') { $version += '-debug' }
+# the Bench tools (docs/TELEMETRY_PLAN.md, tools/bench/, tools/gui/Bench.cs) ship only in the telemetry (debug) package: the stock package has no bench file at all
+$benchFiles = @('bench.exe', 'bench.exe.config', 'perfcore.dll', 'perfreport.exe')
+foreach ($f in $benchFiles) {
+    if ($flavour -ne 'release' -and (Test-Path "$root\out\bench\$f")) { Copy-Item "$root\out\bench\$f" "$pkg\bin" -Force }
+    elseif ($flavour -eq 'release' -and (Test-Path "$pkg\bin\$f")) { Move-Item "$pkg\bin\$f" "$root\_tmp\stale_$f" -Force }   # left by an earlier debug package: moved out, never shipped
+}
 $persFile = "$root\_tmp\install\airframexr.personal.json"
 $persShip = @()
 # a generic build ships no config\airframexr.json: one left in the folder by an earlier personal build is moved out of the package, not shipped
@@ -66,6 +72,7 @@ $zip = "$root\out\dist\AirFrameXR-$version.zip"
 $ship = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\mirrordesktop.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
           'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json',
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\sakura_breeze.mp3', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
+if ($flavour -ne 'release') { $ship += ($benchFiles | Where-Object { Test-Path "$pkg\bin\$_" } | ForEach-Object { "bin\$_" }) }
 $ship += $persShip
 $ship += $persFiles
 $ship += Get-ChildItem "$pkg\profiles" -File -Filter *.json | ForEach-Object { "profiles\$($_.Name)" }
