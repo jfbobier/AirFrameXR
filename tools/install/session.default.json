@@ -669,8 +669,8 @@
         }
       },
       "wired_client_type": {
-        "Custom": "alvr.client",
-        "variant": "Store"
+        "Custom": "airframexr.client",
+        "variant": "Custom"
       },
       "wired_client_autolaunch": true,
       "enable_on_connect_script": false,
