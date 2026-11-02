@@ -41,7 +41,7 @@ AirFrameXR is built for people with a wireless headset and an NVIDIA GPU who wan
 - **One runtime, minimal copies.** Composition, frame pacing and encoding run in one pipeline that passes frames in shared GPU memory, with no extra copies between programs.
 - **A proven network layer.** [ALVR](https://github.com/alvr-org/ALVR) provides the networking, encoding and decoding that a large community has stabilised, and the headset only needs the ALVR app. **Meta Quest** and **Apple Vision Pro** are the tested headsets.
 - **Made for NVIDIA.** NVENC HEVC 10-bit encoding, and **split encoding** that uses all of the GPU's NVENC units instead of one (the RTX 5090 has three), tuned with the pacing and the network.
-- **The game renders only what you see.** Built-in field-of-view restriction and calibration tell the game the field of view the headset actually shows: about 30 % fewer pixels rendered on the Vision Pro profile (computed from the field of view, not yet a measured frame-time gain). See [How FOV restriction works](#how-fov-restriction-works).
+- **The game renders only what you see.** Built-in field-of-view restriction and your own eye calibration tell the game the field of view the headset actually shows: about 30 % fewer pixels rendered on the Vision Pro profile (computed from the field of view, not yet a measured frame-time gain). See [How FOV restriction works](#how-fov-restriction-works).
 - **Frame generation in the pipeline.** Optional GPU optical-flow interpolation with an edge-aware synthesis (the edge technique comes from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented) can improve displayed smoothness when a game cannot sustain the headset's refresh rate. It is experimental, off by default and **can add interpolation latency**; it is not a free FPS boost.
 - **Measure per game.** Game statistics record fps, latency, network and GPU for each game you play.
 - **Less guesswork.** The setup wizard reads what your headset supports, offers a community profile (shareable as a JSON file) and tests the result on your PC and network.
@@ -118,7 +118,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 **One front door.** Double-click `AirFrameXR.exe`: a card per tool, the OpenXR runtime switch (it switches back, too), and reviews of the OpenXR layers and the firewall rules.
 
-<p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, Logs and performance, Diagnose, Setup wizard, and the OpenXR runtime row"></p>
+<p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, Game statistics, Settings, Advanced picture and FOV settings, Diagnostics, Calibrate / restart headset setup, and the status card"></p>
 
 **The streamer.** Live numbers as tiles (the game's fps, what is streamed, what the headset shows, bitrate, latency split, loss), display settings, frame generation with its rate, Recenter, and the optional desktop mirror.
 
@@ -135,6 +135,12 @@ Regenerate them with `python3 harness/readme_screens.py`.
 **Setup, once.** The wizard reads what the headset supports, offers a community profile, a pre-filled manual setup or your existing ALVR settings, then tests the result.
 
 <p align="center"><img src="docs/images/ui_wizard.png" width="640" alt="The setup wizard: choose a setup"></p>
+
+**Calibrate your own field of view.** *Calibrate / restart headset setup* offers the **Eye calibration wizard (30 min)**: a small square drifts outward along one of 24 directions per eye and you click when it is gone, once with your eyes following it and once with them fixed. The result shows every ray, the point where it vanished for you, the outline of what your headset shows (dark) and the field of view the games get (blue), the smallest rectangle that covers 99 % of it. **Use this field of view** applies it from the next game start; **Save a copy...** writes a profile file you can share and import with *Advanced picture and FOV settings* > *Import a calibration file...* ([docs/FOV_CALIBRATION.md](docs/FOV_CALIBRATION.md)).
+
+<p align="center"><img src="docs/images/ui_calibrate.png" width="640" alt="The eye calibration result: 24 grey rays from the centre with a dot where the square vanished on each, the dark outline of the visible window and the blue rectangle the games are told"></p>
+
+*The picture shows made-up demo data from the UI harness (an invented window, not a person's measurement). The calibration itself has not been run on a headset yet.*
 
 **Firewall rules.** Finds the rule for this folder's exact `alvr_host.exe`, offers one only if none is in place, and lists the leftovers Windows keeps (stale, duplicate, blocking) with one click to remove them.
 
@@ -207,8 +213,8 @@ the same code built with the telemetry on, so a diagnosis never changes the numb
   A **Recommended** tick sets the rate from the game's recorded runs on the connected headset, and **Recenter** (a button and a key, **End** by default; also sent at every game start) turns the tracking space to your
   current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), and
   [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) (archive) for why DLSS motion vectors were tried and removed.
-- **A field of view for the game, set from the streamer**, and a render quality slider: [how it works](#how-fov-restriction-works).
-- **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the firewall and OpenXR-layer reviews. They follow the display
+- **A field of view for the game, set from the streamer**, a render quality slider, and an **eye calibration wizard** that measures your own visible window and fills the field of view for you: [how it works](#how-fov-restriction-works).
+- **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the eye calibration, the firewall and OpenXR-layer reviews. They follow the display
   (1080p laptops to 4K, 100-200 % scale), checked by the UI harness below.
 - **Desktop mirror** (optional): see above; it works with either hand.
 - **Advanced picture and FOV settings**: the switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect and what we
@@ -298,6 +304,8 @@ The game's picture is filtered down to the stream's pixels by composition, so th
 carries. The cost is the game's GPU time and video memory, roughly linear in pixels for a GPU-bound game; 100 % costs what the game cost with no restriction. About 2 samples per pixel
 is already near where supersampling stops paying much, so there is no reason to go higher. Which position is right depends on how much headroom the game has: raise it while the game
 holds its frame rate. Off by default (0 %), and with no restriction nothing differs from 1.0.
+
+**Calibrate it yourself.** Launcher > *Calibrate / restart headset setup* > *Eye calibration wizard (30 min)* measures your own window instead of using the profile's (two passes, 48 clicks each, the headset on, the streamer open) and applies the smallest rectangle that covers 99 % of it, or 100 % or 97 % if you choose; the maths and the file format are in [docs/FOV_CALIBRATION.md](docs/FOV_CALIBRATION.md) and [docs/HMD_PROFILES.md](docs/HMD_PROFILES.md). It is new in 1.3.2 and has been checked on the PC only, not yet on a headset.
 
 **What is not known yet.** The visible window is one person's left eye at one fit of the headset; it moves with the seal, glasses inserts and IPD, so start from the recommended row
 (visible + 3 degrees) and check the corners for black with `fovgrid.exe` ([docs/FOV_GRID.md](docs/FOV_GRID.md)). The Vision Pro profile carries the measured window and the suggested render quality (25 %), and the Advanced window offers them with one button, never by itself ([docs/HMD_PROFILES.md](docs/HMD_PROFILES.md)). The feature is covered by lab scenarios (the app gets exactly the tangents

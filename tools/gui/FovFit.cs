@@ -22,6 +22,8 @@ namespace AirFrameXR
     public class FovFitResult
     {
         public Rect Rectangle, Box;
+        /// the visible window: where the dot vanished on each direction, in tangent space (x outward from the nose, y up), in direction order
+        public List<(double X, double Y)> Window = new List<(double X, double Y)>();
         public double Coverage;                 // 0..1, exact share of the window the rectangle covers
         public int Runs, Steps;
         public string Author, Headset, FileName;
@@ -83,6 +85,7 @@ namespace AirFrameXR
             if (!Check(rows, files.Count, r.Warnings, out problem)) return null;
 
             var window = Outline(rows);
+            r.Window = window.Select(w => (w.X, w.Y)).ToList();
             r.Box = BoundingBox(window);
             r.Rectangle = SmallestRect(window, coveragePct / 100);
             r.Coverage = Clipped(window, r.Rectangle) / Area(window);

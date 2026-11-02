@@ -125,6 +125,7 @@ namespace AirFrameXR
             yield return new Case { Name = "analyze-insufficient", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("insufficient") };
             yield return new Case { Name = "analyze-problem-tall", Make = () => new AnalyzeForm(), Prepare = f => { ((AnalyzeForm)f).ApplyDemoState("problem"); f.Height = Ui.WorkArea(f).Height - 40; } };   // the README picture: the window as tall as the screen allows, so the table and the charts show together
             yield return new Case { Name = "analyze-long", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("long") };
+            yield return new Case { Name = "calibrate-result", Make = () => new CalibrateForm(Path.Combine(Path.GetTempPath(), "airframexr_calibrate_demo_" + Guid.NewGuid().ToString("N"))), Prepare = f => ((CalibrateForm)f).ApplyDemoResult() };   // the README picture: the rays, the window, the rectangle
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             yield return new Case { Name = "performance-pipeline", Make = () => new PerformanceForm("LiesOfP-Win64-Shipping.exe") };   // a record whose pipeline block says split encoding did not engage
             for (int p = 0; p <= 6; p++)

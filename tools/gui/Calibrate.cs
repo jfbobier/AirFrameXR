@@ -12,12 +12,45 @@ using System.Windows.Forms;
 
 namespace AirFrameXR
 {
+    /// The measurement as a picture, in tangent space with the nose on the left: a grey ray from the centre for every direction, a dot where the square vanished on it, the outline of
+    /// what the headset shows, and the rectangle the games are told.
+    public class FovPlot : Control
+    {
+        readonly FovFitResult r;
+        public FovPlot(FovFitResult result) { r = result; DoubleBuffered = true; BackColor = Color.White; Size = new Size(520, 340); AccessibleName = "Your visible window with the measured rays"; }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            float x0 = Math.Min(-(float)r.Rectangle.Inner, (float)r.Window.Min(p => p.X)), x1 = Math.Max((float)r.Rectangle.Outer, (float)r.Window.Max(p => p.X));
+            float y0 = Math.Min(-(float)r.Rectangle.Lower, (float)r.Window.Min(p => p.Y)), y1 = Math.Max((float)r.Rectangle.Upper, (float)r.Window.Max(p => p.Y));
+            float pad = 0.06f * Math.Max(x1 - x0, y1 - y0); x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
+            float k = Math.Min((Width - 2) / (x1 - x0), (Height - 2) / (y1 - y0));
+            float ox = (Width - k * (x1 - x0)) / 2, oy = (Height - k * (y1 - y0)) / 2;
+            Func<float, float, PointF> map = (x, y) => new PointF(ox + (x - x0) * k, oy + (y1 - y) * k);
+            var c = map(0, 0);
+            using (var axis = new Pen(Color.Gainsboro)) { g.DrawLine(axis, map(x0, 0), map(x1, 0)); g.DrawLine(axis, map(0, y0), map(0, y1)); }
+            using (var ray = new Pen(Color.Silver, 1f))
+            using (var dot = new SolidBrush(Color.DimGray))
+                foreach (var w in r.Window) { var q = map((float)w.X, (float)w.Y); g.DrawLine(ray, c, q); g.FillEllipse(dot, q.X - 3, q.Y - 3, 6, 6); }
+            using (var outline = new Pen(Color.DimGray, 1.5f)) g.DrawPolygon(outline, r.Window.Select(w => map((float)w.X, (float)w.Y)).ToArray());
+            var a = map(-(float)r.Rectangle.Inner, (float)r.Rectangle.Upper); var b = map((float)r.Rectangle.Outer, -(float)r.Rectangle.Lower);
+            using (var rect = new Pen(Ui.Accent, 2.5f)) g.DrawRectangle(rect, a.X, a.Y, b.X - a.X, b.Y - a.Y);
+            using (var f = new Font(Font.FontFamily, 8.5f))
+            {
+                g.DrawString("nose", f, Brushes.DimGray, 4, c.Y + 2); g.DrawString("outer", f, Brushes.DimGray, Width - 38, c.Y + 2);
+                g.DrawString("up", f, Brushes.DimGray, c.X + 4, 2); g.DrawString("down", f, Brushes.DimGray, c.X + 4, Height - 16);
+            }
+        }
+    }
+
     public class CalibrateForm : DpiForm
     {
         const int Directions = 24, Eyes = 2, StepsPerPass = Directions * Eyes;
         const string Wearer = "my";
         static string Probe => Path.Combine(Paths.Dir, "bench", "xr_probe.exe");
-        static string RunDir => Path.Combine(Paths.Config, "calibration");
+        string RunDir => demoDir ?? Path.Combine(Paths.Config, "calibration");
+        readonly string demoDir;   // the UI harness: synthetic sweeps in a temp folder instead of config\\calibration
 
         readonly AppSettings settings = new AppSettings();
         readonly string headset, headsetSlug;
@@ -29,8 +62,10 @@ namespace AirFrameXR
         Label progressText; ProgressBar bar;
         FovFitResult result;
 
-        public CalibrateForm()
+        public CalibrateForm(string demoFolder = null)
         {
+            demoDir = demoFolder;
+            System.Threading.Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;   // numbers as in the docs and the other tools
             Text = "AirFrameXR – Calibrate the field of view";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);
@@ -42,12 +77,32 @@ namespace AirFrameXR
             MinimumSize = new Size(600, 480);
             Ui.FitToWorkArea(this);
             Controls.Add(page);
-            headset = settings.HeadsetName;
+            headset = demoFolder != null ? "Apple Headset" : settings.HeadsetName;
             headsetSlug = FovFit.Slug(headset).Replace('_', '-');
             poll.Tick += (s, e) => Poll();
             FormClosing += (s, e) => StopProbe();
-            ShowIntro();
+            if (demoFolder == null) ShowIntro();
             Ui.ScreenshotWhenShown(this, 1500);
+        }
+
+        /// The UI harness: a made-up window (an ellipse a little wider outward than toward the nose, both passes) and the result page for it.
+        public void ApplyDemoResult()
+        {
+            Directory.CreateDirectory(RunDir);
+            var rnd = new Random(7);
+            var sb = new System.Text.StringBuilder("eye,fit,gaze,theta_deg,ecc_deg,tan_r,x_out,y,timeout,latency_ms,deg_s,display_time_ns\n");
+            foreach (var gz in new[] { "following", "fixed" })
+                for (int eye = 0; eye < 2; eye++)
+                    for (int i = 0; i < Directions; i++)
+                    {
+                        double th = i * 15, a = th * Math.PI / 180;
+                        double reach = Math.Sqrt(1 / (Math.Pow(Math.Cos(a) / (Math.Cos(a) >= 0 ? 0.95 : 0.72), 2) + Math.Pow(Math.Sin(a) / (Math.Sin(a) >= 0 ? 0.74 : 0.66), 2)));
+                        double tan = reach * (gz == "following" ? 0.93 : 1.0) * (1 + 0.03 * (rnd.NextDouble() - 0.5));
+                        double ecc = Math.Atan(tan) * 180 / Math.PI;
+                        sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0},demoheadset_1,{1},{2:0.0},{3:0.000},{4:0.00000},{5:0.00000},{6:0.00000},0,50,2.00,0", eye, gz, th, ecc, tan, tan * Math.Cos(a), tan * Math.Sin(a)));
+                    }
+            File.WriteAllText(Path.Combine(RunDir, $"fov_sweep_{Wearer}_{headsetSlug}_run1.csv"), sb.ToString());
+            ShowResult(99);
         }
 
         // ---------------------------------------------------------------------------------------------------------- pages
@@ -190,16 +245,18 @@ namespace AirFrameXR
                 return;
             }
             var t = result.Rectangle;
+            page.Controls.Add(new FovPlot(result) { Margin = new Padding(3, 6, 3, 2) });
+            Text_("Grey: the 24 directions the square travelled, with a dot where it vanished for you; the dark outline is what your headset shows; blue is the field of view the games are told.", true);
             Text_($"Outer {t.Outer:0.00}   Inner {t.Inner:0.00}   Upper {t.Upper:0.00}   Lower {t.Lower:0.00}   (tangents; the angles are {Math.Atan(t.Outer) * 180 / Math.PI:0.#} / {Math.Atan(t.Inner) * 180 / Math.PI:0.#} / {Math.Atan(t.Upper) * 180 / Math.PI:0.#} / {Math.Atan(t.Lower) * 180 / Math.PI:0.#} degrees)");
             Text_($"This rectangle covers {100 * result.Coverage:0.0} % of what you saw, from {result.Runs} run(s). It is {100 * result.SavedVsBox:0.0} % smaller than the box around your whole window, so the game renders that much less.");
             foreach (var w in result.Warnings) { var l = Text_("Note: " + w); l.ForeColor = Color.DarkGoldenrod; }
-            var cov = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 330, Margin = new Padding(3, 8, 3, 3), AccessibleName = "Coverage" };
+            var cov = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 470, Margin = new Padding(3, 8, 3, 3), AccessibleName = "Coverage" };
             cov.Items.AddRange(new object[] { "99 % of my window (recommended: black only in the far corners)", "100 % of my window (no black, a little more to render)", "97 % of my window (fewer pixels, more black in corners)" });
             cov.SelectedIndex = coverage >= 99.5 ? 1 : coverage >= 98.5 ? 0 : 2;
             cov.SelectedIndexChanged += (s, e) => ShowResult(new[] { 99.0, 100.0, 97.0 }[cov.SelectedIndex]);
             page.Controls.Add(cov);
             Text_("Applies at the next game start. If a game shows black at an edge, choose 100 % or run the test again; Advanced picture and FOV settings shows and changes the values.", true);
-            Buttons(Btn("Use this field of view", Apply), Btn("Save a copy...", SaveCopy), Btn("Run another pass of tests", ShowIntro), Btn("Close", Close));
+            Buttons(Btn("Use this field of view", Apply), Btn("Save a copy...", SaveCopy), Btn("Measure again", ShowIntro), Btn("Close", Close));
         }
 
         void Apply()

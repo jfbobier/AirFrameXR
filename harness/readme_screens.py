@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SHOTS = {   # harness case -> README image (the size the picture is taken at is the second item when it is not 1080p / 125 %)
     "launcher-ready": "ui_launcher", "streamer-clean": "ui_streamer", "performance": "ui_performance", "wizard-page3": "ui_wizard",
-    "suggestions": "ui_suggestions", "firewall-rules": "ui_firewall",
+    "suggestions": "ui_suggestions", "firewall-rules": "ui_firewall", "calibrate-result": "ui_calibrate",
     "rec-recording": "ui_blackbox_recorder",                              # the Black Box (docs/BENCH_UI.md)
     "analyze-problem-tall": ("ui_blackbox_analyzer", "2560x1440@100"),    # as tall as the screen allows: the resource table and the charts together
 }
