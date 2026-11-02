@@ -97,6 +97,12 @@ behaves as if the chain had only that much (the dev PCs have far more than many 
 `--track-after-frame`, `--track-frames-needed N`. `--host-env AIRFRAMEXR_FG_DARK_MS=0` turns the dark-tracking fix off (the freeze scenarios then fail: that is how the harness is
 known to see the bug).
 
+**Client side (visionOS):** `python3 harness/stability/run_stability.py client [--tsan] [name...]` runs the visionOS client's protocol layer (the
+real `ALVRClient/EventHandler.swift`, compiled on Linux) against a scripted streamer: idle to game, stalls of 1 / 6 / 35 s, a choking game, fps
+drops, irregular cadence, an encoder rebuild, stream restarts, a dying decoder, background reports. Local (WSL, Swift for Linux), a few
+minutes, no builder or headset; `--tsan` adds ThreadSanitizer. What is real and what is modelled: `tools/protocol-harness/README.md` in the client
+fork (checkout `external/alvr-visionos-pr`, or `AIRFRAMEXR_VISIONOS_CLIENT`).
+
 ## Topology
 Note: a client on a loopback address makes `server_core` treat it as *wired* and force the **TCP** stream protocol, so loopback
 scenarios do not exercise ALVR's UDP stream (the real AVP uses UDP).

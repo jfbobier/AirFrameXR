@@ -6,11 +6,12 @@ judged by judge.py (stalls, tracking resumption, memory growth).
     python3 harness/stability/run_stability.py run <name>[,<name>...|all] [--seconds N] [--host-env K=V ...]   # --seconds stretches a scenario (host/client/app), e.g. for a soak;
                                                                                                           # --host-env sets host variables (AIRFRAMEXR_FG_DARK_MS=0 turns the dark-tracking fix off)
     python3 harness/stability/run_stability.py judge <results dir> <scenario>              # re-judge an existing run
+    python3 harness/stability/run_stability.py client [list] [--tsan] [<scenario> ...]     # the visionOS client's protocol layer (local, no builder)
 
 A scenario is scenarios.json: a base (derived from a regular harness scenario, `base_from`) + an override (deep merge; null removes a key) + criteria
 for judge.py. Results: harness/results/stability/<UTC>_<name>/ (frames.csv, client_stdout.txt with the injected faults, mem.csv, host_stdout.txt, result.json).
 Needs the builder (tools/builder.local) with the host, shim, probe and mock client built; the debug flavour for the full instrumentation."""
-import copy, json, sys
+import copy, json, os, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -112,7 +113,30 @@ def run_once(name, seconds=None, host_env=None):
     return result["status"], outdir
 
 
+def client(args):
+    """The visionOS client side: the real ALVRClient/EventHandler.swift against a scripted streamer, compiled with a Linux Swift
+    toolchain (tools/protocol-harness in the client fork). Runs here (WSL), not on the builder; --tsan adds ThreadSanitizer."""
+    root = Path(os.environ.get("AIRFRAMEXR_VISIONOS_CLIENT", HERE.parent.parent / "external" / "alvr-visionos-pr"))
+    ph = root / "tools" / "protocol-harness"
+    if not (ph / "run.sh").exists():
+        print(f"no protocol harness at {ph} (set AIRFRAMEXR_VISIONOS_CLIENT to the visionOS client checkout)")
+        return 2
+    tsan = "--tsan" in args
+    names = [a for a in args if not a.startswith("--")]
+    binary = ph / "build" / ("protocol_harness_tsan" if tsan else "protocol_harness")
+    if names == ["list"]:
+        if not binary.exists() and subprocess.call([str(ph / "build.sh")] + (["--tsan"] if tsan else [])) != 0:
+            return 2
+        return subprocess.call([str(binary), "list"])
+    if subprocess.call([str(ph / "build.sh")] + (["--tsan"] if tsan else [])) != 0:
+        return 2
+    out = HERE.parent / "results" / "stability" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + ("_client_tsan" if tsan else "_client"))
+    return subprocess.call([str(ph / "run.sh"), "--out", str(out)] + (["--tsan"] if tsan else []) + names)
+
+
 def main(argv):
+    if len(argv) >= 2 and argv[1] == "client":
+        return client(argv[2:])
     if len(argv) < 2 or argv[1] == "list":
         for n, s in SPEC["scenarios"].items():
             print(f"{n:32} {s['description'][:150]}")
