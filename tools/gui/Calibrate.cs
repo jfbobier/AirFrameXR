@@ -119,9 +119,10 @@ namespace AirFrameXR
             Reset("Measure what your headset shows");
             Text_("The lens cuts the edges of the picture, and how much depends on your headset and on how it sits on your face. This test finds your own edges, so the games render only what you can see. It takes about 30 minutes (two passes of 48 short steps).");
             Text_("In the headset: keep your head still, only your eyes move. A small square drifts outward from the centre. Follow it with your eyes and click once (controller trigger, or a pinch with hands as controllers) the moment it is gone and you see only black. Do not click when it appears or fades. The second pass is the same with your eyes fixed on the + in the middle.");
+            if (demoDir == null && Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime)) { StartStreamer(); return; }
             var problems = new List<string>();
             if (headset.Length == 0) problems.Add("No headset is known yet: connect it once with the streamer.");
-            if (Process.GetProcessesByName("streamer").Length == 0) problems.Add("Start the streamer and connect your headset first (Main menu > Streamer), then come back here.");
+            if (Process.GetProcessesByName("streamer").Length == 0) problems.Add("The streamer is not running and could not be started (bin\\streamer.exe).");
             if (!File.Exists(Probe)) problems.Add("bench\\xr_probe.exe is missing from this package.");
             var earlier = EarlierRuns();
             if (problems.Count > 0)
@@ -130,6 +131,7 @@ namespace AirFrameXR
                 Buttons(Btn("Check again", ShowIntro), Btn("Close", Close));
                 return;
             }
+            Text_("The streamer is open (minimized if this window started it). Open the ALVR app on your headset so that it is connected before you start; the streamer's link indicator turns green.", true);
             Text_($"Headset: {headset}." + (earlier.Count > 0 ? $" {earlier.Count} earlier run(s) are kept and used together with this one: the larger window of all runs wins." : " Two or three runs, with the headset taken off and put back on between them, give a safer result; the first one is enough to start."), true);
             Text_("Calibration needs the field of view override off, and the headset app's FoV scale at 1.0. Put the headset on only when the test says so.", true);
             var b = new List<Button> { Btn("Start the test", StartRun) };
@@ -140,6 +142,24 @@ namespace AirFrameXR
             }
             Buttons(b.ToArray());
         }
+
+        /// The test needs the streamer (it is the OpenXR runtime's other half): start it, minimized so this window stays in front, and continue when it is up.
+        void StartStreamer()
+        {
+            Reset("Starting the streamer...");
+            Text_("Open the ALVR app on your headset. This page continues by itself once the streamer is up.");
+            try { Process.Start(new ProcessStartInfo(Paths.Runtime) { WorkingDirectory = Paths.Bin, WindowStyle = ProcessWindowStyle.Minimized }); Log.Write("INFO", "calibrate: started the streamer"); }
+            catch (Exception e) { Reset("The streamer did not start"); Text_(e.Message); Buttons(Btn("Try again", ShowIntro), Btn("Close", Close)); return; }
+            int waited = 0;
+            var t = new Timer { Interval = 1000 };
+            t.Tick += (s, e) =>
+            {
+                if (Process.GetProcessesByName("streamer").Length > 0 && ++waited >= 4) { t.Stop(); t.Dispose(); ShowIntro(); }   // up for a few seconds: its host has started
+                else if (waited == 0 && ++startWait > 30) { t.Stop(); t.Dispose(); Reset("The streamer did not start"); Text_("It did not appear within 30 seconds. Start it from the main menu, then come back."); Buttons(Btn("Check again", ShowIntro), Btn("Close", Close)); }
+            };
+            startWait = 0; t.Start();
+        }
+        int startWait;
 
         void StartRun()
         {

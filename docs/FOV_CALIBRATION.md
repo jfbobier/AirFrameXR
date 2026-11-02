@@ -15,7 +15,7 @@ branches, and only the final numbers (and whatever small change they need) come 
 
 ### For one user: the launcher's "Calibrate / restart headset setup" > "Eye calibration wizard (30 min)"
 
-The card opens a choice (this wizard, or the setup wizard); `bin\calibrate.exe` (sources `tools/gui/Calibrate.cs`, the maths in `tools/gui/FovFit.cs`): needs the streamer open and the headset connected; it turns the override off if it is on, runs
+The card opens a choice (this wizard, or the setup wizard); `bin\calibrate.exe` (sources `tools/gui/Calibrate.cs`, the maths in `tools/gui/FovFit.cs`): starts the streamer itself (minimized) when it is not running, and asks you to open ALVR on the headset; it turns the override off if it is on, runs
 `bench\xr_probe.exe` in its sweep mode twice (following, then fixed; the two sweeps of the README below), watches the CSV in `config\calibration\` for the 48 rows of each pass, and shows the
 result: the smallest rectangle covering 99 % (or 100 / 97 %, a choice) of the largest window seen over every run in that folder, both eyes and both passes. **Use this field of view** installs a
 calibration-only profile (`docs/HMD_PROFILES.md`) and applies it as the override; **Save a copy...** writes the file for sharing or for **Import a calibration file...** in the Advanced window.
