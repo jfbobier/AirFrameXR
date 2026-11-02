@@ -36,7 +36,10 @@
     "margin_deg": 0,
     "render_quality": 0,
     "client_fov_scale": 0.8,
-    "note": "The 99 % rectangle of the author's three sweeps (2026-10-28/29, eyes following and fixed, two fits, Sense clicks): outer 44.1 deg (tan 0.97), inner 35.4 (0.71), upper 34.6 (0.69), lower 32.2 (0.63). Covers 99 % of what the author sees; the black is at the far outer and lower corners only. 26 % fewer game pixels than an unrestricted game on the AirFrameXR client (whose ceiling is 1.05 / 0.80 / 0.76 / 0.87), 62 % fewer than on the stock app. Applied as the default field of view when the wizard uses this profile; the Advanced window changes it. The author's own 100 % set is 1.00 / 0.71 / 0.73 / 0.66 (21 % fewer).",
+    "note": "The 99 % rectangle of the author's three sweeps (2026-10-28/29, eyes following and fixed, two fits, Sense clicks): outer 44.1 deg (tan 0.97), inner 35.4 (0.71), upper 34.6 (0.69), lower 32.2 (0.63). Covers 99 % of what the author sees; the black is at the far outer and lower corners only. 26 % fewer game pixels than an unrestricted game on the AirFrameXR client (whose ceiling is 1.05 / 0.80 / 0.76 / 0.87), 62 % fewer than on the stock app. Applied as the default field of view when the wizard uses this profile; the Advanced window changes it. The author's own 100 % set is 1.00 / 0.71 / 0.73 / 0.66 (21 % fewer)."
+  },
+  "network": {
+    "default": "wifi-good",
     "variants": [
       {
         "id": "wifi-good",
