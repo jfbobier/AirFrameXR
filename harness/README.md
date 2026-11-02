@@ -97,11 +97,81 @@ behaves as if the chain had only that much (the dev PCs have far more than many 
 `--track-after-frame`, `--track-frames-needed N`. `--host-env AIRFRAMEXR_FG_DARK_MS=0` turns the dark-tracking fix off (the freeze scenarios then fail: that is how the harness is
 known to see the bug).
 
-**Client side (visionOS):** `python3 harness/stability/run_stability.py client [--tsan] [name...]` runs the visionOS client's protocol layer (the
-real `ALVRClient/EventHandler.swift`, compiled on Linux) against a scripted streamer: idle to game, stalls of 1 / 6 / 35 s, a choking game, fps
-drops, irregular cadence, an encoder rebuild, stream restarts, a dying decoder, background reports. Local (WSL, Swift for Linux), a few
-minutes, no builder or headset; `--tsan` adds ThreadSanitizer. What is real and what is modelled: `tools/protocol-harness/README.md` in the client
-fork (checkout `external/alvr-visionos-pr`, or `AIRFRAMEXR_VISIONOS_CLIENT`).
+## visionOS client simulation (protocol harness, 2026-11-02)
+
+The rest of the lab simulates the **headset as the protocol sees it**: `tools/mock_client` (Rust, on the builder) speaks ALVR like a headset
+and emulates the Vision Pro's display rule (`--display-sim`). That tests the streamer, not the app on the headset. The protocol harness
+simulates the **visionOS app itself**: it compiles the client's own `ALVRClient/EventHandler.swift`, unchanged, on Linux, and runs it against a
+scripted streamer and a model of its render loop. No Mac, no Xcode, no headset, no builder: it runs in WSL in a few minutes.
+
+```
+python3 harness/stability/run_stability.py client list
+python3 harness/stability/run_stability.py client [--tsan] [<scenario> ...]     # every scenario by default
+```
+
+Results: `harness/results/stability/<UTC>_client[_tsan]/`, per scenario `<name>.log` (the client's own `print` lines and the harness events,
+timestamped), `<name>.json` (verdict and metrics), `<name>.tsan.*` (ThreadSanitizer reports with both stacks, `--tsan` only). The table printed
+at the end has one line per scenario: result, share of new frames after the last transition, IDR requests, reconnects, decode errors, races.
+
+**What runs, what is modelled** (details: `tools/protocol-harness/README.md` in the client fork, checkout `external/alvr-visionos-pr` or
+`AIRFRAMEXR_VISIONOS_CLIENT=<path>`):
+
+| Part | In the harness |
+|---|---|
+| Event thread, NAL callback, decoder lifecycle, reconnect and IDR timers, `exit` paths, tracking workers, the render thread's frame pick | the client's code, compiled unchanged |
+| client_core (ALVR v20.14.1) | a stand-in exporting the real C API names. Its video thread follows `connection.rs`: IDR / loss / decoder-saturation handling, the 10-packet unread cap. A fatal decoder error leads to a reconnect. |
+| The streamer | a script: green idle frames at 30 fps, game cadence / pose age / jitter, stalls that send nothing, IDR on request with DecoderConfig re-sent, an encoder rebuild on the same connection, stream restarts |
+| VideoToolbox | a synchronous stand-in: a P frame fails without its reference, with another stream's parameter sets, or on an invalidated session |
+| Render loop | 90 Hz ticks through the client's `pollFrameForDisplay` / `publishShownFrame` / `markSubmitted`; the rest mirrors `Renderer.renderFrame`'s protocol calls without Metal |
+| Apple frameworks | inert stand-ins; the app state can be put in the background |
+
+**Scenarios and what pass means.** Unless noted, a scenario passes when at least 80 % of display ticks show a new frame from one second after
+its last transition, the client never tears the connection down by itself, and it never calls `exit()`.
+
+| Scenario | Transition |
+|---|---|
+| `cold_idle_to_game` | the headset waits, the stream starts on the idle frame, a game starts |
+| `enter_after_stream` | the stream runs before the immersive space opens |
+| `fps_drop` | 90 -> 45 -> 30 -> 90 fps |
+| `stall_1s`, `stall_6s`, `stall_35s` | the game stops presenting (the host sends nothing) for 1, 6, 35 s |
+| `choke` | 6 fps with 700 ms old poses for 5 s, then back to 90 |
+| `irregular` | gaps of 8-90 ms for 15 s |
+| `reconfigure` | the encoder rebuilt with a new size on the same connection (the host does this when a deferred stream change runs after a game exits) |
+| `restart`, `restart_storm` | the streamer ends the stream and starts a new one; five times, one second apart |
+| `decoder_dies` | the decoder session becomes invalid mid-stream (as after a pause) |
+| `decoder_broken` | control: frames arrive and never decode, so the client **must** reconnect exactly once (no new-frame check) |
+| `background_blip` | visionOS reports background for 0.3 s: the client must stay |
+| `background_real` | background for 3 s (the wearer left): the client **must** exit (`pass(exit)`) |
+
+**What it found.** On client 1.2.2 it found the following, all fixed in client 1.3.1 (fork branch `airframexr-client`):
+- A 35 s stall made the client drop the connection.
+- The encoder rebuild froze the picture for good, because the old decoder was kept.
+- A 0.3 s background report closed the app.
+- ThreadSanitizer found races at every stream stop: on the last shown frame, on the decoder session and its format, and on the
+  start of the tracking workers.
+
+On 1.3.1, all 15 scenarios pass. ThreadSanitizer still reports races on plain counters and timers. Those can be stale for a moment but cannot
+crash, and they are left on purpose.
+
+**When to run it:** after any change to the client's event loop, `handleNals`, decoder lifecycle or the render thread's frame pick, and before a
+client TestFlight build that carries one. Add `--tsan` for threading changes. It also simulates the client for streamer work that changes what
+the client receives: cadence, IDRs, DecoderConfig, stream restarts.
+
+**Adding a scenario:** a `Scenario` in `Harness/main.swift` is a list of phases (`idle`, `game`, `stall`, `irregular`, `reconfigure`, `restart`,
+`background`, `invalidateDecoder`, `breakDecoder`, `enterImmersive`) and its criteria (`settleWindow`, `minNewFraction`, `maxReconnects`,
+`minReconnects`, `expectExit`). A new kind of streamer behaviour is a new phase in `Host.run`. When `Renderer.renderFrame` changes, update
+`Harness/DisplaySim.swift`: it names the line ranges it mirrors.
+
+**Toolchain:** Swift 6.x for Linux from swift.org. The Ubuntu 24.04 tarball works on Arch once `libncurses.so.6` points at `libncursesw.so.6`.
+This machine has a `swiftc-linux` wrapper in `~/.local/bin`; elsewhere set `SWIFTC`. The C header is cbindgen output for the fork's
+`client_core` (`CAlvr/alvr_client_core.h`); regenerate it when the ALVR submodule moves.
+
+**Limits:**
+- Swift on Linux is not Swift on visionOS: the same file runs on other threads, another scheduler and another memory model. A clean
+  ThreadSanitizer run means none found, not none.
+- Metal, CompositorServices, ARKit, the real VideoToolbox and the visionOS watchdog are not in it.
+- The scripted IDR is instant and nothing is lost on the way, so recovery times are best cases.
+- A field symptom still needs the client's `[stream]` lines from the host log (`Client : [Error] [ALVR NATIVE] [stream] ...`).
 
 ## Topology
 Note: a client on a loopback address makes `server_core` treat it as *wired* and force the **TCP** stream protocol, so loopback
@@ -219,6 +289,7 @@ Moved here from the top-level README (2026-10-28). The story of why the lab exis
 | **Session logs** | with the launcher's debug tick: every host event (`host_events.jsonl`, 2-second encoder windows with the pipeline's counters), the headset's per-frame statistics (`client_frames.csv`), the shim's per-frame trace, the GPU's clocks and power state (`gpu.csv`); the analyses in `docs/PERFORMANCE_FINDINGS.md` are joins over these | `logs\debug\<session>` |
 | **Benchmarks and probes** | the headless encoder quality sweep and the network bench behind the setup wizard, the wizard's own end-to-end test, the NVENC split-frame probe, the D3D11/D3D12 interop test that pinned the shared-texture flag bug | `harness/run.py`, `wizard_e2e.py`, `tools/nvenc_split_probe`, `tools/interop_test` |
 | **Stability harness** | fault injection and soaks on the real chain (host, shim, fake game, mock headset): the headset's tracking silent for 5 or 30 s, the host or the headset frozen, 15 reconnects, the streamer window not reading the host's output, VRAM and RAM squeezed to what a smaller PC has, and a seeded soak of plausible events (settings, generation toggles, blackouts, audio device changes); a judge reads stalls and memory growth per process. Slow (about 90 minutes for the suite, hours for a soak), so it is **optional**: run it on major changes, not on every build | `harness/stability/` (`python3 harness/stability/run_stability.py list`), harness/README.md |
+| **Fake visionOS client** | the visionOS app's own protocol layer (`EventHandler.swift`, compiled on Linux) against a scripted streamer and a model of its render loop: idle to game, stalls, a choking game, fps drops, encoder rebuild, restarts, a dying decoder, background reports, with ThreadSanitizer on demand. Minutes, local, no Mac or headset | `python3 harness/stability/run_stability.py client [--tsan]`, `tools/protocol-harness/` in the client fork, [visionOS client simulation](#visionos-client-simulation-protocol-harness-2026-11-02) |
 | **GUI matrix** | every window and wizard page at 1080p / 1440p / 4K x 100-200 % Windows scale, audited for fit, clipping, overlap and cut-off text, with a screenshot per case | `harness/ui_matrix.py`, `tools/gui/UiTest.cs` |
 | **Launcher round trip** | the launcher hides while a tool is open and returns when all are closed; the root stub starts it | `harness/launcher_flow.py` |
 | **Desktop mirror** | 7 desktop shapes x SDR / HDR (3 SDR-white levels) rendered on the GPU: colours, placement, cursor size; the input maths (including the left / right hand-over of the beam) as unit tests; the app through the whole chain with scripted controllers (right-handed: `e2e_mirror`; the left trigger takes the beam: `e2e_mirror_left`); real-desktop screenshots of both hands | `harness/mirror_check.py`, `tools/probe/desktop_probe.cpp`, `tools/mirrordesktop/`; `e2e_mirror`, `e2e_mirror_left`; `harness/mirror_screenshot.py --real` |
