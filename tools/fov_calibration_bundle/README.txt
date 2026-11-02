@@ -8,7 +8,8 @@ the edges, and how much depends on the headset and on how it sits on your face.
 This test measures what YOU actually see, in two passes of 48 short steps (24 per eye), so we
 can choose the picture size that wastes nothing. Time: about 25 minutes per run (two passes).
 
-What you send back: the file  fov_sweep_<name>_<headset>_run<N>.csv  (in this folder),
+What you send back: the file  fov_sweep_<name>_<headset>_run<N>.csv  (in this folder; the run also writes
+airframexr_fov_<name>_<headset>.profile.json, which can be imported as it is),
 plus one line saying which headset and controllers you used, and anything that went wrong.
 Two or three runs (take the headset off and put it back on between runs) are better
 than one: the difference between runs tells us how precise your numbers are.

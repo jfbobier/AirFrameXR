@@ -13,11 +13,20 @@ The work happens in **two forks** (streamer host + probe, and the visionOS clien
 `fov-calibration`. They are a calibration runtime, not the product: the engine rule in `CLAUDE.md` is lifted on those
 branches, and only the final numbers (and whatever small change they need) come back to `main`.
 
+### For one user: the launcher's "Calibrate / restart headset setup" > "Eye calibration wizard (30 min)"
+
+The card opens a choice (this wizard, or the setup wizard); `bin\calibrate.exe` (sources `tools/gui/Calibrate.cs`, the maths in `tools/gui/FovFit.cs`): needs the streamer open and the headset connected; it turns the override off if it is on, runs
+`bench\xr_probe.exe` in its sweep mode twice (following, then fixed; the two sweeps of the README below), watches the CSV in `config\calibration\` for the 48 rows of each pass, and shows the
+result: the smallest rectangle covering 99 % (or 100 / 97 %, a choice) of the largest window seen over every run in that folder, both eyes and both passes. **Use this field of view** installs a
+calibration-only profile (`docs/HMD_PROFILES.md`) and applies it as the override; **Save a copy...** writes the file for sharing or for **Import a calibration file...** in the Advanced window.
+Incomplete runs are deleted, a missing pass or a single run produces a warning, fewer than 20 of 24 directions per eye refuses. FovFit's rectangle search (exact polygon clipping, greedy edge
+shrink) gives the same tangents as `harness/fov_calibration.py --sweep` to within 0.01 on the Kevin sweeps (1.00 / 0.89 / 0.92 / 0.82 against 1.00 / 0.89 / 0.91 / 0.82).
+
 ### For a group: the calibration bundle
 
 `tools/fov_calibration_bundle/` (`make_zip.sh` builds `private/dist/AirFrameXR-fov-calibration.zip`): the probe as `fov_sweep.exe`, `run_sweep.bat` (asks name, headset,
-run number; following gaze, dot from 15 degrees at 2 degrees/s, both eyes) and `README.txt` (the instructions written for the participants). Each person sends back
-`fov_sweep_<name>_<headset>_run<N>.csv`; analysis is `python3 harness/fov_calibration.py --sweep <csv> [--sweep <csv2> ...]` (a shared `--sweep` list gives the per-ray
+run number; following gaze, dot from 15 degrees at 2 degrees/s, both eyes) and `README.txt` (the instructions written for the participants). At the end the bundle's `fov_profile.exe` (the console version of FovFit, `tools/gui/FovProfile.cs`) writes `airframexr_fov_<name>_<headset>.profile.json` next to the CSVs, which can be imported as is. Each person sends back
+`fov_sweep_<name>_<headset>_run<N>.csv` (or that profile); analysis is `python3 harness/fov_calibration.py --sweep <csv> [--sweep <csv2> ...]` (a shared `--sweep` list gives the per-ray
 larger/tighter window across runs). The launcher was tested on the 5090 up to the session start (runtime found from `..\bin`, CSV created); no participant has run it.
 
 ### Run the sweep (phase 1)

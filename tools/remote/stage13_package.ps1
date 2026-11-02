@@ -13,7 +13,7 @@ if ($stale) { Move-Item $pkg "$pkg.old-$((Get-Date).ToString('yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Force $pkg, "$pkg\config", "$pkg\bin", "$pkg\docs" | Out-Null
 Copy-Item "$root\out\vdxr-shim\*.dll", "$root\out\vdxr-shim\*.json" "$pkg\bin" -Force                 # virtualdesktop-openxr.dll / .json, LibOVRRT64_1.dll
 Copy-Item "$root\src\ALVR-v20.14.1\target\release\alvr_host.exe" "$pkg\bin" -Force
-foreach ($f in 'streamer.exe', 'configure.exe', 'performance.exe', 'launcher.exe') {
+foreach ($f in 'streamer.exe', 'configure.exe', 'performance.exe', 'calibrate.exe', 'launcher.exe') {
     if (Test-Path "$root\out\gui\$f") { Copy-Item "$root\out\gui\$f" "$pkg\bin" -Force }
     Copy-Item "$root\_tmp\gui\app.exe.config" "$pkg\bin\$f.config" -Force   # WinForms' per-monitor DPI mode (tools/gui/app.exe.config)
 }
@@ -71,7 +71,7 @@ if (Test-Path $pfList) { foreach ($line in (Get-Content $pfList)) { $f = $line.T
 $zip = "$root\out\dist\AirFrameXR-$version.zip"
 # the zip holds only what ships (never logs\, config\session.json or results a test run may have left in the folder);
 # everything sits under AirFrameXR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
-$ship = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\mirrordesktop.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
+$ship = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\calibrate.exe', 'bin\launcher.exe', 'bin\mirrordesktop.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\calibrate.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
           'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json',
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\sakura_breeze.mp3', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
 if ($flavour -ne 'release') { $ship += ($benchFiles | Where-Object { Test-Path "$pkg\bin\$_" } | ForEach-Object { "bin\$_" }) }

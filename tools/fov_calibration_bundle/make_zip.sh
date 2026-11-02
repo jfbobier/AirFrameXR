@@ -5,11 +5,13 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 tmp="$(mktemp -d)"
 bash tools/builder.sh get build/probe/xr_probe.exe "$tmp/xr_probe.exe"
+bash tools/builder.sh get out/gui/fov_profile.exe "$tmp/fov_profile.exe"
 python3 - "$tmp" <<'PY'
 import sys, zipfile
 tmp = sys.argv[1]
 with zipfile.ZipFile("private/dist/AirFrameXR-fov-calibration.zip", "w", zipfile.ZIP_DEFLATED) as z:
     z.write(f"{tmp}/xr_probe.exe", "calibration/fov_sweep.exe")
+    z.write(f"{tmp}/fov_profile.exe", "calibration/fov_profile.exe")
     z.write("tools/fov_calibration_bundle/run_sweep.bat", "calibration/run_sweep.bat")
     z.write("tools/fov_calibration_bundle/README.txt", "calibration/README.txt")
 print("private/dist/AirFrameXR-fov-calibration.zip")

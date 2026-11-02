@@ -570,6 +570,24 @@ namespace AirFrameXR
             }
             var p = HmdProfiles.Read(path, hs, out var warnings, out var error);
             if (p == null) { MessageBox.Show(this, error, "Import profile", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (p.StreamLess)
+            {
+                // a calibration file (fov_profile.exe): only the field of view; the stream profile stays what it was
+                var t = p.FovTangents();
+                var q = $"Calibration: {p.DisplayName}\nField of view the games are told (outer / inner / upper / lower): {string.Join(" / ", t.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))}, render quality {100 * p.FovRenderQuality:0} %\n"
+                    + (p.FovNote.Length > 0 ? p.FovNote + "\n" : "") + "\nYour headset, as ALVR reports it:\n" + HmdProfiles.Describe(hs)
+                    + (warnings.Count > 0 ? "\n\nPossible mismatch:\n - " + string.Join("\n - ", warnings) : "") + "\n\nUse it as the field of view the games are told? The stream settings are not touched; Advanced picture and FOV settings shows and changes it.";
+                if (MessageBox.Show(this, q, "Import calibration", MessageBoxButtons.YesNo, warnings.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.Yes) return;
+                try
+                {
+                    var dst = HmdProfiles.Install(path, p);
+                    var ok = HmdProfiles.ApplyFovDefault(p, string.IsNullOrEmpty(hs?.DisplayName) ? settings.HeadsetName : hs.DisplayName);
+                    Log.Write("INFO", $"calibration '{p.Id}' imported to {dst}, applied {ok}");
+                    MessageBox.Show(this, ok ? "The calibration is saved as the field of view for your next game start." : "The file is copied, but the field of view could not be saved: see the log.", "Import calibration", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                }
+                catch (Exception ex) { MessageBox.Show(this, "Cannot import the calibration: " + ex.Message, "Import calibration", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                return;
+            }
             var fovLine = !p.HasFov ? "" : "A measured field of view is in the profile: it becomes the field of view the games are told when you finish the wizard (Advanced picture and FOV settings shows and changes it)."
                 + (p.FovClientScale > 0 ? " " + p.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " client slider recommended (manually)." : "") + "\n";
             var text = $"Profile: {p.DisplayName}{(p.Author.Length > 0 ? " by " + p.Author : "")}\n{p.EyeW} x {p.EyeH} per eye at {p.Fps:0} fps, {p.Codec.ToUpperInvariant()} {p.BitDepth}-bit, " +

@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import lib
 
-TOOLS = ["Game statistics", "Diagnostics (experimental)", "Restart headset setup", "Streamer"]
+TOOLS = ["Game statistics", "Diagnostics (experimental)", "Setup wizard", "Streamer"]
 only = sys.argv[1:] or TOOLS
 fails = 0
 stamp = time.strftime("%Y%m%d_%H%M%S")

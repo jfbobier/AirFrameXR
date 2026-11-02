@@ -48,6 +48,10 @@ set XR_PROBE_SWEEP_GAZE=fixed
 "%~dp0fov_sweep.exe" "%~dp0fov_sweep.log" 100000000 86400
 echo.
 echo  The probe has stopped. Result file (both passes, one row per ray): %CSV%
+echo.
+echo  Making your profile from every fov_sweep_*.csv in this folder (run again after a 2nd or 3rd run to improve it)...
+"%~dp0fov_profile.exe" "%~dp0"
+echo.
 pause
 exit /b 0
 :bad

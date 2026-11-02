@@ -239,7 +239,7 @@ namespace AirFrameXR
         Label fovNote, fovShare;
         TrackBar fovQ;
         FlowLayoutPanel fovQRow;
-        Button fovProfileBtn;
+        Button fovProfileBtn, fovImportBtn;
         Label fovProfileHint;
         HmdProfile fovProfile;   // the connected headset's profile with a measured window, null = none
         int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
@@ -319,6 +319,10 @@ namespace AirFrameXR
                     body.Controls.Add(fovProfileHint);
                 }
             }
+            fovImportBtn = new Button { AutoSize = true, Margin = new Padding(22, 4, 0, 0), Visible = false, Text = "Import a calibration file...", AccessibleName = "Import a calibration file" };
+            tips.SetToolTip(fovImportBtn, "A file made by the calibration tool (fov_profile.exe in the calibration folder, docs/FOV_CALIBRATION.md): it ticks the override and fills the four fields with your own measured window. Applies at the next game start.");
+            fovImportBtn.Click += (s, e) => FovImport();
+            body.Controls.Add(fovImportBtn);
             fovFields = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 4, 0, 0) };
             for (int k = 0; k < 4; k++)
             {
@@ -381,6 +385,7 @@ namespace AirFrameXR
             fovTick.Checked = on && clientFov != null;
             fovFields.Visible = clientFov != null;
             fovProfileBtn.Visible = clientFov != null && fovProfile != null;
+            fovImportBtn.Visible = clientFov != null;
             if (fovProfileHint != null) fovProfileHint.Visible = clientFov != null;
             if (clientFov == null)
             {
@@ -571,6 +576,28 @@ namespace AirFrameXR
             FovStore(st);
             Save(st, "field of view override " + (fovTick.Checked ? "on" : "off"), NextGame);
             if (!fovTick.Checked) LoadFov(); else FovLabels();
+        }
+
+        /// "Import a calibration file...": a profile written by fov_profile.exe (or any profile with a measured field of view). It is kept in config\\profiles and applied like the profile button.
+        void FovImport()
+        {
+            string path;
+            using (var dlg = new OpenFileDialog { Title = "Import a calibration file", Filter = "AirFrameXR profile (*.json)|*.json|All files (*.*)|*.*", CheckFileExists = true })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                path = dlg.FileName;
+            }
+            var list = new List<HmdProfile>();
+            try { list = HmdProfiles.Parse(File.ReadAllText(path), Path.GetFileName(path)); } catch (Exception e) { Log.Write("WARN", "calibration file: " + e.Message); }
+            var p = list.FirstOrDefault(x => x.HasFov);
+            if (p == null) { MessageBox.Show(this, "This file has no measured field of view. Pick the .profile.json that fov_profile.exe wrote.", "Import a calibration file", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            var name = new AppSettings().HeadsetName;
+            if (p.NameContains.Length > 0 && name.Length > 0 && !p.NameContains.Any(n => name.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)
+                && MessageBox.Show(this, $"This calibration was made for a headset named like \"{string.Join("\" / \"", p.NameContains)}\", yours is \"{name}\". Use it anyway?", "Import a calibration file", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            try { Log.Write("INFO", $"calibration '{p.Id}' imported to {HmdProfiles.Install(path, p)}"); }
+            catch (Exception e) { MessageBox.Show(this, "Cannot copy the file into config\\profiles: " + e.Message, "Import a calibration file", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            fovProfile = p;
+            FovUseProfile();
         }
 
         /// The profile's measured window into the fields and the slider (never above the headset's own values), ticked and saved in one go.

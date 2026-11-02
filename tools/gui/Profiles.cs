@@ -38,6 +38,9 @@ namespace AirFrameXR
         public double FovClientScale;
         public string FovNote = "";
         public bool HasFov => FovVisibleDeg != null;
+        /// A calibration-only file (the calibration bundle's fov_profile.exe writes one): a measured field of view and nothing about the stream. It is never proposed as a stream
+        /// profile (Match skips it); the Advanced window's button and the wizard's import use its field of view.
+        public bool StreamLess;
 
         /// The tangents the game is told for the measured window plus the margin (outer, inner, upper, lower), two decimals like the Advanced window's fields.
         public double[] FovTangents() => FovVisibleDeg.Select(d => Math.Round(Math.Tan((d + FovMarginDeg) * Math.PI / 180), 2)).ToArray();
@@ -72,9 +75,10 @@ namespace AirFrameXR
             {
                 var e = item as Dictionary<string, object>;
                 var st = O(e, "stream");
-                if (e == null || st == null || S(e, "id") == "") continue;
+                if (e == null || S(e, "id") == "" || (st == null && O(e, "fov") == null)) continue;
                 if (S(e, "id") == "my-headset-example") continue;   // the template
-                var p = new HmdProfile { Id = S(e, "id"), DisplayName = S(e, "display_name", S(e, "id")), Source = source, Author = S(e, "author") };
+                var p = new HmdProfile { Id = S(e, "id"), DisplayName = S(e, "display_name", S(e, "id")), Source = source, Author = S(e, "author"), StreamLess = st == null };
+                st = st ?? new Dictionary<string, object>();
                 var so = O(e, "session_overrides");
                 if (so != null) foreach (var kv in so) p.SessionOverrides[kv.Key] = kv.Value;
                 var m = O(e, "match");
@@ -107,7 +111,7 @@ namespace AirFrameXR
                     if (fv.TryGetValue("client_fov_scale", out var cs)) { var c = D(cs); p.FovClientScale = c >= 0.2 && c <= 1.6 && Math.Abs(c - 1) > 0.001 ? c : 0; }
                     p.FovNote = S(fv, "note");
                 }
-                if (p.Variants.Count == 0) continue;
+                if (p.StreamLess ? !p.HasFov : p.Variants.Count == 0) continue;
                 list.Add(p);
             }
             return list;
@@ -315,6 +319,7 @@ namespace AirFrameXR
             foreach (var p in all)
             {
                 double score = 0;
+                if (p.StreamLess) continue;   // a calibration file carries no stream values: it must not outrank the stream profile of the same headset
                 if (p.NameContains.Length > 0)
                 {
                     var hit = p.NameContains.Where(n => hs.DisplayName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0).OrderByDescending(n => n.Length).FirstOrDefault();

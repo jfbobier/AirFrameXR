@@ -64,6 +64,13 @@ click ticks the override, fills the four fields with `tan(visible + margin)` (ne
 The wizard only says on the proposal that such values exist. A headset that shows all it declares (the Quest 3) has no `fov` and no button. Values from another person's fit may not fit
 yours: check the corners for black with `fovgrid.exe` ([FOV_GRID.md](FOV_GRID.md)).
 
+### A calibration-only profile
+
+The launcher's **Calibrate / restart headset setup** > **Eye calibration wizard** (`bin\calibrate.exe`, [FOV_CALIBRATION.md](FOV_CALIBRATION.md)) and the bundle's `fov_profile.exe` write a profile that has `match` and `fov`
+and **no `stream` and no `network`**. It is never offered as a stream profile (the wizard's matching skips it, so it cannot replace the stream settings of the headset's own profile); only its field
+of view is used. Three ways in: the calibration tool applies it itself; *Advanced picture and FOV settings* > **Import a calibration file...** installs it in `config\profiles` and applies it
+(the "Use the ... measured values" button then offers it too, a user's file coming before a shipped one); the wizard's **Import profile...** accepts it and applies only the field of view.
+
 ## Starting-point profiles for other headsets
 
 `profiles\` also holds small starting points for the Meta Quest 2, 3, 3S and Pro and the Pico 4 / 4 Ultra. They are **compiled from public guidance, not tested by

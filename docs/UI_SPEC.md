@@ -25,7 +25,7 @@ screenshot each; 0 FAIL required), `harness/launcher_flow.py`.
 ## Windows
 
 ### Launcher (`bin\launcher.exe`, started by the root stub `AirFrameXR.exe`)
-Six cards, in this order (0.6): **Streamer** (primary), **Game statistics**, **Settings** (`configure.exe --settings`: pairing, benchmarks, video, audio, network), **Advanced settings** (`configure.exe --switches`: docs/EXPERIMENTAL_SWITCHES.md), **Diagnostics (experimental)**, **Restart headset setup** (the wizard). A status card says
+Six cards, in this order (0.6): **Streamer** (primary), **Game statistics**, **Settings** (`configure.exe --settings`: pairing, benchmarks, video, audio, network), **Advanced settings** (`configure.exe --switches`: docs/EXPERIMENTAL_SWITCHES.md), **Diagnostics (experimental)**, **Calibrate / restart headset setup** (a step with two buttons: **Eye calibration wizard (30 min)**, `calibrate.exe`, or **Setup wizard**, `configure.exe`). A status card says
 "Ready" (green) or "Needs attention" (red) with one row per problem and its button: the OpenXR runtime (shows the active one, the same button goes back), OpenXR
 layers that may take the controllers, the Windows Firewall (read in the background). Quiet links: *Advanced (full ALVR settings)...*, *Help*. The launcher
 steps aside while a tool is open and returns when all are closed; starting the streamer from it first offers to close a running one. Single instance.

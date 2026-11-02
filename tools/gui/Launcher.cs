@@ -23,7 +23,7 @@ namespace AirFrameXR
 
     public class LauncherForm : DpiForm
     {
-        class Tool { public string Title, What, Exe, Args = ""; public bool StopsStreamer, Primary; }
+        class Tool { public string Title, What, Exe, Args = ""; public bool StopsStreamer, Primary; public Tool[] Choices; }
         static readonly Tool[] Tools = {
             new Tool { Title = "Streamer", Exe = @"bin\streamer.exe", Primary = true, What = "Start streaming to your headset." },
             new Tool { Title = "Game statistics", Exe = @"bin\performance.exe", What = "How your games ran." },
@@ -31,7 +31,11 @@ namespace AirFrameXR
             // experimental and tuning switches (docs/EXPERIMENTAL_SWITCHES.md): writes config files, the streamer picks the live ones up, so it can stay open
             new Tool { Title = "Advanced picture and FOV settings", Exe = @"bin\configure.exe", Args = "--switches", What = "The field of view the game renders, frame generation, pacing, GPU and encoder switches, each with when it takes effect." },
             new Tool { Title = "Diagnostics (experimental)", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true, What = "Check your setup and get suggestions." },
-            new Tool { Title = "Restart headset setup", Exe = @"bin\configure.exe", StopsStreamer = true, What = "Run the setup wizard again: pair a headset and let the tests propose the settings." },
+            // one card, one extra step: the eye calibration (streamer open, headset on: bin\calibrate.exe) or the setup wizard (streamer closed)
+            new Tool { Title = "Calibrate / restart headset setup", Exe = @"bin\configure.exe", What = "Measure what your headset really shows, or run the setup wizard again to pair a headset and let the tests propose the settings.",
+                Choices = new[] {
+                    new Tool { Title = "Eye calibration wizard (30 min)", Exe = @"bin\calibrate.exe", What = "Measure the edges of what your headset shows, so the games render only that. Start the streamer and connect the headset first." },
+                    new Tool { Title = "Setup wizard", Exe = @"bin\configure.exe", StopsStreamer = true, What = "Pair a headset and let the tests propose the stream settings." } } },
         };
 
         readonly FlowLayoutPanel sys = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(700, 0) };
@@ -83,6 +87,29 @@ namespace AirFrameXR
             return b;
         }
 
+        /// The step between the card and the tool: the card's choices as two buttons with their description. null = cancelled.
+        Tool Choose(Tool t)
+        {
+            Tool picked = null;
+            using (var f = new DpiForm { Text = "AirFrameXR \u2013 " + t.Title, Font = Ui.Body, StartPosition = FormStartPosition.CenterParent, BackColor = Color.White, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(14) })
+            {
+                var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
+                col.Controls.Add(Ui.Line("What do you want to do?", Ui.Big));
+                foreach (var c in t.Choices)
+                {
+                    var choice = c;
+                    var ok = File.Exists(Path.Combine(Paths.Dir, c.Exe));
+                    var b = new Button { Text = c.Title, AutoSize = true, Font = Ui.Big, Padding = new Padding(10, 6, 10, 6), Margin = new Padding(0, 10, 0, 0), MinimumSize = new Size(420, 0), Enabled = ok, AccessibleName = c.Title };
+                    b.Click += (s, e) => { picked = choice; f.Close(); };
+                    col.Controls.Add(b);
+                    col.Controls.Add(new Label { Text = c.What, AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(420, 0), Margin = new Padding(2, 2, 0, 0) });
+                }
+                f.Controls.Add(col);
+                f.ShowDialog(this);
+            }
+            return picked;
+        }
+
         Control MakeCard(Tool t)
         {
             var exe = Path.Combine(Paths.Dir, t.Exe);
@@ -95,7 +122,7 @@ namespace AirFrameXR
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             grid.Controls.Add(text, 0, 0); grid.Controls.Add(chevron, 1, 0);
             card.Controls.Add(grid);
-            card.Click += (s, e) => Launch(t, exe);
+            card.Click += (s, e) => { if (t.Choices == null) { Launch(t, exe); return; } var c = Choose(t); if (c != null) Launch(c, Path.Combine(Paths.Dir, c.Exe)); };
             // the labels are in the way of the card's click: forward them; a hover colour on the whole card
             Action<Control> wire = null;
             wire = c => { foreach (Control k in c.Controls) { k.Click += (s, e) => card.PerformClick(); k.Cursor = Cursors.Hand; k.MouseEnter += (s, e) => card.BackColor = Color.FromArgb(0xE6, 0xEA, 0xF2); k.MouseLeave += (s, e) => card.BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9); wire(k); } };
@@ -158,7 +185,7 @@ namespace AirFrameXR
 
         // The launcher steps aside while a tool is open and comes back when the last one is closed (the wizard hands over to the streamer: the launcher
         // waits for every tool, not for the one it started).
-        static readonly string[] ToolProcesses = { "streamer", "configure", "performance", "blackbox_recorder", "blackbox_analyzer" };
+        static readonly string[] ToolProcesses = { "streamer", "configure", "performance", "calibrate", "blackbox_recorder", "blackbox_analyzer" };
         readonly Timer watch = new Timer { Interval = 500 };
         Process launched;
         static bool AnyToolOpen() => ToolProcesses.Any(n => Process.GetProcessesByName(n).Length > 0);
@@ -210,7 +237,7 @@ namespace AirFrameXR
         void StartTestFlow(string title)
         {
             testFlow = true;
-            var t = Tools.First(x => x.Title == title);
+            var t = Tools.Concat(Tools.Where(x => x.Choices != null).SelectMany(x => x.Choices)).First(x => x.Title == title);   // a card, or one of a card's choices
             var sampler = new Timer { Interval = 400 }; sampler.Tick += (s, e) => FlowLog("sample"); sampler.Start();
             var go = new Timer { Interval = 1500 };
             go.Tick += (s, e) =>
