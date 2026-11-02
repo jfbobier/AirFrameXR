@@ -8,7 +8,7 @@
 **Wireless PCVR for people who want high performance and simplicity. Re-engineered for NVIDIA. No SteamVR required. Optional integrated frame generation.**
 
 <p align="center">
-  <a href="https://youtu.be/Pca1KdtRIqE"><img src="https://img.youtube.com/vi/Pca1KdtRIqE/maxresdefault.jpg" alt="Watch the 2-minute AirFrameXR overview on YouTube" width="640"></a><br>
+  <a href="https://youtu.be/8F8zQXMi9BA"><img src="https://img.youtube.com/vi/8F8zQXMi9BA/maxresdefault.jpg" alt="Watch the 2-minute AirFrameXR overview on YouTube" width="640"></a><br>
   <sub>Watch the 2-minute overview (YouTube). Narration is synthetic; charts use the maintainer's measurements.</sub>
 </p>
 
@@ -31,7 +31,7 @@ For the Quest there is a dedicated **AirFrameXR Quest client** ([releases](https
 | Encoding | General-purpose ALVR configuration | NVIDIA-specific NVENC HEVC 10-bit path |
 | Frame generation | Requires a separate approach if desired | Optional, built into the frame pipeline with NVIDIA Optical Flow and edge-aware synthesis |
 | Headset | ALVR client | **Same ALVR client — no custom headset app required** |
-| Compatibility priority | Broad SteamVR ecosystem | Lean OpenXR-first path; **SteamVR/OpenVR-only titles are not supported** |
+| Compatibility priority | Broad SteamVR ecosystem | Lean OpenXR-first path; **SteamVR/OpenVR-only titles are not supported directly** (try [OpenComposite](#openvr-only-games-opencomposite)) |
 
 ### Why build it this way?
 
@@ -87,7 +87,16 @@ already open source [ALVR](https://github.com/alvr-org/ALVR) as the infrastructu
 > to run every VR game. **For a game that does not work, use SteamVR + ALVR**: SteamVR is excellent at compatibility and at
 > configurability, and this project does not try to compete with that. In testing, the vast majority of **UEVR games**, the
 > **Luke Ross mods** and **native OpenXR / VR games** worked, but some games still have controller problems, crashes or both.
-> Not supported: SteamVR/OpenVR-only games (they need SteamVR).
+> Not supported directly: SteamVR/OpenVR-only games. Try [OpenComposite](#openvr-only-games-opencomposite) first, otherwise they need SteamVR.
+
+#### OpenVR-only games: OpenComposite
+
+AirFrameXR only speaks OpenXR and has no OpenVR support. For older OpenVR games we recommend
+[OpenComposite](https://github.com/QuestCraftPlusPlus/OpenComposite), which translates OpenVR calls to OpenXR. In our tests it worked
+on about 60 % of the "old" OpenVR games we tried. Use its Runtime Switcher to select **OpenComposite (OpenXR)**; to go back, press
+**Switch to SteamVR** (or start SteamVR from Steam's VR button). Games that still fail need SteamVR + stock ALVR.
+
+<p align="center"><img src="docs/images/opencomposite-switcher.jpg" alt="OpenComposite Runtime Switcher showing the status OpenComposite (OpenXR) and a Switch to SteamVR button" width="420"></p>
 
 How it is built: the headset's ALVR app sees an ordinary ALVR 20.14.1 server; in between there is no SteamVR compositor, no extra frame copies
 between processes, and an encode path written for NVENC only.
@@ -230,7 +239,7 @@ What changed in each version: [docs/releases/](docs/releases/) (1.0 onward; earl
   discovery/pairing with the stock app.
 - **Known issues**:
   - Frame generation is still experimental.
-  - Some OpenXR games need the SteamVR + ALVR fallback. OpenVR games are not supported and none is planned.
+  - Some OpenXR games need the SteamVR + ALVR fallback. OpenVR games are not supported natively and none is planned; OpenComposite worked on about 60 % of the old OpenVR games we tried (see above).
   - No USB streaming, except when bridged with ALVR's own tools.
   - HEVC encoding is baked in for maximum split-encoding performance: no H.264 or AV1.
   - On the Vision Pro, in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips them (shown fps a little under the host
