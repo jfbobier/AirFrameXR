@@ -29,12 +29,11 @@ namespace AirFrameXR
             new Tool { Title = "Game statistics", Exe = @"bin\performance.exe", What = "How your games ran." },
             new Tool { Title = "Settings", Exe = @"bin\configure.exe", Args = "--settings", StopsStreamer = true, What = "Headset pairing, benchmarks, video, audio and network settings." },
             // experimental and tuning switches (docs/EXPERIMENTAL_SWITCHES.md): writes config files, the streamer picks the live ones up, so it can stay open
-            new Tool { Title = "Advanced picture and FOV settings", Exe = @"bin\configure.exe", Args = "--switches", What = "The field of view the game renders, frame generation, pacing, GPU and encoder switches, each with when it takes effect." },
-            new Tool { Title = "Diagnostics (experimental)", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true, What = "Check your setup and get suggestions." },
-            // one card, one extra step: the eye calibration (streamer open, headset on: bin\calibrate.exe) or the setup wizard (streamer closed)
-            new Tool { Title = "Calibrate / restart headset setup", Exe = @"bin\configure.exe", What = "Measure what your headset really shows, or run the setup wizard again to pair a headset and let the tests propose the settings.",
+            new Tool { Title = "Advanced video and performance settings", Exe = @"bin\configure.exe", Args = "--switches", What = "Frame generation, pacing, GPU and encoder switches, each with when it takes effect." },
+            // the rarely used ones, one card: the checkup (streamer closed) or the setup wizard again (streamer closed)
+            new Tool { Title = "Diagnostics and headset setup", Exe = @"bin\configure.exe", What = "Check your setup and get suggestions, or run the setup wizard again to pair a headset and let the tests propose the settings.",
                 Choices = new[] {
-                    new Tool { Title = "Eye calibration wizard (30 min)", Exe = @"bin\calibrate.exe", What = "Measure the edges of what your headset shows, so the games render only that. Start the streamer and connect the headset first." },
+                    new Tool { Title = "Diagnostics (experimental)", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true, What = "Check your setup and get suggestions." },
                     new Tool { Title = "Setup wizard", Exe = @"bin\configure.exe", StopsStreamer = true, What = "Pair a headset and let the tests propose the stream settings." } } },
         };
 

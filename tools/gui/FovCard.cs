@@ -91,6 +91,7 @@ namespace AirFrameXR
         readonly Button delete = new Button { Text = "Delete", AutoSize = true }, rename = new Button { Text = "Rename...", AutoSize = true };
         readonly Button add = new Button { Text = "Add to my profiles", AutoSize = true, Enabled = false, Margin = new Padding(12, 2, 3, 3) };
         readonly Button calibrate = new Button { Text = "Calibrate now (30 min, needs the headset)...", AutoSize = true, Margin = new Padding(3, 8, 8, 3) };
+        readonly Button import = new Button { Text = "Import a file...", AutoSize = true, Margin = new Padding(8, 8, 3, 3) };
         readonly Button grid = new Button { Text = "Check with fovgrid...", AutoSize = true, Margin = new Padding(3, 8, 3, 3) };
         readonly ComboBox unit = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100, AccessibleName = "Unit of the typed values" };
         readonly TextBox[] box = new TextBox[4];
@@ -153,12 +154,14 @@ namespace AirFrameXR
             typed.Controls.Add(inner);
             Controls.Add(typed);
 
-            var rowB = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            var rowB = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0) };
             calibrate.Click += (s, e) => Calibrate(); grid.Click += (s, e) => CheckWithGrid();
             tips.SetToolTip(calibrate, "Measures the edges of what your headset shows with the eye calibration wizard (about 30 minutes, the headset on). The result is kept here as a new profile.");
             tips.SetToolTip(grid, "Starts the streamer if needed and draws the chosen rectangle on a degree grid in the headset (bench\\fovgrid.exe): the outline must sit just outside the picture you can see.");
-            rowB.Controls.Add(calibrate); rowB.Controls.Add(grid);
-            Controls.Add(rowB);
+            import.Click += (s, e) => ImportFile();
+            tips.SetToolTip(import, "A calibration file someone shared, or the one fov_profile.exe wrote (a .profile.json with a measured field of view): it is added to your profiles.");
+            rowB.Controls.Add(calibrate); rowB.Controls.Add(grid); rowB.Controls.Add(import);
+            Controls.Add(rowB); Ui.FitWidth(rowB, 700, asMaximum: true);   // the three buttons wrap in a narrow window
             note = Ui.Line(""); note.ForeColor = Color.DimGray; Controls.Add(note); Ui.FitWidth(note, 700, asMaximum: true);
 
             watch.Tick += (s, e) => { if (calProc != null && calProc.HasExited) { calProc = null; watch.Stop(); Reload(null); } };
@@ -283,6 +286,27 @@ namespace AirFrameXR
                 col.Controls.Add(t); col.Controls.Add(row); f.Controls.Add(col); f.AcceptButton = ok; f.CancelButton = cancel;
                 return f.ShowDialog(owner) == DialogResult.OK ? t.Text.Trim() : null;
             }
+        }
+
+        /// "Import a file...": a profile file with a measured field of view (fov_profile.exe's, or one shared by another user) becomes one of the user's profiles.
+        void ImportFile()
+        {
+            string path;
+            using (var dlg = new OpenFileDialog { Title = "Import a calibration file", Filter = "AirFrameXR profile (*.json)|*.json|All files (*.*)|*.*", CheckFileExists = true })
+            {
+                if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+                path = dlg.FileName;
+            }
+            var list = new List<HmdProfile>();
+            try { list = HmdProfiles.Parse(File.ReadAllText(path), Path.GetFileName(path)); } catch (Exception e) { Log.Write("WARN", "calibration file: " + e.Message); }
+            var p = list.FirstOrDefault(x => x.HasFov);
+            if (p == null) { MessageBox.Show(FindForm(), "This file has no measured field of view. Pick the .profile.json that fov_profile.exe wrote.", "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            var hs = settings.HeadsetName;
+            if (p.NameContains.Length > 0 && hs.Length > 0 && !p.NameContains.Any(n => hs.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)
+                && MessageBox.Show(FindForm(), $"This calibration was made for a headset named like \"{string.Join("\" / \"", p.NameContains)}\", yours is \"{hs}\". Add it anyway?", "Field of view profiles", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            var u = UserFovStore.Add(new UserFov { Id = UserFovStore.NewId(), Name = p.DisplayName.Split('(')[0].Trim(), Headset = p.NameContains.FirstOrDefault() ?? "", Source = "imported", Tan = p.FovTangents(), Quality = p.FovRenderQuality, ClientScale = p.FovClientScale, Note = p.FovNote }, storePath);
+            Log.Write("INFO", $"fov profiles: '{u.Name}' imported from {Path.GetFileName(path)}");
+            Reload(u.Id);
         }
 
         // ---- calibration and the grid ------------------------------------------------------------------------------------------------------------------

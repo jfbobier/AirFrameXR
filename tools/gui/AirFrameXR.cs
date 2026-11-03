@@ -387,7 +387,7 @@ namespace AirFrameXR
                 fgRateFromHost = false;
                 Log.Write("INFO", "frame generation rate " + watchRate + " (Advanced settings)");
             }
-            if (FovLine() != watchFov) { watchFov = FovLine(); host.Send("fov_override " + watchFov); Log.Write("INFO", "field of view override: " + watchFov + " (Advanced picture and FOV settings; the next game takes it)"); }
+            if (FovLine() != watchFov) { watchFov = FovLine(); host.Send("fov_override " + watchFov); Log.Write("INFO", "field of view override: " + watchFov + " (the launcher's FOV restriction card; needs a streamer restart)"); }
             if (settings.FrameGenCapFps != watchCap) { watchCap = settings.FrameGenCapFps; host.Send("frame_gen_cap " + watchCap.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation cap " + watchCap + " fps (Advanced settings)"); }
         }
 

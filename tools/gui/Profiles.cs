@@ -165,7 +165,7 @@ namespace AirFrameXR
                 if (client != null) Json.Set(st.Root, "video.fov_for", client.Select(x => (object)Math.Round(x, 4)).ToList());
                 if (!string.IsNullOrEmpty(headsetName)) Json.Set(st.Root, "video.fov_for_headset", headsetName);
                 st.Save();
-                Log.Write("INFO", $"profile '{p.Id}': field of view {string.Join(" / ", t.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))} applied as the default the games are told (render quality {p.FovRenderQuality:0.##}); Advanced picture and FOV settings changes it");
+                Log.Write("INFO", $"profile '{p.Id}': field of view {string.Join(" / ", t.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))} applied as the default the games are told (render quality {p.FovRenderQuality:0.##}); the launcher's FOV card changes it");
                 return true;
             }
             catch (Exception e) { Log.Write("WARN", $"profile '{p.Id}': field of view not applied: {e.Message}"); return false; }

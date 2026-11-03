@@ -374,7 +374,7 @@ namespace AirFrameXR
         // frames in between; docs/FRAME_GENERATION.md), "uncapped" (experimental, from the Advanced settings; docs/FRAME_GENERATION_UNCAPPED.md)
         public string FrameGenRate { get => Json.Str(Root, "video.frame_gen_rate", "half"); set => Json.Set(Root, "video.frame_gen_rate", value); }
         /// uncapped mode's minimum spacing of the game's releases in fps (0 = none) and its content lag in ms (0 = automatic); the streamer takes a change live
-        /// the streamer's override of the field of view the game is told (Advanced picture and FOV settings): on/off and the tangents per edge (outer = away from the nose,
+        /// the streamer's override of the field of view the game is told (the launcher's FOV restriction card): on/off and the tangents per edge (outer = away from the nose,
         /// inner, upper, lower; 0 = not set); the headset's own when off
         public bool FovOverride => Json.Bool(Root, "video.fov_override", false);
         public double FovOuter => Json.Num(Root, "video.fov_outer", 0);

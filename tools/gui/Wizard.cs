@@ -588,7 +588,7 @@ namespace AirFrameXR
                 catch (Exception ex) { MessageBox.Show(this, "Cannot import the calibration: " + ex.Message, "Import calibration", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 return;
             }
-            var fovLine = !p.HasFov ? "" : "A measured field of view is in the profile: it becomes the field of view the games are told when you finish the wizard (Advanced picture and FOV settings shows and changes it)."
+            var fovLine = !p.HasFov ? "" : "A measured field of view is in the profile: it becomes the field of view the games are told when you finish the wizard (the launcher's FOV card shows and changes it)."
                 + (p.FovClientScale > 0 ? " " + p.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " client slider recommended (manually)." : "") + "\n";
             var text = $"Profile: {p.DisplayName}{(p.Author.Length > 0 ? " by " + p.Author : "")}\n{p.EyeW} x {p.EyeH} per eye at {p.Fps:0} fps, {p.Codec.ToUpperInvariant()} {p.BitDepth}-bit, " +
                        $"{(p.Foveated ? "foveated" : "full frame")}, split encode {p.SplitEncode}, {p.Variant(null).Mbps:0} Mbps, {p.SessionOverrides.Count} ALVR setting(s)\n{fovLine}\n" +

@@ -1,4 +1,4 @@
-// configure.exe --switches: the Advanced picture and FOV settings window. The experimental and tuning switches of docs/EXPERIMENTAL_SWITCHES.md, grouped, each with the moment
+// configure.exe --switches: the Advanced video and performance settings window. The experimental and tuning switches of docs/EXPERIMENTAL_SWITCHES.md, grouped, each with the moment
 // its change takes effect (live in the running streamer, at the next streamer start, at the next game start) and its value read back from the file or the registry.
 // Everything applies when changed; a switch at its default is removed from config\airframexr.json. The streamer may stay open: it forwards the live ones itself.
 using System;
@@ -45,7 +45,7 @@ namespace AirFrameXR
 
         public AdvancedForm()
         {
-            Text = "AirFrameXR – Advanced picture and FOV settings";
+            Text = "AirFrameXR – Advanced video and performance settings";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleDimensions = new SizeF(96F, 96F);
@@ -182,7 +182,7 @@ namespace AirFrameXR
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             scroller.Controls.Add(body);
             Controls.Add(scroller);
-            var hdr = Ui.CompactHeader("Advanced picture and FOV settings");
+            var hdr = Ui.CompactHeader("Advanced video and performance settings");
             Controls.Add(hdr);
             Ui.AutoFitWindow(this, hdr, body);
             LoadValues();

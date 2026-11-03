@@ -34,7 +34,7 @@ static class FovProfileTool
             Console.WriteLine($"\n  Field of view for the games (outer / inner / upper / lower): {t.Outer:0.00} / {t.Inner:0.00} / {t.Upper:0.00} / {t.Lower:0.00}");
             Console.WriteLine($"  Covers {100 * r.Coverage:0.0} % of what you see; {100 * r.SavedVsBox:0.0} % less picture than the window's bounding box.");
             Console.WriteLine($"\n  Profile written:\n    {outPath}\n");
-            Console.WriteLine("  To use it: AirFrameXR > Advanced picture and FOV settings > \"Import a calibration file...\".");
+            Console.WriteLine("  To use it: AirFrameXR > FOV restriction card > Manage profiles and calibrate... > Import a file...");
             return 0;
         }
         catch (Exception e) { Console.WriteLine("\n  Something went wrong: " + e.Message); return 1; }
