@@ -2,7 +2,10 @@
 // Tangent space throughout: x outward from the nose, y up; the origin is the view axis.
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -73,5 +76,250 @@ namespace AirFrameXR
         }
 
         static bool Ok(double[] v) => v.Length >= 4 && v.Take(4).All(x => !double.IsNaN(x) && !double.IsInfinity(x) && x > 0);
+    }
+
+    /// The profile card, shared by the profile manager window (and, later, the setup wizard): the user's profiles with their map, delete and rename, values typed by hand
+    /// with the red / yellow check and a live map, the calibration and the fovgrid check. Everything is stored in config\user_fov_profiles.json (UserFovStore).
+    public class FovCard : FlowLayoutPanel
+    {
+        readonly string storePath;
+        readonly double[] declared;
+        readonly AppSettings settings = new AppSettings();
+        readonly ListBox list = new ListBox { Width = 360, Height = 150, IntegralHeight = false, FormattingEnabled = true, AccessibleName = "My field of view profiles" };
+        readonly FovMap map = new FovMap { Size = new Size(350, 250), Margin = new Padding(12, 3, 3, 3) };
+        readonly Label details, message, note;
+        readonly Button delete = new Button { Text = "Delete", AutoSize = true }, rename = new Button { Text = "Rename...", AutoSize = true };
+        readonly Button add = new Button { Text = "Add to my profiles", AutoSize = true, Enabled = false, Margin = new Padding(12, 2, 3, 3) };
+        readonly Button calibrate = new Button { Text = "Calibrate now (30 min, needs the headset)...", AutoSize = true, Margin = new Padding(3, 8, 8, 3) };
+        readonly Button grid = new Button { Text = "Check with fovgrid...", AutoSize = true, Margin = new Padding(3, 8, 3, 3) };
+        readonly ComboBox unit = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100, AccessibleName = "Unit of the typed values" };
+        readonly TextBox[] box = new TextBox[4];
+        readonly TextBox name = new TextBox { Width = 170, AccessibleName = "Name of the new profile" };
+        readonly ToolTip tips = new ToolTip { AutoPopDelay = 30000, InitialDelay = 400 };
+        readonly Timer watch = new Timer { Interval = 1500 };
+        Process calProc;
+        bool loading;
+
+        /// The profile highlighted in the list, null when none.
+        public UserFov Selected => list.SelectedItem as UserFov;
+        public event Action SelectionChanged;
+        // the UI harness and the self-test
+        public bool CanAdd => add.Enabled;
+        public string Message => message.Text;
+        public int Count => list.Items.Count;
+        public void AddForTest() => AddTyped();
+
+        /// storePath / declared: tests use their own file and box; null = the user's file and the headset's box as the host saved it.
+        public FovCard(string storePath = null, double[] declared = null)
+        {
+            this.storePath = storePath;
+            this.declared = declared ?? AppSettings.ReadClientFov();
+            FlowDirection = FlowDirection.TopDown; WrapContents = false; AutoSize = true; Margin = new Padding(0);
+            var top = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            var left = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+            left.Controls.Add(Ui.Line("My profiles", Ui.Bold));
+            list.Format += (s, e) => e.Value = Describe((UserFov)e.ListItem);
+            list.SelectedIndexChanged += (s, e) => { if (!loading) { typedClear(); ShowSelected(); SelectionChanged?.Invoke(); } };
+            left.Controls.Add(list);
+            var lb = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            delete.Click += (s, e) => Delete(); rename.Click += (s, e) => Rename();
+            lb.Controls.Add(delete); lb.Controls.Add(rename);
+            left.Controls.Add(lb);
+            top.Controls.Add(left); top.Controls.Add(map);
+            Controls.Add(top);
+
+            details = Ui.Line(""); details.ForeColor = Color.DimGray; Controls.Add(details); Ui.FitWidth(details, 700, asMaximum: true);
+            message = Ui.Line(""); message.Font = Ui.Bold; Controls.Add(message); Ui.FitWidth(message, 700, asMaximum: true);
+
+            var typed = new GroupBox { Text = "Enter values by hand", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(3, 8, 3, 3), Padding = new Padding(8, 4, 8, 6) };
+            var inner = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Dock = DockStyle.Fill };
+            var row1 = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            unit.Items.AddRange(new object[] { "Tangents", "Degrees" }); unit.SelectedIndex = 0;
+            unit.SelectedIndexChanged += (s, e) => Typed();
+            row1.Controls.Add(new Label { Text = "Unit", AutoSize = true, Margin = new Padding(3, 6, 3, 0) }); row1.Controls.Add(unit);
+            var names = new[] { "Outer", "Inner", "Upper", "Lower" };
+            for (int k = 0; k < 4; k++)
+            {
+                box[k] = new TextBox { Width = 60, AccessibleName = names[k] };
+                box[k].TextChanged += (s, e) => Typed();
+                row1.Controls.Add(new Label { Text = names[k], AutoSize = true, Margin = new Padding(12, 6, 3, 0) }); row1.Controls.Add(box[k]);
+                tips.SetToolTip(box[k], names[k] + ": " + (k == 0 ? "the side away from the nose" : k == 1 ? "the side towards the nose" : k == 2 ? "up" : "down") + ". Tangents (what the Advanced window and the profiles use) or degrees from the view axis, as chosen in Unit. Never more than the headset shows.");
+            }
+            inner.Controls.Add(row1);
+            var row2 = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
+            row2.Controls.Add(new Label { Text = "Name", AutoSize = true, Margin = new Padding(3, 6, 3, 0) }); row2.Controls.Add(name); row2.Controls.Add(add);
+            add.Click += (s, e) => AddTyped();
+            inner.Controls.Add(row2);
+            typed.Controls.Add(inner);
+            Controls.Add(typed);
+
+            var rowB = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            calibrate.Click += (s, e) => Calibrate(); grid.Click += (s, e) => CheckWithGrid();
+            tips.SetToolTip(calibrate, "Measures the edges of what your headset shows with the eye calibration wizard (about 30 minutes, the headset on). The result is kept here as a new profile.");
+            tips.SetToolTip(grid, "Starts the streamer if needed and draws the chosen rectangle on a degree grid in the headset (bench\\fovgrid.exe): the outline must sit just outside the picture you can see.");
+            rowB.Controls.Add(calibrate); rowB.Controls.Add(grid);
+            Controls.Add(rowB);
+            note = Ui.Line(""); note.ForeColor = Color.DimGray; Controls.Add(note); Ui.FitWidth(note, 700, asMaximum: true);
+
+            watch.Tick += (s, e) => { if (calProc != null && calProc.HasExited) { calProc = null; watch.Stop(); Reload(null); } };
+            Disposed += (s, e) => { watch.Dispose(); tips.Dispose(); };
+            Reload(null);
+            Typed();
+        }
+
+        static string Describe(UserFov u) => u.Name + "   " + string.Join(" / ", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)));
+
+        /// Reads the store again; selectId (or the same profile as before, or the first) is highlighted.
+        public void Reload(string selectId)
+        {
+            loading = true;
+            var keep = selectId ?? Selected?.Id;
+            list.Items.Clear();
+            foreach (var u in UserFovStore.Load(storePath)) list.Items.Add(u);
+            var pick = list.Items.Cast<UserFov>().FirstOrDefault(u => u.Id == keep) ?? (list.Items.Count > 0 ? (UserFov)list.Items[0] : null);
+            if (pick != null) list.SelectedItem = pick;
+            loading = false;
+            delete.Enabled = rename.Enabled = list.Items.Count > 0;
+            if (box != null && box.All(b => b == null || b.Text.Length == 0)) ShowSelected();
+            SelectionChanged?.Invoke();
+        }
+
+        bool typedAny => box.Any(b => b != null && b.Text.Trim().Length > 0);
+        void typedClear() { if (!typedAny) return; loading = true; foreach (var b in box) b.Text = ""; loading = false; }
+
+        void ShowSelected()
+        {
+            var u = Selected;
+            map.Declared = declared; map.Window = u?.Window; map.Rectangle = u?.Tan; map.RectColor = Ui.Accent;
+            if (u == null) { details.Text = list.Items.Count == 0 ? "No profile yet: calibrate, or enter values below." : ""; message.Text = ""; Layout(null); return; }
+            var c = FovValidator.Check(u.Tan, FovUnit.Tangent, declared);
+            details.Text = Summary(c) + "\n" + (u.Calibrated ? "Calibrated" : "Entered by hand") + (u.Created.Length >= 10 ? " on " + u.Created.Substring(0, 10) : "") + (u.Headset.Length > 0 ? " for " + u.Headset : "") + ".";
+            Layout(c);
+        }
+
+        static string Summary(FovCheck c)
+        {
+            string F(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
+            string D(double v) => v.ToString("0.#", CultureInfo.InvariantCulture);
+            return $"Outer {F(c.Tan[0])}  Inner {F(c.Tan[1])}  Upper {F(c.Tan[2])}  Lower {F(c.Tan[3])} (tangents) = {D(c.Deg[0])} / {D(c.Deg[1])} / {D(c.Deg[2])} / {D(c.Deg[3])} degrees, {D(c.TotalH)} x {D(c.TotalV)} in total"
+                + (double.IsNaN(c.AreaShare) ? "." : $"; the game renders {(100 * c.AreaShare).ToString("0", CultureInfo.InvariantCulture)} % of the pixels of the headset's own view.");
+        }
+
+        void Layout(FovCheck c)
+        {
+            message.Text = c == null ? "" : c.Summary;
+            message.ForeColor = c == null ? Color.Black : c.Level == FovLevel.Invalid ? Color.Firebrick : c.Level == FovLevel.Strange ? Color.DarkGoldenrod : Color.SeaGreen;
+        }
+
+        // ---- values typed by hand ----------------------------------------------------------------------------------------------------------------------
+
+        FovCheck TypedCheck() => FovValidator.Check(box.Select(b => FovValidator.Parse(b.Text)).ToArray(), unit.SelectedIndex == 1 ? FovUnit.Degrees : FovUnit.Tangent, declared);
+
+        void Typed()
+        {
+            if (loading || box == null || box.Any(b => b == null)) return;
+            if (!typedAny) { add.Enabled = false; ShowSelected(); return; }
+            var c = TypedCheck();
+            bool filled = box.All(b => b.Text.Trim().Length > 0);
+            add.Enabled = filled && c.Usable;
+            map.Declared = declared; map.Window = null;
+            map.Rectangle = c.Tan.All(v => !double.IsNaN(v)) ? c.Tan : null;
+            map.RectColor = c.Level == FovLevel.Invalid ? Color.Firebrick : c.Level == FovLevel.Strange ? Color.DarkGoldenrod : Ui.Accent;
+            details.Text = c.Usable ? Summary(c) : "";
+            Layout(c);
+        }
+
+        /// The UI harness: types values as a person would (unit "Tangents" or "Degrees").
+        public void TypeForTest(string unitName, params string[] values)
+        {
+            unit.SelectedIndex = unitName == "Degrees" ? 1 : 0;
+            loading = true; for (int k = 0; k < 4; k++) box[k].Text = values[k]; loading = false;
+            if (name.Text.Length == 0) name.Text = "My values";
+            Typed();
+        }
+
+        void AddTyped()
+        {
+            var c = TypedCheck();
+            if (!c.Usable || !box.All(b => b.Text.Trim().Length > 0)) return;
+            var u = UserFovStore.Add(new UserFov { Id = UserFovStore.NewId(), Name = name.Text.Trim().Length > 0 ? name.Text.Trim() : "My values", Headset = settings.HeadsetName, Source = "manual", Tan = c.Tan.Select(v => Math.Round(v, 4)).ToArray() }, storePath);
+            Log.Write("INFO", $"fov profiles: '{u.Name}' added by hand ({string.Join(" / ", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))})");
+            loading = true; foreach (var b in box) b.Text = ""; name.Text = ""; loading = false;
+            add.Enabled = false;
+            Reload(u.Id);
+        }
+
+        // ---- the list ------------------------------------------------------------------------------------------------------------------------------------
+
+        void Delete()
+        {
+            var u = Selected; if (u == null) return;
+            bool inUse = settings.FovOverride && Enumerable.Range(0, 4).All(k => Math.Abs(new[] { settings.FovOuter, settings.FovInner, settings.FovUpper, settings.FovLower }[k] - u.Tan[k]) < 0.006);
+            var ask = $"Delete \"{u.Name}\"?" + (inUse ? "\n\nIt is the field of view in use now: the restriction is switched off (it needs a streamer restart to apply)." : "");
+            if (MessageBox.Show(FindForm(), ask, "Field of view profiles", MessageBoxButtons.YesNo, inUse ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.Yes) return;
+            UserFovStore.Remove(u.Id, storePath);
+            if (inUse) { var st = new AppSettings(); Json.Remove(st.Root, "video.fov_override"); st.Save(); Log.Write("INFO", "fov profiles: the profile in use was deleted, restriction off"); }
+            Log.Write("INFO", $"fov profiles: '{u.Name}' deleted");
+            Reload(null);
+        }
+
+        void Rename()
+        {
+            var u = Selected; if (u == null) return;
+            var n = Prompt(FindForm(), "Rename the profile", u.Name);
+            if (string.IsNullOrWhiteSpace(n) || n.Trim() == u.Name) return;
+            UserFovStore.Rename(u.Id, n, storePath);
+            Reload(u.Id);
+        }
+
+        static string Prompt(Form owner, string title, string current)
+        {
+            using (var f = new Form { Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent, MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Font = Ui.Body, AutoScaleDimensions = new SizeF(96F, 96F), AutoScaleMode = AutoScaleMode.Dpi, Padding = new Padding(10) })
+            {
+                var t = new TextBox { Text = current, Width = 280, Margin = new Padding(3, 3, 3, 8) };
+                var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true }; var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };
+                var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false };
+                var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false }; row.Controls.Add(ok); row.Controls.Add(cancel);
+                col.Controls.Add(t); col.Controls.Add(row); f.Controls.Add(col); f.AcceptButton = ok; f.CancelButton = cancel;
+                return f.ShowDialog(owner) == DialogResult.OK ? t.Text.Trim() : null;
+            }
+        }
+
+        // ---- calibration and the grid ------------------------------------------------------------------------------------------------------------------
+
+        void Calibrate()
+        {
+            var exe = Path.Combine(Paths.Bin, "calibrate.exe");
+            if (!File.Exists(exe)) { MessageBox.Show(FindForm(), "bin\\calibrate.exe is missing from this package.", "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (calProc != null && !calProc.HasExited) { note.Text = "The calibration is already open."; return; }
+            try { calProc = Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = Paths.Bin }); watch.Start(); note.Text = "The calibration window is open; its result is added to the list when you apply or save it."; }
+            catch (Exception e) { MessageBox.Show(FindForm(), "Could not start the calibration: " + e.Message, "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        }
+
+        /// The rectangle to show on the grid: the typed values when they are complete and usable, else the selected profile.
+        double[] GridTangents()
+        {
+            if (typedAny) { var c = TypedCheck(); return box.All(b => b.Text.Trim().Length > 0) && c.Usable ? c.Tan : null; }
+            return Selected?.Tan;
+        }
+
+        void CheckWithGrid()
+        {
+            var t = GridTangents();
+            if (t == null) { note.Text = "Select a profile, or type four usable values, first."; return; }
+            var bat = Path.Combine(Paths.Dir, "bench", "fovgrid.bat");
+            if (!File.Exists(bat)) { MessageBox.Show(FindForm(), "bench\\fovgrid.bat is missing from this package.", "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (settings.FovOverride && MessageBox.Show(FindForm(), "The field of view restriction is on. The outline is only readable with it off (with it on, the game's view is this rectangle and the outline falls on the edge of the picture): untick it in the main window and restart the streamer first.\n\nShow the grid anyway?", "Field of view profiles", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            try
+            {
+                if (Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime))
+                    Process.Start(new ProcessStartInfo(Paths.Runtime) { WorkingDirectory = Paths.Bin, WindowStyle = ProcessWindowStyle.Minimized });
+                var arg = string.Join(",", t.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)));
+                Process.Start(new ProcessStartInfo(bat, arg) { WorkingDirectory = Path.GetDirectoryName(bat), UseShellExecute = true });
+                note.Text = "Open the ALVR app on the headset: the grid starts in it once it is connected. The white outline is the rectangle " + arg + "; close the grid's console window when done.";
+                Log.Write("INFO", "fov profiles: fovgrid with " + arg);
+            }
+            catch (Exception e) { MessageBox.Show(FindForm(), "Could not start the grid: " + e.Message, "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        }
     }
 }

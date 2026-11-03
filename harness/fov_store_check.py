@@ -30,6 +30,8 @@ WANT = [
     "rename=True renamed=Renamed",
     "remove=True remove_again=False left=1",
     "corrupt=0",
+    "card=red:False valid:True/0 yellow:True/True partial:False",
+    "card_added=1:My values:1.2349:False",
 ]
 
 rid = f"fovs_{time.strftime('%H%M%S')}"

@@ -88,3 +88,12 @@ CABAC, 1.5 buffered frames, no microphone, the VideoToolbox low-latency option, 
 full frame (encode profile `full-split`) remains selectable in the Settings window.
 
 It also carries the Vision Pro's measured visible window (`fov`: 43.8 / 35.4 / 34.6 / 31.4 degrees outer / inner / upper / lower, margin 0, render quality 0 = no oversampling, all the savings go to performance; calibrated, see [FOV_CALIBRATION.md](FOV_CALIBRATION.md)), which the Advanced window offers with one button (tangents 0.96 / 0.71 / 0.69 / 0.61), and recommends 0.8 for the visionOS app's own FoV Scale (a line under the button and in the wizard's proposal). One person, one fit, not yet tried in a game; the note in the profile says so.
+
+## Your own field-of-view profiles (`config\user_fov_profiles.json`)
+
+Every calibration you keep (the calibration wizard's "Use this field of view" and "Save a copy...") and every valid set of numbers you enter by hand is stored in `config\user_fov_profiles.json`,
+apart from the settings, so an upgrade that replaces the shipped files does not lose them. `bin\configure.exe --fov` opens the manager: the list with a map of the selected profile (the
+headset's own box dashed, the measured window with its rays for a calibration), **Delete** and **Rename**, **Enter values by hand** (tangents or degrees; **red** when the numbers cannot
+be a field of view: not a number, 0 or below, 90 degrees or more, above what the headset shows; **yellow** when they can but look strange: degrees typed as tangents, very different sides,
+a very small or very wide window, under half the headset's area; the Add button stays grey until the four values are usable), **Calibrate now** and **Check with fovgrid** (starts the streamer if needed and draws the chosen rectangle on the degree grid).
+Deleting the profile that is in use switches the restriction off. Changing the restriction needs a streamer restart.

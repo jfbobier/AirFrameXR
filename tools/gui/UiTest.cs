@@ -134,6 +134,12 @@ namespace AirFrameXR
                 yield return new Case { Name = "wizard-page" + page, Make = () => new WizardForm(null, true), Prepare = f => ((WizardForm)f).ForTest(page) };
             }
             yield return new Case { Name = "configure-advanced", Make = () => new ConfigureForm(null) };
+            var quest3 = new[] { 1.376, 0.839, 0.966, 1.428 };
+            yield return new Case { Name = "fov-manager", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), new[] { 1.045, 0.800, 0.759, 0.871 }) };
+            yield return new Case { Name = "fov-manager-red", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), quest3), Prepare = f => ((FovManagerForm)f).Card.TypeForTest("Degrees", "95", "40", "43", "54") };
+            yield return new Case { Name = "fov-manager-yellow", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), quest3), Prepare = f => ((FovManagerForm)f).Card.TypeForTest("Tangents", "1.3", "0.5", "0.9", "1.0") };
+            yield return new Case { Name = "fov-manager-valid", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), quest3), Prepare = f => ((FovManagerForm)f).Card.TypeForTest("Degrees", "51", "40", "43", "54") };
+            yield return new Case { Name = "fov-manager-empty", Make = () => new FovManagerForm(Path.Combine(Path.GetTempPath(), "airframexr_fov_empty_" + Guid.NewGuid().ToString("N") + ".json"), quest3) };
             yield return new Case { Name = "find-headset", Make = () => new FindHeadsetForm(Tuple.Create("1234.client.alvr", "Apple Vision Pro", "192.168.100.123")) };
             yield return new Case { Name = "cable-missing", Make = () => new CableForm() };
             yield return new Case { Name = "chroma-step", Make = () => new ChromaStepForm() };
@@ -460,6 +466,18 @@ namespace AirFrameXR
                 lines.Add("remove=" + UserFovStore.Remove("a", tmp) + " remove_again=" + UserFovStore.Remove("a", tmp) + " left=" + UserFovStore.Load(tmp).Count);
                 File.WriteAllText(tmp, "{ not json");
                 lines.Add("corrupt=" + UserFovStore.Load(tmp).Count);
+                try { File.Delete(tmp); } catch { }
+                // the card: what the Add button allows, and what an add stores
+                using (var card = new FovCard(tmp, quest))
+                {
+                    card.TypeForTest("Degrees", "95", "40", "43", "54"); var red = card.CanAdd;
+                    card.TypeForTest("Degrees", "51", "40", "43", "54"); var valid = card.CanAdd; var validMsg = card.Message.Length;
+                    card.TypeForTest("Tangents", "1.3", "0.5", "0.9", "1.0"); var yellow = card.CanAdd; var yellowMsg = card.Message.Length > 0;
+                    card.TypeForTest("Tangents", "1.0", "", "", ""); var partial = card.CanAdd;
+                    card.TypeForTest("Degrees", "51", "40", "43", "54"); card.AddForTest();
+                    lines.Add("card=red:" + red + " valid:" + valid + "/" + validMsg + " yellow:" + yellow + "/" + yellowMsg + " partial:" + partial);
+                    lines.Add("card_added=" + card.Count + ":" + card.Selected?.Name + ":" + card.Selected?.Tan[0].ToString(CultureInfo.InvariantCulture) + ":" + card.CanAdd);
+                }
                 try { File.Delete(tmp); } catch { }
                 File.WriteAllLines(Path.Combine(outDir, "fovstore.txt"), lines);
                 return 0;
