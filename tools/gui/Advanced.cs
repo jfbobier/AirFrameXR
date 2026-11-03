@@ -257,7 +257,7 @@ namespace AirFrameXR
                 "What does not change: the stream. The frame still covers the headset's whole view (the headset maps it over the field of view it declared), the trimmed margin is black, encode, decode and network cost are the same, frame generation and the client are untouched. The saving is the game's GPU work. If the headset's own app also has a FoV scale, the two multiply: the headset's values shown here already include it.\r\n" +
                 "\r\n" +
                 "How games get it: through the OpenXR handshake. xrLocateViews returns the four angles per eye and xrEnumerateViewConfigurationViews the recommended image size; AirFrameXR returns the restricted angles and a size reduced in proportion to the area. UEVR reads exactly these (the four angles per eye for its projection and the first view's recommended size, scaled by its own resolution slider) when it starts, so it renders the narrower view. Other OpenXR games are expected to behave the same way (not tested here).\r\n" +
-                "When it applies: at the NEXT game start. The runtime reads the field of view once when the game starts and UEVR does not re-read it, so a game that is already running keeps what it began with. Changing a field while the streamer runs is enough; nothing else to restart.\r\n" +
+                "When it applies: after you RESTART THE STREAMER. Close the game, close and start the streamer again, then start the game. The runtime reads the field of view once when the game starts and UEVR does not re-read it, so a game that is already running keeps what it began with, and until the streamer is restarted you may still see the old picture (for example black margins you just unticked).\r\n" +
                 "\r\n" +
                 "The Vision Pro's field of view as visionOS reports it (left eye): tangents 1.78 outer, 1.02 inner, 1.22 up, 1.02 down = 60.7, 45.5, 50.6, 45.5 degrees (about 106 x 96 degrees). Share of the pixels the game renders, for example: outer 1.60 and upper 1.10 -> 88.5 %; every edge 90 % of the headset's -> 81 %; 85 % -> 72 %. The fields need the headset's values: connect the headset once (they are saved when it connects).";
 
@@ -268,7 +268,7 @@ namespace AirFrameXR
                 "What you get: the pixels the restriction saved can be spent on a finer render. The game's picture is filtered down to the stream's pixels, so you get cleaner edges and less shimmer (like supersampling); you do not get detail beyond what the stream carries.\r\n" +
                 "What it costs: game GPU time and video memory, rising with the pixels shown. Encode, decode and network are unchanged.\r\n" +
                 "The limits follow your resolution settings (the per-eye size of the stream, e.g. a Quest's lower one) and the field of view fields above; the slider only works while a restriction is on.\r\n" +
-                "When it applies: at the NEXT game start, like the field of view.";
+                "When it applies: after you restart the streamer, like the field of view (close the game, restart the streamer, start the game).";
 
         /// The stream's per-eye size from the user's resolution settings (session.json: the negotiated cache the host reads too), null when unknown.
         static int[] ReadStreamEye()
@@ -296,11 +296,11 @@ namespace AirFrameXR
         {
             clientFov = testClient ?? AppSettings.ReadClientFov();
             Section(body, "Field of view the game is told");
-            var intro = Ui.Line("The field of view the game is told it has, edge by edge, as tangents (the angle is shown next to each field), like SteamVR's Video > Field of View. The game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start); the stream still covers the whole headset view and the margin is black, so only the game's GPU work changes. Takes effect at the next game start. Hover for details.");
+            var intro = Ui.Line("The field of view the game is told it has, edge by edge, as tangents (the angle is shown next to each field), like SteamVR's Video > Field of View. The game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start); the stream still covers the whole headset view and the margin is black, so only the game's GPU work changes. Takes effect after you restart the streamer: close the game, restart the streamer, start the game. Hover for details.");
             intro.ForeColor = Color.DimGray; intro.MaximumSize = new Size(900, 0);
             body.Controls.Add(intro);
             fovTick = new CheckBox { AutoSize = true, Text = "Override the headset's field of view", AccessibleName = "Override the headset's field of view" };
-            Row(body, fovTick, null, NextGame, "Off: the game gets the headset's own field of view (greyed below, as the headset reported it). On: the fields open, starting from the headset's values; you can only go down from them.", FovTip);
+            Row(body, fovTick, null, Restart, "Off: the game gets the headset's own field of view (greyed below, as the headset reported it). On: the fields open, starting from the headset's values; you can only go down from them.", FovTip);
             fovProfile = testProfile ?? HmdProfiles.WithFovFor(new AppSettings().HeadsetName);
             fovProfileBtn = new Button { AutoSize = true, Margin = new Padding(22, 4, 0, 0), Visible = false, AccessibleName = "Use the measured values" };
             if (fovProfile != null)
@@ -309,7 +309,7 @@ namespace AirFrameXR
                 fovProfileBtn.Text = "Use the " + fovProfile.DisplayName.Split('(')[0].Trim() + "'s measured values (visible + " + fovProfile.FovMarginDeg.ToString("0.#", CultureInfo.InvariantCulture) + "\u00B0: "
                     + string.Join(" / ", m.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))) + ", render quality " + (100 * fovProfile.FovRenderQuality).ToString("0", CultureInfo.InvariantCulture) + " %)";
                 tips.SetToolTip(fovProfileBtn, "From the headset's profile (" + fovProfile.Id + "): the edge of what the headset shows, measured with the FoV grid (docs/AVP_FOV.md), plus a margin.\r\n" +
-                    (fovProfile.FovNote.Length > 0 ? fovProfile.FovNote + "\r\n" : "") + "It ticks the override and fills the fields and the render quality slider; you can change them afterwards. Applies at the next game start.");
+                    (fovProfile.FovNote.Length > 0 ? fovProfile.FovNote + "\r\n" : "") + "It ticks the override and fills the fields and the render quality slider; you can change them afterwards. Applies after you restart the streamer.");
                 fovProfileBtn.Click += (s, e) => FovUseProfile();
                 body.Controls.Add(fovProfileBtn);
                 if (fovProfile.FovClientScale > 0)
@@ -320,7 +320,7 @@ namespace AirFrameXR
                 }
             }
             fovImportBtn = new Button { AutoSize = true, Margin = new Padding(22, 4, 0, 0), Visible = false, Text = "Import a calibration file...", AccessibleName = "Import a calibration file" };
-            tips.SetToolTip(fovImportBtn, "A file made by the calibration tool (fov_profile.exe in the calibration folder, docs/FOV_CALIBRATION.md): it ticks the override and fills the four fields with your own measured window. Applies at the next game start.");
+            tips.SetToolTip(fovImportBtn, "A file made by the calibration tool (fov_profile.exe in the calibration folder, docs/FOV_CALIBRATION.md): it ticks the override and fills the four fields with your own measured window. Applies after you restart the streamer.");
             fovImportBtn.Click += (s, e) => FovImport();
             body.Controls.Add(fovImportBtn);
             fovFields = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 4, 0, 0) };
@@ -431,7 +431,7 @@ namespace AirFrameXR
                 UpdatePipeline();
                 return;
             }
-            fovNote.Text = "Override on: the game is told these values (never more than the headset's). Applies at the next game start.";
+            fovNote.Text = "Override on: the game is told these values (never more than the headset's). Applies after you restart the streamer (close the game, restart the streamer, start the game).";
             double w0 = clientFov[0] + clientFov[1], h0 = clientFov[2] + clientFov[3];
             double w = Math.Min(v[0], clientFov[0]) + Math.Min(v[1], clientFov[1]), h = Math.Min(v[2], clientFov[2]) + Math.Min(v[3], clientFov[3]);
             fovShare.Text = "The game renders " + (100 * w * h / (w0 * h0)).ToString("0", CultureInfo.InvariantCulture) + " % of the pixels the headset's whole view would.";
@@ -574,7 +574,7 @@ namespace AirFrameXR
             }
             else foreach (var n in fovNum) n.Enabled = false;
             FovStore(st);
-            Save(st, "field of view override " + (fovTick.Checked ? "on" : "off"), NextGame);
+            Save(st, "field of view override " + (fovTick.Checked ? "on" : "off"), Restart);
             if (!fovTick.Checked) LoadFov(); else FovLabels();
         }
 
@@ -616,7 +616,7 @@ namespace AirFrameXR
             loading = was;
             var st = new AppSettings();
             FovStore(st);
-            Save(st, "field of view from the " + fovProfile.Id + " profile", NextGame);
+            Save(st, "field of view from the " + fovProfile.Id + " profile", Restart);
             FovLabels();
         }
 
@@ -627,7 +627,7 @@ namespace AirFrameXR
             if (!fovTick.Checked && !fitTick.Checked) return;
             var st = new AppSettings();
             if (fovTick.Checked) FovStore(st); else FovStoreQuality(st);
-            Save(st, "game render quality " + fovQ.Value + " %", NextGame);
+            Save(st, "game render quality " + fovQ.Value + " %", Restart);
         }
 
         void FovValueChanged()
@@ -637,7 +637,7 @@ namespace AirFrameXR
             if (!fovTick.Checked) return;
             var st = new AppSettings();
             FovStore(st);
-            Save(st, "field of view " + string.Join(" ", FovValues().Select(x => x.ToString("0.00", CultureInfo.InvariantCulture))), NextGame);
+            Save(st, "field of view " + string.Join(" ", FovValues().Select(x => x.ToString("0.00", CultureInfo.InvariantCulture))), Restart);
         }
 
         static FlowLayoutPanel Pair(string text, Control c)

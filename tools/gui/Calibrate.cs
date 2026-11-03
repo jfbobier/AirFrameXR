@@ -243,7 +243,7 @@ namespace AirFrameXR
             cov.SelectedIndex = coverage >= 99.5 ? 1 : coverage >= 98.5 ? 0 : 2;
             cov.SelectedIndexChanged += (s, e) => ShowResult(new[] { 99.0, 100.0, 97.0 }[cov.SelectedIndex]);
             page.Controls.Add(cov);
-            Text_("Applies at the next game start. If a game shows black at an edge, choose 100 % or run the test again; Advanced picture and FOV settings shows and changes the values.", true);
+            Text_("Applies after you restart the streamer (close the game, restart the streamer, start the game). If a game shows black at an edge, choose 100 % or run the test again; Advanced picture and FOV settings shows and changes the values.", true);
             Buttons(Btn("Use this field of view", Apply), Btn("Save a copy...", SaveCopy), Btn("Measure again", ShowIntro), Btn("Close", Close));
         }
 
@@ -258,7 +258,7 @@ namespace AirFrameXR
                 bool ok = HmdProfiles.ApplyFovDefault(p, headset);
                 Log.Write("INFO", $"calibrate: '{p.Id}' installed, applied {ok}");
                 KeepInStore();
-                MessageBox.Show(this, ok ? "Saved. The games get your measured field of view from their next start." : "The profile is installed but the settings could not be saved: see the log.", "Calibrate", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                MessageBox.Show(this, ok ? "Saved. Restart the streamer (close the game first) and start the game: the games get your measured field of view from then on." : "The profile is installed but the settings could not be saved: see the log.", "Calibrate", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             catch (Exception e) { MessageBox.Show(this, "Could not apply the calibration: " + e.Message, "Calibrate", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }

@@ -583,7 +583,7 @@ namespace AirFrameXR
                     var dst = HmdProfiles.Install(path, p);
                     var ok = HmdProfiles.ApplyFovDefault(p, string.IsNullOrEmpty(hs?.DisplayName) ? settings.HeadsetName : hs.DisplayName);
                     Log.Write("INFO", $"calibration '{p.Id}' imported to {dst}, applied {ok}");
-                    MessageBox.Show(this, ok ? "The calibration is saved as the field of view for your next game start." : "The file is copied, but the field of view could not be saved: see the log.", "Import calibration", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                    MessageBox.Show(this, ok ? "The calibration is saved as the field of view the games get after the streamer is restarted." : "The file is copied, but the field of view could not be saved: see the log.", "Import calibration", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                 }
                 catch (Exception ex) { MessageBox.Show(this, "Cannot import the calibration: " + ex.Message, "Import calibration", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 return;

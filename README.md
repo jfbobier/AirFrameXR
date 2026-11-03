@@ -145,7 +145,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <p align="center"><img src="docs/images/ui_wizard.png" width="640" alt="The setup wizard: choose a setup"></p>
 
-**Calibrate your own field of view.** *Calibrate / restart headset setup* offers the **Eye calibration wizard (30 min)**: a small square drifts outward along one of 24 directions per eye and you click when it is gone, once with your eyes following it and once with them fixed. The result shows every ray, the point where it vanished for you, the outline of what your headset shows (dark) and the field of view the games get (blue), the smallest rectangle that covers 99 % of it. **Use this field of view** applies it from the next game start; **Save a copy...** writes a profile file you can share and import with *Advanced picture and FOV settings* > *Import a calibration file...* ([docs/FOV_CALIBRATION.md](docs/FOV_CALIBRATION.md)).
+**Calibrate your own field of view.** *Calibrate / restart headset setup* offers the **Eye calibration wizard (30 min)**: a small square drifts outward along one of 24 directions per eye and you click when it is gone, once with your eyes following it and once with them fixed. The result shows every ray, the point where it vanished for you, the outline of what your headset shows (dark) and the field of view the games get (blue), the smallest rectangle that covers 99 % of it. **Use this field of view** applies it after a streamer restart (close the game, restart the streamer, start the game); **Save a copy...** writes a profile file you can share and import with *Advanced picture and FOV settings* > *Import a calibration file...* ([docs/FOV_CALIBRATION.md](docs/FOV_CALIBRATION.md)).
 
 <p align="center"><img src="docs/images/ui_calibrate.png" width="640" alt="The eye calibration result: 24 grey rays from the centre with a dot where the square vanished on each, the dark outline of the visible window and the blue rectangle the games are told"></p>
 
@@ -296,7 +296,7 @@ must keep covering all of it. Only the game is told something else. With the Vis
    above).
 
 So the saving is the game's GPU work only; encode time, bitrate, decode time, frame generation and the headset app are unchanged. A game that is not GPU-bound gains nothing. The values
-apply at the **next game start**, and the override remembers the headset's field of view it was made for: connected to a headset whose field of view differs (a Quest after a Vision Pro), it is not applied and the window says so (on a Quest, a lower of 1.00 would cut its 55-degree
+apply **after a streamer restart** (close the game, restart the streamer, start the game: a running game keeps the picture it started with, so unticking the restriction shows nothing new until then), and the override remembers the headset's field of view it was made for: connected to a headset whose field of view differs (a Quest after a Vision Pro), it is not applied and the window says so (on a Quest, a lower of 1.00 would cut its 55-degree
 down edge); ticking again starts from the new headset's own values.
 
 **Spending the saving: the render quality slider.** Under the fields, a slider moves the recommended size between two limits computed from your own settings: the **floor** (what
