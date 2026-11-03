@@ -345,9 +345,9 @@ namespace AirFrameXR
             hsGo = new Button { Text = "Yes, this is my headset: continue >", AutoSize = true, Font = Ui.Big, Padding = new Padding(10), Visible = false, Margin = new Padding(0, 12, 0, 0) };
             hsGo.Click += (s, e) =>
             {
-                // Chroma-key passthrough is optional and off by default. ALVR has no way to ask a client whether it accepts the key colour the streamer sends (the client never reports its
-                // settings back), and the Vision Pro's App Store app has a fixed key colour and range: so every headset but the Vision Pro is offered it, the Vision Pro keeps it off.
-                if (!hs.IsVisionPro && !demo && !auto && !settings.ChromaAsked)
+                // Chroma-key passthrough is optional. ALVR has no way to ask a client whether it accepts the key colour the streamer sends (the client never reports its settings back),
+                // so every headset is offered it, the Vision Pro too since the AirFrameXR client handles the key colour and the margins itself (the stock App Store app has a fixed key colour and range).
+                if (!demo && !auto && !settings.ChromaAsked)
                     using (var dlg = new ChromaStepForm())
                         if (dlg.ShowDialog(this) == DialogResult.OK)
                         {

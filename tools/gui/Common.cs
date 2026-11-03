@@ -350,7 +350,7 @@ namespace AirFrameXR
         /// NVENC split-frame encoding ("3" = one strip per engine, up to 3; "off"): on by default, the reason the project exists on a multi-engine GPU
         /// the Logs window deletes the records of games whose exe no longer exists (on by default)
         public bool AutoDeleteGameLogs { get => Json.Bool(Root, "logs.auto_delete_uninstalled", true); set => Json.Set(Root, "logs.auto_delete_uninstalled", value); }
-        /// the wizard asked the chroma-key question once (headsets other than the Vision Pro): the answer is in session.json, this only stops the repeat
+        /// the wizard asked the chroma-key question once (every headset, the Vision Pro included since the AirFrameXR client): the answer is in session.json, this only stops the repeat
         public bool ChromaAsked { get => Json.Bool(Root, "chroma.asked", false); set => Json.Set(Root, "chroma.asked", value); }
         /// the key that recentres while playing (the streamer polls it): End by default; "off" disables
         public string RecenterKey { get => Json.Str(Root, "controls.recenter_key", "End"); set => Json.Set(Root, "controls.recenter_key", value); }
@@ -1423,8 +1423,8 @@ namespace AirFrameXR
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
     }
 
-    /// The wizard's chroma-key step, for every headset but the Vision Pro (its App Store app has a fixed key colour and range that the streamer cannot change, so there
-    /// the chroma stays off): transparent background yes or no, with the recommended colour. The answer is applied through Chroma.Apply.
+    /// The wizard's chroma-key step, for every headset (the Vision Pro too: the AirFrameXR client handles the key colour; the stock App Store app has a fixed key colour and range
+    /// that the streamer cannot change): transparent background yes or no, with the recommended colour. The answer is applied through Chroma.Apply.
     public class ChromaStepForm : DpiForm
     {
         public bool Transparent => yes.Checked;
