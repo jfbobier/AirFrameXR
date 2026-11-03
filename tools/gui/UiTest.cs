@@ -38,6 +38,21 @@ namespace AirFrameXR
     }
 
     /// a profile with a measured window, as the shipped Vision Pro one has (profiles\apple-vision-pro.profile.json), for the Advanced window's button
+    /// The launcher's FOV card on its own, with a pretend headset box and the harness's own profile file (ui_matrix cases and the self-tests).
+    class FovPanelTestForm : DpiForm
+    {
+        public readonly FovRestrictionPanel Panel;
+        public FovPanelTestForm(double[] client, bool tick, int[] eye, bool fit, string store)
+        {
+            Text = "AirFrameXR \u2013 FOV restriction (test)"; Font = Ui.Body; BackColor = Color.White; StartPosition = FormStartPosition.CenterScreen;
+            Padding = new Padding(12); Width = 760; Height = 600;
+            Ui.FitToWorkArea(this);
+            Panel = new FovRestrictionPanel(client, tick, eye, fit, store) { Dock = DockStyle.Top };
+            Controls.Add(Panel);
+            Ui.ScreenshotWhenShown(this, 1200);
+        }
+    }
+
     static class UiTestProfiles
     {
         public static HmdProfile WithMeasuredFov() => HmdProfiles.Parse("{\"id\":\"apple-vision-pro-test\",\"display_name\":\"Apple Vision Pro (ALVR visionOS client)\",\"match\":{\"name_contains\":[\"Apple\"]},\"stream\":{\"eye_resolution\":[3552,3200]},\"network\":{\"default\":\"a\",\"variants\":[{\"id\":\"a\",\"label\":\"a\",\"bitrate_mbps\":300}]},\"fov\":{\"visible_deg\":{\"outer\":40.3,\"inner\":40.0,\"upper\":39.0,\"lower\":34.4},\"margin_deg\":3,\"render_quality\":0.5,\"client_fov_scale\":0.8,\"note\":\"test\"}}", "test")[0];
@@ -108,10 +123,11 @@ namespace AirFrameXR
             yield return new Case { Name = "streamer-headset-seen", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); ((RuntimeForm)f).HostEvent("headset_seen", new Dictionary<string, object> { { "hostname", "1234.client.alvr" }, { "ip", "192.168.1.50" } }); } };
             yield return new Case { Name = "streamer-headset-lost", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); } };
             yield return new Case { Name = "advanced-switches", Make = () => new AdvancedForm() };
-            yield return new Case { Name = "advanced-switches-fov-profile", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, false, new[] { 3552, 3200 }, UiTestProfiles.WithMeasuredFov()) };   // the profile button, override off
-            yield return new Case { Name = "advanced-switches-fov-quality", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true, new[] { 3552, 3200 }) };   // the same, restricted, with the render quality row
-            yield return new Case { Name = "advanced-switches-fov", Make = () => new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, true) };   // a pretend Vision Pro, the override ticked
-            yield return new Case { Name = "advanced-switches-fit", Make = () => new AdvancedForm(new[] { 0.94, 0.93, 0.90, 0.76 }, false, new[] { 3552, 3200 }, null, true) };   // the AirFrameXR client's box, the stream fit on: the preview block and the quality row from the fit
+            var avpBox = new[] { 1.045, 0.800, 0.759, 0.871 };   // the AirFrameXR client's declared box
+            yield return new Case { Name = "fov-panel-off", Make = () => new FovPanelTestForm(avpBox, false, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()) };
+            yield return new Case { Name = "fov-panel-on", Make = () => new FovPanelTestForm(avpBox, true, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()) };
+            yield return new Case { Name = "fov-panel-fit", Make = () => new FovPanelTestForm(avpBox, true, new[] { 3552, 3200 }, true, FovManagerForm.DemoStore()) };   // the stream fit on, the fold open: the quality row and the preview
+            yield return new Case { Name = "fov-panel-empty", Make = () => new FovPanelTestForm(avpBox, false, new[] { 3552, 3200 }, false, Path.Combine(Path.GetTempPath(), "airframexr_fovpanel_empty_" + Guid.NewGuid().ToString("N") + ".json")) };
             yield return new Case { Name = "rec-idle", Make = () => { BenchRecorder.Enabled = true; try { return new RuntimeForm(null); } finally { BenchRecorder.Enabled = false; } }, Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).BenchDemoState("idle"); } };
             yield return new Case { Name = "rec-full-waiting", Make = () => { BenchRecorder.Enabled = true; try { return new RuntimeForm(null); } finally { BenchRecorder.Enabled = false; } }, Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).BenchDemoState("full-waiting"); } };
             yield return new Case { Name = "rec-recording", Make = () => { BenchRecorder.Enabled = true; try { return new RuntimeForm(null); } finally { BenchRecorder.Enabled = false; } }, Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).BenchDemoState("recording"); } };
@@ -380,20 +396,21 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "pipeline_model.txt"), lines);
                 return 0;
             }
-            if (Arg("--fov-profile-selftest") != null)   // harness/fov_profile_check.py: the profile button fills the fields and the slider and saves (into this folder's own config)
+            if (Arg("--fov-profile-selftest") != null)   // harness/fov_profile_check.py: choosing a profile in the launcher's FOV card ticks the restriction and saves its tangents (into this folder's own config)
             {
                 var lines = new List<string>();
-                using (var f = new AdvancedForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, false, new[] { 3552, 3200 }, UiTestProfiles.WithMeasuredFov()))
+                using (var f = new FovPanelTestForm(new[] { 1.7909, 1.0218, 1.2211, 1.0218 }, false, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()))
                 {
                     f.Opacity = 0; f.ShowInTaskbar = false; f.StartPosition = FormStartPosition.Manual; f.Location = new Point(-4000, -4000);
                     f.Show(); Application.DoEvents();
-                    Button b = null;
-                    void Find(Control c) { foreach (Control k in c.Controls) { if (k is Button x && x.AccessibleName == "Use the measured values") b = x; Find(k); } }
-                    Find(f);
-                    lines.Add("button=" + (b != null) + " visible=" + (b != null && b.Visible));
-                    if (b != null) { lines.Add("text=" + b.Text); b.PerformClick(); Application.DoEvents(); }
+                    var pn = f.Panel;
+                    lines.Add("profiles=" + pn.ProfileCount + " tick_enabled=" + pn.TickEnabled + " restricted=" + pn.Restricted);   // the Quest profile is wider than this box: not offered
+                    pn.SelectForTest("d1", true); Application.DoEvents();
                     var st = new AppSettings();
-                    lines.Add(string.Format(CultureInfo.InvariantCulture, "override={0} outer={1:0.00} inner={2:0.00} upper={3:0.00} lower={4:0.00} quality={5:0.00}", st.FovOverride, st.FovOuter, st.FovInner, st.FovUpper, st.FovLower, st.FovRenderQuality));
+                    lines.Add(string.Format(CultureInfo.InvariantCulture, "override={0} outer={1:0.00} inner={2:0.00} upper={3:0.00} lower={4:0.00} profile={5}", st.FovOverride, st.FovOuter, st.FovInner, st.FovUpper, st.FovLower, global::AirFrameXR.Json.Str(st.Root, "video.fov_profile", "")));
+                    pn.SelectForTest("d3", false); Application.DoEvents();
+                    st = new AppSettings();
+                    lines.Add(string.Format(CultureInfo.InvariantCulture, "after_other: outer={0:0.00} inner={1:0.00} upper={2:0.00} lower={3:0.00} profile={4}", st.FovOuter, st.FovInner, st.FovUpper, st.FovLower, global::AirFrameXR.Json.Str(st.Root, "video.fov_profile", "")));
                 }
                 File.WriteAllLines(Path.Combine(outDir, "fovprofile.txt"), lines);
                 return 0;
@@ -418,15 +435,13 @@ namespace AirFrameXR
                 var fitsMigrated = new AppSettings().FovFits(ceiling); var fitsMigratedQuest = new AppSettings().FovFits(quest);
                 global::AirFrameXR.Json.Set(st2.Root, "video.fov_for_headset", "Apple Vision Pro"); st2.Save();
                 lines.Add("fits_avp=" + fitsAvp + " fits_quest=" + new AppSettings().FovFits(quest) + " fits_unknown=" + fitsUnknown + " fits_avp_scaled=" + fitsScaled + " fits_same_name_new_shape=" + fitsCeiling + " fits_unnamed_first_box_to_ceiling=" + fitsMigrated + " fits_unnamed_first_box_on_quest=" + fitsMigratedQuest);   // the visionOS app's FoV Scale 0.8 is a uniform factor and the client's ceiling another shape: the override stays on the same headset
-                using (var f = new AdvancedForm(quest, false, null, null))
+                using (var f = new FovPanelTestForm(quest, false, null, false, FovManagerForm.DemoStore()))
                 {
                     f.Opacity = 0; f.ShowInTaskbar = false; f.StartPosition = FormStartPosition.Manual; f.Location = new Point(-4000, -4000);
                     f.Show(); Application.DoEvents();
-                    CheckBox tick = null; var nums = new List<NumericUpDown>();
-                    void Find(Control c) { foreach (Control k in c.Controls) { if (k is CheckBox x && x.AccessibleName == "Override the headset's field of view") tick = x; if (k is NumericUpDown n && (n.AccessibleName == "Outer" || n.AccessibleName == "Inner" || n.AccessibleName == "Upper" || n.AccessibleName == "Lower")) nums.Add(n); Find(k); } }
-                    Find(f);
-                    lines.Add("tick_on_quest=" + (tick != null && tick.Checked) + " lower_shown=" + (nums.Count == 4 ? nums[3].Value.ToString(CultureInfo.InvariantCulture) : "?"));
-                    if (tick != null) { tick.Checked = true; Application.DoEvents(); }
+                    var pn = f.Panel;
+                    lines.Add("profiles_on_quest=" + pn.ProfileCount + " tick_on_quest=" + pn.Restricted);
+                    pn.SelectForTest("d1", true); Application.DoEvents();
                     var st = new AppSettings();
                     lines.Add(string.Format(CultureInfo.InvariantCulture, "after_tick: override={0} lower={1:0.00} fits_quest={2}", st.FovOverride, st.FovLower, st.FovFits(quest)));
                 }

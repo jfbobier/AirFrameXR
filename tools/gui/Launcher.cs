@@ -62,7 +62,11 @@ namespace AirFrameXR
                 ? new[] { new Tool { Title = "Black Box Recorder", Exe = @"bin\blackbox_recorder.exe", Primary = true, What = "Start the streamer with recording: it copies your normal settings, then records a scene or a whole game session." },
                           new Tool { Title = "Black Box Analyzer", Exe = @"bin\blackbox_analyzer.exe", What = "Analyze, replay, export or delete recordings." } }
                 : Tools;
-            foreach (var t in tools) body.Controls.Add(MakeCard(t));
+            foreach (var t in tools)
+            {
+                body.Controls.Add(MakeCard(t));
+                if (ReferenceEquals(tools, Tools) && t.Primary) body.Controls.Add(MakeFovCard());   // the FOV restriction mini app, right under the Streamer (the Black Box package has none)
+            }
             body.Controls.Add(sys);
             // quiet links: the full ALVR settings, and the help
             var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
@@ -108,6 +112,22 @@ namespace AirFrameXR
                 f.ShowDialog(this);
             }
             return picked;
+        }
+
+        FovRestrictionPanel fovPanel;
+
+        /// The FOV restriction and calibration mini app (docs/UI_SPEC.md): not a launch button but a card with its own controls (FovRestrictionPanel); its button opens the profile manager.
+        Control MakeFovCard()
+        {
+            var box = new Panel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(12, 10, 12, 10), Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(700, 0), AccessibleName = "FOV restriction and calibration" };
+            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill, Margin = new Padding(0) };
+            col.Controls.Add(new Label { Text = "FOV restriction and calibration", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
+            col.Controls.Add(new Label { Text = "The game renders only the part of the picture you can see: fewer pixels, a faster game.", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(620, 0), Margin = new Padding(0, 0, 0, 4) });
+            fovPanel = new FovRestrictionPanel();
+            fovPanel.ManageRequested += () => Launch(new Tool { Title = "Field of view profiles", Exe = @"bin\configure.exe", Args = "--fov" }, Paths.Configure);
+            col.Controls.Add(fovPanel);
+            box.Controls.Add(col);
+            return box;
         }
 
         Control MakeCard(Tool t)
@@ -215,6 +235,7 @@ namespace AirFrameXR
             if ((launched != null && !launched.HasExited) || AnyToolOpen()) return;
             watch.Stop();
             RefreshSystem();      // the tool may have switched the runtime or the layers
+            fovPanel?.Reload();   // the profile manager or the calibration may have changed the list
             Show(); Activate();
             FlowLog("show: every tool closed");
             if (testFlow) { var c = new Timer { Interval = 2500 }; c.Tick += (s2, e2) => { FlowLog("sample"); Close(); }; c.Start(); }   // the test ends once the launcher is back

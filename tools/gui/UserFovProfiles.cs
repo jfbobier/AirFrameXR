@@ -13,7 +13,9 @@ namespace AirFrameXR
 {
     public class UserFov
     {
-        public string Id, Name, Headset = "", Source = "manual", Created = "";
+        public string Id, Name, Headset = "", Source = "manual", Created = "", Note = "";
+        /// the headset app's own FoV scale recommended with it (0 = none), e.g. 0.8 for the Vision Pro's calibration
+        public double ClientScale;
         /// outer, inner, upper, lower (tangents)
         public double[] Tan = new double[4];
         /// the game render quality that goes with it (0..1, video.fov_render_quality)
@@ -30,6 +32,8 @@ namespace AirFrameXR
                 ["tan"] = Tan.Select(v => (object)Math.Round(v, 4)).ToList(),
                 ["render_quality"] = Math.Round(Quality, 2),
             };
+            if (Note.Length > 0) d["note"] = Note;
+            if (ClientScale > 0) d["client_scale"] = Math.Round(ClientScale, 2);
             if (Window.Count > 0) d["window"] = Window.Select(p => (object)new List<object> { Math.Round(p[0], 4), Math.Round(p[1], 4) }).ToList();
             return d;
         }
@@ -43,7 +47,7 @@ namespace AirFrameXR
                 var u = new UserFov
                 {
                     Id = Json.Str(d, "id", ""), Name = Json.Str(d, "name", ""), Headset = Json.Str(d, "headset", ""), Source = Json.Str(d, "source", "manual"),
-                    Created = Json.Str(d, "created", ""), Quality = Math.Max(0, Math.Min(1, Json.Num(d, "render_quality", 0))),
+                    Created = Json.Str(d, "created", ""), Note = Json.Str(d, "note", ""), ClientScale = Math.Max(0, Json.Num(d, "client_scale", 0)), Quality = Math.Max(0, Math.Min(1, Json.Num(d, "render_quality", 0))),
                     Tan = Enumerable.Range(0, 4).Select(i => Convert.ToDouble(t[i], CultureInfo.InvariantCulture)).ToArray(),
                 };
                 if (u.Id.Length == 0 || u.Tan.Any(v => double.IsNaN(v) || !(v > 0))) return null;
@@ -71,10 +75,70 @@ namespace AirFrameXR
             return all.OrderByDescending(u => u.Created, StringComparer.Ordinal).ToList();
         }
 
-        public static void Save(IEnumerable<UserFov> all, string path = null)
+        public static void Save(IEnumerable<UserFov> all, string path = null) => Save(all, Seeded(path), path);
+
+        static void Save(IEnumerable<UserFov> all, List<string> seeded, string path)
         {
             var root = new Dictionary<string, object> { ["version"] = 1.0, ["profiles"] = all.Select(u => (object)u.ToJson()).ToList() };
+            if (seeded.Count > 0) root["seeded"] = seeded.Select(x => (object)x).ToList();
             Json.Save(path ?? FilePath, root);
+        }
+
+        /// The ids of the shipped profiles already copied in: a profile the user deleted is not copied again.
+        public static List<string> Seeded(string path = null)
+        {
+            var l = Json.Get(Json.Load(path ?? FilePath), "seeded") as System.Collections.IList;
+            return l == null ? new List<string>() : l.OfType<string>().ToList();
+        }
+
+        /// The shipped profiles (profiles\*.profile.json) that carry a measured field of view and fit the connected headset by name (the Vision Pro's standard calibration) are copied
+        /// into the user's file once, so the list has something to choose from and every choice is one of the user's own (deletable). Returns how many were copied.
+        public static int SeedFromShipped(string headsetName, string path = null, string profilesDir = null)
+        {
+            if (string.IsNullOrEmpty(headsetName)) return 0;
+            int added = 0;
+            try
+            {
+                var dir = profilesDir ?? Path.Combine(Paths.Dir, "profiles");
+                if (!Directory.Exists(dir)) return 0;
+                var all = Load(path); var seeded = Seeded(path);
+                foreach (var f in Directory.GetFiles(dir, "*.profile.json").OrderBy(x => x))
+                {
+                    var d = Json.Load(f);
+                    var id = Json.Str(d, "id", "");
+                    var fov = Json.Get(d, "fov") as Dictionary<string, object>;
+                    var vis = fov == null ? null : Json.Get(fov, "visible_deg") as Dictionary<string, object>;
+                    var names = (Json.Get(d, "match.name_contains") as System.Collections.IList)?.OfType<string>().ToList();
+                    if (id.Length == 0 || vis == null || names == null || seeded.Contains(id)) continue;
+                    if (!names.Any(n => headsetName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                    var margin = Math.Max(0, Math.Min(15, Json.Num(fov, "margin_deg", 3)));
+                    var tan = new[] { "outer", "inner", "upper", "lower" }.Select(k => Math.Round(Math.Tan((Json.Num(vis, k, 0) + margin) * Math.PI / 180), 2)).ToArray();
+                    if (tan.Any(v => !(v > 0))) continue;
+                    var scale = Json.Num(fov, "client_fov_scale", 0);
+                    var standard = Json.Str(fov, "source", "standard");
+                    all.RemoveAll(x => x.Id == "std-" + id);
+                    all.Add(new UserFov
+                    {
+                        Id = "std-" + id, Name = Json.Str(d, "display_name", id).Split('(')[0].Trim() + (standard == "starting-point" ? " (starting point, not measured)" : " (standard calibration)"), Headset = names[0], Source = standard,
+                        Created = "2026-01-01T00:00:00", Tan = tan, Quality = Math.Max(0, Math.Min(1, Json.Num(fov, "render_quality", 0))), ClientScale = scale >= 0.2 && scale <= 1.6 && Math.Abs(scale - 1) > 0.001 ? scale : 0, Note = Json.Str(fov, "note", ""),
+                    });
+                    seeded.Add(id); added++;
+                }
+                if (added > 0) Save(all.OrderByDescending(u => u.Created, StringComparer.Ordinal), seeded, path);
+            }
+            catch (Exception e) { Log.Write("WARN", "fov profiles: seeding failed: " + e.Message); }
+            return added;
+        }
+
+        /// A restriction saved before the store existed (tangents in airframexr.json, no profile in the list): kept as "My earlier values" so nothing is lost. True when one was added.
+        public static bool KeepCurrentValues(AppSettings st, string path = null)
+        {
+            var cur = new[] { st.FovOuter, st.FovInner, st.FovUpper, st.FovLower };
+            if (!st.FovOverride || cur.Any(v => !(v > 0))) return false;
+            var all = Load(path);
+            if (all.Any(u => Enumerable.Range(0, 4).All(k => Math.Abs(u.Tan[k] - cur[k]) < 0.006))) return false;
+            Add(new UserFov { Id = NewId(), Name = "My earlier values", Headset = st.FovForHeadset.Length > 0 ? st.FovForHeadset : st.HeadsetName, Source = "manual", Tan = cur.Select(v => Math.Round(v, 4)).ToArray(), Quality = st.FovRenderQuality }, path);
+            return true;
         }
 
         /// Adds the profile (an id that exists is replaced, a name that exists gets " (2)", " (3)"...). Returns the stored profile.

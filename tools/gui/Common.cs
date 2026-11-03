@@ -33,6 +33,16 @@ namespace AirFrameXR
     }
 
     /// The portable folder: everything next to the exe, config/ and logs/ inside it.
+    /// The streamer process: whether it runs, and the graceful close the launcher and the settings windows use (a setting that needs a streamer restart closes it and never starts it again).
+    public static class StreamerProc
+    {
+        public static bool Running => System.Diagnostics.Process.GetProcessesByName("streamer").Length > 0;
+        public static void Close()
+        {
+            foreach (var p in System.Diagnostics.Process.GetProcessesByName("streamer")) { try { p.CloseMainWindow(); p.WaitForExit(10000); } catch { } }
+        }
+    }
+
     public static class Paths
     {
         /// The package root. Everything but the launcher lives in bin\ (AirFrameXR.exe, the launcher, is the only file in the root): their folder's parent is the root.
