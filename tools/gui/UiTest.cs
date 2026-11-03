@@ -229,7 +229,7 @@ namespace AirFrameXR
             check("logs: bursty tracking", all.Any(x => x.Title.Contains("bursts") && x.Source.Contains("logs")), Titles(all));
             check("logs: arrival margin 9 proposed for an 11 ms spread", all.Any(x => x.Title.Contains("try 9") && x.Apply != null && x.ApplyText.Contains("9 ms")), Titles(all));
             check("logs: the GPU in P8 gets the keepalive", all.Any(x => x.Title.Contains("low power state") && x.Apply != null), Titles(all));
-            var dbg = all.FirstOrDefault(x => x.Apply != null); dbg?.Apply();
+            var dbg = all.FirstOrDefault(x => x.Title.Contains("Debug logging is on") && x.Apply != null); dbg?.Apply();   // by its title: other suggestions with a button come first
             check("debug logging: a button that turns it off", dbg != null && off, Titles(all));
             check("game A (55 fps raw, headset repeats 12 %): frame generation suggested", all.Any(x => x.Title.Contains("Game A") && x.Title.Contains("frame generation")), Titles(all));
             check("game B (host repeats 20 % at 1/2): a lower rate", all.Any(x => x.Title.Contains("Game B") && x.Do.Contains("lower rate")), Titles(all));
@@ -446,6 +446,16 @@ namespace AirFrameXR
                     lines.Add(string.Format(CultureInfo.InvariantCulture, "after_tick: override={0} lower={1:0.00} fits_quest={2}", st.FovOverride, st.FovLower, st.FovFits(quest)));
                 }
                 File.WriteAllLines(Path.Combine(outDir, "fovother.txt"), lines);
+                return 0;
+            }
+            var applyOut = Arg("--fov-apply-to");   // harness/scenarios/e2e_fov_from_settings.json: writes the settings file exactly as choosing a profile in the launcher's FOV card does (UserFovStore.Apply on an empty file)
+            if (applyOut != null)
+            {
+                double[] Nums(string k) => (Arg(k) ?? "").Split(',').Select(x => double.Parse(x, CultureInfo.InvariantCulture)).ToArray();
+                var tan = Nums("--tan"); var client = Nums("--client");
+                var st = new AppSettings(); st.Root.Clear();
+                UserFovStore.Apply(new UserFov { Id = "e2e-profile", Name = "e2e", Tan = tan }, st, client, "Mock headset");
+                global::AirFrameXR.Json.Save(applyOut, st.Root);
                 return 0;
             }
             if (Arg("--fov-store-selftest") != null)   // harness/fov_store_check.py: the validator's red / yellow / valid cases and the profile store (a temp file, not the user's)

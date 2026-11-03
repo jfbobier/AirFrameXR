@@ -25,10 +25,16 @@ screenshot each; 0 FAIL required), `harness/launcher_flow.py`.
 ## Windows
 
 ### Launcher (`bin\launcher.exe`, started by the root stub `AirFrameXR.exe`)
-Six cards, in this order (0.6): **Streamer** (primary), **Game statistics**, **Settings** (`configure.exe --settings`: pairing, benchmarks, video, audio, network), **Advanced settings** (`configure.exe --switches`: docs/EXPERIMENTAL_SWITCHES.md), **Diagnostics (experimental)**, **Calibrate / restart headset setup** (a step with two buttons: **Eye calibration wizard (30 min)**, `calibrate.exe`, or **Setup wizard**, `configure.exe`). A status card says
+Cards, in this order (1.3.4): **Streamer** (primary); **FOV restriction and calibration** (a mini app, not a launch button: `FovRestrictionPanel`, see below); **Game statistics**; **Settings** (`configure.exe --settings`: pairing, benchmarks, video, audio, network); **Advanced video and performance settings** (`configure.exe --switches`: docs/EXPERIMENTAL_SWITCHES.md, the picture and timing switches, no field of view); **Diagnostics and headset setup** (rarely used: a step with two buttons, **Diagnostics (experimental)** and **Setup wizard**, both close the streamer). A status card says
 "Ready" (green) or "Needs attention" (red) with one row per problem and its button: the OpenXR runtime (shows the active one, the same button goes back), OpenXR
 layers that may take the controllers, the Windows Firewall (read in the background). Quiet links: *Advanced (full ALVR settings)...*, *Help*. The launcher
 steps aside while a tool is open and returns when all are closed; starting the streamer from it first offers to close a running one. Single instance.
+
+#### FOV restriction and calibration (the launcher's second card)
+`[ ] Restrict the field of view  [profile list v]  (red) streamer will be closed`; under it what the game is told (degrees, share of the pixels), the render quality, a fold with the stream fit and the pipeline preview, and **Manage profiles and calibrate...** (`configure.exe --fov`, the profile manager). The list holds the user's profiles only (`config\user_fov_profiles.json`, kept across upgrades) that fit the connected headset's box; the standard Vision Pro calibration and the Quest 3 starting point are copied in once for the matching headset (a deleted one is not copied again). Ticking or choosing a profile writes a **copy** of it into `airframexr.json` (`video.fov_override`, the four tangents clamped to the headset's, `video.fov_profile` = which one, `video.fov_for*`): the streamer and the engine never read the profile file, so editing or deleting a profile never changes what a running setup does (deleting the one in use switches the restriction off). A change needs a streamer restart: the card closes the streamer when something changes (red line while it runs, nothing when it is already closed) and never starts it again.
+
+#### Profile manager (`configure.exe --fov`) and the wizard's Field of view step
+The same card (`FovCard`): the list with a map of the selected profile (the headset's box dashed, the measured window with its rays), Delete, Rename, **Enter values by hand** (tangents or degrees; red = cannot be a field of view, yellow = valid but strange, the Add button waits for four usable values), **Calibrate now**, **Check with fovgrid**, **Import a file...**. The wizard shows it as step 5 after the configuration: *No restriction* or *Restrict to a profile* (the proposal for the headset preselected); Next is greyed until a valid choice exists (no restriction always is).
 
 ### Streamer (`bin\streamer.exe`) **[target layout]**
 Top to bottom. Controls are grouped where they balance the window (Picture and Position side by side), not one box per feature.
@@ -101,7 +107,7 @@ ALVR session.json* which asks for the ALVR folder, finds the file, checks it and
 top three suggestions with their measured reason and an **Apply** button where the engine has a setting for it (arrival margin, GPU keepalive, frame generation
 Auto / lower rate, debug off); the rest under *More suggestions*; every measurement under *Details*. Settings page: the values with the reason next to each,
 *Experimental* badges instead of suffixes.
-Harness: `ui_matrix` wizard pages 0-6, `harness/advice_check.py`, `harness/wizard_e2e.py`.
+Harness: `ui_matrix` wizard pages 0-7, `harness/advice_check.py`, `harness/wizard_e2e.py`.
 
 ### Settings (`configure.exe --settings`, launcher card "Settings"; 0.5: Advanced)
 Tabs: headset (pair), benchmark (network sweep, recommended bitrate), settings (all of ALVR's we expose), and *Import ALVR settings...*.

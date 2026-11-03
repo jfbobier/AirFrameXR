@@ -850,10 +850,10 @@ namespace AirFrameXR
             fovNone = new RadioButton { Text = "No restriction: the games render everything the headset declares", AutoSize = true, Margin = new Padding(3, 8, 3, 3), AccessibleName = "No restriction" };
             fovUse = new RadioButton { Text = "Restrict to a profile (choose one below)", AutoSize = true, AccessibleName = "Restrict to a profile" };
             p.Controls.Add(fovNone); p.Controls.Add(fovUse);
-            fovCard = new FovCard { Margin = new Padding(22, 6, 0, 0) };
+            fovCard = (demo ? new FovCard(UserFovStore.DemoStore(), new[] { 1.045, 0.800, 0.759, 0.871 }) : new FovCard()); fovCard.Margin = new Padding(22, 6, 0, 0);   // the screenshot state: made-up profiles
             p.Controls.Add(fovCard);
             var cur = new AppSettings();
-            var pick = FindCurrentProfile(cur) ?? fovCard.Proposed;   // what is in use now, else what we propose for this headset
+            var pick = demo ? fovCard.Selected : (FindCurrentProfile(cur) ?? fovCard.Proposed);   // what is in use now, else what we propose for this headset
             if (pick != null) { fovCard.Select(pick.Id); fovUse.Checked = true; } else fovNone.Checked = true;
             fovNone.CheckedChanged += (s, e) => UpdateFovNext();
             fovUse.CheckedChanged += (s, e) => UpdateFovNext();

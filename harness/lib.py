@@ -425,6 +425,12 @@ def run_scenario(sc, outdir: Path, log=print):
             raise Blocked("portable package missing (build it first: python3 harness/run.py build gui package): " + out[-300:])
         if not sc.get("keep_package_config"):   # a user's fresh unzip has no personal settings: the lab starts from the defaults whatever the builder's folder holds
             b_run(f"echo {{}}> {inst}\\config\\airframexr.json")   # emptied, not deleted (the builder wrapper refuses deletes): {} = every default
+        if sc.get("fov_settings_from_gui"):
+            # the settings file a user's choice in the launcher's FOV card leaves (the GUI's own code, UserFovStore.Apply, through uitest.exe), not a lab flag: the host reads it at its start
+            fg = sc["fov_settings_from_gui"]
+            rc, out = b_run(f"if exist _tmp\\uitest\\run\\uitest.exe (_tmp\\uitest\\run\\uitest.exe --fov-apply-to {inst}\\config\\airframexr.json --tan {','.join(map(str, fg['tan']))} --client {','.join(map(str, fg['client']))} && echo APPLIED) else echo NOUITEST")
+            if "APPLIED" not in out:
+                raise Blocked("uitest.exe missing or failed (python3 harness/ui_matrix.py builds it): " + out[-300:])
         host_exe = f"{inst}\\bin\\alvr_host.exe"
         h = sc["host"] = {**sc["host"], "install_dir": f"%USERPROFILE%\\{ROOTNAME}\\{inst}"}
         if sc.get("app"):
@@ -996,7 +1002,7 @@ def analyse_mirror(sc, outdir):
 
 
 def analyse_fov_restrict(sc, outdir):
-    """The field of view the game is told (Advanced picture and FOV settings, shim `fovScale`): what the OpenXR app received at startup (xr_probe's log: the four
+    """The field of view the game is told (the launcher's FOV restriction card, shim `fovScale`): what the OpenXR app received at startup (xr_probe's log: the four
     tangents per eye from xrLocateViews and the recommended size from xrEnumerateViewConfigurationViews) against the headset's views (the host's views_config event)
     and the restriction, and the decoded stream: the margin the game does not render is black, the stream still covers the headset's whole view."""
     cfgk = sc["checks"]["fov_restrict"]

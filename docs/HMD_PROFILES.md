@@ -26,8 +26,8 @@ against every profile it finds (`profiles\` shipped with the package, then `conf
    audio, and **whether split encoding really engaged** (its own row: engines and strips per frame from the encoder test and the live stream; a GPU that
    cannot split is flagged).
 4. **Save.** The values go into `config\session.json` and `config\airframexr.json`, then the profile's `session_overrides` are written into
-   `session.json`. A profile with a measured field of view (key `fov`, docs/AVP_FOV.md) also sets the field of view the games are told (`video.fov_override` on with its tangents,
-   never above the headset's own, and its render quality): since 1.2.0 the calibration is the default, the Advanced window shows and changes it.
+   `session.json`. A profile with a measured field of view (key `fov`, docs/AVP_FOV.md) does **not** apply it by itself any more (1.3.4): it is copied into the user's own profiles
+   (`config\user_fov_profiles.json`, see below) and the wizard's last page, **Field of view**, proposes it (no restriction is always a valid choice); the launcher's FOV card changes it later.
 
 ## Exporting yours
 
@@ -58,18 +58,17 @@ A profile only changes this PC's configuration files, and only when you run the 
 ### A measured field of view (`fov`)
 
 A headset does not always show the whole field of view it declares (the Vision Pro declares 106 x 96 degrees and shows about 80 x 74: [AVP_FOV.md](AVP_FOV.md)). A profile can carry the
-measured window: the angle from the view axis to each visible edge, a margin to add, and a render quality to suggest. Nothing applies it by itself. *Advanced picture and FOV settings*
-looks up the profile whose `match.name_contains` fits the saved headset's name and, if it has `fov`, shows a button, "Use the <headset>'s measured values (visible + 3 degrees: ...)". One
-click ticks the override, fills the four fields with `tan(visible + margin)` (never above the headset's own values) and the render quality slider, and saves; they can be changed after.
-The wizard only says on the proposal that such values exist. A headset that shows all it declares (the Quest 3) has no `fov` and no button. Values from another person's fit may not fit
-yours: check the corners for black with `fovgrid.exe` ([FOV_GRID.md](FOV_GRID.md)).
+measured window: the angle from the view axis to each visible edge, a margin to add, and a render quality to suggest. Nothing applies it by itself. The launcher and the wizard look up the shipped profile whose `match.name_contains` fits the saved headset's name and, if it has `fov`, copy
+`tan(visible + margin)` (rounded to two decimals) into the user's profiles **once** (a profile the user deleted is not copied again): the Vision Pro's standard calibration, and for the Quest 3 a **starting point**
+(`"source": "starting-point"`: 51 / 40 / 43 / 54 degrees, the declared 54 / 40 / 44 / 55 trimmed by what Road to VR measured as never visible, about 10 % fewer game pixels, from one published measurement, not tested here).
+The user picks it in the launcher's **FOV restriction and calibration** card or at the wizard's Field of view step. Values from another person's fit may not fit
+yours: check the corners for black with `fovgrid.exe` ([FOV_GRID.md](FOV_GRID.md)), or calibrate.
 
 ### A calibration-only profile
 
-The launcher's **Calibrate / restart headset setup** > **Eye calibration wizard** (`bin\calibrate.exe`, [FOV_CALIBRATION.md](FOV_CALIBRATION.md)) and the bundle's `fov_profile.exe` write a profile that has `match` and `fov`
+The launcher's **FOV restriction and calibration** card > **Manage profiles and calibrate...** > **Calibrate now** (the eye calibration wizard, `bin\calibrate.exe`, [FOV_CALIBRATION.md](FOV_CALIBRATION.md)) and the bundle's `fov_profile.exe` write a profile that has `match` and `fov`
 and **no `stream` and no `network`**. It is never offered as a stream profile (the wizard's matching skips it, so it cannot replace the stream settings of the headset's own profile); only its field
-of view is used. Three ways in: the calibration tool applies it itself; *Advanced picture and FOV settings* > **Import a calibration file...** installs it in `config\profiles` and applies it
-(the "Use the ... measured values" button then offers it too, a user's file coming before a shipped one); the wizard's **Import profile...** accepts it and applies only the field of view.
+of view is used. Three ways in: the calibration tool keeps it in the user's profiles and applies it; the profile manager's **Import a file...** adds it to the user's profiles; the wizard's **Import profile...** accepts it and adds its field of view to them (it is chosen at the Field of view step).
 
 ## Starting-point profiles for other headsets
 
@@ -87,7 +86,7 @@ CABAC, 1.5 buffered frames, no microphone, the VideoToolbox low-latency option, 
 7.7 ms for the full 7104x3200 frame, a lighter headset decode, and three times the bits per pixel at the same bitrate; the full frame looked no better. The
 full frame (encode profile `full-split`) remains selectable in the Settings window.
 
-It also carries the Vision Pro's measured visible window (`fov`: 43.8 / 35.4 / 34.6 / 31.4 degrees outer / inner / upper / lower, margin 0, render quality 0 = no oversampling, all the savings go to performance; calibrated, see [FOV_CALIBRATION.md](FOV_CALIBRATION.md)), which the Advanced window offers with one button (tangents 0.96 / 0.71 / 0.69 / 0.61), and recommends 0.8 for the visionOS app's own FoV Scale (a line under the button and in the wizard's proposal). One person, one fit, not yet tried in a game; the note in the profile says so.
+It also carries the Vision Pro's measured visible window (`fov`: 43.8 / 35.4 / 34.6 / 31.4 degrees outer / inner / upper / lower, margin 0, render quality 0 = no oversampling, all the savings go to performance; calibrated, see [FOV_CALIBRATION.md](FOV_CALIBRATION.md)), which is copied into the user's profiles as "Apple Vision Pro (standard calibration)" (tangents 0.97 / 0.71 / 0.69 / 0.63), and recommends 0.8 for the visionOS app's own FoV Scale (a line under the profile list and in the wizard's proposal). One person, one fit, not yet tried in a game; the note in the profile says so.
 
 ## Your own field-of-view profiles (`config\user_fov_profiles.json`)
 

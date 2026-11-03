@@ -1,5 +1,5 @@
 {
-  "description": "Like e2e_fov_override, but the override arrives the way the streamer sends it when the user ticks the box and sets the fields in Advanced picture and FOV settings: a `fov_override on 1.20 1.40 1.00 1.20` line on the host's stdin, the host started without the lab flag (with --gui, as the streamer starts it: that reads the stdin commands). The game that starts afterwards gets the restricted field of view; the host publishes it once (event fov_restrict). (timestamps_monotonic is left out: it flakes about half the time on this rig whatever the field of view, and the unrestricted control e2e_fov_restrict_none keeps it.)",
+  "description": "Like e2e_fov_override, but the override arrives the way the streamer sends it when the user ticks the box and sets the fields in the launcher's FOV restriction card: a `fov_override on 1.20 1.40 1.00 1.20` line on the host's stdin, the host started without the lab flag (with --gui, as the streamer starts it: that reads the stdin commands). The game that starts afterwards gets the restricted field of view; the host publishes it once (event fov_restrict). (timestamps_monotonic is left out: it flakes about half the time on this rig whatever the field of view, and the unrestricted control e2e_fov_restrict_none keeps it.)",
   "topology": {
     "host": "builder",
     "client": "builder",

@@ -13,12 +13,12 @@ The work happens in **two forks** (streamer host + probe, and the visionOS clien
 `fov-calibration`. They are a calibration runtime, not the product: the engine rule in `CLAUDE.md` is lifted on those
 branches, and only the final numbers (and whatever small change they need) come back to `main`.
 
-### For one user: the launcher's "Calibrate / restart headset setup" > "Eye calibration wizard (30 min)"
+### For one user: the launcher's "FOV restriction and calibration" card > Manage profiles and calibrate... > Calibrate now (30 min)
 
-The card opens a choice (this wizard, or the setup wizard); `bin\calibrate.exe` (sources `tools/gui/Calibrate.cs`, the maths in `tools/gui/FovFit.cs`): starts the streamer itself (minimized) when it is not running, and asks you to open ALVR on the headset; it turns the override off if it is on, runs
+The card's manager (`configure.exe --fov`) starts it; `bin\calibrate.exe` (sources `tools/gui/Calibrate.cs`, the maths in `tools/gui/FovFit.cs`): starts the streamer itself (minimized) when it is not running, and asks you to open ALVR on the headset; it turns the override off if it is on, runs
 `bench\xr_probe.exe` in its sweep mode twice (following, then fixed; the two sweeps of the README below), watches the CSV in `config\calibration\` for the 48 rows of each pass, and shows the
 result: the smallest rectangle covering 99 % (or 100 / 97 %, a choice) of the largest window seen over every run in that folder, both eyes and both passes. **Use this field of view** installs a
-calibration-only profile (`docs/HMD_PROFILES.md`) and applies it as the override; **Save a copy...** writes the file for sharing or for **Import a calibration file...** in the Advanced window.
+calibration-only profile (`docs/HMD_PROFILES.md`), keeps the result in the user's profiles (`config\user_fov_profiles.json`, so a bad calibration can be deleted later) and applies it as the override (it needs a streamer restart); **Save a copy...** writes the file for sharing or for **Import a file...** in the profile manager.
 Incomplete runs are deleted, a missing pass or a single run produces a warning, fewer than 20 of 24 directions per eye refuses. FovFit's rectangle search (exact polygon clipping, greedy edge
 shrink) gives the same tangents as `harness/fov_calibration.py --sweep` to within 0.01 on the Kevin sweeps (1.00 / 0.89 / 0.92 / 0.82 against 1.00 / 0.89 / 0.91 / 0.82).
 

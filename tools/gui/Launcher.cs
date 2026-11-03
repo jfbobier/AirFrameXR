@@ -122,7 +122,7 @@ namespace AirFrameXR
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill, Margin = new Padding(0) };
             col.Controls.Add(new Label { Text = "FOV restriction and calibration", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
             col.Controls.Add(new Label { Text = "The game renders only the part of the picture you can see: fewer pixels, a faster game.", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(620, 0), Margin = new Padding(0, 0, 0, 4) });
-            fovPanel = new FovRestrictionPanel();
+            fovPanel = demoReady ? new FovRestrictionPanel(new[] { 1.045, 0.800, 0.759, 0.871 }, true, new[] { 3552, 3200 }, false, UserFovStore.DemoStore()) : new FovRestrictionPanel();   // the screenshot state: a made-up headset box and profiles
             fovPanel.ManageRequested += () => Launch(new Tool { Title = "Field of view profiles", Exe = @"bin\configure.exe", Args = "--fov" }, Paths.Configure);
             col.Controls.Add(fovPanel);
             box.Controls.Add(col);

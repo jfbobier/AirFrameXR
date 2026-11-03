@@ -30,7 +30,7 @@ sweeps (fit 1 following and fixed, fit 3 following) the window's bounding box is
 limit visible at the bottom). **Applied the same night** together with the grid's outer and upper readings: 1.00 / 0.71 / 0.73 / 0.66 (profile and the author's settings). The fixed-gaze
 pass of fit 3 was not run.
 
-Render quality 0 (no oversampling) is the default: the game renders at the floor size, so all the savings go to performance; the slider in the Advanced window raises it for supersampling.
+Render quality 0 (no oversampling) is the default: the game renders at the floor size, so all the savings go to performance; the slider in the launcher's FOV card raises it for supersampling.
 How much that saves depends on the frame the headset declares (computed from tangent areas, not measured): against the stock app's declared 1.79 / 1.02 / 1.22 / 1.02 frustum the game
 renders about 35 % of the pixels; against the AirFrameXR client's own visible limit (0.94 / 0.93 / 0.90 / 0.76, what the 5090's headset declares) about 68 %, and the earlier "recommended" row below
 restricted nothing at all there. Do not read the old "about half the pixels" below as a saving on that client.
@@ -109,7 +109,7 @@ Why the crop (lens and eye position, or the app's mapping of the frame) is not k
 
 ## Recommended FoV restriction
 
-Advanced picture and FOV settings, "Field of view override" ticked: the four fields are the **tangents** the game is
+The launcher's FOV restriction card (a profile from your list; Manage profiles shows and edits its four **tangents**): the four numbers are the **tangents** the game is
 told (X.XX; the window shows the angle next to each), outer = the side away from the nose, inner = towards it
 (`fov_outer`, `fov_inner`, `fov_upper`, `fov_lower` in the settings). The headset's own values are 1.79 / 1.02 /
 1.22 / 1.02.
@@ -128,7 +128,7 @@ recommended row and check the corners for black.
 
 Effect, recommended row: the game renders 66 % x 74 % of the declared span, about half the pixels (game GPU only: the
 stream, encode and decode are unchanged). Full-frame UI then fits the visible window. A new value is taken after a
-streamer restart (the Advanced window closes the streamer when it is changed).
+streamer restart (the launcher's FOV card closes the streamer when it is changed).
 
 The recommended row is what the Vision Pro profile carries (`fov` in `profiles\apple-vision-pro.profile.json`: the visible angles, a 3 degree margin and a render quality of 0.25: the first estimate, replaced by the calibrated profile above, render quality 0). *Advanced
 picture and FOV settings* shows a button, "Use the Apple Vision Pro's measured values", that fills the fields and the slider from it (see [HMD_PROFILES.md](HMD_PROFILES.md)). The
@@ -138,7 +138,7 @@ button is a convenience, not a default: nothing is restricted until it is presse
 
 The Vision Pro profile recommends it ("0.8 client slider recommended (manually)": a value circulating in the community, not measured here; you set it yourself in the app). The stock app multiplies the tangents it declares by its **FoV Scale** (`RealityKitClientSystem.swift`,
 applied when the immersive space is entered), so the stream then covers less angle: every pixel in view is 1.25 times denser at the same encode, decode and bitrate cost. Reconnect once
-afterwards so the Advanced window's greyed values refresh. The fields above stay the same (they are absolute; the inner value is clamped to the headset's own, 0.82), and at 0.8 the
+afterwards so the launcher's FOV card refreshes. The fields above stay the same (they are absolute; the inner value is clamped to the headset's own, 0.82), and at 0.8 the
 game's floor becomes 2778 x 2966 (8.2 Mpx, 72 % of an unrestricted game's cost), which is why the profile suggests a render quality of 25 %. The edge nearest the nose is the limit: at 0.8
 it declares 39.2 degrees against the 40.0 measured visible, so check that corner with `fovgrid.exe`. A scale is uniform; going further needs a per-edge scale in the client.
 

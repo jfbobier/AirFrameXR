@@ -79,7 +79,7 @@ A release zip is built in the release flavour.
 1. `python3 harness/run.py build nvenc client host shim probe gui package --release` (`build` alone is client + host only), then
    `AIRFRAMEXR_PERSONAL=1 python3 harness/run.py build package --release` for the personal zip.
 2. Check the zip before publishing: `bin\flavour.txt` says release, no personal settings in the generic zip (no headset address in
-   `config\airframexr.json`), the personal zip carrying its extra files.
+   `config\airframexr.json`), the personal zip carrying its extra files and `config\user_fov_profiles.json` (from `private/personal_files/user_fov_profiles.json`; `harness/run.py package` fails a personal build when that file is missing or invalid, a generic zip ships none).
 3. The zip is named after the host's `VERSION` (`tools/host/src/vision.rs`) and renamed `AirFrameXR-<tag>.zip` on upload; the release notes
    live in `docs/releases/<tag>.md` and are pushed to GitHub with `gh release edit --notes-file`.
 

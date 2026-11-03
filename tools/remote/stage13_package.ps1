@@ -64,6 +64,10 @@ $persShip = @()
 # a generic build ships no config\airframexr.json: one left in the folder by an earlier personal build is moved out of the package, not shipped
 if (-not ((Test-Path $persFile) -and ((Get-Content $persFile -Raw).Trim().Length -gt 2)) -and (Test-Path "$pkg\config\airframexr.json")) { Move-Item "$pkg\config\airframexr.json" "$root\_tmp\stale_airframexr.json" -Force }
 if ((Test-Path $persFile) -and ((Get-Content $persFile -Raw).Trim().Length -gt 2)) { Copy-Item $persFile "$pkg\config\airframexr.json" -Force; $persShip = @('config\airframexr.json') }
+# the personal bundle's field of view profiles (harness/run.py: private/personal_files/user_fov_profiles.json): shipped as config\user_fov_profiles.json in a personal build only; a generic build moves a stale one out
+$fovFile = "$root\_tmp\install\user_fov_profiles.personal.json"
+if ((Test-Path $fovFile) -and ((Get-Content $fovFile -Raw).Trim().Length -gt 2)) { Copy-Item $fovFile "$pkg\config\user_fov_profiles.json" -Force; $persShip += 'config\user_fov_profiles.json' }
+elseif (Test-Path "$pkg\config\user_fov_profiles.json") { Move-Item "$pkg\config\user_fov_profiles.json" "$root\_tmp\stale_user_fov_profiles.json" -Force }
 # personal build: extra files from the build PC (tools of the owner's own session, e.g. an audio switcher) in extras\ (never in the root)
 $persFiles = @()
 $pfList = "$root\_tmp\install\personal_files.txt"

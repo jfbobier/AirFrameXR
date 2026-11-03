@@ -200,6 +200,21 @@ def build(what):
                 extra = json.loads(pers.read_text()).get("extra_files", [])   # build-PC paths copied next to AirFrameXR.exe (personal builds only)
             (out_dir / "personal_files.txt").write_text("\n".join(extra))
             lib.b_put(out_dir / "personal_files.txt", "_tmp/install/personal_files.txt")
+            # the personal bundle's own field of view profiles (config\user_fov_profiles.json), kept in private/personal_files/ and part of every personal zip: a missing or unreadable file fails the build
+            fovp = "{}"
+            if os.environ.get("AIRFRAMEXR_PERSONAL") == "1":
+                src = lib.ROOT / "private/personal_files/user_fov_profiles.json"
+                try:
+                    d = json.loads(src.read_text())
+                    ok = isinstance(d.get("profiles"), list) and len(d["profiles"]) > 0 and all(len(p.get("tan", [])) == 4 and all(v > 0 for v in p["tan"]) and p.get("id") for p in d["profiles"])
+                except Exception as e:
+                    ok = False
+                if not ok:
+                    print(f"package: private/personal_files/user_fov_profiles.json is missing or invalid (the personal bundle carries it: profiles with an id and four positive tangents)")
+                    return 2
+                fovp = src.read_text()
+            (out_dir / "user_fov_profiles.personal.json").write_text(fovp)
+            lib.b_put(out_dir / "user_fov_profiles.personal.json", "_tmp/install/user_fov_profiles.personal.json")
             (out_dir / "airframexr.personal.json").write_text(vis)
             (out_dir / "version_suffix.txt").write_text(ver)
             lib.b_put(out_dir / "airframexr.personal.json", "_tmp/install/airframexr.personal.json")
