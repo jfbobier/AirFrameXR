@@ -182,7 +182,7 @@ namespace AirFrameXR
         readonly Button benchAnalyze = new Button { Text = "Analyze recordings...", AutoSize = true };
         readonly Button benchFolderBtn = new Button { Text = "Recordings folder", AutoSize = true };
         readonly Label benchState = new Label { AutoSize = false, Font = Ui.Body, Width = 600, Height = 48, Margin = new Padding(3, 6, 3, 0) };
-        readonly Label benchRt = new Label { AutoSize = false, Font = Ui.Body, Width = 600, Height = 54, Margin = new Padding(3, 8, 3, 0) };
+        readonly Label benchRt = new Label { AutoSize = false, Font = Ui.Body, Width = 600, Height = 4 * Ui.Body.Height + 6, Margin = new Padding(3, 8, 3, 0) };
         readonly Button benchRtUse = new Button { Text = "Use Black Box for recording...", AutoSize = true };
         readonly Button benchRtBack = new Button { Text = "Put back", AutoSize = true };
         readonly Label benchSaved = new Label { AutoSize = false, Font = Ui.Body, ForeColor = Color.DimGray, Width = 560, Height = 20, Margin = new Padding(3, 0, 3, 0) };
