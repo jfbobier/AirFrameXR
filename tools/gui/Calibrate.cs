@@ -12,38 +12,6 @@ using System.Windows.Forms;
 
 namespace AirFrameXR
 {
-    /// The measurement as a picture, in tangent space with the nose on the left: a grey ray from the centre for every direction, a dot where the square vanished on it, the outline of
-    /// what the headset shows, and the rectangle the games are told.
-    public class FovPlot : Control
-    {
-        readonly FovFitResult r;
-        public FovPlot(FovFitResult result) { r = result; DoubleBuffered = true; BackColor = Color.White; Size = new Size(520, 340); AccessibleName = "Your visible window with the measured rays"; }
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            var g = e.Graphics; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            float x0 = Math.Min(-(float)r.Rectangle.Inner, (float)r.Window.Min(p => p.X)), x1 = Math.Max((float)r.Rectangle.Outer, (float)r.Window.Max(p => p.X));
-            float y0 = Math.Min(-(float)r.Rectangle.Lower, (float)r.Window.Min(p => p.Y)), y1 = Math.Max((float)r.Rectangle.Upper, (float)r.Window.Max(p => p.Y));
-            float pad = 0.06f * Math.Max(x1 - x0, y1 - y0); x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
-            float k = Math.Min((Width - 2) / (x1 - x0), (Height - 2) / (y1 - y0));
-            float ox = (Width - k * (x1 - x0)) / 2, oy = (Height - k * (y1 - y0)) / 2;
-            Func<float, float, PointF> map = (x, y) => new PointF(ox + (x - x0) * k, oy + (y1 - y) * k);
-            var c = map(0, 0);
-            using (var axis = new Pen(Color.Gainsboro)) { g.DrawLine(axis, map(x0, 0), map(x1, 0)); g.DrawLine(axis, map(0, y0), map(0, y1)); }
-            using (var ray = new Pen(Color.Silver, 1f))
-            using (var dot = new SolidBrush(Color.DimGray))
-                foreach (var w in r.Window) { var q = map((float)w.X, (float)w.Y); g.DrawLine(ray, c, q); g.FillEllipse(dot, q.X - 3, q.Y - 3, 6, 6); }
-            using (var outline = new Pen(Color.DimGray, 1.5f)) g.DrawPolygon(outline, r.Window.Select(w => map((float)w.X, (float)w.Y)).ToArray());
-            var a = map(-(float)r.Rectangle.Inner, (float)r.Rectangle.Upper); var b = map((float)r.Rectangle.Outer, -(float)r.Rectangle.Lower);
-            using (var rect = new Pen(Ui.Accent, 2.5f)) g.DrawRectangle(rect, a.X, a.Y, b.X - a.X, b.Y - a.Y);
-            using (var f = new Font(Font.FontFamily, 8.5f))
-            {
-                g.DrawString("nose", f, Brushes.DimGray, 4, c.Y + 2); g.DrawString("outer", f, Brushes.DimGray, Width - 38, c.Y + 2);
-                g.DrawString("up", f, Brushes.DimGray, c.X + 4, 2); g.DrawString("down", f, Brushes.DimGray, c.X + 4, Height - 16);
-            }
-        }
-    }
-
     public class CalibrateForm : DpiForm
     {
         const int Directions = 24, Eyes = 2, StepsPerPass = Directions * Eyes;
@@ -265,7 +233,7 @@ namespace AirFrameXR
                 return;
             }
             var t = result.Rectangle;
-            page.Controls.Add(new FovPlot(result) { Margin = new Padding(3, 6, 3, 2) });
+            { var map = FovMap.FromResult(result); map.Margin = new Padding(3, 6, 3, 2); page.Controls.Add(map); }
             Text_("Grey: the 24 directions the square travelled, with a dot where it vanished for you; the dark outline is what your headset shows; blue is the field of view the games are told.", true);
             Text_($"Outer {t.Outer:0.00}   Inner {t.Inner:0.00}   Upper {t.Upper:0.00}   Lower {t.Lower:0.00}   (tangents; the angles are {Math.Atan(t.Outer) * 180 / Math.PI:0.#} / {Math.Atan(t.Inner) * 180 / Math.PI:0.#} / {Math.Atan(t.Upper) * 180 / Math.PI:0.#} / {Math.Atan(t.Lower) * 180 / Math.PI:0.#} degrees)");
             Text_($"This rectangle covers {100 * result.Coverage:0.0} % of what you saw, from {result.Runs} run(s). It is {100 * result.SavedVsBox:0.0} % smaller than the box around your whole window, so the game renders that much less.");
@@ -289,13 +257,24 @@ namespace AirFrameXR
                 HmdProfiles.Install(tmp, p);
                 bool ok = HmdProfiles.ApplyFovDefault(p, headset);
                 Log.Write("INFO", $"calibrate: '{p.Id}' installed, applied {ok}");
+                KeepInStore();
                 MessageBox.Show(this, ok ? "Saved. The games get your measured field of view from their next start." : "The profile is installed but the settings could not be saved: see the log.", "Calibrate", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
             catch (Exception e) { MessageBox.Show(this, "Could not apply the calibration: " + e.Message, "Calibrate", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
 
+        /// Every calibration the user keeps goes into config\user_fov_profiles.json (once per result), so a bad one can be deleted later and none is lost to an upgrade.
+        FovFitResult storedResult;
+        void KeepInStore()
+        {
+            if (demoDir != null || storedResult == result) return;
+            try { var u = UserFovStore.Add(UserFovStore.FromCalibration(result, headset)); storedResult = result; Log.Write("INFO", $"calibrate: kept as '{u.Name}' in user_fov_profiles.json"); }
+            catch (Exception e) { Log.Write("WARN", "calibrate: could not keep the profile: " + e.Message); }
+        }
+
         void SaveCopy()
         {
+            KeepInStore();
             using (var dlg = new SaveFileDialog { Title = "Save the calibration profile", FileName = result.FileName, Filter = "AirFrameXR profile (*.json)|*.json" })
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;

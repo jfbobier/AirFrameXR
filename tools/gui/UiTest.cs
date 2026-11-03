@@ -427,6 +427,43 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "fovother.txt"), lines);
                 return 0;
             }
+            if (Arg("--fov-store-selftest") != null)   // harness/fov_store_check.py: the validator's red / yellow / valid cases and the profile store (a temp file, not the user's)
+            {
+                var lines = new List<string>();
+                var quest = new[] { 1.376, 0.839, 0.966, 1.428 };   // the Quest 3's declared box (54 / 40 / 44 / 55 degrees)
+                string Show(double[] v, FovUnit u, double[] decl) { var c = FovValidator.Check(v, u, decl); return c.Level + (double.IsNaN(c.AreaShare) ? "" : string.Format(CultureInfo.InvariantCulture, " area={0:0.00}", c.AreaShare)); }
+                var nan = double.NaN;
+                lines.Add("parse=" + string.Join("|", new[] { "0.96", " 1,05 ", "abc", "", "1e9x" }.Select(t => double.IsNaN(FovValidator.Parse(t)) ? "nan" : FovValidator.Parse(t).ToString(CultureInfo.InvariantCulture))));
+                lines.Add("nan_red=" + Show(new[] { nan, 0.8, 0.7, 0.6 }, FovUnit.Tangent, null));
+                lines.Add("zero_red=" + Show(new[] { 0.9, 0.0, 0.7, 0.6 }, FovUnit.Tangent, null));
+                lines.Add("negative_red=" + Show(new[] { 0.9, -0.1, 0.7, 0.6 }, FovUnit.Tangent, null));
+                lines.Add("deg90_red=" + Show(new[] { 90.0, 40, 40, 40 }, FovUnit.Degrees, null));
+                lines.Add("over_declared_red=" + Show(new[] { 1.5, 0.8, 0.9, 1.4 }, FovUnit.Tangent, quest));
+                lines.Add("avp_calibration_valid=" + Show(new[] { 0.97, 0.71, 0.69, 0.63 }, FovUnit.Tangent, null));
+                lines.Add("quest_trim_valid=" + Show(new[] { 51.0, 40, 43, 54 }, FovUnit.Degrees, quest));
+                lines.Add("quest_declared_valid=" + Show(quest, FovUnit.Tangent, quest));
+                lines.Add("degrees_as_tangents_yellow=" + Show(new[] { 54.0, 40, 44, 55 }, FovUnit.Tangent, null));
+                lines.Add("side_ratio_yellow=" + Show(new[] { 1.6, 0.5, 0.7, 0.7 }, FovUnit.Tangent, null));
+                lines.Add("vertical_ratio_yellow=" + Show(new[] { 0.9, 0.8, 1.4, 0.5 }, FovUnit.Tangent, null));
+                lines.Add("tiny_yellow=" + Show(new[] { 0.2, 0.2, 0.2, 0.2 }, FovUnit.Tangent, null));
+                lines.Add("small_share_yellow=" + Show(new[] { 0.7, 0.5, 0.5, 0.7 }, FovUnit.Tangent, quest));
+                var fcheck = FovValidator.Check(new[] { 0.97, 0.71, 0.69, 0.63 }, FovUnit.Tangent, null);
+                lines.Add(string.Format(CultureInfo.InvariantCulture, "avp_total={0:0.0}x{1:0.0}", fcheck.TotalH, fcheck.TotalV));
+                var tmp = Path.Combine(outDir, "user_fov_profiles_test.json");
+                try { File.Delete(tmp); } catch { }
+                lines.Add("empty=" + UserFovStore.Load(tmp).Count);
+                var a = UserFovStore.Add(new UserFov { Id = "a", Name = "Mine", Headset = "Apple Headset", Source = "manual", Tan = new[] { 0.97, 0.71, 0.69, 0.63 }, Created = "2026-01-01T00:00:00" }, tmp);
+                var b = UserFovStore.Add(new UserFov { Id = "b", Name = "mine", Source = "calibrated", Tan = new[] { 0.9, 0.7, 0.6, 0.6 }, Quality = 0.5, Created = "2026-01-02T00:00:00", Window = new List<double[]> { new[] { 0.9, 0.0 }, new[] { 0.0, 0.6 } } }, tmp);
+                var all = UserFovStore.Load(tmp);
+                lines.Add("after_add=" + string.Join(",", all.Select(x => x.Id + ":" + x.Name)) + " window_b=" + all.First(x => x.Id == "b").Window.Count + " quality_b=" + all.First(x => x.Id == "b").Quality.ToString(CultureInfo.InvariantCulture));
+                lines.Add("rename=" + UserFovStore.Rename("a", "Renamed", tmp) + " renamed=" + UserFovStore.Load(tmp).First(x => x.Id == "a").Name);
+                lines.Add("remove=" + UserFovStore.Remove("a", tmp) + " remove_again=" + UserFovStore.Remove("a", tmp) + " left=" + UserFovStore.Load(tmp).Count);
+                File.WriteAllText(tmp, "{ not json");
+                lines.Add("corrupt=" + UserFovStore.Load(tmp).Count);
+                try { File.Delete(tmp); } catch { }
+                File.WriteAllLines(Path.Combine(outDir, "fovstore.txt"), lines);
+                return 0;
+            }
             var fwExe = Arg("--firewall");   // harness/firewall_check.py: print the firewall analysis of this exe and stop
             if (fwExe != null)
             {
