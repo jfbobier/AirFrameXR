@@ -85,8 +85,8 @@ namespace AirFrameXR
         readonly string storePath;
         readonly double[] declared;
         readonly AppSettings settings = new AppSettings();
-        readonly ListBox list = new ListBox { Width = 360, Height = 150, IntegralHeight = false, FormattingEnabled = true, AccessibleName = "My field of view profiles" };
-        readonly FovMap map = new FovMap { Size = new Size(350, 250), Margin = new Padding(12, 3, 3, 3) };
+        readonly ListBox list = new ListBox { Width = 320, Height = 150, IntegralHeight = false, FormattingEnabled = true, AccessibleName = "My field of view profiles" };
+        readonly FovMap map = new FovMap { Size = new Size(300, 230), Margin = new Padding(12, 3, 3, 3) };
         readonly Label details, message, note;
         readonly Button delete = new Button { Text = "Delete", AutoSize = true }, rename = new Button { Text = "Rename...", AutoSize = true };
         readonly Button add = new Button { Text = "Add to my profiles", AutoSize = true, Enabled = false, Margin = new Padding(12, 2, 3, 3) };
@@ -104,6 +104,19 @@ namespace AirFrameXR
         /// The profile highlighted in the list, null when none.
         public UserFov Selected => list.SelectedItem as UserFov;
         public event Action SelectionChanged;
+        /// the selection changed or the typed values did (the wizard's Next button follows it)
+        public event Action Changed;
+        /// the four typed values are complete and usable (they can be added, or taken as they are by the wizard)
+        public bool TypedValid => box.All(b => b.Text.Trim().Length > 0) && TypedCheck().Usable;
+        /// Adds the typed values as a profile now and returns it (null when they are not usable).
+        public UserFov AddTypedNow() { if (!TypedValid) return null; AddTyped(); return Selected; }
+        /// Highlights the profile with this id.
+        public void Select(string id) { var u = list.Items.Cast<UserFov>().FirstOrDefault(x => x.Id == id); if (u != null) list.SelectedItem = u; }
+        /// The proposal for this headset (a shipped profile copied in: the standard calibration or a starting point), null when none.
+        public UserFov Proposed => list.Items.Cast<UserFov>().FirstOrDefault(u => u.Source == "standard" || u.Source == "starting-point");
+
+        /// A profile file's measured field of view as one of the user's profiles.
+        public static UserFov FromProfile(HmdProfile p) => new UserFov { Id = UserFovStore.NewId(), Name = p.DisplayName.Split('(')[0].Trim(), Headset = p.NameContains.FirstOrDefault() ?? "", Source = "imported", Tan = p.FovTangents(), Quality = p.FovRenderQuality, ClientScale = p.FovClientScale, Note = p.FovNote };
         // the UI harness and the self-test
         public bool CanAdd => add.Enabled;
         public string Message => message.Text;
@@ -120,7 +133,7 @@ namespace AirFrameXR
             var left = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
             left.Controls.Add(Ui.Line("My profiles", Ui.Bold));
             list.Format += (s, e) => e.Value = Describe((UserFov)e.ListItem);
-            list.SelectedIndexChanged += (s, e) => { if (!loading) { typedClear(); ShowSelected(); SelectionChanged?.Invoke(); } };
+            list.SelectedIndexChanged += (s, e) => { if (!loading) { typedClear(); ShowSelected(); SelectionChanged?.Invoke(); Changed?.Invoke(); } };
             left.Controls.Add(list);
             var lb = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
             delete.Click += (s, e) => Delete(); rename.Click += (s, e) => Rename();
@@ -176,6 +189,7 @@ namespace AirFrameXR
         public void Reload(string selectId)
         {
             loading = true;
+            if (storePath == null) UserFovStore.SeedFromShipped(settings.HeadsetName);
             var keep = selectId ?? Selected?.Id;
             list.Items.Clear();
             foreach (var u in UserFovStore.Load(storePath)) list.Items.Add(u);
@@ -184,7 +198,7 @@ namespace AirFrameXR
             loading = false;
             delete.Enabled = rename.Enabled = list.Items.Count > 0;
             if (box != null && box.All(b => b == null || b.Text.Length == 0)) ShowSelected();
-            SelectionChanged?.Invoke();
+            SelectionChanged?.Invoke(); Changed?.Invoke();
         }
 
         bool typedAny => box.Any(b => b != null && b.Text.Trim().Length > 0);
@@ -221,7 +235,7 @@ namespace AirFrameXR
         void Typed()
         {
             if (loading || box == null || box.Any(b => b == null)) return;
-            if (!typedAny) { add.Enabled = false; ShowSelected(); return; }
+            if (!typedAny) { add.Enabled = false; ShowSelected(); Changed?.Invoke(); return; }
             var c = TypedCheck();
             bool filled = box.All(b => b.Text.Trim().Length > 0);
             add.Enabled = filled && c.Usable;
@@ -230,6 +244,7 @@ namespace AirFrameXR
             map.RectColor = c.Level == FovLevel.Invalid ? Color.Firebrick : c.Level == FovLevel.Strange ? Color.DarkGoldenrod : Ui.Accent;
             details.Text = c.Usable ? Summary(c) : "";
             Layout(c);
+            Changed?.Invoke();
         }
 
         /// The UI harness: types values as a person would (unit "Tangents" or "Degrees").
@@ -304,7 +319,7 @@ namespace AirFrameXR
             var hs = settings.HeadsetName;
             if (p.NameContains.Length > 0 && hs.Length > 0 && !p.NameContains.Any(n => hs.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)
                 && MessageBox.Show(FindForm(), $"This calibration was made for a headset named like \"{string.Join("\" / \"", p.NameContains)}\", yours is \"{hs}\". Add it anyway?", "Field of view profiles", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            var u = UserFovStore.Add(new UserFov { Id = UserFovStore.NewId(), Name = p.DisplayName.Split('(')[0].Trim(), Headset = p.NameContains.FirstOrDefault() ?? "", Source = "imported", Tan = p.FovTangents(), Quality = p.FovRenderQuality, ClientScale = p.FovClientScale, Note = p.FovNote }, storePath);
+            var u = UserFovStore.Add(FromProfile(p), storePath);
             Log.Write("INFO", $"fov profiles: '{u.Name}' imported from {Path.GetFileName(path)}");
             Reload(u.Id);
         }

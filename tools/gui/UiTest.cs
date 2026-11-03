@@ -144,7 +144,7 @@ namespace AirFrameXR
             yield return new Case { Name = "calibrate-result", Make = () => new CalibrateForm(Path.Combine(Path.GetTempPath(), "airframexr_calibrate_demo_" + Guid.NewGuid().ToString("N"))), Prepare = f => ((CalibrateForm)f).ApplyDemoResult() };   // the README picture: the rays, the window, the rectangle
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             yield return new Case { Name = "performance-pipeline", Make = () => new PerformanceForm("LiesOfP-Win64-Shipping.exe") };   // a record whose pipeline block says split encoding did not engage
-            for (int p = 0; p <= 6; p++)
+            for (int p = 0; p <= 7; p++)
             {
                 int page = p;
                 yield return new Case { Name = "wizard-page" + page, Make = () => new WizardForm(null, true), Prepare = f => ((WizardForm)f).ForTest(page) };
@@ -494,6 +494,26 @@ namespace AirFrameXR
                     lines.Add("card_added=" + card.Count + ":" + card.Selected?.Name + ":" + card.Selected?.Tan[0].ToString(CultureInfo.InvariantCulture) + ":" + card.CanAdd);
                 }
                 try { File.Delete(tmp); } catch { }
+                // seeding from shipped profiles: the proposal for this headset is copied in once, a deleted one does not come back, a choice is a copy in the settings
+                {
+                    var pd = Path.Combine(outDir, "seed_profiles"); Directory.CreateDirectory(pd);
+                    File.WriteAllText(Path.Combine(pd, "a.profile.json"), "{\"id\":\"t-avp\",\"display_name\":\"Test AVP (x)\",\"match\":{\"name_contains\":[\"Apple\"]},\"fov\":{\"visible_deg\":{\"outer\":44.1,\"inner\":35.4,\"upper\":34.6,\"lower\":32.2},\"margin_deg\":0,\"client_fov_scale\":0.8}}");
+                    File.WriteAllText(Path.Combine(pd, "q.profile.json"), "{\"id\":\"t-q\",\"display_name\":\"Test Quest\",\"match\":{\"name_contains\":[\"Quest 3\"]},\"fov\":{\"visible_deg\":{\"outer\":51,\"inner\":40,\"upper\":43,\"lower\":54},\"margin_deg\":0,\"source\":\"starting-point\"}}");
+                    var sp = Path.Combine(outDir, "user_fov_seed_test.json"); try { File.Delete(sp); } catch { }
+                    string T(UserFov u) => string.Join("/", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)));
+                    var n1 = UserFovStore.SeedFromShipped("Apple Headset", sp, pd); var u1 = UserFovStore.Load(sp).FirstOrDefault();
+                    lines.Add("seed=" + n1 + " name=" + u1?.Name + " tan=" + (u1 == null ? "" : T(u1)) + " scale=" + u1?.ClientScale.ToString(CultureInfo.InvariantCulture));
+                    var n2 = UserFovStore.SeedFromShipped("Apple Headset", sp, pd);
+                    UserFovStore.Remove("std-t-avp", sp);
+                    var n3 = UserFovStore.SeedFromShipped("Apple Headset", sp, pd);
+                    lines.Add("seed_again=" + n2 + " after_delete=" + n3);
+                    var n4 = UserFovStore.SeedFromShipped("Meta Quest 3", sp, pd); var u4 = UserFovStore.Load(sp).FirstOrDefault();
+                    lines.Add("seed_quest=" + n4 + " name=" + u4?.Name + " tan=" + (u4 == null ? "" : T(u4)));
+                    var stA = new AppSettings(); var av = new UserFov { Id = "std-t-avp", Tan = new[] { 0.97, 0.71, 0.69, 0.63 } };
+                    UserFovStore.Apply(av, stA, new[] { 0.9, 0.8, 0.7, 0.6 }, "Apple Headset");
+                    lines.Add(string.Format(CultureInfo.InvariantCulture, "apply={0} {1:0.00}/{2:0.00}/{3:0.00}/{4:0.00} id={5} for={6}", stA.FovOverride, stA.FovOuter, stA.FovInner, stA.FovUpper, stA.FovLower, global::AirFrameXR.Json.Str(stA.Root, "video.fov_profile", ""), stA.FovForHeadset));
+                    try { File.Delete(sp); Directory.Delete(pd, true); } catch { }
+                }
                 File.WriteAllLines(Path.Combine(outDir, "fovstore.txt"), lines);
                 return 0;
             }

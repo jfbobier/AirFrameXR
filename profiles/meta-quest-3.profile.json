@@ -21,6 +21,13 @@
     "full_range": true,
     "foveated": true
   },
+  "fov": {
+    "visible_deg": { "outer": 51, "inner": 40, "upper": 43, "lower": 54 },
+    "margin_deg": 0,
+    "render_quality": 0,
+    "source": "starting-point",
+    "note": "A starting point, not measured here. The Quest 3 declares 54 / 40 / 44 / 55 degrees (outer / inner / upper / lower). Road to VR measured about 104 x 93 degrees binocular at the minimum eye relief against Meta's 110 x 96 claim (https://www.roadtovr.com/meta-quest-3-review-mixed-reality/, one reviewer, one IPD of 64 mm), so about 3 degrees outer and 1 degree up and down are never seen. This trims exactly that: about 10 % fewer game pixels (the pixel area follows the tangents). Verify with the FoV grid and calibrate if you see black at an edge."
+  },
   "network": {
     "default": "wifi-good",
     "variants": [

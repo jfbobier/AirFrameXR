@@ -26,11 +26,11 @@ namespace AirFrameXR
         readonly Panel stepsPanel = new Panel { Dock = DockStyle.Left, Width = 230, BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), Padding = new Padding(12) };
         readonly Button back = new Button { Text = "< Back", AutoSize = true, MinimumSize = new Size(90, 30) };
         readonly Button next = new Button { Text = "Next >", AutoSize = true, MinimumSize = new Size(110, 30), Font = Ui.Bold };
-                readonly Label[] stepLabels = new Label[4];
+                readonly Label[] stepLabels = new Label[5];
         Control wizHeader;
         // four steps the user sees; the pages behind them: PC check + headset + handshake / choice of setup / tests / verdict + configuration
-        static readonly string[] StepNames = { "1  Headset", "2  Setup", "3  Test", "4  Result" };
-        static int Group(int page) => page <= 2 ? 0 : page == 3 ? 1 : page == 4 ? 2 : 3;
+        static readonly string[] StepNames = { "1  Headset", "2  Setup", "3  Test", "4  Result", "5  Field of view" };
+        static int Group(int page) => page <= 2 ? 0 : page == 3 ? 1 : page == 4 ? 2 : page <= 6 ? 3 : 4;
         int step;
         // state
         Handshake hs = new Handshake();
@@ -76,11 +76,11 @@ namespace AirFrameXR
             Width = 1080; Height = 900;   // design values at 96 dpi: scaled at load, then kept inside the work area
             MinimumSize = new Size(980, 760);
             Ui.FitToWorkArea(this);
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 5; i++)
             {
                 stepLabels[i] = new Label { Text = StepNames[i], AutoSize = false, Height = 30, Dock = DockStyle.Top, Font = Ui.Body, ForeColor = Color.DimGray, TextAlign = ContentAlignment.MiddleLeft };
             }
-            for (int i = 3; i >= 0; i--) stepsPanel.Controls.Add(stepLabels[i]);
+            for (int i = 4; i >= 0; i--) stepsPanel.Controls.Add(stepLabels[i]);
             var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 4, Padding = new Padding(8), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9) };
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -130,9 +130,9 @@ namespace AirFrameXR
             discovery?.Dispose(); discovery = null;
             content.Controls.Clear();
             int g = Group(s), shown = 0;
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 5; i++)
             {
-                stepLabels[i].Visible = !(diagnose && i == 1);   // diagnosing keeps the setup as it is: no Setup step
+                stepLabels[i].Visible = !(diagnose && (i == 1 || i == 4));   // diagnosing keeps the setup as it is: no Setup step, no field of view step
                 if (!stepLabels[i].Visible) continue;
                 shown++;
                 stepLabels[i].Font = i == g ? Ui.Bold : Ui.Body;
@@ -152,7 +152,8 @@ namespace AirFrameXR
                     break;
                 case 4: page = PageTests(); next.Enabled = false; break;
                 case 5: page = PageResults(); break;
-                default: page = PageConfig(); next.Text = "Save and start AirFrameXR"; break;
+                case 6: page = PageConfig(); break;
+                default: page = PageFov(); next.Text = "Save and start AirFrameXR"; break;
             }
             Ui.LateScale(page, this);   // built after the window loaded: scaled by hand
             page.Dock = DockStyle.Fill;
@@ -184,8 +185,9 @@ namespace AirFrameXR
                     break;
                 case 4: GoTo(5); break;
                 case 5: if (diagnose) Close(); else GoTo(6); break;
-                case 6:
-                    if (SaveConfig() && !demo) { try { System.Diagnostics.Process.Start(Paths.Runtime); } catch { } Close(); }
+                case 6: if (SaveConfig()) GoTo(7); break;
+                case 7:
+                    if (!demo) { ApplyFovChoice(); try { System.Diagnostics.Process.Start(Paths.Runtime); } catch { } Close(); }
                     break;
             }
         }
@@ -576,19 +578,18 @@ namespace AirFrameXR
                 var t = p.FovTangents();
                 var q = $"Calibration: {p.DisplayName}\nField of view the games are told (outer / inner / upper / lower): {string.Join(" / ", t.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))}, render quality {100 * p.FovRenderQuality:0} %\n"
                     + (p.FovNote.Length > 0 ? p.FovNote + "\n" : "") + "\nYour headset, as ALVR reports it:\n" + HmdProfiles.Describe(hs)
-                    + (warnings.Count > 0 ? "\n\nPossible mismatch:\n - " + string.Join("\n - ", warnings) : "") + "\n\nUse it as the field of view the games are told? The stream settings are not touched; Advanced picture and FOV settings shows and changes it.";
+                    + (warnings.Count > 0 ? "\n\nPossible mismatch:\n - " + string.Join("\n - ", warnings) : "") + "\n\nAdd it to your field of view profiles? The stream settings are not touched; you choose it at the Field of view step or in the launcher.";
                 if (MessageBox.Show(this, q, "Import calibration", MessageBoxButtons.YesNo, warnings.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.Yes) return;
                 try
                 {
-                    var dst = HmdProfiles.Install(path, p);
-                    var ok = HmdProfiles.ApplyFovDefault(p, string.IsNullOrEmpty(hs?.DisplayName) ? settings.HeadsetName : hs.DisplayName);
-                    Log.Write("INFO", $"calibration '{p.Id}' imported to {dst}, applied {ok}");
-                    MessageBox.Show(this, ok ? "The calibration is saved as the field of view the games get after the streamer is restarted." : "The file is copied, but the field of view could not be saved: see the log.", "Import calibration", MessageBoxButtons.OK, ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                    var added = UserFovStore.Add(FovCard.FromProfile(p));
+                    Log.Write("INFO", $"calibration '{p.Id}' imported as '{added.Name}'");
+                    MessageBox.Show(this, "Added to your field of view profiles. You choose it at the Field of view step, after the configuration.", "Import calibration", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex) { MessageBox.Show(this, "Cannot import the calibration: " + ex.Message, "Import calibration", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 return;
             }
-            var fovLine = !p.HasFov ? "" : "A measured field of view is in the profile: it becomes the field of view the games are told when you finish the wizard (the launcher's FOV card shows and changes it)."
+            var fovLine = !p.HasFov ? "" : "A measured field of view is in the profile: it is offered at the Field of view step, at the end of the wizard."
                 + (p.FovClientScale > 0 ? " " + p.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " client slider recommended (manually)." : "") + "\n";
             var text = $"Profile: {p.DisplayName}{(p.Author.Length > 0 ? " by " + p.Author : "")}\n{p.EyeW} x {p.EyeH} per eye at {p.Fps:0} fps, {p.Codec.ToUpperInvariant()} {p.BitDepth}-bit, " +
                        $"{(p.Foveated ? "foveated" : "full frame")}, split encode {p.SplitEncode}, {p.Variant(null).Mbps:0} Mbps, {p.SessionOverrides.Count} ALVR setting(s)\n{fovLine}\n" +
@@ -711,7 +712,7 @@ namespace AirFrameXR
                 }
                 panel.Prefill(cand);
                 if (!panel.Save(out var err) && err != null) { testStatus.Text = err; testStatus.ForeColor = Color.Firebrick; }
-                else { HmdProfiles.ApplySessionOverrides(profile); HmdProfiles.ApplyFovDefault(profile, string.IsNullOrEmpty(hs?.DisplayName) ? settings.HeadsetName : hs.DisplayName); }
+                else HmdProfiles.ApplySessionOverrides(profile);   // the field of view is chosen at the Field of view step
                 ApplyChromaChoice();
             }
             steps = demo ? DemoSteps() : Tests.Build(ctx);
@@ -835,6 +836,62 @@ namespace AirFrameXR
             }
         }
 
+        // ------------------------------------------------------------------------------------------------------------- 7 field of view
+        RadioButton fovNone, fovUse;
+        FovCard fovCard;
+
+        /// The field of view the games are told: no restriction, or one of the user's profiles (a calibration, the proposal for this headset, values typed by hand). Next waits for a valid choice.
+        Control PageFov()
+        {
+            var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+            p.Controls.Add(H("Field of view"));
+            var intro = Ui.Line("Your headset may not show everything a game renders, and a game can skip rendering what you cannot see: fewer pixels, a faster game. Choose what the games are told. A calibration takes about 30 minutes and needs the headset; otherwise take the proposed profile, or enter values by hand. You can change this any time in the launcher (FOV restriction)."); Ui.FitWidth(intro, 760, asMaximum: true);
+            p.Controls.Add(intro);
+            fovNone = new RadioButton { Text = "No restriction: the games render everything the headset declares", AutoSize = true, Margin = new Padding(3, 8, 3, 3), AccessibleName = "No restriction" };
+            fovUse = new RadioButton { Text = "Restrict to a profile (choose one below)", AutoSize = true, AccessibleName = "Restrict to a profile" };
+            p.Controls.Add(fovNone); p.Controls.Add(fovUse);
+            fovCard = new FovCard { Margin = new Padding(22, 6, 0, 0) };
+            p.Controls.Add(fovCard);
+            var cur = new AppSettings();
+            var pick = FindCurrentProfile(cur) ?? fovCard.Proposed;   // what is in use now, else what we propose for this headset
+            if (pick != null) { fovCard.Select(pick.Id); fovUse.Checked = true; } else fovNone.Checked = true;
+            fovNone.CheckedChanged += (s, e) => UpdateFovNext();
+            fovUse.CheckedChanged += (s, e) => UpdateFovNext();
+            fovCard.Changed += () => { if (fovCard.Selected != null || fovCard.TypedValid) fovUse.Checked = true; UpdateFovNext(); };
+            UpdateFovNext();
+            return p;
+        }
+
+        UserFov FindCurrentProfile(AppSettings st)
+        {
+            if (!st.FovOverride) return null;
+            var id = Json.Str(st.Root, "video.fov_profile", "");
+            var all = UserFovStore.Load();
+            var cur = new[] { st.FovOuter, st.FovInner, st.FovUpper, st.FovLower };
+            return all.FirstOrDefault(u => u.Id == id) ?? all.FirstOrDefault(u => Enumerable.Range(0, 4).All(k => Math.Abs(u.Tan[k] - cur[k]) < 0.006));
+        }
+
+        /// Next is greyed until the choice is valid: no restriction always is, a profile needs one selected (or four usable values typed).
+        void UpdateFovNext() { if (step == 7) next.Enabled = fovNone.Checked || (fovUse.Checked && fovCard != null && (fovCard.Selected != null || fovCard.TypedValid)); }
+
+        /// Writes the choice where the streamer reads it (a copy of the profile, UserFovStore.Apply), or switches the restriction off.
+        void ApplyFovChoice()
+        {
+            try
+            {
+                if (fovNone != null && fovNone.Checked) { Json.Remove(settings.Root, "video.fov_override"); Log.Write("INFO", "wizard: no field of view restriction"); }
+                else if (fovCard != null)
+                {
+                    var u = fovCard.Selected ?? fovCard.AddTypedNow();
+                    if (u == null) return;
+                    UserFovStore.Apply(u, settings, AppSettings.ReadClientFov(), string.IsNullOrEmpty(hs?.DisplayName) ? settings.HeadsetName : hs.DisplayName);
+                    Log.Write("INFO", $"wizard: field of view '{u.Name}' ({string.Join(" / ", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))}), needs a streamer start");
+                }
+                settings.Save();
+            }
+            catch (Exception e) { Log.Write("WARN", "wizard: field of view not saved: " + e.Message); }
+        }
+
         bool SaveConfig()
         {
             if (settingsPanel == null) return false;
@@ -846,10 +903,11 @@ namespace AirFrameXR
         void AutoDrive()
         {
             if (step == 5) { var t = new System.Windows.Forms.Timer { Interval = 600 }; t.Tick += (s, e) => { t.Stop(); GoNext(); }; t.Start(); }
-            else if (step == 6)
+            else if (step == 6) { var t = new System.Windows.Forms.Timer { Interval = 600 }; t.Tick += (s, e) => { t.Stop(); GoNext(); }; t.Start(); }
+            else if (step == 7)
             {
                 var t = new System.Windows.Forms.Timer { Interval = 600 };
-                t.Tick += (s, e) => { t.Stop(); SaveConfig(); WriteReport(); Close(); };
+                t.Tick += (s, e) => { t.Stop(); ApplyFovChoice(); WriteReport(); Close(); };
                 t.Start();
             }
             else if (step == 0) { WriteReport(); Close(); }

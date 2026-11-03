@@ -171,6 +171,18 @@ namespace AirFrameXR
             return true;
         }
 
+        /// Writes the profile into the settings the streamer reads (video.fov_override on, the four tangents never above the headset's own, which profile it was, the headset it was made for):
+        /// the profile list itself is never read by the streamer, a choice is a copy. The caller saves. client = the headset's tangents (null = not seen yet).
+        public static void Apply(UserFov u, AppSettings st, double[] client, string headset)
+        {
+            var keys = new[] { "video.fov_outer", "video.fov_inner", "video.fov_upper", "video.fov_lower" };
+            for (int k = 0; k < 4; k++) Json.Set(st.Root, keys[k], Math.Round(client != null ? Math.Min(u.Tan[k], client[k]) : u.Tan[k], 4));
+            Json.Set(st.Root, "video.fov_override", true);
+            Json.Set(st.Root, "video.fov_profile", u.Id);
+            if (client != null) Json.Set(st.Root, "video.fov_for", client.Select(x => (object)Math.Round(x, 4)).ToList());   // the headset these values were made for (they are absolute tangents)
+            if (!string.IsNullOrEmpty(headset)) Json.Set(st.Root, "video.fov_for_headset", headset);
+        }
+
         public static string NewId() => "u" + DateTime.Now.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
 
         /// A calibration result (FovFitResult.Profile's rectangle and window) as a stored profile.

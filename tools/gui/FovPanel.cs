@@ -190,13 +190,8 @@ namespace AirFrameXR
         {
             if (fovTick.Checked)
             {
-                Json.Set(st.Root, V + "fov_override", true);
-                var v = FovValues();
-                for (int k = 0; k < 4; k++) Json.Set(st.Root, V + FovKeys[k], Math.Round(v[k], 4));
+                if (Selected != null) UserFovStore.Apply(Selected, st, clientFov, st.HeadsetName);
                 Json.Set(st.Root, V + "fov_render_quality", Math.Round(fovQ.Value / 100.0, 2));
-                if (Selected != null) Json.Set(st.Root, V + "fov_profile", Selected.Id);
-                Json.Set(st.Root, V + "fov_for", clientFov.Select(x => (object)Math.Round(x, 4)).ToList());   // the headset these values were made for (they are absolute tangents)
-                Json.Set(st.Root, V + "fov_for_headset", st.HeadsetName);   // its name: the same headset keeps the values when its app declares another box
             }
             else Json.Remove(st.Root, V + "fov_override");   // the saved values stay: ticking again brings them back
         }
