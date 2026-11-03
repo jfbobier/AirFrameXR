@@ -26,7 +26,7 @@ namespace AirFrameXR
             public Control Ctl;
         }
 
-        const string Live = "live", Restart = "streamer restart", NextGame = "next game start";
+        const string Live = "live", Restart = "needs streamer restart", NextGame = "next game start";
         readonly List<Knob> knobs = new List<Knob>();
         readonly Label status = Ui.Line("");
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
@@ -132,7 +132,7 @@ namespace AirFrameXR
                 "Not measured: how it looks (PSNR is not what your eyes see; judge by looking, the switch takes effect at the next streamer start), and split encoding " +
                 "across several NVENC engines (the lab GPU has one). The full-frame + split encoding profile turns the map off by itself. Spatial AQ is separate and always on.";
             var body = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(12, 4, 12, 12), Dock = DockStyle.None, Location = Point.Empty };
-            var intro = Ui.Line("Switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect: live = the running streamer takes it within seconds; streamer restart = close and start the streamer; next game start = start the game again. " +
+            var intro = Ui.Line("Switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect: live = the running streamer takes it within seconds; needs streamer restart = the window closes the streamer when you change it (a warning shows while it runs), you start it again when you are done; next game start = start the game again. " +
                 "A switch at its default is removed from config\\airframexr.json. The signals to judge by are in logs\\AirFrameXR.log: the 'frame generation perf' and 'frame generation samples' lines every 10 s, and 'game run recorded' at the end of a game.");
             intro.MaximumSize = new Size(900, 0); intro.ForeColor = Color.DimGray;
             body.Controls.Add(intro);
@@ -203,11 +203,38 @@ namespace AirFrameXR
             top.Controls.Add(ctl);
             if (badge != null) top.Controls.Add(Ui.Badge(badge));
             top.Controls.Add(new Label { Text = when, AutoSize = true, ForeColor = when == Live ? Color.SeaGreen : Color.DarkGoldenrod, Font = Ui.Bold, Margin = new Padding(8, 5, 3, 0) });
+            if (when == Restart) top.Controls.Add(CloseWarning());
             body.Controls.Add(top);
             var d = Ui.Line(desc); d.ForeColor = Color.DimGray; d.Font = new Font(Ui.Body.FontFamily, 8.5f); d.MaximumSize = new Size(900, 0); d.Margin = new Padding(22, 0, 3, 2);
             body.Controls.Add(d);
             tips.SetToolTip(ctl, tip ?? desc);
             return top;
+        }
+
+        // A change that needs a streamer restart closes the streamer (Save): the row says so while it is running, and nothing when it is already closed. The window never starts it again:
+        // the user may go on ticking, and starts it by hand when done.
+        readonly List<Label> closeWarnings = new List<Label>();
+        Timer closeWarnTimer;
+        static bool StreamerRunning() => Process.GetProcessesByName("streamer").Length > 0;
+
+        Label CloseWarning()
+        {
+            var l = new Label { Text = "\u26A0 streamer will be closed", AutoSize = true, ForeColor = Color.Firebrick, Font = Ui.Bold, Margin = new Padding(8, 5, 3, 0), Visible = StreamerRunning() };
+            closeWarnings.Add(l);
+            if (closeWarnTimer == null)
+            {
+                closeWarnTimer = new Timer { Interval = 2000 };
+                closeWarnTimer.Tick += (s, e) => { var on = StreamerRunning(); foreach (var w in closeWarnings) w.Visible = on; };
+                closeWarnTimer.Start();
+                Disposed += (s, e) => closeWarnTimer.Dispose();
+            }
+            return l;
+        }
+
+        /// The same graceful close the launcher uses before a tool that needs the streamer stopped.
+        static void CloseStreamer()
+        {
+            foreach (var p in Process.GetProcessesByName("streamer")) { try { p.CloseMainWindow(); p.WaitForExit(10000); } catch { } }
         }
 
         void AddKnob(FlowLayoutPanel body, Knob k)
@@ -257,7 +284,7 @@ namespace AirFrameXR
                 "What does not change: the stream. The frame still covers the headset's whole view (the headset maps it over the field of view it declared), the trimmed margin is black, encode, decode and network cost are the same, frame generation and the client are untouched. The saving is the game's GPU work. If the headset's own app also has a FoV scale, the two multiply: the headset's values shown here already include it.\r\n" +
                 "\r\n" +
                 "How games get it: through the OpenXR handshake. xrLocateViews returns the four angles per eye and xrEnumerateViewConfigurationViews the recommended image size; AirFrameXR returns the restricted angles and a size reduced in proportion to the area. UEVR reads exactly these (the four angles per eye for its projection and the first view's recommended size, scaled by its own resolution slider) when it starts, so it renders the narrower view. Other OpenXR games are expected to behave the same way (not tested here).\r\n" +
-                "When it applies: after you RESTART THE STREAMER. Close the game, close and start the streamer again, then start the game. The runtime reads the field of view once when the game starts and UEVR does not re-read it, so a game that is already running keeps what it began with, and until the streamer is restarted you may still see the old picture (for example black margins you just unticked).\r\n" +
+                "When it applies: NEEDS STREAMER RESTART (the window closes the streamer when you change it; start it again when you are done). The runtime reads the field of view once when the game starts and UEVR does not re-read it, so a game that is already running keeps what it began with, and until the streamer is restarted you may still see the old picture (for example black margins you just unticked).\r\n" +
                 "\r\n" +
                 "The Vision Pro's field of view as visionOS reports it (left eye): tangents 1.78 outer, 1.02 inner, 1.22 up, 1.02 down = 60.7, 45.5, 50.6, 45.5 degrees (about 106 x 96 degrees). Share of the pixels the game renders, for example: outer 1.60 and upper 1.10 -> 88.5 %; every edge 90 % of the headset's -> 81 %; 85 % -> 72 %. The fields need the headset's values: connect the headset once (they are saved when it connects).";
 
@@ -268,7 +295,7 @@ namespace AirFrameXR
                 "What you get: the pixels the restriction saved can be spent on a finer render. The game's picture is filtered down to the stream's pixels, so you get cleaner edges and less shimmer (like supersampling); you do not get detail beyond what the stream carries.\r\n" +
                 "What it costs: game GPU time and video memory, rising with the pixels shown. Encode, decode and network are unchanged.\r\n" +
                 "The limits follow your resolution settings (the per-eye size of the stream, e.g. a Quest's lower one) and the field of view fields above; the slider only works while a restriction is on.\r\n" +
-                "When it applies: after you restart the streamer, like the field of view (close the game, restart the streamer, start the game).";
+                "When it applies: needs streamer restart, like the field of view.";
 
         /// The stream's per-eye size from the user's resolution settings (session.json: the negotiated cache the host reads too), null when unknown.
         static int[] ReadStreamEye()
@@ -296,7 +323,7 @@ namespace AirFrameXR
         {
             clientFov = testClient ?? AppSettings.ReadClientFov();
             Section(body, "Field of view the game is told");
-            var intro = Ui.Line("The field of view the game is told it has, edge by edge, as tangents (the angle is shown next to each field), like SteamVR's Video > Field of View. The game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start); the stream still covers the whole headset view and the margin is black, so only the game's GPU work changes. Takes effect after you restart the streamer: close the game, restart the streamer, start the game. Hover for details.");
+            var intro = Ui.Line("The field of view the game is told it has, edge by edge, as tangents (the angle is shown next to each field), like SteamVR's Video > Field of View. The game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start); the stream still covers the whole headset view and the margin is black, so only the game's GPU work changes. Needs streamer restart. Hover for details.");
             intro.ForeColor = Color.DimGray; intro.MaximumSize = new Size(900, 0);
             body.Controls.Add(intro);
             fovTick = new CheckBox { AutoSize = true, Text = "Override the headset's field of view", AccessibleName = "Override the headset's field of view" };
@@ -309,7 +336,7 @@ namespace AirFrameXR
                 fovProfileBtn.Text = "Use the " + fovProfile.DisplayName.Split('(')[0].Trim() + "'s measured values (visible + " + fovProfile.FovMarginDeg.ToString("0.#", CultureInfo.InvariantCulture) + "\u00B0: "
                     + string.Join(" / ", m.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))) + ", render quality " + (100 * fovProfile.FovRenderQuality).ToString("0", CultureInfo.InvariantCulture) + " %)";
                 tips.SetToolTip(fovProfileBtn, "From the headset's profile (" + fovProfile.Id + "): the edge of what the headset shows, measured with the FoV grid (docs/AVP_FOV.md), plus a margin.\r\n" +
-                    (fovProfile.FovNote.Length > 0 ? fovProfile.FovNote + "\r\n" : "") + "It ticks the override and fills the fields and the render quality slider; you can change them afterwards. Applies after you restart the streamer.");
+                    (fovProfile.FovNote.Length > 0 ? fovProfile.FovNote + "\r\n" : "") + "It ticks the override and fills the fields and the render quality slider; you can change them afterwards. Needs streamer restart.");
                 fovProfileBtn.Click += (s, e) => FovUseProfile();
                 body.Controls.Add(fovProfileBtn);
                 if (fovProfile.FovClientScale > 0)
@@ -320,7 +347,7 @@ namespace AirFrameXR
                 }
             }
             fovImportBtn = new Button { AutoSize = true, Margin = new Padding(22, 4, 0, 0), Visible = false, Text = "Import a calibration file...", AccessibleName = "Import a calibration file" };
-            tips.SetToolTip(fovImportBtn, "A file made by the calibration tool (fov_profile.exe in the calibration folder, docs/FOV_CALIBRATION.md): it ticks the override and fills the four fields with your own measured window. Applies after you restart the streamer.");
+            tips.SetToolTip(fovImportBtn, "A file made by the calibration tool (fov_profile.exe in the calibration folder, docs/FOV_CALIBRATION.md): it ticks the override and fills the four fields with your own measured window. Needs streamer restart.");
             fovImportBtn.Click += (s, e) => FovImport();
             body.Controls.Add(fovImportBtn);
             fovFields = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 4, 0, 0) };
@@ -431,7 +458,7 @@ namespace AirFrameXR
                 UpdatePipeline();
                 return;
             }
-            fovNote.Text = "Override on: the game is told these values (never more than the headset's). Applies after you restart the streamer (close the game, restart the streamer, start the game).";
+            fovNote.Text = "Override on: the game is told these values (never more than the headset's). Needs streamer restart.";
             double w0 = clientFov[0] + clientFov[1], h0 = clientFov[2] + clientFov[3];
             double w = Math.Min(v[0], clientFov[0]) + Math.Min(v[1], clientFov[1]), h = Math.Min(v[2], clientFov[2]) + Math.Min(v[3], clientFov[3]);
             fovShare.Text = "The game renders " + (100 * w * h / (w0 * h0)).ToString("0", CultureInfo.InvariantCulture) + " % of the pixels the headset's whole view would.";
@@ -704,8 +731,17 @@ namespace AirFrameXR
             try { st.Save(); }
             catch (Exception e) { status.Text = "Cannot write config\\airframexr.json: " + e.Message; status.ForeColor = Color.Firebrick; return; }
             Log.Write("INFO", "advanced: " + what + " (" + when + ")");
-            var running = Process.GetProcessesByName("streamer").Length > 0;
-            status.Text = "Saved: " + what + ". " + (when == Live ? (running ? "The running streamer takes it within a couple of seconds." : "It takes effect when the streamer starts.") : "It takes effect after a streamer restart.");
+            var running = StreamerRunning();
+            string closed = null;
+            if (when == Restart && running)
+            {
+                UseWaitCursor = true;
+                try { CloseStreamer(); } finally { UseWaitCursor = false; }
+                closed = StreamerRunning() ? "The streamer did not close: close it yourself." : "The streamer was closed; start it again when you are done.";
+                Log.Write("INFO", "advanced: streamer closed for '" + what + "'");
+                foreach (var w in closeWarnings) w.Visible = StreamerRunning();
+            }
+            status.Text = "Saved: " + what + ". " + (when == Live ? (running ? "The running streamer takes it within a couple of seconds." : "It takes effect when the streamer starts.") : closed ?? (when == Restart ? "It takes effect when the streamer starts." : "It takes effect after a streamer restart."));
             status.ForeColor = Color.SeaGreen;
         }
 

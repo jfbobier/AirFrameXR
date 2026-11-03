@@ -128,7 +128,7 @@ recommended row and check the corners for black.
 
 Effect, recommended row: the game renders 66 % x 74 % of the declared span, about half the pixels (game GPU only: the
 stream, encode and decode are unchanged). Full-frame UI then fits the visible window. A new value is taken after a
-streamer restart (close the game, restart the streamer, start the game).
+streamer restart (the Advanced window closes the streamer when it is changed).
 
 The recommended row is what the Vision Pro profile carries (`fov` in `profiles\apple-vision-pro.profile.json`: the visible angles, a 3 degree margin and a render quality of 0.25: the first estimate, replaced by the calibrated profile above, render quality 0). *Advanced
 picture and FOV settings* shows a button, "Use the Apple Vision Pro's measured values", that fills the fields and the slider from it (see [HMD_PROFILES.md](HMD_PROFILES.md)). The
