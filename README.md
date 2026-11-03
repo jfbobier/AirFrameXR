@@ -16,7 +16,7 @@ AirFrameXR replaces the **SteamVR + traditional ALVR PC streamer** with a **lean
 
 **The headset side stays the same:** AirFrameXR speaks the **ALVR v20 protocol**, so you keep the existing ALVR headset client. The Windows streamer is NVIDIA-only; it has been tested on **Apple Vision Pro** and **Meta Quest 3**. Other ALVR-protocol clients may work, but are not verified here.
 
-For the Quest there is a dedicated **AirFrameXR Quest client** ([releases](https://github.com/jfbobier/airframexr-metaquest/releases), version 1.0.0): a Vulkan fork of ALVR 20.14.1 with a welcome panel and a floor-height offset. **Controllers only, there is no hand pinch input** (it was not reliable and was removed, as on the Vision Pro client). It was tested on a Quest 3 only; the Meta-store ALVR client keeps working.
+For the Quest there is a dedicated **AirFrameXR Quest client** ([releases](https://github.com/jfbobier/airframexr-metaquest/releases), version 1.3.0): a Vulkan fork of ALVR 20.14.1 with a welcome panel and a floor-height offset. **Controllers only, there is no hand pinch input** (it was not reliable and was removed, as on the Vision Pro client). It was tested on a Quest 3 only; the Meta-store ALVR client keeps working.
 
 <p align="center">
   <img src="docs/images/airframexr-pipeline-comparison.png" alt="Architecture comparison: traditional OpenXR game to SteamVR to ALVR streamer to ALVR client, versus an OpenXR game to an integrated NVIDIA-optimized AirFrameXR runtime and streamer to the same ALVR headset client" width="100%">
