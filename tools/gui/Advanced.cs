@@ -26,6 +26,8 @@ namespace AirFrameXR
             public Control Ctl;
         }
 
+        // the width the explanations wrap at (design px): the window may be narrower than 900 at a high scale (the matrix's 4K at 200 % has 869), and a line wider than the page makes a sideways scroll bar
+        const int WrapWidth = 800;
         const string Live = "live", Restart = "needs streamer restart", NextGame = "next game start";
         readonly List<Knob> knobs = new List<Knob>();
         readonly Label status = Ui.Line("");
@@ -134,7 +136,7 @@ namespace AirFrameXR
             var body = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(12, 4, 12, 12), Dock = DockStyle.None, Location = Point.Empty };
             var intro = Ui.Line("Switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect: live = the running streamer takes it within seconds; needs streamer restart = the window closes the streamer when you change it (a warning shows while it runs), you start it again when you are done; next game start = start the game again. " +
                 "A switch at its default is removed from config\\airframexr.json. The signals to judge by are in logs\\AirFrameXR.log: the 'frame generation perf' and 'frame generation samples' lines every 10 s, and 'game run recorded' at the end of a game.");
-            intro.MaximumSize = new Size(900, 0); intro.ForeColor = Color.DimGray;
+            intro.MaximumSize = new Size(WrapWidth, 0); intro.ForeColor = Color.DimGray;
             body.Controls.Add(intro);
 
             BuildFov(body);
@@ -176,7 +178,7 @@ namespace AirFrameXR
             bottom.Controls.Add(status);
             body.Controls.Add(bottom);
             var note = Ui.Line("Not offered: the removed switches (game_pacing jit / queue, the automatic rate controller, the duplicate-timestamp re-stamp paths, predicted samples) and head_wait_ms; each is documented in docs/PERFORMANCE_KNOBS.md with the measurement that ruled it out. Everything else of ALVR stays in config\\session.json.");
-            note.MaximumSize = new Size(900, 0); note.ForeColor = Color.DimGray;
+            note.MaximumSize = new Size(WrapWidth, 0); note.ForeColor = Color.DimGray;
             body.Controls.Add(note);
 
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
@@ -205,7 +207,7 @@ namespace AirFrameXR
             top.Controls.Add(new Label { Text = when, AutoSize = true, ForeColor = when == Live ? Color.SeaGreen : Color.DarkGoldenrod, Font = Ui.Bold, Margin = new Padding(8, 5, 3, 0) });
             if (when == Restart) top.Controls.Add(CloseWarning());
             body.Controls.Add(top);
-            var d = Ui.Line(desc); d.ForeColor = Color.DimGray; d.Font = new Font(Ui.Body.FontFamily, 8.5f); d.MaximumSize = new Size(900, 0); d.Margin = new Padding(22, 0, 3, 2);
+            var d = Ui.Line(desc); d.ForeColor = Color.DimGray; d.Font = new Font(Ui.Body.FontFamily, 8.5f); d.MaximumSize = new Size(WrapWidth, 0); d.Margin = new Padding(22, 0, 3, 2);
             body.Controls.Add(d);
             tips.SetToolTip(ctl, tip ?? desc);
             return top;
@@ -324,7 +326,7 @@ namespace AirFrameXR
             clientFov = testClient ?? AppSettings.ReadClientFov();
             Section(body, "Field of view the game is told");
             var intro = Ui.Line("The field of view the game is told it has, edge by edge, as tangents (the angle is shown next to each field), like SteamVR's Video > Field of View. The game renders a smaller view with proportionally fewer pixels (UEVR and OpenXR games read the four angles and the recommended size when they start); the stream still covers the whole headset view and the margin is black, so only the game's GPU work changes. Needs streamer restart. Hover for details.");
-            intro.ForeColor = Color.DimGray; intro.MaximumSize = new Size(900, 0);
+            intro.ForeColor = Color.DimGray; intro.MaximumSize = new Size(WrapWidth, 0);
             body.Controls.Add(intro);
             fovTick = new CheckBox { AutoSize = true, Text = "Override the headset's field of view", AccessibleName = "Override the headset's field of view" };
             Row(body, fovTick, null, Restart, "Off: the game gets the headset's own field of view (greyed below, as the headset reported it). On: the fields open, starting from the headset's values; you can only go down from them.", FovTip);
@@ -342,7 +344,7 @@ namespace AirFrameXR
                 if (fovProfile.FovClientScale > 0)
                 {
                     fovProfileHint = Ui.Line(fovProfile.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " client slider recommended (manually)");
-                    fovProfileHint.ForeColor = Color.DimGray; fovProfileHint.Margin = new Padding(22, 2, 3, 2); fovProfileHint.MaximumSize = new Size(900, 0); fovProfileHint.Visible = false;
+                    fovProfileHint.ForeColor = Color.DimGray; fovProfileHint.Margin = new Padding(22, 2, 3, 2); fovProfileHint.MaximumSize = new Size(WrapWidth, 0); fovProfileHint.Visible = false;
                     body.Controls.Add(fovProfileHint);
                 }
             }
@@ -362,8 +364,8 @@ namespace AirFrameXR
                 tips.SetToolTip(nud, FovTip);
             }
             body.Controls.Add(fovFields);
-            fovNote = Ui.Line(""); fovNote.ForeColor = Color.DimGray; fovNote.Margin = new Padding(22, 2, 3, 0); fovNote.MaximumSize = new Size(900, 0);
-            fovShare = Ui.Line(""); fovShare.ForeColor = Color.SeaGreen; fovShare.Margin = new Padding(22, 0, 3, 2); fovShare.MaximumSize = new Size(900, 0);
+            fovNote = Ui.Line(""); fovNote.ForeColor = Color.DimGray; fovNote.Margin = new Padding(22, 2, 3, 0); fovNote.MaximumSize = new Size(WrapWidth, 0);
+            fovShare = Ui.Line(""); fovShare.ForeColor = Color.SeaGreen; fovShare.Margin = new Padding(22, 0, 3, 2); fovShare.MaximumSize = new Size(WrapWidth, 0);
             body.Controls.Add(fovNote);
             body.Controls.Add(fovShare);
             fovQRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 2, 0, 0), Visible = false };
@@ -377,13 +379,13 @@ namespace AirFrameXR
 
             fitTick = new CheckBox { AutoSize = true, Text = "Fit the stream to the headset's window (keep the pixel density)", AccessibleName = "Fit the stream to the headset's window" };
             Row(body, fitTick, null, Restart, "The stream frame is sized from the pixel density you chose (the resolution in Settings, over the box the headset declared then) and the box the headset declares now. A headset app that declares only its visible window then gets a smaller frame at the same pixels per degree: less to compose, generate, encode and decode, nothing lost in what you see. Off: the stream is the size in Settings whatever the headset declares. With it on, the render quality slider above reaches the size in Settings.", FitTip);
-            fitNote = Ui.Line(""); fitNote.ForeColor = Color.DimGray; fitNote.Margin = new Padding(22, 0, 3, 2); fitNote.MaximumSize = new Size(900, 0);
+            fitNote = Ui.Line(""); fitNote.ForeColor = Color.DimGray; fitNote.Margin = new Padding(22, 0, 3, 2); fitNote.MaximumSize = new Size(WrapWidth, 0);
             body.Controls.Add(fitNote);
             fitTick.CheckedChanged += (s, e) => FitChanged();
             var pipeTitle = Ui.Line("What the pipeline will do with these settings", Ui.Bold); pipeTitle.Margin = new Padding(3, 10, 3, 0);
             body.Controls.Add(pipeTitle);
-            pipeLine = Ui.Line(""); pipeLine.ForeColor = Color.DimGray; pipeLine.Margin = new Padding(22, 2, 3, 0); pipeLine.MaximumSize = new Size(900, 0);
-            pipeBand = Ui.Line(""); pipeBand.ForeColor = Color.DimGray; pipeBand.Margin = new Padding(22, 0, 3, 0); pipeBand.MaximumSize = new Size(900, 0);
+            pipeLine = Ui.Line(""); pipeLine.ForeColor = Color.DimGray; pipeLine.Margin = new Padding(22, 2, 3, 0); pipeLine.MaximumSize = new Size(WrapWidth, 0);
+            pipeBand = Ui.Line(""); pipeBand.ForeColor = Color.DimGray; pipeBand.Margin = new Padding(22, 0, 3, 0); pipeBand.MaximumSize = new Size(WrapWidth, 0);
             pipeWarn = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(22, 0, 3, 2) };
             body.Controls.Add(pipeLine); body.Controls.Add(pipeBand); body.Controls.Add(pipeWarn);
         }
@@ -515,8 +517,8 @@ namespace AirFrameXR
             var r = PipelineModel.Compute(i);
             pipeLine.Text = PipelineModel.Summary(r);
             pipeBand.Text = PipelineModel.BandText(r);
-            foreach (var w in r.Warnings) { var l = Ui.Line(w); l.ForeColor = Color.Firebrick; l.MaximumSize = new Size(900, 0); l.Margin = new Padding(0, 0, 3, 0); pipeWarn.Controls.Add(l); }
-            foreach (var w in r.Info) { var l = Ui.Line(w); l.ForeColor = Color.DimGray; l.MaximumSize = new Size(900, 0); l.Margin = new Padding(0, 0, 3, 0); pipeWarn.Controls.Add(l); }
+            foreach (var w in r.Warnings) { var l = Ui.Line(w); l.ForeColor = Color.Firebrick; l.MaximumSize = new Size(WrapWidth, 0); l.Margin = new Padding(0, 0, 3, 0); pipeWarn.Controls.Add(l); }
+            foreach (var w in r.Info) { var l = Ui.Line(w); l.ForeColor = Color.DimGray; l.MaximumSize = new Size(WrapWidth, 0); l.Margin = new Padding(0, 0, 3, 0); pipeWarn.Controls.Add(l); }
             foreach (Control c in pipeWarn.Controls) Ui.LateScale(c, this);
             var refEye = st.StreamReferenceEye; var refFov = st.StreamReferenceFov;
             if (!fitTick.Checked)

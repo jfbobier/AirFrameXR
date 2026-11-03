@@ -308,7 +308,7 @@ namespace AirFrameXR
         TabPage BenchTab()
         {
             var t = new TabPage("2. Benchmark") { BackColor = Color.White, Padding = new Padding(10) };
-            var p = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoScroll = true };
+            var p = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoScroll = true, Padding = new Padding(0, 0, SystemInformation.VerticalScrollBarWidth, 0) };   // room for the vertical scroll bar: without it the filled column is as wide as the whole panel and a sideways bar appears
             p.Controls.Add(Ui.Line("Encoder test (no headset needed): how long NVENC takes per frame with each encoding.", Ui.Bold));
             var enc = new Button { Text = "Run encoder test", AutoSize = true };
             enc.Click += (s, e) => RunEncoderTest();

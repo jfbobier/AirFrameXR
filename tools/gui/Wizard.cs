@@ -772,7 +772,19 @@ namespace AirFrameXR
             var p = Verdict.Build(hs, ctx, profile, proposal, ctxFps, ctxScale, ctxFoveation);
             p.Controls.Add(H("How your setup performs"));
             p.Controls.SetChildIndex(p.Controls[p.Controls.Count - 1], 0);
+            CapWidth(p, 650);
             return p;
+        }
+
+        /// The page is about 690 design px wide at the matrix's 4K at 200 %: no line or suggestion box may be wider, or the page gets a sideways scroll bar (design px, before the page is added and scaled).
+        static void CapWidth(Control root, int max)
+        {
+            foreach (Control c in root.Controls)
+            {
+                if (c is Label l && l.MaximumSize.Width > max) l.MaximumSize = new Size(max, l.MaximumSize.Height);
+                else if (c is FlowLayoutPanel f && f.MinimumSize.Width > max + 30) f.MinimumSize = new Size(max + 30, f.MinimumSize.Height);
+                CapWidth(c, max);
+            }
         }
 
         // ------------------------------------------------------------------------------------------------------------- 5 configuration

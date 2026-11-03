@@ -67,4 +67,4 @@ def case_order(c): return (int(c.split("p@")[0]), int(c.split("@")[1]))
 for (lvl, form, _), g in sorted(groups.items(), key=lambda kv: (kv[0][0] != "FAIL", kv[0][1])):
     print(f"{lvl} {form}: {g['example'][:170]}   [{', '.join(sorted(g['cases'], key=case_order))}]")
 print(f"\nui_matrix: {len(res)} renders, {len(fails)} FAIL, {len(warns)} warnings; PNGs in {dest}")
-sys.exit(1 if fails else 0)
+sys.exit(1 if fails or warns else 0)   # a warning (a sideways scroll bar) fails the run too: the matrix is meant to stay at 0 / 0
