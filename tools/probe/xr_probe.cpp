@@ -311,6 +311,22 @@ int main(int argc, char** argv) {
     std::vector<XrViewConfigurationView> vcv(n, { XR_TYPE_VIEW_CONFIGURATION_VIEW });
     CK(xrEnumerateViewConfigurationViews(inst, sys, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, n, &n, vcv.data()));
     L("views: %u, recommended %ux%u", n, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight);
+    // A game (mod) that ignores the recommended size: XR_PROBE_RENDER_SIZE=WxH renders and submits a fixed size whatever the runtime asks
+    // (docs/FOV_APERTURE_PLAN.md, game behaviours). The line above keeps what the runtime recommended; the harness reads both.
+    if (const char* rs = getenv("XR_PROBE_RENDER_SIZE")) {
+        unsigned fw = 0, fh = 0;
+        if (sscanf(rs, "%ux%u", &fw, &fh) == 2 && fw >= 64 && fh >= 64) {
+            for (auto& v : vcv) { v.recommendedImageRectWidth = fw; v.recommendedImageRectHeight = fh; }
+            L("render size forced %ux%u (the game ignores the recommended size)", fw, fh);
+        }
+    }
+    // A game (mod) that ignores the runtime's field of view: XR_PROBE_RENDER_FOV=outer,inner,up,down tangents (left eye; the right eye mirrors it)
+    // renders with its own frustum and submits that frustum honestly in the projection layer. The runtime's own values are still logged first.
+    float forcedFov[4] = {0, 0, 0, 0};
+    const bool fovForced = getenv("XR_PROBE_RENDER_FOV") &&
+        sscanf(getenv("XR_PROBE_RENDER_FOV"), "%f,%f,%f,%f", &forcedFov[0], &forcedFov[1], &forcedFov[2], &forcedFov[3]) == 4 &&
+        forcedFov[0] > 0 && forcedFov[1] > 0 && forcedFov[2] > 0 && forcedFov[3] > 0;
+    if (fovForced) L("render fov forced outer %.4f inner %.4f up %.4f down %.4f (the game ignores the runtime's field of view)", forcedFov[0], forcedFov[1], forcedFov[2], forcedFov[3]);
 
     CK(xrEnumerateSwapchainFormats(sess, 0, &n, nullptr));
     std::vector<int64_t> fmts(n);
@@ -484,6 +500,15 @@ int main(int argc, char** argv) {
                 fovLogged = true;
                 for (uint32_t k = 0; k < 2; k++)
                     L("view fov tan eye %u: L %.4f R %.4f U %.4f D %.4f", k, -tanf(views[k].fov.angleLeft), tanf(views[k].fov.angleRight), tanf(views[k].fov.angleUp), -tanf(views[k].fov.angleDown));
+            }
+            if (fovForced) {   // after the log line above: the harness compares what the runtime told with what the game did
+                for (uint32_t k = 0; k < vc && k < 2; k++) {
+                    const float outer = forcedFov[0], inner = forcedFov[1];
+                    views[k].fov.angleLeft = -atanf(k == 0 ? outer : inner);
+                    views[k].fov.angleRight = atanf(k == 0 ? inner : outer);
+                    views[k].fov.angleUp = atanf(forcedFov[2]);
+                    views[k].fov.angleDown = -atanf(forcedFov[3]);
+                }
             }
             if (done % 20 == 0) L("frame %d: viewState 0x%llx pos(%.3f %.3f %.3f) period %lld ns", done, (unsigned long long)vs.viewStateFlags,
                 views[0].pose.position.x, views[0].pose.position.y, views[0].pose.position.z, (long long)fs.predictedDisplayPeriod);

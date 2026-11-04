@@ -1052,23 +1052,55 @@ def analyse_fov_restrict(sc, outdir):
     out["ceiling"] = (cw, ch)
     out["expected_recommended"] = (even(fw + (cw - fw) * q), even(fh + (ch - fh) * q))
     out["stream_eye"] = (ew, eh)
+    # What the game actually did (docs/FOV_APERTURE_PLAN.md, game behaviours): a game may ignore the recommended size (xr_probe XR_PROBE_RENDER_SIZE, the
+    # "fixed resolution" mods) or the field of view it is told (XR_PROBE_RENDER_FOV, its own frustum submitted honestly). The composition maps whatever frustum
+    # the game submits into the stream, so the picture's place and the margins follow the game's box, not the one it was told.
+    fs = re.search(r"render size forced (\d+)x(\d+)", log)
+    rendered = (int(fs.group(1)), int(fs.group(2))) if fs else out["recommended"]
+    ff = re.search(r"render fov forced outer ([0-9.]+) inner ([0-9.]+) up ([0-9.]+) down ([0-9.]+)", log)
+    if ff:
+        o_, i_f, u_, d_ = (float(ff.group(k)) for k in range(1, 5))
+        gbox = [[o_, i_f, u_, d_], [i_f, o_, u_, d_]]   # per eye L, R, U, D (the right eye mirrors outer and inner)
+    else:
+        gbox = [list(got[0]), list(got[1])]
+    out["game"] = {"rendered": rendered, "size_ignored": bool(fs), "fov_ignored": bool(ff), "box": [[round(v, 4) for v in b] for b in gbox]}
+    # what the restriction bought and what it cost, from areas in tangent space (left eye; the eyes mirror): render pixels against an unrestricted game (the
+    # stream's eye size), the share of the game's render that lands inside the headset's view (the rest is cropped by the composition), the share of the
+    # headset's view the picture covers, and how many stream pixels each game pixel gets per axis (below 1 = detail the stream cannot carry)
+    L0, R0, U0, D0 = headset[0:4]
+    gL, gR, gU, gD = gbox[0]
+    area = lambda w, h: max(0.0, w) * max(0.0, h)
+    inter = area(min(gL, L0) + min(gR, R0), min(gU, U0) + min(gD, D0))
+    out["game"].update({
+        "render_saving": round(1 - (rendered[0] * rendered[1]) / (ew * eh), 3),
+        "render_used": round(inter / area(gL + gR, gU + gD), 3),
+        "view_covered": round(inter / area(L0 + R0, U0 + D0), 3),
+        "stream_px_per_game_px": (round((ew / (L0 + R0)) / (rendered[0] / (gL + gR)), 3), round((eh / (U0 + D0)) / (rendered[1] / (gU + gD)), 3)),
+    })
     # the stream frame: side by side, each eye covers the headset's view; the game's view sits inside it, the rest is black
-    pts, want = [], []
+    pts, want, edge_pts, edges = [], [], [], []
     cuts = []
+    eff = []   # per eye the game's box as a fraction of the headset's per edge (above 1 = the game rendered past the headset's edge)
     for e in range(2):
         L, R, U, D = headset[4 * e:4 * e + 4]
-        l, r = (s[0], s[1]) if e == 0 else (s[1], s[0])
-        cuts.append(((1 - l) * L / (L + R), (1 - r) * R / (L + R)))
+        eff.append([gbox[e][0] / L, gbox[e][1] / R, gbox[e][2] / U, gbox[e][3] / D])
+        l, r = eff[e][0], eff[e][1]
+        cuts.append((max(0.0, (1 - l) * L / (L + R)), max(0.0, (1 - r) * R / (L + R))))
     # a column along the top and bottom that is inside both eyes' views and clear of the probe's counter bar (16 blocks of 64 px along the top of its view)
     lo, hi = max(c[0] for c in cuts) + 16 * 64 / ew + 0.02, 1 - max(c[1] for c in cuts) - 0.02
     col = (lo + hi) / 2 if lo < hi else 0.5
     for e in range(2):
         L, R, U, D = headset[4 * e:4 * e + 4]
-        l, r = (s[0], s[1]) if e == 0 else (s[1], s[0])
-        cut = [(1 - l) * L / (L + R), (1 - r) * R / (L + R), (1 - s[2]) * U / (U + D), (1 - s[3]) * D / (U + D)]   # left, right, top, bottom shares of the eye
+        l, r, u, d = eff[e]
+        cut = [(1 - l) * L / (L + R), (1 - r) * R / (L + R), (1 - u) * U / (U + D), (1 - d) * D / (U + D)]   # left, right, top, bottom shares of the eye
+        told = [(1 - (s[0] if e == 0 else s[1])), (1 - (s[1] if e == 0 else s[0])), 1 - s[2], 1 - s[3]]   # the edges the restriction cut (told, not rendered)
         x0 = e * ew
         for side, c in enumerate(cut):
             if c < 0.03:
+                if told[side] > 0.03:   # the game was told to stop short of this edge but rendered past it: its picture must reach the stream's edge
+                    k = 0.02
+                    edge_pts.append([(x0 + int(k * ew), eh // 2), (x0 + ew - 1 - int(k * ew), eh // 2), (x0 + int(col * ew), int(k * eh)), (x0 + int(col * ew), eh - 1 - int(k * eh))][side])
+                    edges.append((e, side))
                 continue
             # the middle of the margin (black), and two depths just inside the game's view (content: the probe's picture is not bright everywhere at its very edge,
             # an asymmetric rectangle read 93 % with one depth at 2 %, so a point counts as content when either depth is lit)
@@ -1082,9 +1114,9 @@ def analyse_fov_restrict(sc, outdir):
     # the probe's one-pixel checkerboard (64 x 64 at game pixel 1152,0 of the left eye) mapped into the stream through the restriction: its contrast tells
     # whether the composition averaged a denser game render (render quality above 0) or passed a 1:1 render through (ovrshim ReprojectPS.hlsl)
     if rec and "checker:" in log and "drawn" in log.split("checker:")[1][:40]:
-        gw, gh = out["recommended"]
+        gw, gh = rendered
         L0, R0, U0, D0 = headset[0:4]
-        cutL, cutR, cutT, cutB = (1 - s[0]) * L0 / (L0 + R0), (1 - s[1]) * R0 / (L0 + R0), (1 - s[2]) * U0 / (U0 + D0), (1 - s[3]) * D0 / (U0 + D0)
+        cutL, cutR, cutT, cutB = (1 - eff[0][0]) * L0 / (L0 + R0), (1 - eff[0][1]) * R0 / (L0 + R0), (1 - eff[0][2]) * U0 / (U0 + D0), (1 - eff[0][3]) * D0 / (U0 + D0)
         sx, sy = (1 - cutL - cutR) * ew / gw, (1 - cutT - cutB) * eh / gh     # stream pixels per game pixel
         x0, y0 = cutL * ew + 1152 * sx, cutT * eh                           # the block's top-left in the stream
         cpts = [(int(x0 + (7 + 11 * i) * sx), int(y0 + (7 + 11 * j) * sy)) for i in range(5) for j in range(5)]   # a 5 x 5 grid well inside the block, an ODD step: at 1:1 an even step lands on the same colour of the one-pixel checkerboard every time (std 0 whatever the stream)
@@ -1101,6 +1133,11 @@ def analyse_fov_restrict(sc, outdir):
             content_ok += sum(1 for k in range(1, len(pts), 3) if lum(fr[k]) >= 16 or lum(fr[k + 1]) >= 16)
         n = max(1, len(frames) * len(want))
         out["margin_black_frac"], out["inside_content_frac"], out["frames"] = round(black_ok / n, 3), round(content_ok / n, 3), len(frames)
+    if edge_pts:
+        frames = read_rgb_at(outdir / "client.hevc", edge_pts)[30:]
+        lum = lambda px: 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]
+        lit = sum(1 for fr in frames for px in fr if lum(px) >= 16)
+        out["edges_reached"], out["edges_reached_frac"] = edges, round(lit / max(1, len(frames) * len(edge_pts)), 3)
     return out
 
 
@@ -1936,6 +1973,14 @@ def evaluate(sc, a):
                     chk("checker_averaged_by_composition", bool(cb) and cb["std"] <= ck["checker"]["max_std"], cb, f"std <= {ck['checker']['max_std']}: the denser game render's one-pixel checkerboard comes out flat (the compose pass averages it before the encoder)")
                 if "min_std" in ck["checker"]:
                     chk("checker_passes_at_1_to_1", bool(cb) and cb["std"] >= ck["checker"]["min_std"], cb, f"std >= {ck['checker']['min_std']}: at 1:1 the checkerboard reaches the stream as a checkerboard")
+            gm = fa.get("game") or {}
+            if "render_saving" in ck["fov_restrict"]:   # [min, max]: what the restriction saved on the game's render, given how the game behaves
+                lo_, hi_ = ck["fov_restrict"]["render_saving"]
+                chk("fov_game_render_saving", lo_ <= gm.get("render_saving", -9) <= hi_, gm,
+                    f"the game rendered {gm.get('rendered')} against an unrestricted {fa['stream_eye']}: saving {gm.get('render_saving')} within [{lo_}, {hi_}] (a game that ignores the recommended size saves nothing)")
+            if ck["fov_restrict"].get("edges_reached"):
+                chk("fov_game_edges_reached", fa.get("edges_reached_frac", 0) >= 0.95, {"edges": fa.get("edges_reached"), "lit": fa.get("edges_reached_frac")},
+                    ">= 95 % of the samples at the edges the game was told to stop short of but rendered past carry its picture: the composition maps the frustum the game submits, it does not crop to the one it was told")
             if fa.get("margins"):
                 chk("fov_restrict_margin_black", fa.get("margin_black_frac", 0) >= 0.95, {"margin_black": fa.get("margin_black_frac"), "margins": fa["margins"]},
                     ">= 95 % of the samples in the middle of each trimmed margin of the decoded stream are black: the stream still covers the headset's view")
