@@ -157,7 +157,8 @@ restriction on with the same box (picture and GPU as before, plus the sharper st
 | 2 | "Don't restrict this game" | step 1 (GUI + host) | second start of a fixed-size probe is told the full view | the Enshrouded mod: view back, same fps |
 | 3 | Headset view setting and the channel | engine approval + client build | mock client follows the message (`--views-tan` replaced); stream sized from the view | Calibrated sharper than Panel at equal stream size; no black at Panel |
 | 4 | Card rework: two rows, "Restrict to the headset view", yellow ring warning | GUI only | `ui_matrix` rows | |
-| 5 | Panel end from Apple's rate map, if `[ratemap]` shows the lens window | step 3 | | one wearer per light seal size |
+| 5 | ~~Panel end from Apple's rate map~~ **dropped**: the map does not mark the lens window (section 8) | | | |
+| 5b | Foveated encoding shaped like Apple's rate map (section 8): an existing-parameters profile, no engine change | session settings | encode time and judge at iso centre quality | A/B by eye |
 
 ## 7. Not decided
 
@@ -167,3 +168,39 @@ restriction on with the same box (picture and GPU as before, plus the sharper st
 - Whether the restriction fields stay visible once "Restrict to the headset view" exists (proposal: yes, under the card's Advanced part, for
   performance below the view).
 - The Quest: whether a smaller headset view than the runtime's is ever useful (sharpness at the edge's expense); no request so far.
+
+## 8. What Apple's rasterization rate map says (client 1.3.2 `[ratemap]`, one tester, 2026-11-04 23:46, `alvr.log`)
+
+Six snapshots per eye, 20 s apart, **identical to two decimals**: a static map in that session (not following the gaze, as far as one session with
+a still wearer can tell). The compositor's frustum was exactly **60 / 45 / 50 / 45 degrees** (tangents 1.732 / 1.000 / 1.192 / 1.000, left eye outer /
+inner / up / down): round design values, the same box for every wearer. Logical screen 6261 x 5023 per eye, physically rasterized 2432 x 2368.
+
+Rate (physical pixels per logical pixel, 1 = full) across the left eye:
+
+| Horizontal, outer -> inner | -59 | -50 | -40 | -28 | -20 | -12 | -3 | +7 | +16 | +24 | +31 | +37 | +43 deg |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| rate | 0.06 | 0.09 | 0.15 | 0.30 | 0.70 | 0.96 | 1.00 | 0.99 | 0.94 | 0.43 | 0.23 | 0.17 | 0.13 |
+
+| Vertical, up -> down | +48 | +41 | +32 | +26 | +20 | +13 | +6 | -2 | -9 | -16 | -23 | -34 | -43 deg |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| rate | 0.12 | 0.19 | 0.32 | 0.66 | 0.97 | 1.00 | 1.00 | 0.94 | 0.89 | 0.58 | 0.28 | 0.15 | 0.10 |
+
+Rate at or above 0.5 from about 24 degrees outer to 23 inner, 29 up to 18 down; at or above 0.25: 31 / 30 / 36 / 25; at or above 0.15: 40 / 40 / 44 / 34.
+
+What follows:
+
+- **It is not the lens window.** The rate never reaches zero (0.06 at the outer edge) and does not depend on the wearer: it is a fixed falloff of
+  resolution, not a visibility mask. Step 5 (an automatic Panel box from it) is dropped; the headset view stays Panel or the wearer's calibration.
+- **It is a ceiling on what the stream can show.** The client draws the frame through this map (`Renderer.swift` passes the drawable's
+  `rasterizationRateMap` to its render passes), so detail the stream carries beyond the rate is discarded on the headset. The tester's stream
+  (4096 x 3584 per eye over the declared box 1.83 + 1.04, about 1430 px per tangent unit horizontally) is below the full-rate density in the
+  centre (about 2290 px/tan) but above it in the periphery: the map keeps about 690 px/tan at 28 degrees outer (2x fewer than the stream carries),
+  340 at 40 degrees (4x), 140 at the outer edge (10x). Much of the peripheral detail we encode, send and decode is discarded by the compositor.
+- **So foveated encoding should be shaped on this map** (step 5b): the target is a profile that never compresses below the map (no visible loss)
+  and compresses down to it elsewhere. ALVR's foveation has another shape (a full-density band, then a fixed 4 to 5 times compression;
+  `docs/FOV_PIPELINE_OPTIM.md`), so the comparison is per region, not "more" or "less": `harness/fov_stream_geometry.py` (ALVR's maths ported)
+  is the tool to fit the existing `foveated_encoding` settings (centre size, shift, edge ratio) under the map, then measure encode time in the lab
+  and judge by eye. The tester streams full frame (no foveation) at 8192 x 3584, the case where the gain would be largest; not assumed until measured.
+- Caveats: one session, one wearer, one visionOS version; a dynamic (gaze-driven) map in other conditions would change the last point (foveation
+  would then have to stay wide). The `[ratemap]` lines are temporary: remove them from the client in its next build.
+
