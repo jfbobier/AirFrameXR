@@ -15,7 +15,7 @@ WANT = [
     "zero_red=Invalid",
     "negative_red=Invalid",
     "deg90_red=Invalid",
-    "over_declared_red=Invalid area=1.00",
+    "over_declared_yellow=Strange area=0.94",     # above the declared box is a note, not an error (the streamer caps each edge); the share counts each edge at most the declared one
     "avp_calibration_valid=Valid",
     "quest_trim_valid=Valid area=0.90",          # the Quest 3 starting point: 51 / 40 / 43 / 54 degrees, about 10 % less area than the declared box
     "quest_declared_valid=Valid area=1.00",

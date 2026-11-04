@@ -469,7 +469,7 @@ namespace AirFrameXR
                 lines.Add("zero_red=" + Show(new[] { 0.9, 0.0, 0.7, 0.6 }, FovUnit.Tangent, null));
                 lines.Add("negative_red=" + Show(new[] { 0.9, -0.1, 0.7, 0.6 }, FovUnit.Tangent, null));
                 lines.Add("deg90_red=" + Show(new[] { 90.0, 40, 40, 40 }, FovUnit.Degrees, null));
-                lines.Add("over_declared_red=" + Show(new[] { 1.5, 0.8, 0.9, 1.4 }, FovUnit.Tangent, quest));
+                lines.Add("over_declared_yellow=" + Show(new[] { 1.5, 0.8, 0.9, 1.4 }, FovUnit.Tangent, quest));
                 lines.Add("avp_calibration_valid=" + Show(new[] { 0.97, 0.71, 0.69, 0.63 }, FovUnit.Tangent, null));
                 lines.Add("quest_trim_valid=" + Show(new[] { 51.0, 40, 43, 54 }, FovUnit.Degrees, quest));
                 lines.Add("quest_declared_valid=" + Show(quest, FovUnit.Tangent, quest));

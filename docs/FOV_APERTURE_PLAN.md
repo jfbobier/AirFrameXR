@@ -1,5 +1,8 @@
 # FOV end to end: the aperture plan
 
+**Superseded in its model by `docs/END_TO_END_FOV_DESIGN.md` (2026-11-04):** the headset view and the performance restriction stay two separate
+settings instead of one "aperture"; the game behaviours, the measurements, the `Reserved(String)` channel and the lab work below still apply.
+
 Status 2026-11-04: **plan, nothing of the aperture built.** Built today: the visionOS client 1.3.2 (TestFlight build 38: the client declares the
 compositor's own frustum, the fixed ceiling is gone) and the lab's game behaviours (`xr_probe` options and four `e2e_fov_game_*` scenarios, compile
 and syntax checked, **not run**: both builders offline). Follows `docs/FOV_CLIENT_CEILING.md` (the ceiling, now removed), `docs/FOV_PIPELINE_OPTIM.md`

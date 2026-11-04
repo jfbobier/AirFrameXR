@@ -270,13 +270,21 @@ namespace AirFrameXR
             }
             if (c.Level == FovLevel.Invalid) return c;
 
-            if (declared != null && declared.Length == 4)
-                for (int k = 0; k < 4; k++)
-                    if (c.Tan[k] > declared[k] * OverDeclaredTolerance)
-                        c.Red(Names[k] + " " + F(c.Tan[k]) + " is more than the headset shows (" + F(declared[k]) + ", " + F(Math.Atan(declared[k]) * 180 / Math.PI) + "°): a game cannot be given more than that.");
             c.TotalH = c.Deg[0] + c.Deg[1]; c.TotalV = c.Deg[2] + c.Deg[3];
-            if (declared != null && declared.Length == 4) c.AreaShare = (c.Tan[0] + c.Tan[1]) * (c.Tan[2] + c.Tan[3]) / ((declared[0] + declared[1]) * (declared[2] + declared[3]));
-            if (c.Level == FovLevel.Invalid) return c;
+            if (declared != null && declared.Length == 4)
+            {
+                // Above what the headset app declared at its last connection: not an error. A calibration measures the wearer, not the app; the streamer gives
+                // a game at most the declared box per edge (vision::fov_scale_from), so the extra is unused until the app declares more. The Vision Pro apps
+                // 1.2.0 to 1.3.1 declared a fixed box (about 1.04 / 0.79 / 0.76 / 0.87) that cut wearers who see more; 1.3.2 declares the whole panel.
+                var over = Enumerable.Range(0, 4).Where(k => c.Tan[k] > declared[k] * OverDeclaredTolerance).ToList();
+                if (over.Count > 0)
+                    c.Yellow(string.Join(", ", over.Select(k => Names[k] + " " + F(c.Tan[k]))) + (over.Count == 1 ? " is" : " are") + " more than the headset app declared at its last connection ("
+                             + string.Join(", ", over.Select(k => F(declared[k]) + " = " + F(Math.Atan(declared[k]) * 180 / Math.PI) + "°")) + "). Games get at most that until the app declares more:"
+                             + " with an older AirFrameXR Vision Pro app (1.2.0 to 1.3.1) update it to 1.3.2 or later and connect once; the values are kept as they are.");
+                // the share of the declared box a game renders: each edge counts at most the declared one (what the streamer gives)
+                double E(int k) => Math.Min(c.Tan[k], declared[k]);
+                c.AreaShare = (E(0) + E(1)) * (E(2) + E(3)) / ((declared[0] + declared[1]) * (declared[2] + declared[3]));
+            }
 
             if (unit == FovUnit.Tangent && c.Tan.Any(t => t > LooksLikeDegrees)) c.Yellow("A value above " + F(LooksLikeDegrees) + " is a tangent of more than 71°: did you type degrees?");
             if (Ratio(c.Tan[0], c.Tan[1]) > MaxSideRatio) c.Yellow("Outer and inner differ a lot (" + F(c.Tan[0]) + " against " + F(c.Tan[1]) + "); the nose side is usually the smaller, but not by that much.");
