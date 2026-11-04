@@ -27,6 +27,17 @@ The Quest's OpenXR runtime reports the lens window itself (`xrLocateViews`; Ques
 outer / inner / up / down, constant across sessions). The client declares it, the compositor reprojects the frame over it (`client_openxr`
 `stream.rs`: the projection layer carries the frame's FOV). Nothing to calibrate, nothing to set. *Shipped* (Quest client 1.3).
 
+**UI rule (decided 2026-11-04): no headset fine tuning for Meta Quest users.** A smaller headset view could only cut picture the wearer sees, and
+there is no oversized box to correct. When the last headset seen is a Quest (the name in `config\airframexr_views.json`, as `video.fov_for_headset`
+already uses; Quest 3, Quest Pro, Quest 2, stock or AirFrameXR client):
+
+- the **Headset view** row (Panel .. Calibrated) is shown **greyed**, with one line: "The Quest reports what its lenses show: nothing to tune."
+  Greyed rather than hidden, so the card looks the same for everyone and says why;
+- **Calibrate now** (the 30-minute sweep) is not proposed in the FOV card, the profile manager or the setup wizard's Field of view step;
+- the **performance restriction** stays fully available (the Quest 3 starting point 51 / 40 / 43 / 54 degrees is a restriction profile, about 10 %
+  fewer game pixels), and so does **Check with fovgrid** (it checks a restriction rectangle on any headset);
+- no headset seen yet: everything enabled, as today. A Vision Pro seen later enables the row again.
+
 ### Apple Vision Pro: a setting, because visionOS does not tell us what the wearer sees
 
 What visionOS gives: the frustum the compositor wants rendered, from `LayerRenderer.Drawable` at run time (`computeProjection`), about
@@ -129,7 +140,7 @@ view they are outside what the wearer sees, so nothing visible is lost; with a P
 | Vision Pro client | declares Apple's frustum (1.3.2) | declares `min(panel, box from the streamer)` when the streamer sends one; Apple's frustum otherwise (old streamers keep working) |
 | Channel streamer -> client | none | ALVR v20 `ServerControlPacket::Reserved(String)`, ignored by stock clients: `{"airframexr":1,"headset_view":[o,i,u,d]}` at connection and on change. Engine (server side) + client (`client_core` event + Swift) |
 | Quest client | declares the runtime's FOV | unchanged (may accept the same message later; no need today) |
-| Streamer, launcher | restriction fields; stream fit tick | FOV card: headset view (Panel .. Calibrated) and the restriction as two separate rows; "Restrict to the headset view"; the yellow ring warning; stream size from the headset view (the existing pipeline model); per-game list |
+| Streamer, launcher | restriction fields; stream fit tick | FOV card: headset view (Panel .. Calibrated, greyed for a Quest, section 2) and the restriction as two separate rows; "Restrict to the headset view"; the yellow ring warning; stream size from the headset view (the existing pipeline model); per-game list |
 | Shim | told FOV and size; composes the submitted FOV | records what each game submitted (size, FOV per eye) once per run into the IPC: no per-frame cost |
 | Host | forwards the restriction | run record `game_submitted` + verdict; applies `video.fov_unrestricted_games` at game start (scale 1 for that executable) |
 | Game statistics | pipeline strip | the verdict per game and the "Don't restrict this game" button |
