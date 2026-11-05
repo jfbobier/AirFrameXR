@@ -204,3 +204,22 @@ What follows:
 - Caveats: one session, one wearer, one visionOS version; a dynamic (gaze-driven) map in other conditions would change the last point (foveation
   would then have to stay wide). The `[ratemap]` lines are temporary: remove them from the client in its next build.
 
+
+## 9. Field data from the test slider (client branch `calibration-fov-slider`, TestFlight build 39)
+
+The slider scales the compositor's frustum on every edge alike (0.70 to 1.00, steps of 0.05); the tester reports the lowest value without a
+black edge, the edge that goes black first and the light seal. The app logs one `[fovtest]` line per connection (`logs\alvr.log`).
+
+| Wearer (client id) | Light seal | Lowest value without black | First edge to go black | Frustum logged (left eye o / i / u / d) | IPD | visionOS | What it bounds (left eye tangents) |
+|---|---|---|---|---|---|---|---|
+| B (7488), 2026-11-05 | 25W | **0.80** | **bottom** | 1.758 / 1.011 / 1.208 / 1.013, then 1.742 / 1.004 / 1.198 / 1.005 | 65.6, then 66.6 mm | 27.2 (24N120) | lower edge between 0.76 and 0.81 (37 to 39 degrees); at 0.75 the other edges showed no black, so outer at most 1.31, inner 0.75, upper 0.90 |
+| A (5299), 2026-11-04 | not reported | (no slider) the stock app at 0.80 showed no black; client 1.3.1's box (1.06 / 0.81 / 0.77 / 0.88 declared) did, outer and top | | 1.732 / 1.000 / 1.192 / 1.000 | | | outer above 1.06, upper above 0.77 |
+
+What this adds (two wearers, not a population):
+
+- **The frustum is not a fixed constant**: wearer B's varies by about 1 % with the IPD the headset measured (two connections 7 s apart,
+  65.6 then 66.6 mm). Wearer A's was exactly 60 / 45 / 50 / 45 degrees.
+- **The rate map is the same on both headsets**, to two decimals: a fixed map, not per wearer (section 8).
+- **0.80 of the frustum shows no black for both wearers**, which would be about 25 % more stream pixels per degree on each axis than 1.00 at
+  the same stream size. For wearer B the bottom edge is the limit and the other three edges have room to spare: a uniform scale wastes that room,
+  a per-edge box (the calibration) would not. Not a default yet: more answers first, with light seal sizes.
