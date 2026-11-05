@@ -320,6 +320,15 @@ int main(int argc, char** argv) {
             L("render size forced %ux%u (the game ignores the recommended size)", fw, fh);
         }
     }
+    // A game with a resolution scale (a supersampling setting): XR_PROBE_RENDER_SCALE=1.25 renders the recommended size times the factor per axis, following the
+    // restriction. In one run it looks like a fixed size whose aspect matches the told box: only a second run under another box tells them apart.
+    if (const char* rsc = getenv("XR_PROBE_RENDER_SCALE")) {
+        const double k = atof(rsc);
+        if (k >= 0.25 && k <= 4.0 && !getenv("XR_PROBE_RENDER_SIZE")) {
+            for (auto& v : vcv) { v.recommendedImageRectWidth = (uint32_t)(v.recommendedImageRectWidth * k + 0.5) & ~1u; v.recommendedImageRectHeight = (uint32_t)(v.recommendedImageRectHeight * k + 0.5) & ~1u; }
+            L("render size forced %ux%u (the recommended size scaled %.2f: a resolution scale)", vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight, k);
+        }
+    }
     // A game (mod) that ignores the runtime's field of view: XR_PROBE_RENDER_FOV=outer,inner,up,down tangents (left eye; the right eye mirrors it)
     // renders with its own frustum and submits that frustum honestly in the projection layer. The runtime's own values are still logged first.
     float forcedFov[4] = {0, 0, 0, 0};
@@ -327,6 +336,21 @@ int main(int argc, char** argv) {
         sscanf(getenv("XR_PROBE_RENDER_FOV"), "%f,%f,%f,%f", &forcedFov[0], &forcedFov[1], &forcedFov[2], &forcedFov[3]) == 4 &&
         forcedFov[0] > 0 && forcedFov[1] > 0 && forcedFov[2] > 0 && forcedFov[3] > 0;
     if (fovForced) L("render fov forced outer %.4f inner %.4f up %.4f down %.4f (the game ignores the runtime's field of view)", forcedFov[0], forcedFov[1], forcedFov[2], forcedFov[3]);
+    // Mods that DERIVE their frustum from the one they are told (they look as if they honour a restriction, but submit another box), or lie about it.
+    // XR_PROBE_SUBMIT_FOV:
+    //   union     the union of both eyes' frusta for each eye (left = the smaller left of the two eyes, right = the larger right, up / down alike), rendered and
+    //             submitted for both eyes: the Uncharted community VR mod (uncharted_pc vr_openxr.cpp:650-653 and :897); its outer edges follow a restriction,
+    //             its inner edges become the other eye's outer ones
+    //   symmetric the largest half-tangent over both eyes and every edge, per axis, as a symmetric frustum (-tx, tx, ty, -ty) for both eyes: our Gravity
+    //             Rush 2 mod (flat2vrharness patches/0020 :1167 and :1985), which also renders a fixed 16:9 size (XR_PROBE_RENDER_SIZE=3840x2160)
+    //   lie       draws with its own frustum (XR_PROBE_RENDER_FOV) but submits the one it was told: no data can tell, only the picture's geometry
+    // Each derived frustum is logged once per eye ("submitted fov tan eye k: ..."); the harness takes the box the game submitted from those lines.
+    int submitMode = 0;   // 0 told (or the forced frustum), 1 union, 2 symmetric, 3 lie
+    if (const char* sm = getenv("XR_PROBE_SUBMIT_FOV")) submitMode = !strcmp(sm, "union") ? 1 : !strcmp(sm, "symmetric") ? 2 : !strcmp(sm, "lie") ? 3 : 0;
+    if (submitMode == 3 && !fovForced) { L("XR_PROBE_SUBMIT_FOV=lie needs XR_PROBE_RENDER_FOV (the frustum it really draws): ignored"); submitMode = 0; }
+    if (submitMode) L("submit fov mode %s", submitMode == 1 ? "union" : submitMode == 2 ? "symmetric" : "lie");
+    XrFovf toldFov[2]{};
+    bool submitLogged = false;
 
     CK(xrEnumerateSwapchainFormats(sess, 0, &n, nullptr));
     std::vector<int64_t> fmts(n);
@@ -500,6 +524,22 @@ int main(int argc, char** argv) {
                 fovLogged = true;
                 for (uint32_t k = 0; k < 2; k++)
                     L("view fov tan eye %u: L %.4f R %.4f U %.4f D %.4f", k, -tanf(views[k].fov.angleLeft), tanf(views[k].fov.angleRight), tanf(views[k].fov.angleUp), -tanf(views[k].fov.angleDown));
+            }
+            for (uint32_t k = 0; k < vc && k < 2; k++) toldFov[k] = views[k].fov;   // what the runtime told, kept for XR_PROBE_SUBMIT_FOV=lie
+            if ((submitMode == 1 || submitMode == 2) && vc >= 2) {
+                XrFovf f{};
+                if (submitMode == 1) {
+                    f.angleLeft = std::min(views[0].fov.angleLeft, views[1].fov.angleLeft); f.angleRight = std::max(views[0].fov.angleRight, views[1].fov.angleRight);
+                    f.angleUp = std::max(views[0].fov.angleUp, views[1].fov.angleUp); f.angleDown = std::min(views[0].fov.angleDown, views[1].fov.angleDown);
+                } else {
+                    float tx = 0, ty = 0;
+                    for (uint32_t k = 0; k < 2; k++) {
+                        tx = std::max({tx, tanf(fabsf(views[k].fov.angleLeft)), tanf(fabsf(views[k].fov.angleRight))});
+                        ty = std::max({ty, tanf(fabsf(views[k].fov.angleUp)), tanf(fabsf(views[k].fov.angleDown))});
+                    }
+                    f.angleLeft = -atanf(tx); f.angleRight = atanf(tx); f.angleUp = atanf(ty); f.angleDown = -atanf(ty);
+                }
+                views[0].fov = views[1].fov = f;
             }
             if (fovForced) {   // after the log line above: the harness compares what the runtime told with what the game did
                 for (uint32_t k = 0; k < vc && k < 2; k++) {
@@ -776,7 +816,13 @@ int main(int argc, char** argv) {
                 ctx->Flush();
                 XrSwapchainImageReleaseInfo rl{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
                 r = xrReleaseSwapchainImage(sc[i], &rl); if (XR_FAILED(r)) return fail("xrReleaseSwapchainImage", r);
-                pv[i].pose = views[i].pose; pv[i].fov = views[i].fov;
+                pv[i].pose = views[i].pose; pv[i].fov = submitMode == 3 ? toldFov[i] : views[i].fov;
+                if (submitMode && !submitLogged && i == (uint32_t)vcv.size() - 1) {
+                    submitLogged = true;
+                    for (uint32_t k = 0; k < 2 && k < (uint32_t)vcv.size(); k++)
+                        L("submitted fov tan eye %u: L %.4f R %.4f U %.4f D %.4f (%s)", k, -tanf(pv[k].fov.angleLeft), tanf(pv[k].fov.angleRight), tanf(pv[k].fov.angleUp),
+                          -tanf(pv[k].fov.angleDown), submitMode == 1 ? "union" : submitMode == 2 ? "symmetric" : "lie: drawn with its own frustum");
+                }
                 pv[i].subImage.swapchain = sc[i]; pv[i].subImage.imageRect = { {0,0}, {(int)vcv[i].recommendedImageRectWidth, (int)vcv[i].recommendedImageRectHeight} };
             }
             layer.space = space; layer.viewCount = (uint32_t)pv.size(); layer.views = pv.data();

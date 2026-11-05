@@ -333,8 +333,8 @@ namespace AirFrameXR
 
         /// docs/PICTURE_EDGES_DESIGN.md sections 6 and 9 (owner's UI review 2026-11-05), checked on the real forms by control names, so the GUI work
         /// of steps A and B has a fixed target. The contract (AccessibleName): "Whole panel" (wizard radio), "Fit now" (wizard button), "Fit the picture
-        /// to your eyes" (card and manager button), "Picture edges" (the card's row), "Retry" (calibrate.exe); the restriction keeps "Restrict the field of
-        /// view" (or "What the game renders"). Gone from every window: "Calibrate now (30 min...)" and "Check with fovgrid". One key=value line per window
+        /// to your eyes" (the Vision Pro card and the manager), "Picture edges" (the Vision Pro card in the launcher, the wizard calls the same card), "Retry"
+        /// (calibrate.exe); the FOV restriction lives in Advanced video and performance settings as "Restrict the field of view" (or "What the game renders"). Gone from every window: "Calibrate now (30 min...)" and "Check with fovgrid". One key=value line per window
         /// and headset; the expected lines are in the Python checker. Written before the UI: most lines differ until steps A and B are built.
         static int FovUiPlanSelfTest(string outDir)
         {
@@ -369,10 +369,17 @@ namespace AirFrameXR
                         Hidden(m);
                         lines.Add($"manager_{tag}: fit={B(On(m, "Fit the picture to your eyes"))} ray_calibration={B(Text(m, "Calibrate now") || Text(m, "30 min"))} fovgrid_button={B(Text(m, "Check with fovgrid"))} typed_values={B(TypedBoxes(m) >= 4)} per_eye={B(Text(m, "per eye"))}");
                     }
-                    using (var c = new FovPanelTestForm(tag == "quest" ? new[] { 1.376, 0.839, 0.966, 1.428 } : new[] { 1.732, 1.0, 1.192, 1.0 }, false, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()))
+                    // the launcher: the Vision Pro calibration is its own card (the mini app), absent unless a Vision Pro was seen; the FOV restriction is not in the launcher
+                    using (var l = new LauncherForm())
                     {
-                        Hidden(c);
-                        lines.Add($"card_{tag}: picture_edges={B(On(c, "Picture edges"))} fit={B(On(c, "Fit the picture to your eyes"))} restriction={B(On(c, "Restrict the field of view", "What the game renders"))}");
+                        Hidden(l);
+                        lines.Add($"launcher_{tag}: avp_card={B(Has(l, "Picture edges"))} fit={B(On(l, "Fit the picture to your eyes"))} restriction={B(Has(l, "Restrict the field of view", "What the game renders"))}");
+                    }
+                    // Advanced video and performance settings: the FOV restriction for every headset
+                    using (var a = new AdvancedForm())
+                    {
+                        Hidden(a);
+                        lines.Add($"advanced_{tag}: restriction={B(On(a, "Restrict the field of view", "What the game renders"))} picture_edges={B(Has(a, "Picture edges"))}");
                     }
                 }
                 SetHeadset("Apple Vision Pro");

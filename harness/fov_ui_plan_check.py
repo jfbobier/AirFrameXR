@@ -2,11 +2,12 @@
 """The field-of-view UI of docs/PICTURE_EDGES_DESIGN.md sections 6 and 9 (the owner's UI review of 2026-11-05), checked on the real forms
 (tools/gui/UiTest.cs --fov-ui-plan-selftest, by control names; the contract is in the comment above FovUiPlanSelfTest):
 
-  - Vision Pro: the wizard offers "Whole panel" and "Fit now", no ray calibration and no restriction list; the settings card has the
-    picture-edges row and "Fit the picture to your eyes" (the retry); the profile manager has the fit, typed values and a per-eye row.
-  - Meta Quest: no headset calibration anywhere (no fit, no picture edges, greyed in the card and the manager), the FOV restriction stays
-    (wizard choice, card row, typed values).
-  - No headset seen yet: everything enabled.
+  - Vision Pro: the wizard offers "Whole panel" and "Fit now", no ray calibration and no restriction list; the launcher has the Vision Pro card
+    (picture edges + "Fit the picture to your eyes", the retry); the profile manager has the fit, typed values and a per-eye row.
+  - Meta Quest: no headset calibration anywhere (no Vision Pro card in the launcher, no fit in the manager), the FOV restriction stays (wizard
+    choice, Advanced video and performance settings, typed values).
+  - No headset seen yet: no Vision Pro card (the wizard pairs a headset first); the manager's fit enabled.
+  - The FOV restriction lives in Advanced video and performance settings for every headset, not in the launcher.
   - Everywhere: the 30-minute ray calibration and the fovgrid button are gone; calibrate.exe opens on the fit (Retry, the Space instruction).
 
 Written before the UI (test-first): until steps A and B are built most lines FAIL; `today` below is what 2026-11-05's GUI prints.
@@ -22,11 +23,14 @@ WANT = [
     "wizard_avp: whole_panel=True fit_now=True ray_calibration=False restriction=False",
     "wizard_quest: whole_panel=False fit_now=False ray_calibration=False restriction=True",
     "manager_avp: fit=True ray_calibration=False fovgrid_button=False typed_values=True per_eye=True",
-    "card_avp: picture_edges=True fit=True restriction=True",
+    "launcher_avp: avp_card=True fit=True restriction=False",
+    "advanced_avp: restriction=True picture_edges=False",
     "manager_quest: fit=False ray_calibration=False fovgrid_button=False typed_values=True per_eye=True",
-    "card_quest: picture_edges=False fit=False restriction=True",
+    "launcher_quest: avp_card=False fit=False restriction=False",
+    "advanced_quest: restriction=True picture_edges=False",
     "manager_none: fit=True ray_calibration=False fovgrid_button=False typed_values=True per_eye=True",
-    "card_none: picture_edges=True fit=True restriction=True",
+    "launcher_none: avp_card=False fit=False restriction=False",
+    "advanced_none: restriction=True picture_edges=False",
     "calibrate: retry=True fit_instructions=True ray_sweep=False",
 ]
 

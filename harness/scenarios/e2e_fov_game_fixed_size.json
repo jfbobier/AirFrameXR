@@ -101,7 +101,9 @@
       "render_saving": [
         -0.01,
         0.01
-      ]
+      ],
+      "verdict": "undecided",
+      "truth": "fixed size 1760x1600: within 2 % of the told aspect (1.10 against 1.12), so one run cannot tell it from a resolution scale"
     },
     "timestamps_monotonic": false
   }

@@ -1,6 +1,6 @@
 # Picture edges: the recommended end-to-end design
 
-Status 2026-11-05 (evening): **proposal; lab and oracle work done, product not built.** Review of 2026-11-05 folded in: step 0 (the vertical
+Status 2026-11-05 (night): **proposal; lab, oracle and UI tests done, product not built.** Built on branch `1.4` (engine changes allowed there, owner 2026-11-05). Review of 2026-11-05 folded in: step 0 (the vertical
 orientation) comes first, the work order is 0, A, D, B, C (section 11), the verdict compares the told *size* (section 7), the margin costs
 about 7.5 % per axis, the migration does not keep a default nobody chose (section 8). Replaces the model of `docs/END_TO_END_FOV_DESIGN.md` (sections 1 to 7); that document's
 measurements stay the evidence: the rate map (section 8), the test-slider answers (section 9), the game behaviours and the lab work of
@@ -204,18 +204,38 @@ only remaining use is the polygon a hidden-area mask would need (section 10), wh
 from the command line and `harness/fov_calibration.py`, undocumented for users; removed with the mask decision. Sweep profiles users already
 saved stay in their list. `fovgrid.bat` stays in `bench\` for support; its "Check with fovgrid" button goes, the fit is its own check.
 
-## 7. Games that ignore G (**engine**: shim + host; the rules are GUI)
+## 7. Games that ignore G: the intake (**engine**: shim + host, branch `1.4`; the rules are GUI)
 
-The shim records, once at 2 s of a game and again on change, the size and FOV per eye of the layer the game submits, against what it was told
-(no per-frame cost); the host writes them in the run record and the verdict:
+The shim records, once at 2 s of a game and again on change, the size and the FOV **per eye** of the layer the game submits, against what it
+was told (no per-frame cost); the host emits one `game_fov_verdict` event (told box and size, submitted box and size, verdict) and writes the
+same into the run record. The rules, in this order, on each eye and each edge:
 
 | Verdict | Rule | Effect of G | Action |
 |---|---|---|---|
-| own frustum | submitted FOV differs from the told one by more than 0.01 | none | ignore list |
-| fixed size | FOV matches, but the aspect ratio of the submitted size differs from the told **recommended size**'s by more than 5 % (a fixed, often square render packed into our box). Not the box's tangent aspect: the stream's density differs per axis (1300 against 1460 px/tan at P), so the told size of the author's fit is 2184 x 1927 (1.13) while its tangent box is 1.27, 12 % apart: every honouring game would be flagged | no GPU saved, view shrunk | ignore list |
-| fixed size, second form | a previous run of the same executable under another G exists and the submitted size did not move with the box | same | ignore list |
-| honours | aspect matches; the area may differ (a resolution scale) | saves GPU | nothing |
-| lie (renders its own view, submits the told FOV) | not detectable | distorted picture | the user's eyes; manual entry |
+| `own_frustum` | any submitted edge differs from the told one by more than 0.01 (tangent), on either eye. Catches the mods that derive their box from the told one: the union of both eyes (Uncharted: the inner edge becomes the other eye's outer), a symmetric max-tangent box (our Gravity Rush 2 mod): their outer edges follow a restriction, so they *look* as if they honoured it | none | ignore list |
+| `fixed_size` | FOV as told, but the aspect of the submitted size differs from the told **recommended size**'s by more than 5 %. Not the box's tangent aspect: the stream's density differs per axis (1300 against 1460 px/tan at P), so the told size of the author's fit is 2184 x 1927 (1.13) while its tangent box is 1.27 | no GPU saved, view shrunk | ignore list |
+| `undecided` | FOV as told, aspect within 5 %, size different from the told one: a resolution scale (honest) and a fixed size that happens to keep the aspect (a uniform restriction, or a fixed size close to the told aspect: 1760 x 1600 against the fit's 1.12) give the same numbers in one run | unknown | nothing yet; decided at the next start of that executable under another box: the size followed the box = `honours`, it did not = `fixed_size` |
+| `honours` | FOV as told, size as told (within 2 pixels), or a previous run showed the size following the box | saves GPU | nothing |
+| lie (draws its own view, submits the told FOV and size) | not detectable from data: reported `honours` | distorted picture | the user's eyes; manual entry in the ignore list |
+
+The harness has a fake game for every row (`xr_probe`: `XR_PROBE_RENDER_SIZE`, `XR_PROBE_RENDER_FOV`, `XR_PROBE_RENDER_SCALE`,
+`XR_PROBE_SUBMIT_FOV=union|symmetric|lie`) and knows the truth of each; the scenarios assert the host's verdict (`checks.fov_restrict.verdict`,
+the `truth` field says what the game really does):
+
+| Scenario | Fake game | Truth | Expected verdict |
+|---|---|---|---|
+| `e2e_fov_game_honours` | told FOV, recommended size | honours (UEVR, native games) | `honours` |
+| `e2e_fov_game_uncharted` | union of both eyes, fixed 2160 x 2160 | Uncharted community VR (`uncharted_pc` vr_openxr.cpp:650, :897) | `own_frustum` |
+| `e2e_fov_game_gr2` | symmetric max-tangent box, fixed 3840 x 2160 | our Gravity Rush 2 mod (flat2vrharness patches/0020 :1167, :1985) | `own_frustum` |
+| `e2e_fov_game_own_fov` | the panel's frustum, fixed size | ignores both | `own_frustum` |
+| `e2e_fov_game_square_mod` | symmetric 1.3, 2048 x 2048, no restriction asked | square mod | `own_frustum` |
+| `e2e_fov_game_fixed_size` | told FOV, fixed 1760 x 1600 (aspect within 2 % of the told one) | fixed size | `undecided` (first run) |
+| `e2e_fov_game_fixed_uniform` | told FOV, fixed 1760 x 1600, uniform 80 % restriction | fixed size | `undecided` (first run) |
+| `e2e_fov_game_res_scale` | told FOV, 1.25 resolution scale, uniform 80 % restriction | honours | `undecided` (first run): the same numbers as the one above |
+| `e2e_fov_game_lie` | draws the panel, submits the told box | lies | `honours` (the known limit, asserted on purpose) |
+
+Owed in the harness with the engine: the second start (a scenario that starts the same probe twice under two boxes: `undecided` becomes
+`fixed_size` or `honours`, and an ignore-listed game is told V at its second start).
 
 Ignore list: `video.fov_unrestricted_games` (executables). A verdict of own frustum or fixed size adds the executable automatically; the game is
 told V at its next start. Automatic because it is the deterministic consequence of a measurement, acts at a game start (never mid-session), is
@@ -234,6 +254,18 @@ logged, shown in Game statistics with the verdict and the numbers, and reversibl
 | Launcher card, wizard, manager | section 9 | no |
 | Session settings | density rule, foveation re-anchoring, written by the launcher | no |
 
+**One engine model for every headset (branch `1.4`).** The engine knows no headset types. Per eye it has the box the headset app declares
+(`ViewsConfig`, D) and two optional settings:
+
+1. **Headset view V** (`video.headset_view`, per eye tangents). Unset: V = D (every Quest, and the Vision Pro on Whole panel). Set (by the
+   Vision Pro card): the host sends it to our client at connection and the client declares min(P, V), so D becomes V; the stream is sized from it.
+2. **Restriction G** (`video.fov_override` + tangents, per eye with schema 2; today the left eye mirrored). Capped by V, told to the game
+   (IPC `fovScale` 4 -> 8 values: today `vision::fov_scale_from` averages the two eyes per edge). Games on the ignore list are told V.
+
+A Quest needs no pre-calibrated value: its runtime reports the lens window (constant across sessions, measured). The difference between the
+headsets is only in the UI: the Vision Pro card writes V, the Advanced window writes G. Prerequisite: step 0 (the client's vertical order)
+before V travels to the client.
+
 Migration of today's settings: `fov_override` on with a profile's values becomes V = G = that profile (per eye mirrored) with margin 0 (the values
 were already the user's choice); off stays V = G = P. **Except** values equal to the shipped default 0.97 / 0.71 / 0.69 / 0.63 that the 1.2.0 wizard
 applied by itself (`HmdProfiles.ApplyFovDefault`): nobody chose them, and as V they would bring back the black bars of wearers who see more;
@@ -243,28 +275,26 @@ they become G only (V = P), with a one-time launcher line proposing the fit.
 
 **Which headset.** The name of the last headset seen (`config\airframexr_views.json`, the rule `video.fov_for_headset` already uses) or,
 in the wizard, the one just paired (`hs.DisplayName`). Quest = Quest 3, Quest Pro, Quest 2, our client or the stock one. No headset seen
-yet: everything enabled. Today no code applies this rule (decided 2026-11-04, documented only): built in step A.
+yet: no Vision Pro card, the manager's fit enabled. Today no code applies this rule (decided 2026-11-04, documented only): built in step A.
 
-**The settings card "Picture and performance"** (replaces "FOV restriction and calibration"):
+**The UI, one home per setting** (owner, 2026-11-05):
 
-1. *Picture edges*: `Whole panel` | a profile from the list, with **Fit the picture to your eyes (2 min)** (the retry: it opens the fit
-   again; the new profile is named by date and seal size and selected, the older ones stay in the list) and one line from the model:
-   "Picture: 57 % of the panel's sharpness; a fit typically gives about 90 %". **Quest: the row and the fit button are greyed**, one line:
-   "The Quest reports what its lenses show: nothing to fit."
-2. *What the game renders*: `The picture edges` (default) | a smaller profile, with the saving in game pixels and, when smaller than V, a yellow
-   line with the share of the picture that goes black. Available on every headset (the Quest 3 starting point is a G profile).
-3. *Games that ignore it*: the count, a link to Game statistics (verdict, numbers, the per-game tick), the global automatic/manual tick.
-4. Fold *Advanced*: render quality, stream density, full frame, the edge ratio preset, the pipeline preview and its split warnings (as today).
+| Setting | Where | Who sees it |
+|---|---|---|
+| Headset view (picture edges: `Whole panel` or a profile, **Fit the picture to your eyes (2 min)** = the retry, the sharpness line from the model) | its own mini app card in the launcher, "Vision Pro picture"; the wizard calls the same card when it pairs a Vision Pro | Vision Pro only: no card until a Vision Pro has been seen, never for a Quest |
+| FOV restriction (what the game renders: off, a profile, the Quest 3 starting point, typed values; the saving in game pixels and the yellow share that goes black when smaller than V; render quality) | back in **Advanced video and performance settings** (where it lived before step 3, `eb9b992`) | every headset |
+| Games that ignore it | Game statistics (verdict, numbers, the per-game tick) and the global automatic / manual tick in the Advanced window | every headset |
+| Stream density, full frame, edge ratio preset, pipeline preview and split warnings | Advanced, as today | every headset |
 
-**Wizard step "Picture edges"** (today's step 7 "Field of view"): on the Vision Pro, `Whole panel` selected, the button **Fit now (2 min,
-headset on)** that runs the fit inside the wizard (the streamer and the headset are already connected after the tests step), and `Next`
-works without fitting. No ray calibration, no profile list, no typed values (they stay in the settings card's manager). **On a Quest only
-the headset part goes**: no picture edges, no fit button, no calibration of any kind; the step keeps the FOV restriction (what the game
-renders: `No restriction` | the Quest 3 starting point | a profile), so a Quest user never sees a calibration but keeps the performance
-choice. The step's title becomes "What the game renders" there.
+The card and the Advanced window read the same profile store; the manager opens from both.
+
+**Wizard step "Picture edges"** (today's step 7 "Field of view"), on a Vision Pro: the Vision Pro card itself (`Whole panel` selected, **Fit
+now (2 min, headset on)**: the streamer and the headset are connected after the tests step; `Next` works without fitting). No ray calibration,
+no restriction list, no typed values. **On a Quest the step shows the restriction only** (`No restriction` | the Quest 3 starting point | a
+profile), titled "What the game renders": a Quest user never sees a calibration but keeps the performance choice.
 
 **Profile manager** (`configure.exe --fov`): list, rename, delete, import, typed values with the red / yellow check, the map. "Calibrate
-now (30 min)" and "Check with fovgrid" go; "Fit the picture to your eyes" takes their place (greyed on a Quest, as above).
+now (30 min)" and "Check with fovgrid" go; "Fit the picture to your eyes" takes their place (greyed on a Quest).
 
 **Manual profiles stay, for advanced users** (owner, 2026-11-05: some users want to enter any calibration they like). In the manager, as
 today: four typed values (outer, inner, up, down; tangents or degrees, the red / yellow check, the live map), import of a calibration file,
@@ -296,10 +326,10 @@ only be applied as G: the sharpness of section 3 waits for C and a client build.
 | Step | What | Needs | Lab | Headset |
 |---|---|---|---|---|
 | 0 | **Vertical orientation.** With a standard projection matrix the client declares the frustum upside down (`_extractFrustumTangents` returns left, right, bottom, top; `Renderer.swift` sends the third as up); its own defaults say 45 up / 50 down where our docs say 50 / 45. Log the raw `computeProjection` matrix once (one `[proj]` line per eye with the 16 values) in the next client build; if confirmed, fix the client (z, w order), re-read the `[ratemap]` vertical table mirrored and flip the vertical numbers of section 5b | client build (one log line, then a one-line fix) | `python3 harness/swift_headset_check.py` (the declaration check FAILS today and must PASS with the fix; `--projection-y-flipped` covers the other reading); then the Swift headset against the streamer: `views_config` in the host log equals the frustum | the `[proj]` line; fovgrid with asymmetric up / down marks, read by the wearer: the 0-degree line at eye level |
-| A | Wizard default `Whole panel`; author's profile relabelled, never proposed; `client_fov_scale` removed; card and wizard wording; the Quest rule of section 9 (headset part out: no picture edges, no fit, in the wizard and the settings; the FOV restriction stays); the ray sweep and the fovgrid button out of the UI; migration of section 8 (the shipped default is not a choice) | GUI | `ui_matrix` (new rows: on a Quest the wizard step shows the restriction choice and no fit, the card's picture-edges row and the fit button greyed, the restriction row enabled, enabled with no headset seen), `fov_store_check`, `fov_profile_check` (expects A: FAIL until built) | a fresh install shows no black |
+| A | The UI of section 9: the Vision Pro card in the launcher (absent for a Quest and before a Vision Pro is seen), the restriction back in Advanced video and performance settings, the wizard calling the card on a Vision Pro and showing the restriction only on a Quest; author's profile relabelled, never proposed; `client_fov_scale` removed; the ray sweep and the fovgrid button out of the UI; migration of section 8 | GUI | `python3 harness/fov_ui_plan_check.py [--local]` (12 lines, all FAIL on the 2026-11-05 GUI), `ui_matrix` (row `wizard-page7-quest`), `fov_store_check`, `fov_profile_check` (expects A) | a fresh install shows no black |
 | D | Density rule + rate-map foveation (section 5b), the zero-loss geometry: `PipelineModel` port of the oracle's `--ratemap` mode (`ratemap` in the profile and the oracle: done 2026-11-05). Vertical parameters only after step 0 | settings | `fov_stream_geometry.py --selftest`; `pipeline_model_check` (its grid has Apple's frustum, the fit and 4096 x 3584); `e2e_fov_avp_panel`, `e2e_fov_avp_panel_ratemap` (+ `_rule`) against `e2e_openxr_foveated` (layout, decoded counter and patch, encode ms); `e2e_fov_avp_fit_ratemap` (the vertical orientation of the band); the same with the Swift headset: the client's own foveation variables (`swift.client_foveation`, Float32 maths) equal the encoded frame the host sent (the host's FFR.cpp mixes float and double: a 32-pixel disagreement would misplace the client's decompression); `bench-quality --eye` at the encoded sizes; `slices_per_frame` = 3 at the new heights | A/B on the 5090 at Panel: today's 4 / 5 against the zero-loss geometry: encode ms, the judge, the eyes on the field where today over-compresses (the upper one, or the lower one if step 0 flips it); then a fitted V after C |
 | B | Black-bar fit: probe `fit` scene (blue box, keys read by the probe, JSON lines out, in-headset text with DirectWrite, Space to start) + `calibrate.exe` opening on it (Retry) + wizard button + profile schema 2; applied as G until C | probe + GUI | a scenario that starts the probe's `fit` scene with scripted keys (an env var feeding the same key handler) and reads the blue box's edges and the text screen in the decoded stream (`analyse_fov_restrict` margins; the text area inside 12 degrees); `ui_matrix` rows (wizard button, card retry) | two wearers fit themselves from the headset text alone; the fit matches their sweep within the margin |
-| C | Channel per eye (V to the client), G per eye, verdict (told **size** aspect, section 7), ignore list | **engine** + client build | the Swift headset follows the message with the client's real code (the Rust mock's `--views-tan` stand-in retired); `e2e_fov_game_*` assert the verdict and the skip at the second start; all `e2e_fov_*` as regressions | a fitted V visibly sharper than P at equal stream size; the Enshrouded mod lands on the ignore list by itself |
+| C | The unified model of section 8 (V to the client, G per eye, IPC `fovScale` 4 -> 8) and the intake of section 7 (shim records what the game submitted per eye, host `game_fov_verdict` event + run record, ignore list, `undecided` resolved at the next start) | **engine** (branch `1.4`) + client build | the Swift headset follows the message with the client's real code; the nine `e2e_fov_game_*` assert the verdict (`checks.fov_restrict.verdict`: FAIL until built, "no game_fov_verdict event"); the second-start scenario; all `e2e_fov_*` as regressions | a fitted V visibly sharper than P at equal stream size; the Enshrouded mod lands on the ignore list by itself; Gravity Rush 2 and Uncharted with their mods: `own_frustum` |
 | E | Mask, community box | **engine** / data | | after one Unreal measurement; after five wearers |
 
 Lab infrastructure owed for the steps above: the Swift headset against the streamer (`harness/swift_headset/README.md`: from WSL if the

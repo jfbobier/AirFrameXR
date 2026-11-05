@@ -98,7 +98,9 @@
       "render_saving": [
         0.6,
         0.7
-      ]
+      ],
+      "verdict": "honours",
+      "truth": "honours FOV and size (UEVR, native OpenXR games)"
     },
     "timestamps_monotonic": false
   }

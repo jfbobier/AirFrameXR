@@ -1063,7 +1063,15 @@ def analyse_fov_restrict(sc, outdir):
         gbox = [[o_, i_f, u_, d_], [i_f, o_, u_, d_]]   # per eye L, R, U, D (the right eye mirrors outer and inner)
     else:
         gbox = [list(got[0]), list(got[1])]
-    out["game"] = {"rendered": rendered, "size_ignored": bool(fs), "fov_ignored": bool(ff), "box": [[round(v, 4) for v in b] for b in gbox]}
+    # mods that derive their frustum from the told one (xr_probe XR_PROBE_SUBMIT_FOV: union = Uncharted, symmetric = Gravity Rush 2) log what they submit per
+    # eye; `lie` submits the told box while drawing its own (the picture lands in the told box with the wrong geometry: no data tells it)
+    sub = {int(m.group(1)): [float(m.group(k)) for k in range(2, 6)] for m in re.finditer(
+        r"submitted fov tan eye (\d): L ([0-9.]+) R ([0-9.]+) U ([0-9.]+) D ([0-9.]+) \((union|symmetric|lie)", log)}
+    mode = re.search(r"submit fov mode (union|symmetric|lie)", log)
+    if len(sub) == 2:
+        gbox = [sub[0], sub[1]]
+    out["game"] = {"rendered": rendered, "size_ignored": bool(fs), "fov_ignored": bool(ff), "box": [[round(v, 4) for v in b] for b in gbox],
+                   "submit_mode": mode.group(1) if mode else ("own" if ff else "told")}
     # what the restriction bought and what it cost, from areas in tangent space (left eye; the eyes mirror): render pixels against an unrestricted game (the
     # stream's eye size), the share of the game's render that lands inside the headset's view (the rest is cropped by the composition), the share of the
     # headset's view the picture covers, and how many stream pixels each game pixel gets per axis (below 1 = detail the stream cannot carry)
@@ -1522,6 +1530,15 @@ def analyse(sc, outdir: Path):
     a = {}
     a["host"] = jload(outdir / "host_report.json") or report_from_stdout(outdir / "host_stdout.txt")
     a["client"] = jload(outdir / "client_report.json")
+    # the host's verdict on what the game submitted (engine step C of docs/PICTURE_EDGES_DESIGN.md: one `game_fov_verdict` event, the last one wins)
+    a["fov_verdict"] = None
+    if (outdir / "host_stdout.txt").exists():
+        for line in (outdir / "host_stdout.txt").read_text(errors="replace").splitlines():
+            if '"game_fov_verdict"' in line and "{" in line:
+                try:
+                    a["fov_verdict"] = json.loads(line[line.index("{"):]).get("data")
+                except ValueError:
+                    pass
     a["rig"] = (outdir / "rig.txt").read_text(errors="replace").strip() if (outdir / "rig.txt").exists() else ""
     # Frames sent before the first tracking sample arrived carry the host's own clock (like ALVR's driver: time since connect), which is not the client's: only the frames from the
     # first one that matches a pose the client sent are comparable, so monotonic is judged from there (frames.csv: ts_ns, arrival_ns, len, yaw, yaw_near).
@@ -1978,6 +1995,12 @@ def evaluate(sc, a):
                 lo_, hi_ = ck["fov_restrict"]["render_saving"]
                 chk("fov_game_render_saving", lo_ <= gm.get("render_saving", -9) <= hi_, gm,
                     f"the game rendered {gm.get('rendered')} against an unrestricted {fa['stream_eye']}: saving {gm.get('render_saving')} within [{lo_}, {hi_}] (a game that ignores the recommended size saves nothing)")
+            if "verdict" in ck["fov_restrict"]:   # docs/PICTURE_EDGES_DESIGN.md section 7: the host's verdict on what the game did (engine, step C)
+                want_v = ck["fov_restrict"]["verdict"]
+                hv = a.get("fov_verdict")
+                chk("fov_game_verdict", bool(hv) and hv.get("verdict") == want_v, {"host": hv, "truth": ck["fov_restrict"].get("truth"), "game": gm},
+                    f"the host's verdict on this game is {want_v!r} (ground truth: {ck['fov_restrict'].get('truth', want_v)})" if hv else
+                    "no game_fov_verdict event in the host's output (the shim's record of what the game submitted and the host's verdict: engine step C, not built yet)")
             if ck["fov_restrict"].get("edges_reached"):
                 chk("fov_game_edges_reached", fa.get("edges_reached_frac", 0) >= 0.95, {"edges": fa.get("edges_reached"), "lit": fa.get("edges_reached_frac")},
                     ">= 95 % of the samples at the edges the game was told to stop short of but rendered past carry its picture: the composition maps the frustum the game submits, it does not crop to the one it was told")
