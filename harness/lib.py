@@ -1090,10 +1090,18 @@ def analyse_fov_restrict(sc, outdir):
     # the stream frame: side by side, each eye covers the headset's view; the game's view sits inside it, the rest is black
     pts, want, edge_pts, edges = [], [], [], []
     cuts = []
-    eff = []   # per eye the game's box as a fraction of the headset's per edge (above 1 = the game rendered past the headset's edge)
+    # the live preview box (host `fov_preview`, checks.fov_restrict.preview = outer, inner, upper, lower of the left eye, mirrored): the shim paints black
+    # outside it, so what the stream shows is the game's box cut to the preview box
+    vbox = gbox
+    if cfgk.get("preview"):
+        po, pi, pu, pd = cfgk["preview"]
+        pv = [[po, pi, pu, pd], [pi, po, pu, pd]]
+        vbox = [[min(gbox[e][k], pv[e][k]) for k in range(4)] for e in range(2)]
+        out["preview_box"] = pv
+    eff = []   # per eye the visible box as a fraction of the headset's per edge (above 1 = the game rendered past the headset's edge)
     for e in range(2):
         L, R, U, D = headset[4 * e:4 * e + 4]
-        eff.append([gbox[e][0] / L, gbox[e][1] / R, gbox[e][2] / U, gbox[e][3] / D])
+        eff.append([vbox[e][0] / L, vbox[e][1] / R, vbox[e][2] / U, vbox[e][3] / D])
         l, r = eff[e][0], eff[e][1]
         cuts.append((max(0.0, (1 - l) * L / (L + R)), max(0.0, (1 - r) * R / (L + R))))
     # a column along the top and bottom that is inside both eyes' views and clear of the probe's counter bar (16 blocks of 64 px along the top of its view)

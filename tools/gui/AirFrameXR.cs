@@ -351,7 +351,23 @@ namespace AirFrameXR
             if (AlvrConnecting()) { if (link != Link.Orange || !headset.Text.Contains("connecting")) SetLink(Link.Orange, $"Headset: detected - {name}, connecting..."); }
             else if (link == Link.Orange && (DateTime.UtcNow - lastSeen).TotalSeconds > 30) SetLink(Link.Red, $"Headset: not found - searching for {name} ...");
         }
-        DateTime configSeen; string watchRate; double watchCap; string watchFov;
+        DateTime configSeen; string watchRate; double watchCap; string watchFov; string watchPreview = "off";
+        /// the live preview box as the host command takes it (docs/PICTURE_EDGES_DESIGN.md sections 6, 6b): "off", or "on" and the 4 (left eye outer, inner, upper,
+        /// lower, mirrored) or 8 (per eye L R U D) tangents of `video.fov_preview`, which the Advanced window sets while its preview is on and removes when it ends.
+        /// Live: black outside the box in the next streamed frame, nothing applied to the game.
+        string PreviewLine()
+        {
+            var a = Json.Get(settings.Root, "video.fov_preview") as System.Collections.IList;
+            if (a == null || (a.Count != 4 && a.Count != 8)) return "off";
+            var v = new List<string>();
+            foreach (var x in a)
+            {
+                double d; try { d = Convert.ToDouble(x, CultureInfo.InvariantCulture); } catch { return "off"; }
+                if (!(d > 0) || double.IsInfinity(d)) return "off";
+                v.Add(d.ToString("0.000", CultureInfo.InvariantCulture));
+            }
+            return "on " + string.Join(" ", v);
+        }
         /// the field-of-view override as the host command takes it: "off", or "on outer inner upper lower render_quality" (tangents, then 0..1)
         string FovLine() => settings.FovOverride && settings.FovFits(AppSettings.ReadClientFov()) && settings.FovOuter > 0 && settings.FovInner > 0 && settings.FovUpper > 0 && settings.FovLower > 0
             ? "on " + string.Join(" ", new[] { settings.FovOuter, settings.FovInner, settings.FovUpper, settings.FovLower }.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))) + " " + settings.FovRenderQuality.ToString("0.00", CultureInfo.InvariantCulture)
@@ -387,6 +403,7 @@ namespace AirFrameXR
                 fgRateFromHost = false;
                 Log.Write("INFO", "frame generation rate " + watchRate + " (Advanced settings)");
             }
+            if (PreviewLine() != watchPreview) { watchPreview = PreviewLine(); host.Send("fov_preview " + watchPreview); Log.Write("INFO", "field of view preview: " + watchPreview + " (live, nothing applied to the game)"); }
             if (FovLine() != watchFov) { watchFov = FovLine(); host.Send("fov_override " + watchFov); Log.Write("INFO", "field of view override: " + watchFov + " (the launcher's FOV restriction card; needs a streamer restart)"); }
             if (settings.FrameGenCapFps != watchCap) { watchCap = settings.FrameGenCapFps; host.Send("frame_gen_cap " + watchCap.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation cap " + watchCap + " fps (Advanced settings)"); }
         }
@@ -899,7 +916,15 @@ namespace AirFrameXR
                         ForwardConfigChanges();
                         break;
                     }
-                case "settings_baseline": watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchFov = FovLine(); break;   // the replay harness: what the streamer sent at its start
+                case "settings_preview":   // the replay harness: the Advanced window set the live preview box ("off" or 4 / 8 tangents), the watcher compares and forwards
+                    {
+                        var p = value.Split(' ');
+                        if (p[0] == "off") global::AirFrameXR.Json.Remove(settings.Root, "video.fov_preview");
+                        else global::AirFrameXR.Json.Set(settings.Root, "video.fov_preview", p.Skip(1).Select(x => (object)double.Parse(x, CultureInfo.InvariantCulture)).ToList());
+                        ForwardConfigChanges();
+                        break;
+                    }
+                case "settings_baseline": watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchFov = FovLine(); watchPreview = PreviewLine(); break;   // the replay harness: what the streamer sent at its start
                 case "settings_touch": ForwardConfigChanges(); break;   // the replay harness: the file changed but not a forwarded value
                 case "advanced":
                     {

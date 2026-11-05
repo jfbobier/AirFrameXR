@@ -724,6 +724,16 @@ void nvh_ipc_set_unrestricted(void* i, const char* list_utf8) {
     memcpy(h.unrestrictedExes, w, sizeof(w));
 }
 
+void nvh_ipc_set_preview(void* i, int on, const float* box8) {
+    auto& h = ((Ipc*)i)->state->host;
+    if (on && box8) {
+        for (int e = 0; e < 2; e++)
+            for (int k = 0; k < 4; k++) h.previewBox[e][k] = box8[4 * e + k];
+    }
+    MemoryBarrier();
+    *(volatile uint32_t*)&h.previewOn = on ? 1u : 0u;
+}
+
 void nvh_ipc_shim_stats(void* i, uint32_t* submit_mode, uint32_t* ts_matched, uint32_t* ts_fallback) {
     const auto& s = ((Ipc*)i)->state->shim;
     *submit_mode = s.submitMode; *ts_matched = s.tsMatched; *ts_fallback = s.tsFallback;

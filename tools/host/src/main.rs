@@ -946,6 +946,7 @@ mod nvh {
         pub fn nvh_ipc_shim_recommended(ipc: *mut c_void, w: *mut i32, h: *mut i32);
         pub fn nvh_ipc_game_submission(ipc: *mut c_void, told8: *mut f32, sub8: *mut f32, size4: *mut i32, unrestricted: *mut u32) -> u32;
         pub fn nvh_ipc_set_unrestricted(ipc: *mut c_void, list_utf8: *const std::ffi::c_char);
+        pub fn nvh_ipc_set_preview(ipc: *mut c_void, on: i32, box8: *const f32);
         pub fn nvh_last_ffr_wait_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_set_connected(ipc: *mut c_void, connected: i32);
         pub fn nvh_ipc_publish_head(ipc: *mut c_void, ts: u64, q: *const f32, p: *const f32, lv: *const f32, av: *const f32);
@@ -2864,6 +2865,13 @@ fn main() {
                     logs::general("INFO", &vision::stream_summary(&layout.session(), enc_size));
                     shared.stream_ready.store(true, Ordering::SeqCst);
                 }
+            }
+            // the live preview box (`fov_preview`): to the shim at once, it paints the next composed frame
+            if vision::PREVIEW_PENDING.swap(false, Ordering::SeqCst) && !ipc.is_null() {
+                let on = vision::PREVIEW_ON.load(Ordering::SeqCst);
+                let b: [f32; 8] = std::array::from_fn(|k| f32::from_bits(vision::PREVIEW_REQ[k].load(Ordering::SeqCst)));
+                unsafe { nvh::nvh_ipc_set_preview(ipc, on as i32, b.as_ptr()) };
+                event(origin, "fov_preview", json!({ "on": on, "box": if on { json!(b) } else { json!(null) } }));
             }
             if vision::FOV_PENDING.swap(false, Ordering::SeqCst) {
                 // the user touched the field of view override: publish it once; a game that starts later takes it (a running one keeps what it started with)

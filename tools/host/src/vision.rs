@@ -241,6 +241,22 @@ pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 pub static FOV_ON: AtomicBool = AtomicBool::new(false);
 pub static FOV_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static FOV_PENDING: AtomicBool = AtomicBool::new(false);
+/// the live preview box (`fov_preview`): on/off, per eye L R U D tangents (f32 bits), pending flag
+pub static PREVIEW_ON: AtomicBool = AtomicBool::new(false);
+pub static PREVIEW_REQ: [AtomicU32; 8] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
+pub static PREVIEW_PENDING: AtomicBool = AtomicBool::new(false);
+/// `fov_preview on` values -> per eye L R U D (the OVR convention the shim uses): four = outer, inner, upper, lower of the left eye, mirrored for the right;
+/// eight = left eye L R U D then right eye L R U D. None for anything else (a box must have positive finite edges).
+pub fn preview_box(vals: &[f32]) -> Option<[f32; 8]> {
+    if !vals.iter().all(|v| v.is_finite() && *v > 0.0) {
+        return None;
+    }
+    match vals.len() {
+        4 => Some([vals[0], vals[1], vals[2], vals[3], vals[1], vals[0], vals[2], vals[3]]),
+        8 => Some([vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6], vals[7]]),
+        _ => None,
+    }
+}
 /// the render quality sent with the override (f32 bits)
 pub static FOV_QUALITY_REQ: AtomicU32 = AtomicU32::new(0);
 /// 0..1 for a quality given in the settings, the lab flag or the command; anything else is the floor
@@ -370,6 +386,20 @@ pub fn spawn_stdin_control() {
                         FOV_PENDING.store(true, Ordering::SeqCst);
                     }
                 }
+                (Some("fov_preview"), Some("off")) => {
+                    PREVIEW_ON.store(false, Ordering::SeqCst);
+                    PREVIEW_PENDING.store(true, Ordering::SeqCst);
+                }
+                (Some("fov_preview"), Some("on")) => {
+                    let vals: Vec<f32> = w.filter_map(|x| x.parse().ok()).collect();
+                    if let Some(b) = preview_box(&vals) {
+                        for (k, t) in b.iter().enumerate() {
+                            PREVIEW_REQ[k].store(t.to_bits(), Ordering::SeqCst);
+                        }
+                        PREVIEW_ON.store(true, Ordering::SeqCst);
+                        PREVIEW_PENDING.store(true, Ordering::SeqCst);
+                    }
+                }
                 (Some("color"), Some(first)) => {
                     let vals: Vec<f32> = std::iter::once(first).chain(w).filter_map(|x| x.parse().ok()).collect();
                     if vals.len() == 4 {
@@ -488,6 +518,16 @@ impl RateEstimator {
 
 #[cfg(test)]
 mod fov_tests {
+    #[test]
+    fn preview_box_mirrors_four_values_and_takes_eight() {
+        // outer, inner, upper, lower of the left eye -> L R U D per eye (the right eye's L is its inner edge)
+        assert_eq!(super::preview_box(&[0.97, 0.71, 0.69, 0.63]), Some([0.97, 0.71, 0.69, 0.63, 0.71, 0.97, 0.69, 0.63]));
+        assert_eq!(super::preview_box(&[1.0, 0.7, 0.7, 0.6, 0.75, 1.1, 0.7, 0.6]), Some([1.0, 0.7, 0.7, 0.6, 0.75, 1.1, 0.7, 0.6]));
+        assert_eq!(super::preview_box(&[0.97, 0.71, 0.69]), None);
+        assert_eq!(super::preview_box(&[0.97, 0.0, 0.69, 0.63]), None);
+        assert_eq!(super::preview_box(&[0.97, f32::NAN, 0.69, 0.63]), None);
+    }
+
     use super::fov_scale_from;
     // the Vision Pro's views as the host saved them: left eye l r u d, right eye l r u d
     const AVP: [f32; 8] = [1.7823, 1.0186, 1.2169, 1.0186, 1.0249, 1.7995, 1.2253, 1.0249];

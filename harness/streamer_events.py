@@ -62,6 +62,12 @@ EXPECT = {
         ("fov_quality", ["sent fov_override on 1.50 1.00 1.22 1.02 0.60"], []),   # the render quality is the fifth value
         ("fov_off", ["sent fov_override off"], []),
     ],
+    "fov_preview_forward": [
+        ("preview_on", ["sent fov_preview on 0.970 0.710 0.690 0.630"], []),
+        ("preview_untouched", [], ["sent fov_preview"]),   # the file changed but not the box: nothing is sent again
+        ("preview_per_eye", ["sent fov_preview on 1.000 0.700 0.700 0.600 0.750 1.100 0.700 0.600"], []),
+        ("preview_off", ["sent fov_preview off"], []),
+    ],
     "window_size": [],
     "short12": [
         ("ended", [], []),

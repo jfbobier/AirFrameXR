@@ -37,6 +37,7 @@
 #include "ipc_win.h"
 
 #include <algorithm>
+#include <d3d11_1.h>   // ClearView (the preview mask)
 #include <array>
 #include <cmath>
 #include <deque>
@@ -1460,6 +1461,7 @@ namespace {
                 } else {
                     ok &= ComposeLayers(layers, m_sbsRTV[slot].Get(), m_sbsWidth, m_sbsHeight, TargetMode::DirectEncode);
                 }
+                ApplyPreviewMask(m_sbsRTV[slot].Get(), m_sbsWidth, m_sbsHeight);
 
                 // the display time the app rendered this frame for (its content time: what its animation and camera were computed for), shim clock
                 double displayS = 0.0;
@@ -1623,6 +1625,36 @@ namespace {
         }
 
         // The orientation each eye's projection layer was rendered with (identity when the frame has no projection layer): the host's
+        // The live preview box (ipc.h HostToShim::previewOn / previewBox): black outside it in the composed frame, per eye, every frame while on.
+        // Up to four ClearView rectangles per eye on the final slot (no shader change, no extra pass when off).
+        void ApplyPreviewMask(ID3D11RenderTargetView* rtv, uint32_t width, uint32_t height) {
+            if (!m_ipc.state || !rtv || width < 2 || height < 1) return;
+            const auto& h = m_ipc.state->host;
+            if (!*(volatile const uint32_t*)&h.previewOn) return;
+            if (!m_context1) {
+                if (FAILED(m_submissionContext->QueryInterface(IID_PPV_ARGS(m_context1.ReleaseAndGetAddressOf())))) return;
+            }
+            const float black[4] = {0.f, 0.f, 0.f, 1.f};
+            const LONG ew = (LONG)(width / 2), eh = (LONG)height;
+            D3D11_RECT rects[8];
+            UINT n = 0;
+            for (int e = 0; e < 2; e++) {
+                const ovrFovPort& d = m_eyeFov[e];   // what the stream's eye covers
+                const float spanX = d.LeftTan + d.RightTan, spanY = d.UpTan + d.DownTan;
+                if (spanX <= 0.f || spanY <= 0.f) continue;
+                const float bl = h.previewBox[e][0], br = h.previewBox[e][1], bu = h.previewBox[e][2], bd = h.previewBox[e][3];
+                if (!(bl > 0.f && br > 0.f && bu > 0.f && bd > 0.f)) continue;
+                auto px = [&](float t) { return (LONG)std::lround(std::clamp((t + d.LeftTan) / spanX, 0.f, 1.f) * ew); };   // t: tangent, + = right
+                auto py = [&](float t) { return (LONG)std::lround(std::clamp((d.UpTan - t) / spanY, 0.f, 1.f) * eh); };     // t: tangent, + = up
+                const LONG x0 = px(-bl), x1 = px(br), y0 = py(bu), y1 = py(-bd), ox = e * ew;
+                if (y0 > 0) rects[n++] = {ox, 0, ox + ew, y0};
+                if (y1 < eh) rects[n++] = {ox, y1, ox + ew, eh};
+                if (x0 > 0 && y1 > y0) rects[n++] = {ox, y0, ox + x0, y1};
+                if (x1 < ew && y1 > y0) rects[n++] = {ox + x1, y0, ox + ew, y1};
+            }
+            if (n) m_context1->ClearView(rtv, black, rects, n);
+        }
+
         // The FOV-restriction intake (docs/PICTURE_EDGES_DESIGN.md section 7): what the app submits in its projection layer (FOV and viewport size per
         // eye) against what it was told, for the host's verdict. Written once the app's first projection layer is 2 s old (loading frames left out)
         // and again whenever it changes: a few compares per frame, no GPU work.
@@ -2626,6 +2658,7 @@ namespace {
         LUID m_adapterLuid{};
         ComPtr<ID3D11Device> m_submissionDevice;
         ComPtr<ID3D11DeviceContext> m_submissionContext;
+        ComPtr<ID3D11DeviceContext1> m_context1;   // ClearView for the preview mask (ApplyPreviewMask), queried on first use
         ComPtr<ID3D11VertexShader> m_reprojectVS;
         ComPtr<ID3D11PixelShader> m_reprojectPS;
         ComPtr<ID3D11VertexShader> m_layerVS;

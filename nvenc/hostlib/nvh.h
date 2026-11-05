@@ -49,6 +49,8 @@ void nvh_ipc_shim_recommended(void* ipc, int* w, int* h);
 uint32_t nvh_ipc_game_submission(void* ipc, float* told8, float* sub8, int* size4, uint32_t* unrestricted);
 // The executables told the headset's whole view (ipc.h HostToShim::unrestrictedExes): UTF-8 "|a.exe|b.exe|", lower case; read by an app at its start.
 void nvh_ipc_set_unrestricted(void* ipc, const char* list_utf8);
+// The live preview box (ipc.h HostToShim::previewOn / previewBox): on = 1 paints black outside box8 (per eye L R U D tangents) in every composed frame.
+void nvh_ipc_set_preview(void* ipc, int on, const float* box8);
 void nvh_ipc_set_connected(void* ipc, int connected);
 void nvh_ipc_publish_head(void* ipc, uint64_t client_ts_ns, const float* quat_xyzw, const float* pos, const float* lin_vel, const float* ang_vel);
 void nvh_ipc_publish_hand(void* ipc, int side, int valid, const float* quat_xyzw, const float* pos, const float* lin_vel, const float* ang_vel);

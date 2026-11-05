@@ -127,6 +127,12 @@ struct HostToShim {
     // each closed by '|' ("|game.exe|mod.exe|"): the host's verdicts (own frustum, fixed size, undecided until its next start) and the user's list.
     // Read with fovScale, at the app's start.
     wchar_t unrestrictedExes[1024];
+    // Live preview of a box (docs/PICTURE_EDGES_DESIGN.md sections 6, 6b): while previewOn is 1 the shim paints every composed frame black outside
+    // previewBox, per eye L R U D tangents (OVR convention: positive; the left eye's L is its outer edge), on whatever app runs. It shows a picture-edges
+    // or a restriction box at once, in the headset tools and over a running game, before anything is applied (the game's own FOV and size, latched at its
+    // start, and the stream's size, fixed at connection, do not change). Read every frame.
+    uint32_t previewOn;
+    float previewBox[2][4];
 };
 
 struct Haptic {

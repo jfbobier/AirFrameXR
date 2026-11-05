@@ -1,0 +1,10 @@
+# The live preview box (docs/PICTURE_EDGES_DESIGN.md sections 6, 6b): the Advanced window sets video.fov_preview while its preview is on; the streamer sends `fov_preview` to the host once per change, nothing while the box stays the same, and `off` when the key goes away
+{"ui": "settings_baseline"}
+{"ui": "settings_preview", "value": "on 0.97 0.71 0.69 0.63"}
+{"dump": "preview_on"}
+{"ui": "settings_touch"}
+{"dump": "preview_untouched"}
+{"ui": "settings_preview", "value": "on 1.0 0.7 0.7 0.6 0.75 1.1 0.7 0.6"}
+{"dump": "preview_per_eye"}
+{"ui": "settings_preview", "value": "off"}
+{"dump": "preview_off"}

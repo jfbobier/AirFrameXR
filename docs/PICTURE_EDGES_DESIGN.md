@@ -336,6 +336,19 @@ A Quest needs no pre-calibrated value: its runtime reports the lens window (cons
 headsets is only in the UI: the Vision Pro card writes V, the Advanced window writes G. Prerequisite: step 0 (the client's vertical order)
 before V travels to the client.
 
+**The engine's knobs, and when each takes effect** (owner, 2026-11-05: "the right knobs exposed to update in real time what is displayed"):
+
+| Knob | Host stdin (the streamer forwards it) | Settings key | Takes effect | Used by |
+|---|---|---|---|---|
+| Live preview box | `fov_preview off` / `fov_preview on <o i u d>` or 8 values per eye | `video.fov_preview` (set by the Advanced window while its preview is on, removed after) | **the next streamed frame**: the shim paints black outside the box (ipc `previewOn` / `previewBox`, ClearView on the composed slot), on any app | the Advanced window's live preview over a running game; the tools when a box must be shown over something the probe does not draw |
+| Restriction G | `fov_override off` / `on <o i u d> [quality]` | `video.fov_override`, `fov_outer` .. | the next game start (VDXR latches the FOV and the size) | the Advanced window, the restriction tool's Enter |
+| Ignore list | (published by the host) | `video.fov_unrestricted_games` + `config\fov_verdicts.json` | the next game start | the intake, the per-game tick |
+| Headset view V | (step C: sent to our client) | `video.headset_view` | the next connection (stream size and foveation are negotiated then) | the Vision Pro card, the fit's Enter |
+
+The keyboard tools draw their own candidate box inside the probe (no round trip, every key press visible in the next frame); the preview
+knob is for what the probe does not draw: a real game. Streamer forwarding is the settings poll (1.5 s), enough for values typed in the
+Advanced window; a faster channel is only needed if a keyboard preview over a running game is wanted later.
+
 Migration of today's settings: `fov_override` on with a profile's values becomes V = G = that profile (per eye mirrored) with margin 0 (the values
 were already the user's choice); off stays V = G = P. **Except** values equal to the shipped default 0.97 / 0.71 / 0.69 / 0.63 that the 1.2.0 wizard
 applied by itself (`HmdProfiles.ApplyFovDefault`): nobody chose them, and as V they would bring back the black bars of wearers who see more;
