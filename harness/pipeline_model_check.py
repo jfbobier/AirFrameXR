@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """The launcher's pipeline model (tools/gui/PipelineModel.cs: what the frame pipeline will do with the current settings, and the warnings the
 Advanced window shows) against the Python oracle (harness/fov_stream_geometry.py `model()`), over a grid of the parameter space of
-docs/FOV_PIPELINE_OPTIM.md section 2b: the rectangle (100 / 70 / 50 % of the declared box), the render quality (0 / 0.5 / 1), foveation (off /
-strong / mild), the stream size (2848x2560 / 3552x3200 / 4256x3840), the stream fit (off / on with the Vision Pro reference), the split mode
+docs/FOV_PIPELINE_OPTIM.md section 2b: the declared box (the October client's, Apple's frustum, the author's fit), the rectangle (100 / 70 / 50 % of the declared box), the render quality (0 / 0.5 / 1), foveation (off /
+strong / mild), the stream size (2848x2560 / 3552x3200 / 4096x3584 / 4256x3840), the stream fit (off / on with the Vision Pro reference), the split mode
 (auto / forced 3 / off), the preset and tuning (P1 / P3 / P5 low latency, P2 / P3 high quality) and the GPU's engine count (1 / 2 / 3, unknown).
 Builds uitest.exe on the builder (harness/uibuild.py) and runs its --pipeline-model-selftest. Sizes and strips must be equal, bands within
 0.1 degree, warning and info counts equal.
 
-    python3 harness/pipeline_model_check.py [--all]        # --all: the whole product instead of the deterministic sample of about 150 cases
+    python3 harness/pipeline_model_check.py [--all]        # --all: the whole product instead of the deterministic sample of about 350 cases
 """
 import itertools, json, sys, tempfile, time
 from pathlib import Path
@@ -17,15 +17,18 @@ import fov_stream_geometry as geo
 
 DECLARED = [0.94, 0.93, 0.90, 0.76]
 RECT_R = [0.96, 0.71, 0.69, 0.61]
+APPLE_P = list(geo.load_ratemap()["P"])   # what client 1.3.2+ declares (Apple's frustum, profiles/apple-vision-pro.profile.json `ratemap`)
+AUTHOR_FIT = list(geo.AUTHOR_FIT)
 
 
 def cases(all_cases):
     out = []
     grid = list(itertools.product(
-        (("decl", DECLARED, None), ("r_box", RECT_R, None), ("pct70", DECLARED, 70), ("pct50", DECLARED, 50)),
+        (("decl", DECLARED, None), ("r_box", RECT_R, None), ("pct70", DECLARED, 70), ("pct50", DECLARED, 50),
+         ("avp_p", APPLE_P, None), ("avp_fit", AUTHOR_FIT, None), ("avp_p70", APPLE_P, 70)),
         (0.0, 0.5, 1.0),
         (("fov_off", False, None), ("fov_strong", True, (0.45, 0.4, 0.4, 0.1, 4.0, 5.0)), ("fov_mild", True, (0.45, 0.4, 0.4, 0.1, 2.5, 3.0))),
-        ((2848, 2560), (3552, 3200), (4256, 3840)),
+        ((2848, 2560), (3552, 3200), (4096, 3584), (4256, 3840)),
         (False, True),
         ((0, 3, "ll"), (0, 1, "ll"), (0, 5, "ll"), (0, 2, "hq"), (0, 3, "hq"), (3, 3, "ll"), (15, 3, "ll")),
         (1, 2, 3, -1),

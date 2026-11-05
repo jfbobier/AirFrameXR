@@ -253,6 +253,181 @@ def model(declared, rect=None, eye=EYE, reference_eye=None, reference_fov=None, 
     return out
 
 
+# ---- foveation from Apple's rasterization rate map (docs/PICTURE_EDGES_DESIGN.md section 5b) -------------------------------------------------
+# Orientation, read from ALVR's shaders: the compress pass draws a full-screen quad whose uv.y = 0 is the TOP of the frame
+# (d3d-render-utils/QuadVertexShader.hlsl: position.y = -(uv.y - 0.5) * 2), and TextureToEyeUV mirrors x for the right eye, so in eye uv
+# x = 0 is the outer edge and y = 0 the upper edge, for both eyes. center_shift_y > 0 moves the band DOWN.
+AVP_PROFILE = Path(__file__).resolve().parent.parent / "profiles" / "apple-vision-pro.profile.json"
+AUTHOR_FIT = (0.97, 0.71, 0.69, 0.63)   # the shipped profile's rectangle (docs/AVP_FOV.md), one wearer
+TODAY_GEOMETRY = (0.45, 0.4, 0.4, 0.1, 4.0, 5.0)
+
+
+def load_ratemap(path=AVP_PROFILE):
+    """The headset profile's `ratemap`: frustum P, the panel's full-rate density in px per tangent unit, and the two axis tables."""
+    rm = json.loads(Path(path).read_text())["ratemap"]
+    p = tuple(rm["frustum_tan"])
+    lp = rm["logical_px"]
+    return {"P": p, "density": (lp[0] / (p[0] + p[1]), lp[1] / (p[2] + p[3])), "x": [tuple(a) for a in rm["x"]], "y": [tuple(a) for a in rm["y"]]}
+
+
+def rate_at(tbl, d):
+    """Linear in degrees between samples; beyond the outermost sample the end value (the map is flat-ish there, never zero)."""
+    if d <= tbl[0][0]:
+        return tbl[0][1]
+    if d >= tbl[-1][0]:
+        return tbl[-1][1]
+    for (a, ra), (b, rb) in zip(tbl, tbl[1:]):
+        if a <= d <= b:
+            return ra + (rb - ra) * (d - a) / (b - a)
+    return tbl[-1][1]
+
+
+def _axis_deg(s, lo_t, hi_t, axis):
+    """source eye uv -> degrees from the axis (x: negative = outer; y: negative = down)."""
+    t = (-lo_t + s * (lo_t + hi_t)) if axis == 0 else (hi_t - s * (lo_t + hi_t))
+    return math.degrees(math.atan(t))
+
+
+def axis_loss(cs, sh, er, lo_t, hi_t, axis, tbl, m=1.0, n=2001):
+    """Worst over-compression on one axis: max over the encoded axis of r / max(1, m / rate), r = the local compression (source pixels per
+    encoded pixel, 1 in the band, 2 er - 1 at the frame edge). cs, sh = ALVR's ALIGNED values (lib.fov_vars). 1.0 = no visible loss against the
+    map. lo_t / hi_t: x outer / inner, y down / up tangents. Returns (worst, degrees, r there, what the map allows there)."""
+    fs = cs + (1.0 - cs) / er
+    es = [i / (n - 1) for i in range(n)]
+    src = [lib._fov_f(e, cs, sh, er) for e in es]
+    worst = (0.0, None, None, None)
+    for i in range(n):
+        a, b = max(0, i - 1), min(n - 1, i + 1)
+        r = (src[b] - src[a]) / (es[b] - es[a]) / fs
+        d = _axis_deg(src[i], lo_t, hi_t, axis)
+        allow = max(1.0, m / max(1e-6, rate_at(tbl, d)))
+        if r / allow > worst[0]:
+            worst = (r / allow, round(d, 1), round(r, 2), round(allow, 2))
+    return worst
+
+
+def _band_uv(view, axis, tbl, contour):
+    """The interval where rate >= contour, clipped to the view, in source eye uv (x from the outer edge, y from the top)."""
+    lo_t, hi_t = (view[0], view[1]) if axis == 0 else (view[3], view[2])
+    lo_d, hi_d = -deg(lo_t), deg(hi_t)
+    ds = [lo_d + (hi_d - lo_d) * i / 2000 for i in range(2001)]
+    inside = [d for d in ds if rate_at(tbl, d) >= contour]
+    if not inside:
+        inside = [min(ds, key=abs)]
+    a, b = math.tan(math.radians(inside[0])), math.tan(math.radians(inside[-1]))
+    span = lo_t + hi_t
+    if axis == 0:
+        return (a + lo_t) / span, (b + lo_t) / span, (inside[0], inside[-1])
+    return (hi_t - b) / span, (hi_t - a) / span, (inside[0], inside[-1])
+
+
+def rule_geometry(view, rm, contour=0.5):
+    """Rules 1-2 of section 5b: band = rate >= contour clipped to the view; er = (1 / rate at the stricter edge + 1) / 2, clamped to [1, 10]
+    (ALVR has one ratio for both ends of an axis, so the end that allows less sets it). Returns (cs_x, cs_y, sh_x, sh_y, er_x, er_y), bands in deg."""
+    out, bands = {}, {}
+    for axis, tbl in ((0, rm["x"]), (1, rm["y"])):
+        u0, u1, bd = _band_uv(view, axis, tbl, contour)
+        cs, sh = band_params(u0, u1 - u0)
+        lo_t, hi_t = (view[0], view[1]) if axis == 0 else (view[3], view[2])
+        edge_rate = max(rate_at(tbl, -deg(lo_t)), rate_at(tbl, deg(hi_t)))
+        er = min(10.0, max(1.0, (1.0 / edge_rate + 1.0) / 2.0))
+        out[axis] = (cs, sh, er)
+        bands[axis] = [round(bd[0], 1), round(bd[1], 1)]
+    return (out[0][0], out[1][0], out[0][1], out[1][1], out[0][2], out[1][2]), bands
+
+
+def _geometry_dict(g):
+    return {"foveation_center_size_x": g[0], "foveation_center_size_y": g[1], "foveation_center_shift_x": g[2],
+            "foveation_center_shift_y": g[3], "foveation_edge_ratio_x": g[4], "foveation_edge_ratio_y": g[5]}
+
+
+def assess(view, eye, g, rm, m=1.0):
+    """The encoded frame and the worst over-compression per axis of geometry g over the view at this eye size (ALVR's alignment applied)."""
+    v = lib.fov_vars(eye[0], eye[1], _geometry_dict(g))
+    wx = axis_loss(v["center"][0], v["shift"][0], g[4], view[0], view[1], 0, rm["x"], m)
+    wy = axis_loss(v["center"][1], v["shift"][1], g[5], view[3], view[2], 1, rm["y"], m)
+    bx = tan_band(band_src(v["center"][0], v["shift"][0]), view[0], view[1])
+    byu = band_src(v["center"][1], v["shift"][1])
+    by = (view[2] - byu[1] * (view[2] + view[3]), view[2] - byu[0] * (view[2] + view[3]))
+    return {"geometry": [round(x, 3) for x in g], "encoded": [2 * v["opt_w"], v["opt_h"]], "encoded_mpx": round(2 * v["opt_w"] * v["opt_h"] / 1e6, 2),
+            "band_deg": {"x": [round(deg(bx[0]), 1), round(deg(bx[1]), 1)], "y": [round(deg(by[0]), 1), round(deg(by[1]), 1)]},
+            "worst_x": {"ratio": round(wx[0], 3), "deg": wx[1], "r": wx[2], "allowed": wx[3]},
+            "worst_y": {"ratio": round(wy[0], 3), "deg": wy[1], "r": wy[2], "allowed": wy[3]}}
+
+
+def zero_loss_geometry(view, eye, rm, m=1.0):
+    """Rule 3 of section 5b, exact: per axis, over band contours 0.30 .. 0.95, the largest er (bisection) whose worst over-compression is <= 1
+    after ALVR's alignment, keeping the contour that gives the fewest encoded pixels on that axis."""
+    best = {}
+    for axis in (0, 1):
+        tbl = rm["x"] if axis == 0 else rm["y"]
+        lo_t, hi_t = (view[0], view[1]) if axis == 0 else (view[3], view[2])
+        size = eye[axis]
+        cand = None
+        for k in range(30, 96, 5):
+            u0, u1, _ = _band_uv(view, axis, tbl, k / 100.0)
+            cs, sh = band_params(u0, u1 - u0)
+
+            def worst(er):
+                gd = _geometry_dict((cs, cs, sh, sh, er, er))
+                v = lib.fov_vars(size, size, gd)
+                return axis_loss(v["center"][0], v["shift"][0], er, lo_t, hi_t, axis, tbl, m, n=801)[0], v["opt_w"]
+            if worst(1.0)[0] > 1.0 + 1e-6:
+                continue
+            a, b = 1.0, 10.0
+            if worst(b)[0] <= 1.0 + 1e-6:
+                a = b
+            else:
+                for _ in range(22):
+                    mid = (a + b) / 2
+                    if worst(mid)[0] <= 1.0 + 1e-6:
+                        a = mid
+                    else:
+                        b = mid
+            px = worst(a)[1]
+            if cand is None or px < cand[0]:
+                cand = (px, cs, sh, a, k / 100.0)
+        best[axis] = cand
+    g = (best[0][1], best[1][1], best[0][2], best[1][2], best[0][3], best[1][3])
+    return g, {"contour_x": best[0][4], "contour_y": best[1][4]}
+
+
+def density_eye(view, rm, fraction=1.0, cap=NVENC_MAX_EYE, fits=None):
+    """Section 5 density rule: eye = min(target density x the view's span per axis, NVENC's cap, what the encode test fits), 32-aligned (floor)."""
+    t = (rm["density"][0] * fraction, rm["density"][1] * fraction)
+    raw = (t[0] * (view[0] + view[1]), t[1] * (view[2] + view[3]))
+    lim = (min(cap[0], fits[0]) if fits else cap[0], min(cap[1], fits[1]) if fits else cap[1])
+    return align32(min(raw[0], lim[0])), align32(min(raw[1], lim[1]))
+
+
+def ratemap_cases(rm, m=1.0, eyes=((3552, 3200), (4096, 3584))):
+    P = rm["P"]
+    views = [("Panel", P)] + [("0.80 x Panel", tuple(round(0.8 * x, 4) for x in P))] + [("author's fit", AUTHOR_FIT)]
+    out = []
+    for name, view in views:
+        for eye in (eyes if name == "Panel" else eyes[:1]):
+            rg, bands = rule_geometry(view, rm)
+            zg, contours = zero_loss_geometry(view, eye, rm, m)
+            out.append({"view": name, "box": list(view), "eye": list(eye),
+                        "density_px_per_tan": [round(eye[0] / (view[0] + view[1])), round(eye[1] / (view[2] + view[3]))],
+                        "share_of_panel_density": [round(eye[0] / (view[0] + view[1]) / rm["density"][0], 2), round(eye[1] / (view[2] + view[3]) / rm["density"][1], 2)],
+                        "today": assess(view, eye, TODAY_GEOMETRY, rm, m), "rule": dict(assess(view, eye, rg, rm, m), rate_half_band_deg=bands),
+                        "zero_loss": dict(assess(view, eye, zg, rm, m), **contours)})
+    return out
+
+
+def print_ratemap(cases):
+    for c in cases:
+        print(f"- {c['view']} {c['box']} at {c['eye'][0]}x{c['eye'][1]} per eye: {c['density_px_per_tan'][0]} x {c['density_px_per_tan'][1]} px/tan "
+              f"({int(100 * c['share_of_panel_density'][0])} / {int(100 * c['share_of_panel_density'][1])} % of the panel's)")
+        for k in ("today", "rule", "zero_loss"):
+            a = c[k]
+            g = a["geometry"]
+            print(f"    {k:9s} cs {g[0]:.3f} x {g[1]:.3f}  shift {g[2]:+.3f} / {g[3]:+.3f}  er {g[4]:.2f} / {g[5]:.2f}  -> encoded {a['encoded'][0]}x{a['encoded'][1]} "
+                  f"({a['encoded_mpx']} Mpx), band x {a['band_deg']['x']} y {a['band_deg']['y']} deg; worst over-compression x {a['worst_x']['ratio']} at "
+                  f"{a['worst_x']['deg']} deg, y {a['worst_y']['ratio']} at {a['worst_y']['deg']} deg")
+
+
 def selftest():
     bad = 0
     for cs in (0.3, 0.45, 0.6):
@@ -286,12 +461,35 @@ def selftest():
     if not ok3:
         print("MODEL", m, m2, m3)
     print("CHECK", "PASS" if ok3 else "FAIL", "pipeline model: the fit over R, the quality ceiling, the no-room and unknown-engines lines")
-    return 0 if bad == 0 and bad2 == 0 and ok3 else 1
+    # rate-map foveation (section 5b)
+    rm = load_ratemap()
+    P = rm["P"]
+    edge = [axis_loss(0.45, 0.4, er, 1.0, 1.0, 0, [(-90, 1.0), (90, 1.0)])[2] for er in (2.5, 4.0, 5.0)]
+    ok4 = all(abs(e - (2 * er - 1)) < 0.02 * (2 * er - 1) for e, er in zip(edge, (2.5, 4.0, 5.0)))
+    print("CHECK", "PASS" if ok4 else "FAIL", f"local compression at the frame edge = 2 er - 1 (er 2.5 / 4 / 5 -> {edge})")
+    rg, bands = rule_geometry(P, rm)
+    ok5 = (abs(bands[0][0] + 24) < 0.6 and abs(bands[0][1] - 23) < 0.6 and abs(bands[1][0] + 18) < 0.6 and abs(bands[1][1] - 29) < 0.6
+           and rg[3] < 0 and abs(rg[4] - 4.3) < 0.15 and abs(rg[5] - 4.7) < 0.15)
+    print("CHECK", "PASS" if ok5 else "FAIL", f"rule at Panel: band x {bands[0]} y {bands[1]} deg (-24..23 / -18..29), shift_y {rg[3]:+.3f} (< 0: the band sits above the middle), er {rg[4]:.2f} / {rg[5]:.2f} (4.3 / 4.7)")
+    zg, _ = zero_loss_geometry(P, EYE, rm)
+    za = assess(P, EYE, zg, rm)
+    ok6 = za["worst_x"]["ratio"] <= 1.0 + 1e-3 and za["worst_y"]["ratio"] <= 1.0 + 1e-3
+    print("CHECK", "PASS" if ok6 else "FAIL", f"zero-loss geometry at Panel stays under the map (worst {za['worst_x']['ratio']} / {za['worst_y']['ratio']}), encoded {za['encoded']}")
+    return 0 if bad == 0 and bad2 == 0 and ok3 and ok4 and ok5 and ok6 else 1
 
 
 def main(argv):
     if "--selftest" in argv:
         return selftest()
+    if "--ratemap" in argv:
+        m = float(argv[argv.index("--margin") + 1]) if "--margin" in argv else 1.0
+        cases = ratemap_cases(load_ratemap(), m)
+        if "--json" in argv:
+            print(json.dumps(cases, indent=1))
+        else:
+            print(f"foveation against Apple's rate map (m = {m}; worst over-compression 1.0 = nothing the compositor would keep is lost)")
+            print_ratemap(cases)
+        return 0
     declared, rect, eye = DECLARED, RECT, EYE
     if "--declared" in argv:
         declared = tuple(float(x) for x in argv[argv.index("--declared") + 1].split(","))

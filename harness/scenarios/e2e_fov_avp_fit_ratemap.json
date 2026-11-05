@@ -1,0 +1,120 @@
+{
+  "description": "Step C + D of docs/PICTURE_EDGES_DESIGN.md: our client declares a fitted picture edge box V (here the author's fit 0.97 / 0.71 / 0.69 / 0.63; the mock's --views-tan stands for the streamer -> client message until the mock follows it), the stream is 3552x3200 over V (92 / 106 % of the panel's density), the foveation is the zero-loss geometry for V (`python3 harness/fov_stream_geometry.py --ratemap`): milder ratios 2.70 / 2.14 and a band shifted well up (shift_y -0.305), encoded 4672x2464 (11.5 Mpx). The large vertical shift makes this the scenario that catches a flipped y convention: the probe's counter and gray patch are read back at the positions lib.fov_forward predicts. Thresholds: encode p95 22 ms and delivery 0.5, because the 1-engine laptop encodes about 1.3 ms per Mpx + 2.1 ms (docs/FOV_PIPELINE_OPTIM.md), about 17 ms here, over 90 Hz; the pacing verdict at this size belongs to the 5090 (3 engines, split 3).",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "openvr_config.eye_resolution_width": 3552,
+    "openvr_config.eye_resolution_height": 3200,
+    "openvr_config.target_eye_resolution_width": 3552,
+    "openvr_config.target_eye_resolution_height": 3200,
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 3552,
+        "height": {
+          "set": true,
+          "content": 3200
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 3552,
+        "height": {
+          "set": true,
+          "content": 3200
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.foveated_encoding.content.center_size_x": 0.452,
+    "openvr_config.foveation_center_size_x": 0.452,
+    "session_settings.video.foveated_encoding.content.center_size_y": 0.567,
+    "openvr_config.foveation_center_size_y": 0.567,
+    "session_settings.video.foveated_encoding.content.center_shift_x": 0.273,
+    "openvr_config.foveation_center_shift_x": 0.273,
+    "session_settings.video.foveated_encoding.content.center_shift_y": -0.305,
+    "openvr_config.foveation_center_shift_y": -0.305,
+    "session_settings.video.foveated_encoding.content.edge_ratio_x": 2.701,
+    "openvr_config.foveation_edge_ratio_x": 2.701,
+    "session_settings.video.foveated_encoding.content.edge_ratio_y": 2.138,
+    "openvr_config.foveation_edge_ratio_y": 2.138
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 420
+  },
+  "client": {
+    "seconds": 55,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "views_tan": "0.97,0.71,0.69,0.63"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 420,
+    "timeout_s": 60
+  },
+  "gpu_sample": true,
+  "timeout_s": 200,
+  "checks": {
+    "host_min_frames": 250,
+    "client_min_frames": 200,
+    "timestamps_monotonic": true,
+    "max_duplicate_timestamps": 400,
+    "min_delivery_ratio": 0.5,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "color_range": "pc",
+      "width": 4672,
+      "height": 2464
+    },
+    "decode": true,
+    "decode_frame_slack": 60,
+    "counter_readback": true,
+    "counter_block_px": 64,
+    "gray_patch": [
+      176,
+      200
+    ],
+    "app_min_frames": 300,
+    "pose_roundtrip_max_rad": 0.06,
+    "min_yaw_range_rad": 0.3,
+    "refresh_hz": 90,
+    "max_pipeline_latency_ms": 150,
+    "negotiated": {
+      "view_resolution": [
+        3552,
+        3200
+      ],
+      "use_full_range": true,
+      "enable_foveated_encoding": true
+    },
+    "foveation": true,
+    "max_encode_ms_p95": 22
+  }
+}

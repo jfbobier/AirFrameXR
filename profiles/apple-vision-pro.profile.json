@@ -38,6 +38,14 @@
     "client_fov_scale": 0.8,
     "note": "The 99 % rectangle of the author's three sweeps (2026-10-28/29, eyes following and fixed, two fits, Sense clicks): outer 44.1 deg (tan 0.97), inner 35.4 (0.71), upper 34.6 (0.69), lower 32.2 (0.63). Covers 99 % of what the author sees; the black is at the far outer and lower corners only. 26 % fewer game pixels than an unrestricted game on the AirFrameXR client (whose ceiling is 1.05 / 0.80 / 0.76 / 0.87), 62 % fewer than on the stock app. Applied as the default field of view when the wizard uses this profile; the Advanced window changes it. The author's own 100 % set is 1.00 / 0.71 / 0.73 / 0.66 (21 % fewer)."
   },
+  "ratemap": {
+    "note": "Apple's rasterization rate map as the AirFrameXR client 1.3.2 logged it ([ratemap] lines, docs/END_TO_END_FOV_DESIGN.md sections 8 and 9): static, identical on two headsets. Per axis [degrees from the eye's axis, rate]; rate = the physical pixels the compositor keeps per logical pixel (1 = full). x: negative = outer (left eye; the right eye mirrors). y: negative = down. Read by harness/fov_stream_geometry.py --ratemap (foveation from the map, docs/PICTURE_EDGES_DESIGN.md section 5b) and, once ported, the launcher's pipeline model.",
+    "visionos": "27.2",
+    "frustum_tan": [1.732, 1.0, 1.192, 1.0],
+    "logical_px": [6261, 5023],
+    "x": [[-59, 0.06], [-50, 0.09], [-40, 0.15], [-28, 0.30], [-20, 0.70], [-12, 0.96], [-3, 1.00], [7, 0.99], [16, 0.94], [24, 0.43], [31, 0.23], [37, 0.17], [43, 0.13]],
+    "y": [[-43, 0.10], [-34, 0.15], [-23, 0.28], [-16, 0.58], [-9, 0.89], [-2, 0.94], [6, 1.00], [13, 1.00], [20, 0.97], [26, 0.66], [32, 0.32], [41, 0.19], [48, 0.12]]
+  },
   "network": {
     "default": "wifi-good",
     "variants": [

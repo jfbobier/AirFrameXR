@@ -111,21 +111,29 @@ nothing worse.
    source uv, `sh = 2 start / (1 - cs) - 1` (`fov_stream_geometry.py` `band_params`).
 2. `er = (1 / rate(stricter edge of V) + 1) / 2`: the local ratio at the frame edge, `2 er - 1`, equals what the map allows there on the
    side that allows less (ALVR has one ratio for both ends of an axis). Clamped to [1, 10].
-3. ALVR's alignment, the encoded size, the strips (section 5b, split). The exact variant, the oracle's check: bisection on `er` under the
-   rule over a grid of band contours, which gives the same sizes within 2 %.
+3. ALVR's alignment, the encoded size, the strips (section 5b, split). The exact variant (**the recommended default**, `zero_loss` in the
+   oracle): per axis, over band contours 0.30 to 0.95, the largest `er` (bisection) whose worst over-compression after ALVR's alignment is at
+   most 1, keeping the contour with the fewest encoded pixels. Rules 1-2 alone leave 1.1-1.2x of loss; the exact variant costs 2 % more
+   pixels at Panel and is smaller on a fitted view.
 
-**Results (computed, prototype of the oracle; today = 0.45 x 0.40, shift 0.4 / 0.1, ratios 4 / 5):**
+**Orientation (read from ALVR's shaders, 2026-11-05):** the compress pass draws a full-screen quad with uv.y = 0 at the **top**
+(`QuadVertexShader.hlsl`: `position.y = -(uv.y - 0.5) * 2`), so `center_shift_y > 0` moves the band **down**, and a band from -18 to +29 degrees
+needs a negative shift. The first prototype of this table had the vertical axis upside down: its shifts had the wrong sign and its "today"
+column described the lower field where the loss is in the upper one. The table below is the oracle's (`python3 harness/fov_stream_geometry.py --ratemap`).
 
-| V | Stream per eye | Today: encoded frame | Today: visible loss against the map | Automatic (rule 1 to 3) | Encoded frame | Worst over-compression | Ideal warp (below) |
+**Results (computed, `fov_stream_geometry.py --ratemap`; today = 0.45 x 0.40, shift 0.4 / 0.1, ratios 4 / 5; worst = local compression over what
+the map allows, 1.00 = no loss):**
+
+| V | Stream per eye | Today: encoded, worst | Rules 1-2: geometry | encoded, worst | **Zero loss: geometry** | **encoded, worst** | Ideal warp (below) |
 |---|---|---|---|---|---|---|---|
-| Panel | 3552 x 3200 | 4224 x 1664, 7.03 Mpx | lower field 1.35x over at -20..-28 degrees, top 1.16x at 41; horizontal none, but full density wasted from 20 to 34 degrees where the map keeps 0.2 to 0.7 | band -24..23 / -18..29, cs 0.32 x 0.40, shift 0.38 / 0.03, **er 4.3 / 4.7** | **3392 x 1696, 5.75 Mpx (-18 %)** | 1.09x at 28, 1.19x at 38 degrees | 2816 x 1504, 4.24 Mpx (-40 %) |
-| Panel | 4096 x 3584 | 4864 x 1856, 9.03 Mpx | same | same parameters | 3904 x 1888, 7.37 Mpx (-18 %) | same | 3264 x 1696, 5.54 Mpx |
-| 0.80 x Panel | 3552 x 3200 | 4224 x 1664 | edges at 54 / 39 / 44 / 39 degrees: the map allows 6 / 4.5 / 5.5 / 5.5 at most, today's 7 / 9 local overshoot | cs 0.40 x 0.50, shift 0.43 / 0.08, er 3.6 / 3.6 | 4032 x 2048, 8.26 Mpx | 1.1x | 3328 x 1792, 5.96 Mpx |
-| Author's fit | 3552 x 3200 | 4224 x 1664 | edges at 44 / 35 / 35 / 32 degrees: the map allows 5.3 / 8 / 3.3 / 5.9, today's 7 / 9 local overshoot, band 5 degrees nasal | cs 0.52 x 0.66, shift 0.29 / 0.37, **er 3.2 / 2.3** | 4800 x 2592, 12.4 Mpx | 1.08x, 1.0x | 4096 x 2176, 8.9 Mpx |
+| Panel | 3552 x 3200 | 4224 x 1664, 7.03 Mpx; **upper field 1.6x at +29 degrees**, 1.3-1.45x up to +44; none in the lower field or horizontally, but full density wasted from 23 to 34 degrees | cs 0.317 x 0.398, shift 0.380 / **-0.028**, er 4.35 / 4.67 (band -24..23 / -18..29) | 3392 x 1696, 5.75 Mpx (-18 %); 1.10x at 28, 1.19x at +37 | cs 0.304 x 0.360, shift 0.376 / -0.028, er 3.81 / 3.78 | **3456 x 1696, 5.86 Mpx (-17 %); 1.00** | 2816 x 1504, 4.24 Mpx (-40 %) |
+| Panel | 4096 x 3584 | 4864 x 1856, 9.03 Mpx; same | same | 3904 x 1888, 7.37 Mpx; same | cs 0.331 x 0.360, shift 0.386 / -0.028, er 4.22 / 3.78 | 4032 x 1920, 7.74 Mpx (-14 %); 1.00 | 3264 x 1696, 5.54 Mpx |
+| 0.80 x Panel | 3552 x 3200 | 4224 x 1664; 1.16x at 29, **2.7x at +26** | cs 0.396 x 0.497, shift 0.427 / -0.084, er 3.65 / 3.56 | 4032 x 2048, 8.26 Mpx; 1.11x, 1.09x | cs 0.347 x 0.450, shift 0.403 / -0.082, er 2.96 / 3.17 | 4032 x 2016, 8.13 Mpx; 1.00 | 3328 x 1792, 5.96 Mpx |
+| Author's fit | 3552 x 3200 | 4224 x 1664; 1.6x at -23, **4.6x at +23** | cs 0.516 x 0.660, shift 0.292 / -0.374, er 3.19 / 2.27 | 4800 x 2592, 12.4 Mpx; 1.08x, 1.00 | cs 0.452 x 0.567, shift 0.273 / -0.305, er 2.70 / 2.14 | **4672 x 2464, 11.5 Mpx; 1.00** | 4096 x 2176, 8.9 Mpx |
 
-What this says: at Panel the automatic parameters are both **smaller and better** than today's (18 % fewer encoded pixels, no visible loss, where
-today loses 1.35x in the lower field). On a fitted view the periphery that can be thrown away is small, so zero-loss foveation needs **milder**
-ratios than today (3.2 / 2.3, not 4 / 5): today's parameters would visibly cut a fitted view's edges. The encoded frame grows with a fit; that
+What this says: at Panel the computed parameters are both **smaller and better** than today's (17 % fewer encoded pixels with no loss, where
+today over-compresses the **upper** field 1.6x). On a fitted view the periphery that can be thrown away is small, so zero-loss foveation needs **milder**
+ratios than today (2.7 / 2.1, not 4 / 5): today's parameters would visibly cut a fitted view's upper field (4.6x). The encoded frame grows with a fit; that
 is the price of the sharpness, and the density rule of section 5 and `m` are the two levers when the encode test says it does not fit.
 
 **Split encoding (kept, forced 3 strips).** The strips are horizontal bands of the encoded frame; their seams fall at one and two thirds of
@@ -235,7 +243,7 @@ loses `client_fov_scale` (dead advice on our client). Import and export unchange
 | A | Wizard default `Whole panel`; author's profile relabelled, never proposed; `client_fov_scale` removed; card and wizard wording | GUI | `ui_matrix`, `fov_store_check`, `fov_profile_check` | a fresh install shows no black |
 | B | Quick fit: probe `fit` scene + `calibrate.exe` entry + profile schema 2 | probe + GUI | a scenario that drives the probe's stdin and reads the blue box's edges in the decoded stream (`analyse_fov_restrict` margins); `ui_matrix` rows | two wearers fit themselves; the fit matches their sweep within the margin |
 | C | Channel per eye, G per eye, verdict, ignore list | **engine** + client build | mock client follows the message (`--views-tan` replaced); `e2e_fov_game_*` assert the verdict and the skip at the second start; FoV regressions | a fitted V visibly sharper than P at equal stream size; the Enshrouded mod lands on the ignore list by itself |
-| D | Density rule + rate-map foveation (section 5b): `ratemap` in the profile, oracle `--ratemap` mode, `PipelineModel` port | settings | `pipeline_model_check` against the oracle; `bench-quality --eye` at the encoded sizes of section 5b; `slices_per_frame` = 3 at the new heights | A/B on the 5090 at Panel: today's 4 / 5 against the automatic 4.3 / 4.7 (band -24..23 / -18..29): encode ms, the judge, the eyes on the lower field; then a fitted V |
+| D | Density rule + rate-map foveation (section 5b): `PipelineModel` port of the oracle's `--ratemap` mode (`ratemap` in the profile and the oracle: done 2026-11-05) | settings | `fov_stream_geometry.py --selftest`; `pipeline_model_check` against the oracle (its grid has Apple's frustum and the fit); `e2e_fov_avp_panel_ratemap` (+ `_rule`) against `e2e_openxr_foveated`: layout, decoded counter and patch, encode ms; `e2e_fov_avp_fit_ratemap` (the vertical orientation); `bench-quality --eye` at the encoded sizes of section 5b; `slices_per_frame` = 3 at the new heights | A/B on the 5090 at Panel: today's 4 / 5 against the zero-loss 3.81 / 3.78 (band -23..22 / -16..27): encode ms, the judge, the eyes on the **upper** field (+25 to +45 degrees, where today loses); then a fitted V |
 | E | Mask, community box | **engine** / data | | after one Unreal measurement; after five wearers |
 
 What the lab cannot judge stays owed to the headset and is written in `docs/progress.md` with the legend.

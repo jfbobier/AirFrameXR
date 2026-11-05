@@ -1,5 +1,5 @@
 {
-  "description": "Game behaviours under a FOV restriction (docs/FOV_APERTURE_PLAN.md): the mock headset declares the Vision Pro compositor's own frustum (client 1.3.2, --views-tan 1.79,1.02,1.22,1.02), stream 1760x1600 per eye. No restriction. A mod that renders a fixed square image (2048x2048) over its own symmetric frustum (tangent 1.3 on every edge, a 1:1 image): it renders 49 % more pixels than the stream's eye size, part of them land outside the headset's view (cropped by the composition: render_used in the report), and the outer edge it does not reach is black. Documents what reaches the headset from such a mod today.",
+  "description": "Game behaviours under a FOV restriction (docs/FOV_APERTURE_PLAN.md): the mock headset declares the Vision Pro compositor's own frustum (client 1.3.2, --views-tan 1.732,1.0,1.192,1.0), stream 1760x1600 per eye. No restriction. A mod that renders a fixed square image (2048x2048) over its own symmetric frustum (tangent 1.3 on every edge, a 1:1 image): it renders 49 % more pixels than the stream's eye size, part of them land outside the headset's view (cropped by the composition: render_used in the report), and the outer edge it does not reach is black. Documents what reaches the headset from such a mod today.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -57,7 +57,7 @@
     "connect_timeout": 45,
     "yaw_amp": 0.5,
     "yaw_hz": 0.25,
-    "views_tan": "1.79,1.02,1.22,1.02"
+    "views_tan": "1.732,1.0,1.192,1.0"
   },
   "client_env": {
     "RUST_LOG": "warn"

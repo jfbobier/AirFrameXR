@@ -1,0 +1,120 @@
+{
+  "description": "Step D of docs/PICTURE_EDGES_DESIGN.md at the Vision Pro default: the mock declares Apple's frustum, the stream is the user's 3552x3200 per eye, the foveation is the zero-loss geometry computed from Apple's rate map over that box (`python3 harness/fov_stream_geometry.py --ratemap`, zero_loss row: band where the map keeps >= 0.65, the largest edge ratios that never compress below the map; worst over-compression 1.00). Encoded 3456x1696 (5.86 Mpx, -17 % against today's 4224x1664). The chain at that layout: negotiation, ALVR's layout, the probe's counter and gray patch through the decoded stream, pacing; encode p95 and the stage timings for the A/B with e2e_openxr_foveated (today's 0.45 / 0.4 / 0.4 / 0.1 / 4 / 5) on the same build. The eyes judge on the 5090.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "openvr_config.eye_resolution_width": 3552,
+    "openvr_config.eye_resolution_height": 3200,
+    "openvr_config.target_eye_resolution_width": 3552,
+    "openvr_config.target_eye_resolution_height": 3200,
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 3552,
+        "height": {
+          "set": true,
+          "content": 3200
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 3552,
+        "height": {
+          "set": true,
+          "content": 3200
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.foveated_encoding.content.center_size_x": 0.304,
+    "openvr_config.foveation_center_size_x": 0.304,
+    "session_settings.video.foveated_encoding.content.center_size_y": 0.36,
+    "openvr_config.foveation_center_size_y": 0.36,
+    "session_settings.video.foveated_encoding.content.center_shift_x": 0.376,
+    "openvr_config.foveation_center_shift_x": 0.376,
+    "session_settings.video.foveated_encoding.content.center_shift_y": -0.028,
+    "openvr_config.foveation_center_shift_y": -0.028,
+    "session_settings.video.foveated_encoding.content.edge_ratio_x": 3.813,
+    "openvr_config.foveation_edge_ratio_x": 3.813,
+    "session_settings.video.foveated_encoding.content.edge_ratio_y": 3.776,
+    "openvr_config.foveation_edge_ratio_y": 3.776
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 420
+  },
+  "client": {
+    "seconds": 55,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "views_tan": "1.732,1.0,1.192,1.0"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 420,
+    "timeout_s": 60
+  },
+  "gpu_sample": true,
+  "timeout_s": 200,
+  "checks": {
+    "host_min_frames": 250,
+    "client_min_frames": 200,
+    "timestamps_monotonic": true,
+    "max_duplicate_timestamps": 400,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "color_range": "pc",
+      "width": 3456,
+      "height": 1696
+    },
+    "decode": true,
+    "decode_frame_slack": 60,
+    "counter_readback": true,
+    "counter_block_px": 64,
+    "gray_patch": [
+      176,
+      200
+    ],
+    "app_min_frames": 300,
+    "pose_roundtrip_max_rad": 0.06,
+    "min_yaw_range_rad": 0.3,
+    "refresh_hz": 90,
+    "max_pipeline_latency_ms": 150,
+    "negotiated": {
+      "view_resolution": [
+        3552,
+        3200
+      ],
+      "use_full_range": true,
+      "enable_foveated_encoding": true
+    },
+    "foveation": true,
+    "max_encode_ms_p95": 16
+  }
+}

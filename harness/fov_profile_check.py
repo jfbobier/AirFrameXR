@@ -14,8 +14,10 @@ root = Path(__file__).resolve().parent.parent
 prof = json.loads((root / "profiles" / "apple-vision-pro.profile.json").read_text())["fov"]
 want = [round(math.tan(math.radians(prof["visible_deg"][k] + prof["margin_deg"])), 2) for k in ("outer", "inner", "upper", "lower")]
 doc = [0.97, 0.71, 0.69, 0.63]   # docs/AVP_FOV.md, the shipped 99 % rectangle (2026-10-29)
-ok_doc = want == doc and prof["render_quality"] == 0 and prof.get("client_fov_scale") == 0.8
-print("CHECK", "PASS" if ok_doc else "FAIL", f"shipped Vision Pro profile gives {want} and quality {prof['render_quality']} (docs/AVP_FOV.md: {doc}, 0) and client FoV scale {prof.get('client_fov_scale')} (0.8)")
+# docs/PICTURE_EDGES_DESIGN.md step A: the shipped rectangle stays (one wearer's fit, offered in the list, never proposed by the wizard) and loses
+# client_fov_scale (the stock app's FoV slider: dead advice on our client, which declares Apple's frustum)
+ok_doc = want == doc and prof["render_quality"] == 0 and "client_fov_scale" not in prof
+print("CHECK", "PASS" if ok_doc else "FAIL", f"shipped Vision Pro profile gives {want} and quality {prof['render_quality']} (docs/AVP_FOV.md: {doc}, 0), no client_fov_scale (has {prof.get('client_fov_scale')})")
 
 rid = f"fovp_{time.strftime('%H%M%S')}"
 lib.b_run(f"if not exist runs\\{rid} mkdir runs\\{rid}")
