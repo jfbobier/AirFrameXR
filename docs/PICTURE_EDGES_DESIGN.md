@@ -214,9 +214,25 @@ same into the run record. The rules, in this order, on each eye and each edge:
 |---|---|---|---|
 | `own_frustum` | any submitted edge differs from the told one by more than 0.01 (tangent), on either eye. Catches the mods that derive their box from the told one: the union of both eyes (Uncharted: the inner edge becomes the other eye's outer), a symmetric max-tangent box (our Gravity Rush 2 mod): their outer edges follow a restriction, so they *look* as if they honoured it | none | ignore list |
 | `fixed_size` | FOV as told, but the aspect of the submitted size differs from the told **recommended size**'s by more than 5 %. Not the box's tangent aspect: the stream's density differs per axis (1300 against 1460 px/tan at P), so the told size of the author's fit is 2184 x 1927 (1.13) while its tangent box is 1.27 | no GPU saved, view shrunk | ignore list |
-| `undecided` | FOV as told, aspect within 5 %, size different from the told one: a resolution scale (honest) and a fixed size that happens to keep the aspect (a uniform restriction, or a fixed size close to the told aspect: 1760 x 1600 against the fit's 1.12) give the same numbers in one run | unknown | nothing yet; decided at the next start of that executable under another box: the size followed the box = `honours`, it did not = `fixed_size` |
+| `undecided` | FOV as told, aspect within 5 %, size different from the told one: a resolution scale (honest) and a fixed size that happens to keep the aspect (a uniform restriction, or a fixed size close to the told aspect: 1760 x 1600 against the fit's 1.12) give the same numbers in one run | unknown | **not restricted at its next start** (told V), which is also the deciding measurement (below) |
 | `honours` | FOV as told, size as told (within 2 pixels), or a previous run showed the size following the box | saves GPU | nothing |
 | lie (draws its own view, submits the told FOV and size) | not detectable from data: reported `honours` | distorted picture | the user's eyes; manual entry in the ignore list |
+
+**`undecided`: the policy (owner, 2026-11-05).** When unsure, protect the picture: a fixed-size game wrongly restricted loses picture at
+the edges and saves nothing; an honest game wrongly unrestricted keeps its picture and loses one session's GPU saving.
+
+1. First start: the game runs this session as told (VDXR latches the FOV and the size at its start; nothing changes mid-run). The verdict is
+   there after about 2 s; Game statistics shows the game as "checking".
+2. Second start: the game is told **V** (not restricted). The told box changed (G, then V), so the size answers: it followed the box (the
+   rendered size grew by the ratio of the told sizes, within 2 pixels per axis) = `honours`, restricted again from the third start with one line in
+   Game statistics ("restricted again: it follows the box"); it did not move = `fixed_size`, the executable goes on the ignore list and keeps V.
+3. From the third start the verdict holds for that executable (stored with the boxes and sizes it was decided on); the per-game tick in Game
+   statistics overrides it both ways. A new restriction does not reset an `honours` or a `fixed_size` verdict; a new game version is not detected (the
+   tick is the remedy).
+
+Not done: guessing from one run ("rendered = the unrestricted size, so fixed": it misjudges a game set to native resolution and only holds in
+contrived cases). Possible later, only if users ask: start every never-seen executable unrestricted (no cut picture ever, one session's saving
+lost per new game).
 
 The harness has a fake game for every row (`xr_probe`: `XR_PROBE_RENDER_SIZE`, `XR_PROBE_RENDER_FOV`, `XR_PROBE_RENDER_SCALE`,
 `XR_PROBE_SUBMIT_FOV=union|symmetric|lie`) and knows the truth of each; the scenarios assert the host's verdict (`checks.fov_restrict.verdict`,
@@ -234,8 +250,14 @@ the `truth` field says what the game really does):
 | `e2e_fov_game_res_scale` | told FOV, 1.25 resolution scale, uniform 80 % restriction | honours | `undecided` (first run): the same numbers as the one above |
 | `e2e_fov_game_lie` | draws the panel, submits the told box | lies | `honours` (the known limit, asserted on purpose) |
 
-Owed in the harness with the engine: the second start (a scenario that starts the same probe twice under two boxes: `undecided` becomes
-`fixed_size` or `honours`, and an ignore-listed game is told V at its second start).
+**Second-start scenarios** (owed with the engine; the same executable started twice in one streamer session, the verdict store kept between):
+
+| Scenario | First start | Second start | Third start |
+|---|---|---|---|
+| `e2e_fov_game_second_start_fixed` | fixed 1760 x 1600, uniform 80 %: `undecided` | told V (no restriction), size unchanged: `fixed_size`, on the ignore list | told V |
+| `e2e_fov_game_second_start_scale` | 1.25 resolution scale, uniform 80 %: `undecided` | told V, size grew by 1 / 0.8: `honours` | restricted again (told G) |
+| `e2e_fov_game_second_start_own` | union of both eyes (Uncharted): `own_frustum`, ignore list | told V | told V |
+| `e2e_fov_game_second_start_tick` | as `_fixed`, then the per-game tick forces the restriction | told G whatever the verdict | told G |
 
 Ignore list: `video.fov_unrestricted_games` (executables). A verdict of own frustum or fixed size adds the executable automatically; the game is
 told V at its next start. Automatic because it is the deterministic consequence of a measurement, acts at a game start (never mid-session), is
