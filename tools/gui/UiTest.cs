@@ -353,6 +353,39 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "export.txt"), names.Concat(new[] { "open_forms=" + Application.OpenForms.Count }));
                 return 0;
             }
+            if (Arg("--eye-choice-selftest") != null)   // harness/eye_choice_check.py: a per-eye size saved from Settings reaches both resolution keys, ALVR's negotiated cache and the density reference, and the FOV card reads the setting (not the stale cache)
+            {
+                var lines = new List<string>(); int bad = 0;
+                void Check(bool ok, string what) { lines.Add("CHECK " + (ok ? "PASS" : "FAIL") + " " + what); if (!ok) bad++; }
+                var s = new Dictionary<string, object>();
+                global::AirFrameXR.Json.Set(s, "openvr_config.eye_resolution_width", 3552.0); global::AirFrameXR.Json.Set(s, "openvr_config.eye_resolution_height", 3200.0);
+                global::AirFrameXR.PipelineModel.WriteStreamEye(s, 3552, 3200);
+                var st = new AppSettings();   // this folder's own config, never saved here
+                st.StreamFitWindow = false;
+                var written = global::AirFrameXR.PipelineModel.SaveEyeChoice(s, st, 4096, 3680);
+                Check(written[0] == 4096 && written[1] == 3680, "fit off: the size written is the size chosen (" + written[0] + "x" + written[1] + ")");
+                foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
+                    Check(global::AirFrameXR.Json.Str(s, "session_settings.video." + k + ".variant", "") == "Absolute" && (int)global::AirFrameXR.Json.Num(s, "session_settings.video." + k + ".Absolute.width", 0) == 4096 && (int)global::AirFrameXR.Json.Num(s, "session_settings.video." + k + ".Absolute.height.content", 0) == 3680, k + " = Absolute 4096x3680");
+                Check((int)global::AirFrameXR.Json.Num(s, "openvr_config.eye_resolution_width", 0) == 4096 && (int)global::AirFrameXR.Json.Num(s, "openvr_config.eye_resolution_height", 0) == 3680, "ALVR's negotiated cache follows the save (the FOV card and the encoder tests read it)");
+                Check(st.StreamReferenceEye != null && st.StreamReferenceEye[0] == 4096 && st.StreamReferenceEye[1] == 3680, "the density reference is the chosen size (the fit tick no longer writes an old size back)");
+                var e = global::AirFrameXR.PipelineModel.StreamEyeExpected(s);
+                Check(e != null && e[0] == 4096 && e[1] == 3680, "expected stream size = the setting (" + (e == null ? "-" : e[0] + "x" + e[1]) + ")");
+                // the setting wins over a stale cache, floored to 32 on both axes like ALVR's align32
+                var s2 = new Dictionary<string, object>();
+                global::AirFrameXR.PipelineModel.WriteStreamEye(s2, 4030, 3690);
+                global::AirFrameXR.Json.Set(s2, "openvr_config.eye_resolution_width", 3552.0); global::AirFrameXR.Json.Set(s2, "openvr_config.eye_resolution_height", 3200.0);
+                e = global::AirFrameXR.PipelineModel.StreamEyeExpected(s2);
+                Check(e != null && e[0] == 4000 && e[1] == 3680, "Absolute 4030x3690 with a stale cache 3552x3200 reads 4000x3680, floored to 32 like ALVR (" + (e == null ? "-" : e[0] + "x" + e[1]) + ")");
+                // no Absolute setting (ALVR's Scale variant): the cache is all there is
+                var s3 = new Dictionary<string, object>();
+                global::AirFrameXR.Json.Set(s3, "session_settings.video.transcoding_view_resolution.variant", "Scale");
+                global::AirFrameXR.Json.Set(s3, "openvr_config.eye_resolution_width", 3552.0); global::AirFrameXR.Json.Set(s3, "openvr_config.eye_resolution_height", 3200.0);
+                e = global::AirFrameXR.PipelineModel.StreamEyeExpected(s3);
+                Check(e != null && e[0] == 3552 && e[1] == 3200, "Scale variant: the negotiated cache is used (" + (e == null ? "-" : e[0] + "x" + e[1]) + ")");
+                Check(global::AirFrameXR.PipelineModel.StreamEyeExpected(new Dictionary<string, object>()) == null, "nothing known: null");
+                File.WriteAllLines(Path.Combine(outDir, "eyechoice.txt"), lines);
+                return bad == 0 ? 0 : 1;
+            }
             if (Arg("--encoding-selftest") != null)   // harness/encoding_radios_check.py: the Encoding radio buttons are one group (both could be checked before 1.0.1)
             {
                 var panel = new SettingsPanel(new AppSettings(), Session.Load());

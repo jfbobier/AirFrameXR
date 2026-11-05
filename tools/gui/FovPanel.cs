@@ -279,9 +279,7 @@ namespace AirFrameXR
         {
             try
             {
-                var s = Session.Load();
-                int w = (int)Json.Num(s, "openvr_config.eye_resolution_width", 0), h = (int)Json.Num(s, "openvr_config.eye_resolution_height", 0);
-                return w > 0 && h > 0 ? new[] { w, h } : null;
+                return PipelineModel.StreamEyeExpected(Session.Load());
             }
             catch { return null; }
         }

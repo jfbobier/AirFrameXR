@@ -250,6 +250,33 @@ namespace AirFrameXR
             return w > 0 && h > 0 ? new[] { w, h } : null;
         }
 
+        /// the stream's per-eye size as the next connection negotiates it: the Absolute transcoding size floored to 32 on both axes (server_core align32), else ALVR's
+        /// negotiated cache from the last connection. The setting first: the cache is stale between a save and the next connection (a user saw the old size in the FOV card, 2026-11-05)
+        public static int[] StreamEyeExpected(Dictionary<string, object> session)
+        {
+            var e = SessionEye(session);
+            return e != null ? new[] { e[0] / 32 * 32, e[1] / 32 * 32 } : StreamEye(session);
+        }
+
+        /// The per-eye size the user chose (the wizard's settings panel, the Settings window): it becomes the density reference of the stream fit (stream_reference_eye, with the
+        /// box the headset declared), the session gets the fit size over that box when the fit is on and the size itself otherwise, in both resolution keys and ALVR's negotiated
+        /// cache (what the FOV card and the encoder tests read before the next connection). The caller saves the settings and the session. Returns the size written.
+        public static int[] SaveEyeChoice(Dictionary<string, object> session, AppSettings settings, int w, int h)
+        {
+            settings.StreamReferenceEye = new[] { w, h };
+            var clientFov = AppSettings.ReadClientFov();
+            if (clientFov != null) settings.StreamReferenceFov = clientFov;
+            int sw = w, sh = h;
+            if (settings.StreamFitWindow && clientFov != null && settings.StreamReferenceFov != null)
+            {
+                var fe = FitEye(new[] { w, h }, settings.StreamReferenceFov, clientFov);
+                sw = Math.Min(fe[0], MaxEyeWidth); sh = Math.Min(fe[1], MaxEyeHeight);
+                settings.StreamFitEye = new[] { sw, sh };
+            }
+            WriteStreamEye(session, sw, sh);
+            return new[] { sw, sh };
+        }
+
         /// the session's transcoding size as the Settings panel writes it (Absolute), null when not Absolute
         public static int[] SessionEye(Dictionary<string, object> session)
         {
@@ -280,7 +307,7 @@ namespace AirFrameXR
         {
             var declared = AppSettings.ReadClientFov();
             if (declared == null) return null;
-            var i = new Inputs { Declared = declared, Eye = StreamEye(session) ?? SessionEye(session) ?? new[] { 3552, 3200 }, ReferenceEye = st.StreamReferenceEye, ReferenceFov = st.StreamReferenceFov, Fit = st.StreamFitWindow, Quality = st.FovRenderQuality };
+            var i = new Inputs { Declared = declared, Eye = StreamEyeExpected(session) ?? new[] { 3552, 3200 }, ReferenceEye = st.StreamReferenceEye, ReferenceFov = st.StreamReferenceFov, Fit = st.StreamFitWindow, Quality = st.FovRenderQuality };
             if (st.FovOverride && st.FovFits(declared))
             {
                 var saved = new[] { st.FovOuter, st.FovInner, st.FovUpper, st.FovLower };

@@ -268,14 +268,13 @@ namespace AirFrameXR
             int w = (int)eyeW.Value / 32 * 32, h = (int)eyeH.Value; // ALVR aligns widths to 32
             var tooBig = Nvenc.CheckEye(w, h);
             if (tooBig != null) { MessageBox.Show(this, tooBig, Text); return false; }
-            foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
-            {
-                Json.Set(s, V + k + ".variant", "Absolute");
-                Json.Set(s, V + k + ".Absolute.width", w);
-                Json.Set(s, V + k + ".Absolute.height.set", true);
-                Json.Set(s, V + k + ".Absolute.height.content", h);
-            }
-            Json.Set(s, V + "preferred_fps", double.Parse((string)fps.SelectedItem, CultureInfo.InvariantCulture));
+            // the density reference, the fit, both resolution keys and ALVR's negotiated cache, as the wizard's panel does (until 1.3.4 this window wrote the two resolution keys only:
+            // the FOV card kept showing the old size and the fit tick wrote the old reference back into the session, a user's report of 2026-11-05)
+            PipelineModel.SaveEyeChoice(s, settings, w, h);
+            var rate = double.Parse((string)fps.SelectedItem, CultureInfo.InvariantCulture);
+            Json.Set(s, V + "preferred_fps", rate);
+            Json.Set(s, "openvr_config.refresh_rate", (int)rate);
+            Json.Set(s, "openvr_config.enable_foveated_encoding", profFov.Checked);
             Json.Set(s, V + "bitrate.mode.variant", "ConstantMbps");
             Json.Set(s, V + "bitrate.mode.ConstantMbps", (int)bitrate.Value);
             Json.Set(s, V + "foveated_encoding.enabled", profFov.Checked);
