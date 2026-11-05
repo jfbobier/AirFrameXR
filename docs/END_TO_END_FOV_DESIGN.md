@@ -1,9 +1,16 @@
 # End-to-end FOV design
 
+**Model superseded 2026-11-05 by `docs/PICTURE_EDGES_DESIGN.md`** (sections 1 to 7 below; sections 8 and 9, the measurements, stay the evidence).
+
 Status 2026-11-04: **design.** What exists today is marked *shipped*; the rest is *planned* and the steps that touch the engine (`ovrshim/`, `tools/host/`,
 the IPC, ALVR's server side) need the owner's approval before they are built. Supersedes the "one control" idea of `docs/FOV_APERTURE_PLAN.md` (which
 merged the two settings below into one); that plan's measurements, protocol notes and lab work stay valid. Background: `docs/AVP_FOV.md` (calibration),
 `docs/FOV_PIPELINE_OPTIM.md` (stream geometry), `docs/EXPERIMENTAL_SWITCHES.md` (the settings as they are).
+
+**Assumption (owner, 2026-11-05): the pipeline is ours end to end**, the streamer and our own clients (the visionOS client from the fork's TestFlight, the
+Meta Quest client submitted to Meta). The stock ALVR apps are not a design constraint: good if a feature happens to work with them, no fallback, hint or
+refusal is built for them. A feature may require a client build; the streamer may assume the client takes its messages; the minimum client build per
+feature goes in the release notes and in one launcher line ("update the headset app"). Mixed old/new combinations of our own parts get the same one line.
 
 ## 1. Two settings, two purposes
 
