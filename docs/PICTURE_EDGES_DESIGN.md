@@ -204,6 +204,15 @@ only remaining use is the polygon a hidden-area mask would need (section 10), wh
 from the command line and `harness/fov_calibration.py`, undocumented for users; removed with the mask decision. Sweep profiles users already
 saved stay in their list. `fovgrid.bat` stays in `bench\` for support; its "Check with fovgrid" button goes, the fit is its own check.
 
+**How both headset tools are built (2026-11-05): an OpenXR app on the PC, streamed; no client update, no separate client.** The fit and the
+restriction tool are scenes of the probe (`xr_probe`), an ordinary OpenXR app: it draws the boxes, the scene and the text into its own eye
+images, and the normal chain (VDXR, the shim, the host, ALVR) streams them like a game. What the wearer judges is therefore exactly what a game
+will look like through the stream, on our Vision Pro client and on the Quest client alike. The keys are the PC keyboard's, read by the probe.
+A client-side drawing (sharper text, no stream latency) would be a second renderer on each client for no measured gain; it comes back only if
+the streamed text proves unreadable (at P the stream carries about 23 pixels per degree in the centre: the 1-degree cap height is 24 px). The
+client builds this plan needs are for other reasons: step 0 (the vertical order) and step C (the headset-view message). While a tool runs the
+host must send no headset-view message (V = P), so the fit measures the whole panel; the probe's own executable is never put on the ignore list.
+
 ## 6b. The restriction tool: "Choose what the game renders" (probe + the same tool app, no engine)
 
 Owner, 2026-11-05: the restriction (G) gets the same kind of in-headset, keyboard-driven tool as the fit, for **every headset**, used **after**
