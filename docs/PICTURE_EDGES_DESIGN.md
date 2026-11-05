@@ -1,6 +1,8 @@
 # Picture edges: the recommended end-to-end design
 
-Status 2026-11-05: **proposal, nothing built.** Replaces the model of `docs/END_TO_END_FOV_DESIGN.md` (sections 1 to 7); that document's
+Status 2026-11-05 (evening): **proposal; lab and oracle work done, product not built.** Review of 2026-11-05 folded in: step 0 (the vertical
+orientation) comes first, the work order is 0, A, D, B, C (section 11), the verdict compares the told *size* (section 7), the margin costs
+about 7.5 % per axis, the migration does not keep a default nobody chose (section 8). Replaces the model of `docs/END_TO_END_FOV_DESIGN.md` (sections 1 to 7); that document's
 measurements stay the evidence: the rate map (section 8), the test-slider answers (section 9), the game behaviours and the lab work of
 `docs/FOV_APERTURE_PLAN.md`, the stream geometry of `docs/FOV_PIPELINE_OPTIM.md`, the calibrations of `docs/AVP_FOV.md`. Steps marked **engine**
 need the owner's approval before they are built (`CLAUDE.md`).
@@ -25,12 +27,12 @@ notes and in one launcher line ("update the headset app").
 
 | Box | Per eye | Where it comes from | Default | Who applies it |
 |---|---|---|---|---|
-| **P** panel | yes | the client at connection: Vision Pro = Apple's frustum (60 / 45 / 50 / 45 degrees, about 1 % with the IPD), Quest = the runtime's lens window | | the client declares it when no V is sent |
+| **P** panel | yes | the client at connection: Vision Pro = Apple's frustum (60 / 45 / 50 / 45 degrees outer / inner / up / down as logged, about 1 % with the IPD; up and down may be swapped, step 0), Quest = the runtime's lens window | | the client declares it when no V is sent |
 | **V** picture edges | yes | the PC: P, or a profile (quick fit or sweep) plus the edge margin | **P** | streamer -> client message at connection; the client declares min(P, V); the stream is sized from V |
 | **G** game renders | yes | the PC: V, or a smaller profile for performance (advanced) | **V** | the shim, at the game's next start (VDXR latches it); skipped for games on the ignore list |
 
-Edge margin: one setting, default 2 degrees, added to a fitted window when it becomes V and G. Two degrees cost about 5 % of stream pixels per
-axis; a view that is too tight on a bad fit day is the thing a wearer cannot fix in a game.
+Edge margin: one setting, default 2 degrees, added to a fitted window when it becomes V and G. Two degrees cost about 7.5 % of stream pixels per
+axis on the author's fit (7.4 % horizontally, 7.8 % vertically: the tangent grows faster than the angle at 35 to 45 degrees), about 16 % in area; a view that is too tight on a bad fit day is the thing a wearer cannot fix in a game.
 
 Quest: V is P by construction (the runtime already reports the lens window); the picture-edges row is greyed with that one reason. G and the ignore
 list work the same on both headsets.
@@ -55,7 +57,7 @@ at the same encode cost, and anything above it is wasted. This sets the stream-s
 | Game renders G | V (no black ring); the launcher shows the saving a fit would give | 65 % fewer game pixels for the author's fit against P, computed |
 | Edge margin | 2 degrees | judgement, to tune on fit data |
 | Render quality | 0 | the author's measured choice |
-| Stream size | the density rule (section 5): at P, the largest size the wizard's encode test fits, up to 4096 x 3584 | 5090: 3.1 -> about 4 ms encode for +28 % encoded pixels at the cap |
+| Stream size | the density rule (section 5): at P, the largest size the wizard's encode test fits (NVENC caps an eye at 4096 wide; 4096 x 3584 is the largest size measured so far, a tester's, not a limit) | 5090: 3.1 -> about 4 ms encode for +28 % encoded pixels at the cap |
 | Encoding | foveated, parameters computed from Apple's rate map and V (section 5b), split 3 kept | 3.1 against 7.7 ms encode, 3x bits per pixel at the same bitrate, measured; the map says what the compositor discards |
 | Ignore list | automatic, with a tick to make it manual | section 7 |
 | Quest | V = P greyed, G = V, the Quest 3 starting point offered as a G profile | `docs/HMD_PROFILES.md` |
@@ -63,7 +65,8 @@ at the same encode cost, and anything above it is wasted. This sets the stream-s
 ## 5. Stream size and foveation from V (settings only, `session.json`; the launcher's `PipelineModel` has the maths)
 
 - **Density rule.** Target density = the panel's full-rate density (constant per headset model, from the rate map; a fraction of it as the
-  advanced setting). Eye size = min(target x V span per axis, the 4096 x 8192 cap, what the encode test fits), 32-aligned. At P the cap and
+  advanced setting). Eye size = min(target x V span per axis, NVENC's 4096 x 8192 per eye, what the encode test fits), 32-aligned (at P the target asks 6256 x 5020: the width
+  cap and the encode test decide). At P the cap and
   the encode test decide; as V shrinks the size stays until the target is reached, then shrinks with V (encode, decode and network saving).
   The resolution field becomes "density", shown as the equivalent size over the whole panel so the number keeps its meaning.
 - **Foveation parameters computed from the rate map and V** at every change of V or stream size: section 5b.
@@ -187,7 +190,7 @@ The shim records, once at 2 s of a game and again on change, the size and FOV pe
 | Verdict | Rule | Effect of G | Action |
 |---|---|---|---|
 | own frustum | submitted FOV differs from the told one by more than 0.01 | none | ignore list |
-| fixed size | FOV matches, but the aspect ratio of the submitted size differs from the told box's by more than 5 % (a fixed, often square render packed into our box) | no GPU saved, view shrunk | ignore list |
+| fixed size | FOV matches, but the aspect ratio of the submitted size differs from the told **recommended size**'s by more than 5 % (a fixed, often square render packed into our box). Not the box's tangent aspect: the stream's density differs per axis (1300 against 1460 px/tan at P), so the told size of the author's fit is 2184 x 1927 (1.13) while its tangent box is 1.27, 12 % apart: every honouring game would be flagged | no GPU saved, view shrunk | ignore list |
 | fixed size, second form | a previous run of the same executable under another G exists and the submitted size did not move with the box | same | ignore list |
 | honours | aspect matches; the area may differ (a resolution scale) | saves GPU | nothing |
 | lie (renders its own view, submits the told FOV) | not detectable | distorted picture | the user's eyes; manual entry |
@@ -210,7 +213,9 @@ logged, shown in Game statistics with the verdict and the numbers, and reversibl
 | Session settings | density rule, foveation re-anchoring, written by the launcher | no |
 
 Migration of today's settings: `fov_override` on with a profile's values becomes V = G = that profile (per eye mirrored) with margin 0 (the values
-were already the user's choice); off stays V = G = P.
+were already the user's choice); off stays V = G = P. **Except** values equal to the shipped default 0.97 / 0.71 / 0.69 / 0.63 that the 1.2.0 wizard
+applied by itself (`HmdProfiles.ApplyFovDefault`): nobody chose them, and as V they would bring back the black bars of wearers who see more;
+they become G only (V = P), with a one-time launcher line proposing the fit.
 
 ## 9. UI and profiles
 
@@ -243,12 +248,21 @@ loses `client_fov_scale` (dead advice on our client). Import and export unchange
 
 ## 11. Order of work and tests
 
+Order: **0, A, D, B, C, E.** Step 0 decides the sign of every vertical number; A and D need neither the engine nor a client build, and D is the
+one measured gain (-17 % encoded pixels at Panel with no loss). Until C exists the client declares P whatever the PC wants, so a fit (B) can
+only be applied as G: the sharpness of section 3 waits for C and a client build.
+
 | Step | What | Needs | Lab | Headset |
 |---|---|---|---|---|
-| A | Wizard default `Whole panel`; author's profile relabelled, never proposed; `client_fov_scale` removed; card and wizard wording | GUI | `ui_matrix`, `fov_store_check`, `fov_profile_check` | a fresh install shows no black |
-| B | Quick fit: probe `fit` scene + `calibrate.exe` entry + profile schema 2 | probe + GUI | a scenario that drives the probe's stdin and reads the blue box's edges in the decoded stream (`analyse_fov_restrict` margins); `ui_matrix` rows | two wearers fit themselves; the fit matches their sweep within the margin |
-| C | Channel per eye, G per eye, verdict, ignore list | **engine** + client build | mock client follows the message (`--views-tan` replaced); `e2e_fov_game_*` assert the verdict and the skip at the second start; FoV regressions | a fitted V visibly sharper than P at equal stream size; the Enshrouded mod lands on the ignore list by itself |
-| D | Density rule + rate-map foveation (section 5b): `PipelineModel` port of the oracle's `--ratemap` mode (`ratemap` in the profile and the oracle: done 2026-11-05) | settings | `fov_stream_geometry.py --selftest`; `pipeline_model_check` against the oracle (its grid has Apple's frustum and the fit); `e2e_fov_avp_panel_ratemap` (+ `_rule`) against `e2e_openxr_foveated`: layout, decoded counter and patch, encode ms; `e2e_fov_avp_fit_ratemap` (the vertical orientation); `bench-quality --eye` at the encoded sizes of section 5b; `slices_per_frame` = 3 at the new heights | A/B on the 5090 at Panel: today's 4 / 5 against the zero-loss 3.81 / 3.78 (band -23..22 / -16..27): encode ms, the judge, the eyes on the **upper** field (+25 to +45 degrees, where today loses); then a fitted V |
+| 0 | **Vertical orientation.** With a standard projection matrix the client declares the frustum upside down (`_extractFrustumTangents` returns left, right, bottom, top; `Renderer.swift` sends the third as up); its own defaults say 45 up / 50 down where our docs say 50 / 45. Log the raw `computeProjection` matrix once (one `[proj]` line per eye with the 16 values) in the next client build; if confirmed, fix the client (z, w order), re-read the `[ratemap]` vertical table mirrored and flip the vertical numbers of section 5b | client build (one log line, then a one-line fix) | `python3 harness/swift_headset_check.py` (the declaration check FAILS today and must PASS with the fix; `--projection-y-flipped` covers the other reading); then the Swift headset against the streamer: `views_config` in the host log equals the frustum | the `[proj]` line; fovgrid with asymmetric up / down marks, read by the wearer: the 0-degree line at eye level |
+| A | Wizard default `Whole panel`; author's profile relabelled, never proposed; `client_fov_scale` removed; card and wizard wording; migration of section 8 (the shipped default is not a choice) | GUI | `ui_matrix`, `fov_store_check`, `fov_profile_check` (expects A: FAIL until built) | a fresh install shows no black |
+| D | Density rule + rate-map foveation (section 5b), the zero-loss geometry: `PipelineModel` port of the oracle's `--ratemap` mode (`ratemap` in the profile and the oracle: done 2026-11-05). Vertical parameters only after step 0 | settings | `fov_stream_geometry.py --selftest`; `pipeline_model_check` (its grid has Apple's frustum, the fit and 4096 x 3584); `e2e_fov_avp_panel`, `e2e_fov_avp_panel_ratemap` (+ `_rule`) against `e2e_openxr_foveated` (layout, decoded counter and patch, encode ms); `e2e_fov_avp_fit_ratemap` (the vertical orientation of the band); the same with the Swift headset: the client's own foveation variables (`swift.client_foveation`, Float32 maths) equal the encoded frame the host sent (the host's FFR.cpp mixes float and double: a 32-pixel disagreement would misplace the client's decompression); `bench-quality --eye` at the encoded sizes; `slices_per_frame` = 3 at the new heights | A/B on the 5090 at Panel: today's 4 / 5 against the zero-loss geometry: encode ms, the judge, the eyes on the field where today over-compresses (the upper one, or the lower one if step 0 flips it); then a fitted V after C |
+| B | Quick fit: probe `fit` scene + `calibrate.exe` entry + profile schema 2; applied as G until C | probe + GUI | a scenario that drives the probe's stdin and reads the blue box's edges in the decoded stream (`analyse_fov_restrict` margins); `ui_matrix` rows | two wearers fit themselves; the fit matches their sweep within the margin |
+| C | Channel per eye (V to the client), G per eye, verdict (told **size** aspect, section 7), ignore list | **engine** + client build | the Swift headset follows the message with the client's real code (the Rust mock's `--views-tan` stand-in retired); `e2e_fov_game_*` assert the verdict and the skip at the second start; all `e2e_fov_*` as regressions | a fitted V visibly sharper than P at equal stream size; the Enshrouded mod lands on the ignore list by itself |
 | E | Mask, community box | **engine** / data | | after one Unreal measurement; after five wearers |
+
+Lab infrastructure owed for the steps above: the Swift headset against the streamer (`harness/swift_headset/README.md`: from WSL if the
+builder can reach the laptop, else built on the builder with Swift for Windows) and its `harness/run.py` wiring (`client.kind: "swift"`);
+retire `e2e_fov_declared_ceiling` (the 1.2.0-1.3.1 fixed box no client sends any more).
 
 What the lab cannot judge stays owed to the headset and is written in `docs/progress.md` with the legend.
