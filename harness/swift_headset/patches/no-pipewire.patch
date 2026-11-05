@@ -1,0 +1,24 @@
+--- a/alvr/audio/Cargo.toml	2026-11-05 19:33:36.386064568 +0100
++++ b/alvr/audio/Cargo.toml	2026-11-05 19:33:36.409254070 +0100
+@@ -26,6 +26,4 @@
+     "Win32_UI_Shell_PropertiesSystem",
+ ] }
+ 
+-[target.'cfg(target_os = "linux")'.dependencies]
+-pipewire = { version = "0.8.0", features = ["v0_3_49"] }
+-libspa-sys = "0.8.0"
+\ No newline at end of file
++# harness/swift_headset: the PipeWire bindings (server-side microphone and recording only) do not build against current PipeWire headers; the headset needs none
+\ No newline at end of file
+--- a/alvr/audio/src/lib.rs	2026-11-05 19:33:36.386840073 +0100
++++ b/alvr/audio/src/lib.rs	2026-11-05 19:33:36.409748565 +0100
+@@ -1,8 +1,7 @@
+ #[cfg(windows)]
+ mod windows;
+ 
+-#[cfg(target_os = "linux")]
+-pub mod linux;
++// harness/swift_headset: linux (PipeWire) module left out
+ 
+ #[cfg(windows)]
+ pub use crate::windows::*;

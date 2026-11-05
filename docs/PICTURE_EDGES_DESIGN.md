@@ -121,6 +121,11 @@ nothing worse.
 needs a negative shift. The first prototype of this table had the vertical axis upside down: its shifts had the wrong sign and its "today"
 column described the lower field where the loss is in the upper one. The table below is the oracle's (`python3 harness/fov_stream_geometry.py --ratemap`).
 
+**Open (2026-11-05, `harness/swift_headset/README.md`):** the client's own code may declare the frustum upside down (with a standard
+projection matrix, `_extractFrustumTangents` + `Renderer.swift` send the bottom tangent as `up`; the client's defaults say 45 up / 50
+down). If a headset's raw `computeProjection` confirms it, the panel is 45 up / 50 down, the rate map's vertical table is mirrored, and
+every vertical number below flips sign (up becomes down); the horizontal ones stand. Settle that before step D's vertical parameters.
+
 **Results (computed, `fov_stream_geometry.py --ratemap`; today = 0.45 x 0.40, shift 0.4 / 0.1, ratios 4 / 5; worst = local compression over what
 the map allows, 1.00 = no loss):**
 
