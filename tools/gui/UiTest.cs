@@ -334,7 +334,8 @@ namespace AirFrameXR
         /// docs/PICTURE_EDGES_DESIGN.md sections 6 and 9 (owner's UI review 2026-11-05), checked on the real forms by control names, so the GUI work
         /// of steps A and B has a fixed target. The contract (AccessibleName): "Whole panel" (wizard radio), "Fit now" (wizard button), "Fit the picture
         /// to your eyes" (the Vision Pro card and the manager), "Picture edges" (the Vision Pro card in the launcher, the wizard calls the same card), "Retry"
-        /// (calibrate.exe); the FOV restriction lives in Advanced video and performance settings as "Restrict the field of view" (or "What the game renders"). Gone from every window: "Calibrate now (30 min...)" and "Check with fovgrid". One key=value line per window
+        /// (calibrate.exe); the FOV restriction lives in Advanced video and performance settings as "Restrict the field of view" (or "What the game renders"),
+        /// with its in-headset tool "Choose in the headset" (section 6b) on every headset. Gone from every window: "Calibrate now (30 min...)" and "Check with fovgrid". One key=value line per window
         /// and headset; the expected lines are in the Python checker. Written before the UI: most lines differ until steps A and B are built.
         static int FovUiPlanSelfTest(string outDir)
         {
@@ -379,7 +380,7 @@ namespace AirFrameXR
                     using (var a = new AdvancedForm())
                     {
                         Hidden(a);
-                        lines.Add($"advanced_{tag}: restriction={B(On(a, "Restrict the field of view", "What the game renders"))} picture_edges={B(Has(a, "Picture edges"))}");
+                        lines.Add($"advanced_{tag}: restriction={B(On(a, "Restrict the field of view", "What the game renders"))} headset_tool={B(On(a, "Choose in the headset"))} picture_edges={B(Has(a, "Picture edges"))}");
                     }
                 }
                 SetHeadset("Apple Vision Pro");

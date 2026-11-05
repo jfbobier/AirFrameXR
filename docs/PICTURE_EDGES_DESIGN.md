@@ -204,6 +204,43 @@ only remaining use is the polygon a hidden-area mask would need (section 10), wh
 from the command line and `harness/fov_calibration.py`, undocumented for users; removed with the mask decision. Sweep profiles users already
 saved stay in their list. `fovgrid.bat` stays in `bench\` for support; its "Check with fovgrid" button goes, the fit is its own check.
 
+## 6b. The restriction tool: "Choose what the game renders" (probe + the same tool app, no engine)
+
+Owner, 2026-11-05: the restriction (G) gets the same kind of in-headset, keyboard-driven tool as the fit, for **every headset**, used **after**
+the headset view is settled: on a Quest by design (V is the runtime's lens window), on a Vision Pro after the fit or on Whole panel (G is
+chosen inside V, so V comes first). It is a performance choice made by looking at what is lost.
+
+What the wearer sees, **both eyes open** (unlike the fit): the probe draws a detailed scene (the benchmark scene, `XR_PROBE_SCENE`) inside the
+candidate box G and black outside it, exactly what a game that honours the restriction shows; the box starts at V (nothing restricted). A
+binocular view matters here: what one eye's inner edge loses, the other eye still sees, so the inner edges are where a restriction is cheapest
+to the eye, and only both eyes together show it.
+
+In-headset text (the fit's renderer, the same three screens): before Space, "Choose what the game renders. Arrows pull an edge in, Shift +
+arrow pushes it back out. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit. Press SPACE to start."; while
+choosing, one line with the live estimate from the model, "the game renders 68 % of its pixels (32 % less GPU work in games that honour it)",
+fading after 5 s; after Enter, "Saved."
+
+| Key | Does |
+|---|---|
+| Space | start; then hold to see the whole view V (release: back to G), the before / after of the saving |
+| Arrow | pulls that edge in 1 degree (the same edge on both eyes, mirrored: outer is outer), repeats while held |
+| Shift + arrow | pushes it back out (never past V) |
+| Tab | both eyes (default) / the edges of the left eye alone (inner and outer apart, for the advanced user) |
+| Enter | save as a restriction profile and use it |
+| Esc | leave without saving |
+
+Protocol on the PC window: pull an edge in until you notice the black during normal looking around, then one step back; start with the inner
+edges and the lower one. The tool never goes past V and never below the restriction's floor (a fifth of V per edge, the shim's limit).
+
+Where: **Advanced video and performance settings**, next to the restriction choice: **Choose it in the headset (2 min)** (AccessibleName
+"Choose in the headset"), on every headset; on a Quest also in the wizard's restriction step. Saved as a profile with method `restriction`
+(per eye with schema 2), listed with the others; typed values and imports stay. The tool app is the fit's (`calibrate.exe --restrict`): it
+starts the streamer, tells the probe V (`fov_override off` while choosing), starts the probe in the `restrict` scene, shows the live box and
+saving, and applies the profile as G on Enter.
+
+Lab: the fit's scenario with the `restrict` scene (scripted keys through the same env-var key handler): the decoded stream shows the scene
+inside the box and black outside at the expected degrees; the saved profile's tangents equal the box; `fov_ui_plan_check` checks the button.
+
 ## 7. Games that ignore G: the intake (**engine**: shim + host, branch `1.4`; the rules are GUI)
 
 The shim records, once at 2 s of a game and again on change, the size and the FOV **per eye** of the layer the game submits, against what it
@@ -304,7 +341,7 @@ yet: no Vision Pro card, the manager's fit enabled. Today no code applies this r
 | Setting | Where | Who sees it |
 |---|---|---|
 | Headset view (picture edges: `Whole panel` or a profile, **Fit the picture to your eyes (2 min)** = the retry, the sharpness line from the model) | its own mini app card in the launcher, "Vision Pro picture"; the wizard calls the same card when it pairs a Vision Pro | Vision Pro only: no card until a Vision Pro has been seen, never for a Quest |
-| FOV restriction (what the game renders: off, a profile, the Quest 3 starting point, typed values; the saving in game pixels and the yellow share that goes black when smaller than V; render quality) | back in **Advanced video and performance settings** (where it lived before step 3, `eb9b992`) | every headset |
+| FOV restriction (what the game renders: off, a profile, the Quest 3 starting point, typed values; the saving in game pixels and the yellow share that goes black when smaller than V; render quality; **Choose it in the headset (2 min)**, section 6b) | back in **Advanced video and performance settings** (where it lived before step 3, `eb9b992`) | every headset |
 | Games that ignore it | Game statistics (verdict, numbers, the per-game tick) and the global automatic / manual tick in the Advanced window | every headset |
 | Stream density, full frame, edge ratio preset, pipeline preview and split warnings | Advanced, as today | every headset |
 
@@ -350,7 +387,7 @@ only be applied as G: the sharpness of section 3 waits for C and a client build.
 | 0 | **Vertical orientation.** With a standard projection matrix the client declares the frustum upside down (`_extractFrustumTangents` returns left, right, bottom, top; `Renderer.swift` sends the third as up); its own defaults say 45 up / 50 down where our docs say 50 / 45. Log the raw `computeProjection` matrix once (one `[proj]` line per eye with the 16 values) in the next client build; if confirmed, fix the client (z, w order), re-read the `[ratemap]` vertical table mirrored and flip the vertical numbers of section 5b | client build (one log line, then a one-line fix) | `python3 harness/swift_headset_check.py` (the declaration check FAILS today and must PASS with the fix; `--projection-y-flipped` covers the other reading); then the Swift headset against the streamer: `views_config` in the host log equals the frustum | the `[proj]` line; fovgrid with asymmetric up / down marks, read by the wearer: the 0-degree line at eye level |
 | A | The UI of section 9: the Vision Pro card in the launcher (absent for a Quest and before a Vision Pro is seen), the restriction back in Advanced video and performance settings, the wizard calling the card on a Vision Pro and showing the restriction only on a Quest; author's profile relabelled, never proposed; `client_fov_scale` removed; the ray sweep and the fovgrid button out of the UI; migration of section 8 | GUI | `python3 harness/fov_ui_plan_check.py [--local]` (12 lines, all FAIL on the 2026-11-05 GUI), `ui_matrix` (row `wizard-page7-quest`), `fov_store_check`, `fov_profile_check` (expects A) | a fresh install shows no black |
 | D | Density rule + rate-map foveation (section 5b), the zero-loss geometry: `PipelineModel` port of the oracle's `--ratemap` mode (`ratemap` in the profile and the oracle: done 2026-11-05). Vertical parameters only after step 0 | settings | `fov_stream_geometry.py --selftest`; `pipeline_model_check` (its grid has Apple's frustum, the fit and 4096 x 3584); `e2e_fov_avp_panel`, `e2e_fov_avp_panel_ratemap` (+ `_rule`) against `e2e_openxr_foveated` (layout, decoded counter and patch, encode ms); `e2e_fov_avp_fit_ratemap` (the vertical orientation of the band); the same with the Swift headset: the client's own foveation variables (`swift.client_foveation`, Float32 maths) equal the encoded frame the host sent (the host's FFR.cpp mixes float and double: a 32-pixel disagreement would misplace the client's decompression); `bench-quality --eye` at the encoded sizes; `slices_per_frame` = 3 at the new heights | A/B on the 5090 at Panel: today's 4 / 5 against the zero-loss geometry: encode ms, the judge, the eyes on the field where today over-compresses (the upper one, or the lower one if step 0 flips it); then a fitted V after C |
-| B | Black-bar fit: probe `fit` scene (blue box, keys read by the probe, JSON lines out, in-headset text with DirectWrite, Space to start) + `calibrate.exe` opening on it (Retry) + wizard button + profile schema 2; applied as G until C | probe + GUI | a scenario that starts the probe's `fit` scene with scripted keys (an env var feeding the same key handler) and reads the blue box's edges and the text screen in the decoded stream (`analyse_fov_restrict` margins; the text area inside 12 degrees); `ui_matrix` rows (wizard button, card retry) | two wearers fit themselves from the headset text alone; the fit matches their sweep within the margin |
+| B | Black-bar fit and the restriction tool (section 6b, `restrict` scene, both eyes, the scene inside G): probe `fit` scene (blue box, keys read by the probe, JSON lines out, in-headset text with DirectWrite, Space to start) + `calibrate.exe` opening on it (Retry) + wizard button + profile schema 2; applied as G until C | probe + GUI | a scenario that starts the probe's `fit` scene with scripted keys (an env var feeding the same key handler) and reads the blue box's edges and the text screen in the decoded stream (`analyse_fov_restrict` margins; the text area inside 12 degrees); `ui_matrix` rows (wizard button, card retry) | two wearers fit themselves from the headset text alone; the fit matches their sweep within the margin |
 | C | The unified model of section 8 (V to the client, G per eye, IPC `fovScale` 4 -> 8) and the intake of section 7 (shim records what the game submitted per eye, host `game_fov_verdict` event + run record, ignore list, `undecided` resolved at the next start) | **engine** (branch `1.4`) + client build | the Swift headset follows the message with the client's real code; the nine `e2e_fov_game_*` assert the verdict (`checks.fov_restrict.verdict`: FAIL until built, "no game_fov_verdict event"); the second-start scenario; all `e2e_fov_*` as regressions | a fitted V visibly sharper than P at equal stream size; the Enshrouded mod lands on the ignore list by itself; Gravity Rush 2 and Uncharted with their mods: `own_frustum` |
 | E | Mask, community box | **engine** / data | | after one Unreal measurement; after five wearers |
 
