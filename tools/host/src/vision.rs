@@ -69,6 +69,8 @@ pub struct Settings {
     pub fov_lower: Option<f64>,
     /// 0..1: where the game's render size sits between the floor (the stream's pixel density over the restricted view) and the stream's eye size (0 = the floor)
     pub fov_render_quality: Option<f64>,
+    /// the user's own executables told the headset's whole view whatever the verdicts (docs/PICTURE_EDGES_DESIGN.md section 7, `video.fov_unrestricted_games`)
+    pub fov_unrestricted_games: Vec<String>,
     /// the launcher fits the stream to the box the headset declares at the density of `stream_reference_eye` (the size the user chose over the headset's full box,
     /// docs/FOV_PIPELINE_OPTIM.md S3); with it on and the reference above the stream's eye size, the reference is the render quality slider's ceiling (ipc renderCeiling)
     pub stream_fit_window: Option<bool>,
@@ -138,6 +140,7 @@ pub fn load_settings(path: &Path) -> Settings {
         fov_upper: video["fov_upper"].as_f64(),
         fov_lower: video["fov_lower"].as_f64(),
         fov_render_quality: video["fov_render_quality"].as_f64(),
+        fov_unrestricted_games: video["fov_unrestricted_games"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default(),
         stream_fit_window: video["stream_fit_window"].as_bool(),
         stream_reference_eye: video["stream_reference_eye"].as_array().and_then(|a| Some([a.first()?.as_i64()?, a.get(1)?.as_i64()?])),
         debug: v["debug"].as_bool(),

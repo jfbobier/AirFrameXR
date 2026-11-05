@@ -43,6 +43,12 @@ void* nvh_ipc_open(void);
 void nvh_ipc_config(void* ipc, void* nvh, double rate_hz, int eye_w, int eye_h, const float* fov8, const float* eye_offset6, int bits, float encoding_gamma, const float* fov_scale4, float render_quality, int ceil_w, int ceil_h);
 // The per-eye render size the shim told the app (ipc.h ShimToHost::recommendedW/H; 0 before an app started).
 void nvh_ipc_shim_recommended(void* ipc, int* w, int* h);
+// The FOV-restriction intake (ipc.h ShimToHost::gameSubmit*, docs/PICTURE_EDGES_DESIGN.md section 7): copies the last complete record and returns its
+// sequence number (0 = none yet; it changes when the app's submission changed). told8 / sub8: per eye L R U D tangents (left eye first);
+// size4: submitted width, height of the left eye, then the right; unrestricted: 1 when the app was on the list at its start.
+uint32_t nvh_ipc_game_submission(void* ipc, float* told8, float* sub8, int* size4, uint32_t* unrestricted);
+// The executables told the headset's whole view (ipc.h HostToShim::unrestrictedExes): UTF-8 "|a.exe|b.exe|", lower case; read by an app at its start.
+void nvh_ipc_set_unrestricted(void* ipc, const char* list_utf8);
 void nvh_ipc_set_connected(void* ipc, int connected);
 void nvh_ipc_publish_head(void* ipc, uint64_t client_ts_ns, const float* quat_xyzw, const float* pos, const float* lin_vel, const float* ang_vel);
 void nvh_ipc_publish_hand(void* ipc, int side, int valid, const float* quat_xyzw, const float* pos, const float* lin_vel, const float* ang_vel);

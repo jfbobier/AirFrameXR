@@ -14,6 +14,7 @@ use alvr_server_core::{ServerCoreContext, ServerCoreEvent};
 use alvr_session::CodecType;
 mod bench_quality;
 mod fg_judge;
+mod fov_intake;
 mod discovery;
 mod games;
 mod logs;
@@ -87,6 +88,8 @@ struct Args {
     fov_override: Option<[f32; 4]>,
     /// the render quality slider's ceiling per eye above the stream's eye size (lab `--fov-ceiling WxH`; else the settings' stream_reference_eye when stream_fit_window is on): None = the stream's eye size
     fov_ceiling: Option<(i32, i32)>,
+    /// the user's executables told the headset's whole view whatever the verdicts (settings `video.fov_unrestricted_games`)
+    fov_unrestricted_user: Vec<String>,
     fov_quality_explicit: bool,
     stream_fit_window: bool,
     stream_reference_eye: Option<(i32, i32)>,
@@ -190,6 +193,7 @@ fn parse_args() -> Result<Args, String> {
         fov_quality: 0.0,
         fov_override: None,
         fov_ceiling: None,
+        fov_unrestricted_user: Vec::new(),
         fov_quality_explicit: false,
         stream_fit_window: false,
         stream_reference_eye: None,
@@ -513,6 +517,7 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if a.fg_cap_fps.is_none() {
         a.fg_cap_fps = st.frame_gen_cap_fps.map(|v| v.clamp(0.0, 240.0));
     }
+    a.fov_unrestricted_user = st.fov_unrestricted_games.clone();
     if let (Some(true), Some(o), Some(i), Some(u), Some(l), false) = (st.fov_override, st.fov_outer, st.fov_inner, st.fov_upper, st.fov_lower, a.fov_scale_explicit) {
         a.fov_override = Some([o as f32, i as f32, u as f32, l as f32]);
     }
@@ -939,6 +944,8 @@ mod nvh {
         pub fn nvh_ipc_open() -> *mut c_void;
         pub fn nvh_ipc_config(ipc: *mut c_void, nvh: *mut c_void, rate_hz: f64, eye_w: i32, eye_h: i32, fov8: *const f32, off6: *const f32, bits: i32, encoding_gamma: f32, fov_scale4: *const f32, render_quality: f32, ceil_w: i32, ceil_h: i32);
         pub fn nvh_ipc_shim_recommended(ipc: *mut c_void, w: *mut i32, h: *mut i32);
+        pub fn nvh_ipc_game_submission(ipc: *mut c_void, told8: *mut f32, sub8: *mut f32, size4: *mut i32, unrestricted: *mut u32) -> u32;
+        pub fn nvh_ipc_set_unrestricted(ipc: *mut c_void, list_utf8: *const std::ffi::c_char);
         pub fn nvh_last_ffr_wait_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_set_connected(ipc: *mut c_void, connected: i32);
         pub fn nvh_ipc_publish_head(ipc: *mut c_void, ts: u64, q: *const f32, p: *const f32, lv: *const f32, av: *const f32);
@@ -1493,6 +1500,56 @@ fn save_gpu_info(path: &std::path::Path, gpu: &serde_json::Value, nvenc_cfg: &se
     let v = json!({ "name": gpu["name"], "driver": gpu["driver"], "nvenc_engines": nvenc_cfg["nvenc"]["split"]["engines"], "split": nvenc_cfg["nvenc"]["split"],
         "caps": nvenc_cfg["nvenc"]["caps"], "updated": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) });
     let _ = fs::write(path, v.to_string());
+}
+
+// ---- the FOV-restriction intake (docs/PICTURE_EDGES_DESIGN.md section 7; the logic is fov_intake.rs) ------------------------------------------------
+/// config\fov_verdicts.json: one entry per executable (lower case): the verdict, how it was decided, the user's tick, and the start it was decided on.
+fn load_fov_verdicts(path: &std::path::Path) -> std::collections::HashMap<String, fov_intake::Record> {
+    let mut m = std::collections::HashMap::new();
+    let v: serde_json::Value = fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
+    let f8 = |x: &serde_json::Value| -> Option<fov_intake::Box2> {
+        let a: Vec<f32> = x.as_array()?.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).collect();
+        if a.len() != 8 { return None; }
+        Some([[a[0], a[1], a[2], a[3]], [a[4], a[5], a[6], a[7]]])
+    };
+    let i2 = |x: &serde_json::Value, k: usize| x.get(k).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    if let Some(o) = v["games"].as_object() {
+        for (exe, r) in o {
+            let (Some(verdict), Some(told), Some(sub)) = (r["verdict"].as_str().and_then(fov_intake::Verdict::parse), f8(&r["told"]), f8(&r["submitted"])) else { continue };
+            let ss = &r["submitted_size"];
+            m.insert(exe.to_ascii_lowercase(), fov_intake::Record {
+                verdict,
+                last: fov_intake::Observation { told, told_size: (i2(&r["told_size"], 0), i2(&r["told_size"], 1)), submitted: sub,
+                                               submitted_size: [(i2(ss, 0), i2(ss, 1)), (i2(ss, 2), i2(ss, 3))], unrestricted: r["unrestricted"].as_bool().unwrap_or(false) },
+                decided_by: if r["decided_by"].as_str() == Some("second start") { "second start" } else { "one start" },
+                forced: r["forced"].as_bool(),
+            });
+        }
+    }
+    m
+}
+
+fn fov_record_json(r: &fov_intake::Record) -> serde_json::Value {
+    let o = &r.last;
+    json!({ "verdict": r.verdict.name(), "decided_by": r.decided_by, "forced": r.forced, "restrict_next_start": fov_intake::restrict_next_start(Some(r)),
+            "told": o.told.concat(), "told_size": [o.told_size.0, o.told_size.1], "submitted": o.submitted.concat(),
+            "submitted_size": [o.submitted_size[0].0, o.submitted_size[0].1, o.submitted_size[1].0, o.submitted_size[1].1], "unrestricted": o.unrestricted })
+}
+
+fn save_fov_verdicts(path: &std::path::Path, m: &std::collections::HashMap<String, fov_intake::Record>) {
+    let games: serde_json::Map<String, serde_json::Value> = m.iter().map(|(k, r)| (k.clone(), fov_record_json(r))).collect();
+    let _ = fs::write(path, serde_json::to_string_pretty(&json!({ "schema": 1, "games": games })).unwrap_or_default());
+}
+
+/// Tells the shim which executables get the whole view at their next start (HostToShim::unrestrictedExes).
+fn publish_unrestricted(ipc: *mut std::ffi::c_void, m: &std::collections::HashMap<String, fov_intake::Record>, user: &[String]) -> String {
+    let list = fov_intake::unrestricted_list(m.iter().map(|(k, r)| (k.as_str(), r)), user);
+    if !ipc.is_null() {
+        if let Ok(c) = std::ffi::CString::new(list.clone()) {
+            unsafe { nvh::nvh_ipc_set_unrestricted(ipc, c.as_ptr()) };
+        }
+    }
+    list
 }
 
 /// The run record's `pipeline` block (docs/FOV_PIPELINE_OPTIM.md S8): what each stage of the frame path did in this run, for the Game statistics app's strip.
@@ -2434,6 +2491,15 @@ fn main() {
         if s + o > 0 { format!(", {s} boundaries skipped for want of a tracking sample ({:.1} %)", 100.0 * s as f64 / (s + o) as f64) } else { String::new() }
     };
     let mut game: Option<GameRun> = None;
+    // the intake: the per-executable verdicts, the list the shim reads at an app's start, the record sequence already seen, the store's entry before this run
+    let fov_verdicts_path = args.config_dir.join("fov_verdicts.json");
+    let mut fov_store = load_fov_verdicts(&fov_verdicts_path);
+    let fov_list = publish_unrestricted(ipc, &fov_store, &args.fov_unrestricted_user);
+    if !fov_list.is_empty() {
+        logs::general("INFO", &format!("games told the whole view at their start (FOV restriction ignored): {fov_list}"));
+    }
+    let mut fov_seq_seen: u32 = 0;
+    let mut fov_run_prev: Option<fov_intake::Record> = None;
     // the run record (games.json): one (headset repeated share, host repeat share) sample per status tick (10 s) while a game runs
     let mut run_windows: Vec<(f64, f64, f64)> = Vec::new();
     let mut run_stats = RunStats::default();
@@ -2557,6 +2623,30 @@ fn main() {
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_cap");
             }
+            // the intake: a new record from the shim while a game runs (once at 2 s, again on a change) -> verdict, store, the shim's list, an event
+            if let (false, Some(g)) = (ipc.is_null(), game.as_ref()) {
+                let (mut t8, mut s8, mut sz, mut un) = ([0f32; 8], [0f32; 8], [0i32; 4], 0u32);
+                let seq = unsafe { nvh::nvh_ipc_game_submission(ipc, t8.as_mut_ptr(), s8.as_mut_ptr(), sz.as_mut_ptr(), &mut un) };
+                if seq != 0 && seq != fov_seq_seen {
+                    fov_seq_seen = seq;
+                    let (mut rw, mut rh) = (0i32, 0i32);
+                    unsafe { nvh::nvh_ipc_shim_recommended(ipc, &mut rw, &mut rh) };
+                    let o = fov_intake::Observation { told: [[t8[0], t8[1], t8[2], t8[3]], [t8[4], t8[5], t8[6], t8[7]]], told_size: (rw, rh),
+                                                      submitted: [[s8[0], s8[1], s8[2], s8[3]], [s8[4], s8[5], s8[6], s8[7]]],
+                                                      submitted_size: [(sz[0], sz[1]), (sz[2], sz[3])], unrestricted: un != 0 };
+                    let key = g.exe.to_ascii_lowercase();
+                    let r = fov_intake::update(fov_run_prev.as_ref(), o);
+                    let next = fov_intake::restrict_next_start(Some(&r));
+                    logs::general("INFO", &format!("field of view intake: {} {} ({}): told {}x{}, rendered {}x{}; next start {}", g.exe, r.verdict.name(), r.decided_by,
+                                                   rw, rh, sz[0], sz[1], if next { "restricted" } else { "told the whole view" }));
+                    let mut ev = fov_record_json(&r);
+                    ev["exe"] = json!(g.exe);
+                    event(origin, "game_fov_verdict", ev);
+                    fov_store.insert(key, r);
+                    save_fov_verdicts(&fov_verdicts_path, &fov_store);
+                    publish_unrestricted(ipc, &fov_store, &args.fov_unrestricted_user);
+                }
+            }
             // game start / end, for the general log and the GUI
             let alive = app_alive();
             let mut b = [0 as std::ffi::c_char; 256];
@@ -2578,6 +2668,12 @@ fn main() {
                 run_rep0 = pipeline.as_ref().map(|p| (p.fg_repeats.load(Ordering::Relaxed), p.fg_synths.load(Ordering::Relaxed) + p.fg_reals.load(Ordering::Relaxed))).unwrap_or((0, 0));
                 let (skips0, outputs0) = fg_counts(&pipeline);
                 let (frames0, submitted0, now) = (shared.frames_sent.load(Ordering::Relaxed), shim_submitted(ipc), Instant::now());
+                // the intake: what the store knew before this start, and the shim's record sequence now (a new record will be this game's)
+                fov_run_prev = fov_store.get(&exe.to_ascii_lowercase()).cloned();
+                if !ipc.is_null() {
+                    let (mut t8, mut s8, mut sz, mut un) = ([0f32; 8], [0f32; 8], [0i32; 4], 0u32);
+                    fov_seq_seen = unsafe { nvh::nvh_ipc_game_submission(ipc, t8.as_mut_ptr(), s8.as_mut_ptr(), sz.as_mut_ptr(), &mut un) };
+                }
                 game = Some(GameRun { exe, start: now, frames0, submitted0, skips0, outputs0, seg_start: now, seg_frames0: frames0, seg_submitted0: submitted0, seg_skips0: skips0, seg_outputs0: outputs0 });
             } else if (!alive || displaced) && game.is_some() {
                 let g = game.take().unwrap();

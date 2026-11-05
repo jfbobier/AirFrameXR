@@ -1557,6 +1557,7 @@ namespace {
                     m_diagNoDisplayTime = 0;
                     m_diagSameTs = 0;
                 }
+                RecordGameSubmission(layers);
                 if (m_publishThread.joinable()) {
                     // The host may only read the slot once the GPU is done with it, and that includes the app's own rendering of
                     // this frame (same device, in order). Waiting here would block the app's render thread for the whole GPU frame
@@ -1622,6 +1623,42 @@ namespace {
         }
 
         // The orientation each eye's projection layer was rendered with (identity when the frame has no projection layer): the host's
+        // The FOV-restriction intake (docs/PICTURE_EDGES_DESIGN.md section 7): what the app submits in its projection layer (FOV and viewport size per
+        // eye) against what it was told, for the host's verdict. Written once the app's first projection layer is 2 s old (loading frames left out)
+        // and again whenever it changes: a few compares per frame, no GPU work.
+        void RecordGameSubmission(const std::vector<const ovrLayerHeader*>& layers) {
+            if (!m_ipc.state) return;
+            const ovrLayerEyeFov* l = nullptr;
+            for (const ovrLayerHeader* h : layers) {
+                if (h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth)) { l = (const ovrLayerEyeFov*)h; break; }
+            }
+            if (!l) return;
+            const auto now = std::chrono::steady_clock::now();
+            if (!m_subSeen) { m_subSeen = true; m_subFirst = now; }
+            if (now - m_subFirst < std::chrono::seconds(2)) return;
+            float sub[2][4];
+            int32_t w[2], hgt[2];
+            for (int e = 0; e < 2; e++) {
+                sub[e][0] = l->Fov[e].LeftTan; sub[e][1] = l->Fov[e].RightTan; sub[e][2] = l->Fov[e].UpTan; sub[e][3] = l->Fov[e].DownTan;
+                w[e] = l->Viewport[e].Size.w; hgt[e] = l->Viewport[e].Size.h;
+            }
+            if (m_subWritten && !memcmp(sub, m_subFov, sizeof(sub)) && !memcmp(w, m_subW, sizeof(w)) && !memcmp(hgt, m_subH, sizeof(hgt))) return;
+            memcpy(m_subFov, sub, sizeof(sub)); memcpy(m_subW, w, sizeof(w)); memcpy(m_subH, hgt, sizeof(hgt));
+            m_subWritten = true;
+            auto& s = m_ipc.state->shim;
+            InterlockedIncrement((volatile LONG*)&s.gameSubmitSeq);   // odd: writing
+            for (int e = 0; e < 2; e++) {
+                s.gameToldFov[e][0] = m_gameFov[e].LeftTan; s.gameToldFov[e][1] = m_gameFov[e].RightTan;
+                s.gameToldFov[e][2] = m_gameFov[e].UpTan; s.gameToldFov[e][3] = m_gameFov[e].DownTan;
+                for (int k = 0; k < 4; k++) s.gameSubmittedFov[e][k] = sub[e][k];
+                s.gameSubmittedW[e] = w[e]; s.gameSubmittedH[e] = hgt[e];
+            }
+            InterlockedIncrement((volatile LONG*)&s.gameSubmitSeq);   // even: complete
+            shimlog::General("INFO", "game submitted: left eye L/R/U/D tan %.3f/%.3f/%.3f/%.3f at %d x %d, right %.3f/%.3f/%.3f/%.3f at %d x %d (told left %.3f/%.3f/%.3f/%.3f, recommended %d x %d)",
+                             sub[0][0], sub[0][1], sub[0][2], sub[0][3], w[0], hgt[0], sub[1][0], sub[1][1], sub[1][2], sub[1][3], w[1], hgt[1],
+                             m_gameFov[0].LeftTan, m_gameFov[0].RightTan, m_gameFov[0].UpTan, m_gameFov[0].DownTan, m_recommendedResolution.w, m_recommendedResolution.h);
+        }
+
         // frame generation rotates the picture from it to the tracking sample it stamps the frame with.
         static void FrameRenderOrientation(const std::vector<const ovrLayerHeader*>& layers, float q[2][4], bool& hasProjection) {
             hasProjection = false;
@@ -2083,6 +2120,21 @@ namespace {
             float sc[4];
             for (int k = 0; k < 4; k++) {
                 sc[k] = (h.fovScale[k] >= 0.2f && h.fovScale[k] <= 1.f) ? h.fovScale[k] : 1.f;   // 0 / garbage = not restricted
+            }
+            // The intake (docs/PICTURE_EDGES_DESIGN.md section 7): an executable on the host's list (a verdict of own frustum or fixed size, an undecided
+            // one at its deciding start, or the user's choice) is told the headset's whole view.
+            if (initial) {
+                wchar_t list[1024];
+                wcsncpy_s(list, h.unrestrictedExes, _TRUNCATE);
+                std::wstring me = L"|" + shimlog::ExeName() + L"|";
+                for (auto& c : me) c = (wchar_t)towlower(c);
+                const bool skip = list[0] && wcsstr(list, me.c_str()) != nullptr;
+                m_ipc.state->shim.gameUnrestricted = skip ? 1u : 0u;
+                if (skip) {
+                    const bool wasRestricted = sc[0] < 1.f || sc[1] < 1.f || sc[2] < 1.f || sc[3] < 1.f;
+                    for (int k = 0; k < 4; k++) sc[k] = 1.f;
+                    if (wasRestricted) shimlog::General("INFO", "field of view: this game is on the list of games told the whole view (it ignores the restriction): not restricted");
+                }
             }
             double widthRatio = 0, heightRatio = 0;
             int measured = 0;
@@ -2598,6 +2650,11 @@ namespace {
         uint32_t m_hostConfigSeq = 0;
         ovrSizei m_recommendedResolution{};
         ovrFovPort m_eyeFov[ovrEye_Count]{};   // the headset's: the stream frame's field of view (composition target, what the client maps the frame over)
+        // the intake's record of what the app submitted (RecordGameSubmission)
+        bool m_subSeen = false, m_subWritten = false;
+        std::chrono::steady_clock::time_point m_subFirst{};
+        float m_subFov[2][4]{};
+        int32_t m_subW[2]{}, m_subH[2]{};
         ovrFovPort m_gameFov[ovrEye_Count]{};  // what the game is told (GetEyeFov): the headset's restricted per edge by the host's fovScale, see LoadHostConfig
         bool m_useStageTracking{false};
 

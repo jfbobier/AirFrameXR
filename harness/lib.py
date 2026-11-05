@@ -342,6 +342,7 @@ def launch_app(app, rid, rd, log):
         cmd2 = ("@echo off\r\n"
                 f"set XR_RUNTIME_JSON={home}\\{ROOTNAME}\\{rt}\\virtualdesktop-openxr.json\r\n"
                 f"set OVRSHIM_LOG={home}\\{ROOTNAME}\\{rd}\\ovrshim{i + 2}.log\r\n"
+                + "".join(f"set {k}={v}\r\n" for k, v in second.get("env", {}).items()) +   # this start's own fake-game behaviour (xr_probe XR_PROBE_*)
                 f"cd /d {home}\\{ROOTNAME}\r\n" + run2 +
                 f"echo %ERRORLEVEL% > {rd}\\{n}.rc\r\n")
         local2 = CACHE / f"{n}.cmd"
@@ -628,6 +629,7 @@ def run_scenario(sc, outdir: Path, log=print):
             b_get(f"runs/{rid}/AirFrameXR/logs", outdir / "logs")      # AirFrameXR.log, alvr.log, debug\<time>\...
         else:
             b_get(f"runs/{rid}/host_cfg/session_log.txt", outdir / "host_session_log.txt")
+            b_get(f"runs/{rid}/host_cfg/fov_verdicts.json", outdir / "fov_verdicts.json")   # the intake's store after the run (section 7)
             b_get(f"runs/{rid}/host_cfg/session.json", outdir / "host_session_final.json")
         if h.get("dump_qpmap"):
             b_get(f"runs/{rid}/qpmap.json", outdir / "qpmap.json")   # what ALVR negotiated (openvr_config)
@@ -1531,14 +1533,22 @@ def analyse(sc, outdir: Path):
     a["host"] = jload(outdir / "host_report.json") or report_from_stdout(outdir / "host_stdout.txt")
     a["client"] = jload(outdir / "client_report.json")
     # the host's verdict on what the game submitted (engine step C of docs/PICTURE_EDGES_DESIGN.md: one `game_fov_verdict` event, the last one wins)
-    a["fov_verdict"] = None
+    # and per game start the first verdict after its game_started event (the second-start scenarios: one entry per start of the chain)
+    a["fov_verdict"], a["fov_starts"] = None, []
     if (outdir / "host_stdout.txt").exists():
+        want_new = False
         for line in (outdir / "host_stdout.txt").read_text(errors="replace").splitlines():
+            if '"game_started"' in line:
+                want_new = True
             if '"game_fov_verdict"' in line and "{" in line:
                 try:
-                    a["fov_verdict"] = json.loads(line[line.index("{"):]).get("data")
+                    d = json.loads(line[line.index("{"):]).get("data")
                 except ValueError:
-                    pass
+                    continue
+                a["fov_verdict"] = d
+                if want_new:
+                    a["fov_starts"].append(d)
+                    want_new = False
     a["rig"] = (outdir / "rig.txt").read_text(errors="replace").strip() if (outdir / "rig.txt").exists() else ""
     # Frames sent before the first tracking sample arrived carry the host's own clock (like ALVR's driver: time since connect), which is not the client's: only the frames from the
     # first one that matches a pose the client sent are comparable, so monotonic is judged from there (frames.csv: ts_ns, arrival_ns, len, yaw, yaw_near).
@@ -2001,6 +2011,10 @@ def evaluate(sc, a):
                 chk("fov_game_verdict", bool(hv) and hv.get("verdict") == want_v, {"host": hv, "truth": ck["fov_restrict"].get("truth"), "game": gm},
                     f"the host's verdict on this game is {want_v!r} (ground truth: {ck['fov_restrict'].get('truth', want_v)})" if hv else
                     "no game_fov_verdict event in the host's output (the shim's record of what the game submitted and the host's verdict: engine step C, not built yet)")
+            if "starts" in ck["fov_restrict"]:   # the second-start policy (section 7): per start of the chain, the verdict and whether it was told the whole view
+                want_s, got_s = ck["fov_restrict"]["starts"], [{"verdict": d.get("verdict"), "unrestricted": d.get("unrestricted")} for d in a.get("fov_starts", [])]
+                chk("fov_game_starts", got_s[:len(want_s)] == want_s and len(got_s) >= len(want_s), {"host": got_s, "truth": ck["fov_restrict"].get("truth")},
+                    f"per start: {want_s} (start 1 as told; an undecided, own-frustum or fixed-size game told the whole view at its next start; honours restricted again)")
             if ck["fov_restrict"].get("edges_reached"):
                 chk("fov_game_edges_reached", fa.get("edges_reached_frac", 0) >= 0.95, {"edges": fa.get("edges_reached"), "lit": fa.get("edges_reached_frac")},
                     ">= 95 % of the samples at the edges the game was told to stop short of but rendered past carry its picture: the composition maps the frustum the game submits, it does not crop to the one it was told")

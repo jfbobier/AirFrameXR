@@ -14,7 +14,7 @@
 namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 36;
+constexpr uint32_t kVersion = 37;   // 37: the FOV-restriction intake (gameSubmit*, unrestrictedExes; docs/PICTURE_EDGES_DESIGN.md section 7)
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -123,6 +123,10 @@ struct HostToShim {
     // headset's full box) when the stream is fitted to a smaller declared window, so the slider can still raise the game's render up to it. 0 = the stream's
     // eye size (the way it was). Read with the recommended size, so an app that started later takes a new value.
     int32_t renderCeilingW, renderCeilingH;
+    // The FOV-restriction intake (docs/PICTURE_EDGES_DESIGN.md section 7): executables told the headset's whole view (fovScale ignored), lower case,
+    // each closed by '|' ("|game.exe|mod.exe|"): the host's verdicts (own frustum, fixed size, undecided until its next start) and the user's list.
+    // Read with fovScale, at the app's start.
+    wchar_t unrestrictedExes[1024];
 };
 
 struct Haptic {
@@ -158,6 +162,14 @@ struct ShimToHost {
     uint64_t gateHolds;            // releases the intake gate skipped for a standing host queue (see HostToShim::intakeGate)
     uint64_t gateSuppressed;       // standing queue seen while the gate was quiet after a skip (its effect still in flight)
     int32_t recommendedW, recommendedH;   // the per-eye render size the shim told the app (GetRecommendedResolution), for the host's run record
+    // The FOV-restriction intake: what the app submitted in its projection layer against what it was told, per eye (L R U D tangents, the
+    // OVR convention: positive, left eye's Left = outer, right eye's Left = inner), written once the app's session is 2 s old and again on any
+    // change. Seqlock: gameSubmitSeq is odd while the shim writes, even (and > 0) once a record is complete.
+    uint32_t gameSubmitSeq;
+    float gameToldFov[2][4];
+    float gameSubmittedFov[2][4];
+    int32_t gameSubmittedW[2], gameSubmittedH[2];   // the projection layer's viewport size per eye (what the app rendered)
+    uint32_t gameUnrestricted;                       // 1: this app was on unrestrictedExes at its start (told the headset's whole view)
 };
 
 struct IpcState {
