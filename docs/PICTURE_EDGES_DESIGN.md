@@ -266,6 +266,13 @@ choice. The step's title becomes "What the game renders" there.
 **Profile manager** (`configure.exe --fov`): list, rename, delete, import, typed values with the red / yellow check, the map. "Calibrate
 now (30 min)" and "Check with fovgrid" go; "Fit the picture to your eyes" takes their place (greyed on a Quest, as above).
 
+**Manual profiles stay, for advanced users** (owner, 2026-11-05: some users want to enter any calibration they like). In the manager, as
+today: four typed values (outer, inner, up, down; tangents or degrees, the red / yellow check, the live map), import of a calibration file,
+rename, delete. Added with schema 2: a "per eye" tick that opens a second row for the right eye (the fit measures the eyes apart, a typed
+profile may too). A typed profile is used exactly like a fitted one: on the Vision Pro as picture edges (V) and / or what the game renders
+(G), on a Quest as G only (no picture-edges row there). Only the wizard leaves typed values out: its job is a safe default and the fit.
+The headset profiles of `profiles\*.profile.json` (encoder and session settings per headset model) are a separate thing and are unchanged.
+
 **Profiles (`config\user_fov_profiles.json`, schema 2):** a profile is the wearer's window; V and G derive from it. New optional fields: per-eye
 tangents (`tan_left`, `tan_right`; `tan` stays the mirrored union for old readers), window polygon per eye, `method` (quickfit | sweep |
 slider | manual), `declared_at_measure` (P then), `light_seal`, `ipd_mm`, `client_build`, `visionos`. The active profile is remembered per
