@@ -149,6 +149,8 @@ namespace AirFrameXR
                 int page = p;
                 yield return new Case { Name = "wizard-page" + page, Make = () => new WizardForm(null, true), Prepare = f => ((WizardForm)f).ForTest(page) };
             }
+            // docs/PICTURE_EDGES_DESIGN.md section 9: the field-of-view step as a Quest user sees it (the restriction only, no headset calibration)
+            yield return new Case { Name = "wizard-page7-quest", Make = () => new WizardForm(null, true), Prepare = f => { WizardForm.DemoHeadset = "quest3"; try { ((WizardForm)f).ForTest(7); } finally { WizardForm.DemoHeadset = null; } } };
             yield return new Case { Name = "configure-advanced", Make = () => new ConfigureForm(null) };
             var quest3 = new[] { 1.376, 0.839, 0.966, 1.428 };
             yield return new Case { Name = "fov-manager", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), new[] { 1.045, 0.800, 0.759, 0.871 }) };
@@ -329,6 +331,66 @@ namespace AirFrameXR
             return fails == 0 ? 0 : 1;
         }
 
+        /// docs/PICTURE_EDGES_DESIGN.md sections 6 and 9 (owner's UI review 2026-11-05), checked on the real forms by control names, so the GUI work
+        /// of steps A and B has a fixed target. The contract (AccessibleName): "Whole panel" (wizard radio), "Fit now" (wizard button), "Fit the picture
+        /// to your eyes" (card and manager button), "Picture edges" (the card's row), "Retry" (calibrate.exe); the restriction keeps "Restrict the field of
+        /// view" (or "What the game renders"). Gone from every window: "Calibrate now (30 min...)" and "Check with fovgrid". One key=value line per window
+        /// and headset; the expected lines are in the Python checker. Written before the UI: most lines differ until steps A and B are built.
+        static int FovUiPlanSelfTest(string outDir)
+        {
+            var lines = new List<string>();
+            IEnumerable<Control> All(Control c) { foreach (Control k in c.Controls) { yield return k; foreach (var d in All(k)) yield return d; } }
+            Control Named(Control root, params string[] names) => All(root).FirstOrDefault(c => names.Any(n => string.Equals(c.AccessibleName, n, StringComparison.OrdinalIgnoreCase)));
+            bool Has(Control root, params string[] names) => Named(root, names) != null;
+            bool On(Control root, params string[] names) { var c = Named(root, names); return c != null && c.Enabled; }
+            bool Text(Control root, string part) => All(root).Any(c => (c.Text ?? "").IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0);
+            int TypedBoxes(Control root) => All(root).OfType<TextBox>().Count(t => !string.Equals(t.AccessibleName, "Name of the new profile", StringComparison.OrdinalIgnoreCase));
+            string B(bool v) => v ? "True" : "False";
+            void Hidden(Form f) { f.Opacity = 0; f.ShowInTaskbar = false; f.StartPosition = FormStartPosition.Manual; f.Location = new Point(-4000, -4000); f.Show(); Application.DoEvents(); }
+            void SetHeadset(string name) { var st = new AppSettings(); if (name == null) global::AirFrameXR.Json.Remove(st.Root, "headset.name"); else global::AirFrameXR.Json.Set(st.Root, "headset.name", name); st.Save(); }
+            var saved = new AppSettings().HeadsetName;
+            try
+            {
+                foreach (var (tag, demoHs) in new[] { ("avp", (string)null), ("quest", "quest3") })
+                {
+                    WizardForm.DemoHeadset = demoHs;
+                    using (var w = new WizardForm(null, true))
+                    {
+                        Hidden(w); w.ForTest(7); Application.DoEvents();
+                        lines.Add($"wizard_{tag}: whole_panel={B(Has(w, "Whole panel"))} fit_now={B(On(w, "Fit now"))} ray_calibration={B(Text(w, "Calibrate now") || Text(w, "30 min"))} restriction={B(Has(w, "No restriction", "Restrict to a profile", "What the game renders"))}");
+                    }
+                    WizardForm.DemoHeadset = null;
+                }
+                foreach (var (tag, name) in new[] { ("avp", "Apple Vision Pro"), ("quest", "Meta Quest 3"), ("none", (string)null) })
+                {
+                    SetHeadset(name);
+                    using (var m = new FovManagerForm(FovManagerForm.DemoStore(), tag == "quest" ? new[] { 1.376, 0.839, 0.966, 1.428 } : new[] { 1.732, 1.0, 1.192, 1.0 }))
+                    {
+                        Hidden(m);
+                        lines.Add($"manager_{tag}: fit={B(On(m, "Fit the picture to your eyes"))} ray_calibration={B(Text(m, "Calibrate now") || Text(m, "30 min"))} fovgrid_button={B(Text(m, "Check with fovgrid"))} typed_values={B(TypedBoxes(m) >= 4)} per_eye={B(Text(m, "per eye"))}");
+                    }
+                    using (var c = new FovPanelTestForm(tag == "quest" ? new[] { 1.376, 0.839, 0.966, 1.428 } : new[] { 1.732, 1.0, 1.192, 1.0 }, false, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()))
+                    {
+                        Hidden(c);
+                        lines.Add($"card_{tag}: picture_edges={B(On(c, "Picture edges"))} fit={B(On(c, "Fit the picture to your eyes"))} restriction={B(On(c, "Restrict the field of view", "What the game renders"))}");
+                    }
+                }
+                SetHeadset("Apple Vision Pro");
+                // calibrate.exe in its demo mode (no streamer, no probe): the planned window opens on the fit page (Retry, the Space instruction); today's
+                // demo result page draws the measured rays (its map control) and must be gone with the sweep
+                using (var k = new CalibrateForm(Path.Combine(Path.GetTempPath(), "airframexr_calibrate_plan_" + Guid.NewGuid().ToString("N"))))
+                {
+                    Hidden(k);
+                    var retry = Has(k, "Retry"); var space = Text(k, "SPACE");
+                    k.ApplyDemoResult(); Application.DoEvents();
+                    lines.Add($"calibrate: retry={B(retry)} fit_instructions={B(space)} ray_sweep={B(Has(k, "Your visible window with the measured rays"))}");
+                }
+            }
+            finally { SetHeadset(string.IsNullOrEmpty(saved) ? null : saved); }
+            File.WriteAllLines(Path.Combine(outDir, "fovuiplan.txt"), lines);
+            return 0;
+        }
+
         [STAThread]
         static int Main(string[] args)
         {
@@ -448,6 +510,7 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "fovprofile.txt"), lines);
                 return 0;
             }
+            if (Arg("--fov-ui-plan-selftest") != null) return FovUiPlanSelfTest(outDir);   // harness/fov_ui_plan_check.py: the UI rules of docs/PICTURE_EDGES_DESIGN.md sections 6 and 9
             if (Arg("--fov-other-headset-selftest") != null)   // harness/fov_profile_check.py: an override made for the Vision Pro is not applied to a headset with another field of view
             {
                 var lines = new List<string>();

@@ -104,6 +104,8 @@ namespace AirFrameXR
 
         /// uitest.exe: one page of the demo wizard, without the discovery and the tests.
         public void ForTest(int page) { if (demo) LoadDemo(); GoTo(page); }
+        /// The UI harness: the demo headset for the next LoadDemo ("quest3", or null = the command line's --demo-headset, else the Vision Pro).
+        public static string DemoHeadset;
 
         // ------------------------------------------------------------------------------------------------------------- navigation
         void Start()
@@ -944,7 +946,7 @@ namespace AirFrameXR
                 FromHeadset = true, DisplayName = "Apple Vision Pro", Hostname = "1234.client.alvr", Ip = "192.168.1.50", PanelW = 3552, PanelH = 3200,
                 Rates = new List<double> { 90, 96, 100 }, MicRate = 48000, Gamma = 1.0,
             };
-            if (Arg("--demo-headset") == "quest3")
+            if ((DemoHeadset ?? Arg("--demo-headset")) == "quest3")
                 hs = new Handshake { FromHeadset = true, DisplayName = "Oculus Quest3", Hostname = "quest3.client.alvr_", Ip = "192.168.1.30", PanelW = 2064, PanelH = 2208, Rates = new List<double> { 72, 80, 90, 120 }, MicRate = 48000, EncAv1 = true, Gamma = 2.2 };
             chosenHost = hs.Hostname; chosenIp = hs.Ip; chosenName = hs.DisplayName; ctxFps = hs.Rates.Contains(90) ? 90 : hs.Rates.Max();
             ctx = new TestContext { HS = hs, Check = check, HeadsetAvailable = true };
