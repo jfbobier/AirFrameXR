@@ -211,7 +211,9 @@ will look like through the stream, on our Vision Pro client and on the Quest cli
 A client-side drawing (sharper text, no stream latency) would be a second renderer on each client for no measured gain; it comes back only if
 the streamed text proves unreadable (at P the stream carries about 23 pixels per degree in the centre: the 1-degree cap height is 24 px). The
 client builds this plan needs are for other reasons: step 0 (the vertical order) and step C (the headset-view message). While a tool runs the
-host must send no headset-view message (V = P), so the fit measures the whole panel; the probe's own executable is never put on the ignore list.
+host must send no headset-view message (V = P), so the fit measures the whole panel. The probe goes through the intake like any game: its tool
+scenes honour the box by construction (verdict `honours`), so it never lands on the ignore list; the lab's fake games are the same executable,
+which is why each scenario starts with an empty store (its own `host_cfg`).
 
 ## 6b. The restriction tool: "Choose what the game renders" (probe + the same tool app, no engine)
 
