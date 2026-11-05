@@ -158,29 +158,51 @@ a judge run and a headset look; the QP map follows the same contours (it reads t
 
 ## 6. The fit tool: "Fit the picture to your eyes" (probe + `calibrate.exe`, no engine)
 
-What the wearer sees: the stream covers P (G off during the tool). The probe fills the candidate box with a mid blue, black outside, a thin lighter
-line on the box edge so it reads where the panel is dim. No grid, no numbers in the headset. Not green (chroma key), not white (too bright).
+UI review 2026-11-05 (owner's choices): the black-bar fit with the keyboard is **the** calibration, proposed in the wizard and in the
+settings for retries; the ray sweep leaves the UI; the instructions are shown **in the headset** and Space starts; nothing of this is
+offered to Meta Quest users (section 9).
+
+What the wearer sees: the stream covers P (G off during the tool: the probe is told P). The probe fills the candidate box with a mid blue, black
+outside, a thin lighter line on the box edge so it reads where the panel is dim. Not green (chroma key), not white (too bright).
+
+**In-headset text** (new in the probe: DirectWrite into a texture, drawn head-locked in the centre of the eye, within 12 degrees of the axis
+where the rate map keeps full density; white on dark grey, about 1 degree cap height = 24 stream pixels at P; only in the eye being fitted
+while the other is black). Three screens, no numbers:
+
+1. Before Space: "Fit the picture to your eyes. Arrows push an edge out until its black bar is gone. Shift + arrow pulls it back.
+   Tab: other eye. Enter: save. Esc: quit. Press SPACE to start." Both eyes, on the full blue box.
+2. While fitting: one line at the top of the text area, "RIGHT EYE: close your left eye", and the hint "push until the bar is gone, one step back,
+   one forward". It fades after 5 s without a key so it does not cover the edges being judged; any key brings it back.
+3. After Enter: "Saved. You can take the headset off." for 3 s, then the probe exits.
 
 | Key (PC keyboard, blind) | Does |
 |---|---|
+| Space | start (screen 1 -> 2); during the fit: both eyes, the check view |
 | Arrow | pushes that edge outward 0.5 degree, repeats while held |
 | Shift + arrow | pulls it back |
 | Tab | switches eye; the other eye goes black |
-| Space | both eyes, the check view |
 | Enter | keep it |
 | Esc | leave without saving |
 
-Protocol, written on the PC window: push until the black bar is gone, one step back to see it return, one step forward. One eye at a time (with
-both eyes open the nose-side edges hide behind the other eye, and the eyes differ: the author's right eye 44 degrees outward against 37, Kevin's
-8 degrees apart at the top). Eight short holds, under two minutes. Start box 0.80 x P so the bars are visible on the first frame.
+**Input in the probe, not in `calibrate.exe`:** the probe reads the keys with `GetAsyncKeyState` (the physical keyboard, whatever window has
+the focus: with the headset on, nobody can click a window back into focus) and prints the box as one JSON line per change on stdout;
+`calibrate.exe` only shows those values and saves them. Replaces the plan's "keys in the calibrate window, written to the probe's stdin".
 
-Mechanics: `calibrate.exe` gains a Quick fit entry: starts the streamer minimized (as today), turns G off, starts the probe as a child in a
-`fit` scene, takes the keys in its own window, writes the box to the probe's stdin on every change (the probe redraws it next frame), shows the
-eight values live. Enter asks the light seal size once and saves a profile (method `quickfit`, per-eye tangents, P at measurement, seal, IPD if
-known), then applies it as V and G with the margin. If P is not Apple's frustum (an old app), one line: update the headset app.
+Protocol (also on the PC window, for whoever sits at the PC): push until the black bar is gone, one step back to see it return, one step
+forward. One eye at a time (with both eyes open the nose-side edges hide behind the other eye, and the eyes differ: the author's right eye
+44 degrees outward against 37, Kevin's 8 degrees apart at the top). Eight short holds, under two minutes. Start box 0.80 x P so the bars are
+visible on the first frame.
 
-The 30-minute sweep stays in the profile manager only (it alone gives the polygon a hidden-area mask would need, section 10); it leaves the
-wizard and the card. Remove it later if the mask is not pursued.
+Mechanics: `calibrate.exe` opens on the fit (no menu): starts the streamer minimized (as today), switches G off (`fov_override off` on the
+host's stdin), starts the probe as a child in the `fit` scene, shows the eight values live and a Retry button. Enter asks the light seal
+size once and saves a profile (method `quickfit`, per-eye tangents, P at measurement, seal, IPD if known, client build), then applies it
+(as G until step C exists, as V and G with the margin after). If P is not Apple's frustum (an old app), one line: update the headset app.
+Step 0 comes first: a fit stored while the client declares the frustum upside down would carry swapped up / down values.
+
+**The ray sweep leaves the UI** (wizard, settings card, profile manager): it takes 30 minutes, needs a controller or a pinch per ray, and its
+only remaining use is the polygon a hidden-area mask would need (section 10), which waits for a measurement. Kept: `calibrate.exe --sweep`
+from the command line and `harness/fov_calibration.py`, undocumented for users; removed with the mask decision. Sweep profiles users already
+saved stay in their list. `fovgrid.bat` stays in `bench\` for support; its "Check with fovgrid" button goes, the fit is its own check.
 
 ## 7. Games that ignore G (**engine**: shim + host; the rules are GUI)
 
@@ -219,18 +241,28 @@ they become G only (V = P), with a one-time launcher line proposing the fit.
 
 ## 9. UI and profiles
 
-**The card "Picture and performance"** (replaces "FOV restriction and calibration"):
+**Which headset.** The name of the last headset seen (`config\airframexr_views.json`, the rule `video.fov_for_headset` already uses) or,
+in the wizard, the one just paired (`hs.DisplayName`). Quest = Quest 3, Quest Pro, Quest 2, our client or the stock one. No headset seen
+yet: everything enabled. Today no code applies this rule (decided 2026-11-04, documented only): built in step A.
 
-1. *Picture edges*: `Whole panel` | a profile from the list, with **Fit the picture to your eyes (2 min)** and one line from the model:
-   "Picture: 57 % of the panel's sharpness; a fit typically gives about 90 %". Quest: greyed, "The Quest reports what its lenses show: nothing
-   to fit."
+**The settings card "Picture and performance"** (replaces "FOV restriction and calibration"):
+
+1. *Picture edges*: `Whole panel` | a profile from the list, with **Fit the picture to your eyes (2 min)** (the retry: it opens the fit
+   again; the new profile is named by date and seal size and selected, the older ones stay in the list) and one line from the model:
+   "Picture: 57 % of the panel's sharpness; a fit typically gives about 90 %". **Quest: the row and the fit button are greyed**, one line:
+   "The Quest reports what its lenses show: nothing to fit."
 2. *What the game renders*: `The picture edges` (default) | a smaller profile, with the saving in game pixels and, when smaller than V, a yellow
-   line with the share of the picture that goes black.
+   line with the share of the picture that goes black. Available on every headset (the Quest 3 starting point is a G profile).
 3. *Games that ignore it*: the count, a link to Game statistics (verdict, numbers, the per-game tick), the global automatic/manual tick.
 4. Fold *Advanced*: render quality, stream density, full frame, the edge ratio preset, the pipeline preview and its split warnings (as today).
 
-**Wizard step 5 "Picture edges"**: `Whole panel` selected by default on the Vision Pro, the fit button, nothing else. The shipped author's
-profile is never pre-selected.
+**Wizard step "Picture edges"** (today's step 7 "Field of view"): on the Vision Pro, `Whole panel` selected, the button **Fit now (2 min,
+headset on)** that runs the fit inside the wizard (the streamer and the headset are already connected after the tests step), and `Next`
+works without fitting. No ray calibration, no profile list, no typed values (they stay in the settings card's manager). **On a Quest the
+step is skipped** (the wizard goes from the settings to the end; the log says why), so a Quest user never sees a calibration.
+
+**Profile manager** (`configure.exe --fov`): list, rename, delete, import, typed values with the red / yellow check, the map. "Calibrate
+now (30 min)" and "Check with fovgrid" go; "Fit the picture to your eyes" takes their place (greyed on a Quest, as above).
 
 **Profiles (`config\user_fov_profiles.json`, schema 2):** a profile is the wearer's window; V and G derive from it. New optional fields: per-eye
 tangents (`tan_left`, `tan_right`; `tan` stays the mirrored union for old readers), window polygon per eye, `method` (quickfit | sweep |
@@ -255,9 +287,9 @@ only be applied as G: the sharpness of section 3 waits for C and a client build.
 | Step | What | Needs | Lab | Headset |
 |---|---|---|---|---|
 | 0 | **Vertical orientation.** With a standard projection matrix the client declares the frustum upside down (`_extractFrustumTangents` returns left, right, bottom, top; `Renderer.swift` sends the third as up); its own defaults say 45 up / 50 down where our docs say 50 / 45. Log the raw `computeProjection` matrix once (one `[proj]` line per eye with the 16 values) in the next client build; if confirmed, fix the client (z, w order), re-read the `[ratemap]` vertical table mirrored and flip the vertical numbers of section 5b | client build (one log line, then a one-line fix) | `python3 harness/swift_headset_check.py` (the declaration check FAILS today and must PASS with the fix; `--projection-y-flipped` covers the other reading); then the Swift headset against the streamer: `views_config` in the host log equals the frustum | the `[proj]` line; fovgrid with asymmetric up / down marks, read by the wearer: the 0-degree line at eye level |
-| A | Wizard default `Whole panel`; author's profile relabelled, never proposed; `client_fov_scale` removed; card and wizard wording; migration of section 8 (the shipped default is not a choice) | GUI | `ui_matrix`, `fov_store_check`, `fov_profile_check` (expects A: FAIL until built) | a fresh install shows no black |
+| A | Wizard default `Whole panel`; author's profile relabelled, never proposed; `client_fov_scale` removed; card and wizard wording; the Quest rule of section 9 (wizard step skipped, picture-edges row and fit greyed); the ray sweep and the fovgrid button out of the UI; migration of section 8 (the shipped default is not a choice) | GUI | `ui_matrix` (new rows: wizard on a Quest skips the step, card and manager greyed on a Quest, enabled with no headset seen), `fov_store_check`, `fov_profile_check` (expects A: FAIL until built) | a fresh install shows no black |
 | D | Density rule + rate-map foveation (section 5b), the zero-loss geometry: `PipelineModel` port of the oracle's `--ratemap` mode (`ratemap` in the profile and the oracle: done 2026-11-05). Vertical parameters only after step 0 | settings | `fov_stream_geometry.py --selftest`; `pipeline_model_check` (its grid has Apple's frustum, the fit and 4096 x 3584); `e2e_fov_avp_panel`, `e2e_fov_avp_panel_ratemap` (+ `_rule`) against `e2e_openxr_foveated` (layout, decoded counter and patch, encode ms); `e2e_fov_avp_fit_ratemap` (the vertical orientation of the band); the same with the Swift headset: the client's own foveation variables (`swift.client_foveation`, Float32 maths) equal the encoded frame the host sent (the host's FFR.cpp mixes float and double: a 32-pixel disagreement would misplace the client's decompression); `bench-quality --eye` at the encoded sizes; `slices_per_frame` = 3 at the new heights | A/B on the 5090 at Panel: today's 4 / 5 against the zero-loss geometry: encode ms, the judge, the eyes on the field where today over-compresses (the upper one, or the lower one if step 0 flips it); then a fitted V after C |
-| B | Quick fit: probe `fit` scene + `calibrate.exe` entry + profile schema 2; applied as G until C | probe + GUI | a scenario that drives the probe's stdin and reads the blue box's edges in the decoded stream (`analyse_fov_restrict` margins); `ui_matrix` rows | two wearers fit themselves; the fit matches their sweep within the margin |
+| B | Black-bar fit: probe `fit` scene (blue box, keys read by the probe, JSON lines out, in-headset text with DirectWrite, Space to start) + `calibrate.exe` opening on it (Retry) + wizard button + profile schema 2; applied as G until C | probe + GUI | a scenario that starts the probe's `fit` scene with scripted keys (an env var feeding the same key handler) and reads the blue box's edges and the text screen in the decoded stream (`analyse_fov_restrict` margins; the text area inside 12 degrees); `ui_matrix` rows (wizard button, card retry) | two wearers fit themselves from the headset text alone; the fit matches their sweep within the margin |
 | C | Channel per eye (V to the client), G per eye, verdict (told **size** aspect, section 7), ignore list | **engine** + client build | the Swift headset follows the message with the client's real code (the Rust mock's `--views-tan` stand-in retired); `e2e_fov_game_*` assert the verdict and the skip at the second start; all `e2e_fov_*` as regressions | a fitted V visibly sharper than P at equal stream size; the Enshrouded mod lands on the ignore list by itself |
 | E | Mask, community box | **engine** / data | | after one Unreal measurement; after five wearers |
 
