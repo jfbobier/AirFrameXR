@@ -19,8 +19,8 @@ VR stack does (SteamVR's running start, Meta's Phase Sync, the OpenXR `xrWaitFra
 | `alvr_host.exe` | the streamer (`tools/host`): compositor boundary clock, encoder (ALVR's foveation pass + NVENC), ALVR's `server_core` for the connection, tracking, audio and the network |
 | `AirFrameXR.exe` / `configure.exe` | GUIs (C#): launch, status, pairing; discovery is done by the host (`--discover`) |
 
-Shim and host share one memory block (`ovrshim/ipc.h`, IPC v36): host → shim config (eye size, FoV, the game's restricted FoV and render quality with its ceiling), poses, display ticks, compositor
-pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock), heartbeat, haptics, diagnostics, the render size it told the app.
+Shim and host share one memory block (`ovrshim/ipc.h`, IPC v38): host → shim config (eye size, FoV, the game's restricted FoV per eye and render quality with its ceiling, the live preview box, the executables told the whole view), poses, display ticks, compositor
+pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock), heartbeat, haptics, diagnostics, the render size it told the app, and what the game submitted per eye (size and FoV, seqlock; the intake below).
 
 ## Threads (v0.2)
 
@@ -31,7 +31,7 @@ pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock
 | Shim GPU-complete wait → IPC publish | shim publisher thread (time-critical) | DXGI completion event per slot | the GPU |
 | Shim display clock (predicted display time to the game) | shim server thread (time-critical) | host vsync event | the host tick |
 | **Host clock**: display ticks to the shim, **compositor boundary** pick (newest complete frame → encoder mailbox; green idle frame at 30 fps with no game; empty boundary left empty) | host vsync thread (HIGHEST, sleep-then-spin) | ALVR's `duration_until_next_vsync` grid at the headset's refresh | nothing (one-deep mailboxes, newest wins) |
-| **Field of view**: the headset's FoV (ViewsConfig) is the stream frame's and the composition target's; the game is told a per-edge restricted FoV and a recommended size reduced with its area (and raised again by the render quality slider, up to the stream's eye size) (shim `GetEyeFov` / `GetRecommendedResolution`, host `fovScale`, taken at the app's start) | shim, host | the user's Advanced fields | nothing |
+| **Field of view**: the headset's FoV (ViewsConfig) is the stream frame's and the composition target's; the game is told a per-edge restricted FoV and a recommended size reduced with its area (and raised again by the render quality slider, up to the stream's eye size) (shim `GetEyeFov` / `GetRecommendedResolution`, host `fovScale`, taken at the app's start); the three-box model of the section "Field of view: one negotiation for every headset" below | shim, host | the user's Advanced fields | nothing |
 | **Host intake**: IPC frame event → frame queue (three deep, oldest first), slot marked busy for the shim | host intake thread (HIGHEST) | the shim's publish event | nothing |
 | **Host encoder**: foveation pass + NVENC on the picked slot (slot released when its copy is done), packets → sender queue | host encoder thread (HIGHEST) | encoder mailbox | the encode itself only; the main loop rebuilds the encoder under the same lock, only when no game runs |
 | **Host sender**: release each packet at its send time `asap` \| `vsync` (next tick) \| `phase` (boundary + encode-time envelope, default) → `send_video_nal` | host sender thread (HIGHEST) | sender queue | nothing |
@@ -66,6 +66,53 @@ the one SteamVR's compositor runs with, so the encoder's copy never queues behin
 - **Newest-wins mailboxes** between host threads (intake → clock, clock → encoder) and a FIFO with release times to the sender.
   A frame superseded before a boundary (`superseded`) means the game ran faster than the display; an encoder overrun means an
   encode took longer than a period.
+
+## Field of view: one negotiation for every headset (1.4)
+
+The engine knows no headset types. Per eye there are three boxes, all decided on the PC and all in tangents (design, measurements and the
+reasons: `docs/PICTURE_EDGES_DESIGN.md`; this section is the mechanism):
+
+| Box | Meaning | Who decides | Who applies it |
+|---|---|---|---|
+| **P** panel | what the headset's app can show | the client, declared at connection (Vision Pro: Apple's frustum; Quest: the runtime's lens window) | the client |
+| **V** headset view | what the stream covers and the wearer sees | the PC (`video.headset_view`: P by default, or a fitted window plus a margin) | the client declares min(P, V); the host sizes the stream and the foveation from it |
+| **G** game box | what the game renders | the PC (`video.fov_override`, per eye: V by default, or a smaller box for performance) | the shim tells the game G and a recommended size reduced with its area; black appears only where the game drew nothing |
+
+G sits inside V inside P, per eye. A Quest is the same model with V = P (its runtime already reports the lens window), so nothing in the engine
+branches on the headset: the Vision Pro card writes V, the Advanced window writes G, and both headsets use G and the intake.
+
+```
+ GUI / settings ── video.headset_view (V) ─┐                  ┌─ video.fov_override [+ _right] (G) ─┐
+                                           ▼                  ▼                                     │
+ host (alvr_host) ── ServerControlPacket::Reserved(JSON) ──► client: declares min(P, V) per eye      │
+   │  first real-time update of a connection,                 (view params), P when no message        │
+   │  again on change; never before StartStream               │                                      │
+   │◄──────────────── ViewsConfig (the declared box D = min(P, V)) ◄─────────────────────────────────┘
+   │  stream size + foveation from D;   IPC fovScale[2][4] (G per eye) ──► shim ──► game: GetEyeFov, recommended size
+   │◄── IPC gameSubmit* (size and FoV the game really submitted, per eye, once at 2 s and on change) ◄─┘
+   └─► game_fov_verdict event + run record; unrestrictedExes ──► shim tells a listed executable V instead of G
+```
+
+- **The message.** One JSON line over `ServerControlPacket::Reserved`, `{"airframexr":1,"view":{"left":[outer,inner,upper,lower],"right":[...]}}`
+  (tangents; the right eye's outer edge is its right one). Stock clients ignore it; ours parses it and declares again when it changes. The
+  host reads the declared views once per connection, so a V that arrives after the first declaration takes effect for the stream size at the next
+  connection. Host side: `tools/patches/headset-view-message.patch` (`server_core`), stdin command `headset_view on|off`. Client side: the
+  visionOS fork (branch `1.4`, `patches/alvr-reserved-message.patch` for its `client_core`).
+- **G per eye.** `fovScale` is `[2][4]` since IPC v38; four typed values mirror to the other eye as before. The tool app and the Advanced window
+  preview a box live (`fov_preview`, `previewOn` / `previewBox`): the shim paints black outside it in the next composed frame on any app, nothing is
+  re-told to the game.
+- **The intake** (`tools/host/src/fov_intake.rs`, shim record): some games ignore G (a mod with its own frustum, a fixed render size). The shim
+  records, once per game start, the size and FoV the game submits per eye against what it was told; the host classifies it (`honours`, `own_frustum`,
+  `fixed_size`, `undecided`) and keeps `config\fov_verdicts.json` and the ignore list `video.fov_unrestricted_games`, applied at the game's *next*
+  start (VDXR latches FoV and size at the start). An `undecided` game runs restricted once, then is told V once to see whether its size follows.
+  The rules and the table of fake games the lab uses are in section 7 of the design.
+- **The headset tools** are scenes of the probe (`xr_probe` with `XR_PROBE_TOOL=fit|restrict`): an ordinary OpenXR app on the PC, streamed like a
+  game, so neither headset needs a client update for them. While one runs the host sends no V (the fit measures the whole panel) and the probe
+  is never put on the ignore list. `calibrate.exe` starts them and keeps the result as a profile (`tools/gui/Calibrate.cs`).
+- **The launcher's side** (`tools/gui/PipelineModel.cs`, settings only, no engine): the stream size follows the density rule from V, the foveation
+  band and edge ratios come from Apple's rasterization rate map (zero-loss geometry), written to `session.json` through existing parameters.
+- **Open:** the client may declare the vertical axis upside down (step 0: the client logs `[proj]` matrices to decide; until then one switch in
+  `PipelineModel` holds the documented orientation). Status of each part, what ran in the lab and what has not run on a headset: `docs/progress.md`.
 
 ## Telemetry and the Black Box
 

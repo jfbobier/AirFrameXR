@@ -1,0 +1,50 @@
+diff --git a/alvr/server_core/src/connection.rs b/alvr/server_core/src/connection.rs
+index 3144dfef..a1824c1f 100644
+--- a/alvr/server_core/src/connection.rs
++++ b/alvr/server_core/src/connection.rs
+@@ -1087,6 +1087,9 @@ fn connection_pipeline(
+         let control_sender = Arc::clone(&control_sender);
+         let client_hostname = client_hostname.clone();
+         move || {
++            // AirFrameXR: the headset view message goes out with the first real-time update (a Reserved packet before StartStream would be an
++            // "Unexpected packet" to the client's handshake), then again whenever it changes
++            let mut sent_view_message: Option<String> = None;
+             while is_streaming(&client_hostname) {
+                 let config = {
+                     let session_manager_lock = SESSION_MANAGER.read();
+@@ -1099,6 +1102,15 @@ fn connection_pipeline(
+                     control_sender.lock().send(&config).ok();
+                 }
+ 
++                // AirFrameXR: the headset view message again when it changed
++                let message = crate::HEADSET_VIEW_MESSAGE.lock().clone();
++                if message != sent_view_message {
++                    if let Some(m) = &message {
++                        control_sender.lock().send(&ServerControlPacket::Reserved(m.clone())).ok();
++                    }
++                    sent_view_message = message;
++                }
++
+                 thread::sleep(REAL_TIME_UPDATE_INTERVAL);
+             }
+         }
+diff --git a/alvr/server_core/src/lib.rs b/alvr/server_core/src/lib.rs
+index a1023203..e2ddfacd 100644
+--- a/alvr/server_core/src/lib.rs
++++ b/alvr/server_core/src/lib.rs
+@@ -157,6 +157,15 @@ pub fn notify_restart_driver() {
+     }
+ }
+ 
++/// AirFrameXR (tools/patches/headset-view-message.patch): the one JSON line the host wants every connected client to have
++/// (`{"airframexr":1,"view":{...}}`, docs/PICTURE_EDGES_DESIGN.md section 8), sent as `ServerControlPacket::Reserved` right after the stream starts and
++/// again whenever it changes. None = nothing to send.
++pub static HEADSET_VIEW_MESSAGE: Mutex<Option<String>> = Mutex::new(None);
++
++pub fn set_headset_view_message(message: Option<String>) {
++    *HEADSET_VIEW_MESSAGE.lock() = message;
++}
++
+ pub fn settings() -> Settings {
+     SESSION_MANAGER.read().settings().clone()
+ }
