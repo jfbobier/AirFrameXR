@@ -419,4 +419,6 @@ Lab infrastructure owed for the steps above: the Swift headset against the strea
 builder can reach the laptop, else built on the builder with Swift for Windows) and its `harness/run.py` wiring (`client.kind: "swift"`);
 retire `e2e_fov_declared_ceiling` (the 1.2.0-1.3.1 fixed box no client sends any more).
 
+**Step A as built (2026-11-06):** see `docs/progress.md` ("1.4 step A"): the UI of section 9 with the contract of `harness/fov_ui_plan_check.py` (12/12 on this laptop); the migration of section 8 is not built (an old restriction stays a restriction), the Retry button and "Choose it in the headset" are waiting for step B.
+
 What the lab cannot judge stays owed to the headset and is written in `docs/progress.md` with the legend.
