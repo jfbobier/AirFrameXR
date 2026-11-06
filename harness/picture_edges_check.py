@@ -11,7 +11,7 @@ the builder and runs --picture-edges-selftest (nothing is saved), then compares 
 
     python3 harness/picture_edges_check.py
 """
-import sys, tempfile, time
+import json, sys, tempfile, time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import lib, uibuild
