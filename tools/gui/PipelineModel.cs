@@ -385,7 +385,8 @@ namespace AirFrameXR
         {
             public static string ProfilePath => Path.Combine(Paths.Dir, "profiles", "apple-vision-pro.profile.json");
 
-            static double[] Four(object o) => (o as object[])?.Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
+            // an array read from the file is an object[], a list the card has just set in the same settings object is a List<object>: both are the profile's numbers
+            static double[] Four(object o) => (o as System.Collections.IEnumerable)?.Cast<object>().Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
 
             /// V as one box (outer, inner, upper, lower): the per-edge union of the two eyes of video.headset_view (four numbers, or {left, right}), never wider than the
             /// panel the headset declares (the client declares the smaller of the two); absent = the whole panel; no headset seen yet = Apple's frustum from the map
