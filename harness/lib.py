@@ -1041,6 +1041,10 @@ def analyse_fov_restrict(sc, outdir):
         exp.append([L * l, R * r, U * s[2], D * s[3]])
     out["expected_fov"] = exp
     out["fov_max_err"] = max(abs(g - x) for e in range(2) for g, x in zip(got[e], exp[e]))
+    if "declared" in cfgk:   # step C: the headset view V the host sent and the client declared (min of its panel and V): outer, inner, upper, lower of the left eye, the right eye mirrored
+        o_, i_, u_, d_ = cfgk["declared"]
+        out["declared_expected"] = [o_, i_, u_, d_, i_, o_, u_, d_]
+        out["declared_err"] = max(abs(a - b) for a, b in zip(headset, out["declared_expected"]))
     cfg = negotiated_cfg(outdir)
     ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
     wr = sum((exp[e][0] + exp[e][1]) / (headset[4 * e] + headset[4 * e + 1]) for e in range(2)) / 2
@@ -1787,12 +1791,12 @@ def analyse(sc, outdir: Path):
         a["handover_chain"] = analyse_handover_chain(sc, outdir)
     if sc.get("checks", {}).get("fov_restrict"):
         a["fov_restrict"] = analyse_fov_restrict(sc, outdir)
+    if sc.get("checks", {}).get("tool"):
+        a["tool"] = analyse_tool(sc, outdir)
     if sc.get("checks", {}).get("qpmap"):
         a["qpmap"] = analyse_qpmap(sc, outdir, a.get("host") or {})
     if sc.get("checks", {}).get("modsim") and sc.get("app"):
         a["modsim"] = analyse_modsim(sc, outdir)
-    if sc.get("checks", {}).get("tool"):
-        a["tool"] = analyse_tool(sc, outdir)
     if sc.get("checks", {}).get("pacing") and sc.get("app"):
         a["pacing"] = analyse_pacing(sc, outdir, 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0))
     period = 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0)
@@ -2105,6 +2109,9 @@ def evaluate(sc, a):
             tol = ck["fov_restrict"].get("tol", 0.01)
             chk("fov_restrict_app_fov", fa["fov_max_err"] <= tol, {"max_err": round(fa["fov_max_err"], 4), "got": fa["app_fov"], "expected": fa["expected_fov"]},
                 f"the four tangents per eye the app got from xrLocateViews are the headset's scaled per edge (outer, inner, upper, lower = {[round(x, 3) for x in fa['scale']]} of it), within {tol}")
+            if "declared_err" in fa:
+                chk("headset_view_declared", fa["declared_err"] <= tol, {"host_views": fa["headset_fov"], "expected": fa["declared_expected"], "max_err": round(fa["declared_err"], 4)},
+                    "the views the client declared (the host's views_config) are the headset view V the host sent, cut to the panel's box (docs/PICTURE_EDGES_DESIGN.md section 8)")
             er, rr = fa["expected_recommended"], fa["recommended"]
             chk("fov_restrict_recommended_size", abs(er[0] - rr[0]) <= 2 and abs(er[1] - rr[1]) <= 2, {"app": rr, "expected": er, "stream_eye": fa["stream_eye"], "ceiling": fa.get("ceiling")},
                 "the recommended image size follows the area of the restricted view and the render quality between the floor and the ceiling (the stream's eye size, or the panel reference when the stream is fitted to the headset's window)")
@@ -2132,7 +2139,8 @@ def evaluate(sc, a):
             if ck["fov_restrict"].get("edges_reached"):
                 chk("fov_game_edges_reached", fa.get("edges_reached_frac", 0) >= 0.95, {"edges": fa.get("edges_reached"), "lit": fa.get("edges_reached_frac")},
                     ">= 95 % of the samples at the edges the game was told to stop short of but rendered past carry its picture: the composition maps the frustum the game submits, it does not crop to the one it was told")
-            if fa.get("margins"):
+            any_whole = any(st.get("unrestricted") for st in (ck["fov_restrict"].get("starts") or [{}]))
+            if fa.get("margins") and not any_whole:   # a chain with a start told the whole view (any of them: the decoded stream is one file) has no restricted margin to see in every frame; the per-start checks above say what each start was told
                 chk("fov_restrict_margin_black", fa.get("margin_black_frac", 0) >= 0.95, {"margin_black": fa.get("margin_black_frac"), "margins": fa["margins"]},
                     ">= 95 % of the samples in the middle of each trimmed margin of the decoded stream are black: the stream still covers the headset's view")
                 chk("fov_restrict_content_inside", fa.get("inside_content_frac", 0) >= 0.95, {"content": fa.get("inside_content_frac")},

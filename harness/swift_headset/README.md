@@ -44,3 +44,13 @@ table and every vertical number of `docs/PICTURE_EDGES_DESIGN.md` 5b are mirrore
   (the shims use `clock_gettime` and `Glibc.exit`, small `#if os(Windows)` changes) and run it on loopback like the Rust mock.
 - `harness/run.py` wiring (`client.kind: "swift"` choosing the binary and the topology).
 - `use_full_range` in `negotiated_config` (the C API's StreamingStarted event does not carry it).
+
+## The headset view message (step C, owed here)
+
+The host sends `{"airframexr":1,"view":{"left":[o,i,u,d],"right":[o,i,u,d]}}` over `ServerControlPacket::Reserved` (docs/PICTURE_EDGES_DESIGN.md
+section 8). The client declares min(frustum, V) per eye and edge instead of the frustum alone. To test the client's real code: (1) the fork's
+`client_core` needs the text as an event (`tools/patches/client-reserved-message.patch` is the change on ALVR v20.14.1; the fork's header
+and Swift event enum need the same case), (2) the client's `EventHandler.swift` takes it and the declaration in `Drawable.swift` / `Renderer`'s
+path cuts the tangents, (3) this headset prints the declared boxes as it does now, and the scenario `e2e_fov_headset_view` (with
+`client.kind: "swift"`) checks the host's `views_config` against V. None of it is written: it is client work in the fork's repo, which is not edited
+without the owner. The lab's Rust mock client already does (2) and passes through `e2e_fov_headset_view` once built on the builder.

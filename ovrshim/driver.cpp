@@ -2149,10 +2149,10 @@ namespace {
             // upper, lower; 1 = all of it). The composition above keeps the headset's FoV: a game layer rendered with the smaller one is mapped into the
             // frame by EyeHomography and the rest of the frame stays black. The recommended size follows the area (proportional in tangent space), so the game
             // renders fewer pixels, not the same pixels over less angle. VDXR reads both once, when the app starts: a change is taken by the next game.
-            float sc[4];
-            for (int k = 0; k < 4; k++) {
-                sc[k] = (h.fovScale[k] >= 0.2f && h.fovScale[k] <= 1.f) ? h.fovScale[k] : 1.f;   // 0 / garbage = not restricted
-            }
+            float sc[2][4];   // per eye: outer, inner, upper, lower
+            for (int e = 0; e < 2; e++)
+                for (int k = 0; k < 4; k++)
+                    sc[e][k] = (h.fovScale[e][k] >= 0.2f && h.fovScale[e][k] <= 1.f) ? h.fovScale[e][k] : 1.f;   // 0 / garbage = not restricted
             // The intake (docs/PICTURE_EDGES_DESIGN.md section 7): an executable on the host's list (a verdict of own frustum or fixed size, an undecided
             // one at its deciding start, or the user's choice) is told the headset's whole view.
             if (initial) {
@@ -2163,8 +2163,9 @@ namespace {
                 const bool skip = list[0] && wcsstr(list, me.c_str()) != nullptr;
                 m_ipc.state->shim.gameUnrestricted = skip ? 1u : 0u;
                 if (skip) {
-                    const bool wasRestricted = sc[0] < 1.f || sc[1] < 1.f || sc[2] < 1.f || sc[3] < 1.f;
-                    for (int k = 0; k < 4; k++) sc[k] = 1.f;
+                    bool wasRestricted = false;
+                    for (int e = 0; e < 2; e++)
+                        for (int k = 0; k < 4; k++) { wasRestricted |= sc[e][k] < 1.f; sc[e][k] = 1.f; }
                     if (wasRestricted) shimlog::General("INFO", "field of view: this game is on the list of games told the whole view (it ignores the restriction): not restricted");
                 }
             }
@@ -2172,18 +2173,21 @@ namespace {
             int measured = 0;
             for (int e = 0; e < 2; e++) {
                 if (h.eyeFovTan[e][0] > 0) {
-                    const float l = e == 0 ? sc[0] : sc[1], r = e == 0 ? sc[1] : sc[0];
+                    const float* s = sc[e];
+                    const float l = e == 0 ? s[0] : s[1], r = e == 0 ? s[1] : s[0];
                     const ovrFovPort& f = m_eyeFov[e];
                     m_gameFov[e].LeftTan = f.LeftTan * l;
                     m_gameFov[e].RightTan = f.RightTan * r;
-                    m_gameFov[e].UpTan = f.UpTan * sc[2];
-                    m_gameFov[e].DownTan = f.DownTan * sc[3];
+                    m_gameFov[e].UpTan = f.UpTan * s[2];
+                    m_gameFov[e].DownTan = f.DownTan * s[3];
                     widthRatio += (f.LeftTan * l + f.RightTan * r) / (f.LeftTan + f.RightTan);
-                    heightRatio += (f.UpTan * sc[2] + f.DownTan * sc[3]) / (f.UpTan + f.DownTan);
+                    heightRatio += (f.UpTan * s[2] + f.DownTan * s[3]) / (f.UpTan + f.DownTan);
                     measured++;
                 }
             }
-            const bool restricted = sc[0] < 1.f || sc[1] < 1.f || sc[2] < 1.f || sc[3] < 1.f;
+            bool restricted = false;
+            for (int e = 0; e < 2; e++)
+                for (int k = 0; k < 4; k++) restricted |= sc[e][k] < 1.f;
             // the render quality slider's ceiling: the stream's eye size, or the panel reference the host gives when the stream is fitted to the
             // headset's visible window (ipc.h renderCeiling); with a ceiling above the stream the slider has room even without a restriction
             const int ceilW = (h.renderCeilingW > 0 && h.renderCeilingH > 0) ? h.renderCeilingW : 0, ceilH = ceilW ? h.renderCeilingH : 0;
@@ -2194,7 +2198,7 @@ namespace {
                 m_recommendedResolution = {rs.w, rs.h};
                 {
                     shimlog::General("INFO", "field of view told to the game: outer %.0f%% inner %.0f%% upper %.0f%% lower %.0f%% of the headset's -> left eye L/R/U/D tan %.3f/%.3f/%.3f/%.3f, recommended %d x %d (stream %d x %d, render quality %.2f, ceiling %d x %d)",
-                                     sc[0] * 100, sc[1] * 100, sc[2] * 100, sc[3] * 100, m_gameFov[0].LeftTan, m_gameFov[0].RightTan, m_gameFov[0].UpTan,
+                                     sc[0][0] * 100, sc[0][1] * 100, sc[0][2] * 100, sc[0][3] * 100, m_gameFov[0].LeftTan, m_gameFov[0].RightTan, m_gameFov[0].UpTan,
                                      m_gameFov[0].DownTan, m_recommendedResolution.w, m_recommendedResolution.h, h.eyeWidth, h.eyeHeight, h.renderQuality, ceilW ? ceilW : h.eyeWidth, ceilH ? ceilH : h.eyeHeight);
                 }
             }

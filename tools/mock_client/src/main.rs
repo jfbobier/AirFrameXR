@@ -231,6 +231,22 @@ struct Shared {
     controller_log: Vec<String>,
     haptics: Vec<(f64, u64, u64, f32, f32)>, // t_ms, device, duration_ms, frequency, amplitude
     views_sent_at_ms: Option<f64>,
+    /// the headset view V the host sent (`{"airframexr":1,"view":{"left":[o,i,u,d],"right":[...]}}`, docs/PICTURE_EDGES_DESIGN.md section 8): per eye outer, inner, upper, lower tangents
+    headset_view: Option<[[f32; 4]; 2]>,
+}
+
+/// The views the client declares: its panel's, cut to the host's headset view V per eye and edge (min of the two tangents); the panel's when no message came.
+fn declared_views(vps: [ViewParams; 2], v: Option<[[f32; 4]; 2]>) -> [ViewParams; 2] {
+    let Some(v) = v else { return vps };
+    let mut out = vps;
+    for e in 0..2 {
+        let f = &vps[e].fov;
+        let (tl, tr, tu, td) = ((-f.left).tan(), f.right.tan(), f.up.tan(), (-f.down).tan());
+        let (outer, inner) = (v[e][0], v[e][1]);   // V per eye: outer (away from the nose), inner, upper, lower
+        let (vl, vr) = if e == 0 { (outer, inner) } else { (inner, outer) };
+        out[e].fov = Fov { left: -tl.min(vl).atan(), right: tr.min(vr).atan(), up: tu.min(v[e][2]).atan(), down: -td.min(v[e][3]).atan() };
+    }
+    out
 }
 
 fn event(origin: Instant, name: &str, extra: serde_json::Value) {
@@ -387,6 +403,14 @@ fn main() {
                     event(origin, "haptics", json!({ "device": device_id, "ms": duration.as_millis() as u64, "freq": frequency, "amp": amplitude }))
                 }
                 ClientCoreEvent::RealTimeConfig(_) => event(origin, "realtime_config", json!(null)),
+                ClientCoreEvent::ReservedMessage(text) => {
+                    // the host's headset view message (the client declares min(panel, V) per eye, like our visionOS client)
+                    let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                    let eye = |k: &str| -> Option<[f32; 4]> { let a = v["view"][k].as_array()?; Some([a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32, a.get(3)?.as_f64()? as f32]) };
+                    let view = eye("left").map(|l| [l, eye("right").unwrap_or(l)]);
+                    event(origin, "reserved_message", json!({ "text": text, "view": view }));
+                    if v["airframexr"] == 1 { shared.lock().headset_view = view; }
+                }
             }
         }
 
@@ -698,7 +722,7 @@ fn display(
         // tracking for the frame that will be presented at the next tick
         let fed = shared.lock().frames.len() >= frames0 + need;
         if !views_sent && (!(late_views || after_frame) || fed) {
-            ctx.send_view_params(vps);
+            ctx.send_view_params(declared_views(vps, shared.lock().headset_view));
             views_sent = true;
             shared.lock().views_sent_at_ms = Some(origin.elapsed().as_secs_f64() * 1000.0);
         }
@@ -871,7 +895,7 @@ fn tracking(
     let mut next = Instant::now();
     while streaming.value() {
         if !views_sent && (!late_views || !shared.lock().frames.is_empty()) {
-            ctx.send_view_params(vps);
+            ctx.send_view_params(declared_views(vps, shared.lock().headset_view));
             views_sent = true;
             shared.lock().views_sent_at_ms = Some(origin.elapsed().as_secs_f64() * 1000.0);
         }

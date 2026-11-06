@@ -50,7 +50,8 @@
     "seconds": 60,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "exit_after_frames": 420
+    "exit_after_frames": 420,
+    "gui": true
   },
   "client": {
     "seconds": 55,

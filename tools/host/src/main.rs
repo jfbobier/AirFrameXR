@@ -86,6 +86,10 @@ struct Args {
     fov_quality: f32,   // 0..1, see vision::render_quality
     /// the streamer's override (settings, `fov_override` command, `--fov-override`): the tangents the game is told per edge (outer, inner, upper, lower); None = not overridden
     fov_override: Option<[f32; 4]>,
+    /// the right eye's own tangents (settings `fov_override_right`, `fov_override` with eight values); None = the left eye's, mirrored
+    fov_override_right: Option<[f32; 4]>,
+    /// the headset view V sent to our client at connection (settings `video.headset_view`, the `headset_view` command): per eye outer, inner, upper, lower
+    headset_view: Option<[[f64; 4]; 2]>,
     /// the render quality slider's ceiling per eye above the stream's eye size (lab `--fov-ceiling WxH`; else the settings' stream_reference_eye when stream_fit_window is on): None = the stream's eye size
     fov_ceiling: Option<(i32, i32)>,
     /// the user's executables told the headset's whole view whatever the verdicts (settings `video.fov_unrestricted_games`)
@@ -192,6 +196,8 @@ fn parse_args() -> Result<Args, String> {
         fov_scale_explicit: false,
         fov_quality: 0.0,
         fov_override: None,
+        fov_override_right: None,
+        headset_view: None,
         fov_ceiling: None,
         fov_unrestricted_user: Vec::new(),
         fov_quality_explicit: false,
@@ -520,7 +526,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     a.fov_unrestricted_user = st.fov_unrestricted_games.clone();
     if let (Some(true), Some(o), Some(i), Some(u), Some(l), false) = (st.fov_override, st.fov_outer, st.fov_inner, st.fov_upper, st.fov_lower, a.fov_scale_explicit) {
         a.fov_override = Some([o as f32, i as f32, u as f32, l as f32]);
+        a.fov_override_right = st.fov_override_right.map(|r| r.map(|x| x as f32));
     }
+    a.headset_view = st.headset_view;
     if !a.fov_quality_explicit {
         // the slider counts with a restriction or with a ceiling above the stream (the stream fitted to the headset's window), so it is read whatever the override
         if let Some(q) = st.fov_render_quality {
@@ -1470,18 +1478,20 @@ fn apply_fg_pacing(ipc: *mut std::ffi::c_void, p: Option<&pipeline::Pipeline>, a
 
 /// The field of view the game is told (percent of the headset's, per edge), logged at the start and whenever it changes.
 /// The per-edge fractions the game's field of view is scaled by: the streamer's override (tangents, converted against the headset's views), else the lab percent flag, else 1.
-fn effective_fov_scale(a: &Args, fov8: &[f32; 8]) -> [f32; 4] {
+/// Per eye (left, then right): outer, inner, upper, lower.
+fn effective_fov_scale(a: &Args, fov8: &[f32; 8]) -> [f32; 8] {
     match &a.fov_override {
-        Some(t) => vision::fov_scale_from(t, fov8),
-        None => a.fov_scale,
+        Some(t) => vision::fov_scale_per_eye(t, a.fov_override_right.as_ref().unwrap_or(t), fov8),
+        None => [a.fov_scale, a.fov_scale].concat().try_into().unwrap(),
     }
 }
 
-fn log_fov_restriction(origin: Instant, s: &[f32; 4], quality: f32, ceiling: (i32, i32), why: &str) {
-    let p = s.map(|v| (v * 100.0).round());
+fn log_fov_restriction(origin: Instant, s8: &[f32; 8], quality: f32, ceiling: (i32, i32), why: &str) {
+    let s = &s8[..4];   // the left eye; the right eye's values follow in the event when they differ
+    let p: Vec<f32> = s.iter().map(|v| (v * 100.0).round()).collect();
     let c = if ceiling.0 > 0 { format!(", render ceiling {} x {}", ceiling.0, ceiling.1) } else { String::new() };
     logs::general("INFO", &format!("field of view the game is told ({why}): outer {} %, inner {} %, upper {} %, lower {} % of the headset's, render quality {:.2}{c}; a game takes it when it starts", p[0], p[1], p[2], p[3], quality));
-    event(origin, "fov_restrict", json!({ "why": why, "outer": s[0], "inner": s[1], "upper": s[2], "lower": s[3], "render_quality": quality, "ceiling": [ceiling.0, ceiling.1] }));
+    event(origin, "fov_restrict", json!({ "why": why, "outer": s[0], "inner": s[1], "upper": s[2], "lower": s[3], "right": if s8[..4] != s8[4..] { json!(&s8[4..]) } else { json!(null) }, "render_quality": quality, "ceiling": [ceiling.0, ceiling.1] }));
 }
 
 /// The render quality slider's ceiling per eye (ipc renderCeiling): the lab flag, else the user's reference size when the stream is fitted to the headset's window
@@ -1530,6 +1540,10 @@ fn load_fov_verdicts(path: &std::path::Path) -> std::collections::HashMap<String
     m
 }
 
+/// The intake's verdict on the game that is running (its `game_fov_verdict` event body, with the executable): the run record's `fov_intake` block. Set when the
+/// shim's record is judged, cleared when a game starts.
+static FOV_INTAKE_RECORD: std::sync::Mutex<Option<serde_json::Value>> = std::sync::Mutex::new(None);
+
 fn fov_record_json(r: &fov_intake::Record) -> serde_json::Value {
     let o = &r.last;
     json!({ "verdict": r.verdict.name(), "decided_by": r.decided_by, "forced": r.forced, "restrict_next_start": fov_intake::restrict_next_start(Some(r)),
@@ -1558,7 +1572,8 @@ fn publish_unrestricted(ipc: *mut std::ffi::c_void, m: &std::collections::HashMa
 fn pipeline_facts(views: Option<&([f32; 8], [f32; 6])>, args: &Args, ipc: *mut std::ffi::c_void, eye: (i32, i32), enc: (i32, i32), cfg: &StreamCfg, fg_active: bool,
                   fg_stats: Option<String>, nvenc_cfg: &serde_json::Value, enc_windows: &[serde_json::Value], compose_ms: &[f64]) -> serde_json::Value {
     let fov8 = views.map(|v| v.0).unwrap_or([0.0; 8]);
-    let scale = views.map(|v| effective_fov_scale(args, &v.0)).unwrap_or([1.0; 4]);
+    let scale8 = views.map(|v| effective_fov_scale(args, &v.0)).unwrap_or([1.0; 8]);
+    let scale = &scale8[..4];   // the left eye (the record's field since 1.0); both eyes in fov_scale_eyes
     let ceiling = render_ceiling(args, eye);
     let (mut rw, mut rh) = (0i32, 0i32);
     if !ipc.is_null() {
@@ -1579,7 +1594,8 @@ fn pipeline_facts(views: Option<&([f32; 8], [f32; 6])>, args: &Args, ipc: *mut s
     let preset = nvidia_profile::NVH_KEYS.iter().find(|(k, _)| *k == "nvenc_quality_preset").map(|(_, v)| *v).unwrap_or(3);
     let round2 = |x: f64| (x * 100.0).round() / 100.0;
     json!({
-        "declared_fov": fov8, "fov_scale": scale, "render_quality": args.fov_quality, "ceiling": [ceiling.0, ceiling.1],
+        "fov_intake": FOV_INTAKE_RECORD.lock().ok().and_then(|g| g.clone()).unwrap_or(serde_json::Value::Null),
+        "declared_fov": fov8, "fov_scale": scale, "fov_scale_eyes": scale8, "render_quality": args.fov_quality, "ceiling": [ceiling.0, ceiling.1],
         "game_render": [rw, rh], "stream_eye": [eye.0, eye.1], "encoded": [enc.0, enc.1], "foveated": cfg.foveated,
         "foveation": { "center_size": [cfg.geom[0], cfg.geom[1]], "center_shift": [cfg.geom[2], cfg.geom[3]], "edge_ratio": [cfg.geom[4], cfg.geom[5]] },
         "frame_gen": { "on": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "flow_size": gen["flow_size"], "flow_ms": gen["flow_ms_avg"], "synth_ms": gen["synth_ms_avg"] },
@@ -1897,6 +1913,8 @@ fn main() {
     alvr_server_core::initialize_environment(layout.clone()); // (logging: logs::init above replaces server_core's init_logging)
 
     let (ctx, events) = ServerCoreContext::new();
+    // the headset view V for our client (tools/patches/headset-view-message.patch): sent before each stream starts and again when the `headset_view` command changes it
+    alvr_server_core::set_headset_view_message(args.headset_view.as_ref().map(vision::headset_view_message));
     let ctx = Arc::new(ctx);
     let shared = Arc::new(Shared::default());
     watchdog::start(origin, Arc::clone(&shared));
@@ -2462,7 +2480,7 @@ fn main() {
     let mut sent_ts: Vec<u64> = vec![];
     let views_path = args.config_dir.join("airframexr_views.json");
     let mut last_views = load_views(&views_path);
-    let mut logged_fov = ([1.0f32; 4], 0.0f32, (0i32, 0i32));   // the field-of-view restriction last logged (a change, or the first publish with one, is logged once)
+    let mut logged_fov = ([1.0f32; 8], 0.0f32, (0i32, 0i32));   // the field-of-view restriction last logged (a change, or the first publish with one, is logged once)
     let mut views_published = false;
     let mut deferred_reconfig = false;
     let (mut encode_errors, consecutive_errors) = (0usize, 0usize);
@@ -2642,6 +2660,7 @@ fn main() {
                                                    rw, rh, sz[0], sz[1], if next { "restricted" } else { "told the whole view" }));
                     let mut ev = fov_record_json(&r);
                     ev["exe"] = json!(g.exe);
+                    if let Ok(mut g) = FOV_INTAKE_RECORD.lock() { *g = Some(ev.clone()); }
                     event(origin, "game_fov_verdict", ev);
                     fov_store.insert(key, r);
                     save_fov_verdicts(&fov_verdicts_path, &fov_store);
@@ -2663,6 +2682,7 @@ fn main() {
                 event(origin, "game_started", json!({ "exe": exe }));
                 vision::RECENTER_REQ.store(true, Ordering::SeqCst);   // the player's forward and position at game start are the game's forward and origin, on every headset, with or without the launcher
                 run_windows.clear();
+                if let Ok(mut g) = FOV_INTAKE_RECORD.lock() { *g = None; }
                 run_stats = RunStats::default();
                 if let Ok(mut g) = ENC_WINDOWS.lock() { g.clear(); }   // the run's encoder windows start with the game
                 run_client0 = logs::client_stats::client_frames_missed();
@@ -2873,9 +2893,20 @@ fn main() {
                 unsafe { nvh::nvh_ipc_set_preview(ipc, on as i32, b.as_ptr()) };
                 event(origin, "fov_preview", json!({ "on": on, "box": if on { json!(b) } else { json!(null) } }));
             }
+            if vision::VIEW_PENDING.swap(false, Ordering::SeqCst) {
+                // the headset view V changed: to the connected client now, to the next one at its connection; its stream size and foveation follow at the next connection
+                args.headset_view = if vision::VIEW_ON.load(Ordering::SeqCst) {
+                    let b: [f64; 8] = std::array::from_fn(|k| f32::from_bits(vision::VIEW_REQ[k].load(Ordering::SeqCst)) as f64);
+                    Some([[b[0], b[1], b[2], b[3]], [b[4], b[5], b[6], b[7]]])
+                } else { None };
+                alvr_server_core::set_headset_view_message(args.headset_view.as_ref().map(vision::headset_view_message));
+                logs::general("INFO", &format!("headset view for the client: {}", args.headset_view.map_or("off (the client declares its panel)".to_string(), |v| format!("{:?}", v))));
+                event(origin, "headset_view", json!({ "view": args.headset_view }));
+            }
             if vision::FOV_PENDING.swap(false, Ordering::SeqCst) {
                 // the user touched the field of view override: publish it once; a game that starts later takes it (a running one keeps what it started with)
                 args.fov_override = if vision::FOV_ON.load(Ordering::SeqCst) { Some([0, 1, 2, 3].map(|k| f32::from_bits(vision::FOV_REQ[k].load(Ordering::SeqCst)))) } else { None };
+                args.fov_override_right = if vision::FOV_ON.load(Ordering::SeqCst) && vision::FOV_RIGHT_ON.load(Ordering::SeqCst) { Some([0, 1, 2, 3].map(|k| f32::from_bits(vision::FOV_RIGHT_REQ[k].load(Ordering::SeqCst)))) } else { None };
                 args.fov_quality = f32::from_bits(vision::FOV_QUALITY_REQ.load(Ordering::SeqCst));
                 args.fov_scale_explicit = true;   // the streamer's choice wins over the settings file from now on
                 views_published = false;

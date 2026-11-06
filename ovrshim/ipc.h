@@ -14,7 +14,7 @@
 namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 37;   // 37: the FOV-restriction intake (gameSubmit*, unrestrictedExes; docs/PICTURE_EDGES_DESIGN.md section 7)
+constexpr uint32_t kVersion = 38;   // 38: fovScale per eye (the restriction G per eye, docs/PICTURE_EDGES_DESIGN.md section 8); 37: the FOV-restriction intake (gameSubmit*, unrestrictedExes; docs/PICTURE_EDGES_DESIGN.md section 7)
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -110,9 +110,10 @@ struct HostToShim {
     // Uncapped frame generation (docs/FRAME_GENERATION_UNCAPPED.md): the app is paced at every boundary (appPeriodMul 1) and may be held to a
     // minimum spacing between releases (an fps cap chosen by the user: headroom for the host's own GPU work). 0 = no cap.
     uint32_t appMinPeriodUs;
-    // the field of view the GAME is told, as fractions of the headset's tangents (eyeFovTan): outer (the side away from the nose), inner, upper, lower; 1 = all of it.
-    // The stream frame keeps covering the headset's whole FoV (the client maps it over the FoV it declared); an app that started later takes new values.
-    float fovScale[4];
+    // the field of view the GAME is told, per eye (index 0 = left, 1 = right), as fractions of the headset's tangents (eyeFovTan): outer (the side away from
+    // the nose), inner, upper, lower; 1 = all of it. The stream frame keeps covering the headset's whole FoV (the client maps it over the FoV it declared);
+    // an app that started later takes new values.
+    float fovScale[2][4];
     // with a restricted field of view: where the recommended size sits between the floor (the stream's pixel density over the smaller view) and the ceiling
     // (the stream's eye size itself), 0..1; 0 = the floor, the way it was. Read with the recommended size, so an app that started later takes a new value.
     float renderQuality;

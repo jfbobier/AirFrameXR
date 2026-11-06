@@ -46,6 +46,9 @@ Put "$repo\tools\patches\client-caps-log.patch" "$repo\_tmp\client-caps-log.patc
 Put "$repo\tools\patches\audio-trace.patch" "$repo\_tmp\audio-trace.patch"
 Put "$repo\tools\patches\audio-process-loopback.patch" "$repo\_tmp\audio-process-loopback.patch"
 Put "$repo\tools\patches\client-audio-device.patch" "$repo\_tmp\client-audio-device.patch"
+Put "$repo\tools\patches\headset-view-message.patch" "$repo\_tmp\headset-view-message.patch"
+Put "$repo\tools\patches\client-reserved-message.patch" "$repo\_tmp\client-reserved-message.patch"
+Put "$repo\tools\patches\client-reserved-message-capi.patch" "$repo\_tmp\client-reserved-message-capi.patch"
 Put "$repo\tools\host\Cargo.toml" "$repo\_tmp\host\Cargo.toml"
 Put "$repo\tools\host\build.rs" "$repo\_tmp\host\build.rs"
 Get-ChildItem "$repo\tools\host\src\*.rs" | ForEach-Object { Put $_.FullName "$repo\_tmp\host\src\$($_.Name)" }
@@ -62,9 +65,9 @@ Put "$repo\THIRD_PARTY_NOTICES.md" "$repo\_tmp\install\THIRD_PARTY_NOTICES.md"
 Put "$repo\LICENSE" "$repo\_tmp\install\LICENSE.txt"
 Get-ChildItem "$repo\third_party\licenses\*.txt" | ForEach-Object { Put $_.FullName "$repo\_tmp\install\licenses\$($_.Name)" }
 Put "$repo\tools\probe\xr_probe.cpp" "$repo\_tmp\xr_probe.cpp"
+Put "$repo\tools\probe\xr_tool.h" "$repo\_tmp\xr_tool.h"
 
 # ---- the benchmark scene: converted in Linux by tools\bench_scene\build.sh, else taken from the published release (verified)
-Put "$repo\tools\probe\xr_tool.h" "$repo\_tmp\xr_tool.h"
 $vab = "$repo\bench\littlest_tokyo.vab"
 $vabSha = 'c2fe8ebe167282079adea9088c90a99e29a28d9f893b80c599e128be3f051a93'
 if (Test-Path "$repo\build\bench\littlest_tokyo.vab") { Copy-Item "$repo\build\bench\littlest_tokyo.vab" $vab -Force }

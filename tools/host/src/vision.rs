@@ -67,6 +67,10 @@ pub struct Settings {
     pub fov_inner: Option<f64>,
     pub fov_upper: Option<f64>,
     pub fov_lower: Option<f64>,
+    /// the right eye's own tangents when they differ from the mirrored left eye's (schema 2 of the profiles: the fit measures the eyes apart): outer, inner, upper, lower
+    pub fov_override_right: Option<[f64; 4]>,
+    /// the headset view V (docs/PICTURE_EDGES_DESIGN.md section 8): per eye outer, inner, upper, lower tangents sent to our client at connection; None = the client declares its panel
+    pub headset_view: Option<[[f64; 4]; 2]>,
     /// 0..1: where the game's render size sits between the floor (the stream's pixel density over the restricted view) and the stream's eye size (0 = the floor)
     pub fov_render_quality: Option<f64>,
     /// the user's own executables told the headset's whole view whatever the verdicts (docs/PICTURE_EDGES_DESIGN.md section 7, `video.fov_unrestricted_games`)
@@ -139,6 +143,8 @@ pub fn load_settings(path: &Path) -> Settings {
         fov_inner: video["fov_inner"].as_f64(),
         fov_upper: video["fov_upper"].as_f64(),
         fov_lower: video["fov_lower"].as_f64(),
+        fov_override_right: arr4(&video["fov_override_right"]),
+        headset_view: headset_view_from(&video["headset_view"]),
         fov_render_quality: video["fov_render_quality"].as_f64(),
         fov_unrestricted_games: video["fov_unrestricted_games"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default(),
         stream_fit_window: video["stream_fit_window"].as_bool(),
@@ -240,6 +246,12 @@ pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 /// the field-of-view override sent by the streamer when the user touches the tick or a field: on/off, the four tangents (outer, inner, upper, lower; f32 bits), pending flag
 pub static FOV_ON: AtomicBool = AtomicBool::new(false);
 pub static FOV_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
+pub static FOV_RIGHT_ON: AtomicBool = AtomicBool::new(false);   // the right eye has its own values (fov_override with eight tangents)
+pub static FOV_RIGHT_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
+/// the headset view V (`headset_view` command): on/off, per eye outer, inner, upper, lower (f32 bits), pending flag
+pub static VIEW_ON: AtomicBool = AtomicBool::new(false);
+pub static VIEW_REQ: [AtomicU32; 8] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
+pub static VIEW_PENDING: AtomicBool = AtomicBool::new(false);
 pub static FOV_PENDING: AtomicBool = AtomicBool::new(false);
 /// the live preview box (`fov_preview`): on/off, per eye L R U D tangents (f32 bits), pending flag
 pub static PREVIEW_ON: AtomicBool = AtomicBool::new(false);
@@ -263,6 +275,25 @@ pub static FOV_QUALITY_REQ: AtomicU32 = AtomicU32::new(0);
 pub fn render_quality(v: f64) -> f32 {
     if v.is_finite() { v.clamp(0.0, 1.0) as f32 } else { 0.0 }
 }
+fn arr4(v: &serde_json::Value) -> Option<[f64; 4]> {
+    let a = v.as_array()?;
+    if a.len() != 4 { return None; }
+    let t = [a[0].as_f64()?, a[1].as_f64()?, a[2].as_f64()?, a[3].as_f64()?];
+    t.iter().all(|x| x.is_finite() && *x > 0.0).then_some(t)
+}
+
+/// `video.headset_view`: {"left": [outer, inner, upper, lower], "right": [...]} (one array = both eyes); None when unset or malformed.
+pub fn headset_view_from(v: &serde_json::Value) -> Option<[[f64; 4]; 2]> {
+    if v.is_array() { let t = arr4(v)?; return Some([t, t]); }
+    let l = arr4(&v["left"])?;
+    Some([l, arr4(&v["right"]).unwrap_or(l)])
+}
+
+/// The one JSON line our client takes over `ServerControlPacket::Reserved` (section 8): `{"airframexr":1,"view":{"left":[o,i,u,d],"right":[o,i,u,d]}}`.
+pub fn headset_view_message(v: &[[f64; 4]; 2]) -> String {
+    serde_json::json!({ "airframexr": 1, "view": { "left": v[0], "right": v[1] } }).to_string()
+}
+
 /// percent -> fraction (the lab flag `--fov-scale`), within what a restriction accepts (a view cannot be emptied)
 pub fn fov_fraction(pct: f64) -> f32 {
     (pct / 100.0).clamp(0.2, 1.0) as f32
@@ -282,8 +313,23 @@ pub fn fov_scale_from(t: &[f32; 4], fov8: &[f32; 8]) -> [f32; 4] {
     s
 }
 
+/// Per eye (left, right) fractions of the headset's field of view for an override given per eye as tangents (outer, inner, upper, lower): each eye against its own
+/// declared box (fov8 = left eye l r u d, right eye l r u d; the outer edge is the left eye's left and the right eye's right), same rules as `fov_scale_from`.
+pub fn fov_scale_per_eye(left: &[f32; 4], right: &[f32; 4], fov8: &[f32; 8]) -> [f32; 8] {
+    let client = [[fov8[0], fov8[1], fov8[2], fov8[3]], [fov8[5], fov8[4], fov8[6], fov8[7]]];   // per eye: outer, inner, upper, lower
+    let mut s = [1.0f32; 8];
+    for (e, t) in [left, right].iter().enumerate() {
+        for k in 0..4 {
+            if t[k] > 0.0 && client[e][k] > 0.0 && t[k] + 0.005 < client[e][k] {
+                s[e * 4 + k] = (t[k] / client[e][k]).clamp(0.2, 1.0);
+            }
+        }
+    }
+    s
+}
+
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
-/// `frame_gen_cap <fps>` (0 = none), `fov_override off` | `fov_override on <outer> <inner> <upper> <lower> [<render quality 0..1>]` (the tangents the game is told and where its render size sits between the floor and the stream's eye size, taken by the next game), `recenter`,
+/// `frame_gen_cap <fps>` (0 = none), `fov_override off` | `fov_override on <outer> <inner> <upper> <lower> [<render quality 0..1>]` (or eight tangents, left eye then right eye, before the quality), `headset_view off` | `headset_view on <outer> <inner> <upper> <lower>` (or eight, per eye: the view our client declares, taken at the next connection), (the tangents the game is told and where its render size sits between the floor and the stream's eye size, taken by the next game), `recenter`,
 /// `color <brightness> <contrast> <saturation> <sharpening>`,
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
@@ -377,13 +423,32 @@ pub fn spawn_stdin_control() {
                 }
                 (Some("fov_override"), Some("on")) => {
                     let vals: Vec<f32> = w.filter_map(|x| x.parse().ok()).collect();
-                    if (vals.len() == 4 || vals.len() == 5) && vals[..4].iter().all(|v| v.is_finite() && *v > 0.0) {
+                    let n = if vals.len() >= 8 { 8 } else { 4 };   // 4 = both eyes the same (mirrored), 8 = left eye then right eye; an optional quality follows
+                    if (vals.len() == n || vals.len() == n + 1) && vals[..n].iter().all(|v| v.is_finite() && *v > 0.0) {
                         for (k, t) in vals[..4].iter().enumerate() {
                             FOV_REQ[k].store(t.to_bits(), Ordering::SeqCst);
                         }
-                        FOV_QUALITY_REQ.store(vals.get(4).map_or(0.0, |q| render_quality(*q as f64)).to_bits(), Ordering::SeqCst);
+                        for k in 0..4 {
+                            FOV_RIGHT_REQ[k].store(vals[if n == 8 { 4 + k } else { k }].to_bits(), Ordering::SeqCst);
+                        }
+                        FOV_RIGHT_ON.store(n == 8, Ordering::SeqCst);
+                        FOV_QUALITY_REQ.store(vals.get(n).map_or(0.0, |q| render_quality(*q as f64)).to_bits(), Ordering::SeqCst);
                         FOV_ON.store(true, Ordering::SeqCst);
                         FOV_PENDING.store(true, Ordering::SeqCst);
+                    }
+                }
+                (Some("headset_view"), Some("off")) => {
+                    VIEW_ON.store(false, Ordering::SeqCst);
+                    VIEW_PENDING.store(true, Ordering::SeqCst);
+                }
+                (Some("headset_view"), Some("on")) => {
+                    let vals: Vec<f32> = w.filter_map(|x| x.parse().ok()).collect();
+                    if (vals.len() == 4 || vals.len() == 8) && vals.iter().all(|v| v.is_finite() && *v > 0.0) {
+                        for k in 0..8 {
+                            VIEW_REQ[k].store(vals[k % vals.len()].to_bits(), Ordering::SeqCst);
+                        }
+                        VIEW_ON.store(true, Ordering::SeqCst);
+                        VIEW_PENDING.store(true, Ordering::SeqCst);
                     }
                 }
                 (Some("fov_preview"), Some("off")) => {
@@ -526,6 +591,33 @@ mod fov_tests {
         assert_eq!(super::preview_box(&[0.97, 0.71, 0.69]), None);
         assert_eq!(super::preview_box(&[0.97, 0.0, 0.69, 0.63]), None);
         assert_eq!(super::preview_box(&[0.97, f32::NAN, 0.69, 0.63]), None);
+    }
+
+    #[test]
+    fn per_eye_scale_uses_each_eyes_own_box() {
+        use super::fov_scale_per_eye;
+        // a mirrored override equals the averaged one on a symmetric headset, per eye
+        let s = fov_scale_per_eye(&[1.5, 1.02, 0.9, 0.1], &[1.5, 1.02, 0.9, 0.1], &AVP);
+        assert!((s[0] - 1.5 / 1.7823).abs() < 1e-4 && (s[4] - 1.5 / 1.7995).abs() < 1e-4, "outer: left eye's left, right eye's right: {s:?}");
+        assert_eq!(s[1], 1.0, "inner within its mask is the headset's");
+        assert!((s[2] - 0.9 / 1.2169).abs() < 1e-4 && (s[6] - 0.9 / 1.2253).abs() < 1e-4);
+        assert_eq!(s[3], 0.2, "lower clamps to a fifth");
+        // eyes apart
+        let s = fov_scale_per_eye(&[1.0, 1.0, 1.0, 1.0], &[1.7995, 1.0249, 1.2253, 1.0249], &AVP);
+        assert!(s[0] < 1.0 && s[4..] == [1.0; 4]);
+    }
+
+    #[test]
+    fn headset_view_reads_and_writes_the_client_message() {
+        let v: serde_json::Value = serde_json::from_str(r#"{"left":[0.97,0.71,0.69,0.63],"right":[0.9,0.7,0.69,0.6]}"#).unwrap();
+        let t = super::headset_view_from(&v).unwrap();
+        assert_eq!(t[1][0], 0.9);
+        assert_eq!(super::headset_view_message(&t), r#"{"airframexr":1,"view":{"left":[0.97,0.71,0.69,0.63],"right":[0.9,0.7,0.69,0.6]}}"#);
+        // one array = both eyes; right missing = the left's; junk = none
+        assert_eq!(super::headset_view_from(&serde_json::json!([1.0, 0.7, 0.7, 0.6])).unwrap()[1], [1.0, 0.7, 0.7, 0.6]);
+        assert_eq!(super::headset_view_from(&serde_json::json!({"left": [1.0, 0.7, 0.7, 0.6]})).unwrap()[1], [1.0, 0.7, 0.7, 0.6]);
+        assert!(super::headset_view_from(&serde_json::json!({"left": [1.0, 0.0, 0.7, 0.6]})).is_none());
+        assert!(super::headset_view_from(&serde_json::json!(null)).is_none());
     }
 
     use super::fov_scale_from;

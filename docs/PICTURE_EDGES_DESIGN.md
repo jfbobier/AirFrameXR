@@ -324,6 +324,25 @@ logged, shown in Game statistics with the verdict and the numbers, and reversibl
 | Launcher card, wizard, manager | section 9 | no |
 | Session settings | density rule, foveation re-anchoring, written by the launcher | no |
 
+**Step C as built (2026-11-06, branch `1.4`; what runs and what does not is in `docs/progress.md`).**
+
+- **The message V.** One text line over `ServerControlPacket::Reserved`: `{"airframexr":1,"view":{"left":[outer,inner,upper,lower],"right":[...]}}`
+  (tangents, positive; the right eye's outer is its right edge). The host sets it with `video.headset_view` (settings: `{"left":[..],"right":[..]}`, or one
+  array for both eyes) or the stdin command `headset_view on <4 or 8 values>` / `off`. It goes out with the first real-time update of a connection (never
+  before `StartStream`: a `Reserved` packet there is "Unexpected packet" to every client's handshake, ours and stock) and again when it changes. Stock clients
+  ignore it. `tools/patches/headset-view-message.patch` (server_core: `set_headset_view_message`).
+- **What a client must do** (visionOS first; the Quest client may ignore it, V = P there): parse the line, keep the last V, and declare min(P, V) per eye
+  and edge through the existing view-params path, **before the first frame is decoded, or again when it changes** (the host reads views once per
+  connection for the stream size and foveation; a change after the first declaration takes the next connection). Needs a client_core event for the
+  text: `tools/patches/client-reserved-message.patch` is that change for the lab's mock client (`ClientCoreEvent::ReservedMessage`); the visionOS fork's
+  client_core (UniFFI) needs the same event. Not done in the client repos (separate, not touched without the owner).
+- **G per eye.** IPC `fovScale` is `[2][4]` (left, right: outer, inner, upper, lower), version 38. `video.fov_override_right` and `fov_override on` with eight
+  tangents give the right eye its own box; four values mirror, as before. The shim tells each eye its own scale; the recommended size stays the
+  average of the two eyes' ratios. The run record carries `fov_scale` (left eye, as before), `fov_scale_eyes` (8 values) and `fov_intake` (the verdict
+  block: the `game_fov_verdict` event body of the running game, null before the shim's record or between games).
+- **Not built:** the client side (above); the GUI writing `video.headset_view` and `fov_override_right` (steps A and B); the streamer forwarding
+  `headset_view` from the settings file (the GUI's poll forwards `fov_preview` today; the same one hunk for the new key); the Swift headset's handler.
+
 **One engine model for every headset (branch `1.4`).** The engine knows no headset types. Per eye it has the box the headset app declares
 (`ViewsConfig`, D) and two optional settings:
 
