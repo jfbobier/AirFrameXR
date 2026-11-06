@@ -1623,9 +1623,9 @@ def analyse_third_party(sc, outdir):
                 pts2 += [(ax, ay), (ax - d, ay), (ax + d, ay), (ax, ay - d), (ax, ay + d)]
             fr2 = read_rgb_at(cl, pts2)[30:]
             mag = lambda px: px[0] > 150 and px[2] > 150 and px[1] < 90
-            # counted from the first frame where the quad shows: the stream's first frames are the idle colour, before the game's first frame
-            start = next((i for i, fr in enumerate(fr2) if mag(fr[0]) or mag(fr[5])), None)
-            fr2 = fr2[start:] if start is not None else []
+            # counted from the first frame where the quad shows to the last: the stream has idle frames before the game's first frame and after its last
+            shown = [i for i, fr in enumerate(fr2) if mag(fr[0]) or mag(fr[5])]
+            fr2 = fr2[shown[0]:shown[-1] + 1] if shown else []   # and to the last: the host streams idle frames after the app's last
             out["hud_magenta_frac"] = round(sum(1 for fr in fr2 for px in fr if mag(px)) / max(1, len(fr2) * len(pts2)), 3)
     return out
 
