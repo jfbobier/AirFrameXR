@@ -2958,11 +2958,17 @@ fn main() {
             }
             if vision::VIEW_PENDING.swap(false, Ordering::SeqCst) {
                 // the headset view V changed: to the connected client now, to the next one at its connection; its stream size and foveation follow at the next connection
+                let view_was_on = args.headset_view.is_some();
                 args.headset_view = if vision::VIEW_ON.load(Ordering::SeqCst) {
                     let b: [f64; 8] = std::array::from_fn(|k| f32::from_bits(vision::VIEW_REQ[k].load(Ordering::SeqCst)) as f64);
                     Some([[b[0], b[1], b[2], b[3]], [b[4], b[5], b[6], b[7]]])
                 } else { None };
-                alvr_server_core::set_headset_view_message(args.headset_view.as_ref().map(vision::headset_view_message));
+                // a view taken back reaches the connected client too (a message without a view): it declares its whole frustum again without reconnecting
+                alvr_server_core::set_headset_view_message(match (&args.headset_view, view_was_on) {
+                    (Some(v), _) => Some(vision::headset_view_message(v)),
+                    (None, true) => Some(vision::headset_view_off_message()),
+                    (None, false) => None,
+                });
                 logs::general("INFO", &format!("headset view for the client: {}", args.headset_view.map_or("off (the client declares its panel)".to_string(), |v| format!("{:?}", v))));
                 event(origin, "headset_view", json!({ "view": args.headset_view }));
             }

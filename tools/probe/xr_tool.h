@@ -7,7 +7,7 @@
 // lab: XR_PROBE_KEYS="<frame>:<key>[,...]" with key = space left right up down tab enter esc, "shift+left" etc.; "+space" / "-space" press and release only (a
 // plain key is a tap: down on that frame, up on the next). Frames count from the first rendered frame; scripted mode ignores the real keyboard.
 // Output: one JSON line per change on stdout (the tool app reads them): {"tool","event":"box|start|enter|esc","frame","eye","box":[[outer,inner,upper,lower] per eye],
-// "panel":[...same...],"pct":..}; tangents, outer = away from the nose. XR_PROBE_TOOL_START = the fit's start box as a fraction of the panel (default 0.40: easier to push out than to pull in),
+// "panel":[...same...],"pct":..}; tangents, outer = away from the nose. XR_PROBE_TOOL_START = the fit's start box as a fraction of the panel (box style; the line style starts on the author's rays 0.97 / 0.71 / 0.69 / 0.63 capped at the panel, XR_PROBE_START_BOX replaces them),
 // XR_PROBE_TOOL_SAVED_S = how long the "Saved" screen stays (default 3).
 // The in-headset text is drawn with GDI into a bitmap and copied into the eye image (the plan said DirectWrite: same result, no Direct2D device needed), head-locked
 // at the centre of the view axis inside 12 degrees, white on dark grey, about 1 degree cap height, only in the eye being fitted while the other is black.
@@ -37,6 +37,9 @@ struct XrTool {
     bool scripted = false;
     double startMs = 0, lastKeyMs = 0, savedMs = 0, savedFor = 3000;
     float startFrac = 0.4f;
+    float startBox[4] = { 0.97f, 0.71f, 0.69f, 0.63f };   // the line style starts on the author's ray measurement (outer, inner, upper, lower), capped at the panel; XR_PROBE_START_BOX=o,i,u,d replaces it
+    bool useStartBox = false;
+    bool lineStyle = true;   // fit: four bright line segments (visible until the lens cuts them), not a filled box; XR_PROBE_FIT_STYLE=box = the old blue box (lab scenarios)
     int frame = 0;
 
     struct Ev { int frame; Key key; bool down; };
@@ -48,6 +51,9 @@ struct XrTool {
     void Init(const char* tool, const char* keys) {
         if (!tool) return;
         mode = !strcmp(tool, "fit") ? Fit : !strcmp(tool, "restrict") ? Restrict : None;
+        if (const char* s = getenv("XR_PROBE_FIT_STYLE")) lineStyle = strcmp(s, "box") != 0;
+        if (const char* s = getenv("XR_PROBE_START_BOX")) { float v[4]; if (sscanf(s, "%f,%f,%f,%f", v, v + 1, v + 2, v + 3) == 4 && v[0] > 0 && v[1] > 0 && v[2] > 0 && v[3] > 0) memcpy(startBox, v, sizeof v); }
+        useStartBox = mode == Fit && lineStyle && !getenv("XR_PROBE_TOOL_START");
         if (const char* s = getenv("XR_PROBE_TOOL_START")) startFrac = std::max(0.2f, std::min(1.f, (float)atof(s)));
         if (const char* s = getenv("XR_PROBE_TOOL_SAVED_S")) savedFor = std::max(0.0, atof(s)) * 1000.0;
         if (keys && *keys) { scripted = true; ParseKeys(keys); }
@@ -91,7 +97,7 @@ struct XrTool {
                 for (int k = 0; k < 4; k++) box[e][k] *= np[k] / std::max(P[e][k], 1e-4f);
             }
             memcpy(P[e], np, sizeof np);
-            if (!havePanel) for (int k = 0; k < 4; k++) box[e][k] = np[k] * (mode == Fit ? startFrac : 1.f);
+            if (!havePanel) for (int k = 0; k < 4; k++) box[e][k] = useStartBox ? std::min(np[k], startBox[k]) : np[k] * (mode == Fit ? startFrac : 1.f);
         }
         if (!havePanel) { havePanel = true; startMs = nowMs; lastKeyMs = nowMs; Emit("box"); }
         bool pressed[KCount] = {};
@@ -164,10 +170,11 @@ struct XrTool {
     std::wstring Text(int e, bool& show) const {
         show = true;
         if (mode == Fit) {
+            if (lineStyle && phase == Intro) return L"Fit the picture to your eyes.\nLook at each bright line. Arrows push a line outward until it just disappears; Shift + arrow brings it back until it is clearly visible again.\nEnter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
             if (phase == Intro) return L"Fit the picture to your eyes.\nArrows push an edge out until its black bar is gone. Shift + arrow pulls it back.\nHold SPACE: compare. Enter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
             if (phase == Saved) return L"Saved. You can take the headset off.";
             if (compare) { show = false; return L""; }
-            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\npush until the bar is gone, one step back, then ENTER";
+            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\n" + (lineStyle ? L"push each line out until it disappears, bring it back until it is clearly visible, then ENTER" : L"push until the bar is gone, one step back, then ENTER");
         }
         if (phase == Intro) return L"Choose what the game renders.\nArrows pull an edge in, Shift + arrow pushes it back out. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
         if (phase == Saved) return L"Saved.";
@@ -200,12 +207,18 @@ struct XrTool {
         if (mode == Fit) {
             // one eye at a time while fitting; the other is black. Before Space and with Space held, both eyes on the box.
             eyeShown = (phase == Intro) || compare || e == eye;
-            if (sceneDrawn) {   // the scene the probe drew is inside the box, black outside; the eye that is not being fitted is black
+            if (sceneDrawn && !lineStyle) {   // the scene the probe drew is inside the box, black outside; the eye that is not being fitted is black
                 if (!eyeShown) fill(0, 0, W, H, black);
                 else { fill(0, 0, W, y0, black); fill(0, y1, W, H, black); fill(0, y0, x0, y1, black); fill(x1, y0, W, y1, black); }
             }
-            else c1->ClearView(rtv, black, nullptr, 0);
-            if (eyeShown && !sceneDrawn) { fill(x0, y0, x1, y1, blue); fill(x0, y0, x1, y0 + lw, line); fill(x0, y1 - lw, x1, y1, line); fill(x0, y0, x0 + lw, y1, line); fill(x1 - lw, y0, x1, y1, line); }
+            else c1->ClearView(rtv, black, nullptr, 0);   // (the line style never shows the scene: lines on black)
+            if (eyeShown && lineStyle) {   // four bright segments on the edges (each a fraction of its edge, so a rounded window does not matter), about half a degree thick
+                static const float yellow[4] = { 1.f, 0.92f, 0.15f, 1 };
+                const float lt = std::max(6.f, ppt * 0.0087f), cxm = (x0 + x1) / 2, cym = (y0 + y1) / 2, hl = 0.22f * (y1 - y0), hw = 0.22f * (x1 - x0);
+                fill(x0 - lt / 2, cym - hl, x0 + lt / 2, cym + hl, yellow); fill(x1 - lt / 2, cym - hl, x1 + lt / 2, cym + hl, yellow);
+                fill(cxm - hw, y0 - lt / 2, cxm + hw, y0 + lt / 2, yellow); fill(cxm - hw, y1 - lt / 2, cxm + hw, y1 + lt / 2, yellow);
+            }
+            else if (eyeShown && !sceneDrawn) { fill(x0, y0, x1, y1, blue); fill(x0, y0, x1, y0 + lw, line); fill(x0, y1 - lw, x1, y1, line); fill(x0, y0, x0 + lw, y1, line); fill(x1 - lw, y0, x1, y1, line); }
         } else {
             if (!sceneDrawn) { c1->ClearView(rtv, grey, nullptr, 0); const float mid[4] = { 0.3f, 0.34f, 0.4f, 1 }; fill(x0, y0, x1, y1, mid); }
             fill(0, 0, W, y0, black); fill(0, y1, W, H, black); fill(0, y0, x0, y1, black); fill(x1, y0, W, y1, black);

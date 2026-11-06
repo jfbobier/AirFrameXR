@@ -421,6 +421,11 @@ namespace AirFrameXR
         readonly RadioButton mine = new RadioButton { Text = "My fit:", AutoSize = true, AccessibleName = "My fit", Margin = new Padding(3, 4, 3, 0) };
         readonly ComboBox profiles = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 320, FormattingEnabled = true, AccessibleName = "Picture edges profile", Margin = new Padding(3, 1, 3, 0) };
         readonly Button fit;
+        // the restriction G derived from V: "the game renders X % of what you see" (video.restriction_share, percent of the pixels; 100 = no restriction)
+        const string ShareKey = "video.restriction_share";
+        readonly TrackBar share = new TrackBar { Minimum = 70, Maximum = 100, Value = 90, TickStyle = TickStyle.None, SmallChange = 1, LargeChange = 5, Width = 220, AutoSize = false, Height = 26, AccessibleName = "Share of the view the game renders" };
+        readonly Label shareLabel = Ui.Line("");
+        readonly Timer shareTimer = new Timer { Interval = 500 };
         readonly Label note = Ui.Line("");
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
         readonly Timer watch = new Timer { Interval = 1500 };
@@ -446,6 +451,14 @@ namespace AirFrameXR
             tips.SetToolTip(fit, "Two minutes with the headset on: push each edge in until the black bar is gone, one step back; one eye at a time. The result is kept as one of your profiles and chosen here.");
             tips.SetToolTip(whole, "The stream covers everything the Vision Pro app declares (its compositor's frustum). Safe for every wearer: no black bar.");
             Controls.Add(fit);
+            var shareRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
+            shareRow.Controls.Add(new Label { Text = "The game renders", AutoSize = true, Margin = new Padding(3, 5, 6, 0) });
+            shareRow.Controls.Add(share); shareRow.Controls.Add(shareLabel);
+            shareLabel.Margin = new Padding(6, 5, 3, 0);
+            Controls.Add(shareRow);
+            tips.SetToolTip(share, "The restriction: games that obey it render only this share of the pixels of the view above (the rest is the barely seen edge). 100 % = no restriction. Only games that are known to honour a box take it; the others are told the whole view.");
+            share.ValueChanged += (s, e) => { if (!loading) { DescribeShare(); shareTimer.Stop(); shareTimer.Start(); } };
+            shareTimer.Tick += (s, e) => { shareTimer.Stop(); ApplyShare(); };
             note.ForeColor = Color.DimGray; note.MaximumSize = new Size(600, 0);
             Controls.Add(note);
             Ui.Exclusive(whole, mine);   // "My fit" sits in its own row panel: Windows Forms does not make the two one group, both showed as chosen (and "My fit" kept winning)
@@ -453,7 +466,7 @@ namespace AirFrameXR
             mine.CheckedChanged += (s, e) => Changed();
             profiles.SelectedIndexChanged += (s, e) => { if (!loading && !mine.Checked) mine.Checked = true; else Changed(); };
             watch.Tick += (s, e) => { if (proc != null && proc.HasExited) { proc = null; watch.Stop(); Reload(); if (storePath == null) PipelineModel.PictureEdgesFoveation.ApplyToFiles(new AppSettings(), true); } };   // a fit finished: its profile is the choice now
-            Disposed += (s, e) => { watch.Dispose(); tips.Dispose(); };
+            Disposed += (s, e) => { watch.Dispose(); shareTimer.Dispose(); tips.Dispose(); };
             Reload();
             if (wizard && storePath == null) PipelineModel.PictureEdgesFoveation.ApplyToFiles(new AppSettings(), true);   // setting up: Apple's default (or the choice already made) gets its foveation now
         }
@@ -473,11 +486,17 @@ namespace AirFrameXR
             foreach (var u in UserFovStore.Load(storePath)) if (clientFov == null || FovValidator.Check(u.Tan, FovUnit.Tangent, clientFov).Usable) profiles.Items.Add(u);
             var want = Json.Str(st.Root, Key + "_profile", "");
             var pick = profiles.Items.Cast<UserFov>().FirstOrDefault(u => u.Id == want);
+            // the default view is the author's ray measurement (a window that was measured with rays and flown in many games), until the user chooses: a fit of their own, or the whole panel
+            bool defaulted = false;
+            if (pick == null && Json.Str(st.Root, Key + "_choice", "") != "whole") { pick = profiles.Items.Cast<UserFov>().FirstOrDefault(u => u.Source == "author"); defaulted = pick != null; }
             if (pick != null) { profiles.SelectedItem = pick; mine.Checked = true; }
             else { whole.Checked = true; if (profiles.Items.Count > 0) profiles.SelectedIndex = 0; }
             mine.Enabled = profiles.Enabled = profiles.Items.Count > 0;
             loading = false;
-            Describe();
+            { var v = (int)Math.Round(Json.Num(st.Root, ShareKey, 90)); loading = true; share.Value = Math.Max(share.Minimum, Math.Min(share.Maximum, v)); loading = false; }
+            if (defaulted) Changed();   // written once, so the streamer sends it
+            else if (storePath == null && Json.Get(st.Root, ShareKey) == null) ApplyShare();   // the default share, written once
+            Describe(); DescribeShare();
         }
 
         void Changed()
@@ -490,10 +509,39 @@ namespace AirFrameXR
                 List<object> L(double[] v) => v.Select(x => (object)Math.Round(x, 4)).ToList();
                 if (u.PerEye) Json.Set(st.Root, Key, new Dictionary<string, object> { ["left"] = L(u.TanLeft), ["right"] = L(u.TanRight) }); else Json.Set(st.Root, Key, L(u.Tan));
                 Json.Set(st.Root, Key + "_profile", u.Id);
+                Json.Remove(st.Root, Key + "_choice");
             }
-            else { Json.Remove(st.Root, Key); Json.Remove(st.Root, Key + "_profile"); }
+            else { Json.Remove(st.Root, Key); Json.Remove(st.Root, Key + "_profile"); Json.Set(st.Root, Key + "_choice", "whole"); }
+            Json.Set(st.Root, ShareKey, share.Value);
             try { st.Save(); Log.Write("INFO", "picture edges: " + (mine.Checked && Selected != null ? "profile '" + Selected.Name + "'" : "whole panel")); if (storePath == null) PipelineModel.PictureEdgesFoveation.ApplyToFiles(st, true); } catch (Exception e) { note.Text = "Cannot write config\\airframexr.json: " + e.Message; note.ForeColor = Color.Firebrick; return; }
             Describe();
+            if (storePath == null) ApplyShare();
+        }
+
+        void DescribeShare() => shareLabel.Text = share.Value >= 100 ? "100 % of what you see (no restriction)" : share.Value + " % of what you see (about " + (100 - share.Value) + " % less game rendering in games that obey)";
+
+        /// G from V: the chosen view (the profile, or the declared whole panel) with every edge scaled by sqrt(share), written as the restriction the streamer forwards (100 = off).
+        void ApplyShare()
+        {
+            try
+            {
+                var st = new AppSettings();
+                Json.Set(st.Root, ShareKey, share.Value);
+                var client = AppSettings.ReadClientFov();
+                var baseView = mine.Checked && Selected != null ? Selected : (client != null ? new UserFov { Id = "whole", Name = "Whole panel", Tan = client } : null);
+                if (share.Value >= 100 || baseView == null) Json.Remove(st.Root, "video.fov_override");
+                else
+                {
+                    double f = Math.Sqrt(share.Value / 100.0);
+                    double[] F(double[] v) => v.Select(x => Math.Round(x * f, 4)).ToArray();
+                    var g = new UserFov { Id = "share-" + baseView.Id, Name = baseView.Name + " at " + share.Value + " %", Tan = F(baseView.Tan), Headset = st.HeadsetName };
+                    if (baseView.PerEye) { g.TanLeft = F(baseView.TanLeft); g.TanRight = F(baseView.TanRight); }
+                    UserFovStore.Apply(g, st, client, st.HeadsetName);
+                }
+                st.Save();
+                Log.Write("INFO", "picture edges: the game renders " + share.Value + " % of the headset view");
+            }
+            catch (Exception e) { note.Text = "Cannot write config\\airframexr.json: " + e.Message; note.ForeColor = Color.Firebrick; }
         }
 
         void Describe()

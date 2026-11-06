@@ -294,6 +294,12 @@ pub fn headset_view_message(v: &[[f64; 4]; 2]) -> String {
     serde_json::json!({ "airframexr": 1, "view": { "left": v[0], "right": v[1] } }).to_string()
 }
 
+/// The line that takes a headset view back while a client is connected (the client then declares its whole frustum again): the same message without a `view`.
+/// Without it a client keeps the last view it was sent until it reconnects (the calibration tools need the stock frustum at once).
+pub fn headset_view_off_message() -> String {
+    serde_json::json!({ "airframexr": 1 }).to_string()
+}
+
 /// percent -> fraction (the lab flag `--fov-scale`), within what a restriction accepts (a view cannot be emptied)
 pub fn fov_fraction(pct: f64) -> f32 {
     (pct / 100.0).clamp(0.2, 1.0) as f32
@@ -605,6 +611,11 @@ mod fov_tests {
         // eyes apart
         let s = fov_scale_per_eye(&[1.0, 1.0, 1.0, 1.0], &[1.7995, 1.0249, 1.2253, 1.0249], &AVP);
         assert!(s[0] < 1.0 && s[4..] == [1.0; 4]);
+    }
+
+    #[test]
+    fn headset_view_off_message_has_no_view() {
+        assert_eq!(super::headset_view_off_message(), r#"{"airframexr":1}"#);
     }
 
     #[test]

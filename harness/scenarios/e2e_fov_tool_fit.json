@@ -69,6 +69,7 @@
     "env": {
       "XR_PROBE_TOOL": "fit",
       "XR_PROBE_TOOL_START": "0.8",
+      "XR_PROBE_FIT_STYLE": "box",
       "XR_PROBE_KEYS": "120:space,150:left,154:left,158:left,162:left,180:up,184:up,200:shift+right,204:shift+right,330:tab,350:right,354:right,1000:enter"
     }
   },

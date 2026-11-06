@@ -83,7 +83,7 @@ namespace AirFrameXR
         {
             if (restrictTool) { ShowRestrictIntro(); return; }
             Reset("Fit the picture to your eyes");
-            Text_("Two minutes, the headset on, one eye at a time. The tool shows a coloured box with black bars at the edges. For each edge: push it until the black bar is gone, then one step back so you see the bar return. When all four edges are done, press Enter: the other eye comes, and Enter on the second eye saves. The scene is Littlest Tokyo, as in the restriction tool. The result is kept as one of your profiles.");
+            Text_("Two minutes, the headset on, one eye at a time. Four bright lines mark the edges of the picture: look at a line and push it outward until it just disappears behind the lens edge, then bring it back until it is clearly visible again. When all four edges are done, press Enter: the other eye comes, and Enter on the second eye saves. The result is kept as one of your profiles.");
             Text_("Press SPACE on the PC keyboard (or pinch with hands as controllers) to start; the text in the headset says which eye to close and which edge you are on.", true);
             var problems = new List<string>();
             if (headset.Length == 0) problems.Add("No headset is known yet: connect it once with the streamer.");
@@ -196,7 +196,7 @@ namespace AirFrameXR
                 : "Arrows push an edge out until its black bar is gone, Shift + arrow pulls it back, hold SPACE: compare, Enter: this eye is finished (the second eye saves), Esc: leave. One eye at a time: close the other. Keep this window in front: it receives the keys.", true);
             Buttons(Btn("Stop", () => { EndTool(); ShowIntro(); }));
             // the streamer takes the settings change within a moment; the scene is started after it so the game is told the whole panel
-            var t = new Timer { Interval = 3000 };
+            var t = new Timer { Interval = 6000 };
             t.Tick += (s, e) => { t.Stop(); t.Dispose(); if (hostPrepared) LaunchProbe(); };
             t.Start();
         }
@@ -208,8 +208,10 @@ namespace AirFrameXR
                 Directory.CreateDirectory(Path.GetDirectoryName(ProbeLog));
                 var psi = new ProcessStartInfo(Probe, "\"" + ProbeLog + "\" 100000000 86400") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(Probe) };
                 psi.EnvironmentVariables["XR_PROBE_TOOL"] = restrictTool ? "restrict" : "fit";
+                var author = UserFovStore.Load().FirstOrDefault(u => u.Source == "author");   // the fit's lines start on the author's ray measurement
+                if (!restrictTool && author != null) psi.EnvironmentVariables["XR_PROBE_START_BOX"] = string.Join(",", author.Tan.Select(v => v.ToString("0.####", CultureInfo.InvariantCulture)));
                 var vab = Path.Combine(Paths.Dir, "bench", "littlest_tokyo.vab");
-                if (File.Exists(vab)) psi.EnvironmentVariables["XR_PROBE_SCENE"] = vab;
+                if (restrictTool && File.Exists(vab)) psi.EnvironmentVariables["XR_PROBE_SCENE"] = vab;
                 probe = Process.Start(psi);
                 probe.OutputDataReceived += (s, e) => { if (e.Data != null) try { BeginInvoke((Action)(() => HandleLine(e.Data))); } catch { } };
                 probe.EnableRaisingEvents = true;
@@ -220,7 +222,7 @@ namespace AirFrameXR
             catch (Exception e) { EndTool(); Reset("The scene did not start"); Text_(e.Message); Buttons(Btn("Retry", Retry), Btn("Close", Close)); }
         }
 
-        bool finished;
+        bool finished, viewLimited;
         void ProbeEnded()
         {
             if (finished || liveLabel == null) return;
@@ -246,8 +248,11 @@ namespace AirFrameXR
             string Deg(double t) => (Math.Atan(t) * 180 / Math.PI).ToString("0.0", CultureInfo.InvariantCulture);
             if (liveLabel != null && liveBox != null)
                 liveLabel.Text = string.Join("\n", new[] { 0, 1 }.Select(e => (e == 0 ? "Left eye:  " : "Right eye: ") + $"outer {Deg(liveBox[e][0])}  inner {Deg(liveBox[e][1])}  up {Deg(liveBox[e][2])}  down {Deg(liveBox[e][3])} degrees")) + (restrictTool ? $"\nThe game renders {livePct:0} % of its pixels." : "");
-            if (ev == "start" && liveState != null) liveState.Text = "Running.";
+            // the fit measures against the stock frustum (a Vision Pro declares a left outer edge of about 1.7); a limited view (a headset view still in force) would make every result look small
+            if (!restrictTool && livePanel != null && (ev == "start" || ev == "enter")) viewLimited = livePanel[0][0] < 1.4;
+            if (ev == "start" && liveState != null) { liveState.Text = viewLimited ? "The headset still shows a limited view: stop here, wait ten seconds and start again (the tool refuses to save this one)." : "Running."; if (viewLimited) liveState.ForeColor = Color.Firebrick; }
             else if (ev == "esc") { finished = true; EndTool(); ShowIntro(); if (note != null) note.Text = "You left without saving."; }
+            else if (ev == "enter" && liveBox != null && viewLimited) { finished = true; EndTool(); ShowIntro(); if (note != null) { note.Text = "Not saved: the headset was still declaring a limited view, so the numbers would be too small. Wait ten seconds and run it again."; note.ForeColor = Color.Firebrick; } Log.Write("WARN", "calibrate: fit refused, the declared view was limited (left outer " + livePanel[0][0].ToString("0.00", CultureInfo.InvariantCulture) + ")"); }
             else if (ev == "enter" && liveBox != null) { finished = true; Finish(); }
         }
 
