@@ -14,7 +14,7 @@
 namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 38;   // 38: fovScale per eye (the restriction G per eye, docs/PICTURE_EDGES_DESIGN.md section 8); 37: the FOV-restriction intake (gameSubmit*, unrestrictedExes; docs/PICTURE_EDGES_DESIGN.md section 7)
+constexpr uint32_t kVersion = 39;   // 39: restrictExes + trustedNames (the restriction is a bonus: a game is told the whole view unless it is trusted or proven, docs/PICTURE_EDGES_DESIGN.md section 7), gameTrusted; 38: fovScale per eye (the restriction G per eye, docs/PICTURE_EDGES_DESIGN.md section 8); 37: the FOV-restriction intake (gameSubmit*, unrestrictedExes; docs/PICTURE_EDGES_DESIGN.md section 7)
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -128,6 +128,12 @@ struct HostToShim {
     // each closed by '|' ("|game.exe|mod.exe|"): the host's verdicts (own frustum, fixed size, undecided until its next start) and the user's list.
     // Read with fovScale, at the app's start.
     wchar_t unrestrictedExes[1024];
+    // The restriction as a bonus (owner, 2026-11-06): an app is told the headset's whole view at its start UNLESS it is on restrictExes (a verdict of
+    // honours, or the user's choice: lower case, "|game.exe|") or trusted. trustedNames is the user's fov_restriction_whitelist.txt, lower case, each closed
+    // by '|': a name ending in .dll is a module that must be loaded in the app's process (UEVRBackend.dll), any other name is the app's executable.
+    // unrestrictedExes still wins over both (a verified dishonest game stays unrestricted whatever the whitelist says).
+    wchar_t restrictExes[1024];
+    wchar_t trustedNames[1024];
     // Live preview of a box (docs/PICTURE_EDGES_DESIGN.md sections 6, 6b): while previewOn is 1 the shim paints every composed frame black outside
     // previewBox, per eye L R U D tangents (OVR convention: positive; the left eye's L is its outer edge), on whatever app runs. It shows a picture-edges
     // or a restriction box at once, in the headset tools and over a running game, before anything is applied (the game's own FOV and size, latched at its
@@ -176,7 +182,8 @@ struct ShimToHost {
     float gameToldFov[2][4];
     float gameSubmittedFov[2][4];
     int32_t gameSubmittedW[2], gameSubmittedH[2];   // the projection layer's viewport size per eye (what the app rendered)
-    uint32_t gameUnrestricted;                       // 1: this app was on unrestrictedExes at its start (told the headset's whole view)
+    uint32_t gameUnrestricted;                       // 1: this app was told the headset's whole view at its start (not restricted)
+    uint32_t gameTrusted;                            // 0: not on the whitelist; 1: a whitelisted module is loaded in the app; 2: the app's executable is whitelisted
 };
 
 struct IpcState {

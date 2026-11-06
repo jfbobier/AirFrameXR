@@ -701,7 +701,7 @@ void nvh_ipc_shim_recommended(void* i, int* w, int* h) {
     *w = s.recommendedW; *h = s.recommendedH;
 }
 
-uint32_t nvh_ipc_game_submission(void* i, float* told8, float* sub8, int* size4, uint32_t* unrestricted) {
+uint32_t nvh_ipc_game_submission(void* i, float* told8, float* sub8, int* size4, uint32_t* unrestricted, uint32_t* trusted) {
     const auto& s = ((Ipc*)i)->state->shim;
     for (int attempt = 0; attempt < 8; attempt++) {   // seqlock: odd while the shim writes; retry until two reads of the sequence match
         const uint32_t a = *(volatile const uint32_t*)&s.gameSubmitSeq;
@@ -712,6 +712,7 @@ uint32_t nvh_ipc_game_submission(void* i, float* told8, float* sub8, int* size4,
             for (int k = 0; k < 4; k++) { told8[4 * e + k] = s.gameToldFov[e][k]; sub8[4 * e + k] = s.gameSubmittedFov[e][k]; }
         size4[0] = s.gameSubmittedW[0]; size4[1] = s.gameSubmittedH[0]; size4[2] = s.gameSubmittedW[1]; size4[3] = s.gameSubmittedH[1];
         *unrestricted = s.gameUnrestricted;
+        *trusted = s.gameTrusted;
         MemoryBarrier();
         if (*(volatile const uint32_t*)&s.gameSubmitSeq == a) return a;
     }
@@ -723,6 +724,20 @@ void nvh_ipc_set_unrestricted(void* i, const char* list_utf8) {
     wchar_t w[1024] = {};
     if (list_utf8 && *list_utf8) MultiByteToWideChar(CP_UTF8, 0, list_utf8, -1, w, 1023);
     memcpy(h.unrestrictedExes, w, sizeof(w));
+}
+
+void nvh_ipc_set_restrict(void* i, const char* list_utf8) {
+    auto& h = ((Ipc*)i)->state->host;
+    wchar_t w[1024] = {};
+    if (list_utf8 && *list_utf8) MultiByteToWideChar(CP_UTF8, 0, list_utf8, -1, w, 1023);
+    memcpy(h.restrictExes, w, sizeof(w));
+}
+
+void nvh_ipc_set_trusted(void* i, const char* list_utf8) {
+    auto& h = ((Ipc*)i)->state->host;
+    wchar_t w[1024] = {};
+    if (list_utf8 && *list_utf8) MultiByteToWideChar(CP_UTF8, 0, list_utf8, -1, w, 1023);
+    memcpy(h.trustedNames, w, sizeof(w));
 }
 
 void nvh_ipc_set_preview(void* i, int on, const float* box8) {

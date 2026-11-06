@@ -108,6 +108,9 @@ int main(int argc, char** argv) {
     ici.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0); // 1.0: every runtime accepts it (SteamVR rejects the SDK's 1.1 with API_VERSION_UNSUPPORTED)
     ici.enabledExtensionCount = (uint32_t)ext.size(); ici.enabledExtensionNames = ext.data();
     XrInstance inst;
+    // XR_PROBE_LOAD_MODULE=name.dll: loads a module before the OpenXR instance exists, as a mod that injects itself into a game does (UEVR's UEVRBackend.dll is what the
+    // shim's whitelist looks for in the game's process); build\probe\UEVRBackend.dll is an empty stand-in (tools/probe/uevr_stub.cpp)
+    if (const char* lm = getenv("XR_PROBE_LOAD_MODULE")) { HMODULE m = LoadLibraryA(lm); L("module %s %s", lm, m ? "loaded" : "NOT loaded"); }
     CK(xrCreateInstance(&ici, &inst));
     XrInstanceProperties ip{ XR_TYPE_INSTANCE_PROPERTIES };
     CK(xrGetInstanceProperties(inst, &ip));

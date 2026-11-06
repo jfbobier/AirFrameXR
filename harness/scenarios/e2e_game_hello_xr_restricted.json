@@ -1,5 +1,5 @@
 {
-  "description": "A game that is not ours: the OpenXR SDK's own sample app hello_xr (tools/remote/stage19_hello_xr_build.ps1, unmodified, D3D11, stereo) with the streamer's restriction on (0.97 / 0.71 / 0.69 / 0.63, Apple's frustum). An independent implementation of the OpenXR contract must be told the restricted box and size, follow them (swapchains at the told size, the submitted FOV equal to the told one) and be judged `honours` by the host; its picture reaches both eyes of the decoded stream. Checks the engine without the circularity of xr_probe, which encodes our own assumptions.",
+  "description": "A game that is not ours: the OpenXR SDK's own sample app hello_xr (tools/remote/stage19_hello_xr_build.ps1, unmodified, D3D11, stereo) with the streamer's restriction on (0.97 / 0.71 / 0.69 / 0.63, Apple's frustum). An independent implementation of the OpenXR contract must be told the restricted box and size, follow them (swapchains at the told size, the submitted FOV equal to the told one) and be judged `honours` by the host; its picture reaches both eyes of the decoded stream. Checks the engine without the circularity of xr_probe, which encodes our own assumptions. (hello_xr.exe is in the whitelist: told the restricted box at its first start.)",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -51,7 +51,10 @@
     "connect_timeout": 45,
     "gpu_keepalive": 90,
     "exit_after_frames": 1200,
-    "fov_override": "0.97,0.71,0.69,0.63"
+    "fov_override": "0.97,0.71,0.69,0.63",
+    "fov_whitelist": [
+      "hello_xr.exe"
+    ]
   },
   "client": {
     "seconds": 55,

@@ -46,9 +46,12 @@ void nvh_ipc_shim_recommended(void* ipc, int* w, int* h);
 // The FOV-restriction intake (ipc.h ShimToHost::gameSubmit*, docs/PICTURE_EDGES_DESIGN.md section 7): copies the last complete record and returns its
 // sequence number (0 = none yet; it changes when the app's submission changed). told8 / sub8: per eye L R U D tangents (left eye first);
 // size4: submitted width, height of the left eye, then the right; unrestricted: 1 when the app was on the list at its start.
-uint32_t nvh_ipc_game_submission(void* ipc, float* told8, float* sub8, int* size4, uint32_t* unrestricted);
+uint32_t nvh_ipc_game_submission(void* ipc, float* told8, float* sub8, int* size4, uint32_t* unrestricted, uint32_t* trusted);
 // The executables told the headset's whole view (ipc.h HostToShim::unrestrictedExes): UTF-8 "|a.exe|b.exe|", lower case; read by an app at its start.
 void nvh_ipc_set_unrestricted(void* ipc, const char* list_utf8);
+// The executables told the restricted box at their start (HostToShim::restrictExes) and the whitelist (trustedNames): UTF-8 "|a|b|", lower case.
+void nvh_ipc_set_restrict(void* ipc, const char* list_utf8);
+void nvh_ipc_set_trusted(void* ipc, const char* list_utf8);
 // The live preview box (ipc.h HostToShim::previewOn / previewBox): on = 1 paints black outside box8 (per eye L R U D tangents) in every composed frame.
 void nvh_ipc_set_preview(void* ipc, int on, const float* box8);
 void nvh_ipc_set_connected(void* ipc, int connected);

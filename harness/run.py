@@ -262,6 +262,7 @@ def build(what):
             lib.b_put(lib.ROOT / "tools/probe/xr_probe.cpp", "_tmp/xr_probe.cpp")
             lib.b_put(lib.ROOT / "tools/probe/xr_tool.h", "_tmp/xr_tool.h")   # the headset tools (XR_PROBE_TOOL=fit|restrict)
             lib.b_put(lib.ROOT / "tools/probe/xr_modsim.cpp", "_tmp/xr_modsim.cpp")   # the mod-loop mimic (e2e_modsim_*)
+            lib.b_put(lib.ROOT / "tools/probe/uevr_stub.cpp", "_tmp/uevr_stub.cpp")   # an empty UEVRBackend.dll for the whitelist scenarios (XR_PROBE_LOAD_MODULE)
             lib.b_run("if not exist nvenc\\hostlib mkdir nvenc\\hostlib")
             lib.b_put(lib.ROOT / "nvenc/hostlib/bench_scene.h", "nvenc/hostlib/bench_scene.h")
             lib.b_run("if not exist third_party\\stb mkdir third_party\\stb")

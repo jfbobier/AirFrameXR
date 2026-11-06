@@ -413,6 +413,16 @@ def run_scenario(sc, outdir: Path, log=print):
         steps["pinned_client"] = pin[0]
     derive_session(sc, outdir / "session.json", pin)
     b_put(outdir / "session.json", f"runs/{rid}/session.json")
+    if h is not None:
+        # the FOV restriction whitelist (config\fov_restriction_whitelist.txt, docs/PICTURE_EDGES_DESIGN.md section 7): the lab's probe is a trusted game by default
+        # (the restriction is a bonus: an app is told the whole view at its first start unless it is trusted or proven); a scenario sets host.fov_whitelist to test the
+        # policy itself ([] = nobody trusted, ["UEVRBackend.dll"] = the shipped default)
+        wl = h.get("fov_whitelist", ["xr_probe.exe"])
+        b_run(f"mkdir runs\\{rid}\\host_cfg")
+        wlf = CACHE / "fov_restriction_whitelist.txt"
+        CACHE.mkdir(parents=True, exist_ok=True)
+        wlf.write_text("# written by the harness\r\n" + "".join(f"{n}\r\n" for n in wl))
+        b_put(wlf, f"runs/{rid}/host_cfg/fov_restriction_whitelist.txt")
 
     gpu_p = None
     if sc.get("gpu_sample"):
@@ -2188,8 +2198,10 @@ def evaluate(sc, a):
                     f"the host's verdict on this game is {want_v!r} (ground truth: {ck['fov_restrict'].get('truth', want_v)})" if hv else
                     "no game_fov_verdict event in the host's output (the shim's record of what the game submitted and the host's verdict: engine step C, not built yet)")
             if "starts" in ck["fov_restrict"]:   # the second-start policy (section 7): per start of the chain, the verdict and whether it was told the whole view
-                want_s, got_s = ck["fov_restrict"]["starts"], [{"verdict": d.get("verdict"), "unrestricted": d.get("unrestricted")} for d in a.get("fov_starts", [])]
-                chk("fov_game_starts", got_s[:len(want_s)] == want_s and len(got_s) >= len(want_s), {"host": got_s, "truth": ck["fov_restrict"].get("truth")},
+                want_s = ck["fov_restrict"]["starts"]
+                got_all = [{"verdict": d.get("verdict"), "unrestricted": d.get("unrestricted"), "trusted_by": d.get("trusted_by"), "proven": d.get("proven")} for d in a.get("fov_starts", [])]
+                got_s = [{k: g.get(k) for k in w} for w, g in zip(want_s, got_all)]   # only the keys a start's expectation names
+                chk("fov_game_starts", got_s == want_s and len(got_all) >= len(want_s), {"host": got_s, "truth": ck["fov_restrict"].get("truth")},
                     f"per start: {want_s} (start 1 as told; an undecided, own-frustum or fixed-size game told the whole view at its next start; honours restricted again)")
             if ck["fov_restrict"].get("edges_reached"):
                 chk("fov_game_edges_reached", fa.get("edges_reached_frac", 0) >= 0.95, {"edges": fa.get("edges_reached"), "lit": fa.get("edges_reached_frac")},

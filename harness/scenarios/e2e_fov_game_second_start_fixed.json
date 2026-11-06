@@ -1,5 +1,5 @@
 {
-  "description": "The second-start policy of docs/PICTURE_EDGES_DESIGN.md section 7: the same fake game (xr_probe) started several times in one streamer session (app.then, 25 s apart), the host's verdict store kept between (host_cfg/fov_verdicts.json, fetched with the results). Uniform 80 % restriction, Apple's frustum, stream 1760x1600. A fixed-size game (1760x1600 whatever it is told): start 1 restricted, undecided; start 2 told the whole view (on the shim's list), its size did not move: fixed_size, and it stays unrestricted at start 3.",
+  "description": "The restriction policy of docs/PICTURE_EDGES_DESIGN.md section 7 (owner, 2026-11-06), a fixed-size game: nobody is trusted. Start 1 is told the whole view (V) whatever the streamer's restriction (80 %): its fixed 1760 x 1600 render is the told size, so it looks honest (`honours`, predicted). Start 2 is told the restricted box and renders the same size: `fixed_size`, so start 3 is told V again and stays there.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -50,7 +50,8 @@
     "seconds": 150,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "fov_scale": "80,80,80,80"
+    "fov_scale": "80,80,80,80",
+    "fov_whitelist": []
   },
   "client": {
     "seconds": 140,
@@ -111,21 +112,21 @@
     "refresh_hz": 90,
     "fov_restrict": {
       "scale": [
-        80,
-        80,
-        80,
-        80
+        100,
+        100,
+        100,
+        100
       ],
       "tol": 0.002,
-      "truth": "fixed size 1760x1600",
+      "truth": "fixed size 1760x1600 (equal to V's size at start 1: it looks honest on V)",
       "starts": [
         {
-          "verdict": "undecided",
-          "unrestricted": false
+          "verdict": "honours",
+          "unrestricted": true
         },
         {
           "verdict": "fixed_size",
-          "unrestricted": true
+          "unrestricted": false
         },
         {
           "verdict": "fixed_size",

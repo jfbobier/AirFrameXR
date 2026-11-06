@@ -1,0 +1,135 @@
+{
+  "description": "Trust with verification (owner, 2026-11-06): a game with the whitelisted module that draws its own union frustum at a fixed 2160 x 2160 (a mod that shares the module name, or a changed UEVR). Start 1 is told the restricted box because it is trusted, the first record shows it ignores it (`own_frustum`), and start 2 is told the whole view even though it is trusted: a verified dishonest game never keeps the restriction.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 150,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "fov_scale": "80,80,80,80",
+    "fov_whitelist": [
+      "UEVRBackend.dll"
+    ],
+    "fov_override": "0.97,0.71,0.69,0.63"
+  },
+  "client": {
+    "seconds": 140,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "views_tan": "1.732,1.0,1.192,1.0"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 600,
+    "timeout_s": 60,
+    "env": {
+      "XR_PROBE_LOAD_MODULE": "UEVRBackend.dll",
+      "XR_PROBE_SUBMIT_FOV": "union",
+      "XR_PROBE_RENDER_SIZE": "2160x2160"
+    },
+    "then": [
+      {
+        "exe": "xr_probe",
+        "after_s": 25,
+        "frames": 600,
+        "timeout_s": 60,
+        "env": {
+          "XR_PROBE_LOAD_MODULE": "UEVRBackend.dll",
+          "XR_PROBE_SUBMIT_FOV": "union",
+          "XR_PROBE_RENDER_SIZE": "2160x2160"
+        }
+      }
+    ]
+  },
+  "gpu_sample": true,
+  "timeout_s": 330,
+  "checks": {
+    "host_min_frames": 250,
+    "client_min_frames": 200,
+    "max_duplicate_timestamps": 400,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 3520,
+      "height": 1600,
+      "color_range": "pc"
+    },
+    "decode": true,
+    "decode_frame_slack": 40,
+    "app_min_frames": 300,
+    "refresh_hz": 90,
+    "fov_restrict": {
+      "tol": 0.002,
+      "truth": "union of both eyes + fixed square size, with a trusted module",
+      "starts": [
+        {
+          "verdict": "own_frustum",
+          "unrestricted": false,
+          "trusted_by": "module"
+        },
+        {
+          "verdict": "own_frustum",
+          "unrestricted": true,
+          "trusted_by": "module"
+        }
+      ],
+      "override": [
+        0.97,
+        0.71,
+        0.69,
+        0.63
+      ]
+    },
+    "timestamps_monotonic": false
+  }
+}

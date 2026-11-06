@@ -1,6 +1,11 @@
 //! The FOV-restriction intake (docs/PICTURE_EDGES_DESIGN.md section 7): from what a game submitted against what it was told, the verdict, and
 //! whether the next start of that executable is restricted. Pure logic (std only): main.rs reads the shim's record (ipc.h ShimToHost::gameSubmit*),
-//! keeps the per-executable store (config\fov_verdicts.json) and publishes the list of executables told the whole view (HostToShim::unrestrictedExes).
+//! keeps the per-executable store (config\fov_verdicts.json) and publishes the lists the shim reads at an app's start (HostToShim::unrestrictedExes, restrictExes).
+//!
+//! The restriction is a bonus (owner, 2026-11-06): an app is told the whole view V at its first start, whatever the user configured, and the record of that start
+//! says what it does with a box. A game that follows the box it is told is restricted from its next start (the first record of that start proves it or sends it
+//! back); a game that draws its own frustum or a fixed other-aspect size stays on V; a game that scales its size (same aspect, other size) stays on V until the
+//! user ticks it or trusts it (the whitelist, read by the shim: fov_restriction_whitelist.txt).
 //!
 //! Tests: `cargo test -p alvr_host --bins` on the builder, or without the workspace: `rustc --edition 2021 --test tools/host/src/fov_intake.rs`.
 
@@ -9,7 +14,8 @@ pub type Box2 = [[f32; 4]; 2];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
-    /// FOV and size as told (or a later start showed the size following the box): the restriction saves GPU work
+    /// FOV and size as told (or a later start showed the size following the box): the restriction saves GPU work. Judged at a start that was told the whole view
+    /// (`last.unrestricted`) it is a prediction (the restriction is tried at the next start); judged at a restricted start it is proven
     Honours,
     /// any submitted edge differs from the told one (the union of both eyes, a symmetric box, its own frustum)
     OwnFrustum,
@@ -145,11 +151,17 @@ pub fn update(prev: Option<&Record>, o: Observation) -> Record {
     Record { verdict: one, last: o, decided_by: "one start", forced }
 }
 
-/// The policy at the executable's next start: restricted (told G) or told the whole view V. A never-seen game is restricted; honours stays
-/// restricted; own frustum and fixed size are not; undecided is not (protect the picture), which is also the start that decides it.
+/// Honours, proven by a start that was told a smaller box than the whole view (not only a prediction from a start on V).
+pub fn proven(r: &Record) -> bool {
+    r.verdict == Verdict::Honours && !r.last.unrestricted
+}
+
+/// The policy at the executable's next start, from the record alone: restricted (told G) or told the whole view V. A never-seen game is told V; honours
+/// (predicted or proven) is restricted; own frustum, fixed size and undecided are not (protect the picture); the user's per-game tick wins. The shim adds the
+/// whitelist (a trusted app is restricted even when it is unseen or undecided, but never against a verdict of own frustum or fixed size).
 pub fn restrict_next_start(r: Option<&Record>) -> bool {
     match r {
-        None => true,
+        None => false,
         Some(r) => match r.forced {
             Some(f) => f,
             None => r.verdict == Verdict::Honours,
@@ -157,11 +169,7 @@ pub fn restrict_next_start(r: Option<&Record>) -> bool {
     }
 }
 
-/// The list the shim reads (HostToShim::unrestrictedExes): "|a.exe|b.exe|", lower case, the executables not restricted at their next start plus
-/// the user's own list; longer than the IPC buffer (1023 UTF-16 units) is cut at the last whole entry.
-pub fn unrestricted_list<'a>(records: impl Iterator<Item = (&'a str, &'a Record)>, user: &[String]) -> String {
-    let mut names: Vec<String> = records.filter(|(_, r)| !restrict_next_start(Some(r))).map(|(e, _)| e.to_ascii_lowercase()).collect();
-    names.extend(user.iter().map(|e| e.trim().to_ascii_lowercase()).filter(|e| !e.is_empty()));
+fn fit_list(mut names: Vec<String>) -> String {
     names.sort();
     names.dedup();
     let mut out = String::from("|");
@@ -174,6 +182,46 @@ pub fn unrestricted_list<'a>(records: impl Iterator<Item = (&'a str, &'a Record)
     }
     if out == "|" { String::new() } else { out }
 }
+
+/// The list the shim reads as HostToShim::restrictExes: "|a.exe|b.exe|", lower case, the executables told the restricted box at their next start (a verdict of
+/// honours, or the user's tick); longer than the IPC buffer (1023 UTF-16 units) is cut at the last whole entry.
+pub fn restrict_list<'a>(records: impl Iterator<Item = (&'a str, &'a Record)>) -> String {
+    fit_list(records.filter(|(_, r)| restrict_next_start(Some(r))).map(|(e, _)| e.to_ascii_lowercase()).collect())
+}
+
+/// The list the shim reads as HostToShim::unrestrictedExes: the executables that must be told the whole view whatever the whitelist says: a verdict of own
+/// frustum or fixed size (verified dishonest), the user's tick "never", and the user's own list.
+pub fn unrestricted_list<'a>(records: impl Iterator<Item = (&'a str, &'a Record)>, user: &[String]) -> String {
+    let mut names: Vec<String> = records
+        .filter(|(_, r)| match r.forced {
+            Some(f) => !f,
+            None => r.verdict == Verdict::OwnFrustum || r.verdict == Verdict::FixedSize,
+        })
+        .map(|(e, _)| e.to_ascii_lowercase())
+        .collect();
+    names.extend(user.iter().map(|e| e.trim().to_ascii_lowercase()).filter(|e| !e.is_empty()));
+    fit_list(names)
+}
+
+/// The user's fov_restriction_whitelist.txt: one entry per line, '#' starts a comment; a name ending in .dll is a module loaded in the game's process
+/// (UEVRBackend.dll), any other name is the game's executable. Returned as the shim's list: "|uevrbackend.dll|game.exe|", lower case.
+pub fn whitelist_from_text(text: &str) -> String {
+    let names: Vec<String> = text
+        .lines()
+        .map(|l| l.split('#').next().unwrap_or("").trim().to_ascii_lowercase())
+        .filter(|l| !l.is_empty() && !l.contains('|') && l.len() < 120)
+        .collect();
+    fit_list(names)
+}
+
+/// What a new whitelist file starts with: the entries that are known to obey the box.
+pub const WHITELIST_DEFAULT: &str = "# AirFrameXR: games and mods trusted to obey the FOV restriction.\n\
+# A trusted game is told the restricted box (\"Try to apply FOV restriction\") at its FIRST start; the restriction is still checked on that start, and a game\n\
+# that does not follow the box goes back to the whole view and stays there. Games not listed here are told the whole view at their first start and get the\n\
+# restriction from their next start only if they followed the box.\n\
+# One entry per line: a DLL name (a mod loaded into the game: the game is trusted when that module is in its process) or a game executable.\n\
+# Case does not matter; '#' starts a comment.\n\
+UEVRBackend.dll\n";
 
 #[cfg(test)]
 mod tests {
@@ -214,42 +262,61 @@ mod tests {
     }
 
     #[test]
-    fn undecided_is_not_restricted_next_and_that_start_decides() {
-        // first start: restricted (never seen), undecided
-        assert!(restrict_next_start(None));
-        let r1 = update(None, obs(U80, U80_SIZE, U80, FULL));
-        assert_eq!(r1.verdict, Verdict::Undecided);
-        assert!(!restrict_next_start(Some(&r1)));
-        // second start told V (the stream's eye size): a fixed size does not move
-        let fixed = update(Some(&r1), Observation { unrestricted: true, ..obs(P, FULL, P, FULL) });
-        assert_eq!((fixed.verdict, fixed.decided_by), (Verdict::FixedSize, "second start"));
-        assert!(!restrict_next_start(Some(&fixed)));
-        // the same, for a 1.25 resolution scale: 1760 x 1600 told 1408 x 1280, then 2200 x 2000 told 1760 x 1600
-        let scale = update(Some(&r1), Observation { unrestricted: true, ..obs(P, FULL, P, (2200, 2000)) });
-        assert_eq!((scale.verdict, scale.decided_by), (Verdict::Honours, "second start"));
-        assert!(restrict_next_start(Some(&scale)));
-        // third start restricted again: still honours, nothing new needed
-        let third = update(Some(&scale), obs(U80, U80_SIZE, U80, (1760, 1600)));
-        assert_eq!(third.verdict, Verdict::Honours);
+    fn a_first_start_is_told_the_whole_view_and_an_honest_game_is_restricted_next() {
+        assert!(!restrict_next_start(None));   // never seen: V
+        // an honest game on V: its size is the stream's (V), the box it was told: honours, predicted
+        let r1 = update(None, Observation { unrestricted: true, ..obs(P, FULL, P, FULL) });
+        assert_eq!(r1.verdict, Verdict::Honours);
+        assert!(!proven(&r1));
+        assert!(restrict_next_start(Some(&r1)));
+        // the next start is told the fit: it follows (UEVR): proven
+        let r2 = update(Some(&r1), obs(FIT, FIT_SIZE, FIT, FIT_SIZE));
+        assert_eq!(r2.verdict, Verdict::Honours);
+        assert!(proven(&r2));
+        assert!(restrict_next_start(Some(&r2)));
     }
 
     #[test]
-    fn the_second_start_scenarios_three_starts() {
-        // e2e_fov_game_second_start_fixed: undecided, fixed_size, and a third start told V that looks like honours on its own stays fixed_size
-        let s1 = update(None, obs(U80, U80_SIZE, U80, FULL));
-        let s2 = update(Some(&s1), Observation { unrestricted: true, ..obs(P, FULL, P, FULL) });
-        let s3 = update(Some(&s2), Observation { unrestricted: true, ..obs(P, FULL, P, FULL) });
-        assert_eq!([s1.verdict, s2.verdict, s3.verdict], [Verdict::Undecided, Verdict::FixedSize, Verdict::FixedSize]);
-        assert!(!restrict_next_start(Some(&s3)));
-        // e2e_fov_game_second_start_scale: undecided, honours, honours (restricted again at the third start)
-        let t1 = update(None, obs(U80, U80_SIZE, U80, FULL));
-        let t2 = update(Some(&t1), Observation { unrestricted: true, ..obs(P, FULL, P, (2200, 2000)) });
-        let t3 = update(Some(&t2), obs(U80, U80_SIZE, U80, FULL));
-        assert_eq!([t1.verdict, t2.verdict, t3.verdict], [Verdict::Undecided, Verdict::Honours, Verdict::Honours]);
-        // e2e_fov_game_second_start_own: own_frustum at both starts (told V the second time, still a union)
-        let o1 = update(None, obs(U80, U80_SIZE, union(U80), (2160, 2160)));
-        let o2 = update(Some(&o1), Observation { unrestricted: true, ..obs(P, FULL, union(P), (2160, 2160)) });
-        assert_eq!([o1.verdict, o2.verdict], [Verdict::OwnFrustum, Verdict::OwnFrustum]);
+    fn a_game_that_looked_honest_on_v_but_ignores_the_smaller_box_goes_back() {
+        // fixed size 1760 x 1600 = the stream's size: honours on V by coincidence; told the fit (1082 x 964) it renders the same size: fixed size
+        let r1 = update(None, Observation { unrestricted: true, ..obs(P, FULL, P, FULL) });
+        assert!(restrict_next_start(Some(&r1)));
+        let r2 = update(Some(&r1), obs(FIT, FIT_SIZE, FIT, FULL));
+        assert_eq!((r2.verdict, r2.decided_by), (Verdict::FixedSize, "second start"));
+        assert!(!restrict_next_start(Some(&r2)));
+        // and one that draws another frustum under the restriction
+        let r3 = update(Some(&r1), obs(FIT, FIT_SIZE, union(FIT), (2160, 2160)));
+        assert_eq!(r3.verdict, Verdict::OwnFrustum);
+        assert!(!restrict_next_start(Some(&r3)));
+    }
+
+    #[test]
+    fn dishonest_games_are_known_from_the_first_start_on_v() {
+        let own = update(None, Observation { unrestricted: true, ..obs(P, FULL, union(P), (2160, 2160)) });   // Uncharted, Luke Ross's mods
+        assert_eq!(own.verdict, Verdict::OwnFrustum);
+        assert!(!restrict_next_start(Some(&own)));
+        let sq = update(None, Observation { unrestricted: true, ..obs(P, FULL, P, (2160, 2160)) });         // EnshroudedVR's square frame: told 1.10 aspect, 1.0
+        assert_eq!(sq.verdict, Verdict::FixedSize);
+        assert!(!restrict_next_start(Some(&sq)));
+    }
+
+    #[test]
+    fn undecided_stays_on_v_until_the_user_ticks_it_and_the_tick_decides_it() {
+        // a resolution scale of 1.25 on V: 2200 x 2000 told 1760 x 1600: undecided, not restricted
+        let r1 = update(None, Observation { unrestricted: true, ..obs(P, FULL, P, (2200, 2000)) });
+        assert_eq!(r1.verdict, Verdict::Undecided);
+        assert!(!restrict_next_start(Some(&r1)));
+        // the user's tick: the next start is restricted, and its size followed the box (1.25 x 1082 x 964 = 1352 x 1205): honours
+        let mut t = r1.clone();
+        t.forced = Some(true);
+        assert!(restrict_next_start(Some(&t)));
+        let r2 = update(Some(&t), obs(FIT, FIT_SIZE, FIT, (1352, 1205)));
+        assert_eq!((r2.verdict, r2.decided_by), (Verdict::Honours, "second start"));
+        assert_eq!(r2.forced, Some(true));
+        // a fixed size that keeps the aspect does not follow: fixed size (the tick still wins, the user chose it)
+        let f2 = update(Some(&t), obs(FIT, FIT_SIZE, FIT, (2200, 2000)));
+        assert_eq!(f2.verdict, Verdict::FixedSize);
+        assert!(restrict_next_start(Some(&f2)));
     }
 
     #[test]
@@ -267,13 +334,19 @@ mod tests {
     }
 
     #[test]
-    fn the_list_for_the_shim() {
+    fn the_lists_for_the_shim_and_the_whitelist() {
         let own = update(None, obs(FIT, FIT_SIZE, union(FIT), (2160, 2160)));
         let hon = update(None, obs(FIT, FIT_SIZE, FIT, FIT_SIZE));
         let und = update(None, obs(U80, U80_SIZE, U80, FULL));
         let recs = vec![("Uncharted.exe".to_string(), own), ("ue4game.exe".to_string(), hon), ("GR2.exe".to_string(), und)];
+        assert_eq!(restrict_list(recs.iter().map(|(e, r)| (e.as_str(), r))), "|ue4game.exe|");
         let l = unrestricted_list(recs.iter().map(|(e, r)| (e.as_str(), r)), &["Mine.EXE".to_string(), "".to_string()]);
-        assert_eq!(l, "|gr2.exe|mine.exe|uncharted.exe|");
+        assert_eq!(l, "|mine.exe|uncharted.exe|");   // an undecided game is on neither list: the shim's default (V, or G when trusted)
         assert_eq!(unrestricted_list(std::iter::empty(), &[]), "");
+        assert_eq!(restrict_list(std::iter::empty()), "");
+        // the whitelist file: comments, blank lines, case, a stray bar
+        assert_eq!(whitelist_from_text("# trusted\nUEVRBackend.dll   # UEVR\n\n  Game-Win64-Shipping.EXE\nbad|name\n"), "|game-win64-shipping.exe|uevrbackend.dll|");
+        assert_eq!(whitelist_from_text(WHITELIST_DEFAULT), "|uevrbackend.dll|");
+        assert_eq!(whitelist_from_text(""), "");
     }
 }

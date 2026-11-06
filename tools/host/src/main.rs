@@ -952,8 +952,10 @@ mod nvh {
         pub fn nvh_ipc_open() -> *mut c_void;
         pub fn nvh_ipc_config(ipc: *mut c_void, nvh: *mut c_void, rate_hz: f64, eye_w: i32, eye_h: i32, fov8: *const f32, off6: *const f32, bits: i32, encoding_gamma: f32, fov_scale4: *const f32, render_quality: f32, ceil_w: i32, ceil_h: i32);
         pub fn nvh_ipc_shim_recommended(ipc: *mut c_void, w: *mut i32, h: *mut i32);
-        pub fn nvh_ipc_game_submission(ipc: *mut c_void, told8: *mut f32, sub8: *mut f32, size4: *mut i32, unrestricted: *mut u32) -> u32;
+        pub fn nvh_ipc_game_submission(ipc: *mut c_void, told8: *mut f32, sub8: *mut f32, size4: *mut i32, unrestricted: *mut u32, trusted: *mut u32) -> u32;
         pub fn nvh_ipc_set_unrestricted(ipc: *mut c_void, list_utf8: *const std::ffi::c_char);
+        pub fn nvh_ipc_set_restrict(ipc: *mut c_void, list_utf8: *const std::ffi::c_char);
+        pub fn nvh_ipc_set_trusted(ipc: *mut c_void, list_utf8: *const std::ffi::c_char);
         pub fn nvh_ipc_set_preview(ipc: *mut c_void, on: i32, box8: *const f32);
         pub fn nvh_last_ffr_wait_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_set_connected(ipc: *mut c_void, connected: i32);
@@ -1546,7 +1548,7 @@ static FOV_INTAKE_RECORD: std::sync::Mutex<Option<serde_json::Value>> = std::syn
 
 fn fov_record_json(r: &fov_intake::Record) -> serde_json::Value {
     let o = &r.last;
-    json!({ "verdict": r.verdict.name(), "decided_by": r.decided_by, "forced": r.forced, "restrict_next_start": fov_intake::restrict_next_start(Some(r)),
+    json!({ "verdict": r.verdict.name(), "proven": fov_intake::proven(r), "decided_by": r.decided_by, "forced": r.forced, "restrict_next_start": fov_intake::restrict_next_start(Some(r)),
             "told": o.told.concat(), "told_size": [o.told_size.0, o.told_size.1], "submitted": o.submitted.concat(),
             "submitted_size": [o.submitted_size[0].0, o.submitted_size[0].1, o.submitted_size[1].0, o.submitted_size[1].1], "unrestricted": o.unrestricted })
 }
@@ -1556,15 +1558,38 @@ fn save_fov_verdicts(path: &std::path::Path, m: &std::collections::HashMap<Strin
     let _ = fs::write(path, serde_json::to_string_pretty(&json!({ "schema": 1, "games": games })).unwrap_or_default());
 }
 
-/// Tells the shim which executables get the whole view at their next start (HostToShim::unrestrictedExes).
+/// Tells the shim which executables must get the whole view at their next start (HostToShim::unrestrictedExes: verified dishonest, or the user's choice) and
+/// which are told the restricted box (HostToShim::restrictExes: they honoured a box). Everything else is told the whole view unless the whitelist trusts it.
 fn publish_unrestricted(ipc: *mut std::ffi::c_void, m: &std::collections::HashMap<String, fov_intake::Record>, user: &[String]) -> String {
     let list = fov_intake::unrestricted_list(m.iter().map(|(k, r)| (k.as_str(), r)), user);
+    let restrict = fov_intake::restrict_list(m.iter().map(|(k, r)| (k.as_str(), r)));
     if !ipc.is_null() {
         if let Ok(c) = std::ffi::CString::new(list.clone()) {
             unsafe { nvh::nvh_ipc_set_unrestricted(ipc, c.as_ptr()) };
         }
+        if let Ok(c) = std::ffi::CString::new(restrict) {
+            unsafe { nvh::nvh_ipc_set_restrict(ipc, c.as_ptr()) };
+        }
     }
     list
+}
+
+/// config\fov_restriction_whitelist.txt (the games and mods the user trusts to obey the restriction): created with the entries known to obey the box when it
+/// is missing, read as the shim's list, and read again when its modification time changes. Returns the list and the time it was read at.
+fn load_fov_whitelist(path: &std::path::Path) -> (String, Option<std::time::SystemTime>) {
+    if !path.exists() {
+        let _ = fs::write(path, fov_intake::WHITELIST_DEFAULT.replace('\n', "\r\n"));
+    }
+    let text = fs::read_to_string(path).unwrap_or_default();
+    (fov_intake::whitelist_from_text(&text), fs::metadata(path).and_then(|m| m.modified()).ok())
+}
+
+fn publish_whitelist(ipc: *mut std::ffi::c_void, list: &str) {
+    if !ipc.is_null() {
+        if let Ok(c) = std::ffi::CString::new(list) {
+            unsafe { nvh::nvh_ipc_set_trusted(ipc, c.as_ptr()) };
+        }
+    }
 }
 
 /// The run record's `pipeline` block (docs/FOV_PIPELINE_OPTIM.md S8): what each stage of the frame path did in this run, for the Game statistics app's strip.
@@ -2517,6 +2542,11 @@ fn main() {
     if !fov_list.is_empty() {
         logs::general("INFO", &format!("games told the whole view at their start (FOV restriction ignored): {fov_list}"));
     }
+    let fov_whitelist_path = args.config_dir.join("fov_restriction_whitelist.txt");
+    let (fov_whitelist, mut fov_whitelist_mtime) = load_fov_whitelist(&fov_whitelist_path);
+    publish_whitelist(ipc, &fov_whitelist);
+    logs::general("INFO", &format!("games and mods trusted to obey the FOV restriction (fov_restriction_whitelist.txt): {}", if fov_whitelist.is_empty() { "none" } else { fov_whitelist.as_str() }));
+    let mut fov_whitelist_checked = std::time::Instant::now();
     let mut fov_seq_seen: u32 = 0;
     let mut fov_run_prev: Option<fov_intake::Record> = None;
     // the run record (games.json): one (headset repeated share, host repeat share) sample per status tick (10 s) while a game runs
@@ -2642,10 +2672,20 @@ fn main() {
                 apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_cap");
             }
+            // the whitelist file is read again when it changes (the shim takes the list at an app's start)
+            if fov_whitelist_checked.elapsed() >= std::time::Duration::from_secs(1) {
+                fov_whitelist_checked = std::time::Instant::now();
+                if fs::metadata(&fov_whitelist_path).and_then(|m| m.modified()).ok() != fov_whitelist_mtime {
+                    let (list, mtime) = load_fov_whitelist(&fov_whitelist_path);
+                    fov_whitelist_mtime = mtime;
+                    publish_whitelist(ipc, &list);
+                    logs::general("INFO", &format!("fov_restriction_whitelist.txt changed: trusted to obey the FOV restriction: {}", if list.is_empty() { "none" } else { list.as_str() }));
+                }
+            }
             // the intake: a new record from the shim while a game runs (once at 2 s, again on a change) -> verdict, store, the shim's list, an event
             if let (false, Some(g)) = (ipc.is_null(), game.as_ref()) {
-                let (mut t8, mut s8, mut sz, mut un) = ([0f32; 8], [0f32; 8], [0i32; 4], 0u32);
-                let seq = unsafe { nvh::nvh_ipc_game_submission(ipc, t8.as_mut_ptr(), s8.as_mut_ptr(), sz.as_mut_ptr(), &mut un) };
+                let (mut t8, mut s8, mut sz, mut un, mut trusted) = ([0f32; 8], [0f32; 8], [0i32; 4], 0u32, 0u32);
+                let seq = unsafe { nvh::nvh_ipc_game_submission(ipc, t8.as_mut_ptr(), s8.as_mut_ptr(), sz.as_mut_ptr(), &mut un, &mut trusted) };
                 if seq != 0 && seq != fov_seq_seen {
                     fov_seq_seen = seq;
                     let (mut rw, mut rh) = (0i32, 0i32);
@@ -2660,6 +2700,7 @@ fn main() {
                                                    rw, rh, sz[0], sz[1], if next { "restricted" } else { "told the whole view" }));
                     let mut ev = fov_record_json(&r);
                     ev["exe"] = json!(g.exe);
+                    ev["trusted_by"] = json!(match trusted { 1 => Some("module"), 2 => Some("executable"), _ => None });
                     if let Ok(mut g) = FOV_INTAKE_RECORD.lock() { *g = Some(ev.clone()); }
                     event(origin, "game_fov_verdict", ev);
                     fov_store.insert(key, r);
@@ -2692,8 +2733,8 @@ fn main() {
                 // the intake: what the store knew before this start, and the shim's record sequence now (a new record will be this game's)
                 fov_run_prev = fov_store.get(&exe.to_ascii_lowercase()).cloned();
                 if !ipc.is_null() {
-                    let (mut t8, mut s8, mut sz, mut un) = ([0f32; 8], [0f32; 8], [0i32; 4], 0u32);
-                    fov_seq_seen = unsafe { nvh::nvh_ipc_game_submission(ipc, t8.as_mut_ptr(), s8.as_mut_ptr(), sz.as_mut_ptr(), &mut un) };
+                    let (mut t8, mut s8, mut sz, mut un, mut trusted) = ([0f32; 8], [0f32; 8], [0i32; 4], 0u32, 0u32);
+                    fov_seq_seen = unsafe { nvh::nvh_ipc_game_submission(ipc, t8.as_mut_ptr(), s8.as_mut_ptr(), sz.as_mut_ptr(), &mut un, &mut trusted) };
                 }
                 game = Some(GameRun { exe, start: now, frames0, submitted0, skips0, outputs0, seg_start: now, seg_frames0: frames0, seg_submitted0: submitted0, seg_skips0: skips0, seg_outputs0: outputs0 });
             } else if (!alive || displaced) && game.is_some() {

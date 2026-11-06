@@ -103,9 +103,12 @@ branches on the headset: the Vision Pro card writes V, the Advanced window write
   re-told to the game.
 - **The intake** (`tools/host/src/fov_intake.rs`, shim record): some games ignore G (a mod with its own frustum, a fixed render size). The shim
   records, once per game start, the size and FoV the game submits per eye against what it was told; the host classifies it (`honours`, `own_frustum`,
-  `fixed_size`, `undecided`) and keeps `config\fov_verdicts.json` and the ignore list `video.fov_unrestricted_games`, applied at the game's *next*
-  start (VDXR latches FoV and size at the start). An `undecided` game runs restricted once, then is told V once to see whether its size follows.
-  The rules and the table of fake games the lab uses are in section 7 of the design.
+  `fixed_size`, `undecided`) and keeps `config\fov_verdicts.json`. The restriction is a bonus: **a game is told V at its first start** and G only from a start
+  after its record showed it follows the box (or when it is trusted); the choice is made by the shim at the app's start (VDXR latches FoV and size then)
+  from three lists the host publishes: `restrictExes` (honoured a box, or the user's tick), `unrestrictedExes` (own frustum, fixed size, the user's list: always V,
+  even when trusted) and `trustedNames` (`config\fov_restriction_whitelist.txt`: a module loaded in the game's process, such as UEVR's `UEVRBackend.dll`,
+  or a game executable: told G at its first start, still verified by its first record). An `undecided` game (a resolution scale) stays on V until the user
+  ticks it or trusts it. The rules and the table of fake games the lab uses are in section 7 of the design.
 - **The headset tools** are scenes of the probe (`xr_probe` with `XR_PROBE_TOOL=fit|restrict`): an ordinary OpenXR app on the PC, streamed like a
   game, so neither headset needs a client update for them. While one runs the host sends no V (the fit measures the whole panel) and the probe
   is never put on the ignore list. `calibrate.exe` starts them and keeps the result as a profile (`tools/gui/Calibrate.cs`).

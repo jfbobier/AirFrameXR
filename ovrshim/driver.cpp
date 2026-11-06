@@ -2155,19 +2155,34 @@ namespace {
                     sc[e][k] = (h.fovScale[e][k] >= 0.2f && h.fovScale[e][k] <= 1.f) ? h.fovScale[e][k] : 1.f;   // 0 / garbage = not restricted
             // The intake (docs/PICTURE_EDGES_DESIGN.md section 7): an executable on the host's list (a verdict of own frustum or fixed size, an undecided
             // one at its deciding start, or the user's choice) is told the headset's whole view.
+            // The restriction is a bonus (docs/PICTURE_EDGES_DESIGN.md section 7, owner 2026-11-06): the app is told the whole view unless the host's verdict
+            // lists it for the restriction (it honoured a box) or it is trusted (the user's fov_restriction_whitelist.txt: a module loaded in this process, like
+            // UEVRBackend.dll, or this executable); a verified dishonest game (unrestrictedExes) stays on the whole view whatever the whitelist says.
             if (initial) {
-                wchar_t list[1024];
-                wcsncpy_s(list, h.unrestrictedExes, _TRUNCATE);
-                std::wstring me = L"|" + shimlog::ExeName() + L"|";
+                auto has = [](const wchar_t* list, const std::wstring& name) { return list[0] && wcsstr(list, (L"|" + name + L"|").c_str()) != nullptr; };
+                std::wstring me = shimlog::ExeName();
                 for (auto& c : me) c = (wchar_t)towlower(c);
-                const bool skip = list[0] && wcsstr(list, me.c_str()) != nullptr;
-                m_ipc.state->shim.gameUnrestricted = skip ? 1u : 0u;
-                if (skip) {
-                    bool wasRestricted = false;
+                wchar_t un[1024], rs[1024], tr[1024];
+                wcsncpy_s(un, h.unrestrictedExes, _TRUNCATE); wcsncpy_s(rs, h.restrictExes, _TRUNCATE); wcsncpy_s(tr, h.trustedNames, _TRUNCATE);
+                uint32_t trustedBy = 0; std::wstring trustedName;
+                for (const wchar_t* p = tr[0] == L'|' ? tr + 1 : tr; *p;) {
+                    const wchar_t* q = wcschr(p, L'|'); if (!q) break;
+                    const std::wstring name(p, q);
+                    p = q + 1;
+                    if (name.empty()) continue;
+                    if (name.size() > 4 && name.compare(name.size() - 4, 4, L".dll") == 0) { if (GetModuleHandleW(name.c_str())) { trustedBy = 1; trustedName = name; break; } }
+                    else if (name == me) { trustedBy = 2; trustedName = name; break; }
+                }
+                const bool listedUnrestricted = has(un, me), listedRestrict = has(rs, me);
+                const bool tryRestriction = !listedUnrestricted && (listedRestrict || trustedBy != 0);
+                m_ipc.state->shim.gameUnrestricted = tryRestriction ? 0u : 1u;
+                m_ipc.state->shim.gameTrusted = trustedBy;
+                bool wasRestricted = false;
+                if (!tryRestriction)
                     for (int e = 0; e < 2; e++)
                         for (int k = 0; k < 4; k++) { wasRestricted |= sc[e][k] < 1.f; sc[e][k] = 1.f; }
-                    if (wasRestricted) shimlog::General("INFO", "field of view: this game is on the list of games told the whole view (it ignores the restriction): not restricted");
-                }
+                if (trustedBy) shimlog::General("INFO", "field of view: trusted game (%ls %ls)%ls", trustedBy == 1 ? L"module" : L"executable", trustedName.c_str(), listedUnrestricted ? L", but on the list of games that ignore the restriction: told the whole view" : L": told the restricted box at its first start");
+                else if (wasRestricted) shimlog::General("INFO", "field of view: %ls the whole view at its start (%ls)", L"this game is told", listedUnrestricted ? L"it ignored the restriction" : L"the restriction is tried only for games that honoured it, or are whitelisted");
             }
             double widthRatio = 0, heightRatio = 0;
             int measured = 0;

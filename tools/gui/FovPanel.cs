@@ -39,7 +39,7 @@ namespace AirFrameXR
             clientFov = testClient ?? AppSettings.ReadClientFov();
 
             var top = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-            fovTick = new CheckBox { AutoSize = true, Text = "Restrict the field of view", AccessibleName = "Restrict the field of view", Margin = new Padding(3, 6, 12, 0) };
+            fovTick = new CheckBox { AutoSize = true, Text = "Try to apply FOV restriction", AccessibleName = "Try to apply FOV restriction", Margin = new Padding(3, 6, 12, 0) };
             profileBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300, FormattingEnabled = true, AccessibleName = "Field of view profile", Margin = new Padding(3, 3, 8, 0) };
             profileBox.Format += (s, e) => { if (e.ListItem is UserFov u) e.Value = u.Name + "   " + string.Join(" / ", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))); };
             closeWarn = new Label { Text = "⚠ streamer will be closed", AutoSize = true, ForeColor = Color.Firebrick, Font = Ui.Bold, Margin = new Padding(4, 7, 3, 0), Visible = StreamerProc.Running };
@@ -264,7 +264,9 @@ namespace AirFrameXR
         // ---- moved from the Advanced window: the quality row, the stream fit and the pipeline preview ----------------------------------------------------------
 
         const string FovTip =
-                "Field of view the game is told\r\n" +
+                "Try to apply FOV restriction (a performance bonus)\r\n" +
+                "\r\n" +
+                "How it is applied: a game is told the headset's whole view the FIRST time it runs, so it always looks right; AirFrameXR watches what it draws. A game that follows the box it is told (UEVR and native OpenXR games) is told this restriction from its next start. A game that draws its own box or forces a fixed frame (some mods) stays on the whole view. Games and mods you trust (fov_restriction_whitelist.txt in the config folder, UEVRBackend.dll to begin with) are restricted from their first start; AirFrameXR still checks that they follow it.\r\n" +
                 "\r\n" +
                 "What it is: the field of view the game is told it has, taken from one of your profiles (a calibration you made, or values you entered: Manage profiles). Unticked, the game gets the headset's own, as it reported it. Ticked, it gets the profile's window, never more than the headset shows.\r\n" +
                 "What you get: the game renders a smaller view with proportionally fewer pixels, so a GPU-bound game gets faster; you give up what was in the margin you trimmed. The edges of the Vision Pro's view are optically weaker than its centre, so a little off the edges costs little to see. Like SteamVR's Video > Field of View sliders, in absolute values.\r\n" +

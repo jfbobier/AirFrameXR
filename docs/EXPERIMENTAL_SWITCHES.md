@@ -101,3 +101,7 @@ duplicate-timestamp re-stamp paths. Each is documented in docs/PERFORMANCE_KNOBS
 - Everything here changes timing; the signals to judge by are in `logs\AirFrameXR.log`: the `frame generation perf` and `frame generation samples`
   lines every 10 s (app fps, late releases, skipped boundaries, held, regime switches), the `game run recorded` line at game end (fps, headset
   repeats), and with debug logging on, the client's per-frame latency in `logs\debug\<session>\client_graph.csv`.
+
+## FOV restriction whitelist (`config\fov_restriction_whitelist.txt`, 1.4)
+
+The restriction ("Try to apply FOV restriction") is a performance bonus: a game is told the headset's whole view the first time it runs and gets the restriction from its next start if it followed the box. This file lists games and mods that are trusted to follow it, so they get it from their **first** start. One entry per line, `#` starts a comment, case does not matter: a name ending in `.dll` is a module (a mod loaded into the game: the game is trusted while that module is in its process), any other name is the game's executable. The file is created with `UEVRBackend.dll` when it is missing, and read again within a second of a change; a game started afterwards takes it. Trust is verified: the first record of a trusted start is still judged, and a game that does not follow the box (own frustum, a fixed size) goes back to the whole view and stays there, whatever the file says. Takes effect: at the game's next start.

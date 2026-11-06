@@ -1,5 +1,5 @@
 {
-  "description": "The second-start policy of docs/PICTURE_EDGES_DESIGN.md section 7: the same fake game (xr_probe) started several times in one streamer session (app.then, 25 s apart), the host's verdict store kept between (host_cfg/fov_verdicts.json, fetched with the results). Uniform 80 % restriction, Apple's frustum, stream 1760x1600. The Uncharted-like game (union of both eyes, fixed 2160x2160): own_frustum from its first start, told the whole view from its second.",
+  "description": "The restriction policy (owner, 2026-11-06), a game that draws its own frustum (Uncharted community VR, Luke Ross's mods): nobody is trusted. It is told V at its first start, where its own union frustum already shows (`own_frustum`), and V again at the next start.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -50,7 +50,8 @@
     "seconds": 150,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "fov_scale": "80,80,80,80"
+    "fov_scale": "80,80,80,80",
+    "fov_whitelist": []
   },
   "client": {
     "seconds": 140,
@@ -104,17 +105,17 @@
     "refresh_hz": 90,
     "fov_restrict": {
       "scale": [
-        80,
-        80,
-        80,
-        80
+        100,
+        100,
+        100,
+        100
       ],
       "tol": 0.002,
       "truth": "union of both eyes + fixed square size (Uncharted community VR)",
       "starts": [
         {
           "verdict": "own_frustum",
-          "unrestricted": false
+          "unrestricted": true
         },
         {
           "verdict": "own_frustum",

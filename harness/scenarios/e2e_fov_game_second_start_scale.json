@@ -1,5 +1,5 @@
 {
-  "description": "The second-start policy of docs/PICTURE_EDGES_DESIGN.md section 7: the same fake game (xr_probe) started several times in one streamer session (app.then, 25 s apart), the host's verdict store kept between (host_cfg/fov_verdicts.json, fetched with the results). Uniform 80 % restriction, Apple's frustum, stream 1760x1600. A game that honours the restriction at a 1.25 resolution scale: start 1 undecided (the same numbers as the fixed one), start 2 told the whole view and its size grew with the box (2200x2000): honours, so start 3 is restricted again.",
+  "description": "The restriction policy (owner, 2026-11-06), a game with a resolution scale: nobody is trusted. It is told V at every start and its size (1.25 x the told one) is neither the told size nor a fixed aspect: `undecided`, so it is never restricted on its own (the user's tick or the whitelist decides). The safe side of the open question: an honest scaling game does not get the bonus by itself.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -50,7 +50,8 @@
     "seconds": 150,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "fov_scale": "80,80,80,80"
+    "fov_scale": "80,80,80,80",
+    "fov_whitelist": []
   },
   "client": {
     "seconds": 140,
@@ -111,25 +112,25 @@
     "refresh_hz": 90,
     "fov_restrict": {
       "scale": [
-        80,
-        80,
-        80,
-        80
+        100,
+        100,
+        100,
+        100
       ],
       "tol": 0.002,
-      "truth": "honours, at a 1.25 resolution scale",
+      "truth": "honours, at a 1.25 resolution scale (undecided: not restricted unless ticked or whitelisted)",
       "starts": [
         {
           "verdict": "undecided",
-          "unrestricted": false
-        },
-        {
-          "verdict": "honours",
           "unrestricted": true
         },
         {
-          "verdict": "honours",
-          "unrestricted": false
+          "verdict": "undecided",
+          "unrestricted": true
+        },
+        {
+          "verdict": "undecided",
+          "unrestricted": true
         }
       ]
     },
