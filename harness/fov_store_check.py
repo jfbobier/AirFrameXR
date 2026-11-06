@@ -32,7 +32,7 @@ WANT = [
     "corrupt=0",
     "card=red:False valid:True/0 yellow:True/True partial:False",
     "card_added=1:My values:1.2349:False",
-    "seed=1 name=Test AVP (standard calibration) tan=0.97/0.71/0.69/0.63 scale=0.8",
+    "seed=1 name=Test AVP (standard calibration) tan=0.97/0.71/0.69/0.63",
     "seed_again=0 after_delete=0",
     "seed_quest=1 name=Test Quest (starting point, not measured) tan=1.23/0.84/0.93/1.38",
     "apply=True 0.90/0.71/0.69/0.60 id=std-t-avp for=Apple Headset",

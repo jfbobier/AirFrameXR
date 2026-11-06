@@ -14,10 +14,13 @@ namespace AirFrameXR
     public class UserFov
     {
         public string Id, Name, Headset = "", Source = "manual", Created = "", Note = "";
-        /// the headset app's own FoV scale recommended with it (0 = none), e.g. 0.8 for the Vision Pro's calibration
-        public double ClientScale;
         /// outer, inner, upper, lower (tangents)
         public double[] Tan = new double[4];
+        /// schema 2: each eye's own four tangents when the eyes were fitted apart (null = the eyes are mirrored); Tan stays the per-edge union, which is what a reader of schema 1 and the streamer (until the per-eye message exists) use
+        public double[] TanLeft, TanRight;
+        public bool PerEye => TanLeft != null && TanRight != null;
+        /// schema 2: how the numbers were found: quickfit | restriction | sweep | slider | manual ("" for a file written before)
+        public string Method = "";
         /// the game render quality that goes with it (0..1, video.fov_render_quality)
         public double Quality;
         /// the measured window of a calibration (tangent space, x outward from the nose, y up); empty for numbers typed by hand
@@ -33,7 +36,8 @@ namespace AirFrameXR
                 ["render_quality"] = Math.Round(Quality, 2),
             };
             if (Note.Length > 0) d["note"] = Note;
-            if (ClientScale > 0) d["client_scale"] = Math.Round(ClientScale, 2);
+            if (PerEye) { d["tan_left"] = TanLeft.Select(v => (object)Math.Round(v, 4)).ToList(); d["tan_right"] = TanRight.Select(v => (object)Math.Round(v, 4)).ToList(); }
+            if (Method.Length > 0) d["method"] = Method;
             if (Window.Count > 0) d["window"] = Window.Select(p => (object)new List<object> { Math.Round(p[0], 4), Math.Round(p[1], 4) }).ToList();
             return d;
         }
@@ -47,9 +51,16 @@ namespace AirFrameXR
                 var u = new UserFov
                 {
                     Id = Json.Str(d, "id", ""), Name = Json.Str(d, "name", ""), Headset = Json.Str(d, "headset", ""), Source = Json.Str(d, "source", "manual"),
-                    Created = Json.Str(d, "created", ""), Note = Json.Str(d, "note", ""), ClientScale = Math.Max(0, Json.Num(d, "client_scale", 0)), Quality = Math.Max(0, Math.Min(1, Json.Num(d, "render_quality", 0))),
+                    Created = Json.Str(d, "created", ""), Note = Json.Str(d, "note", ""), Quality = Math.Max(0, Math.Min(1, Json.Num(d, "render_quality", 0))),
                     Tan = Enumerable.Range(0, 4).Select(i => Convert.ToDouble(t[i], CultureInfo.InvariantCulture)).ToArray(),
                 };
+                u.Method = Json.Str(d, "method", "");
+                if (Json.Get(d, "tan_left") is System.Collections.IList tl && tl.Count >= 4 && Json.Get(d, "tan_right") is System.Collections.IList tr && tr.Count >= 4)
+                {
+                    double[] Four(System.Collections.IList l) => Enumerable.Range(0, 4).Select(i => Convert.ToDouble(l[i], CultureInfo.InvariantCulture)).ToArray();
+                    var left = Four(tl); var right = Four(tr);
+                    if (left.Concat(right).All(v => !double.IsNaN(v) && v > 0)) { u.TanLeft = left; u.TanRight = right; }
+                }
                 if (u.Id.Length == 0 || u.Tan.Any(v => double.IsNaN(v) || !(v > 0))) return null;
                 if (u.Name.Length == 0) u.Name = u.Id;
                 if (Json.Get(d, "window") is System.Collections.IList w)
@@ -79,7 +90,7 @@ namespace AirFrameXR
 
         static void Save(IEnumerable<UserFov> all, List<string> seeded, string path)
         {
-            var root = new Dictionary<string, object> { ["version"] = 1.0, ["profiles"] = all.Select(u => (object)u.ToJson()).ToList() };
+            var root = new Dictionary<string, object> { ["version"] = 2.0, ["profiles"] = all.Select(u => (object)u.ToJson()).ToList() };
             if (seeded.Count > 0) root["seeded"] = seeded.Select(x => (object)x).ToList();
             Json.Save(path ?? FilePath, root);
         }
@@ -114,13 +125,12 @@ namespace AirFrameXR
                     var margin = Math.Max(0, Math.Min(15, Json.Num(fov, "margin_deg", 3)));
                     var tan = new[] { "outer", "inner", "upper", "lower" }.Select(k => Math.Round(Math.Tan((Json.Num(vis, k, 0) + margin) * Math.PI / 180), 2)).ToArray();
                     if (tan.Any(v => !(v > 0))) continue;
-                    var scale = Json.Num(fov, "client_fov_scale", 0);
                     var standard = Json.Str(fov, "source", "standard");
                     all.RemoveAll(x => x.Id == "std-" + id);
                     all.Add(new UserFov
                     {
-                        Id = "std-" + id, Name = Json.Str(d, "display_name", id).Split('(')[0].Trim() + (standard == "starting-point" ? " (starting point, not measured)" : " (standard calibration)"), Headset = names[0], Source = standard,
-                        Created = "2026-01-01T00:00:00", Tan = tan, Quality = Math.Max(0, Math.Min(1, Json.Num(fov, "render_quality", 0))), ClientScale = scale >= 0.2 && scale <= 1.6 && Math.Abs(scale - 1) > 0.001 ? scale : 0, Note = Json.Str(fov, "note", ""),
+                        Id = "std-" + id, Name = standard == "author" ? "Author's fit (one wearer, 2026-10-29)" : Json.Str(d, "display_name", id).Split('(')[0].Trim() + (standard == "starting-point" ? " (starting point, not measured)" : " (standard calibration)"), Headset = names[0], Source = standard,
+                        Created = "2026-01-01T00:00:00", Tan = tan, Quality = Math.Max(0, Math.Min(1, Json.Num(fov, "render_quality", 0))), Note = Json.Str(fov, "note", ""),
                     });
                     seeded.Add(id); added++;
                 }
@@ -176,7 +186,10 @@ namespace AirFrameXR
         public static void Apply(UserFov u, AppSettings st, double[] client, string headset)
         {
             var keys = new[] { "video.fov_outer", "video.fov_inner", "video.fov_upper", "video.fov_lower" };
-            for (int k = 0; k < 4; k++) Json.Set(st.Root, keys[k], Math.Round(client != null ? Math.Min(u.Tan[k], client[k]) : u.Tan[k], 4));
+            var left = u.PerEye ? u.TanLeft : u.Tan;   // schema 2: the left eye's own numbers (Tan is the union); the right eye's go to video.fov_override_right
+            for (int k = 0; k < 4; k++) Json.Set(st.Root, keys[k], Math.Round(client != null ? Math.Min(left[k], client[k]) : left[k], 4));
+            if (u.PerEye) Json.Set(st.Root, "video.fov_override_right", Enumerable.Range(0, 4).Select(k => (object)Math.Round(client != null ? Math.Min(u.TanRight[k], client[k]) : u.TanRight[k], 4)).ToList());
+            else Json.Remove(st.Root, "video.fov_override_right");
             Json.Set(st.Root, "video.fov_override", true);
             Json.Set(st.Root, "video.fov_profile", u.Id);
             if (client != null) Json.Set(st.Root, "video.fov_for", client.Select(x => (object)Math.Round(x, 4)).ToList());   // the headset these values were made for (they are absolute tangents)

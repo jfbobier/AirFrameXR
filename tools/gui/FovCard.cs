@@ -30,8 +30,7 @@ namespace AirFrameXR
         public static FovMap FromResult(FovFitResult r) => new FovMap
         {
             Rectangle = new[] { r.Rectangle.Outer, r.Rectangle.Inner, r.Rectangle.Upper, r.Rectangle.Lower },
-            Window = r.Window.Select(w => new[] { w.X, w.Y }).ToList(),
-            AccessibleName = "Your visible window with the measured rays",
+            AccessibleName = "Your visible window",
         };
 
         protected override void OnPaint(PaintEventArgs e)
@@ -90,11 +89,12 @@ namespace AirFrameXR
         readonly Label details, message, note;
         readonly Button delete = new Button { Text = "Delete", AutoSize = true }, rename = new Button { Text = "Rename...", AutoSize = true };
         readonly Button add = new Button { Text = "Add to my profiles", AutoSize = true, Enabled = false, Margin = new Padding(12, 2, 3, 3) };
-        readonly Button calibrate = new Button { Text = "Calibrate now (30 min, needs the headset)...", AutoSize = true, Margin = new Padding(3, 8, 8, 3) };
+        readonly Button fit = new Button { Text = "Fit the picture to your eyes (2 min, headset on)...", AutoSize = true, Margin = new Padding(3, 8, 8, 3), AccessibleName = "Fit the picture to your eyes" };
         readonly Button import = new Button { Text = "Import a file...", AutoSize = true, Margin = new Padding(8, 8, 3, 3) };
-        readonly Button grid = new Button { Text = "Check with fovgrid...", AutoSize = true, Margin = new Padding(3, 8, 3, 3) };
+        readonly CheckBox perEye = new CheckBox { Text = "Fit each eye on its own (per eye)", AutoSize = true, Margin = new Padding(12, 6, 3, 0), AccessibleName = "Per eye" };
         readonly ComboBox unit = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100, AccessibleName = "Unit of the typed values" };
-        readonly TextBox[] box = new TextBox[4];
+        readonly TextBox[] box = new TextBox[4], box2 = new TextBox[4];   // box: the left eye (both eyes unless per eye is ticked); box2: the right eye
+        FlowLayoutPanel rowRight;
         readonly TextBox name = new TextBox { Width = 170, AccessibleName = "Name of the new profile" };
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 30000, InitialDelay = 400 };
         readonly Timer watch = new Timer { Interval = 1500 };
@@ -107,7 +107,7 @@ namespace AirFrameXR
         /// the selection changed or the typed values did (the wizard's Next button follows it)
         public event Action Changed;
         /// the four typed values are complete and usable (they can be added, or taken as they are by the wizard)
-        public bool TypedValid => box.All(b => b.Text.Trim().Length > 0) && TypedCheck().Usable;
+        public bool TypedValid => box.All(b => b.Text.Trim().Length > 0) && TypedCheck().Usable && (!perEye.Checked || (RightFilled && TypedCheckRight().Usable));
         /// Adds the typed values as a profile now and returns it (null when they are not usable).
         public UserFov AddTypedNow() { if (!TypedValid) return null; AddTyped(); return Selected; }
         /// Highlights the profile with this id.
@@ -116,7 +116,7 @@ namespace AirFrameXR
         public UserFov Proposed => list.Items.Cast<UserFov>().FirstOrDefault(u => u.Source == "standard" || u.Source == "starting-point");
 
         /// A profile file's measured field of view as one of the user's profiles.
-        public static UserFov FromProfile(HmdProfile p) => new UserFov { Id = UserFovStore.NewId(), Name = p.DisplayName.Split('(')[0].Trim(), Headset = p.NameContains.FirstOrDefault() ?? "", Source = "imported", Tan = p.FovTangents(), Quality = p.FovRenderQuality, ClientScale = p.FovClientScale, Note = p.FovNote };
+        public static UserFov FromProfile(HmdProfile p) => new UserFov { Id = UserFovStore.NewId(), Name = p.DisplayName.Split('(')[0].Trim(), Headset = p.NameContains.FirstOrDefault() ?? "", Source = "imported", Tan = p.FovTangents(), Quality = p.FovRenderQuality, Note = p.FovNote };
         // the UI harness and the self-test
         public bool CanAdd => add.Enabled;
         public string Message => message.Text;
@@ -124,7 +124,7 @@ namespace AirFrameXR
         public void AddForTest() => AddTyped();
 
         /// storePath / declared: tests use their own file and box; null = the user's file and the headset's box as the host saved it.
-        public FovCard(string storePath = null, double[] declared = null)
+        public FovCard(string storePath = null, double[] declared = null, bool simple = false)
         {
             this.storePath = storePath;
             this.declared = declared ?? AppSettings.ReadClientFov();
@@ -159,7 +159,19 @@ namespace AirFrameXR
                 row1.Controls.Add(new Label { Text = names[k], AutoSize = true, Margin = new Padding(12, 6, 3, 0) }); row1.Controls.Add(box[k]);
                 tips.SetToolTip(box[k], names[k] + ": " + (k == 0 ? "the side away from the nose" : k == 1 ? "the side towards the nose" : k == 2 ? "up" : "down") + ". Tangents (what the Advanced window and the profiles use) or degrees from the view axis, as chosen in Unit. Never more than the headset shows.");
             }
+            row1.Controls.Add(perEye);
             inner.Controls.Add(row1);
+            rowRight = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0), Visible = false };
+            rowRight.Controls.Add(new Label { Text = "Right eye", AutoSize = true, Margin = new Padding(3, 6, 3, 0) });
+            for (int k = 0; k < 4; k++)
+            {
+                box2[k] = new TextBox { Width = 60, AccessibleName = "Right " + names[k].ToLowerInvariant() };
+                box2[k].TextChanged += (s, e) => Typed();
+                rowRight.Controls.Add(new Label { Text = names[k], AutoSize = true, Margin = new Padding(12, 6, 3, 0) }); rowRight.Controls.Add(box2[k]);
+            }
+            inner.Controls.Add(rowRight);
+            perEye.CheckedChanged += (s, e) => { rowRight.Visible = perEye.Checked; Typed(); };
+            tips.SetToolTip(perEye, "The eyes of one wearer are not mirror images (the nose, the lens position). Tick to type the right eye's four values on a second row; the left eye's row is then the left eye. The streamer uses the per-edge union of the two until the per-eye message exists.");
             var row2 = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0) };
             row2.Controls.Add(new Label { Text = "Name", AutoSize = true, Margin = new Padding(3, 6, 3, 0) }); row2.Controls.Add(name); row2.Controls.Add(add);
             add.Click += (s, e) => AddTyped();
@@ -168,15 +180,16 @@ namespace AirFrameXR
             Controls.Add(typed);
 
             var rowB = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0) };
-            calibrate.Click += (s, e) => Calibrate(); grid.Click += (s, e) => CheckWithGrid();
-            tips.SetToolTip(calibrate, "Measures the edges of what your headset shows with the eye calibration wizard (about 30 minutes, the headset on). The result is kept here as a new profile.");
-            tips.SetToolTip(grid, "Starts the streamer if needed and draws the chosen rectangle on a degree grid in the headset (bench\\fovgrid.exe): the outline must sit just outside the picture you can see.");
+            fit.Click += (s, e) => Fit();
+            fit.Enabled = settings.Kind != HeadsetKind.Quest;   // a Quest has no picture edges to fit: the headset's own lens window is what its app declares
+            tips.SetToolTip(fit, "Two minutes with the headset on: push each edge in until the black bar is gone, one step back, and the result is kept here as a new profile. Vision Pro only.");
             import.Click += (s, e) => ImportFile();
             tips.SetToolTip(import, "A calibration file someone shared, or the one fov_profile.exe wrote (a .profile.json with a measured field of view): it is added to your profiles.");
-            rowB.Controls.Add(calibrate); rowB.Controls.Add(grid); rowB.Controls.Add(import);
-            Controls.Add(rowB); Ui.FitWidth(rowB, 700, asMaximum: true);   // the three buttons wrap in a narrow window
+            rowB.Controls.Add(fit); rowB.Controls.Add(import);
+            Controls.Add(rowB); Ui.FitWidth(rowB, 700, asMaximum: true);   // the buttons wrap in a narrow window
             note = Ui.Line(""); note.ForeColor = Color.DimGray; Controls.Add(note); Ui.FitWidth(note, 700, asMaximum: true);
 
+            if (simple) { typed.Visible = false; rowB.Visible = false; note.Visible = false; }   // the wizard's restriction step: the list only, no typed values, no fit, no import
             watch.Tick += (s, e) => { if (calProc != null && calProc.HasExited) { calProc = null; watch.Stop(); Reload(null); } };
             Disposed += (s, e) => { watch.Dispose(); tips.Dispose(); };
             Reload(null);
@@ -201,8 +214,8 @@ namespace AirFrameXR
             SelectionChanged?.Invoke(); Changed?.Invoke();
         }
 
-        bool typedAny => box.Any(b => b != null && b.Text.Trim().Length > 0);
-        void typedClear() { if (!typedAny) return; loading = true; foreach (var b in box) b.Text = ""; loading = false; }
+        bool typedAny => box.Any(b => b != null && b.Text.Trim().Length > 0) || box2.Any(b => b != null && b.Text.Trim().Length > 0);
+        void typedClear() { if (!typedAny) return; loading = true; foreach (var b in box.Concat(box2)) b.Text = ""; perEye.Checked = false; loading = false; }
 
         void ShowSelected()
         {
@@ -231,14 +244,16 @@ namespace AirFrameXR
         // ---- values typed by hand ----------------------------------------------------------------------------------------------------------------------
 
         FovCheck TypedCheck() => FovValidator.Check(box.Select(b => FovValidator.Parse(b.Text)).ToArray(), unit.SelectedIndex == 1 ? FovUnit.Degrees : FovUnit.Tangent, declared);
+        FovCheck TypedCheckRight() => FovValidator.Check(box2.Select(b => FovValidator.Parse(b.Text)).ToArray(), unit.SelectedIndex == 1 ? FovUnit.Degrees : FovUnit.Tangent, declared);
+        bool RightFilled => box2.All(b => b.Text.Trim().Length > 0);
 
         void Typed()
         {
-            if (loading || box == null || box.Any(b => b == null)) return;
+            if (loading || box == null || box.Any(b => b == null) || box2.Any(b => b == null)) return;
             if (!typedAny) { add.Enabled = false; ShowSelected(); Changed?.Invoke(); return; }
             var c = TypedCheck();
             bool filled = box.All(b => b.Text.Trim().Length > 0);
-            add.Enabled = filled && c.Usable;
+            add.Enabled = TypedValid;
             map.Declared = declared; map.Window = null;
             map.Rectangle = c.Tan.All(v => !double.IsNaN(v)) ? c.Tan : null;
             map.RectColor = c.Level == FovLevel.Invalid ? Color.Firebrick : c.Level == FovLevel.Strange ? Color.DarkGoldenrod : Ui.Accent;
@@ -256,13 +271,31 @@ namespace AirFrameXR
             Typed();
         }
 
+        /// The UI harness: the per-eye row, left eye then right eye.
+        public void PerEyeForTest(string unitName, string[] left, string[] right)
+        {
+            perEye.Checked = true;
+            unit.SelectedIndex = unitName == "Degrees" ? 1 : 0;
+            loading = true; for (int k = 0; k < 4; k++) { box[k].Text = left[k]; box2[k].Text = right[k]; } loading = false;
+            if (name.Text.Length == 0) name.Text = "My eyes";
+            Typed();
+        }
+
         void AddTyped()
         {
+            if (!TypedValid) return;
             var c = TypedCheck();
-            if (!c.Usable || !box.All(b => b.Text.Trim().Length > 0)) return;
-            var u = UserFovStore.Add(new UserFov { Id = UserFovStore.NewId(), Name = name.Text.Trim().Length > 0 ? name.Text.Trim() : "My values", Headset = settings.HeadsetName, Source = "manual", Tan = c.Tan.Select(v => Math.Round(v, 4)).ToArray() }, storePath);
+            double[] R(double[] v) => v.Select(x => Math.Round(x, 4)).ToArray();
+            var u = new UserFov { Id = UserFovStore.NewId(), Name = name.Text.Trim().Length > 0 ? name.Text.Trim() : "My values", Headset = settings.HeadsetName, Source = "manual", Method = "manual", Tan = R(c.Tan) };
+            if (perEye.Checked)
+            {
+                var r = TypedCheckRight();
+                u.TanLeft = R(c.Tan); u.TanRight = R(r.Tan);
+                u.Tan = Enumerable.Range(0, 4).Select(k => Math.Max(u.TanLeft[k], u.TanRight[k])).ToArray();   // the union: what a schema 1 reader and the streamer use
+            }
+            u = UserFovStore.Add(u, storePath);
             Log.Write("INFO", $"fov profiles: '{u.Name}' added by hand ({string.Join(" / ", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))})");
-            loading = true; foreach (var b in box) b.Text = ""; name.Text = ""; loading = false;
+            loading = true; foreach (var b in box.Concat(box2)) b.Text = ""; name.Text = ""; perEye.Checked = false; loading = false;
             add.Enabled = false;
             Reload(u.Id);
         }
@@ -324,41 +357,16 @@ namespace AirFrameXR
             Reload(u.Id);
         }
 
-        // ---- calibration and the grid ------------------------------------------------------------------------------------------------------------------
+        // ---- the fit ------------------------------------------------------------------------------------------------------------------
 
-        void Calibrate()
+        /// "Fit the picture to your eyes": calibrate.exe, which opens on the fit page (docs/PICTURE_EDGES_DESIGN.md section 6); its result is added to the list when it closes.
+        void Fit()
         {
             var exe = Path.Combine(Paths.Bin, "calibrate.exe");
             if (!File.Exists(exe)) { MessageBox.Show(FindForm(), "bin\\calibrate.exe is missing from this package.", "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (calProc != null && !calProc.HasExited) { note.Text = "The calibration is already open."; return; }
-            try { calProc = Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = Paths.Bin }); watch.Start(); note.Text = "The calibration window is open; its result is added to the list when you apply or save it."; }
-            catch (Exception e) { MessageBox.Show(FindForm(), "Could not start the calibration: " + e.Message, "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-        }
-
-        /// The rectangle to show on the grid: the typed values when they are complete and usable, else the selected profile.
-        double[] GridTangents()
-        {
-            if (typedAny) { var c = TypedCheck(); return box.All(b => b.Text.Trim().Length > 0) && c.Usable ? c.Tan : null; }
-            return Selected?.Tan;
-        }
-
-        void CheckWithGrid()
-        {
-            var t = GridTangents();
-            if (t == null) { note.Text = "Select a profile, or type four usable values, first."; return; }
-            var bat = Path.Combine(Paths.Dir, "bench", "fovgrid.bat");
-            if (!File.Exists(bat)) { MessageBox.Show(FindForm(), "bench\\fovgrid.bat is missing from this package.", "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (settings.FovOverride && MessageBox.Show(FindForm(), "The field of view restriction is on. The outline is only readable with it off (with it on, the game's view is this rectangle and the outline falls on the edge of the picture): untick it in the main window and restart the streamer first.\n\nShow the grid anyway?", "Field of view profiles", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-            try
-            {
-                if (Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime))
-                    Process.Start(new ProcessStartInfo(Paths.Runtime) { WorkingDirectory = Paths.Bin, WindowStyle = ProcessWindowStyle.Minimized });
-                var arg = string.Join(",", t.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)));
-                Process.Start(new ProcessStartInfo(bat, arg) { WorkingDirectory = Path.GetDirectoryName(bat), UseShellExecute = true });
-                note.Text = "Open the ALVR app on the headset: the grid starts in it once it is connected. The white outline is the rectangle " + arg + "; close the grid's console window when done.";
-                Log.Write("INFO", "fov profiles: fovgrid with " + arg);
-            }
-            catch (Exception e) { MessageBox.Show(FindForm(), "Could not start the grid: " + e.Message, "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            if (calProc != null && !calProc.HasExited) { note.Text = "The fit is already open."; return; }
+            try { calProc = Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = Paths.Bin }); watch.Start(); note.Text = "The fit window is open; its result is added to the list when it closes."; }
+            catch (Exception e) { MessageBox.Show(FindForm(), "Could not start the fit: " + e.Message, "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
     }
 }

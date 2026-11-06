@@ -1,4 +1,4 @@
-// The FOV restriction mini app of the launcher (docs/UI_SPEC.md): the tick, the list of the user's profiles (UserFovStore), the render quality, the stream fit and the pipeline preview that used to
+// The FOV restriction panel (since 1.4 in Advanced video and performance settings, docs/PICTURE_EDGES_DESIGN.md section 9; the launcher has the Vision Pro card below instead): the tick, the list of the user's profiles (UserFovStore), the render quality, the stream fit and the pipeline preview that used to
 // live in the Advanced window. Every change that needs a streamer restart closes the streamer (never starts it again) and the tick row says so while it runs.
 using System;
 using System.Collections.Generic;
@@ -21,7 +21,7 @@ namespace AirFrameXR
         readonly Label status = Ui.Line("");
         readonly Timer warnTimer = new Timer { Interval = 2000 };
         readonly List<UserFov> profiles = new List<UserFov>();
-        CheckBox fovTick; ComboBox profileBox; Label fovNote, fovShare, clientHint, closeWarn;
+        CheckBox fovTick; ComboBox profileBox; Label fovNote, fovShare, closeWarn;
         TrackBar fovQ; FlowLayoutPanel fovQRow; Button manage;
         CheckBox fitTick; Label fitNote, pipeLine, pipeBand; FlowLayoutPanel pipeWarn;
         int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
@@ -29,7 +29,7 @@ namespace AirFrameXR
         readonly double[] testClient; readonly bool testTick; readonly int[] testEye; readonly bool testFit;   // the UI harness: a pretend headset, the restriction ticked, a stream size, the fit on
         bool loading;
 
-        /// "Manage profiles and calibrate..." was pressed (the launcher opens configure.exe --fov and steps aside); without a handler the panel starts it itself.
+        /// "Manage profiles..." was pressed (the launcher opens configure.exe --fov and steps aside); without a handler the panel starts it itself.
         public event Action ManageRequested;
 
         public FovRestrictionPanel(double[] clientFovForTest = null, bool tickForTest = false, int[] streamEyeForTest = null, bool fitForTest = false, string storePathForTest = null)
@@ -45,18 +45,21 @@ namespace AirFrameXR
             closeWarn = new Label { Text = "⚠ streamer will be closed", AutoSize = true, ForeColor = Color.Firebrick, Font = Ui.Bold, Margin = new Padding(4, 7, 3, 0), Visible = StreamerProc.Running };
             top.Controls.Add(fovTick); top.Controls.Add(profileBox); top.Controls.Add(closeWarn);
             Controls.Add(top);
-            tips.SetToolTip(fovTick, FovTip); tips.SetToolTip(profileBox, "The profiles you calibrated or entered (Manage profiles and calibrate...). The game is told this window, never more than the headset shows. " + Restart + ".");
+            tips.SetToolTip(fovTick, FovTip); tips.SetToolTip(profileBox, "The profiles you fitted, chose in the headset or entered (Manage profiles...). The game is told this window, never more than the headset shows. " + Restart + ".");
 
             fovNote = Ui.Line(""); fovNote.ForeColor = Color.DimGray; fovNote.Margin = new Padding(22, 2, 3, 0); fovNote.MaximumSize = new Size(WrapWidth, 0);
             fovShare = Ui.Line(""); fovShare.ForeColor = Color.SeaGreen; fovShare.Margin = new Padding(22, 0, 3, 2); fovShare.MaximumSize = new Size(WrapWidth, 0);
-            clientHint = Ui.Line(""); clientHint.ForeColor = Color.DimGray; clientHint.Margin = new Padding(22, 0, 3, 2); clientHint.MaximumSize = new Size(WrapWidth, 0);
-            Controls.Add(fovNote); Controls.Add(fovShare); Controls.Add(clientHint);
+            Controls.Add(fovNote); Controls.Add(fovShare);
 
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 0) };
-            manage = new Button { Text = "Manage profiles and calibrate...", AutoSize = true, AccessibleName = "Manage profiles and calibrate", Margin = new Padding(22, 2, 8, 2) };
+            manage = new Button { Text = "Manage profiles...", AutoSize = true, AccessibleName = "Manage profiles", Margin = new Padding(22, 2, 8, 2) };
             manage.Click += (s, e) => { if (ManageRequested != null) ManageRequested(); else StartManager(); };
-            tips.SetToolTip(manage, "Your profiles: calibrate (30 minutes, the headset on), enter values by hand, check one with the FoV grid, rename, delete.");
+            tips.SetToolTip(manage, "Your profiles: fit the picture to your eyes (Vision Pro), enter values by hand, rename, delete.");
             row.Controls.Add(manage);
+            var choose = new Button { Text = "Choose it in the headset (2 min)...", AutoSize = true, AccessibleName = "Choose in the headset", Margin = new Padding(3, 2, 8, 2) };
+            choose.Click += (s, e) => MessageBox.Show(FindForm(), "The in-headset tool is not built in this build (docs/PICTURE_EDGES_DESIGN.md section 6b). Pick a profile above or enter values in Manage profiles.", "What the game renders", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            tips.SetToolTip(choose, "Two minutes in the headset: the scene inside the box, black outside; pull an edge in until you notice the black during normal looking around, then one step back. Every headset.");
+            row.Controls.Add(choose);
             status.ForeColor = Color.SeaGreen; status.Margin = new Padding(3, 8, 3, 0); status.MaximumSize = new Size(WrapWidth, 0);
             row.Controls.Add(status);
             Controls.Add(row);
@@ -151,13 +154,12 @@ namespace AirFrameXR
         void FovLabels()
         {
             FovLabelsText();
-            fovShare.Visible = fovShare.Text.Length > 0; clientHint.Visible = clientHint.Text.Length > 0;   // an empty line would leave a gap in the card
+            fovShare.Visible = fovShare.Text.Length > 0;   // an empty line would leave a gap in the card
         }
 
         void FovLabelsText()
         {
             var u = Selected;
-            clientHint.Text = u != null && u.ClientScale > 0 && fovTick.Checked ? u.ClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " recommended for the FoV Scale slider in the headset's app (set it there by hand)." : "";
             if (clientFov == null)
             {
                 fovNote.Text = "The headset's field of view is not known yet: connect the headset once with the streamer (it is saved when it connects).";
@@ -165,7 +167,7 @@ namespace AirFrameXR
             }
             if (profiles.Count == 0)
             {
-                fovNote.Text = "No profile yet: calibrate (30 minutes, the headset on) or enter values by hand.";
+                fovNote.Text = "No profile yet: choose it in the headset (2 minutes), fit the picture (Vision Pro) or enter values by hand in Manage profiles.";
                 fovShare.Text = ""; UpdatePipeline(); return;
             }
             var v = FovValues();
@@ -385,6 +387,108 @@ namespace AirFrameXR
         void FovStoreQuality(AppSettings st)
         {
             if (fovTick.Checked || fitTick.Checked) Json.Set(st.Root, V + "fov_render_quality", Math.Round(fovQ.Value / 100.0, 2));
+        }
+    }
+
+    /// The Vision Pro card of the launcher and of the wizard's picture-edges step (docs/PICTURE_EDGES_DESIGN.md sections 6 and 9): the headset view V is the whole panel or one of the profiles,
+    /// and "Fit the picture to your eyes" is the retry (calibrate.exe). Vision Pro only: the owner of this card never creates it for a Quest or before a headset was seen. The choice is stored
+    /// as video.headset_view (the profile's tangents, per eye when it has them; absent = the whole panel) and video.headset_view_profile (its id, for this card); the streamer forwards it as the `headset_view` command.
+    public class VisionProCard : FlowLayoutPanel
+    {
+        const string Key = "video.headset_view";
+        readonly bool wizard;
+        readonly string storePath;
+        readonly RadioButton whole = new RadioButton { Text = "Whole panel (everything the headset can show; sharpness as the stock app)", AutoSize = true, AccessibleName = "Whole panel", Margin = new Padding(3, 6, 3, 0) };
+        readonly RadioButton mine = new RadioButton { Text = "My fit:", AutoSize = true, AccessibleName = "My fit", Margin = new Padding(3, 4, 3, 0) };
+        readonly ComboBox profiles = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 320, FormattingEnabled = true, AccessibleName = "Picture edges profile", Margin = new Padding(3, 1, 3, 0) };
+        readonly Button fit;
+        readonly Label note = Ui.Line("");
+        readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
+        readonly Timer watch = new Timer { Interval = 1500 };
+        Process proc;
+        bool loading;
+
+        public VisionProCard(bool wizard = false, string storePathForTest = null)
+        {
+            this.wizard = wizard; storePath = storePathForTest;
+            FlowDirection = FlowDirection.TopDown; WrapContents = false; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; Margin = new Padding(0);
+            AccessibleName = "Picture edges";
+            profiles.Format += (s, e) => { if (e.ListItem is UserFov u) e.Value = u.Name + "   " + string.Join(" / ", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))); };
+            Controls.Add(whole);
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            row.Controls.Add(mine); row.Controls.Add(profiles);
+            Controls.Add(row);
+            fit = new Button
+            {
+                Text = wizard ? "Fit now (2 min, headset on)" : "Fit the picture to your eyes (2 min, headset on)...", AutoSize = true, Margin = new Padding(3, 8, 3, 3),
+                AccessibleName = wizard ? "Fit now" : "Fit the picture to your eyes",
+            };
+            fit.Click += (s, e) => Fit();
+            tips.SetToolTip(fit, "Two minutes with the headset on: push each edge in until the black bar is gone, one step back; one eye at a time. The result is kept as one of your profiles and chosen here.");
+            tips.SetToolTip(whole, "The stream covers everything the Vision Pro app declares (its compositor's frustum). Safe for every wearer: no black bar.");
+            Controls.Add(fit);
+            note.ForeColor = Color.DimGray; note.MaximumSize = new Size(600, 0);
+            Controls.Add(note);
+            whole.CheckedChanged += (s, e) => Changed();
+            mine.CheckedChanged += (s, e) => Changed();
+            profiles.SelectedIndexChanged += (s, e) => { if (!loading && !mine.Checked) mine.Checked = true; else Changed(); };
+            watch.Tick += (s, e) => { if (proc != null && proc.HasExited) { proc = null; watch.Stop(); Reload(); } };
+            Disposed += (s, e) => { watch.Dispose(); tips.Dispose(); };
+            Reload();
+        }
+
+        public bool WholePanel => whole.Checked;
+        public UserFov Selected => profiles.SelectedItem as UserFov;
+        public int ProfileCount => profiles.Items.Count;
+
+        /// Reads the files again (the fit may have added a profile).
+        public void Reload()
+        {
+            loading = true;
+            var st = new AppSettings();
+            var clientFov = AppSettings.ReadClientFov();
+            UserFovStore.SeedFromShipped(st.HeadsetName);
+            profiles.Items.Clear();
+            foreach (var u in UserFovStore.Load(storePath)) if (clientFov == null || FovValidator.Check(u.Tan, FovUnit.Tangent, clientFov).Usable) profiles.Items.Add(u);
+            var want = Json.Str(st.Root, Key + "_profile", "");
+            var pick = profiles.Items.Cast<UserFov>().FirstOrDefault(u => u.Id == want);
+            if (pick != null) { profiles.SelectedItem = pick; mine.Checked = true; }
+            else { whole.Checked = true; if (profiles.Items.Count > 0) profiles.SelectedIndex = 0; }
+            mine.Enabled = profiles.Enabled = profiles.Items.Count > 0;
+            loading = false;
+            Describe();
+        }
+
+        void Changed()
+        {
+            if (loading) return;
+            var st = new AppSettings();
+            if (mine.Checked && Selected != null)
+            {
+                var u = Selected;
+                List<object> L(double[] v) => v.Select(x => (object)Math.Round(x, 4)).ToList();
+                if (u.PerEye) Json.Set(st.Root, Key, new Dictionary<string, object> { ["left"] = L(u.TanLeft), ["right"] = L(u.TanRight) }); else Json.Set(st.Root, Key, L(u.Tan));
+                Json.Set(st.Root, Key + "_profile", u.Id);
+            }
+            else { Json.Remove(st.Root, Key); Json.Remove(st.Root, Key + "_profile"); }
+            try { st.Save(); Log.Write("INFO", "picture edges: " + (mine.Checked && Selected != null ? "profile '" + Selected.Name + "'" : "whole panel")); } catch (Exception e) { note.Text = "Cannot write config\\airframexr.json: " + e.Message; note.ForeColor = Color.Firebrick; return; }
+            Describe();
+        }
+
+        void Describe()
+        {
+            note.ForeColor = Color.DimGray;
+            note.Text = (mine.Checked && Selected != null ? "Saved: the stream will cover your fit \"" + Selected.Name + "\"" : "Saved: the stream covers the whole panel")
+                + ". The streamer sends it to the headset app at the next connection (needs a headset app that reads the headset-view message: not released yet, a stock or older app keeps the whole panel).";
+        }
+
+        void Fit()
+        {
+            var exe = Path.Combine(Paths.Bin, "calibrate.exe");
+            if (!File.Exists(exe)) { MessageBox.Show(FindForm(), "bin\\calibrate.exe is missing from this package.", "Picture edges", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (proc != null && !proc.HasExited) return;
+            try { proc = Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = Paths.Bin }); watch.Start(); }
+            catch (Exception e) { MessageBox.Show(FindForm(), "Could not start the fit: " + e.Message, "Picture edges", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
     }
 }

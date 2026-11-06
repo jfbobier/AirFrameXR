@@ -26,16 +26,16 @@ loc = Path(tempfile.mkdtemp(prefix="fovp_"))
 lib.b_get(f"runs/{rid}/fovprofile.txt", loc / "fovprofile.txt")
 lines = (loc / "fovprofile.txt").read_text(errors="replace").splitlines() if (loc / "fovprofile.txt").exists() else []
 print("\n".join(lines))
-ok = (len(lines) == 3 and lines[0] == "profiles=2 tick_enabled=True restricted=False" and lines[1] == "override=True outer=0.97 inner=0.71 upper=0.69 lower=0.63 profile=d1"
+ok = (len(lines) == 3 and lines[0] == "profiles=3 tick_enabled=True restricted=False" and lines[1] == "override=True outer=0.97 inner=0.71 upper=0.69 lower=0.63 profile=d1"
       and lines[2] == "after_other: outer=0.90 inner=0.65 upper=0.60 lower=0.55 profile=d3")
-print("CHECK", "PASS" if ok else "FAIL", "the launcher's FOV card offers only the profiles that fit the headset's box, ticking with a profile saves its tangents and its id, choosing another while ticked saves that one")
+print("CHECK", "PASS" if ok else "FAIL", "the launcher's FOV card offers the profiles whose numbers are usable for the headset's box (above it is a note, the streamer caps each edge), ticking with a profile saves its tangents and its id, choosing another while ticked saves that one")
 
 # an override made for the Vision Pro must not be applied to a headset with another field of view (a Quest's lower edge is 55 degrees; the Vision Pro's tuned 0.76 would cut it to 37; the Vision Pro with its app's FoV Scale at 0.8 keeps its override)
 lib.b_run(f"_tmp\\uitest\\run\\uitest.exe --fov-other-headset-selftest 1 --out runs\\{rid}")
 lib.b_get(f"runs/{rid}/fovother.txt", loc / "fovother.txt")
 lines2 = (loc / "fovother.txt").read_text(errors="replace").splitlines() if (loc / "fovother.txt").exists() else []
 print("\n".join(lines2))
-ok2 = (len(lines2) == 3 and lines2[0] == "fits_avp=True fits_quest=False fits_unknown=True fits_avp_scaled=True fits_same_name_new_shape=True fits_unnamed_first_box_to_ceiling=True fits_unnamed_first_box_on_quest=False" and lines2[1] == "profiles_on_quest=2 tick_on_quest=False"
+ok2 = (len(lines2) == 3 and lines2[0] == "fits_avp=True fits_quest=False fits_unknown=True fits_avp_scaled=True fits_same_name_new_shape=True fits_unnamed_first_box_to_ceiling=True fits_unnamed_first_box_on_quest=False" and lines2[1] == "profiles_on_quest=3 tick_on_quest=False"
        and lines2[2] == "after_tick: override=True lower=0.63 fits_quest=True")
 print("CHECK", "PASS" if ok2 else "FAIL", "an override saved for the Vision Pro stays on the Vision Pro whatever box its app declares (the client's ceiling), is off on a Quest and ticking there saves a profile that fits the Quest")
 sys.exit(0 if ok and ok_doc and ok2 else 1)

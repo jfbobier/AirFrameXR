@@ -64,7 +64,7 @@ namespace AirFrameXR
             foreach (var t in tools)
             {
                 body.Controls.Add(MakeCard(t));
-                if (ReferenceEquals(tools, Tools) && t.Primary) body.Controls.Add(MakeFovCard());   // the FOV restriction mini app, right under the Streamer (the Black Box package has none)
+                if (ReferenceEquals(tools, Tools) && t.Primary && (demoReady || new AppSettings().Kind == HeadsetKind.VisionPro)) body.Controls.Add(MakeAvpCard());   // the Vision Pro picture card, right under the Streamer (the Black Box package has none)
             }
             body.Controls.Add(sys);
             // quiet links: the full ALVR settings, and the help
@@ -113,18 +113,18 @@ namespace AirFrameXR
             return picked;
         }
 
-        FovRestrictionPanel fovPanel;
+        VisionProCard avpCard;
 
-        /// The FOV restriction and calibration mini app (docs/UI_SPEC.md): not a launch button but a card with its own controls (FovRestrictionPanel); its button opens the profile manager.
-        Control MakeFovCard()
+        /// The Vision Pro picture card (docs/PICTURE_EDGES_DESIGN.md section 9): the headset view (whole panel or my fit) and "Fit the picture to your eyes". Only once a Vision Pro has been seen (or in the
+        /// screenshot state): never for a Quest, none before a headset was paired. The FOV restriction is not here any more: Advanced video and performance settings.
+        Control MakeAvpCard()
         {
-            var box = new Panel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(12, 10, 12, 10), Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(700, 0), AccessibleName = "FOV restriction and calibration" };
+            var box = new Panel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(12, 10, 12, 10), Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(0, 0) };
             var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill, Margin = new Padding(0) };
-            col.Controls.Add(new Label { Text = "FOV restriction and calibration", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
-            col.Controls.Add(new Label { Text = "The game renders only the part of the picture you can see: fewer pixels, a faster game.", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(620, 0), Margin = new Padding(0, 0, 0, 4) });
-            fovPanel = demoReady ? new FovRestrictionPanel(new[] { 1.045, 0.800, 0.759, 0.871 }, true, new[] { 3552, 3200 }, false, UserFovStore.DemoStore()) : new FovRestrictionPanel();   // the screenshot state: a made-up headset box and profiles
-            fovPanel.ManageRequested += () => Launch(new Tool { Title = "Field of view profiles", Exe = @"bin\configure.exe", Args = "--fov" }, Paths.Configure);
-            col.Controls.Add(fovPanel);
+            col.Controls.Add(new Label { Text = "Vision Pro picture", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
+            col.Controls.Add(new Label { Text = "What the stream covers: the whole panel, or the window you fitted to your eyes (sharper at the same stream size).", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(620, 0), Margin = new Padding(0, 0, 0, 4) });
+            avpCard = new VisionProCard(false, demoReady ? UserFovStore.DemoStore() : null);
+            col.Controls.Add(avpCard);
             box.Controls.Add(col);
             return box;
         }
@@ -234,7 +234,7 @@ namespace AirFrameXR
             if ((launched != null && !launched.HasExited) || AnyToolOpen()) return;
             watch.Stop();
             RefreshSystem();      // the tool may have switched the runtime or the layers
-            fovPanel?.Reload();   // the profile manager or the calibration may have changed the list
+            avpCard?.Reload();   // the fit may have added a profile
             Show(); Activate();
             FlowLog("show: every tool closed");
             if (testFlow) { var c = new Timer { Interval = 2500 }; c.Tick += (s2, e2) => { FlowLog("sample"); Close(); }; c.Start(); }   // the test ends once the launcher is back

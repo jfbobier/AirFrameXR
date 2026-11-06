@@ -29,7 +29,7 @@ namespace AirFrameXR
                 readonly Label[] stepLabels = new Label[5];
         Control wizHeader;
         // four steps the user sees; the pages behind them: PC check + headset + handshake / choice of setup / tests / verdict + configuration
-        static readonly string[] StepNames = { "1  Headset", "2  Setup", "3  Test", "4  Result", "5  Field of view" };
+        static readonly string[] StepNames = { "1  Headset", "2  Setup", "3  Test", "4  Result", "5  Picture edges" };
         static int Group(int page) => page <= 2 ? 0 : page == 3 ? 1 : page == 4 ? 2 : page <= 6 ? 3 : 4;
         int step;
         // state
@@ -586,13 +586,13 @@ namespace AirFrameXR
                 {
                     var added = UserFovStore.Add(FovCard.FromProfile(p));
                     Log.Write("INFO", $"calibration '{p.Id}' imported as '{added.Name}'");
-                    MessageBox.Show(this, "Added to your field of view profiles. You choose it at the Field of view step, after the configuration.", "Import calibration", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(this, "Added to your field of view profiles. You choose it in Advanced video and performance settings (What the game renders).", "Import calibration", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex) { MessageBox.Show(this, "Cannot import the calibration: " + ex.Message, "Import calibration", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
                 return;
             }
-            var fovLine = !p.HasFov ? "" : "A measured field of view is in the profile: it is offered at the Field of view step, at the end of the wizard."
-                + (p.FovClientScale > 0 ? " " + p.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " client slider recommended (manually)." : "") + "\n";
+            var fovLine = !p.HasFov ? "" : "A measured field of view is in the profile: it is offered in Advanced video and performance settings (What the game renders)."
+                + "\n";
             var text = $"Profile: {p.DisplayName}{(p.Author.Length > 0 ? " by " + p.Author : "")}\n{p.EyeW} x {p.EyeH} per eye at {p.Fps:0} fps, {p.Codec.ToUpperInvariant()} {p.BitDepth}-bit, " +
                        $"{(p.Foveated ? "foveated" : "full frame")}, split encode {p.SplitEncode}, {p.Variant(null).Mbps:0} Mbps, {p.SessionOverrides.Count} ALVR setting(s)\n{fovLine}\n" +
                        $"Your headset, as ALVR reports it:\n{HmdProfiles.Describe(hs)}\n\n";
@@ -714,7 +714,7 @@ namespace AirFrameXR
                 }
                 panel.Prefill(cand);
                 if (!panel.Save(out var err) && err != null) { testStatus.Text = err; testStatus.ForeColor = Color.Firebrick; }
-                else HmdProfiles.ApplySessionOverrides(profile);   // the field of view is chosen at the Field of view step
+                else HmdProfiles.ApplySessionOverrides(profile);   // the field of view is chosen at the last step
                 ApplyChromaChoice();
             }
             steps = demo ? DemoSteps() : Tests.Build(ctx);
@@ -842,24 +842,37 @@ namespace AirFrameXR
         RadioButton fovNone, fovUse;
         FovCard fovCard;
 
-        /// The field of view the games are told: no restriction, or one of the user's profiles (a calibration, the proposal for this headset, values typed by hand). Next waits for a valid choice.
+        /// Step 7 (docs/PICTURE_EDGES_DESIGN.md section 9). A Vision Pro: the picture-edges card itself (whole panel, or "Fit now (2 min)": the streamer and the headset are connected after the tests;
+        /// Next works without fitting), no ray calibration, no restriction list, no typed values. Any other headset: the restriction only ("What the game renders": no restriction, the starting
+        /// point or a profile), no fit. Next waits for a valid choice on the restriction page.
         Control PageFov()
         {
+            var name = hs != null && !string.IsNullOrEmpty(hs.DisplayName) ? hs.DisplayName : (string.IsNullOrEmpty(chosenName) ? settings.HeadsetName : chosenName);
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
-            p.Controls.Add(H("Field of view"));
-            var intro = Ui.Line("Your headset may not show everything a game renders, and a game can skip rendering what you cannot see: fewer pixels, a faster game. Choose what the games are told. A calibration takes about 30 minutes and needs the headset; otherwise take the proposed profile, or enter values by hand. You can change this any time in the launcher (FOV restriction)."); Ui.FitWidth(intro, 760, asMaximum: true);
+            fovNone = null; fovUse = null; fovCard = null;
+            if (AppSettings.KindOf(name) == HeadsetKind.VisionPro)
+            {
+                p.Controls.Add(H("Picture edges"));
+                p.Controls.Add(Ui.Line("What the stream covers. The whole panel is safe for every wearer and shows no black bar. A fit to your eyes (two minutes, the headset on) keeps what you can see and makes it sharper at the same stream size; you can do it now or later from the launcher."));
+                var card = new VisionProCard(true, demo ? UserFovStore.DemoStore() : null) { Margin = new Padding(22, 6, 0, 0) };
+                p.Controls.Add(card);
+                next.Enabled = true;
+                return p;
+            }
+            p.Controls.Add(H("What the game renders"));
+            var intro = Ui.Line("A game can skip rendering what your headset does not show: fewer pixels, a faster game. Choose what the games are told. This can be changed later in Advanced video and performance settings.");
             p.Controls.Add(intro);
             fovNone = new RadioButton { Text = "No restriction: the games render everything the headset declares", AutoSize = true, Margin = new Padding(3, 8, 3, 3), AccessibleName = "No restriction" };
             fovUse = new RadioButton { Text = "Restrict to a profile (choose one below)", AutoSize = true, AccessibleName = "Restrict to a profile" };
             p.Controls.Add(fovNone); p.Controls.Add(fovUse);
-            fovCard = (demo ? new FovCard(UserFovStore.DemoStore(), new[] { 1.045, 0.800, 0.759, 0.871 }) : new FovCard()); fovCard.Margin = new Padding(22, 6, 0, 0);   // the screenshot state: made-up profiles
+            fovCard = (demo ? new FovCard(UserFovStore.DemoStore(), new[] { 1.045, 0.800, 0.759, 0.871 }, true) : new FovCard(null, null, true)); fovCard.Margin = new Padding(22, 6, 0, 0);   // the screenshot state: made-up profiles
             p.Controls.Add(fovCard);
             var cur = new AppSettings();
             var pick = demo ? fovCard.Selected : (FindCurrentProfile(cur) ?? fovCard.Proposed);   // what is in use now, else what we propose for this headset
             if (pick != null) { fovCard.Select(pick.Id); fovUse.Checked = true; } else fovNone.Checked = true;
             fovNone.CheckedChanged += (s, e) => UpdateFovNext();
             fovUse.CheckedChanged += (s, e) => UpdateFovNext();
-            fovCard.Changed += () => { if (fovCard.Selected != null || fovCard.TypedValid) fovUse.Checked = true; UpdateFovNext(); };
+            fovCard.Changed += () => { if (fovCard.Selected != null) fovUse.Checked = true; UpdateFovNext(); };
             UpdateFovNext();
             return p;
         }
@@ -874,17 +887,18 @@ namespace AirFrameXR
         }
 
         /// Next is greyed until the choice is valid: no restriction always is, a profile needs one selected (or four usable values typed).
-        void UpdateFovNext() { if (step == 7) next.Enabled = fovNone.Checked || (fovUse.Checked && fovCard != null && (fovCard.Selected != null || fovCard.TypedValid)); }
+        void UpdateFovNext() { if (step == 7 && fovNone != null) next.Enabled = fovNone.Checked || (fovUse.Checked && fovCard != null && fovCard.Selected != null); }
 
         /// Writes the choice where the streamer reads it (a copy of the profile, UserFovStore.Apply), or switches the restriction off.
         void ApplyFovChoice()
         {
             try
             {
-                if (fovNone != null && fovNone.Checked) { Json.Remove(settings.Root, "video.fov_override"); Log.Write("INFO", "wizard: no field of view restriction"); }
+                if (fovNone == null) { }   // the Vision Pro page: the card saved its own choice
+                else if (fovNone.Checked) { Json.Remove(settings.Root, "video.fov_override"); Log.Write("INFO", "wizard: no field of view restriction"); }
                 else if (fovCard != null)
                 {
-                    var u = fovCard.Selected ?? fovCard.AddTypedNow();
+                    var u = fovCard.Selected;
                     if (u == null) return;
                     UserFovStore.Apply(u, settings, AppSettings.ReadClientFov(), string.IsNullOrEmpty(hs?.DisplayName) ? settings.HeadsetName : hs.DisplayName);
                     Log.Write("INFO", $"wizard: field of view '{u.Name}' ({string.Join(" / ", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)))}), needs a streamer start");

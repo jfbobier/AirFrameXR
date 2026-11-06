@@ -68,6 +68,12 @@ EXPECT = {
         ("preview_per_eye", ["sent fov_preview on 1.000 0.700 0.700 0.600 0.750 1.100 0.700 0.600"], []),
         ("preview_off", ["sent fov_preview off"], []),
     ],
+    "headset_view_forward": [
+        ("view_on", ["sent headset_view on 0.970 0.710 0.690 0.630"], []),
+        ("view_untouched", [], ["sent headset_view"]),   # the file changed but not the view: nothing is sent again
+        ("view_per_eye", ["sent headset_view on 1.000 0.700 0.700 0.600 0.750 1.100 0.700 0.600"], []),
+        ("view_off", ["sent headset_view off"], []),
+    ],
     "window_size": [],
     "short12": [
         ("ended", [], []),

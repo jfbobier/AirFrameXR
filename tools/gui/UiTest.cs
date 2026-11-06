@@ -157,6 +157,8 @@ namespace AirFrameXR
             yield return new Case { Name = "fov-manager-red", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), quest3), Prepare = f => ((FovManagerForm)f).Card.TypeForTest("Degrees", "95", "40", "43", "54") };
             yield return new Case { Name = "fov-manager-yellow", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), quest3), Prepare = f => ((FovManagerForm)f).Card.TypeForTest("Tangents", "1.3", "0.5", "0.9", "1.0") };
             yield return new Case { Name = "fov-manager-valid", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), quest3), Prepare = f => ((FovManagerForm)f).Card.TypeForTest("Degrees", "51", "40", "43", "54") };
+            yield return new Case { Name = "fov-manager-per-eye", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), quest3), Prepare = f => ((FovManagerForm)f).Card.PerEyeForTest("Degrees", new[] { "51", "40", "43", "54" }, new[] { "49", "42", "43", "52" }) };   // schema 2: the right eye on its own row
+            yield return new Case { Name = "calibrate-fit", Make = () => new CalibrateForm(Path.Combine(Path.GetTempPath(), "airframexr_calibrate_demo_" + Guid.NewGuid().ToString("N"))) };   // the page calibrate.exe opens on: Fit the picture to your eyes
             yield return new Case { Name = "fov-manager-empty", Make = () => new FovManagerForm(Path.Combine(Path.GetTempPath(), "airframexr_fov_empty_" + Guid.NewGuid().ToString("N") + ".json"), quest3) };
             yield return new Case { Name = "find-headset", Make = () => new FindHeadsetForm(Tuple.Create("1234.client.alvr", "Apple Vision Pro", "192.168.100.123")) };
             yield return new Case { Name = "cable-missing", Make = () => new CableForm() };
@@ -616,7 +618,7 @@ namespace AirFrameXR
                     var sp = Path.Combine(outDir, "user_fov_seed_test.json"); try { File.Delete(sp); } catch { }
                     string T(UserFov u) => string.Join("/", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)));
                     var n1 = UserFovStore.SeedFromShipped("Apple Headset", sp, pd); var u1 = UserFovStore.Load(sp).FirstOrDefault();
-                    lines.Add("seed=" + n1 + " name=" + u1?.Name + " tan=" + (u1 == null ? "" : T(u1)) + " scale=" + u1?.ClientScale.ToString(CultureInfo.InvariantCulture));
+                    lines.Add("seed=" + n1 + " name=" + u1?.Name + " tan=" + (u1 == null ? "" : T(u1)));
                     var n2 = UserFovStore.SeedFromShipped("Apple Headset", sp, pd);
                     UserFovStore.Remove("std-t-avp", sp);
                     var n3 = UserFovStore.SeedFromShipped("Apple Headset", sp, pd);

@@ -1,0 +1,10 @@
+# The headset view V (docs/PICTURE_EDGES_DESIGN.md sections 8, 9): the Vision Pro card sets video.headset_view (four tangents, or left / right per eye); the streamer sends `headset_view` to the host once per change, nothing while it stays the same, and `off` when the key goes away
+{"ui": "settings_baseline"}
+{"ui": "settings_view", "value": "on 0.97 0.71 0.69 0.63"}
+{"dump": "view_on"}
+{"ui": "settings_touch"}
+{"dump": "view_untouched"}
+{"ui": "settings_view", "value": "on 1.0 0.7 0.7 0.6 0.75 1.1 0.7 0.6"}
+{"dump": "view_per_eye"}
+{"ui": "settings_view", "value": "off"}
+{"dump": "view_off"}
