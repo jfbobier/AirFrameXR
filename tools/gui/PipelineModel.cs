@@ -220,7 +220,7 @@ namespace AirFrameXR
 
         /// Apple's rasterization rate map: the panel's frustum P (outer, inner, upper, lower tangents), the full-rate density in px per tangent unit per axis, and one table
         /// per axis of [degrees from the eye's axis, rate] (x: negative = outer; y: negative = down).
-        public class RateMap { public double[] P, Density; public double[][] X, Y; }
+        public class RateMap { public double[] P, Density; public double[][] X, Y; /** the profile's quality reference: bits per encoded pixel the stream is sized for (0 = none: the size stays the user's) */ public double Bpp; }
 
         public static class RateMapFoveation
         {
@@ -236,7 +236,8 @@ namespace AirFrameXR
                 if (profile == null || !profile.TryGetValue("ratemap", out var ro) || !(ro is Dictionary<string, object> rm)) return null;
                 var p = ((object[])rm["frustum_tan"]).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
                 var lp = ((object[])rm["logical_px"]).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
-                return new RateMap { P = p, Density = new[] { lp[0] / (p[0] + p[1]), lp[1] / (p[2] + p[3]) }, X = Table(rm["x"]), Y = Table(rm["y"]) };
+                double bpp = profile.TryGetValue("stream_budget", out var sb) && sb is Dictionary<string, object> sbd && sbd.ContainsKey("reference_bits_per_pixel") ? Convert.ToDouble(sbd["reference_bits_per_pixel"], CultureInfo.InvariantCulture) : 0;
+                return new RateMap { P = p, Density = new[] { lp[0] / (p[0] + p[1]), lp[1] / (p[2] + p[3]) }, X = Table(rm["x"]), Y = Table(rm["y"]), Bpp = bpp };
             }
 
             public static RateMap Load(string path) { try { return FromProfile(Json.Load(path)); } catch { return null; } }
@@ -402,6 +403,35 @@ namespace AirFrameXR
                 return v.All(x => x > 0.05) ? v : panel;
             }
 
+            /// The stream size from the bitrate budget (the user's constant bitrate, the profile's default being 300 Mbps; owner 2026-11-06): the encoded frame gets
+            /// bitrate / (fps x the profile's bits per pixel) pixels, spent as density (px per tangent unit, equal on both axes) over V, never above Apple's own full-rate
+            /// density or NVENC's cap: the same bitrate costs what the shipped foveation cost, a lower bitrate gives a smaller stream (less to encode, send and decode), a higher
+            /// one more density up to Apple's. Null when the budget cannot be computed. `mpx` = the encoded megapixels of the answer.
+            public static int[] ChooseEye(double[] view, RateMap rm, double bitrateMbps, double fps, out double mpx)
+            {
+                mpx = 0;
+                if (rm == null || rm.Bpp <= 0 || bitrateMbps <= 0 || fps <= 0) return null;
+                double budget = bitrateMbps * 1e6 / (fps * rm.Bpp), sx = view[0] + view[1], sy = view[2] + view[3];
+                int[] EyeAt(double d) => new[] { Math.Max(256, Math.Min(MaxEyeWidth, Align32Floor(d * sx))), Math.Max(256, Math.Min(MaxEyeHeight, Align32Floor(d * sy))) };
+                double Px(int[] e)
+                {
+                    var g = RateMapFoveation.ZeroLoss(view, e, rm);
+                    FfrVars(e[0], e[1], g[0], g[1], g[2], g[3], g[4], g[5], out var ow, out var oh, out _, out _, out _, out _);
+                    return 2.0 * ow * oh;
+                }
+                double hi = Math.Max(rm.Density[0], rm.Density[1]), lo = 600;
+                int[] best;
+                if (Px(EyeAt(hi)) <= budget) best = EyeAt(hi);
+                else if (Px(EyeAt(lo)) >= budget) best = EyeAt(lo);
+                else
+                {
+                    for (int i = 0; i < 20; i++) { var mid = (lo + hi) / 2; if (Px(EyeAt(mid)) <= budget) lo = mid; else hi = mid; }
+                    best = EyeAt(lo);
+                }
+                mpx = Px(best) / 1e6;
+                return best;
+            }
+
             static readonly string[] Keys = { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" };
 
             /// Computes the foveation for the stream size in `session` and writes it there. Vision Pro only (the map is Apple's). `explicit`: the user just chose a picture-edges
@@ -413,13 +443,27 @@ namespace AirFrameXR
                 rm = rm ?? RateMapFoveation.Load(ProfilePath);
                 if (rm == null) return null;
                 if (st.FoveationManual) { if (!explicitChoice) return null; st.FoveationManual = false; }
-                var eye = StreamEyeExpected(session);
-                if (eye == null || eye[0] < 256 || eye[1] < 256) return null;
                 var view = View(st, rm);
+                var eye = StreamEyeExpected(session);
+                var c = CultureInfo.InvariantCulture;
+                string sized = "";
+                // the stream size follows the bitrate (a constant bitrate, the user's: the profile only suggests 300 Mbps) unless the user fits the stream to the headset's window
+                // (the older tick) or set the size by hand (the flag above)
+                if (!st.StreamFitWindow && Json.Str(session, "session_settings.video.bitrate.mode.variant", "") == "ConstantMbps")
+                {
+                    double mbps = Json.Num(session, "session_settings.video.bitrate.mode.ConstantMbps", 0), fps = Json.Num(session, "session_settings.video.preferred_fps", 0);
+                    var chosen = ChooseEye(view, rm, mbps, fps, out var mpx);
+                    if (chosen != null)
+                    {
+                        sized = $" (stream sized for {mbps.ToString("0", c)} Mbps at {fps.ToString("0", c)} Hz: {mpx.ToString("0.0", c)} Mpx encoded{(eye != null && (eye[0] != chosen[0] || eye[1] != chosen[1]) ? $", was {eye[0]} x {eye[1]}" : "")})";
+                        eye = chosen;
+                        SaveEyeChoice(session, st, eye[0], eye[1]);
+                    }
+                }
+                if (eye == null || eye[0] < 256 || eye[1] < 256) return null;
                 var g = RateMapFoveation.ZeroLoss(view, eye, rm);
                 RateMapFoveation.ApplyGeometry(session, g);
-                var c = CultureInfo.InvariantCulture;
-                return $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map, over {eye[0]} x {eye[1]} per eye: centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}";
+                return $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye: centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}";
             }
 
             /// Apply on the files: loads the session, writes it back when something changed, logs. Never throws (a failure is a warning in the log).
@@ -432,7 +476,7 @@ namespace AirFrameXR
                     var line = Apply(st, s, explicitChoice);
                     if (line == null) return null;
                     Json.Save(Paths.Session, s);
-                    if (flag != st.FoveationManual) st.Save();
+                    st.Save();   // the density reference and the flag may have changed with the size
                     Log.Write("INFO", line);
                     return line;
                 }

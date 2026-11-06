@@ -392,6 +392,36 @@ def zero_loss_geometry(view, eye, rm, m=1.0):
     return g, {"contour_x": best[0][4], "contour_y": best[1][4]}
 
 
+def encoded_px(view, eye, rm, m=1.0):
+    """encoded pixels (both eyes side by side) of the zero-loss geometry for this view at this per-eye size"""
+    g, _ = zero_loss_geometry(tuple(view), tuple(eye), rm, m)
+    return assess(tuple(view), tuple(eye), g, rm, m)["encoded"][0] * assess(tuple(view), tuple(eye), g, rm, m)["encoded"][1]
+
+
+def choose_eye(view, rm, budget_px, cap=NVENC_MAX_EYE):
+    """The stream size for a pixel budget (bitrate / (fps x bits per pixel)): the per-eye size at the density d (px per tangent, equal on both axes, never above Apple's own
+    full-rate density, 32-aligned, within NVENC's cap) whose zero-loss encoded frame is the budget; the cap's density when the budget is more than it takes (the surplus
+    bits make the picture cleaner), the floor density when it is less."""
+    span = (view[0] + view[1], view[2] + view[3])
+
+    def eye_at(d):
+        return (max(256, min(cap[0], align32(d * span[0]))), max(256, min(cap[1], align32(d * span[1]))))
+
+    hi = max(rm["density"])
+    lo = 600.0
+    if encoded_px(view, eye_at(hi), rm) <= budget_px:
+        return eye_at(hi)
+    if encoded_px(view, eye_at(lo), rm) >= budget_px:
+        return eye_at(lo)
+    for _ in range(20):
+        mid = (lo + hi) / 2
+        if encoded_px(view, eye_at(mid), rm) <= budget_px:
+            lo = mid
+        else:
+            hi = mid
+    return eye_at(lo)
+
+
 def density_eye(view, rm, fraction=1.0, cap=NVENC_MAX_EYE, fits=None):
     """Section 5 density rule: eye = min(target density x the view's span per axis, NVENC's cap, what the encode test fits), 32-aligned (floor)."""
     t = (rm["density"][0] * fraction, rm["density"][1] * fraction)

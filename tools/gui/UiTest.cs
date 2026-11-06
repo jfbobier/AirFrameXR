@@ -501,24 +501,33 @@ namespace AirFrameXR
                 var rm = global::AirFrameXR.PipelineModel.RateMapFoveation.FromProfile(global::AirFrameXR.Json.Parse(File.ReadAllText(peProfile)));
                 string[] ks = { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" };
                 List<object> L(params double[] v) => v.Select(x => (object)x).ToList();
-                void Case(string name, string headset, object view, int w, int h, bool manual, bool explicitChoice, bool wasManualExpected)
+                void Case(string name, string headset, object view, int w, int h, bool manual, bool explicitChoice, bool unused, double mbps = 300, double fps = 90, string bitrateMode = "ConstantMbps", bool fitOn = false)
                 {
                     var st = new AppSettings();
                     global::AirFrameXR.Json.Set(st.Root, "headset.name", headset);
                     global::AirFrameXR.Json.Remove(st.Root, "video.headset_view");
                     if (view != null) global::AirFrameXR.Json.Set(st.Root, "video.headset_view", view);
                     st.FoveationManual = manual;
+                    st.StreamFitWindow = fitOn;
                     var s = new Dictionary<string, object>();
                     global::AirFrameXR.PipelineModel.WriteStreamEye(s, w, h);
+                    global::AirFrameXR.Json.Set(s, "session_settings.video.bitrate.mode.variant", bitrateMode);
+                    global::AirFrameXR.Json.Set(s, "session_settings.video.bitrate.mode.ConstantMbps", mbps);
+                    global::AirFrameXR.Json.Set(s, "session_settings.video.preferred_fps", fps);
                     var line = global::AirFrameXR.PipelineModel.PictureEdgesFoveation.Apply(st, s, explicitChoice, rm);
                     var a = ks.Select(k => global::AirFrameXR.Json.Num(s, "session_settings.video.foveated_encoding.content." + k, -1)).ToArray();
                     var b = ks.Select(k => global::AirFrameXR.Json.Num(s, "openvr_config.foveation_" + k, -1)).ToArray();
                     string J(double[] v) => string.Join(",", v.Select(x => x.ToString("0.000", ic)));
-                    lines.Add($"{name}|wrote={(line != null ? 1 : 0)}|session={J(a)}|cache={J(b)}|manual_after={(st.FoveationManual ? 1 : 0)}");
+                    var eyeNow = global::AirFrameXR.PipelineModel.StreamEyeExpected(s);
+                    lines.Add($"{name}|wrote={(line != null ? 1 : 0)}|session={J(a)}|cache={J(b)}|manual_after={(st.FoveationManual ? 1 : 0)}|eye={eyeNow[0]}x{eyeNow[1]}|mbps={mbps.ToString(ic)}|fps={fps.ToString(ic)}");
                 }
                 Case("whole_3552x3200", "Apple Vision Pro", null, 3552, 3200, false, true, false);
                 Case("fit_3552x3200", "Apple Vision Pro", L(0.97, 0.71, 0.69, 0.63), 3552, 3200, false, true, false);
-                Case("fit_2848x2560", "Apple Vision Pro", L(0.97, 0.71, 0.69, 0.63), 2848, 2560, false, true, false);
+                Case("fit_200mbps", "Apple Vision Pro", L(0.97, 0.71, 0.69, 0.63), 3552, 3200, false, true, false, 200, 90);
+                Case("whole_150mbps", "Apple Vision Pro", null, 3552, 3200, false, true, false, 150, 90);
+                Case("whole_300mbps_100hz", "Apple Vision Pro", null, 3552, 3200, false, true, false, 300, 100);
+                Case("adaptive_bitrate_keeps_the_size", "Apple Vision Pro", L(0.97, 0.71, 0.69, 0.63), 3552, 3200, false, true, false, 300, 90, "Adaptive");
+                Case("fit_to_window_keeps_the_size", "Apple Vision Pro", L(0.97, 0.71, 0.69, 0.63), 3200, 2880, false, true, false, 300, 90, "ConstantMbps", true);
                 Case("per_eye_union", "Apple Vision Pro", new Dictionary<string, object> { ["left"] = L(1.0, 0.7, 0.7, 0.65), ["right"] = L(0.9, 0.8, 0.69, 0.6) }, 3552, 3200, false, true, false);
                 Case("wider_than_panel", "Apple Vision Pro", L(2.0, 1.5, 1.5, 1.5), 3552, 3200, false, true, false);
                 Case("quest_writes_nothing", "Meta Quest 3", L(0.97, 0.71, 0.69, 0.63), 3552, 3200, false, true, false);

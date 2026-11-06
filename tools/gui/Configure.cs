@@ -270,6 +270,10 @@ namespace AirFrameXR
             if (tooBig != null) { MessageBox.Show(this, tooBig, Text); return false; }
             // the density reference, the fit, both resolution keys and ALVR's negotiated cache, as the wizard's panel does (until 1.3.4 this window wrote the two resolution keys only:
             // the FOV card kept showing the old size and the fit tick wrote the old reference back into the session, a user's report of 2026-11-05)
+            {   // a size the user typed is theirs: the size from the bitrate (PictureEdgesFoveation) leaves it until a picture-edges choice is made again
+                var was = PipelineModel.StreamEyeExpected(s);
+                if (was != null && (was[0] != w || was[1] != h)) settings.FoveationManual = true;
+            }
             PipelineModel.SaveEyeChoice(s, settings, w, h);
             var rate = double.Parse((string)fps.SelectedItem, CultureInfo.InvariantCulture);
             Json.Set(s, V + "preferred_fps", rate);
@@ -303,6 +307,7 @@ namespace AirFrameXR
             settings.EncodeProfile = profFull.Checked ? "full-split" : "foveated";
             settings.Debug = debugDefault.Checked;
             settings.Save();
+            PipelineModel.PictureEdgesFoveation.ApplyToFiles(settings, false);   // a new bitrate or rate resizes the stream (and its foveation) now, as it will at the next start; hand-set sizes stay
             Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {fps.SelectedItem} Hz, {bitrate.Value} Mbps, {settings.EncodeProfile}, idle #{settings.IdleRgb}, audio {audio.Checked}, {proto.SelectedItem}, debug {settings.Debug}");
             if (confirm) MessageBox.Show(this, "Saved. The changes apply the next time AirFrameXR starts.", Text);
             return true;

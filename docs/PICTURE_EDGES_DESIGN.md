@@ -75,6 +75,14 @@ at the same encode cost, and anything above it is wasted. This sets the stream-s
 - A change of V needs a new connection (stream size and foveation are fixed at connection): the launcher closes the streamer as it does today.
 
 
+**Built (2026-11-06, owner: reinvest at the user's bitrate): the stream size follows the bitrate.** `PipelineModel.PictureEdgesFoveation.ChooseEye` (oracle: `choose_eye`):
+the encoded frame gets `bitrate / (fps x b)` pixels, `b` = the profile's `stream_budget.reference_bits_per_pixel` (0.474: the author's shipped foveation, 7.03 Mpx at 300 Mbps and
+90 Hz, the quality judged right on the 5090), spent as one density (px per tangent unit, equal on both axes) over V and capped by Apple's full-rate density (2292) and NVENC's 4096
+width. The bitrate is the user's (Settings; the profile's 300 Mbps is only the default): at 300 Mbps / 90 Hz the whole panel gets 4096 x 3264 (6.97 Mpx) and the author's fit 2976 x
+2336 (7.00 Mpx); at 200 Mbps 3328 x 2656 and 2400 x 1888 (4.6 Mpx); at 150 Mbps 2880 x 2336 and 2112 x 1632 (3.5 Mpx). **A lower bitrate is how the user buys latency**: a smaller
+stream, less to encode, send and decode. It applies to a Vision Pro, a constant bitrate, and not when the stream is fitted to the window (the older tick) or the size was typed in
+Settings (the flag that also keeps hand-edited foveation). Existing Vision Pro installs get the size from their bitrate at their next start. Not yet measured: the 5090 A/B.
+
 ## 5b. Foveation from the rate map: the maths (settings only; the oracle is `harness/fov_stream_geometry.py`, to extend)
 
 **What Apple discards.** The compositor draws the frame through a rasterization rate map that is static and the same on every headset measured
