@@ -307,6 +307,20 @@ the `truth` field says what the game really does):
 | `e2e_fov_game_second_start_own` | union of both eyes (Uncharted): `own_frustum`, ignore list | told V | told V |
 | `e2e_fov_game_second_start_tick` | as `_fixed`, then the per-game tick forces the restriction | told G whatever the verdict | told G |
 
+**What mods do wrong, in the lab (2026-11-06; written from the mods' READMEs and sources, EnshroudedVR and UEVR; not run when written, see `docs/progress.md`).** Each is a probe knob and a scenario with the verdict the policy wants (the policy, not whatever the code does today: a failing scenario is a finding):
+
+| Scenario | Knob | What the mod does (source) | Expected |
+|---|---|---|---|
+| `e2e_game_mod_aer` | `XR_PROBE_AER=1` | alternate-eye rendering: one eye drawn per frame, the other submits the image it holds (EnshroudedVR default; UEVR alternating / synchronized sequential) | `honours`, same verdict in every record |
+| `e2e_game_mod_dynres_fixed` | `XR_PROBE_DYNRES=75` | a fixed frame in a bigger swapchain: imageRect 75 % per axis from the start (EnshroudedVR `force_window`) | `undecided` (told aspect, other size) |
+| `e2e_game_mod_dynres_periodic` | `XR_PROBE_DYNRES=70:4` | dynamic resolution through the imageRect, the swapchain never changes | `honours` from the first record; later sizes recorded, no flip |
+| `e2e_game_mod_recreate` | `XR_PROBE_RECREATE=6:1400x1260` | a resolution slider or a window resize recreates the swapchains (UEVR's resolution factor) | `honours` from the first record; the new size recorded, no flip |
+| `e2e_game_mod_hud` | `XR_PROBE_HUD=1` | a head-locked HUD quad layer next to the projection layer (EnshroudedVR `hud_mode`) | `honours` (the intake reads the projection layer); the quad is in the stream on the view axis |
+| `e2e_fov_quest_panel` | mock `views_tan` of a Quest | an honest game on an asymmetric lens window, V = P | `honours`, the box capped by the panel |
+| `e2e_game_hello_xr_restricted` / `_whole` | none (the OpenXR SDK's own sample app, unmodified) | an independent, well-behaved game | `honours` |
+
+Not modelled, on purpose: a rotated (canted) eye pose ignored by the game (the mock client sends no eye rotation and the shim composes from FOV and viewport, so the lab could not tell; needs mock-client work first); a game that lies about its FOV (undetectable, section 7). Behaviours already covered by `XR_PROBE_RENDER_SIZE` / `_FOV` / `_SCALE` / `SUBMIT_FOV`: a forced square frame (EnshroudedVR `force_window` 2160 x 2160), a smaller own frustum (`fov_pct`), the union and symmetric frusta.
+
 Ignore list: `video.fov_unrestricted_games` (executables). A verdict of own frustum or fixed size adds the executable automatically; the game is
 told V at its next start. Automatic because it is the deterministic consequence of a measurement, acts at a game start (never mid-session), is
 logged, shown in Game statistics with the verdict and the numbers, and reversible (a tick per game; a global tick "add games by hand only").

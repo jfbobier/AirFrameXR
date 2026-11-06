@@ -1571,6 +1571,26 @@ def analyse_third_party(sc, outdir):
         lum = lambda px: 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]
         lit = sum(1 for fr in frames for px in fr if lum(px) >= 16)
         out["lit_frac"], out["frames"] = round(lit / max(1, len(frames) * len(pts)), 3), len(frames)
+        # a head-locked quad (XR_PROBE_HUD: magenta, 1.5 m ahead, 0.45 m square: +-0.15 tangent) sits on the view axis of each eye
+        hs = None
+        for line in open(outdir / "host_stdout.txt", errors="replace"):
+            if '"views_config"' in line and '"views_config_ignored"' not in line:
+                try:
+                    hs = json.loads(line)["data"]["fov_tan"]
+                    break
+                except Exception:
+                    pass
+        if hs and sc["checks"]["third_party"].get("hud_magenta"):
+            pts2 = []
+            for e in range(2):
+                Lt, Rt, Ut, Dt = hs[4 * e:4 * e + 4]
+                ax, ay = e * ew + int(Lt / (Lt + Rt) * ew), int(Ut / (Ut + Dt) * eh)
+                ppt = ew / (Lt + Rt)
+                d = int(0.08 * ppt)   # well inside the quad's +-0.15
+                pts2 += [(ax, ay), (ax - d, ay), (ax + d, ay), (ax, ay - d), (ax, ay + d)]
+            fr2 = read_rgb_at(cl, pts2)[30:]
+            mag = lambda px: px[0] > 150 and px[2] > 150 and px[1] < 90
+            out["hud_magenta_frac"] = round(sum(1 for fr in fr2 for px in fr if mag(px)) / max(1, len(fr2) * len(pts2)), 3)
     return out
 
 
@@ -1682,7 +1702,7 @@ def analyse(sc, outdir: Path):
 
     # the host's verdict on what the game submitted (engine step C of docs/PICTURE_EDGES_DESIGN.md: one `game_fov_verdict` event, the last one wins)
     # and per game start the first verdict after its game_started event (the second-start scenarios: one entry per start of the chain)
-    a["fov_verdict"], a["fov_starts"] = None, []
+    a["fov_verdict"], a["fov_starts"], a["fov_verdicts_all"] = None, [], []
     if (outdir / "host_stdout.txt").exists():
         want_new = False
         for line in (outdir / "host_stdout.txt").read_text(errors="replace").splitlines():
@@ -1694,6 +1714,7 @@ def analyse(sc, outdir: Path):
                 except ValueError:
                     continue
                 a["fov_verdict"] = d
+                a["fov_verdicts_all"].append({"verdict": d.get("verdict"), "submitted_size": d.get("submitted_size"), "submitted": d.get("submitted")})
                 if want_new:
                     a["fov_starts"].append(d)
                     want_new = False
@@ -2185,12 +2206,21 @@ def evaluate(sc, a):
         chk("third_party_ran", bool(hv) and hv.get("exe") == tk.get("exe", hv.get("exe")), hv and hv.get("exe"), "the host saw the game start and recorded what it submitted (hello_xr buffers its stdout, a watchdog ends it: nothing to read there)")
         if "verdict" in tk:
             chk("third_party_verdict", bool(hv) and hv.get("verdict") == tk["verdict"], hv and {k: hv.get(k) for k in ("exe", "verdict", "decided_by")}, f"the host's verdict on {tk.get('exe', 'the game')} is {tk['verdict']}")
-        if hv:
+        if hv and tk.get("follows", True):
             ts, ss = hv.get("told_size") or [0, 0], hv.get("submitted_size") or [0, 0, 0, 0]
             sw = [(ss[0], ss[1]), (ss[2], ss[3])]   # the shim's record of the layer the game submitted, per eye
             chk("third_party_follows_told_size", all(abs(w - ts[0]) <= 2 and abs(h - ts[1]) <= 2 for w, h in sw), {"submitted": sw, "told_size": ts}, "the game submitted its layers at the recommended size it was told (it follows the contract)")
+        if hv:
             tf, sf = hv.get("told") or [], hv.get("submitted") or []
             chk("third_party_submits_told_fov", len(tf) == 8 and len(sf) == 8 and max(abs(x - y) for x, y in zip(tf, sf)) <= 0.01, {"told": tf, "submitted": sf}, "the FOV the game submitted is the FOV it was told, per eye and edge (within 0.01)")
+        if tk.get("stable"):   # the verdict is decided once per start: a change of the app's size mid-run is recorded, not re-judged
+            vs = [v["verdict"] for v in a.get("fov_verdicts_all", [])]
+            chk("third_party_verdict_stable", len(set(vs)) == 1, {"verdicts": vs, "sizes": [v["submitted_size"] for v in a.get("fov_verdicts_all", [])]}, "every verdict the host emitted in this run is the same one (a size change mid-run does not flip it)")
+        if tk.get("changes"):   # the app really changed what it submits mid-run (the test is vacuous otherwise)
+            sz = {tuple(v["submitted_size"] or []) for v in a.get("fov_verdicts_all", [])}
+            chk("third_party_size_changed_midrun", len(sz) >= 2, sorted(sz), "the shim recorded more than one submitted size in the run (the behaviour was exercised)")
+        if "hud_magenta" in tk:
+            chk("third_party_hud_in_stream", (tp.get("hud_magenta_frac") or 0) >= tk["hud_magenta"], tp.get("hud_magenta_frac"), f"the head-locked quad is composed in the stream on the view axis of both eyes (magenta >= {tk['hud_magenta']})")
         if "min_lit" in tk:
             chk("third_party_picture_in_stream", (tp.get("lit_frac") or 0) >= tk["min_lit"], {"lit": tp.get("lit_frac"), "frames": tp.get("frames")}, f"the game's picture reaches the middle of both eyes in the decoded stream (>= {tk['min_lit']})")
     if "qpmap" in ck:
@@ -2369,7 +2399,7 @@ def evaluate(sc, a):
         chk("host_refresh_hz", abs(h.get("refresh_hz", 0) - ck["refresh_hz"]) < 0.5, h.get("refresh_hz"), ck["refresh_hz"])
     if "app" in a:
         ap = a["app"]
-        if not ck.get("third_party"):   # a third-party game has no frame limit or PASS line: a watchdog ends it
+        if sc.get("app", {}).get("exe") != "hello_xr":   # the OpenXR SDK sample has no frame limit or PASS line: a watchdog ends it
             chk("app_exit_ok", ap["rc"] == "0" and ap["passed"], {"rc": ap["rc"], "log_pass": ap["passed"]}, "rc 0 and PASS in app.log")
         if "app_min_frames" in ck:
             chk("app_frames", ap["frames_logged"] >= ck["app_min_frames"], ap["frames_logged"], f">={ck['app_min_frames']}")

@@ -350,6 +350,25 @@ int main(int argc, char** argv) {
     if (const char* sm = getenv("XR_PROBE_SUBMIT_FOV")) submitMode = !strcmp(sm, "union") ? 1 : !strcmp(sm, "symmetric") ? 2 : !strcmp(sm, "lie") ? 3 : 0;
     if (submitMode == 3 && !fovForced) { L("XR_PROBE_SUBMIT_FOV=lie needs XR_PROBE_RENDER_FOV (the frustum it really draws): ignored"); submitMode = 0; }
     if (submitMode) L("submit fov mode %s", submitMode == 1 ? "union" : submitMode == 2 ? "symmetric" : "lie");
+
+    // What mods do that the contract allows or forgets (docs/PICTURE_EDGES_DESIGN.md section 7; found in the READMEs and sources of the mods: EnshroudedVR, UEVR):
+    //   XR_PROBE_AER=1              alternate-eye rendering: only one eye is drawn per frame (the other submits the stale image of its swapchain), as EnshroudedVR's
+    //                               default and UEVR's "alternating / AFR" and "synchronized sequential" methods do
+    //   XR_PROBE_DYNRES=<pct>[:<s>] renders and submits a sub-rect of the swapchain (imageRect smaller than the swapchain): constant from the start without the
+    //                               period (a fixed frame copied into a bigger swapchain), else after 3 s alternating every <s> seconds between the full size and
+    //                               <pct> % per axis (dynamic resolution); the swapchain itself is never recreated
+    //   XR_PROBE_RECREATE=<s>:<WxH> at <s> seconds the swapchains are destroyed and created again at another size (a resolution slider, a window resize)
+    //   XR_PROBE_HUD=1              a head-locked quad layer (view space, 1.5 m, 0.45 m square, magenta) next to the projection layer: EnshroudedVR's HUD panel
+    const bool aerOn = getenv("XR_PROBE_AER") && atoi(getenv("XR_PROBE_AER")) != 0;
+    const bool hudOn = getenv("XR_PROBE_HUD") && atoi(getenv("XR_PROBE_HUD")) != 0;
+    float dynPct = 100.f; double dynPeriod = 0;
+    if (const char* dr = getenv("XR_PROBE_DYNRES")) { float pc = 100.f; double pe = 0; const int n = sscanf(dr, "%f:%lf", &pc, &pe); if (n >= 1 && pc >= 20.f && pc < 100.f) { dynPct = pc; dynPeriod = n >= 2 ? pe : 0; } }
+    double recreateAtS = 0; uint32_t recreateW = 0, recreateH = 0; bool recreated = false;
+    if (const char* rc2 = getenv("XR_PROBE_RECREATE")) { double t = 0; unsigned w = 0, h = 0; if (sscanf(rc2, "%lf:%ux%u", &t, &w, &h) == 3 && t > 0 && w >= 64 && h >= 64) { recreateAtS = t; recreateW = w; recreateH = h; } }
+    if (aerOn) L("modder behaviour: alternate-eye rendering");
+    if (hudOn) L("modder behaviour: head-locked HUD quad layer");
+    if (dynPct < 100.f) L("modder behaviour: sub-rect %.0f %% %s", dynPct, dynPeriod > 0 ? "alternating (dynamic resolution)" : "constant (a fixed frame in a bigger swapchain)");
+    if (recreateAtS > 0) L("modder behaviour: swapchains recreated at %ux%u after %.1f s", recreateW, recreateH, recreateAtS);
     XrFovf toldFov[2]{};
     bool submitLogged = false;
 
@@ -362,23 +381,27 @@ int main(int argc, char** argv) {
 
     std::vector<XrSwapchain> sc(vcv.size());
     std::vector<std::vector<XrSwapchainImageD3D11KHR>> imgs(vcv.size());
-    for (size_t i = 0; i < vcv.size(); i++) {
-        XrSwapchainCreateInfo si{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
-        si.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
-        si.format = fmt; si.sampleCount = 1; si.faceCount = 1; si.arraySize = 1; si.mipCount = 1;
-        si.width = vcv[i].recommendedImageRectWidth; si.height = vcv[i].recommendedImageRectHeight;
-        CK(xrCreateSwapchain(sess, &si, &sc[i]));
-        uint32_t c; CK(xrEnumerateSwapchainImages(sc[i], 0, &c, nullptr));
-        imgs[i].assign(c, { XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR });
-        CK(xrEnumerateSwapchainImages(sc[i], c, &c, (XrSwapchainImageBaseHeader*)imgs[i].data()));
-        L("swapchain %zu: %u images", i, c);
-    }
+    auto createEyeSwapchains = [&]() -> int {   // also called again by XR_PROBE_RECREATE
+        for (size_t i = 0; i < vcv.size(); i++) {
+            XrSwapchainCreateInfo si{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
+            si.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+            si.format = fmt; si.sampleCount = 1; si.faceCount = 1; si.arraySize = 1; si.mipCount = 1;
+            si.width = vcv[i].recommendedImageRectWidth; si.height = vcv[i].recommendedImageRectHeight;
+            CK(xrCreateSwapchain(sess, &si, &sc[i]));
+            uint32_t c; CK(xrEnumerateSwapchainImages(sc[i], 0, &c, nullptr));
+            imgs[i].assign(c, { XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR });
+            CK(xrEnumerateSwapchainImages(sc[i], c, &c, (XrSwapchainImageBaseHeader*)imgs[i].data()));
+            L("swapchain %zu: %u images (%ux%u)", i, c, si.width, si.height);
+        }
+        return 0;
+    };
+    if (createEyeSwapchains()) return 1;
 
     // ---- composition-layer test resources: phases of 90 frames
     //  0 head-locked quad   1 world-locked rotated quad   2 cylinder   3 cube (behind a transparent projection layer)
     //  4 quad for the LEFT eye only   5 alpha-blended quad over an opaque one (sub-rect of the texture)
     struct LayerSwap { XrSwapchain sc{}; std::vector<XrSwapchainImageD3D11KHR> imgs; uint32_t w = 0, h = 0; };
-    LayerSwap quadSw, alphaSw, cubeSw;
+    LayerSwap quadSw, alphaSw, cubeSw, hudSw;
     auto makeLayerSwap = [&](LayerSwap& ls, uint32_t w, uint32_t h, uint32_t faces) -> int {
         XrSwapchainCreateInfo si{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
         si.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
@@ -389,6 +412,7 @@ int main(int argc, char** argv) {
         xrEnumerateSwapchainImages(ls.sc, c, &c, (XrSwapchainImageBaseHeader*)ls.imgs.data());
         ls.w = w; ls.h = h; return 0;
     };
+    if (hudOn && makeLayerSwap(hudSw, 512, 512, 1)) return 1;
     if (layerTest) {
         if (makeLayerSwap(quadSw, 512, 512, 1) || makeLayerSwap(alphaSw, 64, 64, 1) || (cubeTest && makeLayerSwap(cubeSw, 256, 256, 6))) return 1;
         L("layer test swapchains created");
@@ -421,6 +445,13 @@ int main(int argc, char** argv) {
     bool running = false, exiting = false; int done = 0; bool sawReady = false, sawSync = false;
     int rc = 0;
     while (!exiting && !tool.quit && done < frames) {
+        if (recreateAtS > 0 && !recreated && done > 0 && (qpcMs() - loopStartMs) / 1000.0 >= recreateAtS) {
+            recreated = true;
+            for (size_t i = 0; i < sc.size(); i++) xrDestroySwapchain(sc[i]);
+            for (auto& v : vcv) { v.recommendedImageRectWidth = recreateW; v.recommendedImageRectHeight = recreateH; }
+            L("swapchains recreated at %ux%u (a resolution change)", recreateW, recreateH);
+            if (createEyeSwapchains()) return 1;
+        }
         if (GetTickCount64() - t0 > (ULONGLONG)timeoutS * 1000) { L("FAIL timeout (done=%d/%d ready=%d)", done, frames, sawReady); rc = 3; break; }
         XrEventDataBuffer ev{ XR_TYPE_EVENT_DATA_BUFFER };
         XrResult pr = xrPollEvent(inst, &ev);
@@ -512,7 +543,7 @@ int main(int argc, char** argv) {
         std::vector<XrCompositionLayerProjectionView> pv(vcv.size(), { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW });
         XrCompositionLayerProjection layer{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
         std::vector<const XrCompositionLayerBaseHeader*> lay;
-        XrCompositionLayerQuad q1{ XR_TYPE_COMPOSITION_LAYER_QUAD }, q2{ XR_TYPE_COMPOSITION_LAYER_QUAD };
+        XrCompositionLayerQuad q1{ XR_TYPE_COMPOSITION_LAYER_QUAD }, q2{ XR_TYPE_COMPOSITION_LAYER_QUAD }, hudQ{ XR_TYPE_COMPOSITION_LAYER_QUAD };
         XrCompositionLayerCylinderKHR cylL{ XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR };
         XrCompositionLayerCubeKHR cubeL{ XR_TYPE_COMPOSITION_LAYER_CUBE_KHR };
         uint32_t nl = 0;
@@ -577,6 +608,12 @@ int main(int argc, char** argv) {
                 }
             }
             if (tool.On() && views.size() >= 2) { XrFovf tf[2] = { views[0].fov, views[1].fov }; tool.Update(done, qpcMs(), tf); }
+            // the rect the app renders and submits this frame (XR_PROBE_DYNRES): the same for both eyes, a sub-rect of the swapchain
+            int frW = (int)vcv[0].recommendedImageRectWidth, frH = (int)vcv[0].recommendedImageRectHeight;
+            if (dynPct < 100.f) {
+                const double tNow = (qpcMs() - loopStartMs) / 1000.0;
+                if (dynPeriod <= 0 || (tNow > 3.0 && (((int)((tNow - 3.0) / dynPeriod)) & 1) == 0)) { frW = std::max(64, (int)(frW * dynPct / 100.f) & ~1); frH = std::max(64, (int)(frH * dynPct / 100.f) & ~1); }
+            }
             SceneFrame sceneFrame;
             if (sceneOn) BeginSceneFrame(scene, ctx, (qpcMs() - loopStartMs) / 1000.0, sceneFrame, scenePlace);
             for (size_t i = 0; i < vcv.size(); i++) {
@@ -587,7 +624,8 @@ int main(int argc, char** argv) {
                 // stamp: dark background, 16 counter blocks and a gray patch in the left eye image
                 ID3D11RenderTargetView* rtv = nullptr;
                 D3D11_RENDER_TARGET_VIEW_DESC rd{}; rd.Format = (DXGI_FORMAT)fmt; rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-                if (SUCCEEDED(dev->CreateRenderTargetView(imgs[i][idx].texture, &rd, &rtv))) {
+                const bool staleEye = aerOn && (int)i != (done & 1);   // alternate-eye rendering: this eye keeps the image it already holds
+                if (!staleEye && SUCCEEDED(dev->CreateRenderTargetView(imgs[i][idx].texture, &rd, &rtv))) {
                     float bg[4] = { 0.02f, 0.02f, 0.02f + (i ? 0.1f : 0.f), 1 };
                     if (cubeTest && (done / 90) % 6 == 3) { bg[0] = bg[1] = bg[2] = bg[3] = 0.f; }   // cube phase: transparent, cube is drawn behind
                     if (sceneOn && i < 2) {
@@ -610,7 +648,7 @@ int main(int argc, char** argv) {
                                                 * XMMatrixTranslation(xp.position.x, xp.position.y, xp.position.z);
                             const float tan4[4] = { -tanf(xf.angleLeft), tanf(xf.angleRight), tanf(xf.angleUp), -tanf(xf.angleDown) };
                             const XMMATRIX vp = XMMatrixInverse(nullptr, pose) * Projection(tan4, 0.05f, 100.f);
-                            D3D11_VIEWPORT v{ 0, 0, (float)td.Width, (float)td.Height, 0, 1 };
+                            D3D11_VIEWPORT v{ 0, 0, (float)std::min<int>((int)td.Width, frW), (float)std::min<int>((int)td.Height, frH), 0, 1 };
                             DrawSceneEye(scene, ctx, sceneFrame, v, vp, scenePlace);
                             ID3D11RenderTargetView* none = nullptr;
                             ctx->OMSetRenderTargets(1, &none, nullptr);
@@ -828,12 +866,18 @@ int main(int argc, char** argv) {
                         L("submitted fov tan eye %u: L %.4f R %.4f U %.4f D %.4f (%s)", k, -tanf(pv[k].fov.angleLeft), tanf(pv[k].fov.angleRight), tanf(pv[k].fov.angleUp),
                           -tanf(pv[k].fov.angleDown), submitMode == 1 ? "union" : submitMode == 2 ? "symmetric" : "lie: drawn with its own frustum");
                 }
-                pv[i].subImage.swapchain = sc[i]; pv[i].subImage.imageRect = { {0,0}, {(int)vcv[i].recommendedImageRectWidth, (int)vcv[i].recommendedImageRectHeight} };
+                pv[i].subImage.swapchain = sc[i]; pv[i].subImage.imageRect = { {0,0}, {std::min<int>(frW, (int)vcv[i].recommendedImageRectWidth), std::min<int>(frH, (int)vcv[i].recommendedImageRectHeight)} };
             }
             layer.space = space; layer.viewCount = (uint32_t)pv.size(); layer.views = pv.data();
             const XrCompositionLayerBaseHeader* proj = (XrCompositionLayerBaseHeader*)&layer;
             if (!layerTest) {
                 lay.push_back(proj);
+                if (hudOn) {   // a head-locked panel in the view space, a fresh image every frame like the mods' HUD copy
+                    if (drawLayerSwap(hudSw, [&](std::vector<ID3D11RenderTargetView*>& r) { const float m[4] = { 1, 0, 1, 1 }; ctx->ClearRenderTargetView(r[0], m); })) return 1;
+                    hudQ.space = viewSpace; hudQ.pose = pose(0, 0, -1.5f, 0); hudQ.size = { 0.45f, 0.45f }; hudQ.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+                    hudQ.subImage.swapchain = hudSw.sc; hudQ.subImage.imageRect = { {0, 0}, {512, 512} }; hudQ.subImage.imageArrayIndex = 0;
+                    lay.push_back((XrCompositionLayerBaseHeader*)&hudQ);
+                }
             } else {
                 const int phase = (done / 90) % 6;
                 const float headY = 0.5f * (views[0].pose.position.y + views[1].pose.position.y);   // the head's height in the app's space: 1.5 m with the mock's own height, 0 since the eye-level origin (the world-locked layers are placed at the head's height, as the oracle in harness/lib.py assumes)
