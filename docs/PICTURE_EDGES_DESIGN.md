@@ -266,7 +266,19 @@ same into the run record. The rules, in this order, on each eye and each edge:
 | `honours` | FOV as told, size as told (within 2 pixels), or a previous run showed the size following the box | saves GPU | nothing |
 | lie (draws its own view, submits the told FOV and size) | not detectable from data: reported `honours` | distorted picture | the user's eyes; manual entry in the ignore list |
 
-**`undecided`: the policy (owner, 2026-11-05).** When unsure, protect the picture: a fixed-size game wrongly restricted loses picture at
+**Policy change (owner, 2026-11-06; decided, NOT built: the code and the scenarios below still implement the 2026-11-05 policy).** The base case is a game that
+follows the box it is told (UEVR, native OpenXR games), and it must always look right: **a game's first start is unrestricted** (told V), and the restriction is a
+performance bonus applied from a later start, never the reverse (a first run restricted that turns out to be ignored, or to cut a fixed-size game, loses picture
+the user cannot get back in that session). The tick becomes **"Try to apply FOV restriction"** (the setting that exists today; the per-game tick keeps its
+meaning). From the first record under V the host can already tell: `own_frustum` (the game submits another box: Luke Ross's mods, the Gravity Rush 2 and Uncharted
+mods) and `fixed_size` with a different aspect (a forced square frame: EnshroudedVR) stay unrestricted for good; a game that follows the told box and size is
+restricted from its second start, and the second start's first record is checked (size and FOV follow the smaller box: keep it; they do not: back to V at the
+next start, on the ignore list). **Open**: a game whose first record is `undecided` under V (told aspect, other size: a resolution scale or a uniform fixed size)
+cannot be told apart without a start that changes the box; the safe proposal is to leave it unrestricted until the user ticks it for that game (a one-session
+check then verifies it), instead of testing it with a cut view. Not built: the host policy (`fov_intake.rs`), the scenarios `e2e_fov_game_second_start_*`, the
+new tick wording.
+
+**`undecided`: the policy (owner, 2026-11-05; superseded by the change above, kept until it is built).** When unsure, protect the picture: a fixed-size game wrongly restricted loses picture at
 the edges and saves nothing; an honest game wrongly unrestricted keeps its picture and loses one session's GPU saving.
 
 1. First start: the game runs this session as told (VDXR latches the FOV and the size at its start; nothing changes mid-run). The verdict is
