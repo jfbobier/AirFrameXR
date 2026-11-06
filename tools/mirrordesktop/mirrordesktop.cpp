@@ -1,9 +1,9 @@
 // mirrordesktop.exe: the Windows desktop in the headset, as an ordinary OpenXR application. The streamer knows nothing about it: it is an app like any game
 // (it connects through the runtime and the shim, renders a projection layer with the views the runtime gives it, reads the controllers through OpenXR
-// actions), except that the host does not record it as a game. Its own jobs: a monitor-sized screen that floats in front of the user and follows them
-// when they walk away (and a quarter of the room at a time when they turn), a laser beam from the controller, and the mouse (SendInput): the beam moves the cursor,
-// trigger = left button, A / X = double click, grip or B / Y = right button, thumbstick = scroll (both controllers; the beam is the right one's until a press of the
-// left trigger or grip hands it over, and back).
+// actions), except that the host does not record it as a game. Its own jobs: a monitor-sized screen that floats in front of the user, a laser beam from the controller, and the mouse (SendInput): the beam moves the cursor,
+// trigger = left button, A / X / B / Y = double click, thumbstick = scroll, grip (either) = the screen back in front of you (the beam is the right controller's until a
+// press of the left trigger hands it over, and back). The screen has one place, in front of the user at the start; a "? controls" badge under it opens the commands
+// when the beam is on it. A physical mouse takes the cursor when it moves; a button press or a sweep of the beam gives it back.
 // Everything that is not the screen is the idle colour (107C10 by default), which the headset shows as passthrough.
 //
 //   mirrordesktop.exe [--log <file>] [--seconds N] [--no-mouse] [--clear RRGGBB] [--synthetic [--image-rgba <file>]] [--input-log <csv>]
@@ -236,12 +236,12 @@ int main(int argc, char** argv) {
     }
 
     // state
-    Screen screen{}; bool haveScreen = false, replace = true, moving = false; int64_t lastTime = 0; float refYaw = 0; int quad = 0; bool primWas[2] = { false, false };
+    Screen screen{}; bool haveScreen = false, replace = true; int64_t lastTime = 0; bool primWas[2] = { false, false }, gripWas[2] = { false, false }, panelOpen = false;
     LARGE_INTEGER qpf; QueryPerformanceFrequency(&qpf); auto qpcMs = [&] { LARGE_INTEGER t; QueryPerformanceCounter(&t); return (double)t.QuadPart * 1000.0 / (double)qpf.QuadPart; };
     double perfT0 = qpcMs(), frameStart = 0, frameMaxMs = 0, renderSumMs = 0; int perfFrames = 0;
-    bool seenHand = false, seenHit = false; bool left = false, right = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, stickMax = 0; bool primSeen = false, secSeen = false; float su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
+    bool seenHand = false, seenHit = false; bool left = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, stickMax = 0; bool primSeen = false; float su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
     bool yielded = false, haveSent = false; POINT sent{}; float yU = 0, yV = 0;   // yielded: the physical mouse moved the cursor, so the beam stops moving it until a press or a deliberate sweep
-    int activeHand = 1; bool swallow = false;   // the hand that holds the beam (the right one until the left trigger or grip is pressed); swallow: its take-over press does not click
+    int activeHand = 1; bool swallow = false;   // the hand that holds the beam (the right one until the left trigger is pressed); swallow: its take-over press does not click
     ULONGLONG t0 = GetTickCount64(); bool running = false, exiting = false, endKey = false; uint64_t frames = 0;
     int rc = 0; bool leaving = false; ULONGLONG leaveT0 = 0;
     while (!exiting) {
@@ -272,55 +272,56 @@ int main(int argc, char** argv) {
             XrViewState vst{ XR_TYPE_VIEW_STATE }; XrView views[2] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } }; uint32_t vc = 0;
             XrSpaceLocation head{ XR_TYPE_SPACE_LOCATION }; xrLocateSpace(viewSpace, space, fs.predictedDisplayTime, &head);
             if (XR_SUCCEEDED(xrLocateViews(sess, &li, &vst, 2, &vc, views)) && vc == 2 && (head.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) && (head.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
-                // the screen: put in front at the start (and at End), then following lazily
+                // the screen: put in front at the start, at End and when a grip is pressed (below), and it stays where it is
                 const Q hq = toQ(head.pose.orientation); const V3 hp = toV(head.pose.position);
                 const float dt = lastTime ? (float)((fs.predictedDisplayTime - lastTime) * 1e-9) : 0.f; lastTime = fs.predictedDisplayTime;
                 const bool key = (GetAsyncKeyState(VK_END) & 0x8000) != 0; if (key && !endKey) replace = true; endKey = key;
-                if (!haveScreen || replace) { refYaw = headYaw(hq); quad = 0; }   // the quarters count from where the user looks now
-                else { const int q = quadrantFor(headYaw(hq), refYaw, quad); if (q != quad) { quad = q; L("the screen moves to quarter %d", quad); } }
-                const Screen target = placeFacing(cardinal(refYaw, quad), hp, aspect);
-                if (!haveScreen || replace) { screen = target; haveScreen = true; replace = false; moving = false; } else screen = follow(screen, target, moving, dt);
-
                 // the pointer: the active controller (the right one at the start; the other one when the active one is not tracked); its aim along -Z
                 XrActionStateGetInfo gi{ XR_TYPE_ACTION_STATE_GET_INFO };
                 auto flt = [&](XrAction a, int h) { gi.subactionPath = hands[h]; gi.action = a; XrActionStateFloat st{ XR_TYPE_ACTION_STATE_FLOAT }; xrGetActionStateFloat(sess, &gi, &st); return st.isActive ? st.currentState : 0.f; };
                 auto btn = [&](XrAction a, int h) { gi.subactionPath = hands[h]; gi.action = a; XrActionStateBoolean st{ XR_TYPE_ACTION_STATE_BOOLEAN }; xrGetActionStateBoolean(sess, &gi, &st); return st.isActive && st.currentState; };
                 auto tracked = [&](int h, XrSpaceLocation& al) { al = XrSpaceLocation{ XR_TYPE_SPACE_LOCATION }; xrLocateSpace(aimSpace[h], space, fs.predictedDisplayTime, &al); return (al.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) && (al.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT); };
-                {   // a press of the trigger or the grip on the other controller takes the beam over (that press does not click)
+                float grip[2]; bool gripNew = false;   // a grip on either controller puts the screen in front of the user again (a firm squeeze, once)
+                for (int h = 0; h < 2; h++) { grip[h] = flt(aSqueeze, h); const bool d = gripDown(grip[h], gripWas[h]); if (d && !gripWas[h]) { gripNew = true; event("recentre", h ? "right grip" : "left grip"); } gripWas[h] = d; }
+                if (gripNew) replace = true;
+                if (!haveScreen || replace) { screen = placeFacing(facingYaw(headYaw(hq)), hp, aspect); haveScreen = true; replace = false; }
+                {   // a press of the trigger on the other controller takes the beam over (that press does not click)
                     const int other = 1 - activeHand; XrSpaceLocation ol;
-                    if (tracked(other, ol) && takesBeam(flt(aTrigger, other), flt(aSqueeze, other))) {
+                    if (tracked(other, ol) && takesBeam(flt(aTrigger, other))) {
                         activeHand = other; swallow = true; smoothing = false; L("the %s controller takes the beam", activeHand ? "right" : "left");
                         event("hand_switch", activeHand ? "right" : "left");
                     }
                 }
-                bool aimOk = false; V3 o{}, d{}; int hand = activeHand; float trig = 0, sq = 0, stickY = 0; bool prim[2] = { false, false }, sec = false;
+                bool aimOk = false; V3 o{}, d{}; int hand = activeHand; float trig = 0, stickY = 0; bool prim[2] = { false, false };
                 for (int k = 0; k < 2 && !aimOk; k++) {
                     hand = k == 0 ? activeHand : 1 - activeHand;
                     XrSpaceLocation al;
                     if (tracked(hand, al)) {
                         o = toV(al.pose.position); d = norm(rotate(toQ(al.pose.orientation), { 0, 0, -1 })); aimOk = true;
-                        trig = flt(aTrigger, hand); sq = flt(aSqueeze, hand); sec = btn(aSecondary, hand);
-                        if (swallow) { if (takeOverReleased(trig, sq, sec)) swallow = false; else { trig = 0; sq = 0; sec = false; } }
+                        trig = flt(aTrigger, hand);
+                        if (swallow) { if (takeOverReleased(trig)) swallow = false; else trig = 0; }
                     }
                 }
-                // the thumbsticks and A / X, B / Y work on either controller whichever one holds the beam
+                // the thumbsticks and A / X / B / Y work on either controller whichever one holds the beam
                 for (int h = 0; h < 2; h++) {
                     gi.subactionPath = hands[h]; gi.action = aStick; XrActionStateVector2f sv{ XR_TYPE_ACTION_STATE_VECTOR2F }; xrGetActionStateVector2f(sess, &gi, &sv);
                     const float y = sv.isActive ? sv.currentState.y : 0.f; if (std::fabs(y) > std::fabs(stickY)) stickY = y;
-                    prim[h] = btn(aPrimary, h);
-                    if (h != hand) sec = sec || (!swallow && btn(aSecondary, h));
+                    prim[h] = btn(aPrimary, h) || btn(aSecondary, h);   // A, X, B and Y alike: a double click
                 }
+                // the controls hint under the screen: the beam on its badge opens the panel (the commands) in the same place, until the beam leaves it
+                const Screen hintScreen = hintBelow(screen, panelOpen ? kPanelW : kBadgeW, panelOpen ? kPanelH : kBadgeH); float hu = 0, hv = 0; bool hintHit = false;
                 float cu = -1, cv = -1; bool hit = false; float u = 0, v = 0;
                 if (aimOk) {
                     if (frames % 300 == 0 && frames < 3000) L("aim: %s hand at (%.2f %.2f %.2f) pointing (%.2f %.2f %.2f); screen centre (%.2f %.2f %.2f) normal (%.2f %.2f %.2f) %.2fx%.2f m; head (%.2f %.2f %.2f)", hand ? "right" : "left", o.x, o.y, o.z, d.x, d.y, d.z, screen.center.x, screen.center.y, screen.center.z, screen.normal.x, screen.normal.y, screen.normal.z, screen.width, screen.height, hp.x, hp.y, hp.z);
                     if (!seenHand) { seenHand = true; L("the %s controller / hand is tracked: its beam is drawn", hand ? "right" : "left"); }
                     hit = rayHit(screen, o, d, u, v);
+                    hintHit = rayHit(hintScreen, o, d, hu, hv);
                     if (hit) { cu = u; cv = v; if (!seenHit) { seenHit = true; L("the pointer is on the screen"); } }
                 }
-                // a hand's pinch or a trigger rarely reaches 1: the button goes down at 0.3 and up at 0.15 ; the grip at 0.5 / 0.3 (or the B / Y button); A / X is a double click
-                const bool lWant = trig > (left ? 0.15f : 0.3f), rWant = sq > (right ? 0.3f : 0.5f) || sec;
-                trigMax = std::max(trigMax, trig); sqMax = std::max(sqMax, sq); stickMax = std::max(stickMax, std::fabs(stickY)); primSeen |= prim[0] || prim[1]; secSeen |= sec;
-                if (frames % 300 == 0 && frames < 6000) { L("input: trigger max %.2f, grip max %.2f, A/X %d B/Y %d, stick y %.2f in the last 5 s; left button %s, right %s", trigMax, sqMax, primSeen ? 1 : 0, secSeen ? 1 : 0, stickMax, left ? "down" : "up", right ? "down" : "up"); trigMax = sqMax = stickMax = 0; primSeen = secSeen = false; }
+                // a trigger rarely reaches 1: the left button goes down at 0.3 and up at 0.15; A / X / B / Y is a double click; the grips recentre (above)
+                const bool lWant = trig > (left ? 0.15f : 0.3f);
+                trigMax = std::max(trigMax, trig); sqMax = std::max(sqMax, std::max(grip[0], grip[1])); stickMax = std::max(stickMax, std::fabs(stickY)); primSeen |= prim[0] || prim[1];
+                if (frames % 300 == 0 && frames < 6000) { L("input: trigger max %.2f, grip max %.2f, A/X/B/Y %d, stick y %.2f in the last 5 s; left button %s", trigMax, sqMax, primSeen ? 1 : 0, stickMax, left ? "down" : "up"); trigMax = sqMax = stickMax = 0; primSeen = false; }
                 // the pointer is smoothed (slow movements steadier, fast ones followed at once) and held still while a press starts: the click lands where it was aimed
                 if (hit) {
                     const float dpx = std::hypot((u - su) * mirror.DesktopW(), (v - sv_) * mirror.DesktopH());
@@ -337,17 +338,16 @@ int main(int argc, char** argv) {
                         // a physical mouse and the beam do not fight: when the cursor is somewhere other than where the beam put it, the mouse has it (the dot follows the real cursor)
                         // until a button press or a deliberate sweep of the beam (120 desktop pixels from where it was) takes it back; a hand's small tremor does not
                         POINT cp; const bool haveCp = GetCursorPos(&cp) != 0;
-                        const bool beamDown = trig > 0.3f || sq > 0.5f || sec || prim[0] || prim[1];
-                        if (!yielded && haveSent && haveCp && std::hypot((float)(cp.x - sent.x), (float)(cp.y - sent.y)) > 4.f && !left && !right) { yielded = true; yU = su; yV = sv_; event("mouse_takes", "physical mouse moved"); }
+                        const bool beamDown = trig > 0.3f || prim[0] || prim[1];
+                        if (!yielded && haveSent && haveCp && std::hypot((float)(cp.x - sent.x), (float)(cp.y - sent.y)) > 4.f && !left) { yielded = true; yU = su; yV = sv_; event("mouse_takes", "physical mouse moved"); }
                         if (yielded && hit && (beamDown || std::hypot((su - yU) * mirror.DesktopW(), (sv_ - yV) * mirror.DesktopH()) > 120.f)) { yielded = false; haveSent = false; event("beam_takes", beamDown ? "press" : "sweep"); }
                         if (yielded && haveCp) { const float mu = (float)(cp.x - g_mon.left) / (float)std::max<LONG>(1, g_mon.right - g_mon.left - 1), mv = (float)(cp.y - g_mon.top) / (float)std::max<LONG>(1, g_mon.bottom - g_mon.top - 1); if (mu >= 0 && mu <= 1 && mv >= 0 && mv <= 1) { cu = mu; cv = mv; } else { cu = -1; cv = -1; } }
                         else if (hit) { sent = mouseTo(su, sv_); haveSent = true; }
                     }
-                    const bool l = hit && !yielded && lWant, r = hit && !yielded && rWant;
+                    const bool l = hit && !yielded && lWant;
                     char det[96];
                     if (l != left) { snprintf(det, sizeof det, "trigger %.2f", trig); event(l ? "left_down" : "left_up", det); if (mouse) sendMouse(0, 0, l ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP); }
-                    if (r != right) { snprintf(det, sizeof det, "grip %.2f B/Y %d", sq, sec ? 1 : 0); event(r ? "right_down" : "right_up", det); if (mouse) sendMouse(0, 0, r ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP); }
-                    left = l; right = r;
+                    left = l;
                     // A / X (each on its own, so one pressed while the other is held still counts): a double click (Windows opens a file or runs a program on one), on the press
                     for (int h = 0; h < 2; h++) {
                         if (prim[h] && !primWas[h] && hit) {
@@ -360,14 +360,17 @@ int main(int argc, char** argv) {
                     if (hit && std::fabs(stickY) > 0.5f && GetTickCount64() - lastWheel > (ULONGLONG)(220 - 100 * std::fabs(stickY))) { event("wheel", stickY > 0 ? "up" : "down"); if (mouse) wheel(stickY > 0 ? 1 : -1); lastWheel = GetTickCount64(); }
                 }
 
+                if (hintHit != panelOpen) { panelOpen = hintHit; L("the controls hint %s", panelOpen ? "opens" : "closes"); }
                 // the picture
                 float ndc[16], extra[10]; for (float& f : ndc) f = NAN; for (float& f : extra) f = NAN; extra[0] = cu; extra[1] = cv;
                 bool any = false;
                 for (int e = 0; e < 2; e++) if (corners(screen, toEye(views[e]), ndc + e * 8)) any = true; else for (int k = 0; k < 8; k++) ndc[e * 8 + k] = NAN;
                 if (aimOk) {
-                    const V3 end = hit ? screenPoint(screen, u, v) : add(o, mul(d, 3.f));
+                    const V3 end = hit ? screenPoint(screen, u, v) : hintHit ? screenPoint(hintScreen, hu, hv) : add(o, mul(d, 3.f));
                     for (int e = 0; e < 2; e++) segment(toEye(views[e]), o, end, extra + 2 + e * 4);
                 }
+                { float hn[16]; for (int e = 0; e < 2; e++) if (!corners(hintScreen, toEye(views[e]), hn + e * 8)) for (int k = 0; k < 8; k++) hn[e * 8 + k] = NAN;
+                  mirror.SetHint(hn, panelOpen ? 2 : 1); }
                 const double r0 = qpcMs();
                 ID3D11Texture2D* tex = mirror.Render(ndc, extra, clear, err, 256);
                 renderSumMs += qpcMs() - r0;
@@ -393,7 +396,7 @@ int main(int argc, char** argv) {
             perfT0 = qpcMs(); perfFrames = 0; frameMaxMs = 0; renderSumMs = 0;
         }
     }
-    if (mouse) { if (left) sendMouse(0, 0, MOUSEEVENTF_LEFTUP); if (right) sendMouse(0, 0, MOUSEEVENTF_RIGHTUP); }
+    if (mouse && left) sendMouse(0, 0, MOUSEEVENTF_LEFTUP);
     L("ending after %llu frames", (unsigned long long)frames);
     if (rc == 0) L("PASS (rc=0)");
     if (running) xrRequestExitSession(sess);

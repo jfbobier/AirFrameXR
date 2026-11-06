@@ -22,6 +22,9 @@ public:
     // into each eye's half: ndc = left eye TL TR BL BR then right eye (x, y pairs; NaN x = that eye does not see the screen);
     // cursor = (u, v) over the desktop, or negative for none. Returns the target texture (owned here), nullptr on failure.
     ID3D11Texture2D* Render(const float ndc[16], const float cursor[10], uint32_t clearRgb, char* err, int errlen);
+    // The controls hint for the next Render: ndc = the hint's four corners per eye (as for the screen, NaN x = not seen), mode 0 none, 1 the badge, 2 the panel
+    // (the commands). Drawn under the screen with the same shader; the text is drawn once with GDI.
+    void SetHint(const float ndc[16], int mode);
 private:
     struct Impl;
     std::unique_ptr<Impl> I;

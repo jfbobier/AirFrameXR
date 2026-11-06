@@ -18,8 +18,10 @@ cbuffer CB : register(b0) {
     float4 cursor;   // xy: uv over the desktop (negative: none), zw: desktop size in pixels
     float4 mode;     // x: 1 = HDR (scRGB), y: SDR white level (scRGB units of the desktop's white), z: 1 = draw the laser, w: eye image height in pixels
     float4 laser;    // the pointing beam in this eye's NDC: x0 y0 x1 y1
+    float4 pass;     // x: 1 = the quad is the controls hint (drawn from `help`), not the desktop
 };
 Texture2D desk : register(t0);
+Texture2D help : register(t1);
 SamplerState smp : register(s0);
 struct VSOut { float4 pos : SV_Position; float2 ndc : TEXCOORD0; };
 // the whole eye: the screen is found per pixel (a perspective-correct mapping), so a screen seen at an angle is not warped
@@ -52,6 +54,7 @@ float4 PS(VSOut i) : SV_Target {
     }
     float2 uv = ScreenUV(i.ndc);
     if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) discard;
+    if (pass.x > 0.5) return float4(help.Sample(smp, uv).rgb, 1);
     float3 c = desk.Sample(smp, uv).rgb;
     if (mode.x > 0.5) {
         c = max(c, 0) / mode.y;                                        // the desktop's SDR white becomes 1
@@ -82,6 +85,41 @@ float SdrWhite() {
     return w.SDRWhiteLevel / 1000.f;   // 1000 = 80 nits
 }
 
+// The controls hint, drawn with GDI into two small textures: the badge and the panel (key in orange, what it does in white, on a dark card).
+struct HelpLine { const wchar_t* key; const wchar_t* what; };
+bool DrawCard(int w, int h, const HelpLine* lines, int n, bool badge, std::vector<uint32_t>& out) {
+    BITMAPINFO bi{}; bi.bmiHeader.biSize = sizeof bi.bmiHeader; bi.bmiHeader.biWidth = w; bi.bmiHeader.biHeight = -h; bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr; HDC dc = CreateCompatibleDC(nullptr); HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!dc || !bmp || !bits) { if (bmp) DeleteObject(bmp); if (dc) DeleteDC(dc); return false; }
+    HGDIOBJ old = SelectObject(dc, bmp);
+    RECT all{ 0, 0, w, h }; HBRUSH bg = CreateSolidBrush(RGB(24, 24, 28)); FillRect(dc, &all, bg); DeleteObject(bg);
+    HBRUSH edge = CreateSolidBrush(RGB(255, 90, 25)); FrameRect(dc, &all, edge); RECT in{ 1, 1, w - 1, h - 1 }; FrameRect(dc, &in, edge); DeleteObject(edge);
+    SetBkMode(dc, TRANSPARENT);
+    if (badge) {
+        HFONT f = CreateFontW(-h * 5 / 10, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        HGDIOBJ of = SelectObject(dc, f); SetTextColor(dc, RGB(255, 255, 255)); RECT r = all;
+        DrawTextW(dc, L"?  controls", -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(dc, of); DeleteObject(f);
+    } else {
+        const int pad = w / 32, rowH = (h - 2 * pad) / (n + 1);
+        HFONT f = CreateFontW(-rowH * 62 / 100, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        HFONT fb = CreateFontW(-rowH * 62 / 100, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        HGDIOBJ of = SelectObject(dc, fb); SetTextColor(dc, RGB(255, 255, 255)); RECT t{ pad, pad, w - pad, pad + rowH }; DrawTextW(dc, L"Controllers", -1, &t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        for (int i = 0; i < n; i++) {
+            const int y = pad + (i + 1) * rowH;
+            SelectObject(dc, fb); SetTextColor(dc, RGB(255, 130, 60)); RECT k{ pad, y, w * 36 / 100, y + rowH }; DrawTextW(dc, lines[i].key, -1, &k, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(dc, f); SetTextColor(dc, RGB(240, 240, 240)); RECT d{ w * 36 / 100, y, w - pad, y + rowH }; DrawTextW(dc, lines[i].what, -1, &d, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        }
+        SelectObject(dc, of); DeleteObject(f); DeleteObject(fb);
+    }
+    GdiFlush();
+    out.assign((uint32_t*)bits, (uint32_t*)bits + (size_t)w * h);
+    for (uint32_t& p : out) p |= 0xFF000000u;
+    SelectObject(dc, old); DeleteObject(bmp); DeleteDC(dc);
+    return true;
+}
+const int kBadgePxW = 320, kBadgePxH = 80, kPanelPxW = 960, kPanelPxH = 480;
+
 void seterr(char* err, int len, const char* m) { if (err && len > 0) snprintf(err, len, "%s", m); }
 }
 
@@ -95,6 +133,25 @@ struct DesktopMirror::Impl {
     // encoder side
     ComPtr<ID3D11Texture2D> src; ComPtr<ID3D11ShaderResourceView> srcSrv;
     ComPtr<ID3D11Texture2D> target; ComPtr<ID3D11RenderTargetView> rtv;
+    ComPtr<ID3D11Texture2D> helpTex[2]; ComPtr<ID3D11ShaderResourceView> helpSrv[2]; float hintNdc[16]; int hintMode = 0;
+    bool BuildHelp() {
+        static const HelpLine lines[] = {
+            { L"Trigger", L"left click (the controller that holds the beam)" },
+            { L"A / X / B / Y", L"double click" },
+            { L"Thumbstick up / down", L"scroll" },
+            { L"Grip (either)", L"put the screen in front of you again" },
+            { L"Other trigger", L"gives it the beam (left-handed: press it)" },
+            { L"Mouse", L"move it to use it; a button or a sweep of the beam takes back" },
+        };
+        const int dims[2][2] = { { kBadgePxW, kBadgePxH }, { kPanelPxW, kPanelPxH } };
+        for (int k = 0; k < 2; k++) {
+            std::vector<uint32_t> px; if (!DrawCard(dims[k][0], dims[k][1], lines, (int)(sizeof lines / sizeof lines[0]), k == 0, px)) return false;
+            D3D11_TEXTURE2D_DESC td{}; td.Width = dims[k][0]; td.Height = dims[k][1]; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            D3D11_SUBRESOURCE_DATA sd{ px.data(), (UINT)(dims[k][0] * 4), 0 };
+            if (FAILED(dev->CreateTexture2D(&td, &sd, &helpTex[k])) || FAILED(dev->CreateShaderResourceView(helpTex[k].Get(), nullptr, &helpSrv[k]))) return false;
+        }
+        return true;
+    }
     ComPtr<ID3D11VertexShader> vs; ComPtr<ID3D11PixelShader> ps; ComPtr<ID3D11Buffer> cb; ComPtr<ID3D11SamplerState> smp; ComPtr<ID3D11RasterizerState> rs;
 
     bool OpenDuplication(char* err, int errlen) {
@@ -174,12 +231,14 @@ struct DesktopMirror::Impl {
         }
         dev->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &vs);
         dev->CreatePixelShader(pb->GetBufferPointer(), pb->GetBufferSize(), nullptr, &ps);
-        D3D11_BUFFER_DESC bd{}; bd.ByteWidth = 80; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        D3D11_BUFFER_DESC bd{}; bd.ByteWidth = 96; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         dev->CreateBuffer(&bd, nullptr, &cb);
         D3D11_SAMPLER_DESC sd{}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
         dev->CreateSamplerState(&sd, &smp);
         D3D11_RASTERIZER_DESC rd{}; rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_NONE; rd.DepthClipEnable = TRUE;
         dev->CreateRasterizerState(&rd, &rs);
+        for (float& f : hintNdc) f = NAN;
+        if (!helpSrv[0] && !BuildHelp()) { helpSrv[0].Reset(); helpSrv[1].Reset(); }   // no hint then; the rest works
         return true;
     }
 
@@ -240,12 +299,23 @@ struct DesktopMirror::Impl {
             const float* lz = cursor + 2 + eye * 4;   // the beam of this eye (NaN: none)
             f[14] = std::isnan(lz[0]) ? 0.f : 1.f; f[15] = (float)th;
             memcpy(f + 16, lz, 4 * sizeof(float)); if (f[14] == 0.f) f[16] = f[17] = f[18] = f[19] = 0.f;
+            f[20] = f[21] = f[22] = f[23] = 0.f;
             ctx->Unmap(cb.Get(), 0);
             D3D11_VIEWPORT vp{ eye * tw / 2.f, 0.f, tw / 2.f, (float)th, 0.f, 1.f };
             ctx->RSSetViewports(1, &vp);
             ctx->Draw(4, 0);
+            const float* hc = hintNdc + eye * 8;
+            if (hintMode > 0 && helpSrv[hintMode - 1] && !std::isnan(hc[0]) && SUCCEEDED(ctx->Map(cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {   // the hint card over the same eye
+                float* g = (float*)m.pData; memcpy(g, hc, 8 * sizeof(float));
+                g[8] = -1.f; g[9] = -1.f; g[10] = (float)dw; g[11] = (float)dh; g[12] = 0.f; g[13] = 1.f; g[14] = std::isnan(lz[0]) ? 0.f : 1.f; g[15] = (float)th;
+                memcpy(g + 16, lz, 4 * sizeof(float)); if (g[14] == 0.f) g[16] = g[17] = g[18] = g[19] = 0.f;
+                g[20] = 1.f; g[21] = g[22] = g[23] = 0.f;
+                ctx->Unmap(cb.Get(), 0);
+                ctx->PSSetShaderResources(1, 1, helpSrv[hintMode - 1].GetAddressOf());
+                ctx->Draw(4, 0);
+            }
         }
-        ID3D11ShaderResourceView* none = nullptr; ctx->PSSetShaderResources(0, 1, &none);
+        ID3D11ShaderResourceView* none[2] = { nullptr, nullptr }; ctx->PSSetShaderResources(0, 2, none);
         return target.Get();
     }
 };
@@ -264,5 +334,6 @@ void DesktopMirror::SetTestImage(const void* pixels) {
 }
 int DesktopMirror::DesktopW() const { return I->dw; }
 int DesktopMirror::DesktopH() const { return I->dh; }
+void DesktopMirror::SetHint(const float ndc[16], int mode) { memcpy(I->hintNdc, ndc, 16 * sizeof(float)); I->hintMode = mode; }
 bool DesktopMirror::Hdr() const { return I->hdr; }
 ID3D11Texture2D* DesktopMirror::Render(const float ndc[16], const float cursor[10], uint32_t clearRgb, char* err, int errlen) { return I->Render(ndc, cursor, clearRgb, err, errlen); }

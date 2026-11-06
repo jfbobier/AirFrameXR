@@ -1251,17 +1251,19 @@ def analyse_mirror_clicks(outdir):
     ev = {}
     for r in csv.DictReader(open(ef)):
         ev.setdefault(r["event"], []).append(int(r["wall_ns"]))
-    exp = {"left_down": [], "left_up": [], "right_down": [], "right_up": [], "double_click": []}
-    left = right = False; a_prev = x_prev = False
+    exp = {"left_down": [], "left_up": [], "double_click": [], "recentre": []}
+    left = grip = False; prev = {"a": False, "x": False, "b": False}
     for r in rows:
-        w = int(r["wall_ns"]); trig = float(r["trigger_r"]); sq = float(r["squeeze_r"]); b = r["b_r"] == "1"; a = r["a_r"] == "1"; x = r["x_l"] == "1"
+        w = int(r["wall_ns"]); trig = float(r["trigger_r"]); sq = float(r["squeeze_r"])
         l = trig > (0.15 if left else 0.3)
-        rr = sq > (0.3 if right else 0.5) or b
+        g = sq > (0.3 if grip else 0.7)   # a grip: down at 0.7, up under 0.3; the press recentres the screen
         if l != left: exp["left_down" if l else "left_up"].append(w)
-        if rr != right: exp["right_down" if rr else "right_up"].append(w)
-        if a and not a_prev: exp["double_click"].append(w)
-        if x and not x_prev: exp["double_click"].append(w)
-        left, right, a_prev, x_prev = l, rr, a, x
+        if g and not grip: exp["recentre"].append(w)
+        for k, col in (("a", "a_r"), ("x", "x_l"), ("b", "b_r")):   # A, X, B (Y is not scripted): each press is a double click
+            now = r[col] == "1"
+            if now and not prev[k]: exp["double_click"].append(w)
+            prev[k] = now
+        left, grip = l, g
     t0 = int(rows[0]["wall_ns"]) if rows else 0; t1 = int(rows[-1]["wall_ns"]) if rows else 0
     out = {}
     for k, xs in exp.items():
@@ -2048,7 +2050,7 @@ def evaluate(sc, a):
             if "error" in C_:
                 chk("mirror_clicks", False, C_["error"], "the click log and the scripted controller are there")
             else:
-                for kind, minimum in (("left_down", 2), ("left_up", 2), ("right_down", 2), ("right_up", 2), ("double_click", 2)):
+                for kind, minimum in (("left_down", 2), ("left_up", 2), ("double_click", 2), ("recentre", 2)):
                     c = C_.get(kind, {"expected": 0, "matched": 0, "latency_ms": []})
                     lat = c["latency_ms"]; p95 = lat[int(0.95 * (len(lat) - 1))] if lat else None
                     chk(f"mirror_click.{kind}", c["expected"] >= minimum and c["matched"] == c["expected"] and p95 is not None and p95 <= mk.get("max_latency_ms", 150),

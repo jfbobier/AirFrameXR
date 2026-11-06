@@ -166,7 +166,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
 <p align="center"><img src="docs/images/ui_firewall.png" width="640" alt="The firewall review"></p>
 
 <!-- AirFrameXR desktop mirror illustration -->
-**Desktop mirror (optional).** Between games, the Windows desktop can float in front of you in the headset, and a controller is the mouse: the orange beam points, trigger clicks, A / X double-clicks, grip or B / Y right-clicks, the thumbstick scrolls. Start the next game from where you sit, without removing the headset or looking at the monitor. The right controller holds the beam; **left-handed**, press the left trigger or grip and the beam is the left controller's (press the right one to give it back). It is a switch in the streamer, and an alternative to chroma-key passthrough as the idle view.
+**Desktop mirror (optional).** Between games, the Windows desktop can float in front of you in the headset, and a controller is the mouse: the orange beam points, trigger clicks, A / X / B / Y double-click, the thumbstick scrolls, a grip puts the screen back in front of you, and a "? controls" badge under the screen shows these on hover. Start the next game from where you sit, without removing the headset or looking at the monitor. The right controller holds the beam; **left-handed**, press the left trigger and the beam is the left controller's (press the right one to give it back). It is a switch in the streamer, and an alternative to chroma-key passthrough as the idle view.
 
 <p align="center"><img src="docs/images/airframexr-desktop-mirror-3d.png" width="860" alt="Illustration of a three-dimensional Windows desktop mirror in VR, with a visible controller projecting an orange pointing beam onto the desktop"></p>
 
