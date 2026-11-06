@@ -898,7 +898,7 @@ int main(int argc, char** argv) {
     if (soundOn) mciSendStringA("close xrbgm", nullptr, 0, nullptr);
     L("loop done: frames=%d ready=%d synchronized=%d", done, sawReady, sawSync);
     if (done > 1) L("app fps %.2f over %d frames", (done - 1) * 1000.0 / (qpcMs() - loopStartMs), done - 1);
-    if (rc == 0 && done < frames) rc = 4;
+    if (rc == 0 && done < frames && !tool.quit) rc = 4;   // a tool that saved and quit on purpose is not a short run
     if (running) { xrRequestExitSession(sess); }
     xrDestroySession(sess); xrDestroyInstance(inst);
     L("%s (rc=%d)", rc == 0 ? "PASS" : "FAIL", rc);

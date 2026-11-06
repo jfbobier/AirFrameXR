@@ -217,8 +217,9 @@ struct XrTool {
 
     // GDI text into a BGRA bitmap, then into a texture of the swapchain's own format (4 bytes per pixel, R8G8B8A8 / B8G8R8A8 families) copied into the eye image.
     void DrawText_(int e, ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Texture2D* eyeTex, DXGI_FORMAT fmt, int cx, int cy, int halfW, int halfH, const std::wstring& s, int fontPx) {
-        const bool bgra = fmt == DXGI_FORMAT_B8G8R8A8_UNORM || fmt == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
-        const bool rgba = fmt == DXGI_FORMAT_R8G8B8A8_UNORM || fmt == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        // the runtime's swapchain images may be TYPELESS (VDXR's are): the same bytes, the same copy family
+        const bool bgra = fmt == DXGI_FORMAT_B8G8R8A8_UNORM || fmt == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || fmt == DXGI_FORMAT_B8G8R8A8_TYPELESS;
+        const bool rgba = fmt == DXGI_FORMAT_R8G8B8A8_UNORM || fmt == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || fmt == DXGI_FORMAT_R8G8B8A8_TYPELESS;
         if (!bgra && !rgba) return;
         const int areaW = std::max(64, 2 * halfW), areaH = std::max(48, 2 * halfH);
         const std::wstring key = s + L"|" + std::to_wstring(areaW) + L"x" + std::to_wstring(areaH) + L"|" + std::to_wstring(fontPx) + L"|" + std::to_wstring((int)fmt);

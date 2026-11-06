@@ -2143,6 +2143,8 @@ def evaluate(sc, a):
                 {"mismatch": qa.get("mismatch"), "ctbs": qa.get("ctbs"), "hist": qa.get("hist")}, "the C++ map equals the independent Python port (<= 0.5% CTBs differing by rounding)")
         if "min_detail_ratio" in qk:
             chk("qpmap_center_keeps_more_detail", (qa.get("detail_ratio") or 0) >= qk["min_detail_ratio"], qa.get("detail") or qa.get("detail_error"), f"decoded detail center/edge >= {qk['min_detail_ratio']} (ratio {qa.get('detail_ratio')})")
+        if "max_detail_ratio" in qk:
+            chk("qpmap_off_is_flat", (qa.get("detail_ratio") or 99) <= qk["max_detail_ratio"], qa.get("detail"), f"decoded detail center/edge <= {qk['max_detail_ratio']} with the map off (ratio {qa.get('detail_ratio')})")
     if "tool" in ck:   # the headset tools (xr_probe XR_PROBE_TOOL, scripted keys): analyse_tool
         import math
         tk, ta = ck["tool"], a.get("tool") or {}
@@ -2183,8 +2185,6 @@ def evaluate(sc, a):
                     i = smp.get(f"eye{e}", {})
                     chk(f"tool_{tag}_eye{e}_scene_in_box", i.get("outside_black", 0) >= 0.97 and i.get("inside_lit", 0) >= 0.9, {"outside_black": i.get("outside_black"), "inside_lit": i.get("inside_lit"), "box_px": i.get("expected_px")},
                         "the scene is lit inside the box and black outside it")
-        if "max_detail_ratio" in qk:
-            chk("qpmap_off_is_flat", (qa.get("detail_ratio") or 99) <= qk["max_detail_ratio"], qa.get("detail"), f"decoded detail center/edge <= {qk['max_detail_ratio']} with the map off (ratio {qa.get('detail_ratio')})")
     if "display" in ck:
         dc, dk = ck["display"], a.get("display")
         chk("display_measured", dk is not None and dk.get("ticks", 0) > 200, dk and dk.get("ticks"), "> 200 emulated display ticks")
