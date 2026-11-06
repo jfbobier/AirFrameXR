@@ -1413,6 +1413,26 @@ def analyse_pacing(sc, outdir, period_ms):
     lat = [(int(c[1]) - int(c[0])) / 1e6 for c in crows[first + warm:last + 1]]
     third = max(1, len(lat) // 3)
     drift = round(pct(lat[-third:], .5) - pct(lat[:third], .5), 2) if len(lat) >= 30 else None
+    # The first seconds of a game are not a steady state: the frames alternate between two latencies one frame period apart (the app's frame is picked from the
+    # slot before or after) until the host's phase lock has slid the boundary clock (docs/ARCHITECTURE.md; two corrections of 2 ms, the last about 3.5 s into the game).
+    # Once it has settled the latency is one value, higher than the mean of the alternation, which the thirds above read as a creep of up to a period. So the drift that
+    # decides the check is measured from 0.5 s after the last correction of the phase lock (a queue that only grows still shows there); the whole-run figure is kept.
+    drift_all, settle_s = drift, None
+    try:
+        hs_ = [json.loads(l) for l in open(outdir / "host_stdout.txt", errors="replace") if '"phase_lock"' in l or '"game_started"' in l]
+        t_game = next((e["t_ms"] for e in hs_ if e["event"] == "game_started"), None)
+        acted = [e["t_ms"] for e in hs_ if e["event"] == "phase_lock" and (e.get("data") or {}).get("acted")]
+        _, prow2 = read_csv(outdir / "host_pipeline.csv")
+        send_of = {int(r[1]): float(r[7]) for r in prow2 if int(r[0]) >= 0}
+        t0_send = min(send_of.values())
+        if t_game is not None and acted:
+            settle_s = (max(acted) - t_game) / 1000.0 + 0.5
+            late_lat = [(int(c[1]) - int(c[0])) / 1e6 for c in crows[first + warm:last + 1] if int(c[0]) in send_of and send_of[int(c[0])] - t0_send >= settle_s]
+            if len(late_lat) >= 90:
+                th = max(1, len(late_lat) // 3)
+                drift = round(pct(late_lat[-th:], .5) - pct(late_lat[:th], .5), 2)
+    except (OSError, ValueError, KeyError, StopIteration):
+        pass
     # where the skipped slots are made: the same count on the host's own send times means the slot was already empty when the host picked a frame for it (the app or the stage before
     # the encoder had nothing ready); more at the client means the network or the client added them
     host_late = None
@@ -1425,7 +1445,7 @@ def analyse_pacing(sc, outdir, period_ms):
         pass
     return {"period_ms": period_ms, "n": len(d), "p50": round(pct(d, .5), 2), "p95": round(pct(d, .95), 2), "p99": round(pct(d, .99), 2),
             "max": round(max(d), 2), "max_gap_periods": round(max(d) / period_ms, 2), "late": sum(late), "late_frac": round(sum(late) / len(d), 4),
-            "longest_late_run": best, "latency_drift_ms": drift, "late_frac_at_host_send": host_late}
+            "longest_late_run": best, "latency_drift_ms": drift, "latency_drift_whole_run_ms": drift_all, "phase_settle_s": settle_s, "late_frac_at_host_send": host_late}
 
 
 def analyse_display(sc, outdir, client, period_ms):
