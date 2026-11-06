@@ -159,8 +159,8 @@ namespace AirFrameXR
                 row1.Controls.Add(new Label { Text = names[k], AutoSize = true, Margin = new Padding(12, 6, 3, 0) }); row1.Controls.Add(box[k]);
                 tips.SetToolTip(box[k], names[k] + ": " + (k == 0 ? "the side away from the nose" : k == 1 ? "the side towards the nose" : k == 2 ? "up" : "down") + ". Tangents (what the Advanced window and the profiles use) or degrees from the view axis, as chosen in Unit. Never more than the headset shows.");
             }
-            row1.Controls.Add(perEye);
             inner.Controls.Add(row1);
+            inner.Controls.Add(perEye);   // its own row: on the row of the four values the card is wider than the manager's window
             rowRight = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0), Visible = false };
             rowRight.Controls.Add(new Label { Text = "Right eye", AutoSize = true, Margin = new Padding(3, 6, 3, 0) });
             for (int k = 0; k < 4; k++)
