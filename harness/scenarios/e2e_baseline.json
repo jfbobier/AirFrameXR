@@ -1,5 +1,5 @@
 {
-  "description": "GOLDEN BASELINE: the author's session.json verbatim (no overrides; only the harness-required client pin/trust) -> full OpenXR chain at 3552x3200 per eye with foveation on, HEVC Main10 full range at the session's 250 Mbps",
+  "description": "GOLDEN BASELINE: the author's session.json verbatim (no overrides; only the harness-required client pin/trust) -> full OpenXR chain at 3552x3200 per eye with foveation on, HEVC Main10 full range at the session's 250 Mbps (900 frames, 10 s: the host's phase lock slides the boundary clock twice and settles about 4.5 s into a game, so a 420-frame run ended with the settling; the latency drift is measured from 0.5 s after its last correction.)",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -13,7 +13,7 @@
     "seconds": 60,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "exit_after_frames": 420
+    "exit_after_frames": 900
   },
   "client": {
     "seconds": 55,
@@ -25,7 +25,7 @@
     "RUST_LOG": "warn"
   },
   "app": {
-    "frames": 420,
+    "frames": 900,
     "timeout_s": 60
   },
   "gpu_sample": true,
