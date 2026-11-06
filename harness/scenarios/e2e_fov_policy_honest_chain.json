@@ -50,7 +50,6 @@
     "seconds": 150,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "fov_scale": "80,80,80,80",
     "fov_whitelist": [],
     "fov_override": "0.97,0.71,0.69,0.63"
   },
