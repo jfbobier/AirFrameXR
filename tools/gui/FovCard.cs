@@ -116,7 +116,7 @@ namespace AirFrameXR
         public UserFov Proposed => list.Items.Cast<UserFov>().FirstOrDefault(u => u.Source == "standard" || u.Source == "starting-point");
 
         /// A profile file's measured field of view as one of the user's profiles.
-        public static UserFov FromProfile(HmdProfile p) => new UserFov { Id = UserFovStore.NewId(), Name = p.DisplayName.Split('(')[0].Trim(), Headset = p.NameContains.FirstOrDefault() ?? "", Source = "imported", Tan = p.FovTangents(), Quality = p.FovRenderQuality, Note = p.FovNote };
+        public static UserFov FromProfile(HmdProfile p) => new UserFov { Id = UserFovStore.NewId(), Name = p.DisplayName.Split('(')[0].Trim(), Headset = p.NameContains.FirstOrDefault() ?? "", Source = "imported", Tan = p.FovTangents(), Quality = p.FovRenderQuality, ClientScale = p.FovClientScale, Note = p.FovNote };
         // the UI harness and the self-test
         public bool CanAdd => add.Enabled;
         public string Message => message.Text;

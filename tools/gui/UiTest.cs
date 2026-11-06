@@ -548,7 +548,7 @@ namespace AirFrameXR
                     var sp = Path.Combine(outDir, "user_fov_seed_test.json"); try { File.Delete(sp); } catch { }
                     string T(UserFov u) => string.Join("/", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)));
                     var n1 = UserFovStore.SeedFromShipped("Apple Headset", sp, pd); var u1 = UserFovStore.Load(sp).FirstOrDefault();
-                    lines.Add("seed=" + n1 + " name=" + u1?.Name + " tan=" + (u1 == null ? "" : T(u1)));
+                    lines.Add("seed=" + n1 + " name=" + u1?.Name + " tan=" + (u1 == null ? "" : T(u1)) + " scale=" + u1?.ClientScale.ToString(CultureInfo.InvariantCulture));
                     var n2 = UserFovStore.SeedFromShipped("Apple Headset", sp, pd);
                     UserFovStore.Remove("std-t-avp", sp);
                     var n3 = UserFovStore.SeedFromShipped("Apple Headset", sp, pd);

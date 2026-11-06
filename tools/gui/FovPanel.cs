@@ -22,7 +22,7 @@ namespace AirFrameXR
         readonly Timer warnTimer = new Timer { Interval = 2000 };
         readonly List<UserFov> profiles = new List<UserFov>();
         CheckBox fovTick = new CheckBox();   // the state behind the two radio buttons (never shown): ticked = the restriction
-        RadioButton stockRb, restrictRb; ComboBox profileBox; Label fovNote, fovShare, clientHint = new Label(), closeWarn;
+        RadioButton stockRb, restrictRb; ComboBox profileBox; Label fovNote, fovShare, clientHint, closeWarn;
         TrackBar fovQ; FlowLayoutPanel fovQRow; Button manage;
         CheckBox fitTick; Label fitNote, pipeLine, pipeBand; FlowLayoutPanel pipeWarn;
         int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
@@ -59,7 +59,7 @@ namespace AirFrameXR
             fovNote = Ui.Line(""); fovNote.ForeColor = Color.DimGray; fovNote.Margin = new Padding(22, 2, 3, 0); fovNote.MaximumSize = new Size(WrapWidth, 0);
             fovShare = Ui.Line(""); fovShare.ForeColor = Color.SeaGreen; fovShare.Margin = new Padding(22, 0, 3, 2); fovShare.MaximumSize = new Size(WrapWidth, 0);
             clientHint = Ui.Line(""); clientHint.ForeColor = Color.DimGray; clientHint.Margin = new Padding(22, 0, 3, 2); clientHint.MaximumSize = new Size(WrapWidth, 0);
-            Controls.Add(fovNote); Controls.Add(fovShare);
+            Controls.Add(fovNote); Controls.Add(fovShare); Controls.Add(clientHint);
 
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 0) };
             manage = new Button { Text = "Manage profiles and calibrate...", AutoSize = true, AccessibleName = "Manage profiles and calibrate", Margin = new Padding(22, 2, 8, 2) };
@@ -168,6 +168,8 @@ namespace AirFrameXR
         void FovLabelsText()
         {
             var u = Selected;
+            // the sharper stream: the headset app's own FoV Scale (the slider of the 1.3.5 client), set by hand to what the profile recommends; with "Fit the stream to the headset's window" ticked below, the stream then covers only that angle at the same pixel density
+            clientHint.Text = u != null && u.ClientScale > 0 && fovTick.Checked ? u.ClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " recommended for the FoV Scale slider in the headset's app (set it there by hand), and tick \"Fit the stream to the headset's window\" below to keep the pixel density." : "";
             if (clientFov == null)
             {
                 fovNote.Text = fovTick.Checked ? "On: the game is told the chosen window (the headset has not connected yet: it is capped to the headset's own box once it has). " + RestartSentence
