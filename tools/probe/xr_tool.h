@@ -1,12 +1,13 @@
 // The headset tools of docs/PICTURE_EDGES_DESIGN.md sections 6 and 6b, as scenes of the probe (an ordinary OpenXR app on the PC, streamed like a game):
-//   XR_PROBE_TOOL=fit       "Fit the picture to your eyes": a mid-blue box on black, one eye at a time, arrows push an edge out until its black bar is gone.
+//   XR_PROBE_TOOL=fit       "Fit the picture to your eyes": a mid-blue box on black (the scene inside the box when XR_PROBE_SCENE is set), one eye at a time, arrows push an edge out until its black bar is gone.
+//                           Enter = this eye is finished (the other eye comes; on the second eye it saves), Tab goes to the other eye and back.
 //   XR_PROBE_TOOL=restrict  "Choose what the game renders": the scene (XR_PROBE_SCENE=<file.vab>, flat grey without it) inside the box, black outside, both eyes,
 //                           arrows pull an edge in; Space (held) shows the whole view.
 // Keys: the PC keyboard through GetAsyncKeyState (whatever window has the focus: with the headset on nobody can click a window back into focus), or scripted for the
 // lab: XR_PROBE_KEYS="<frame>:<key>[,...]" with key = space left right up down tab enter esc, "shift+left" etc.; "+space" / "-space" press and release only (a
 // plain key is a tap: down on that frame, up on the next). Frames count from the first rendered frame; scripted mode ignores the real keyboard.
 // Output: one JSON line per change on stdout (the tool app reads them): {"tool","event":"box|start|enter|esc","frame","eye","box":[[outer,inner,upper,lower] per eye],
-// "panel":[...same...],"pct":..}; tangents, outer = away from the nose. XR_PROBE_TOOL_START = the fit's start box as a fraction of the panel (default 0.80),
+// "panel":[...same...],"pct":..}; tangents, outer = away from the nose. XR_PROBE_TOOL_START = the fit's start box as a fraction of the panel (default 0.40: easier to push out than to pull in),
 // XR_PROBE_TOOL_SAVED_S = how long the "Saved" screen stays (default 3).
 // The in-headset text is drawn with GDI into a bitmap and copied into the eye image (the plan said DirectWrite: same result, no Direct2D device needed), head-locked
 // at the centre of the view axis inside 12 degrees, white on dark grey, about 1 degree cap height, only in the eye being fitted while the other is black.
@@ -35,7 +36,7 @@ struct XrTool {
     bool havePanel = false;
     bool scripted = false;
     double startMs = 0, lastKeyMs = 0, savedMs = 0, savedFor = 3000;
-    float startFrac = 0.8f;
+    float startFrac = 0.4f;
     int frame = 0;
 
     struct Ev { int frame; Key key; bool down; };
@@ -120,7 +121,10 @@ struct XrTool {
         const bool shift = down[KShift];
         for (int a = KLeft; a <= KDown; a++) if (pressed[a]) { Arrow((Key)a, shift); changed = true; }
         if (changed) Emit("box");
-        if (pressed[KEnter]) { Emit("enter"); phase = Saved; savedMs = nowMs; }
+        if (pressed[KEnter]) {
+            if (mode == Fit && eye == 0) { eye = 1; Emit("box"); }   // the first eye is finished: the other eye comes
+            else { Emit("enter"); phase = Saved; savedMs = nowMs; }
+        }
     }
 
     // Left / Right are the screen sides of the eye in the fit (the nose side is the inner edge), outer / inner in the restriction (both eyes alike).
@@ -160,10 +164,10 @@ struct XrTool {
     std::wstring Text(int e, bool& show) const {
         show = true;
         if (mode == Fit) {
-            if (phase == Intro) return L"Fit the picture to your eyes.\nArrows push an edge out until its black bar is gone. Shift + arrow pulls it back.\nTab: other eye. Enter: save. Esc: quit.\nPress SPACE to start.";
+            if (phase == Intro) return L"Fit the picture to your eyes.\nArrows push an edge out until its black bar is gone. Shift + arrow pulls it back.\nHold SPACE: compare. Enter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
             if (phase == Saved) return L"Saved. You can take the headset off.";
             if (compare) { show = false; return L""; }
-            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\npush until the bar is gone, one step back, one forward";
+            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\npush until the bar is gone, one step back, then ENTER";
         }
         if (phase == Intro) return L"Choose what the game renders.\nArrows pull an edge in, Shift + arrow pushes it back out. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
         if (phase == Saved) return L"Saved.";
@@ -196,8 +200,12 @@ struct XrTool {
         if (mode == Fit) {
             // one eye at a time while fitting; the other is black. Before Space and with Space held, both eyes on the box.
             eyeShown = (phase == Intro) || compare || e == eye;
-            c1->ClearView(rtv, black, nullptr, 0);
-            if (eyeShown) { fill(x0, y0, x1, y1, blue); fill(x0, y0, x1, y0 + lw, line); fill(x0, y1 - lw, x1, y1, line); fill(x0, y0, x0 + lw, y1, line); fill(x1 - lw, y0, x1, y1, line); }
+            if (sceneDrawn) {   // the scene the probe drew is inside the box, black outside; the eye that is not being fitted is black
+                if (!eyeShown) fill(0, 0, W, H, black);
+                else { fill(0, 0, W, y0, black); fill(0, y1, W, H, black); fill(0, y0, x0, y1, black); fill(x1, y0, W, y1, black); }
+            }
+            else c1->ClearView(rtv, black, nullptr, 0);
+            if (eyeShown && !sceneDrawn) { fill(x0, y0, x1, y1, blue); fill(x0, y0, x1, y0 + lw, line); fill(x0, y1 - lw, x1, y1, line); fill(x0, y0, x0 + lw, y1, line); fill(x1 - lw, y0, x1, y1, line); }
         } else {
             if (!sceneDrawn) { c1->ClearView(rtv, grey, nullptr, 0); const float mid[4] = { 0.3f, 0.34f, 0.4f, 1 }; fill(x0, y0, x1, y1, mid); }
             fill(0, 0, W, y0, black); fill(0, y1, W, H, black); fill(0, y0, x0, y1, black); fill(x1, y0, W, y1, black);

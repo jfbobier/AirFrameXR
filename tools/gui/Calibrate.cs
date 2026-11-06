@@ -83,7 +83,7 @@ namespace AirFrameXR
         {
             if (restrictTool) { ShowRestrictIntro(); return; }
             Reset("Fit the picture to your eyes");
-            Text_("Two minutes, the headset on, one eye at a time. The tool shows a coloured box with black bars at the edges. For each edge: push it until the black bar is gone, then one step back so you see the bar return. When all four edges are done, the other eye. The result is kept as one of your profiles.");
+            Text_("Two minutes, the headset on, one eye at a time. The tool shows a coloured box with black bars at the edges. For each edge: push it until the black bar is gone, then one step back so you see the bar return. When all four edges are done, press Enter: the other eye comes, and Enter on the second eye saves. The scene is Littlest Tokyo, as in the restriction tool. The result is kept as one of your profiles.");
             Text_("Press SPACE on the PC keyboard (or pinch with hands as controllers) to start; the text in the headset says which eye to close and which edge you are on.", true);
             var problems = new List<string>();
             if (headset.Length == 0) problems.Add("No headset is known yet: connect it once with the streamer.");
@@ -103,7 +103,7 @@ namespace AirFrameXR
         {
             Reset("Choose what the game renders");
             Text_("Two minutes, the headset on, both eyes open. The tool shows a scene inside a box and black outside it: exactly what a game that honours the restriction shows. Pull an edge in until you notice the black during normal looking around, then one step back. Start with the inner edges and the lower one. The result is kept as one of your profiles and used by the games.");
-            Text_("Press SPACE on the PC keyboard to start. Arrows pull an edge in, Shift + arrow pushes it back out, Tab switches between both eyes and one eye, hold SPACE to see the whole view, Enter saves, Esc leaves.", true);
+            Text_("Press SPACE on the PC keyboard to start. Arrows pull an edge in, Shift + arrow pushes it back out, Tab switches between both eyes and one eye, hold SPACE to see the whole view, Enter saves, Esc leaves. Keep this window in front: it receives the keys.", true);
             var problems = new List<string>();
             if (headset.Length == 0) problems.Add("No headset is known yet: connect it once with the streamer.");
             if (demoDir == null && Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime)) { StartStreamer(); return; }
@@ -150,7 +150,32 @@ namespace AirFrameXR
         {
             try { if (probe != null && !probe.HasExited) probe.Kill(); } catch { }
             probe = null;
+            guard.Stop();
             RestoreHost();
+        }
+
+        // While the tool runs this window must be the one that has the keyboard, and nothing may move the Windows mouse: the desktop mirror (a controller / hand beam is its mouse) is stopped
+        // and kept stopped, and the keys the scene uses are swallowed here (a focused button would otherwise take Space / Enter as a click: Stop). The scene reads the keys itself.
+        readonly Timer guard = new Timer { Interval = 1000 };
+        bool toolKeys => probe != null && !probe.HasExited;
+        static void StopMirror() { foreach (var p in Process.GetProcessesByName("mirrordesktop")) { try { p.Kill(); } catch { } p.Dispose(); } }
+        void TakeFocus() { try { WindowState = FormWindowState.Normal; TopMost = true; TopMost = false; Activate(); } catch { } }
+        void StartGuard()
+        {
+            guardTicks = 0; StopMirror(); TakeFocus();
+            guard.Tick -= GuardTick; guard.Tick += GuardTick; guard.Start();
+        }
+        int guardTicks;
+        void GuardTick(object s, EventArgs e) { StopMirror(); if (guardTicks++ < 6 && toolKeys) TakeFocus(); }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (toolKeys)
+                switch (keyData & Keys.KeyCode)
+                {
+                    case Keys.Space: case Keys.Enter: case Keys.Tab: case Keys.Escape: case Keys.Left: case Keys.Right: case Keys.Up: case Keys.Down: return true;
+                }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         void StartTool()
@@ -161,13 +186,14 @@ namespace AirFrameXR
             if (!restrictTool && settings.Kind == HeadsetKind.Quest) { if (note != null) { note.Text = "A Quest has no picture edges to fit."; note.ForeColor = Color.Firebrick; } return; }
             if (Process.GetProcessesByName("streamer").Length == 0) { StartStreamer(); return; }
             PrepareHost();
+            StartGuard();
             Reset(restrictTool ? "Choose what the game renders" : "Fit the picture to your eyes");
             Text_("Put the headset on. The instructions are in the headset; press SPACE on this PC's keyboard to start.");
             liveState = Text_("Starting the OpenXR scene...", true);
             liveLabel = Text_("", true);
             Text_(restrictTool
-                ? "Arrows pull an edge in 1 degree, Shift + arrow pushes it back out, Tab: both eyes / one eye, hold SPACE: the whole view, Enter: save, Esc: leave."
-                : "Arrows push an edge out until its black bar is gone, Shift + arrow pulls it back, Tab: other eye, Enter: save, Esc: leave. One eye at a time: close the other.", true);
+                ? "Arrows pull an edge in 1 degree, Shift + arrow pushes it back out, Tab: both eyes / one eye, hold SPACE: the whole view, Enter: save, Esc: leave. Keep this window in front: it receives the keys."
+                : "Arrows push an edge out until its black bar is gone, Shift + arrow pulls it back, hold SPACE: compare, Enter: this eye is finished (the second eye saves), Esc: leave. One eye at a time: close the other. Keep this window in front: it receives the keys.", true);
             Buttons(Btn("Stop", () => { EndTool(); ShowIntro(); }));
             // the streamer takes the settings change within a moment; the scene is started after it so the game is told the whole panel
             var t = new Timer { Interval = 3000 };
@@ -183,7 +209,7 @@ namespace AirFrameXR
                 var psi = new ProcessStartInfo(Probe, "\"" + ProbeLog + "\" 100000000 86400") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(Probe) };
                 psi.EnvironmentVariables["XR_PROBE_TOOL"] = restrictTool ? "restrict" : "fit";
                 var vab = Path.Combine(Paths.Dir, "bench", "littlest_tokyo.vab");
-                if (restrictTool && File.Exists(vab)) psi.EnvironmentVariables["XR_PROBE_SCENE"] = vab;
+                if (File.Exists(vab)) psi.EnvironmentVariables["XR_PROBE_SCENE"] = vab;
                 probe = Process.Start(psi);
                 probe.OutputDataReceived += (s, e) => { if (e.Data != null) try { BeginInvoke((Action)(() => HandleLine(e.Data))); } catch { } };
                 probe.EnableRaisingEvents = true;

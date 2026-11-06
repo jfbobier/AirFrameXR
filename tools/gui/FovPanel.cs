@@ -448,6 +448,7 @@ namespace AirFrameXR
             Controls.Add(fit);
             note.ForeColor = Color.DimGray; note.MaximumSize = new Size(600, 0);
             Controls.Add(note);
+            Ui.Exclusive(whole, mine);   // "My fit" sits in its own row panel: Windows Forms does not make the two one group, both showed as chosen (and "My fit" kept winning)
             whole.CheckedChanged += (s, e) => Changed();
             mine.CheckedChanged += (s, e) => Changed();
             profiles.SelectedIndexChanged += (s, e) => { if (!loading && !mine.Checked) mine.Checked = true; else Changed(); };
