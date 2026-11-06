@@ -53,6 +53,8 @@ Results: `harness/results/<UTC>_<scenario>/` (`result.json`, `analysis.json`, ho
 `frames.csv`, logs); `harness/results/latest` points at the newest. A scenario is BLOCKED (not FAIL) when the
 infrastructure is missing (builder unreachable, binary or source absent, impossible topology).
 
+**A game that is not ours (2026-11-06).** `e2e_game_hello_xr_restricted` / `_whole` run the OpenXR SDK's own sample app `hello_xr` (unmodified, D3D11, stereo; built by `tools/remote/stage19_hello_xr_build.ps1` from VDXR's `OpenXR-SDK-Source` into `build\hello_xr`; no frame limit, a watchdog ends it after `app.seconds`) as the game: an independent implementation of the OpenXR contract, so the intake and the V / G logic are not only checked against our own `xr_probe`. `checks.third_party` (`analyse_third_party`): the host's verdict (`honours`), the size and FOV the shim recorded as submitted against the told ones, and its picture lit in the middle of both decoded eyes (its stdout is buffered and lost with the watchdog, so nothing is read from it).
+
 ## Audio harnesses (2026-10-21)
 
 The game audio has three layers that fail in different ways (Windows' device state, ALVR's capture, the network to the headset), so it is tested from the

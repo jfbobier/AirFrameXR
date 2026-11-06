@@ -98,7 +98,7 @@ def kill_stale():
     # host from starting), and /end takes the task's whole process tree (cmd, feeder, host)
     for task in ("openxr_host_tmp", "openxr_app_tmp", "openxr_ballast_tmp", "openxr_dbg"):
         b_run(f"schtasks /end /tn {task} >nul 2>&1")
-    for exe in ("alvr_host.exe", "alvr_client_headless.exe", "xr_probe.exe", "vram_ballast.exe", "findstr.exe"):
+    for exe in ("alvr_host.exe", "alvr_client_headless.exe", "xr_probe.exe", "hello_xr.exe", "vram_ballast.exe", "findstr.exe"):
         b_run(f"taskkill /f /im {exe} >nul 2>&1")
     # the audio / UI harnesses start the packaged streamer (and its host) through their own scheduled tasks (va_*): end those tasks too, and any streamer, launcher or desktop mirror
     # running from the harness's own folders (runs\, out\, build\; never an install the user started elsewhere). A streamer left by an aborted run kept its host's ports, and the next
@@ -318,6 +318,14 @@ def launch_app(app, rid, rd, log):
               (f"build\\probe\\xr_modsim.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "xr_modsim" else
   f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n")) +
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
+    if app.get("exe") == "hello_xr":
+        # the OpenXR SDK's own sample app (tools/remote/stage19_hello_xr_build.ps1), unmodified: an independent, well-behaved game. It has no frame limit: a watchdog ends it after `seconds`.
+        secs = int(app.get("seconds", 25))
+        keep = [l for l in cmd.split("\r\n") if not l.startswith("build\\probe\\xr_probe.exe") and not l.startswith("echo %ERRORLEVEL%")]
+        keep += [f'start "" /b cmd /c "ping -n {secs + 1} 127.0.0.1 >nul & taskkill /f /im hello_xr.exe >nul 2>&1"',
+                 f"build\\hello_xr\\src\\tests\\hello_xr\\Release\\hello_xr.exe -g D3D11 -ff Hmd -vc Stereo -bm Opaque -s Local > {rd}\\app_stdout.txt 2>&1",
+                 f"echo %ERRORLEVEL% > {rd}\\app.rc", ""]
+        cmd = "\r\n".join(keep)
     local = CACHE / "app.cmd"
     CACHE.mkdir(parents=True, exist_ok=True)
     local.write_text(cmd)
@@ -1542,6 +1550,30 @@ def analyse_qpmap(sc, outdir, host):
     return out
 
 
+def analyse_third_party(sc, outdir):
+    """A game that is not ours (checks.third_party; the OpenXR SDK's hello_xr, tools/remote/stage19_hello_xr_build.ps1): what it did, read from its own
+    stdout (the swapchain sizes it created, per view) and from the decoded stream (its picture reaches both eyes), against what the host recorded of it
+    (`game_fov_verdict`, analysed in analyse(): told and submitted). The app's own log has none of xr_probe's lines, so analyse_fov_restrict does not apply."""
+    out = {"swapchains": []}
+    f = outdir / "app_stdout.txt"
+    txt = f.read_text(errors="replace") if f.exists() else ""
+    for m in re.finditer(r"Creating color \S+ swapchain for view (\d+) with dimensions Width=(\d+) Height=(\d+)", txt):
+        out["swapchains"].append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+    out["frames_rendered_hint"] = txt.count("xrEndFrame") if "xrEndFrame" in txt else None
+    cfg = negotiated_cfg(outdir)
+    ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
+    out["stream_eye"] = (ew, eh)
+    cl = outdir / "client.hevc"
+    if cl.exists() and cl.stat().st_size > 0:
+        # the middle of each eye: hello_xr clears to a grey-blue (not black) and draws its cubes there; black means the game's picture did not reach the stream
+        pts = [(ew // 2, eh // 2), (ew + ew // 2, eh // 2), (ew // 2, eh // 4), (ew + ew // 2, eh // 4)]
+        frames = read_rgb_at(cl, pts)[30:]
+        lum = lambda px: 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]
+        lit = sum(1 for fr in frames for px in fr if lum(px) >= 16)
+        out["lit_frac"], out["frames"] = round(lit / max(1, len(frames) * len(pts)), 3), len(frames)
+    return out
+
+
 def analyse_tool(sc, outdir):
     """The headset tools of docs/PICTURE_EDGES_DESIGN.md sections 6 and 6b (xr_probe XR_PROBE_TOOL=fit|restrict with scripted keys, XR_PROBE_KEYS): the probe's JSON lines
     (app_stdout.txt: the box per eye after every key) against the keys that were pressed, and the decoded stream against the box: where the blue box (fit) or the scene (restrict)
@@ -1793,6 +1825,8 @@ def analyse(sc, outdir: Path):
         a["fov_restrict"] = analyse_fov_restrict(sc, outdir)
     if sc.get("checks", {}).get("tool"):
         a["tool"] = analyse_tool(sc, outdir)
+    if sc.get("checks", {}).get("third_party"):
+        a["third_party"] = analyse_third_party(sc, outdir)
     if sc.get("checks", {}).get("qpmap"):
         a["qpmap"] = analyse_qpmap(sc, outdir, a.get("host") or {})
     if sc.get("checks", {}).get("modsim") and sc.get("app"):
@@ -2145,6 +2179,20 @@ def evaluate(sc, a):
                     ">= 95 % of the samples in the middle of each trimmed margin of the decoded stream are black: the stream still covers the headset's view")
                 chk("fov_restrict_content_inside", fa.get("inside_content_frac", 0) >= 0.95, {"content": fa.get("inside_content_frac")},
                     ">= 95 % of the samples just inside the game's view carry its picture (the restricted view is placed where it belongs)")
+    if "third_party" in ck:   # a game that is not ours: the host's record of it, its own swapchains, its picture in the stream
+        tk, tp = ck["third_party"], a.get("third_party") or {}
+        hv = a.get("fov_verdict")
+        chk("third_party_ran", bool(hv) and hv.get("exe") == tk.get("exe", hv.get("exe")), hv and hv.get("exe"), "the host saw the game start and recorded what it submitted (hello_xr buffers its stdout, a watchdog ends it: nothing to read there)")
+        if "verdict" in tk:
+            chk("third_party_verdict", bool(hv) and hv.get("verdict") == tk["verdict"], hv and {k: hv.get(k) for k in ("exe", "verdict", "decided_by")}, f"the host's verdict on {tk.get('exe', 'the game')} is {tk['verdict']}")
+        if hv:
+            ts, ss = hv.get("told_size") or [0, 0], hv.get("submitted_size") or [0, 0, 0, 0]
+            sw = [(ss[0], ss[1]), (ss[2], ss[3])]   # the shim's record of the layer the game submitted, per eye
+            chk("third_party_follows_told_size", all(abs(w - ts[0]) <= 2 and abs(h - ts[1]) <= 2 for w, h in sw), {"submitted": sw, "told_size": ts}, "the game submitted its layers at the recommended size it was told (it follows the contract)")
+            tf, sf = hv.get("told") or [], hv.get("submitted") or []
+            chk("third_party_submits_told_fov", len(tf) == 8 and len(sf) == 8 and max(abs(x - y) for x, y in zip(tf, sf)) <= 0.01, {"told": tf, "submitted": sf}, "the FOV the game submitted is the FOV it was told, per eye and edge (within 0.01)")
+        if "min_lit" in tk:
+            chk("third_party_picture_in_stream", (tp.get("lit_frac") or 0) >= tk["min_lit"], {"lit": tp.get("lit_frac"), "frames": tp.get("frames")}, f"the game's picture reaches the middle of both eyes in the decoded stream (>= {tk['min_lit']})")
     if "qpmap" in ck:
         qk, qa = ck["qpmap"], a.get("qpmap") or {}
         chk("qpmap_enabled_in_nvenc", qa.get("nvenc_qp_map_mode") == (2 if qk.get("on", True) else 0), qa.get("nvenc_qp_map_mode"), "NVENC reports qpMapMode 2 (delta) when the map is on, 0 when off")
@@ -2321,7 +2369,8 @@ def evaluate(sc, a):
         chk("host_refresh_hz", abs(h.get("refresh_hz", 0) - ck["refresh_hz"]) < 0.5, h.get("refresh_hz"), ck["refresh_hz"])
     if "app" in a:
         ap = a["app"]
-        chk("app_exit_ok", ap["rc"] == "0" and ap["passed"], {"rc": ap["rc"], "log_pass": ap["passed"]}, "rc 0 and PASS in app.log")
+        if not ck.get("third_party"):   # a third-party game has no frame limit or PASS line: a watchdog ends it
+            chk("app_exit_ok", ap["rc"] == "0" and ap["passed"], {"rc": ap["rc"], "log_pass": ap["passed"]}, "rc 0 and PASS in app.log")
         if "app_min_frames" in ck:
             chk("app_frames", ap["frames_logged"] >= ck["app_min_frames"], ap["frames_logged"], f">={ck['app_min_frames']}")
         if "pose_roundtrip_max_rad" in ck:
