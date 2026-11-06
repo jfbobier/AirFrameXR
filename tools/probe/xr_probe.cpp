@@ -45,13 +45,13 @@
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
 #include "bench_scene.h"
-#include "xr_tool.h"   // XR_PROBE_TOOL=fit|restrict: the headset tools (docs/PICTURE_EDGES_DESIGN.md sections 6, 6b)
 #include <vector>
 #include <mmsystem.h>   // MCI: the scene's music (winmm.lib)
 #define XR_USE_GRAPHICS_API_D3D11
 #define XR_USE_PLATFORM_WIN32
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
+#include "xr_tool.h"   // XR_PROBE_TOOL=fit|restrict: the headset tools (docs/PICTURE_EDGES_DESIGN.md sections 6, 6b)
 
 static FILE* g_log;
 static void L(const char* fmt, ...) {

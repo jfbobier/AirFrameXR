@@ -345,6 +345,8 @@ namespace AirFrameXR
         }
     }
 
+    public enum HeadsetKind { None, VisionPro, Quest, Other }
+
     /// config\airframexr.json: AirFrameXR's own settings (the ALVR ones stay in session.json).
     public class AppSettings
     {
@@ -355,6 +357,15 @@ namespace AirFrameXR
         static Dictionary<string, object> Load() { var r = Json.Load(Paths.Settings); foreach (var k in Retired) Json.Remove(r, "video." + k); return r; }
         public string HeadsetHost { get => Json.Str(Root, "headset.hostname", ""); set => Json.Set(Root, "headset.hostname", value); }
         public string HeadsetName { get => Json.Str(Root, "headset.name", ""); set => Json.Set(Root, "headset.name", value); }
+        /// Which headset family the last seen name belongs to (docs/PICTURE_EDGES_DESIGN.md section 9): Quest = Quest 3 / Pro / 2, our client or the stock one; "" = none seen yet.
+        public static HeadsetKind KindOf(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return HeadsetKind.None;
+            if (name.IndexOf("Quest", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Oculus", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Meta", StringComparison.OrdinalIgnoreCase) >= 0) return HeadsetKind.Quest;
+            if (name.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Vision", StringComparison.OrdinalIgnoreCase) >= 0) return HeadsetKind.VisionPro;
+            return HeadsetKind.Other;
+        }
+        public HeadsetKind Kind => KindOf(HeadsetName);
         public string HeadsetIp { get => Json.Str(Root, "headset.ip", ""); set => Json.Set(Root, "headset.ip", value); }
         public string EncodeProfile { get => Json.Str(Root, "video.encode_profile", "foveated"); set => Json.Set(Root, "video.encode_profile", value); }
         /// NVENC split-frame encoding ("3" = one strip per engine, up to 3; "off"): on by default, the reason the project exists on a multi-engine GPU
@@ -423,6 +434,9 @@ namespace AirFrameXR
         public double FrameGenCapFps { get => Json.Num(Root, "video.frame_gen_cap_fps", 0); set => Json.Set(Root, "video.frame_gen_cap_fps", value); }
         /// the stream fit (docs/FOV_PIPELINE_OPTIM.md): size the stream from the saved density over whatever box the headset declares (a client that declares the
         /// calibrated window then gets a smaller frame at the same pixels per degree); the reference is the eye size the user chose and the box the headset declared then
+        /// the user edited the foveation numbers by hand (Settings): the passive recompute from the picture edges (PictureEdgesFoveation) leaves them alone; choosing a picture
+        /// edges profile, or finishing a fit, computes them again and clears this
+        public bool FoveationManual { get => Json.Bool(Root, "video.foveation_manual", false); set { if (value) Json.Set(Root, "video.foveation_manual", true); else Json.Remove(Root, "video.foveation_manual"); } }
         public bool StreamFitWindow { get => Json.Bool(Root, "video.stream_fit_window", false); set { if (value) Json.Set(Root, "video.stream_fit_window", true); else Json.Remove(Root, "video.stream_fit_window"); } }
         public int[] StreamReferenceEye
         {

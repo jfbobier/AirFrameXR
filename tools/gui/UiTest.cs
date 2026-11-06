@@ -341,6 +341,25 @@ namespace AirFrameXR
             if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);
             if (args.Contains("--recorder-selftest")) return RecorderSelfTest(outDir);
             if (args.Contains("--center-selftest")) return CenterSelfTest(outDir);
+            var rmCases = Arg("--ratemap-selftest");   // harness/ratemap_check.py: the C# rate-map foveation (PipelineModel.RateMapFoveation) against the Python oracle
+            if (rmCases != null)
+            {
+                var lines = new List<string>(); var ic = CultureInfo.InvariantCulture;
+                var root = global::AirFrameXR.Json.Parse(File.ReadAllText(rmCases));
+                var rm = global::AirFrameXR.PipelineModel.RateMapFoveation.FromProfile(global::AirFrameXR.Json.Parse(File.ReadAllText(Convert.ToString(root["profile"]))));
+                double[] Arr(object o) => ((object[])o).Select(x => Convert.ToDouble(x, ic)).ToArray();
+                foreach (var o in (object[])root["cases"])
+                {
+                    var c = (Dictionary<string, object>)o; var view = Arr(c["view"]); var eyeD = Arr(c["eye"]); var eye = new[] { (int)eyeD[0], (int)eyeD[1] }; var m = Convert.ToDouble(c["m"], ic);
+                    var rule = global::AirFrameXR.PipelineModel.RateMapFoveation.RuleGeometry(view, rm);
+                    var zl = global::AirFrameXR.PipelineModel.RateMapFoveation.ZeroLoss(view, eye, rm, m);
+                    var de = global::AirFrameXR.PipelineModel.RateMapFoveation.DensityEye(view, rm, 1.0, null);
+                    string J(double[] v) => string.Join(",", v.Select(x => x.ToString("0.0000", ic)));
+                    lines.Add($"{c["name"]}|rule={J(rule)}|zero={J(zl)}|density={de[0]}x{de[1]}");
+                }
+                File.WriteAllLines(Path.Combine(outDir, "ratemap.txt"), lines);
+                return 0;
+            }
             var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
             if (replay != null) return Replay(replay, outDir);
             var perfGame = Arg("--dump-performance");
