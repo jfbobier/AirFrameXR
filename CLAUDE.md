@@ -4,7 +4,7 @@ Wireless PCVR for NVIDIA: OpenXR runtime (VDXR + our shim `ovrshim/`) -> Rust ho
 
 ## Rules
 
-- **The engine is off limits without asking first**: `ovrshim/`, `nvenc/`, `tools/host/`, `tools/mirrordesktop/`, the IPC (`ovrshim/ipc.h`) and anything on the frame path. Allowed without asking: the GUIs (`tools/gui/`), docs, the harness, and behaviour changes that go through existing parameters (`session.json`, `airframexr.json`, host stdin commands). A comment-only edit in engine code still counts as touching it.
+- **The engine is off limits without asking first**: `ovrshim/`, `nvenc/`, `tools/host/`, the IPC (`ovrshim/ipc.h`) and anything on the frame path. Allowed without asking: the GUIs (`tools/gui/`), docs, the harness, **the desktop mirror (`tools/mirrordesktop/`): it is NOT part of the engine, it is an OpenXR client that talks to the engine like any game** (owner, 2026-11-06), and behaviour changes that go through existing parameters (`session.json`, `airframexr.json`, host stdin commands). A comment-only edit in engine code still counts as touching it.
 - Targeted changes. Reuse proven third-party code over writing our own. Prefer a manual toggle over an auto mode. Do not add settings or modes without a measurement that justifies them.
 - Do not say "works" for something that only builds. Say what was tested, how, and what was not (legend in `docs/progress.md`).
 - Commit only your own hunks; never reset or force-push. Another session may be editing the same tree. Ask before pushing, releasing, or deleting anything on GitHub.
