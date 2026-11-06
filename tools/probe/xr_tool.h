@@ -39,6 +39,7 @@ struct XrTool {
     float startFrac = 0.4f;
     float startBox[4] = { 0.97f, 0.71f, 0.69f, 0.63f };   // the line style starts on the author's ray measurement (outer, inner, upper, lower), capped at the panel; XR_PROBE_START_BOX=o,i,u,d replaces it
     bool useStartBox = false;
+    HANDLE parentH = nullptr;   // XR_PROBE_PARENT_PID: the tool app that started this scene; when it is gone the scene ends (an orphan kept streaming stale textures into every new host)
     bool lineStyle = true;   // fit: four bright line segments (visible until the lens cuts them), not a filled box; XR_PROBE_FIT_STYLE=box = the old blue box (lab scenarios)
     int frame = 0;
 
@@ -53,7 +54,8 @@ struct XrTool {
         mode = !strcmp(tool, "fit") ? Fit : !strcmp(tool, "restrict") ? Restrict : None;
         if (const char* s = getenv("XR_PROBE_FIT_STYLE")) lineStyle = strcmp(s, "box") != 0;
         if (const char* s = getenv("XR_PROBE_START_BOX")) { float v[4]; if (sscanf(s, "%f,%f,%f,%f", v, v + 1, v + 2, v + 3) == 4 && v[0] > 0 && v[1] > 0 && v[2] > 0 && v[3] > 0) memcpy(startBox, v, sizeof v); }
-        useStartBox = mode == Fit && lineStyle && !getenv("XR_PROBE_TOOL_START");
+        useStartBox = (mode == Fit && lineStyle && !getenv("XR_PROBE_TOOL_START")) || (mode == Restrict && getenv("XR_PROBE_START_BOX"));   // the restriction starts on the author's rays and shows the same bars only when the tool app says so (the lab's scenarios keep the whole view)
+        if (const char* s = getenv("XR_PROBE_PARENT_PID")) { const DWORD pid = (DWORD)atoi(s); if (pid) parentH = OpenProcess(SYNCHRONIZE, FALSE, pid); }
         if (const char* s = getenv("XR_PROBE_TOOL_START")) startFrac = std::max(0.2f, std::min(1.f, (float)atof(s)));
         if (const char* s = getenv("XR_PROBE_TOOL_SAVED_S")) savedFor = std::max(0.0, atof(s)) * 1000.0;
         if (keys && *keys) { scripted = true; ParseKeys(keys); }
@@ -88,6 +90,7 @@ struct XrTool {
     // ---- per frame: the panel from the told views, the keys, the state -------------------------------------------------------------------------------------------
     void Update(int fr, double nowMs, const XrFovf fov[2]) {
         frame = fr;
+        if (parentH && WaitForSingleObject(parentH, 0) == WAIT_OBJECT_0) { quit = true; return; }
         for (int e = 0; e < 2; e++) {
             const float tl = -tanf(fov[e].angleLeft), tr = tanf(fov[e].angleRight), tu = tanf(fov[e].angleUp), td = -tanf(fov[e].angleDown);
             const float np[4] = { e == 0 ? tl : tr, e == 0 ? tr : tl, tu, td };
@@ -176,6 +179,7 @@ struct XrTool {
             if (compare) { show = false; return L""; }
             return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\n" + (lineStyle ? L"push each line out until it disappears, bring it back until it is clearly visible, then ENTER" : L"push until the bar is gone, one step back, then ENTER");
         }
+        if (useStartBox && phase == Intro) return L"Choose what the game renders.\nFour bright lines mark the edges of the picture the game renders; outside them it is black. Arrows move a line inward, Shift + arrow outward, until you just notice the black at that edge, then one step back. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
         if (phase == Intro) return L"Choose what the game renders.\nArrows pull an edge in, Shift + arrow pushes it back out. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
         if (phase == Saved) return L"Saved.";
         if (compare) { show = false; return L""; }
@@ -222,6 +226,12 @@ struct XrTool {
         } else {
             if (!sceneDrawn) { c1->ClearView(rtv, grey, nullptr, 0); const float mid[4] = { 0.3f, 0.34f, 0.4f, 1 }; fill(x0, y0, x1, y1, mid); }
             fill(0, 0, W, y0, black); fill(0, y1, W, H, black); fill(0, y0, x0, y1, black); fill(x1, y0, W, y1, black);
+            if (useStartBox && !compare) {   // the same bars as the fit, on the edges of the box
+                static const float yellow[4] = { 1.f, 0.92f, 0.15f, 1 };
+                const float lt = std::max(6.f, ppt * 0.0087f), cxm = (x0 + x1) / 2, cym = (y0 + y1) / 2, hl = 0.22f * (y1 - y0), hw = 0.22f * (x1 - x0);
+                fill(x0 - lt / 2, cym - hl, x0 + lt / 2, cym + hl, yellow); fill(x1 - lt / 2, cym - hl, x1 + lt / 2, cym + hl, yellow);
+                fill(cxm - hw, y0 - lt / 2, cxm + hw, y0 + lt / 2, yellow); fill(cxm - hw, y1 - lt / 2, cxm + hw, y1 + lt / 2, yellow);
+            }
         }
         // the text: centred on the view axis, inside 12 degrees, only while the screen says so and (fit, working) only in the eye being fitted
         bool show; std::wstring s = Text(e, show);

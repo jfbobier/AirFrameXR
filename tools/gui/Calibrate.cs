@@ -182,6 +182,7 @@ namespace AirFrameXR
         {
             if (demoDir != null) { if (note != null) note.Text = "Demo window: nothing is started."; return; }
             if (probe != null && !probe.HasExited) return;
+            foreach (var stray in Process.GetProcessesByName("xr_probe")) { try { stray.Kill(); Log.Write("WARN", "calibrate: a stray xr_probe.exe was stopped"); } catch { } stray.Dispose(); }   // a scene left over from an earlier run would attach to the new host
             if (!File.Exists(Probe)) { if (note != null) { note.Text = "bench\\xr_probe.exe is missing from this package."; note.ForeColor = Color.Firebrick; } return; }
             if (!restrictTool && settings.Kind == HeadsetKind.Quest) { if (note != null) { note.Text = "A Quest has no picture edges to fit."; note.ForeColor = Color.Firebrick; } return; }
             if (Process.GetProcessesByName("streamer").Length == 0) { StartStreamer(); return; }
@@ -192,7 +193,7 @@ namespace AirFrameXR
             liveState = Text_("Starting the OpenXR scene...", true);
             liveLabel = Text_("", true);
             Text_(restrictTool
-                ? "Arrows pull an edge in 1 degree, Shift + arrow pushes it back out, Tab: both eyes / one eye, hold SPACE: the whole view, Enter: save, Esc: leave. Keep this window in front: it receives the keys."
+                ? "Four bright lines mark the edges of the picture the game renders: arrows pull a line in 1 degree, Shift + arrow pushes it back out, Tab: both eyes / one eye, hold SPACE: the whole view, Enter: save, Esc: leave. Keep this window in front: it receives the keys."
                 : "Arrows push an edge out until its black bar is gone, Shift + arrow pulls it back, hold SPACE: compare, Enter: this eye is finished (the second eye saves), Esc: leave. One eye at a time: close the other. Keep this window in front: it receives the keys.", true);
             Buttons(Btn("Stop", () => { EndTool(); ShowIntro(); }));
             // the streamer takes the settings change within a moment; the scene is started after it so the game is told the whole panel
@@ -209,7 +210,8 @@ namespace AirFrameXR
                 var psi = new ProcessStartInfo(Probe, "\"" + ProbeLog + "\" 100000000 86400") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(Probe) };
                 psi.EnvironmentVariables["XR_PROBE_TOOL"] = restrictTool ? "restrict" : "fit";
                 var author = UserFovStore.Load().FirstOrDefault(u => u.Source == "author");   // the fit's lines start on the author's ray measurement
-                if (!restrictTool && author != null) psi.EnvironmentVariables["XR_PROBE_START_BOX"] = string.Join(",", author.Tan.Select(v => v.ToString("0.####", CultureInfo.InvariantCulture)));
+                psi.EnvironmentVariables["XR_PROBE_PARENT_PID"] = Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);   // the scene ends with this window, whatever happens to it
+                if (author != null) psi.EnvironmentVariables["XR_PROBE_START_BOX"] = string.Join(",", author.Tan.Select(v => v.ToString("0.####", CultureInfo.InvariantCulture)));
                 var vab = Path.Combine(Paths.Dir, "bench", "littlest_tokyo.vab");
                 if (restrictTool && File.Exists(vab)) psi.EnvironmentVariables["XR_PROBE_SCENE"] = vab;
                 probe = Process.Start(psi);
