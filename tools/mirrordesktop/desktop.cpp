@@ -18,7 +18,7 @@ cbuffer CB : register(b0) {
     float4 cursor;   // xy: uv over the desktop (negative: none), zw: desktop size in pixels
     float4 mode;     // x: 1 = HDR (scRGB), y: SDR white level (scRGB units of the desktop's white), z: 1 = draw the laser, w: eye image height in pixels
     float4 laser;    // the pointing beam in this eye's NDC: x0 y0 x1 y1
-    float4 pass;     // x: 1 = the quad is the controls hint (drawn from `help`), not the desktop
+    float4 hintq;    // x: 1 = the quad is the controls hint (drawn from `help`), not the desktop
 };
 Texture2D desk : register(t0);
 Texture2D help : register(t1);
@@ -54,7 +54,7 @@ float4 PS(VSOut i) : SV_Target {
     }
     float2 uv = ScreenUV(i.ndc);
     if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) discard;
-    if (pass.x > 0.5) return float4(help.Sample(smp, uv).rgb, 1);
+    if (hintq.x > 0.5) return float4(help.Sample(smp, uv).rgb, 1);
     float3 c = desk.Sample(smp, uv).rgb;
     if (mode.x > 0.5) {
         c = max(c, 0) / mode.y;                                        // the desktop's SDR white becomes 1
