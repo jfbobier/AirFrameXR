@@ -237,6 +237,9 @@ int main(int argc, char** argv) {
 
     // state
     Screen screen{}; bool haveScreen = false, replace = true; int64_t lastTime = 0; bool primWas[2] = { false, false }, gripWas[2] = { false, false }, panelOpen = false;
+    // a controller is "in use" (and its beam drawn, its aim moving the mouse) only once it is confirmed: it sent an input (trigger, grip, stick, a button), or its aim pose, seen from the head, has moved
+    // at least 6 cm and been at least 15 cm from it. A pose the headset reports without a controller (head-locked, or at the origin) does neither: no ray from the head.
+    bool confirmed[2] = { false, false }, haveRel[2] = { false, false }; V3 relFirst[2]{}; float relMaxDist[2] = { 0, 0 }, relMoved[2] = { 0, 0 };
     LARGE_INTEGER qpf; QueryPerformanceFrequency(&qpf); auto qpcMs = [&] { LARGE_INTEGER t; QueryPerformanceCounter(&t); return (double)t.QuadPart * 1000.0 / (double)qpf.QuadPart; };
     double perfT0 = qpcMs(), frameStart = 0, frameMaxMs = 0, renderSumMs = 0; int perfFrames = 0;
     bool seenHand = false, seenHit = false; bool left = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, stickMax = 0; bool primSeen = false; float su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
@@ -287,16 +290,31 @@ int main(int argc, char** argv) {
                 if (!haveScreen || replace) { screen = placeFacing(facingYaw(headYaw(hq)), hp, aspect); haveScreen = true; replace = false; }
                 {   // a press of the trigger on the other controller takes the beam over (that press does not click)
                     const int other = 1 - activeHand; XrSpaceLocation ol;
-                    if (tracked(other, ol) && takesBeam(flt(aTrigger, other))) {
+                    if (confirmed[other] && tracked(other, ol) && takesBeam(flt(aTrigger, other))) {
                         activeHand = other; swallow = true; smoothing = false; L("the %s controller takes the beam", activeHand ? "right" : "left");
                         event("hand_switch", activeHand ? "right" : "left");
                     }
+                }
+                for (int h = 0; h < 2; h++) {
+                    if (confirmed[h]) continue;
+                    gi.subactionPath = hands[h]; gi.action = aStick; XrActionStateVector2f sv0{ XR_TYPE_ACTION_STATE_VECTOR2F }; xrGetActionStateVector2f(sess, &gi, &sv0);
+                    const bool used = flt(aTrigger, h) > 0.05f || flt(aSqueeze, h) > 0.05f || btn(aPrimary, h) || btn(aSecondary, h) || (sv0.isActive && (std::fabs(sv0.currentState.x) > 0.2f || std::fabs(sv0.currentState.y) > 0.2f));
+                    XrSpaceLocation cl; bool movedFromHead = false;
+                    if (tracked(h, cl)) {
+                        const V3 rel = rotate(conj(hq), sub(toV(cl.pose.position), hp));   // the aim position in the head's own frame: a head-locked pose does not change here
+                        if (!haveRel[h]) { haveRel[h] = true; relFirst[h] = rel; }
+                        const V3 dv = sub(rel, relFirst[h]);
+                        relMoved[h] = std::max(relMoved[h], std::sqrt(dv.x * dv.x + dv.y * dv.y + dv.z * dv.z));
+                        relMaxDist[h] = std::max(relMaxDist[h], std::sqrt(rel.x * rel.x + rel.y * rel.y + rel.z * rel.z));
+                        movedFromHead = relMoved[h] >= 0.06f && relMaxDist[h] >= 0.15f;
+                    }
+                    if (used || movedFromHead) { confirmed[h] = true; L("the %s controller is confirmed in use (%s): its beam is drawn", h ? "right" : "left", used ? "input" : "its pose moves away from the head"); event("controller_confirmed", h ? "right" : "left"); }
                 }
                 bool aimOk = false; V3 o{}, d{}; int hand = activeHand; float trig = 0, stickY = 0; bool prim[2] = { false, false };
                 for (int k = 0; k < 2 && !aimOk; k++) {
                     hand = k == 0 ? activeHand : 1 - activeHand;
                     XrSpaceLocation al;
-                    if (tracked(hand, al)) {
+                    if (confirmed[hand] && tracked(hand, al)) {
                         o = toV(al.pose.position); d = norm(rotate(toQ(al.pose.orientation), { 0, 0, -1 })); aimOk = true;
                         trig = flt(aTrigger, hand);
                         if (swallow) { if (takeOverReleased(trig)) swallow = false; else trig = 0; }
