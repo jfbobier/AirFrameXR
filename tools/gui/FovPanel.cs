@@ -95,6 +95,7 @@ namespace AirFrameXR
             fovTick.CheckedChanged += (s, e) => FovTickChanged();
             profileBox.SelectedIndexChanged += (s, e) => ProfileChanged();
             fitTick.CheckedChanged += (s, e) => FitChanged();
+            HandleCreated += (s, e) => { var f = FindForm(); if (f != null) f.Activated += (s2, e2) => { if (!loading) Reload(); }; };   // a tool (the wizard, the manager) may have changed the settings while this window was behind
             warnTimer.Tick += (s, e) => closeWarn.Visible = StreamerProc.Running;
             warnTimer.Start();
             Disposed += (s, e) => { warnTimer.Dispose(); tips.Dispose(); };

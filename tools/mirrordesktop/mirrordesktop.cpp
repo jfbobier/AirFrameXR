@@ -378,6 +378,15 @@ int main(int argc, char** argv) {
                     if (hit && std::fabs(stickY) > 0.5f && GetTickCount64() - lastWheel > (ULONGLONG)(220 - 100 * std::fabs(stickY))) { event("wheel", stickY > 0 ? "up" : "down"); if (mouse) wheel(stickY > 0 ? 1 : -1); lastWheel = GetTickCount64(); }
                 }
 
+                // the pointer the user sees is the dot of the picture (the desktop capture does not carry the cursor): when the beam is not on the screen (no controller, or it points elsewhere)
+                // the dot is the real Windows cursor, so a physical mouse is always visible
+                if (cu < 0) {
+                    POINT rc2;
+                    if (GetCursorPos(&rc2)) {
+                        const float mu = (float)(rc2.x - g_mon.left) / (float)std::max<LONG>(1, g_mon.right - g_mon.left - 1), mv = (float)(rc2.y - g_mon.top) / (float)std::max<LONG>(1, g_mon.bottom - g_mon.top - 1);
+                        if (mu >= 0 && mu <= 1 && mv >= 0 && mv <= 1) { cu = mu; cv = mv; }
+                    }
+                }
                 if (hintHit != panelOpen) { panelOpen = hintHit; L("the controls hint %s", panelOpen ? "opens" : "closes"); }
                 // the picture
                 float ndc[16], extra[10]; for (float& f : ndc) f = NAN; for (float& f : extra) f = NAN; extra[0] = cu; extra[1] = cv;
