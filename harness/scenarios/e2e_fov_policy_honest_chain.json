@@ -47,15 +47,15 @@
   "host": {
     "shim": true,
     "fps": 90,
-    "seconds": 60,
+    "seconds": 150,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "exit_after_frames": 420,
-    "fov_override": "0.97,0.71,0.69,0.63",
-    "fov_whitelist": []
+    "fov_scale": "80,80,80,80",
+    "fov_whitelist": [],
+    "fov_override": "0.97,0.71,0.69,0.63"
   },
   "client": {
-    "seconds": 55,
+    "seconds": 140,
     "connect_timeout": 45,
     "yaw_amp": 0.5,
     "yaw_hz": 0.25,
@@ -79,7 +79,7 @@
     ]
   },
   "gpu_sample": true,
-  "timeout_s": 200,
+  "timeout_s": 330,
   "checks": {
     "host_min_frames": 250,
     "client_min_frames": 200,
