@@ -1578,10 +1578,22 @@ fn publish_unrestricted(ipc: *mut std::ffi::c_void, m: &std::collections::HashMa
 /// is missing, read as the shim's list, and read again when its modification time changes. Returns the list and the time it was read at.
 fn load_fov_whitelist(path: &std::path::Path) -> (String, Option<std::time::SystemTime>) {
     if !path.exists() {
-        let _ = fs::write(path, fov_intake::WHITELIST_DEFAULT.replace('\n', "\r\n"));
+        let _ = fs::write(path, fov_intake::WHITELIST_USER_TEMPLATE.replace('\n', "\r\n"));
     }
-    let text = fs::read_to_string(path).unwrap_or_default();
-    (fov_intake::whitelist_from_text(&text), fs::metadata(path).and_then(|m| m.modified()).ok())
+    // the shipped list sits next to it (replaced by an update); a development tree without it uses the same entries from the code
+    let shipped = fs::read_to_string(whitelist_default_path(path)).unwrap_or_else(|_| fov_intake::WHITELIST_DEFAULT.to_string());
+    let user = fs::read_to_string(path).unwrap_or_default();
+    (fov_intake::whitelist_merge(&shipped, &user), whitelist_mtime(path))
+}
+
+fn whitelist_default_path(path: &std::path::Path) -> std::path::PathBuf {
+    path.with_file_name("fov_restriction_whitelist.default.txt")
+}
+
+/// the newer modification time of the two files: what the poll compares
+fn whitelist_mtime(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    let m = |p: &std::path::Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    m(path).max(m(&whitelist_default_path(path)))
 }
 
 fn publish_whitelist(ipc: *mut std::ffi::c_void, list: &str) {
@@ -2675,7 +2687,7 @@ fn main() {
             // the whitelist file is read again when it changes (the shim takes the list at an app's start)
             if fov_whitelist_checked.elapsed() >= std::time::Duration::from_secs(1) {
                 fov_whitelist_checked = std::time::Instant::now();
-                if fs::metadata(&fov_whitelist_path).and_then(|m| m.modified()).ok() != fov_whitelist_mtime {
+                if whitelist_mtime(&fov_whitelist_path) != fov_whitelist_mtime {
                     let (list, mtime) = load_fov_whitelist(&fov_whitelist_path);
                     fov_whitelist_mtime = mtime;
                     publish_whitelist(ipc, &list);

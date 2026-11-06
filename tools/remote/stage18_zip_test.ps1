@@ -22,6 +22,8 @@ Check 'fovgrid_ships' ((Test-Path "$d\bench\fovgrid.exe") -and (Test-Path "$d\be
 
 Check 'no_logs_before_first_run' (-not (Test-Path "$d\logs")) ''
 Check 'no_user_config_shipped' (-not (Test-Path "$d\config\session.json")) ''
+Check 'whitelist_default_ships_with_uevr' ((Test-Path "$d\config\fov_restriction_whitelist.default.txt") -and (Select-String -Path "$d\config\fov_restriction_whitelist.default.txt" -Pattern 'UEVRBackend.dll' -Quiet)) ''
+Check 'no_user_whitelist_shipped' (-not (Test-Path "$d\config\fov_restriction_whitelist.txt")) ''
 $runs = @('--debug', '', '--debug')
 foreach ($r in $runs) {
   & cmd /c "`"$d\bin\alvr_host.exe`" --install-dir `"$d`" --benchmark-quality --bq-plan quick --bq-frames 10 --bq-warmup 5 $r > `"$t\run.txt`" 2>&1"

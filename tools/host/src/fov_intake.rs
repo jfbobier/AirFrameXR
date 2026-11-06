@@ -203,18 +203,31 @@ pub fn unrestricted_list<'a>(records: impl Iterator<Item = (&'a str, &'a Record)
     fit_list(names)
 }
 
-/// The user's fov_restriction_whitelist.txt: one entry per line, '#' starts a comment; a name ending in .dll is a module loaded in the game's process
-/// (UEVRBackend.dll), any other name is the game's executable. Returned as the shim's list: "|uevrbackend.dll|game.exe|", lower case.
-pub fn whitelist_from_text(text: &str) -> String {
-    let names: Vec<String> = text
-        .lines()
-        .map(|l| l.split('#').next().unwrap_or("").trim().to_ascii_lowercase())
-        .filter(|l| !l.is_empty() && !l.contains('|') && l.len() < 120)
-        .collect();
+fn whitelist_lines(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.lines().map(|l| l.split('#').next().unwrap_or("").trim().to_ascii_lowercase()).filter(|l| !l.is_empty() && !l.contains('|') && l.len() < 120)
+}
+
+/// The whitelist: the shipped list (config\fov_restriction_whitelist.default.txt, the games and mods known to obey the box, replaced by an update) plus the user's own
+/// (config\fov_restriction_whitelist.txt); one entry per line, '#' starts a comment; a name ending in .dll is a module loaded in the game's process (UEVRBackend.dll),
+/// any other name is the game's executable; a line starting with '-' in the user's file removes an entry of the shipped one. Returned as the shim's list:
+/// "|uevrbackend.dll|game.exe|", lower case.
+pub fn whitelist_merge(shipped: &str, user: &str) -> String {
+    let mut names: Vec<String> = whitelist_lines(shipped).filter(|l| !l.starts_with('-')).collect();
+    for l in whitelist_lines(user) {
+        match l.strip_prefix('-') {
+            Some(rest) => { let rest = rest.trim(); names.retain(|n| n != rest) }
+            None => names.push(l),
+        }
+    }
     fit_list(names)
 }
 
-/// What a new whitelist file starts with: the entries that are known to obey the box.
+/// One list on its own (the user's file without a shipped one)
+pub fn whitelist_from_text(text: &str) -> String {
+    whitelist_merge("", text)
+}
+
+/// The shipped list when the package's file is missing (a development tree): the entries that are known to obey the box.
 pub const WHITELIST_DEFAULT: &str = "# AirFrameXR: games and mods trusted to obey the FOV restriction.\n\
 # A trusted game is told the restricted box (\"Try to apply FOV restriction\") at its FIRST start; the restriction is still checked on that start, and a game\n\
 # that does not follow the box goes back to the whole view and stays there. Games not listed here are told the whole view at their first start and get the\n\
@@ -222,6 +235,12 @@ pub const WHITELIST_DEFAULT: &str = "# AirFrameXR: games and mods trusted to obe
 # One entry per line: a DLL name (a mod loaded into the game: the game is trusted when that module is in its process) or a game executable.\n\
 # Case does not matter; '#' starts a comment.\n\
 UEVRBackend.dll\n";
+
+/// What a new user whitelist starts with: no entries, the way to add and to remove one.
+pub const WHITELIST_USER_TEMPLATE: &str = "# AirFrameXR: your own games and mods trusted to obey the FOV restriction (told the restricted box at their FIRST start, still checked).\n\
+# The ones known to obey ship in fov_restriction_whitelist.default.txt (UEVRBackend.dll first); add yours here.\n\
+# One entry per line: a DLL name (a mod loaded into the game) or a game executable. A line starting with - stops trusting an entry of the shipped list (-UEVRBackend.dll).\n\
+# Case does not matter; '#' starts a comment.\n";
 
 #[cfg(test)]
 mod tests {
@@ -347,6 +366,11 @@ mod tests {
         // the whitelist file: comments, blank lines, case, a stray bar
         assert_eq!(whitelist_from_text("# trusted\nUEVRBackend.dll   # UEVR\n\n  Game-Win64-Shipping.EXE\nbad|name\n"), "|game-win64-shipping.exe|uevrbackend.dll|");
         assert_eq!(whitelist_from_text(WHITELIST_DEFAULT), "|uevrbackend.dll|");
+        // the shipped list and the user's: added, removed, no entry in the template
+        assert_eq!(whitelist_merge(WHITELIST_DEFAULT, "MyMod.dll\nGame.exe # mine\n"), "|game.exe|mymod.dll|uevrbackend.dll|");
+        assert_eq!(whitelist_merge(WHITELIST_DEFAULT, "-UEVRBackend.dll\nmymod.dll"), "|mymod.dll|");
+        assert_eq!(whitelist_merge(WHITELIST_DEFAULT, WHITELIST_USER_TEMPLATE), "|uevrbackend.dll|");
+        assert_eq!(whitelist_merge("", "-nothing.dll"), "");
         assert_eq!(whitelist_from_text(""), "");
     }
 }

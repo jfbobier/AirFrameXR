@@ -22,6 +22,7 @@ if (Test-Path "$root\out\gui\AirFrameXR.exe") { Copy-Item "$root\out\gui\AirFram
 Copy-Item "$root\_tmp\install\register_openxr_runtime.ps1" "$pkg\bin" -Force
 Copy-Item "$root\_tmp\install\README.txt" "$pkg\docs" -Force
 Copy-Item "$root\_tmp\install\session.default.json" "$pkg\config\session.default.json" -Force
+Copy-Item "$root\_tmp\install\fov_restriction_whitelist.default.txt" "$pkg\config\fov_restriction_whitelist.default.txt" -Force   # the games and mods known to obey the FOV restriction (UEVR first); the user's own additions go in config\fov_restriction_whitelist.txt
 # licences: notices, the project licence (if present) and the upstream texts
 New-Item -ItemType Directory -Force "$pkg\docs\licenses" | Out-Null
 Copy-Item "$root\_tmp\install\THIRD_PARTY_NOTICES.md" "$pkg\docs" -Force
@@ -77,7 +78,7 @@ $zip = "$root\out\dist\AirFrameXR-$version.zip"
 # everything sits under AirFrameXR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
 $ship = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\calibrate.exe', 'bin\launcher.exe', 'bin\mirrordesktop.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\calibrate.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
           'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json',
-          'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\sakura_breeze.mp3', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
+          'config\session.default.json', 'config\fov_restriction_whitelist.default.txt', 'bench\littlest_tokyo.vab', 'bench\sakura_breeze.mp3', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
 if ($flavour -ne 'release') { $ship += ($benchFiles | Where-Object { Test-Path "$pkg\bin\$_" } | ForEach-Object { "bin\$_" }) }
 $ship += $persShip
 $ship += $persFiles

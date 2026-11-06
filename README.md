@@ -232,7 +232,7 @@ the same code built with the telemetry on, so a diagnosis never changes the numb
   A **Recommended** tick sets the rate from the game's recorded runs on the connected headset, and **Recenter** (a button and a key, **End** by default; also sent at every game start) turns the tracking space to your
   current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), and
   [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) (archive) for why DLSS motion vectors were tried and removed.
-- **Picture edges, what the game renders, and the foveation computed for them** (Vision Pro app 1.4 for the picture edges): [how it works](#how-the-picture-edges-the-restriction-and-the-foveation-work). The foveation and the stream size follow your picture edges, Apple's map and your bitrate; trusted games and mods are listed in `config\fov_restriction_whitelist.txt`.
+- **Picture edges, what the game renders, and the foveation computed for them** (Vision Pro app 1.4 for the picture edges): [how it works](#how-the-picture-edges-the-restriction-and-the-foveation-work). The foveation and the stream size follow your picture edges, Apple's map and your bitrate; trusted games and mods are listed in `config\fov_restriction_whitelist.default.txt` (shipped, UEVR first) and your own `config\fov_restriction_whitelist.txt`.
 - **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the fit tool, the firewall and OpenXR-layer reviews. They follow the display
   (1080p laptops to 4K, 100-200 % scale), checked by the UI harness below.
 - **Desktop mirror** (optional): see above; it works with either hand.
@@ -287,8 +287,8 @@ declares the smaller of its panel and that. A Quest is the same model with the p
 is **always told the whole view the first time it runs**, so it always looks right. The streamer reads what the game actually submits. A game that follows the box it is told
 (UEVR, native OpenXR games) is restricted from its next start; a game that draws its own frustum or forces a fixed frame whatever it is told (some mods: Luke Ross's, the Gravity Rush 2
 and Uncharted mods, EnshroudedVR's square frame) is left on the whole view, since it draws everything anyway and the stream keeps its extra pixels; a game that only scales its own
-resolution stays on the whole view until you tick it. Games and mods you trust go in `config\fov_restriction_whitelist.txt` (a mod's DLL name, `UEVRBackend.dll` to begin with, or a
-game's executable): they are restricted from their first start, and still checked, so one that does not follow goes back to the whole view and stays there. The values need a game
+resolution stays on the whole view until you tick it. Games and mods you trust go on the whitelist (a mod's DLL name or a game's executable): the zip ships the known-good ones in `config\fov_restriction_whitelist.default.txt`
+(`UEVRBackend.dll` first) and yours go in `config\fov_restriction_whitelist.txt`, with `-name` to stop trusting a shipped entry: they are restricted from their first start, and still checked, so one that does not follow goes back to the whole view and stays there. The values need a game
 restart; a running game keeps what it started with.
 
 **The foveation is computed, and its savings are reinvested.** ALVR's foveation keeps a band of the frame at full density and compresses the rest. Apple's compositor already discards

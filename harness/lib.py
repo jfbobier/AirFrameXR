@@ -423,6 +423,9 @@ def run_scenario(sc, outdir: Path, log=print):
         CACHE.mkdir(parents=True, exist_ok=True)
         wlf.write_text("# written by the harness\r\n" + "".join(f"{n}\r\n" for n in wl))
         b_put(wlf, f"runs/{rid}/host_cfg/fov_restriction_whitelist.txt")
+        wld = CACHE / "fov_restriction_whitelist.default.txt"   # the shipped layer, empty in the lab: the scenario's list is the whole list
+        wld.write_text("# the lab ships no entries\r\n")
+        b_put(wld, f"runs/{rid}/host_cfg/fov_restriction_whitelist.default.txt")
 
     gpu_p = None
     if sc.get("gpu_sample"):

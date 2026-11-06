@@ -106,7 +106,7 @@ branches on the headset: the Vision Pro card writes V, the Advanced window write
   `fixed_size`, `undecided`) and keeps `config\fov_verdicts.json`. The restriction is a bonus: **a game is told V at its first start** and G only from a start
   after its record showed it follows the box (or when it is trusted); the choice is made by the shim at the app's start (VDXR latches FoV and size then)
   from three lists the host publishes: `restrictExes` (honoured a box, or the user's tick), `unrestrictedExes` (own frustum, fixed size, the user's list: always V,
-  even when trusted) and `trustedNames` (`config\fov_restriction_whitelist.txt`: a module loaded in the game's process, such as UEVR's `UEVRBackend.dll`,
+  even when trusted) and `trustedNames` (`config\fov_restriction_whitelist.default.txt`, shipped, plus the user's `config\fov_restriction_whitelist.txt`: a module loaded in the game's process, such as UEVR's `UEVRBackend.dll`,
   or a game executable: told G at its first start, still verified by its first record). An `undecided` game (a resolution scale) stays on V until the user
   ticks it or trusts it. The rules and the table of fake games the lab uses are in section 7 of the design.
 - **The headset tools** are scenes of the probe (`xr_probe` with `XR_PROBE_TOOL=fit|restrict`): an ordinary OpenXR app on the PC, streamed like a
