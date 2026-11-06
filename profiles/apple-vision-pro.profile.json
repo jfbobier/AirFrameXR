@@ -122,7 +122,7 @@
     "session_settings.video.passthrough.content.RgbChromaKey.green": 255,
     "session_settings.video.passthrough.content.RgbChromaKey.red": 0,
     "session_settings.video.passthrough.content.variant": "RgbChromaKey",
-    "session_settings.video.passthrough.enabled": false,
+    "session_settings.video.passthrough.enabled": true,
     "session_settings.video.preferred_codec.variant": "Hevc"
   },
   "notes": [
