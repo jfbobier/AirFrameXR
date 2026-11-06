@@ -269,7 +269,7 @@ namespace AirFrameXR
             static double AxisDeg(double s, double loT, double hiT, int axis) => Deg(axis == 0 ? -loT + s * (loT + hiT) : hiT - s * (loT + hiT));
 
             /// worst over-compression on one axis (r / max(1, m / rate)); cs, sh are ALVR's aligned values. loT / hiT: x outer / inner, y down / up tangents
-            public static double AxisLoss(double cs, double sh, double er, double loT, double hiT, int axis, RateMap rm, double m, int n, out double atDeg, out double rAt, out double allowAt)
+            public static double AxisLoss(double cs, double sh, double er, double loT, double hiT, int axis, RateMap rm, double m, int n, out double atDeg, out double rAt, out double allowAt, double[] freeDeg = null)
             {
                 double fs = cs + (1.0 - cs) / er;
                 var es = new double[n]; var src = new double[n];
@@ -281,6 +281,7 @@ namespace AirFrameXR
                     double r = (src[b] - src[a]) / (es[b] - es[a]) / fs;
                     double d = AxisDeg(src[i], loT, hiT, axis);
                     double allow = Math.Max(1.0, m / Math.Max(1e-6, Rate(rm, axis, d)));
+                    if (freeDeg != null && (d < freeDeg[0] || d > freeDeg[1])) allow = 1e9;   // outside the restriction window the game draws nothing: any compression is free
                     if (r / allow > worst) { worst = r / allow; atDeg = Math.Round(d, 1); rAt = Math.Round(r, 2); allowAt = Math.Round(allow, 2); }
                 }
                 return worst;
@@ -321,11 +322,11 @@ namespace AirFrameXR
                 return o;
             }
 
-            static double Worst(double size, double cs, double sh, double er, double loT, double hiT, int axis, RateMap rm, double m, out int opt)
+            static double Worst(double size, double cs, double sh, double er, double loT, double hiT, int axis, RateMap rm, double m, out int opt, double[] freeDeg = null)
             {
                 FfrVars((int)size, (int)size, cs, cs, sh, sh, er, er, out var ow, out _, out var cx, out _, out var sx, out _);
                 opt = ow;
-                return AxisLoss(cx, sx, er, loT, hiT, axis, rm, m, 801, out _, out _, out _);
+                return AxisLoss(cx, sx, er, loT, hiT, axis, rm, m, 801, out _, out _, out _, freeDeg);
             }
 
             /// rule 3 of section 5b, exact: per axis, over band contours 0.30 .. 0.95, the largest er (bisection) whose worst over-compression after ALVR's alignment is <= 1,
@@ -353,6 +354,57 @@ namespace AirFrameXR
                     best[axis] = cand ?? new[] { 0.45, 0.0, 1.0 };   // nothing under the map even without compression: cannot happen with a map <= 1 everywhere, kept safe
                 }
                 return new[] { best[0][0], best[1][0], best[0][1], best[1][1], best[0][2], best[1][2] };
+            }
+
+            /// The share of Apple's loss the foveation may add (AirFrameXR 1.3.5, owner 2026-11-07): the zero-loss geometry compressed each angle exactly as much as Apple's map already
+            /// loses there, and on a headset that showed as soft, over-compressed edges (the decoder's own softening comes on top). The compression allowed is max(1, Margin / rate).
+            public const double Margin = 0.6;
+            /// ALVR's own defaults (center_size 0.45 x 0.40, edge_ratio 4 x 5): the foveation is always milder than these, whatever the map allows: a centre 10 % larger and an
+            /// edge ratio 20 % lower at the most.
+            public static readonly double[] AlvrCenter = { 0.45 * 1.1, 0.40 * 1.1 }, AlvrEdge = { 4.0 * 0.8, 5.0 * 0.8 };
+            const double WindowMarginDeg = 2.0;
+
+            /// The foveation the stream gets: the zero-loss geometry at `Margin`, never stronger than ALVR's defaults (a centre at least that large, an edge ratio at most that high),
+            /// and, when a restriction window is on (outer, inner, upper, lower tangents), centred on that window: outside it (plus two degrees) the game draws nothing, so the edge
+            /// may be compressed as far as the cap allows. (cs x, cs y, shift x, shift y, er x, er y)
+            public static double[] Milder(double[] view, int[] eye, RateMap rm, double[] window = null)
+            {
+                var o = new double[6];
+                for (int axis = 0; axis < 2; axis++)
+                {
+                    double loT = axis == 0 ? view[0] : view[3], hiT = axis == 0 ? view[1] : view[2], span = loT + hiT, size = eye[axis];
+                    double[] free = null; double[] best = null; int bestPx = 0;
+                    var bands = new List<double[]>();
+                    if (window != null)
+                    {
+                        double gLo = axis == 0 ? window[0] : window[3], gHi = axis == 0 ? window[1] : window[2];
+                        gLo = Math.Min(loT, Math.Tan(Math.Atan(gLo) + WindowMarginDeg * Math.PI / 180)); gHi = Math.Min(hiT, Math.Tan(Math.Atan(gHi) + WindowMarginDeg * Math.PI / 180));
+                        free = new[] { -Deg(gLo), Deg(gHi) };
+                        bands.Add(axis == 0 ? new[] { (loT - gLo) / span, (loT + gHi) / span } : new[] { (hiT - gHi) / span, (hiT + gLo) / span });
+                    }
+                    else for (int k = 30; k < 96; k += 5) { BandUv(view, axis, rm, k / 100.0, out var a0, out var a1, out _, out _); bands.Add(new[] { a0, a1 }); }
+                    foreach (var b in bands)
+                    {
+                        double u0 = Math.Max(0, Math.Min(1, b[0])), u1 = Math.Max(0, Math.Min(1, b[1]));
+                        if (u1 - u0 < AlvrCenter[axis])   // never a smaller centre than ALVR's default: widen the band around its middle, inside the frame
+                        {
+                            double mid = (u0 + u1) / 2, w = AlvrCenter[axis];
+                            u0 = Math.Max(0, Math.Min(1 - w, mid - w / 2)); u1 = u0 + w;
+                        }
+                        var bp = BandParams(u0, u1 - u0);
+                        double cs = bp[0], sh = bp[1];
+                        if (Worst(size, cs, sh, 1.0, loT, hiT, axis, rm, Margin, out _, free) > 1.0 + 1e-6) continue;
+                        double lo = 1.0, hi = AlvrEdge[axis];
+                        double er;
+                        if (Worst(size, cs, sh, hi, loT, hiT, axis, rm, Margin, out _, free) <= 1.0 + 1e-6) er = hi;
+                        else { for (int it = 0; it < 22; it++) { double mid2 = (lo + hi) / 2; if (Worst(size, cs, sh, mid2, loT, hiT, axis, rm, Margin, out _, free) <= 1.0 + 1e-6) lo = mid2; else hi = mid2; } er = lo; }
+                        Worst(size, cs, sh, er, loT, hiT, axis, rm, Margin, out var px, free);
+                        if (best == null || px < bestPx) { best = new[] { cs, sh, er }; bestPx = px; }
+                    }
+                    best = best ?? new[] { AlvrCenter[axis], 0.0, 1.0 };
+                    o[axis] = best[0]; o[2 + axis] = best[1]; o[4 + axis] = best[2];
+                }
+                return o;
             }
 
             /// section 5 density rule: eye = min(target density x the view's span per axis, NVENC's cap, what the encode test fits), 32-aligned (floor)
@@ -390,6 +442,16 @@ namespace AirFrameXR
 
             /// V as one box (outer, inner, upper, lower): the per-edge union of the two eyes of video.headset_view (four numbers, or {left, right}), never wider than the
             /// panel the headset declares (the client declares the smaller of the two); absent = the whole panel; no headset seen yet = Apple's frustum from the map
+            /// The box the game is told (video.fov_override: outer, inner, upper, lower), never past the frame `view`; null when the restriction is off.
+            public static double[] RestrictionWindow(AppSettings st, double[] view)
+            {
+                if (!st.FovOverride) return null;
+                var w = new[] { st.FovOuter, st.FovInner, st.FovUpper, st.FovLower };
+                if (w.Any(x => !(x > 0.05))) return null;
+                for (int k = 0; k < 4; k++) w[k] = Math.Min(w[k], view[k]);
+                return w;
+            }
+
             public static double[] View(AppSettings st, RateMap rm)
             {
                 var panel = AppSettings.ReadClientFov() ?? rm.P;
@@ -408,7 +470,7 @@ namespace AirFrameXR
             /// bitrate / (fps x the profile's bits per pixel) pixels, spent as density (px per tangent unit, equal on both axes) over V, never above Apple's own full-rate
             /// density or NVENC's cap: the same bitrate costs what the shipped foveation cost, a lower bitrate gives a smaller stream (less to encode, send and decode), a higher
             /// one more density up to Apple's. Null when the budget cannot be computed. `mpx` = the encoded megapixels of the answer.
-            public static int[] ChooseEye(double[] view, RateMap rm, double bitrateMbps, double fps, out double mpx)
+            public static int[] ChooseEye(double[] view, RateMap rm, double bitrateMbps, double fps, out double mpx, double[] window = null)
             {
                 mpx = 0;
                 if (rm == null || rm.Bpp <= 0 || bitrateMbps <= 0 || fps <= 0) return null;
@@ -416,7 +478,7 @@ namespace AirFrameXR
                 int[] EyeAt(double d) => new[] { Math.Max(256, Math.Min(MaxEyeWidth, Align32Floor(d * sx))), Math.Max(256, Math.Min(MaxEyeHeight, Align32Floor(d * sy))) };
                 double Px(int[] e)
                 {
-                    var g = RateMapFoveation.ZeroLoss(view, e, rm);
+                    var g = RateMapFoveation.Milder(view, e, rm, window);
                     FfrVars(e[0], e[1], g[0], g[1], g[2], g[3], g[4], g[5], out var ow, out var oh, out _, out _, out _, out _);
                     return 2.0 * ow * oh;
                 }
@@ -445,6 +507,7 @@ namespace AirFrameXR
                 if (rm == null) return null;
                 if (st.FoveationManual) { if (!explicitChoice) return null; st.FoveationManual = false; }
                 var view = View(st, rm);
+                var window = RestrictionWindow(st, view);   // the restriction profile in force, capped at the frame: where the game draws; null = it draws everywhere
                 var eye = StreamEyeExpected(session);
                 var c = CultureInfo.InvariantCulture;
                 string sized = "";
@@ -453,7 +516,7 @@ namespace AirFrameXR
                 if (!st.StreamFitWindow && Json.Str(session, "session_settings.video.bitrate.mode.variant", "") == "ConstantMbps")
                 {
                     double mbps = Json.Num(session, "session_settings.video.bitrate.mode.ConstantMbps", 0), fps = Json.Num(session, "session_settings.video.preferred_fps", 0);
-                    var chosen = ChooseEye(view, rm, mbps, fps, out var mpx);
+                    var chosen = ChooseEye(view, rm, mbps, fps, out var mpx, window);
                     if (chosen != null)
                     {
                         sized = $" (stream sized for {mbps.ToString("0", c)} Mbps at {fps.ToString("0", c)} Hz: {mpx.ToString("0.0", c)} Mpx encoded{(eye != null && (eye[0] != chosen[0] || eye[1] != chosen[1]) ? $", was {eye[0]} x {eye[1]}" : "")})";
@@ -462,9 +525,9 @@ namespace AirFrameXR
                     }
                 }
                 if (eye == null || eye[0] < 256 || eye[1] < 256) return null;
-                var g = RateMapFoveation.ZeroLoss(view, eye, rm);
+                var g = RateMapFoveation.Milder(view, eye, rm, window);
                 RateMapFoveation.ApplyGeometry(session, g);
-                return $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye: centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}";
+                return $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye: centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}" + (window != null ? $" (centred on the restriction {string.Join(" / ", window.Select(x => x.ToString("0.00", c)))})" : "") + " (never stronger than ALVR's 0.45 x 0.40, 4 / 5)";
             }
 
             /// Apply on the files: loads the session, writes it back when something changed, logs. Never throws (a failure is a warning in the log).

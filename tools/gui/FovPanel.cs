@@ -23,7 +23,7 @@ namespace AirFrameXR
         readonly List<UserFov> profiles = new List<UserFov>();
         CheckBox fovTick = new CheckBox();   // the state behind the two radio buttons (never shown): ticked = the restriction
         RadioButton stockRb, restrictRb; ComboBox profileBox; Label fovNote, fovShare, clientHint = new Label(), closeWarn;
-        TrackBar fovQ; FlowLayoutPanel fovQRow; Button manage, calibrateBtn;
+        TrackBar fovQ; FlowLayoutPanel fovQRow; Button manage;
         CheckBox fitTick; Label fitNote, pipeLine, pipeBand; FlowLayoutPanel pipeWarn;
         int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
         double[] clientFov;   // the headset's tangents per edge (outer, inner, upper, lower), averaged over the two eyes; null = no headset seen yet
@@ -62,13 +62,9 @@ namespace AirFrameXR
             Controls.Add(fovNote); Controls.Add(fovShare);
 
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 0) };
-            calibrateBtn = new Button { Text = "Calibrate (1 min, headset on)...", AutoSize = true, AccessibleName = "Calibrate", Margin = new Padding(22, 2, 8, 2) };
-            calibrateBtn.Click += (s, e) => StartCalibration();
-            tips.SetToolTip(calibrateBtn, "Four bright lines in the headset: push each edge out until the lens cuts it, one eye at a time. The result is kept as a profile and chosen here. Any headset.");
-            row.Controls.Add(calibrateBtn);
-            manage = new Button { Text = "Manage profiles...", AutoSize = true, AccessibleName = "Manage profiles", Margin = new Padding(3, 2, 8, 2) };
+            manage = new Button { Text = "Manage profiles and calibrate...", AutoSize = true, AccessibleName = "Manage profiles and calibrate", Margin = new Padding(22, 2, 8, 2) };
             manage.Click += (s, e) => { if (ManageRequested != null) ManageRequested(); else StartManager(); };
-            tips.SetToolTip(manage, "Your profiles: enter values by hand, check one with the FoV grid, rename, delete.");
+            tips.SetToolTip(manage, "Your profiles: calibrate (one minute, the headset on, once is enough), enter values by hand, check one with the FoV grid, rename, delete.");
             row.Controls.Add(manage);
             status.ForeColor = Color.SeaGreen; status.Margin = new Padding(3, 8, 3, 0); status.MaximumSize = new Size(WrapWidth, 0);
             row.Controls.Add(status);
@@ -103,23 +99,6 @@ namespace AirFrameXR
             warnTimer.Start();
             Disposed += (s, e) => { warnTimer.Dispose(); tips.Dispose(); };
             Reload();
-        }
-
-        Process calProc;
-        /// "Calibrate": calibrate.exe (the line test); its profile is chosen when the list is read again after it closes.
-        void StartCalibration()
-        {
-            var exe = Path.Combine(Paths.Bin, "calibrate.exe");
-            if (!File.Exists(exe)) { MessageBox.Show(FindForm(), "bin\\calibrate.exe is missing from this package.", "Field of view", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (calProc != null && !calProc.HasExited) return;
-            try
-            {
-                calProc = Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = Paths.Bin });
-                var t = new Timer { Interval = 700 };
-                t.Tick += (s, e) => { if (calProc != null && calProc.HasExited) { t.Stop(); t.Dispose(); calProc = null; Reload(); } };
-                t.Start();
-            }
-            catch (Exception e) { MessageBox.Show(FindForm(), "Could not start the calibration: " + e.Message, "Field of view", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
 
         void StartManager()
@@ -164,8 +143,8 @@ namespace AirFrameXR
             fovQ.Value = (int)Math.Round(st.FovRenderQuality * 100);
             fitTick.Enabled = clientFov != null;
             fitTick.Checked = clientFov != null && (testFit || st.StreamFitWindow);
-            fovTick.Enabled = clientFov != null && profiles.Count > 0;
-            profileBox.Enabled = clientFov != null && profiles.Count > 0;
+            fovTick.Enabled = profiles.Count > 0;   // a profile can be chosen before any headset was seen (the cap at the headset's box is applied when it is known)
+            profileBox.Enabled = profiles.Count > 0;
             fovTick.Checked = on && fovTick.Enabled;
             restrictRb.Enabled = fovTick.Enabled; stockRb.Enabled = true;
             loading = false;
@@ -190,7 +169,8 @@ namespace AirFrameXR
             var u = Selected;
             if (clientFov == null)
             {
-                fovNote.Text = "The headset's field of view is not known yet: connect the headset once with the streamer (it is saved when it connects).";
+                fovNote.Text = fovTick.Checked ? "On: the game is told the chosen window (the headset has not connected yet: it is capped to the headset's own box once it has). " + RestartSentence
+                                               : "Off: the stock vendor view. The headset's own field of view is not known yet: connect it once with the streamer (it is saved when it connects).";
                 fovShare.Text = ""; UpdatePipeline(); return;
             }
             if (profiles.Count == 0)
@@ -229,7 +209,7 @@ namespace AirFrameXR
 
         void FovTickChanged()
         {
-            if (loading || clientFov == null) return;
+            if (loading) return;
             var st = new AppSettings();
             FovStore(st);
             Save(st, "field of view restriction " + (fovTick.Checked ? "on" : "off") + (fovTick.Checked && Selected != null ? " (" + Selected.Name + ")" : ""), Restart);
@@ -238,7 +218,7 @@ namespace AirFrameXR
 
         void ProfileChanged()
         {
-            if (loading || clientFov == null || Selected == null) return;
+            if (loading || Selected == null) return;
             var st = new AppSettings();
             if (fovTick.Checked) { FovStore(st); Save(st, "field of view profile " + Selected.Name, Restart); }
             else { Json.Set(st.Root, V + "fov_profile", Selected.Id); try { st.Save(); } catch { } }   // only remembered: nothing changes for the streamer
@@ -261,6 +241,8 @@ namespace AirFrameXR
             try { st.Save(); }
             catch (Exception e) { status.Text = "Cannot write config\\airframexr.json: " + e.Message; status.ForeColor = Color.Firebrick; return; }
             Log.Write("INFO", "fov: " + what + " (" + when + ")");
+            // the foveation follows the choice: centred on the restriction window (or the whole frame when it is off), at the same bitrate; a choice counts as explicit, so numbers set by hand give way
+            if (testEye == null && testClient == null && storePath == null) PipelineModel.PictureEdgesFoveation.ApplyToFiles(st, true);
             if (StreamerProc.Running && testEye == null && testClient == null)
             {
                 var host = FindForm(); if (host != null) host.UseWaitCursor = true;

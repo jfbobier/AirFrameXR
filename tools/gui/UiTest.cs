@@ -360,6 +360,23 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "ratemap.txt"), lines);
                 return 0;
             }
+            var mildCases = Arg("--milder-selftest");   // harness/milder_check.py: the foveation the stream gets (RateMapFoveation.Milder), case by case
+            if (mildCases != null)
+            {
+                var lines = new List<string>(); var ic = CultureInfo.InvariantCulture;
+                var root = global::AirFrameXR.Json.Parse(File.ReadAllText(mildCases));
+                var rm = global::AirFrameXR.PipelineModel.RateMapFoveation.FromProfile(global::AirFrameXR.Json.Parse(File.ReadAllText(Convert.ToString(root["profile"]))));
+                double[] Arr(object o) => ((object[])o).Select(x => Convert.ToDouble(x, ic)).ToArray();
+                foreach (var o in (object[])root["cases"])
+                {
+                    var c = (Dictionary<string, object>)o; var view = Arr(c["view"]); var eyeD = Arr(c["eye"]); var eye = new[] { (int)eyeD[0], (int)eyeD[1] };
+                    var win = c.ContainsKey("window") && c["window"] != null ? Arr(c["window"]) : null;
+                    var g = global::AirFrameXR.PipelineModel.RateMapFoveation.Milder(view, eye, rm, win);
+                    lines.Add(c["name"] + "|" + string.Join(",", g.Select(x => x.ToString("0.0000", ic))));
+                }
+                File.WriteAllLines(Path.Combine(outDir, "milder.txt"), lines);
+                return 0;
+            }
             var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
             if (replay != null) return Replay(replay, outDir);
             var perfGame = Arg("--dump-performance");
