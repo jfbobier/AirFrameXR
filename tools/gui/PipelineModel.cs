@@ -214,6 +214,168 @@ namespace AirFrameXR
             return $"Foveation keeps full detail from {Math.Abs(r.BandX[0]).ToString("0.0", c)}° outward to {r.BandX[1].ToString("0.0", c)}° toward the nose, and from {Math.Abs(r.BandY[0]).ToString("0.0", c)}° down to {r.BandY[1].ToString("0.0", c)}° up; the rest of the frame is compressed.";
         }
 
+        // ---- foveation from Apple's rate map (docs/PICTURE_EDGES_DESIGN.md section 5b, step D) --------------------------------------------------
+        // A port of harness/fov_stream_geometry.py (load_ratemap .. density_eye); harness/ratemap_check.py compares the two. Settings only: the result goes to session.json
+        // (ApplyGeometry) through the foveation parameters the host already reads. Nothing calls ApplyGeometry yet: the A/B of the zero-loss geometry on the 5090 decides.
+
+        /// Apple's rasterization rate map: the panel's frustum P (outer, inner, upper, lower tangents), the full-rate density in px per tangent unit per axis, and one table
+        /// per axis of [degrees from the eye's axis, rate] (x: negative = outer; y: negative = down).
+        public class RateMap { public double[] P, Density; public double[][] X, Y; }
+
+        public static class RateMapFoveation
+        {
+            /// STEP 0 SWITCH (docs/PICTURE_EDGES_DESIGN.md section 11): true = the client declares the frustum upside down, so the vertical table is read mirrored (up becomes down).
+            /// Default false = the documented orientation (50 up / 45 down). Settled by the client's `[proj]` log line; this is the only place the vertical orientation lives.
+            public static bool VerticalFlipped = false;
+
+            static double[][] Table(object o) => ((object[])o).Select(r => ((object[])r).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray()).ToArray();
+
+            /// the headset profile's `ratemap` block (profiles/apple-vision-pro.profile.json); null when absent
+            public static RateMap FromProfile(Dictionary<string, object> profile)
+            {
+                if (profile == null || !profile.TryGetValue("ratemap", out var ro) || !(ro is Dictionary<string, object> rm)) return null;
+                var p = ((object[])rm["frustum_tan"]).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
+                var lp = ((object[])rm["logical_px"]).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
+                return new RateMap { P = p, Density = new[] { lp[0] / (p[0] + p[1]), lp[1] / (p[2] + p[3]) }, X = Table(rm["x"]), Y = Table(rm["y"]) };
+            }
+
+            public static RateMap Load(string path) { try { return FromProfile(Json.Load(path)); } catch { return null; } }
+
+            /// the rate at `d` degrees: linear between samples, the end value beyond them (never zero)
+            public static double RateAt(double[][] tbl, double d)
+            {
+                if (d <= tbl[0][0]) return tbl[0][1];
+                if (d >= tbl[tbl.Length - 1][0]) return tbl[tbl.Length - 1][1];
+                for (int k = 0; k + 1 < tbl.Length; k++)
+                    if (tbl[k][0] <= d && d <= tbl[k + 1][0]) return tbl[k][1] + (tbl[k + 1][1] - tbl[k][1]) * (d - tbl[k][0]) / (tbl[k + 1][0] - tbl[k][0]);
+                return tbl[tbl.Length - 1][1];
+            }
+
+            /// the rate on an axis (0 = x, 1 = y) at `d` degrees, with the step-0 switch applied to the vertical one
+            public static double Rate(RateMap rm, int axis, double d) => axis == 0 ? RateAt(rm.X, d) : RateAt(rm.Y, VerticalFlipped ? -d : d);
+
+            /// ALVR's compress shader, output -> source mapping of one axis (harness/lib.py _fov_f)
+            public static double FovF(double e, double cs, double sh, double er)
+            {
+                double c0 = (1.0 - cs) / 2.0, c1 = (er - 1.0) * c0 * (sh + 1.0) / er, c2 = (er - 1.0) * cs + 1.0;
+                double lo = c0 * (sh + 1.0) / c2, hi = c0 * (sh - 1.0) / c2 + 1.0, center = e * c2 / er + c1;
+                double d2 = e * c2, d3 = (e - 1.0) * c2 + 1.0;
+                if (e < lo) { var g1 = e / lo; return g1 * center + (1.0 - g1) * d2; }
+                if (e > hi) { var g2 = (1.0 - e) / (1.0 - hi); return g2 * center + (1.0 - g2) * d3; }
+                return center;
+            }
+
+            static double AxisDeg(double s, double loT, double hiT, int axis) => Deg(axis == 0 ? -loT + s * (loT + hiT) : hiT - s * (loT + hiT));
+
+            /// worst over-compression on one axis (r / max(1, m / rate)); cs, sh are ALVR's aligned values. loT / hiT: x outer / inner, y down / up tangents
+            public static double AxisLoss(double cs, double sh, double er, double loT, double hiT, int axis, RateMap rm, double m, int n, out double atDeg, out double rAt, out double allowAt)
+            {
+                double fs = cs + (1.0 - cs) / er;
+                var es = new double[n]; var src = new double[n];
+                for (int i = 0; i < n; i++) { es[i] = i / (double)(n - 1); src[i] = FovF(es[i], cs, sh, er); }
+                double worst = 0; atDeg = 0; rAt = 0; allowAt = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    int a = Math.Max(0, i - 1), b = Math.Min(n - 1, i + 1);
+                    double r = (src[b] - src[a]) / (es[b] - es[a]) / fs;
+                    double d = AxisDeg(src[i], loT, hiT, axis);
+                    double allow = Math.Max(1.0, m / Math.Max(1e-6, Rate(rm, axis, d)));
+                    if (r / allow > worst) { worst = r / allow; atDeg = Math.Round(d, 1); rAt = Math.Round(r, 2); allowAt = Math.Round(allow, 2); }
+                }
+                return worst;
+            }
+
+            /// the interval where rate >= contour, clipped to the view, in source eye uv (x from the outer edge, y from the top)
+            static void BandUv(double[] view, int axis, RateMap rm, double contour, out double u0, out double u1, out double d0, out double d1)
+            {
+                double loT = axis == 0 ? view[0] : view[3], hiT = axis == 0 ? view[1] : view[2];
+                double loD = -Deg(loT), hiD = Deg(hiT);
+                double first = double.NaN, last = double.NaN, near = 0, nearAbs = double.MaxValue;
+                for (int i = 0; i <= 2000; i++)
+                {
+                    double d = loD + (hiD - loD) * i / 2000;
+                    if (Math.Abs(d) < nearAbs) { nearAbs = Math.Abs(d); near = d; }
+                    if (Rate(rm, axis, d) >= contour) { if (double.IsNaN(first)) first = d; last = d; }
+                }
+                if (double.IsNaN(first)) { first = last = near; }
+                double a = Math.Tan(first * Math.PI / 180.0), b = Math.Tan(last * Math.PI / 180.0), span = loT + hiT;
+                d0 = first; d1 = last;
+                if (axis == 0) { u0 = (a + loT) / span; u1 = (b + loT) / span; }
+                else { u0 = (hiT - b) / span; u1 = (hiT - a) / span; }
+            }
+
+            /// rules 1-2 of section 5b: band = rate >= contour clipped to the view, er = (1 / rate at the edge that allows more + 1) / 2 in [1, 10]
+            /// (cs x, cs y, shift x, shift y, edge ratio x, edge ratio y)
+            public static double[] RuleGeometry(double[] view, RateMap rm, double contour = 0.5)
+            {
+                var o = new double[6];
+                for (int axis = 0; axis < 2; axis++)
+                {
+                    BandUv(view, axis, rm, contour, out var u0, out var u1, out _, out _);
+                    var bp = BandParams(u0, u1 - u0);
+                    double loT = axis == 0 ? view[0] : view[3], hiT = axis == 0 ? view[1] : view[2];
+                    double edge = Math.Max(Rate(rm, axis, -Deg(loT)), Rate(rm, axis, Deg(hiT)));
+                    o[axis] = bp[0]; o[2 + axis] = bp[1]; o[4 + axis] = Math.Min(10.0, Math.Max(1.0, (1.0 / edge + 1.0) / 2.0));
+                }
+                return o;
+            }
+
+            static double Worst(double size, double cs, double sh, double er, double loT, double hiT, int axis, RateMap rm, double m, out int opt)
+            {
+                FfrVars((int)size, (int)size, cs, cs, sh, sh, er, er, out var ow, out _, out var cx, out _, out var sx, out _);
+                opt = ow;
+                return AxisLoss(cx, sx, er, loT, hiT, axis, rm, m, 801, out _, out _, out _);
+            }
+
+            /// rule 3 of section 5b, exact: per axis, over band contours 0.30 .. 0.95, the largest er (bisection) whose worst over-compression after ALVR's alignment is <= 1,
+            /// keeping the contour with the fewest encoded pixels on that axis. eye = the per-eye stream size; returns cs x, cs y, shift x, shift y, er x, er y
+            public static double[] ZeroLoss(double[] view, int[] eye, RateMap rm, double m = 1.0)
+            {
+                var best = new double[2][];
+                for (int axis = 0; axis < 2; axis++)
+                {
+                    double loT = axis == 0 ? view[0] : view[3], hiT = axis == 0 ? view[1] : view[2];
+                    double size = eye[axis];
+                    double[] cand = null; int candPx = 0;
+                    for (int k = 30; k < 96; k += 5)
+                    {
+                        BandUv(view, axis, rm, k / 100.0, out var u0, out var u1, out _, out _);
+                        var bp = BandParams(u0, u1 - u0);
+                        double cs = bp[0], sh = bp[1];
+                        if (Worst(size, cs, sh, 1.0, loT, hiT, axis, rm, m, out _) > 1.0 + 1e-6) continue;
+                        double a = 1.0, b = 10.0;
+                        if (Worst(size, cs, sh, b, loT, hiT, axis, rm, m, out _) <= 1.0 + 1e-6) a = b;
+                        else for (int it = 0; it < 22; it++) { double mid = (a + b) / 2; if (Worst(size, cs, sh, mid, loT, hiT, axis, rm, m, out _) <= 1.0 + 1e-6) a = mid; else b = mid; }
+                        Worst(size, cs, sh, a, loT, hiT, axis, rm, m, out var px);
+                        if (cand == null || px < candPx) { cand = new[] { cs, sh, a }; candPx = px; }
+                    }
+                    best[axis] = cand ?? new[] { 0.45, 0.0, 1.0 };   // nothing under the map even without compression: cannot happen with a map <= 1 everywhere, kept safe
+                }
+                return new[] { best[0][0], best[1][0], best[0][1], best[1][1], best[0][2], best[1][2] };
+            }
+
+            /// section 5 density rule: eye = min(target density x the view's span per axis, NVENC's cap, what the encode test fits), 32-aligned (floor)
+            public static int[] DensityEye(double[] view, RateMap rm, double fraction = 1.0, int[] fits = null)
+            {
+                double rawX = rm.Density[0] * fraction * (view[0] + view[1]), rawY = rm.Density[1] * fraction * (view[2] + view[3]);
+                double limX = fits != null ? Math.Min(MaxEyeWidth, fits[0]) : MaxEyeWidth, limY = fits != null ? Math.Min(MaxEyeHeight, fits[1]) : MaxEyeHeight;
+                return new[] { Align32Floor(Math.Min(rawX, limX)), Align32Floor(Math.Min(rawY, limY)) };
+            }
+
+            /// writes the six foveation numbers where the host reads them (session_settings.video.foveated_encoding.content.* and ALVR's cache openvr_config.foveation_*),
+            /// rounded to 3 decimals as the scenarios carry them
+            public static void ApplyGeometry(Dictionary<string, object> session, double[] g)
+            {
+                string[] keys = { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" };
+                for (int k = 0; k < 6; k++)
+                {
+                    var v = Math.Round(g[k], 3);
+                    Json.Set(session, "session_settings.video.foveated_encoding.content." + keys[k], v);
+                    Json.Set(session, "openvr_config.foveation_" + keys[k], v);
+                }
+            }
+        }
+
         // ---- the files -------------------------------------------------------------------------------------------------------------------------
         /// encoder facts from the session and the settings: foveated, its geometry, split mode, preset, engines (-1 = unknown)
         public static void ReadEncoder(AppSettings st, Dictionary<string, object> session, Inputs i)
