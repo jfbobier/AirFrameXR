@@ -43,7 +43,7 @@ AirFrameXR is built for people with a wireless headset and an NVIDIA GPU who wan
 - **One runtime, minimal copies.** Composition, frame pacing and encoding run in one pipeline that passes frames in shared GPU memory, with no extra copies between programs.
 - **A proven network layer.** [ALVR](https://github.com/alvr-org/ALVR) provides the networking, encoding and decoding that a large community has stabilised, and the headset only needs the ALVR app. **Meta Quest** and **Apple Vision Pro** are the tested headsets.
 - **Made for NVIDIA.** NVENC HEVC 10-bit encoding, and **split encoding** that uses all of the GPU's NVENC units instead of one (the RTX 5090 has three), tuned with the pacing and the network.
-- **The game renders only what you see.** Built-in field-of-view restriction and your own eye calibration tell the game the field of view the headset actually shows: about 30 % fewer pixels rendered on the Vision Pro profile (computed from the field of view, not yet a measured frame-time gain). See [How FOV restriction works](#how-fov-restriction-works).
+- **The picture you see is the picture you get, and the savings go back into quality.** Two tools you drive in the headset set the *picture edges* (a Vision Pro fit, about two minutes, optional) and what a game renders; a game is told the whole view the first time it runs, and from its next start the streamer tries to restrict it only if it obeys (a performance bonus, never a requirement). The foveation of the stream is computed from your picture edges and the rasterization map Apple's compositor really uses, and what it saves is reinvested as sharpness at your bitrate; lower the bitrate for latency. See [How the picture edges, the restriction and the foveation work](#how-the-picture-edges-the-restriction-and-the-foveation-work).
 - **Frame generation in the pipeline.** Optional GPU optical-flow interpolation with an edge-aware synthesis (the edge technique comes from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented) can improve displayed smoothness when a game cannot sustain the headset's refresh rate. It is experimental, off by default and **can add interpolation latency**; it is not a free FPS boost.
 - **Measure per game.** Game statistics record fps, latency, network and GPU for each game you play.
 - **Less guesswork.** The setup wizard reads what your headset supports, offers a community profile (shareable as a JSON file) and tests the result on your PC and network.
@@ -127,7 +127,7 @@ flowchart LR
 The windows, at 1080p and 125 % scale, rendered by the project's own UI harness with demo data (a made-up game history and headset, no real person's data).
 Regenerate them with `python3 harness/readme_screens.py`.
 
-**One front door.** Double-click `AirFrameXR.exe`: a card per tool, the OpenXR runtime switch (it switches back, too), and reviews of the OpenXR layers and the firewall rules. Right under the Streamer, the **FOV restriction and calibration** card: tick *Restrict the field of view*, choose one of your profiles, and the game renders only the part of the picture you can see (fewer pixels, a faster game). A change needs a streamer restart: the card says so in red and closes the streamer for you (it never starts it again, so you can go on ticking and start it when you are done).
+**One front door.** Double-click `AirFrameXR.exe`: a card per tool, the OpenXR runtime switch (it switches back, too), and reviews of the OpenXR layers and the firewall rules. On a Vision Pro, right under the Streamer, the **Vision Pro picture** card: the *whole panel* (what the headset declares, the default) or one of your fitted profiles, and **Fit the picture to your eyes**. What a game renders, and the *Try to apply FOV restriction* tick, are in **Advanced video and performance settings**, the same for every headset. A change needs a streamer restart; the windows say so.
 
 <p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, the FOV restriction and calibration card with its profile list, Game statistics, Settings, Advanced video and performance settings, Diagnostics and headset setup, and the status card"></p>
 
@@ -147,17 +147,17 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <p align="center"><img src="docs/images/ui_wizard.png" width="640" alt="The setup wizard: choose a setup"></p>
 
-**Your field of view, your profiles.** *Manage profiles and calibrate...* (the FOV card) opens the profile manager: every calibration you keep and every set of values you type is stored in `config\user_fov_profiles.json`, apart from the settings, so an upgrade does not lose it. Pick one to see its map (the headset's own box dashed, your measured window with its rays), delete the bad ones (a lot of people do not calibrate well the first time), enter values by hand (red when the numbers cannot be a field of view, yellow when they can but look strange), import a file someone shared, or check one with `fovgrid` in the headset. The standard Vision Pro calibration, and a starting point for the Quest 3 (about 10 % fewer game pixels, from one published measurement, not tested here), are copied in for the matching headset.
+**Your picture edges, your profiles.** The profile manager (from the Vision Pro card, or `configure.exe --fov`) lists every profile you keep (a fit, values you typed, a file someone shared), stored in `config\user_fov_profiles.json` apart from the settings so an upgrade does not lose them. Pick one to see its map, delete the bad ones (a lot of people do not fit well the first time), type values by hand (red when the numbers cannot be a field of view, yellow when they can but look strange), set them per eye, or import a file. Calibration is the Vision Pro's only: the Quest's runtime already reports its lens window. The standard Vision Pro profile is the author's own fit, listed but never proposed.
 
 <p align="center"><img src="docs/images/ui_fov_manager.png" width="640" alt="The profile manager: the list of profiles, the map of the selected one, the values entered by hand with the red / yellow check, and the calibrate, fovgrid and import buttons"></p>
 
-**Calibrate your own field of view.** *Calibrate now (30 min, needs the headset)* runs the **eye calibration wizard**: a small square drifts outward along one of 24 directions per eye and you click when it is gone, once with your eyes following it and once with them fixed. The result shows every ray, the point where it vanished for you, the outline of what your headset shows (dark) and the field of view the games get (blue), the smallest rectangle that covers 99 % of it. **Use this field of view** keeps it in your profiles and applies it after a streamer restart; **Save a copy...** writes a profile file you can share ([docs/FOV_CALIBRATION.md](docs/FOV_CALIBRATION.md)).
+**Fit the picture to your eyes** (Vision Pro, about two minutes, optional). The wizard and the settings are the same for every headset; this is the one tool that exists for the Vision Pro only. A blue rectangle appears in the headset, one eye at a time: with the arrow keys of the PC keyboard, push each edge out until its black bar is gone, one step back, Enter. What you see is what you get: the rectangle becomes the *picture edges* of that profile, and the stream is sized for exactly it. A second tool, **Choose it in the headset** (Advanced video and performance settings, every headset), does the same for what the game renders. The old 30-minute ray calibration is gone.
 
 <p align="center"><img src="docs/images/ui_calibrate.png" width="640" alt="The eye calibration result: 24 grey rays from the centre with a dot where the square vanished on each, the dark outline of the visible window and the blue rectangle the games are told"></p>
 
-*The pictures show made-up demo data from the UI harness (invented windows, not a person's measurement). The calibration itself has not been run on a headset yet.*
+*The pictures show made-up demo data from the UI harness (invented windows, not a person's measurement). The headset tools are drawn in the headset and are not pictured.*
 
-**In the setup wizard.** The last step asks for the field of view: *no restriction*, or a profile (the proposal for your headset is preselected). Calibrating takes about 30 minutes and needs the headset; otherwise take the proposal, or enter values by hand. Next stays grey until the choice is valid.
+**In the setup wizard.** One step for every headset: on a Vision Pro the *Picture edges* card (the whole panel is the default, *Fit now* is optional), on a Quest what the game renders. Nothing has to be calibrated: the streamer takes the picture the headset itself declares. That default is probably wider than what you see through a Vision Pro (the panel is declared wider than most faces see), so it costs some sharpness; fitting fine-tunes it.
 
 <p align="center"><img src="docs/images/ui_wizard_fov.png" width="640" alt="The setup wizard's Field of view step: no restriction or a profile, with the list, the map and the values entered by hand"></p>
 
@@ -232,8 +232,8 @@ the same code built with the telemetry on, so a diagnosis never changes the numb
   A **Recommended** tick sets the rate from the game's recorded runs on the connected headset, and **Recenter** (a button and a key, **End** by default; also sent at every game start) turns the tracking space to your
   current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), and
   [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) (archive) for why DLSS motion vectors were tried and removed.
-- **A field of view for the game, set from the streamer**, a render quality slider, and an **eye calibration wizard** that measures your own visible window and fills the field of view for you: [how it works](#how-fov-restriction-works).
-- **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the eye calibration, the firewall and OpenXR-layer reviews. They follow the display
+- **Picture edges, what the game renders, and the foveation computed for them** (Vision Pro app 1.4 for the picture edges): [how it works](#how-the-picture-edges-the-restriction-and-the-foveation-work). The foveation and the stream size follow your picture edges, Apple's map and your bitrate; trusted games and mods are listed in `config\fov_restriction_whitelist.txt`.
+- **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the fit tool, the firewall and OpenXR-layer reviews. They follow the display
   (1080p laptops to 4K, 100-200 % scale), checked by the UI harness below.
 - **Desktop mirror** (optional): see above; it works with either hand.
 - **Advanced video and performance settings**: the switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect and what we
@@ -254,7 +254,7 @@ What changed in each version: [docs/releases/](docs/releases/) (1.0 onward; earl
   - HEVC encoding is baked in for maximum split-encoding performance: no H.264 or AV1.
   - On the Vision Pro, in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips them (shown fps a little under the host
     fps). A host-side fix was built and parked (tag `archive/exp-restamp-2026-10-13`); it needs a change in the visionOS client, so it is not in the release.
-  - The field of view override and render quality slider have not been tried in a real game yet (lab scenarios only).
+  - The picture-edges tools, the restriction policy and the automatic foveation have been run in the lab (a mock headset and fake games, including UEVR's module name and the OpenXR SDK's sample app) but not yet on a real headset with a real game.
 - **Perceived quality varies a lot from one setup to another, especially with frame generation on.** Every time the same build felt different on the same PC and headset, the
   cause was a condition of the setup, not a game: the Wi-Fi channel (a neighbour's network produced micro-stutters that stock ALVR showed too; channel 149 cured them), the panel
   running 100 Hz instead of 90, the margin frames need before the headset's tick (7 ms is the default), the generation rate per game, the Quest tracking at 270 Hz being read as
@@ -264,72 +264,46 @@ What changed in each version: [docs/releases/](docs/releases/) (1.0 onward; earl
 - The benchmark that picks settings for your PC + router + headset is half built: the headless quality sweep works (`docs/BENCHMARK_DESIGN.md`); the headset phases and applying
   the results are next. Measured on a 1-NVENC laptop GPU and a 5090.
 
-## How FOV restriction works
+## How the picture edges, the restriction and the foveation work
 
 **What a field of view is.** A headset image is a window onto the world, and OpenXR describes the window by four angles from the eye's view axis to its edges: left, right, up and
 down (`XrFovf`). Renderers use their tangents, because a flat projection is linear in the tangent: the picture is a rectangle spanning `tan(left) + tan(right)` across and
 `tan(up) + tan(down)` down, and a pixel density is "pixels per unit of tangent". The four angles are rarely equal: the nose side is smaller than the outer side. The Vision Pro's app
-declares (left eye, the right is its mirror, outer = away from the nose):
+declares (left eye, the right is its mirror, outer = away from the nose) 60.8 / 45.6 / 50.6 / 45.6 degrees, 106 x 96 degrees in all, with a recommended image of 3552 x 3200 per
+eye. The Quest 3 declares 94 x 99 degrees and shows all of it. The Vision Pro does not: measured with a grid ([docs/AVP_FOV.md](docs/AVP_FOV.md), one person, a first estimate) it
+shows about 80 x 74 degrees of the 106 x 96 it declares, so about half the pixels of the frame land outside what you can see.
 
-| Edge | Outer | Inner | Up | Down |
-|---|---|---|---|---|
-| declared angle | 60.8 deg | 45.6 deg | 50.6 deg | 45.6 deg |
-| declared tangent | 1.79 | 1.02 | 1.22 | 1.02 |
+**How games use it** (we read UEVR's OpenXR path to see). An OpenXR game asks the runtime two things when it starts: the recommended image size per eye, and the four angles with each
+eye's pose. UEVR builds its projection from those angles, creates its swapchain at the recommended size (times its own resolution slider), renders, and submits a projection layer
+carrying the same angles and size. A game takes these values once, when it starts, and the runtime reads them once too (VDXR latches them at system creation). The consequence is the
+lever: **the game renders what it is told it has**.
 
-That is 106 x 96 degrees, with a recommended image of 3552 x 3200 per eye. The Quest 3 declares 94 x 99 degrees and shows all of it. The Vision Pro does not: measured with a grid
-([docs/AVP_FOV.md](docs/AVP_FOV.md), one person, left eye, a first estimate) it shows about 80 x 74 degrees of the 106 x 96 it declares (tangents 1.69 x 1.49 instead of
-2.81 x 2.24), so about half the pixels of the frame land outside what you can see.
+**Three boxes, per eye** (the design and the measurements: [docs/PICTURE_EDGES_DESIGN.md](docs/PICTURE_EDGES_DESIGN.md); the mechanism: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+The **panel** is what the headset's app can show. The **picture edges** are what the stream covers and you see: the whole panel by default, or your fit. **What the game renders** is
+the third, inside the picture edges, for performance. The PC decides all three before the connection and tells the Vision Pro app the picture edges over the control channel; the app
+declares the smaller of its panel and that. A Quest is the same model with the picture edges equal to the panel (its runtime reports the lens window).
 
-**How games use it** (we read UEVR's OpenXR path to see). An OpenXR game asks the runtime two things when it starts. `xrEnumerateViewConfigurationViews` returns the recommended image
-size per eye; `xrLocateViews` returns, with each eye's pose, the four angles. UEVR builds its projection from those angles, creates the swapchain at the recommended size (times its own
-resolution slider), renders, and submits a projection layer carrying the same angles and size. It does not use a visibility mask, and nothing in the handshake announces a change
-later, so a game takes these values once, when it starts. The runtime reads them once too (VDXR latches them at system creation). The consequence is the lever: **the game renders
-what it is told it has**. Tell it a smaller field of view and a proportionally smaller image, and a GPU-bound game does less work.
+**The restriction is a bonus.** *Try to apply FOV restriction* tells a game the smaller box and a proportionally smaller image size, so a GPU-bound game does less work, but a game
+is **always told the whole view the first time it runs**, so it always looks right. The streamer reads what the game actually submits. A game that follows the box it is told
+(UEVR, native OpenXR games) is restricted from its next start; a game that draws its own frustum or forces a fixed frame whatever it is told (some mods: Luke Ross's, the Gravity Rush 2
+and Uncharted mods, EnshroudedVR's square frame) is left on the whole view, since it draws everything anyway and the stream keeps its extra pixels; a game that only scales its own
+resolution stays on the whole view until you tick it. Games and mods you trust go in `config\fov_restriction_whitelist.txt` (a mod's DLL name, `UEVRBackend.dll` to begin with, or a
+game's executable): they are restricted from their first start, and still checked, so one that does not follow goes back to the whole view and stays there. The values need a game
+restart; a running game keeps what it started with.
 
-**How AirFrameXR uses it.** The headset's real window is the contract with the client: the Vision Pro app maps the stream frame over the field of view it declared, so the frame
-must keep covering all of it. Only the game is told something else. With the Vision Pro, the frame flow is:
+**The foveation is computed, and its savings are reinvested.** ALVR's foveation keeps a band of the frame at full density and compresses the rest. Apple's compositor already discards
+detail at the edges of the display (a rasterization map, static and identical on the two headsets measured), so detail the stream carries beyond it is wasted. On a Vision Pro, the
+launcher computes the band and the compression from your picture edges and that map, for the stream size in use, so that nothing is compressed below what the compositor keeps there;
+it does so when you choose a profile, when a fit finishes, in the setup wizard (Apple's default included) and at each streamer start. Numbers you edit by hand in Settings are left alone.
+At the whole-panel default that is about 17 % fewer encoded pixels than the shipped static foveation (computed); with a fit it keeps more detail, so it encodes more. **What it saves is
+reinvested in quality, not left on the table:** the stream size follows your constant bitrate, so the encoded frame costs the same bits per pixel as the shipped foveated profile did,
+and the pixels go to density where Apple's display can show it (never above Apple's own, or NVENC's 4096-wide eye). **Latency comes from lowering the bitrate:** a lower bitrate gives a
+smaller stream, with less to encode, send and decode. A size you type in Settings is kept. This applies to the foveated encode profile; the full-frame profile (`full-split`) is unchanged.
 
-![Frame size at each step on the Vision Pro with the measured visible field of view and foveation](docs/images/fov-pipeline-frame-sizes.svg)
-
-1. **The headset declares its views** when it connects (the app sends the render frustum, `views_config`). The host saves them in `config\airframexr_views.json`; the FOV card in the launcher
-   uses them to offer only the profiles that fit.
-2. **You choose what the game is told**: in the launcher's *FOV restriction and calibration* card, tick the restriction and choose a profile (four tangents: outer, inner, upper, lower). A copy of
-   the profile goes into `airframexr.json`; the values are never more than the headset's. For the Vision Pro, [docs/AVP_FOV.md](docs/AVP_FOV.md) gives the visible window and the calibrated values that fit it (0.97 / 0.71 / 0.69 /
-   0.63, the standard calibration copied into your profiles). The host turns them into per-edge fractions of the headset's tangents and publishes them to the shim.
-3. **The shim answers the game** at its next start: `GetEyeFov` returns the restricted angles, and the recommended size is the stream's eye size scaled by the restricted span on
-   each axis (about 2800 x 2500 for the row above with the AirFrameXR client's own visible limit declared, about 68 % of the pixels: computed, not measured). The game renders that, with the restricted projection.
-4. **Composition puts it back where it belongs.** The shim maps the game's layer into a frame that covers the headset's whole field of view (3552 x 3200 per eye), the margin the game
-   did not render stays black, and the picture sits where those angles fall in the frame.
-5. **The foveation warp, encode, network and decode do not know.** Both eyes go through ALVR's foveation warp into one 4224 x 1664 frame and through NVENC as before. The black
-   margin lies in the periphery, which the warp shrinks the most, so it is 51 % of the composed frame but 34 % of the stream frame, and black blocks cost almost no bits.
-6. **The client unwarps** and maps the frame over the declared field of view, as always. The margin shows as black at the edges, outside what the lens shows anyway (for the values
-   above).
-
-So the saving is the game's GPU work only; encode time, bitrate, decode time, frame generation and the headset app are unchanged. A game that is not GPU-bound gains nothing. The values
-**need a streamer restart** (the FOV card in the launcher closes the streamer for you when you change one, and you start it again when you are done; a running game keeps the picture it started with, so unticking the restriction shows nothing new until then), and the override remembers the headset's field of view it was made for: connected to a headset whose field of view differs (a Quest after a Vision Pro), it is not applied and the window says so (on a Quest, a lower of 1.00 would cut its 55-degree
-down edge); ticking again starts from the new headset's own values.
-
-**Spending the saving: the render quality slider.** Under the fields, a slider moves the recommended size between two limits computed from your own settings: the **floor** (what
-the restriction gives, the stream's pixel density over the smaller view) and the **ceiling** (the stream's own per-eye size, from your resolution settings, so a Quest's smaller one
-works the same way). The window shows both and the size at the slider. For the Vision Pro with the values above:
-
-| Slider | Game render per eye | Cost vs the floor | Samples per stream pixel |
-|---|---|---|---|
-| 0 % | 2366 x 2370 (5.6 Mpx) | 1.0x | 1.0 |
-| 50 % | 2959 x 2785 (8.2 Mpx) | 1.5x | about 1.5 |
-| 100 % | 3552 x 3200 (11.4 Mpx) | 2.0x | about 2.0 |
-
-The game's picture is filtered down to the stream's pixels by composition, so the extra pixels are supersampling: cleaner edges and less shimmer, not detail beyond what the stream
-carries. The cost is the game's GPU time and video memory, roughly linear in pixels for a GPU-bound game; 100 % costs what the game cost with no restriction. About 2 samples per pixel
-is already near where supersampling stops paying much, so there is no reason to go higher. Which position is right depends on how much headroom the game has: raise it while the game
-holds its frame rate. Off by default (0 %), and with no restriction nothing differs from 1.0.
-
-**Calibrate it yourself.** Launcher > *FOV restriction and calibration* > *Manage profiles and calibrate...* > *Calibrate now (30 min)* measures your own window instead of using the profile's (two passes, 48 clicks each, the headset on, the streamer open) and keeps (and applies) the smallest rectangle that covers 99 % of it, or 100 % or 97 % if you choose, as one of your profiles; the maths and the file format are in [docs/FOV_CALIBRATION.md](docs/FOV_CALIBRATION.md) and [docs/HMD_PROFILES.md](docs/HMD_PROFILES.md). It is new in 1.3.2 and has been checked on the PC only, not yet on a headset.
-
-**What is not known yet.** The visible window is one person's left eye at one fit of the headset; it moves with the seal, glasses inserts and IPD, so start from the recommended row
-(visible + 3 degrees) and check the corners for black with `fovgrid.exe` ([docs/FOV_GRID.md](docs/FOV_GRID.md)). The Vision Pro profile carries the measured window and the suggested render quality (25 %), and they are copied into your profiles once for the matching headset, never applied by themselves ([docs/HMD_PROFILES.md](docs/HMD_PROFILES.md)). The feature is covered by lab scenarios (the app gets exactly the tangents
-and recommended size, the margin is black, the picture sits inside it) and has not been tried in a real game. The bigger lever, spending the stream's own pixels on the visible window
-only, needs the client to declare that window; the host alone cannot do it. Details and keys: [docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md).
+**What is not known yet.** The visible window is one person's at one fit; it moves with the seal, glasses inserts and IPD, which is why the default is the whole panel and the fit is
+yours. Which way up and down are declared (the client logs the raw matrices once per declaration) and whether the reinvested density is visible on a headset are for the headset to
+answer; the lab (a mock headset, fake games, the OpenXR SDK's sample app) checks the logic and the numbers, not what you see. Details and keys:
+[docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md).
 
 ## Game audio
 The game's sound reaches the headset without installing anything: the host captures it with **Windows' process loopback** (everything the PC plays, taken before the output's volume and mute), so your Windows default output is left alone and games started as administrator are heard too. While the streamer runs it can mute your PC speakers (a checkbox in Settings, on by default) and puts the mute back when it closes. A virtual cable (VB-CABLE, a separate product) is the fallback, and the only way to get the headset's **microphone** into a game. Details, and what is not tested: [docs/INSTALL.md](docs/INSTALL.md#game-audio-and-headset-microphone).
@@ -438,7 +412,7 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 ## Documentation
 
 - **Start here:** [docs/INSTALL.md](docs/INSTALL.md) (install, settings, logs, audio), [docs/PERFORMANCE_KNOBS.md](docs/PERFORMANCE_KNOBS.md) (every knob and what should drive it), [docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md) (the Advanced video and performance settings window), [docs/HMD_PROFILES.md](docs/HMD_PROFILES.md) (community profiles).
-- **How it works:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (frame pipeline, threads, buffers), [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md) and [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md), [docs/AVP_FOV.md](docs/AVP_FOV.md) and [docs/FOV_GRID.md](docs/FOV_GRID.md) (field of view; [how FOV restriction works](#how-fov-restriction-works)), [docs/CHROMA_KEY_PROTOCOL.md](docs/CHROMA_KEY_PROTOCOL.md), [docs/DESKTOP_MIRROR.md](docs/DESKTOP_MIRROR.md), [docs/UI_SPEC.md](docs/UI_SPEC.md), [docs/CONFIGURE_WIZARD.md](docs/CONFIGURE_WIZARD.md), [docs/BENCHMARK_DESIGN.md](docs/BENCHMARK_DESIGN.md).
+- **How it works:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (frame pipeline, threads, buffers), [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md) and [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md), [docs/AVP_FOV.md](docs/AVP_FOV.md) and [docs/FOV_GRID.md](docs/FOV_GRID.md) (field of view; [how the picture edges, the restriction and the foveation work](#how-the-picture-edges-the-restriction-and-the-foveation-work)), [docs/CHROMA_KEY_PROTOCOL.md](docs/CHROMA_KEY_PROTOCOL.md), [docs/DESKTOP_MIRROR.md](docs/DESKTOP_MIRROR.md), [docs/UI_SPEC.md](docs/UI_SPEC.md), [docs/CONFIGURE_WIZARD.md](docs/CONFIGURE_WIZARD.md), [docs/BENCHMARK_DESIGN.md](docs/BENCHMARK_DESIGN.md).
 - **What we learned:** [docs/PERFORMANCE_FINDINGS.md](docs/PERFORMANCE_FINDINGS.md) (what was tried, so nobody repeats the dead ends).
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), [docs/DEVELOPMENT_PHILOSOPHY.md](docs/DEVELOPMENT_PHILOSOPHY.md), [docs/UPSTREAM.md](docs/UPSTREAM.md), [harness/README.md](harness/README.md).
 - **Status and history:** [docs/progress.md](docs/progress.md), [docs/releases/](docs/releases/). The older plans and logs are archived in [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) (only for revisiting a past decision).
