@@ -98,8 +98,8 @@ int main(int argc, char** argv) {
             if (persp) { float n[2]; proj(u, v, n); fprintf(f, "%s%s", p ? "," : "", px((int)((n[0] + 1.f) / 2.f * 512.f), (int)((1.f - n[1]) / 2.f * 512.f)).c_str()); }
             else fprintf(f, "%s%s", p ? "," : "", px(ex(u), ey(v)).c_str());
         }
-        // the cursor dot: pixels at known distances (desktop pixels) to the right of its centre; 1 desktop px = (xr - xl) / DW * 256 eye px
-        const float sc = std::max(1.f, DH / 1080.f), eyePerDesk = (xr - xl) / DW * 256.f;   // zoom: exactly 1
+        // the cursor dot (twice the old size since 0342d7e: 8 px core, 6 px ring on a 1080-line desktop): pixels at known distances (desktop pixels) to the right of its centre; 1 desktop px = (xr - xl) / DW * 256 eye px
+        const float sc = 2.f * std::max(1.f, DH / 1080.f), eyePerDesk = (xr - xl) / DW * 256.f;   // zoom: exactly 1
         auto at = [&](float deskPx) { return px((int)(ex(cu) + deskPx * eyePerDesk), ey(cv)); };
         fprintf(f, "],\"cursor_scale\":%.4f", sc);
         fprintf(f, ",\"cursor_core\":%s,\"cursor_ring\":%s,\"cursor_outside\":%s", at(2.f * sc).c_str(), at(5.5f * sc).c_str(), at(9.f * sc).c_str());
