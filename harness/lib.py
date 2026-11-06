@@ -1623,6 +1623,9 @@ def analyse_third_party(sc, outdir):
                 pts2 += [(ax, ay), (ax - d, ay), (ax + d, ay), (ax, ay - d), (ax, ay + d)]
             fr2 = read_rgb_at(cl, pts2)[30:]
             mag = lambda px: px[0] > 150 and px[2] > 150 and px[1] < 90
+            # counted from the first frame where the quad shows: the stream's first frames are the idle colour, before the game's first frame
+            start = next((i for i, fr in enumerate(fr2) if mag(fr[0]) or mag(fr[5])), None)
+            fr2 = fr2[start:] if start is not None else []
             out["hud_magenta_frac"] = round(sum(1 for fr in fr2 for px in fr if mag(px)) / max(1, len(fr2) * len(pts2)), 3)
     return out
 
@@ -1735,12 +1738,17 @@ def analyse(sc, outdir: Path):
 
     # the host's verdict on what the game submitted (engine step C of docs/PICTURE_EDGES_DESIGN.md: one `game_fov_verdict` event, the last one wins)
     # and per game start the first verdict after its game_started event (the second-start scenarios: one entry per start of the chain)
-    a["fov_verdict"], a["fov_starts"], a["fov_verdicts_all"] = None, [], []
+    a["fov_verdict"], a["fov_starts"], a["fov_verdicts_all"], a["fov_changed"] = None, [], [], []
     if (outdir / "host_stdout.txt").exists():
         want_new = False
         for line in (outdir / "host_stdout.txt").read_text(errors="replace").splitlines():
             if '"game_started"' in line:
                 want_new = True
+            if '"game_fov_changed"' in line and "{" in line:   # the app changed its size mid-run and the verdict stayed (fov_intake::within_run)
+                try:
+                    a["fov_changed"].append(json.loads(line[line.index("{"):]).get("data"))
+                except ValueError:
+                    pass
             if '"game_fov_verdict"' in line and "{" in line:
                 try:
                     d = json.loads(line[line.index("{"):]).get("data")
@@ -2252,7 +2260,7 @@ def evaluate(sc, a):
             vs = [v["verdict"] for v in a.get("fov_verdicts_all", [])]
             chk("third_party_verdict_stable", len(set(vs)) == 1, {"verdicts": vs, "sizes": [v["submitted_size"] for v in a.get("fov_verdicts_all", [])]}, "every verdict the host emitted in this run is the same one (a size change mid-run does not flip it)")
         if tk.get("changes"):   # the app really changed what it submits mid-run (the test is vacuous otherwise)
-            sz = {tuple(v["submitted_size"] or []) for v in a.get("fov_verdicts_all", [])}
+            sz = {tuple(v["submitted_size"] or []) for v in a.get("fov_verdicts_all", [])} | {tuple(c.get("submitted_size") or []) for c in a.get("fov_changed", [])}
             chk("third_party_size_changed_midrun", len(sz) >= 2, sorted(sz), "the shim recorded more than one submitted size in the run (the behaviour was exercised)")
         if "hud_magenta" in tk:
             chk("third_party_hud_in_stream", (tp.get("hud_magenta_frac") or 0) >= tk["hud_magenta"], tp.get("hud_magenta_frac"), f"the head-locked quad is composed in the stream on the view axis of both eyes (magenta >= {tk['hud_magenta']})")

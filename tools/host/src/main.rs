@@ -2561,6 +2561,7 @@ fn main() {
     let mut fov_whitelist_checked = std::time::Instant::now();
     let mut fov_seq_seen: u32 = 0;
     let mut fov_run_prev: Option<fov_intake::Record> = None;
+    let mut fov_run_cur: Option<fov_intake::Record> = None;   // this run's verdict so far (fov_intake::within_run)
     // the run record (games.json): one (headset repeated share, host repeat share) sample per status tick (10 s) while a game runs
     let mut run_windows: Vec<(f64, f64, f64)> = Vec::new();
     let mut run_stats = RunStats::default();
@@ -2706,7 +2707,14 @@ fn main() {
                                                       submitted: [[s8[0], s8[1], s8[2], s8[3]], [s8[4], s8[5], s8[6], s8[7]]],
                                                       submitted_size: [(sz[0], sz[1]), (sz[2], sz[3])], unrestricted: un != 0 };
                     let key = g.exe.to_ascii_lowercase();
-                    let r = fov_intake::update(fov_run_prev.as_ref(), o);
+                    let judged = fov_intake::update(fov_run_prev.as_ref(), o);
+                    let r = fov_intake::within_run(fov_run_cur.as_ref(), judged.clone());
+                    if r.verdict != judged.verdict {
+                        // the app changed its size at the told aspect after an honest first record (dynamic resolution, a slider, a resize): recorded, not re-judged
+                        logs::general("INFO", &format!("field of view intake: {} changed its render size to {}x{} (told {}x{}): the verdict stays {}", g.exe, sz[0], sz[1], rw, rh, r.verdict.name()));
+                        event(origin, "game_fov_changed", json!({ "exe": g.exe, "verdict": r.verdict.name(), "would_be": judged.verdict.name(), "told_size": [rw, rh], "submitted_size": [sz[0], sz[1], sz[2], sz[3]], "submitted": judged.last.submitted.concat() }));
+                    } else {
+                    fov_run_cur = Some(r.clone());
                     let next = fov_intake::restrict_next_start(Some(&r));
                     logs::general("INFO", &format!("field of view intake: {} {} ({}): told {}x{}, rendered {}x{}; next start {}", g.exe, r.verdict.name(), r.decided_by,
                                                    rw, rh, sz[0], sz[1], if next { "restricted" } else { "told the whole view" }));
@@ -2718,6 +2726,7 @@ fn main() {
                     fov_store.insert(key, r);
                     save_fov_verdicts(&fov_verdicts_path, &fov_store);
                     publish_unrestricted(ipc, &fov_store, &args.fov_unrestricted_user);
+                    }
                 }
             }
             // game start / end, for the general log and the GUI
@@ -2744,6 +2753,7 @@ fn main() {
                 let (frames0, submitted0, now) = (shared.frames_sent.load(Ordering::Relaxed), shim_submitted(ipc), Instant::now());
                 // the intake: what the store knew before this start, and the shim's record sequence now (a new record will be this game's)
                 fov_run_prev = fov_store.get(&exe.to_ascii_lowercase()).cloned();
+                fov_run_cur = None;
                 if !ipc.is_null() {
                     let (mut t8, mut s8, mut sz, mut un, mut trusted) = ([0f32; 8], [0f32; 8], [0i32; 4], 0u32, 0u32);
                     fov_seq_seen = unsafe { nvh::nvh_ipc_game_submission(ipc, t8.as_mut_ptr(), s8.as_mut_ptr(), sz.as_mut_ptr(), &mut un, &mut trusted) };

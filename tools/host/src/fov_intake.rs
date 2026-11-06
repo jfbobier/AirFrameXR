@@ -156,6 +156,16 @@ pub fn proven(r: &Record) -> bool {
     r.verdict == Verdict::Honours && !r.last.unrestricted
 }
 
+/// Within one run of a game the shim records again whenever the app's size or FOV changes. A verdict of honours is not undone by a later size at the told aspect: dynamic
+/// resolution, a resolution slider or a window resize are what an honest game does (found by the lab's mod scenarios: the verdict flipped honours / undecided every few seconds and
+/// the store kept the last). Only evidence that the game ignores the box (another FOV, another aspect) replaces it. `current` is this run's verdict so far.
+pub fn within_run(current: Option<&Record>, new: Record) -> Record {
+    match current {
+        Some(c) if c.verdict == Verdict::Honours && new.verdict == Verdict::Undecided => c.clone(),
+        _ => new,
+    }
+}
+
 /// The policy at the executable's next start, from the record alone: restricted (told G) or told the whole view V. A never-seen game is told V; honours
 /// (predicted or proven) is restricted; own frustum, fixed size and undecided are not (protect the picture); the user's per-game tick wins. The shim adds the
 /// whitelist (a trusted app is restricted even when it is unseen or undecided, but never against a verdict of own frustum or fixed size).
@@ -307,6 +317,29 @@ mod tests {
         let r3 = update(Some(&r1), obs(FIT, FIT_SIZE, union(FIT), (2160, 2160)));
         assert_eq!(r3.verdict, Verdict::OwnFrustum);
         assert!(!restrict_next_start(Some(&r3)));
+    }
+
+    #[test]
+    fn a_resolution_change_mid_run_does_not_undo_honours_but_another_frustum_does() {
+        let first = update(None, obs(FIT, FIT_SIZE, FIT, FIT_SIZE));
+        assert_eq!(first.verdict, Verdict::Honours);
+        // dynamic resolution: 70 % of the told size at the told aspect, then back; a slider: 1400 x 1260
+        let smaller = update(None, obs(FIT, FIT_SIZE, FIT, (758, 674)));
+        assert_eq!(smaller.verdict, Verdict::Undecided);
+        let kept = within_run(Some(&first), smaller);
+        assert_eq!(kept.verdict, Verdict::Honours);
+        assert_eq!(kept.last, first.last);                       // the proof stays the first record
+        let slider = update(None, obs(FIT, FIT_SIZE, FIT, (1400, 1260)));
+        assert_eq!(within_run(Some(&first), slider).verdict, Verdict::Honours);
+        // evidence that it ignores the box still wins: another frustum, or another aspect
+        let own = update(None, obs(FIT, FIT_SIZE, union(FIT), (2160, 2160)));
+        assert_eq!(within_run(Some(&first), own).verdict, Verdict::OwnFrustum);
+        let square = update(None, obs(FIT, FIT_SIZE, FIT, (2048, 2048)));
+        assert_eq!(within_run(Some(&first), square).verdict, Verdict::FixedSize);
+        // an undecided start is not held: a later honours replaces it
+        let und = update(None, obs(U80, U80_SIZE, U80, FULL));
+        assert_eq!(within_run(Some(&und), update(None, obs(U80, U80_SIZE, U80, U80_SIZE))).verdict, Verdict::Honours);
+        assert_eq!(within_run(None, und.clone()).verdict, Verdict::Undecided);
     }
 
     #[test]
