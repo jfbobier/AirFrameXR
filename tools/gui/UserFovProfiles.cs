@@ -21,6 +21,9 @@ namespace AirFrameXR
         public bool PerEye => TanLeft != null && TanRight != null;
         /// schema 2: how the numbers were found: quickfit | restriction | sweep | slider | manual ("" for a file written before)
         public string Method = "";
+        /// schema 2: the light seal size the wearer named ("" = not asked / not known) and the panel (outer, inner, upper, lower of the left eye, then the right eye's) the numbers were measured against (null = not recorded)
+        public string LightSeal = "";
+        public double[] DeclaredAtMeasure;
         /// the game render quality that goes with it (0..1, video.fov_render_quality)
         public double Quality;
         /// the measured window of a calibration (tangent space, x outward from the nose, y up); empty for numbers typed by hand
@@ -38,6 +41,8 @@ namespace AirFrameXR
             if (Note.Length > 0) d["note"] = Note;
             if (PerEye) { d["tan_left"] = TanLeft.Select(v => (object)Math.Round(v, 4)).ToList(); d["tan_right"] = TanRight.Select(v => (object)Math.Round(v, 4)).ToList(); }
             if (Method.Length > 0) d["method"] = Method;
+            if (LightSeal.Length > 0) d["light_seal"] = LightSeal;
+            if (DeclaredAtMeasure != null) d["declared_at_measure"] = DeclaredAtMeasure.Select(v => (object)Math.Round(v, 4)).ToList();
             if (Window.Count > 0) d["window"] = Window.Select(p => (object)new List<object> { Math.Round(p[0], 4), Math.Round(p[1], 4) }).ToList();
             return d;
         }
@@ -55,6 +60,8 @@ namespace AirFrameXR
                     Tan = Enumerable.Range(0, 4).Select(i => Convert.ToDouble(t[i], CultureInfo.InvariantCulture)).ToArray(),
                 };
                 u.Method = Json.Str(d, "method", "");
+                u.LightSeal = Json.Str(d, "light_seal", "");
+                if (Json.Get(d, "declared_at_measure") is System.Collections.IList dm && dm.Count >= 8) u.DeclaredAtMeasure = Enumerable.Range(0, 8).Select(i => Convert.ToDouble(dm[i], CultureInfo.InvariantCulture)).ToArray();
                 if (Json.Get(d, "tan_left") is System.Collections.IList tl && tl.Count >= 4 && Json.Get(d, "tan_right") is System.Collections.IList tr && tr.Count >= 4)
                 {
                     double[] Four(System.Collections.IList l) => Enumerable.Range(0, 4).Select(i => Convert.ToDouble(l[i], CultureInfo.InvariantCulture)).ToArray();
@@ -214,6 +221,21 @@ namespace AirFrameXR
         }
 
         public static string NewId() => "u" + DateTime.Now.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
+
+        /// A box the probe's tool scenes produced (one per eye: outer, inner, upper, lower tangents) as a stored profile: method "quickfit" (the black-bar fit) or "restriction" (what the game renders).
+        /// Tan is the per-edge union of the two eyes, which is what schema 1 readers and the streamer's mirrored fields take; TanLeft / TanRight carry the eyes apart.
+        public static UserFov FromTool(string method, double[][] box, double[][] panel, string headset, string seal)
+        {
+            var u = new UserFov
+            {
+                Id = NewId(), Headset = headset ?? "", Source = method == "quickfit" ? "calibrated" : "manual", Method = method, LightSeal = seal ?? "", Quality = 0,
+                Name = (method == "quickfit" ? "Fit " : "Restriction ") + DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+                TanLeft = box[0].Select(v => Math.Round(v, 4)).ToArray(), TanRight = box[1].Select(v => Math.Round(v, 4)).ToArray(),
+            };
+            u.Tan = Enumerable.Range(0, 4).Select(k => Math.Round(Math.Max(box[0][k], box[1][k]), 4)).ToArray();
+            if (panel != null) u.DeclaredAtMeasure = panel[0].Concat(panel[1]).ToArray();
+            return u;
+        }
 
         /// A calibration result (FovFitResult.Profile's rectangle and window) as a stored profile.
         public static UserFov FromCalibration(FovFitResult r, string headset, string name = null)

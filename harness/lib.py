@@ -1540,6 +1540,106 @@ def analyse(sc, outdir: Path):
     a = {}
     a["host"] = jload(outdir / "host_report.json") or report_from_stdout(outdir / "host_stdout.txt")
     a["client"] = jload(outdir / "client_report.json")
+def analyse_tool(sc, outdir):
+    """The headset tools of docs/PICTURE_EDGES_DESIGN.md sections 6 and 6b (xr_probe XR_PROBE_TOOL=fit|restrict with scripted keys, XR_PROBE_KEYS): the probe's JSON lines
+    (app_stdout.txt: the box per eye after every key) against the keys that were pressed, and the decoded stream against the box: where the blue box (fit) or the scene (restrict)
+    ends in each eye, which eye is black, and where the in-headset text is (white pixels, inside 12 degrees of the view axis). tool = {"samples": [{"app_frame", "eye", "what"}...]}."""
+    import numpy as np
+    ck = sc["checks"]["tool"]
+    out = {"events": [], "samples": []}
+    for line in open(outdir / "app_stdout.txt", errors="replace"):
+        line = line.strip()
+        if line.startswith("{") and '"tool"' in line:
+            try:
+                out["events"].append(json.loads(line))
+            except ValueError:
+                pass
+    headset = None
+    for line in open(outdir / "host_stdout.txt", errors="replace"):
+        if '"views_config"' in line and '"views_config_ignored"' not in line:
+            try:
+                headset = json.loads(line)["data"]["fov_tan"]
+                break
+            except Exception:
+                pass
+    cfg = negotiated_cfg(outdir)
+    ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
+    out["headset_fov"], out["stream_eye"] = headset, (ew, eh)
+    if not headset or not out["events"] or not (outdir / "client.hevc").exists():
+        out["error"] = "no views_config event / no tool event in app_stdout.txt / no client.hevc"
+        return out
+    hevc = str(outdir / "client.hevc")
+
+    def decode(n):
+        p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", hevc, "-vf", f"select=eq(n\\,{n})", "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"], capture_output=True, timeout=600)
+        if len(p.stdout) != 2 * ew * eh * 3:
+            return None
+        return np.frombuffer(p.stdout, dtype=np.uint8).reshape(eh, 2 * ew, 3).astype(np.int16)
+
+    # the stream frame that carries the app's first frame: the first one with the blue box (or the scene's sky) at the centre of the left eye
+    L, R, U, D = headset[0:4]
+    cx0, cy0 = int(L / (L + R) * ew), int((1 - D / (U + D)) * eh)   # the view axis in the stream (left eye)
+    first = next((i for i, fr in enumerate(read_rgb_at(outdir / "client.hevc", [(cx0 - 60, cy0 + 120), (cx0 + 60, cy0 - 120)])) if any(px[2] - px[0] > 60 or sum(px) > 90 for px in fr)), None)
+    out["first_frame"] = first
+    if first is None:
+        out["error"] = "no frame with the tool's picture in the decoded stream"
+        return out
+    mode = ck.get("mode", "fit")
+    box_at = {}   # the last box event at or before an app frame
+    for ev in out["events"]:
+        if ev.get("event") in ("box", "start", "enter"):
+            box_at[ev["frame"]] = ev
+    def last_box(f):
+        ks = [k for k in box_at if k <= f]
+        return box_at[max(ks)] if ks else None
+    for smp in ck["samples"]:
+        f = smp["app_frame"]
+        img = decode(first + f)
+        res = {"app_frame": f, "what": smp.get("what", ""), "decoded": img is not None}
+        out["samples"].append(res)
+        if img is None:
+            continue
+        ev = last_box(f)
+        whole = bool(smp.get("whole_view"))   # the restriction's Space held: the stream shows the whole view, not the box
+        res["event_frame"] = ev["frame"] if ev else None
+        for e in range(2):
+            l, r, u, d = headset[4 * e:4 * e + 4]
+            ppt = ew / (l + r)
+            ax, ay = int(l / (l + r) * ew), int((1 - d / (u + d)) * eh)
+            eye = img[:, e * ew:(e + 1) * ew]
+            lum = eye.mean(axis=2)
+            white = (eye.min(axis=2) > 215)
+            blue = ((eye[:, :, 2] - eye[:, :, 0]) > 80) & (eye[:, :, 2] > 140)
+            info = {"black_frac": round(float((lum < 16).mean()), 4), "white_px": int(white.sum())}
+            if white.any():
+                ys, xs = np.nonzero(white)
+                info["text_extent_deg"] = {"x": [round(float(np.degrees(np.arctan((xs.min() - ax) / ppt))), 1), round(float(np.degrees(np.arctan((xs.max() - ax) / ppt))), 1)],
+                                           "y": [round(float(np.degrees(np.arctan((ay - ys.max()) / ppt))), 1), round(float(np.degrees(np.arctan((ay - ys.min()) / ppt))), 1)]}
+            if mode == "fit" and blue.any():
+                row = np.nonzero(blue[ay])[0]; col = np.nonzero(blue[:, ax])[0]
+                if len(row) and len(col):
+                    info["edges_px"] = {"left": int(row.min()), "right": int(row.max()), "top": int(col.min()), "bottom": int(col.max())}
+                    if ev:
+                        b = ev["panel" if whole else "box"][e]   # outer, inner, upper, lower (tangents; the told view = the headset's)
+                        xl, xr = (-b[0], b[1]) if e == 0 else (-b[1], b[0])
+                        info["expected_px"] = {"left": round((xl + l) * ppt), "right": round((xr + l) * ppt), "top": round((1 - (b[2] + d) / (u + d)) * eh), "bottom": round((1 - (-b[3] + d) / (u + d)) * eh)}
+                        info["max_err_px"] = max(abs(info["edges_px"][k] - info["expected_px"][k]) for k in ("left", "right", "top", "bottom"))
+            if mode == "restrict" and ev:
+                b = ev["panel" if whole else "box"][e]
+                xl, xr = (-b[0], b[1]) if e == 0 else (-b[1], b[0])
+                exp = {"left": (xl + l) * ppt, "right": (xr + l) * ppt, "top": (1 - (b[2] + d) / (u + d)) * eh, "bottom": (1 - (-b[3] + d) / (u + d)) * eh}
+                info["expected_px"] = {k: round(v) for k, v in exp.items()}
+                # inside the box the scene is lit (the sky is not black), outside it is black (a few pixels of margin around the edge for the codec)
+                m = 12
+                x0, x1, y0, y1 = max(0, int(exp["left"])), min(ew, int(exp["right"])), max(0, int(exp["top"])), min(eh, int(exp["bottom"]))
+                core = np.zeros((eh, ew), dtype=bool); core[min(eh, y0 + m):max(0, y1 - m), min(ew, x0 + m):max(0, x1 - m)] = True
+                out_ring = np.ones((eh, ew), dtype=bool); out_ring[max(0, y0 - m):min(eh, y1 + m), max(0, x0 - m):min(ew, x1 + m)] = False
+                info["outside_black"] = round(float((lum[out_ring] < 16).mean()), 4) if out_ring.any() else 1.0
+                info["inside_lit"] = round(float((lum[core] >= 16).mean()), 4) if core.any() else 0.0
+            res[f"eye{e}"] = info
+    return out
+
+
     # the host's verdict on what the game submitted (engine step C of docs/PICTURE_EDGES_DESIGN.md: one `game_fov_verdict` event, the last one wins)
     # and per game start the first verdict after its game_started event (the second-start scenarios: one entry per start of the chain)
     a["fov_verdict"], a["fov_starts"] = None, []
@@ -1687,6 +1787,8 @@ def analyse(sc, outdir: Path):
         a["qpmap"] = analyse_qpmap(sc, outdir, a.get("host") or {})
     if sc.get("checks", {}).get("modsim") and sc.get("app"):
         a["modsim"] = analyse_modsim(sc, outdir)
+    if sc.get("checks", {}).get("tool"):
+        a["tool"] = analyse_tool(sc, outdir)
     if sc.get("checks", {}).get("pacing") and sc.get("app"):
         a["pacing"] = analyse_pacing(sc, outdir, 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0))
     period = 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0)
@@ -2039,6 +2141,46 @@ def evaluate(sc, a):
                 {"mismatch": qa.get("mismatch"), "ctbs": qa.get("ctbs"), "hist": qa.get("hist")}, "the C++ map equals the independent Python port (<= 0.5% CTBs differing by rounding)")
         if "min_detail_ratio" in qk:
             chk("qpmap_center_keeps_more_detail", (qa.get("detail_ratio") or 0) >= qk["min_detail_ratio"], qa.get("detail") or qa.get("detail_error"), f"decoded detail center/edge >= {qk['min_detail_ratio']} (ratio {qa.get('detail_ratio')})")
+    if "tool" in ck:   # the headset tools (xr_probe XR_PROBE_TOOL, scripted keys): analyse_tool
+        import math
+        tk, ta = ck["tool"], a.get("tool") or {}
+        if ta.get("error"):
+            chk("tool_seen", False, ta["error"], "the probe's tool lines, the headset's views and the tool's picture in the decoded stream")
+        else:
+            evs = ta["events"]
+            enter = [e for e in evs if e["event"] == "enter"]
+            chk("tool_start_and_enter", any(e["event"] == "start" for e in evs) and bool(enter), [e["event"] for e in evs][:3] + ["..."], "Space started the tool and Enter kept the result (the probe's JSON lines)")
+            if tk.get("expect") and enter:   # the keys that were scripted, applied to the start box of the panel the app was told
+                pan = enter[-1]["panel"]; st = tk["expect"]["start"]
+                exp = [[math.tan(math.atan(st * pan[e][k]) + math.radians(tk["expect"]["deltas"][e][k])) for k in range(4)] for e in range(2)]
+                err = max(abs(exp[e][k] - enter[-1]["box"][e][k]) for e in range(2) for k in range(4))
+                chk("tool_keys_move_edges", err <= 0.002, {"max_err": round(err, 5), "box": enter[-1]["box"], "expected": [[round(v, 4) for v in b] for b in exp]},
+                    "each scripted arrow moved its edge by the step (0.5 degree out in the fit, 1 degree in in the restriction), Shift reversed it, Tab switched the eye / the edit")
+            for smp in ta["samples"]:
+                want = next((w for w in tk["samples"] if w["app_frame"] == smp["app_frame"]), {})
+                tag = f"{smp['what']}@{smp['app_frame']}"
+                if not smp["decoded"]:
+                    chk(f"tool_{tag}_decoded", False, None, "the stream frame decodes"); continue
+                for e in want.get("edges_eyes", []):
+                    i = smp.get(f"eye{e}", {})
+                    chk(f"tool_{tag}_eye{e}_edges", i.get("max_err_px", 999) <= tk.get("edge_tol_px", 8), {"edges": i.get("edges_px"), "expected": i.get("expected_px"), "err": i.get("max_err_px")},
+                        f"the blue box ends where the tool's box says (within {tk.get('edge_tol_px', 8)} px of the stream)")
+                for e in want.get("black_eyes", []):
+                    i = smp.get(f"eye{e}", {})
+                    chk(f"tool_{tag}_eye{e}_black", i.get("black_frac", 0) >= 0.97, i.get("black_frac"), "the eye that is not being fitted is black")
+                for e in want.get("text_eyes", []):
+                    i = smp.get(f"eye{e}", {}); x = (i.get("text_extent_deg") or {})
+                    lim = tk.get("text_deg", 12.5)
+                    inside = bool(x) and all(abs(v) <= lim for v in x["x"] + x["y"])
+                    chk(f"tool_{tag}_eye{e}_text", i.get("white_px", 0) >= tk.get("min_text_px", 150) and inside, {"white_px": i.get("white_px"), "extent_deg": x},
+                        f"the in-headset text is there (>= {tk.get('min_text_px', 150)} white pixels) and inside {lim} degrees of the view axis")
+                for e in want.get("no_text_eyes", []):
+                    i = smp.get(f"eye{e}", {})
+                    chk(f"tool_{tag}_eye{e}_no_text", i.get("white_px", 999) <= 40, i.get("white_px"), "no text (it faded after 5 s without a key / this eye is black)")
+                for e in want.get("restrict_eyes", []):
+                    i = smp.get(f"eye{e}", {})
+                    chk(f"tool_{tag}_eye{e}_scene_in_box", i.get("outside_black", 0) >= 0.97 and i.get("inside_lit", 0) >= 0.9, {"outside_black": i.get("outside_black"), "inside_lit": i.get("inside_lit"), "box_px": i.get("expected_px")},
+                        "the scene is lit inside the box and black outside it")
         if "max_detail_ratio" in qk:
             chk("qpmap_off_is_flat", (qa.get("detail_ratio") or 99) <= qk["max_detail_ratio"], qa.get("detail"), f"decoded detail center/edge <= {qk['max_detail_ratio']} with the map off (ratio {qa.get('detail_ratio')})")
     if "display" in ck:

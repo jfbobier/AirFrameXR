@@ -159,6 +159,7 @@ namespace AirFrameXR
             yield return new Case { Name = "fov-manager-valid", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), quest3), Prepare = f => ((FovManagerForm)f).Card.TypeForTest("Degrees", "51", "40", "43", "54") };
             yield return new Case { Name = "fov-manager-per-eye", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), quest3), Prepare = f => ((FovManagerForm)f).Card.PerEyeForTest("Degrees", new[] { "51", "40", "43", "54" }, new[] { "49", "42", "43", "52" }) };   // schema 2: the right eye on its own row
             yield return new Case { Name = "calibrate-fit", Make = () => new CalibrateForm(Path.Combine(Path.GetTempPath(), "airframexr_calibrate_demo_" + Guid.NewGuid().ToString("N"))) };   // the page calibrate.exe opens on: Fit the picture to your eyes
+            yield return new Case { Name = "calibrate-restrict", Make = () => new CalibrateForm(Path.Combine(Path.GetTempPath(), "airframexr_calibrate_demo_" + Guid.NewGuid().ToString("N")), true) };   // calibrate.exe --restrict: "Choose what the game renders" (docs/PICTURE_EDGES_DESIGN.md section 6b)
             yield return new Case { Name = "fov-manager-empty", Make = () => new FovManagerForm(Path.Combine(Path.GetTempPath(), "airframexr_fov_empty_" + Guid.NewGuid().ToString("N") + ".json"), quest3) };
             yield return new Case { Name = "find-headset", Make = () => new FindHeadsetForm(Tuple.Create("1234.client.alvr", "Apple Vision Pro", "192.168.100.123")) };
             yield return new Case { Name = "cable-missing", Make = () => new CableForm() };
@@ -538,6 +539,30 @@ namespace AirFrameXR
                 }
                 File.WriteAllLines(Path.Combine(outDir, "fovprofile.txt"), lines);
                 return 0;
+            }
+            if (Arg("--tool-profile-selftest") != null)   // harness/fov_tool_profile_check.py: what the headset tools save (docs/PICTURE_EDGES_DESIGN.md sections 6, 6b): a schema 2 profile per eye, method, seal, applied as the restriction
+            {
+                var lines = new List<string>();
+                void Check(bool ok, string what) => lines.Add("CHECK " + (ok ? "PASS" : "FAIL") + " " + what);
+                var path = Path.Combine(Path.GetTempPath(), "airframexr_tool_profile_" + Guid.NewGuid().ToString("N") + ".json");
+                var box = new[] { new[] { 1.10, 0.80, 0.70, 0.60 }, new[] { 0.95, 0.85, 0.72, 0.58 } };
+                var panel = new[] { new[] { 1.732, 1.0, 1.192, 1.0 }, new[] { 1.0, 1.732, 1.192, 1.0 } };
+                var fit = UserFovStore.Add(UserFovStore.FromTool("quickfit", box, panel, "Apple Vision Pro", "25W"), path);
+                var rs = UserFovStore.Add(UserFovStore.FromTool("restriction", box, panel, "Meta Quest 3", ""), path);
+                var all = UserFovStore.Load(path);
+                var f = all.First(x => x.Id == fit.Id); var r = all.First(x => x.Id == rs.Id);
+                Check(f.Method == "quickfit" && r.Method == "restriction", "the method is kept (quickfit / restriction)");
+                Check(f.PerEye && f.TanLeft[0] == 1.10 && f.TanRight[0] == 0.95 && f.TanRight[1] == 0.85, "the eyes are kept apart (tan_left, tan_right)");
+                Check(f.Tan[0] == 1.10 && f.Tan[1] == 0.85 && f.Tan[2] == 0.72 && f.Tan[3] == 0.60, "Tan is the per-edge union of the two eyes (what schema 1 readers take)");
+                Check(f.LightSeal == "25W" && r.LightSeal == "", "the light seal size is kept (empty when not asked)");
+                Check(f.DeclaredAtMeasure != null && f.DeclaredAtMeasure.Length == 8 && f.DeclaredAtMeasure[0] == 1.732 && f.DeclaredAtMeasure[5] == 1.732, "the panel at the measurement is kept (declared_at_measure, 8 numbers)");
+                Check(f.Source == "calibrated" && r.Source == "manual", "a fit counts as calibrated, a restriction as chosen");
+                var st = new AppSettings();   // this folder's own config, never saved here
+                UserFovStore.Apply(f, st, new[] { 1.732, 1.0, 1.192, 1.0 }, "Apple Vision Pro");
+                var right = global::AirFrameXR.Json.Get(st.Root, "video.fov_override_right") as System.Collections.IList;
+                Check(st.FovOverride && st.FovOuter == 1.10 && st.FovInner == 0.80 && right != null && right.Count == 4 && Convert.ToDouble(right[0], CultureInfo.InvariantCulture) == 0.95, "applying writes the left eye's numbers and the right eye's own (video.fov_override_right)");
+                File.WriteAllLines(Path.Combine(outDir, "toolprofile.txt"), lines);
+                return lines.Any(l => l.StartsWith("CHECK FAIL")) ? 1 : 0;
             }
             if (Arg("--fov-ui-plan-selftest") != null) return FovUiPlanSelfTest(outDir);   // harness/fov_ui_plan_check.py: the UI rules of docs/PICTURE_EDGES_DESIGN.md sections 6 and 9
             if (Arg("--fov-other-headset-selftest") != null)   // harness/fov_profile_check.py: an override made for the Vision Pro is not applied to a headset with another field of view

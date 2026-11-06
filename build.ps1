@@ -64,6 +64,7 @@ Get-ChildItem "$repo\third_party\licenses\*.txt" | ForEach-Object { Put $_.FullN
 Put "$repo\tools\probe\xr_probe.cpp" "$repo\_tmp\xr_probe.cpp"
 
 # ---- the benchmark scene: converted in Linux by tools\bench_scene\build.sh, else taken from the published release (verified)
+Put "$repo\tools\probe\xr_tool.h" "$repo\_tmp\xr_tool.h"
 $vab = "$repo\bench\littlest_tokyo.vab"
 $vabSha = 'c2fe8ebe167282079adea9088c90a99e29a28d9f893b80c599e128be3f051a93'
 if (Test-Path "$repo\build\bench\littlest_tokyo.vab") { Copy-Item "$repo\build\bench\littlest_tokyo.vab" $vab -Force }

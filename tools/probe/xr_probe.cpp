@@ -51,6 +51,7 @@
 #define XR_USE_PLATFORM_WIN32
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
+#include "xr_tool.h"   // XR_PROBE_TOOL=fit|restrict: the headset tools (docs/PICTURE_EDGES_DESIGN.md sections 6, 6b)
 
 static FILE* g_log;
 static void L(const char* fmt, ...) {
@@ -415,9 +416,11 @@ int main(int argc, char** argv) {
     };
     auto pose = [](float x, float y, float z, float yawRad) { XrPosef p{}; p.orientation = { 0.f, sinf(yawRad / 2), 0.f, cosf(yawRad / 2) }; p.position = { x, y, z }; return p; };
 
+    XrTool tool; tool.Init(getenv("XR_PROBE_TOOL"), getenv("XR_PROBE_KEYS"));
+    if (tool.On()) L("headset tool: %s (keys %s)", getenv("XR_PROBE_TOOL"), tool.scripted ? "scripted" : "keyboard");
     bool running = false, exiting = false; int done = 0; bool sawReady = false, sawSync = false;
     int rc = 0;
-    while (!exiting && done < frames) {
+    while (!exiting && !tool.quit && done < frames) {
         if (GetTickCount64() - t0 > (ULONGLONG)timeoutS * 1000) { L("FAIL timeout (done=%d/%d ready=%d)", done, frames, sawReady); rc = 3; break; }
         XrEventDataBuffer ev{ XR_TYPE_EVENT_DATA_BUFFER };
         XrResult pr = xrPollEvent(inst, &ev);
@@ -573,6 +576,7 @@ int main(int argc, char** argv) {
                     L("scene placed at the head: eyes (%.2f %.2f %.2f), facing yaw %.0f deg", hp.position.x, hp.position.y, hp.position.z, yaw * 57.29578f);
                 }
             }
+            if (tool.On() && views.size() >= 2) { XrFovf tf[2] = { views[0].fov, views[1].fov }; tool.Update(done, qpcMs(), tf); }
             SceneFrame sceneFrame;
             if (sceneOn) BeginSceneFrame(scene, ctx, (qpcMs() - loopStartMs) / 1000.0, sceneFrame, scenePlace);
             for (size_t i = 0; i < vcv.size(); i++) {
@@ -722,6 +726,7 @@ int main(int argc, char** argv) {
                             gc->Release();
                         }
                     }
+                    if (tool.On() && i < 2) { tool.sceneDrawn = sceneOn; ID3D11DeviceContext1* tc = nullptr; if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&tc))) { tool.Draw((int)i, dev, ctx, tc, rtv, imgs[i][idx].texture, views[i].fov); tc->Release(); } }
                     if (markF && i < 2) {
                         FILETIME wft; GetSystemTimePreciseAsFileTime(&wft);
                         const unsigned long long wallNs = ((((unsigned long long)wft.dwHighDateTime << 32) | wft.dwLowDateTime) - 116444736000000000ull) * 100ull;
@@ -780,7 +785,7 @@ int main(int argc, char** argv) {
                         }
                     }
                     ID3D11DeviceContext1* c1 = nullptr;
-                    if (i == 0 && SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
+                    if (i == 0 && !tool.On() && SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
                         const uint32_t stamp = (uint32_t)(done + 1);
                         const float white[4] = { 1, 1, 1, 1 }, black[4] = { 0, 0, 0, 1 }, gray[4] = { 0.5f, 0.5f, 0.5f, 1 };
                         for (int bi = 0; bi < 16; bi++) {

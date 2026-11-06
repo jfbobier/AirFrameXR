@@ -57,7 +57,7 @@ namespace AirFrameXR
             tips.SetToolTip(manage, "Your profiles: fit the picture to your eyes (Vision Pro), enter values by hand, rename, delete.");
             row.Controls.Add(manage);
             var choose = new Button { Text = "Choose it in the headset (2 min)...", AutoSize = true, AccessibleName = "Choose in the headset", Margin = new Padding(3, 2, 8, 2) };
-            choose.Click += (s, e) => MessageBox.Show(FindForm(), "The in-headset tool is not built in this build (docs/PICTURE_EDGES_DESIGN.md section 6b). Pick a profile above or enter values in Manage profiles.", "What the game renders", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            choose.Click += (s, e) => ChooseInHeadset();
             tips.SetToolTip(choose, "Two minutes in the headset: the scene inside the box, black outside; pull an edge in until you notice the black during normal looking around, then one step back. Every headset.");
             row.Controls.Add(choose);
             status.ForeColor = Color.SeaGreen; status.Margin = new Padding(3, 8, 3, 0); status.MaximumSize = new Size(WrapWidth, 0);
@@ -93,6 +93,23 @@ namespace AirFrameXR
             warnTimer.Start();
             Disposed += (s, e) => { warnTimer.Dispose(); tips.Dispose(); };
             Reload();
+        }
+
+        Process toolProc;
+        /// "Choose it in the headset": calibrate.exe --restrict (docs/PICTURE_EDGES_DESIGN.md section 6b); the profile it saves is chosen when it closes (the list is read again).
+        void ChooseInHeadset()
+        {
+            var exe = Path.Combine(Paths.Bin, "calibrate.exe");
+            if (!File.Exists(exe)) { MessageBox.Show(FindForm(), "bin\\calibrate.exe is missing from this package.", "What the game renders", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            if (toolProc != null && !toolProc.HasExited) return;
+            try
+            {
+                toolProc = Process.Start(new ProcessStartInfo(exe, "--restrict") { WorkingDirectory = Paths.Bin });
+                var t = new Timer { Interval = 700 };
+                t.Tick += (s, e) => { if (toolProc != null && toolProc.HasExited) { t.Stop(); t.Dispose(); toolProc = null; Reload(); } };
+                t.Start();
+            }
+            catch (Exception e) { MessageBox.Show(FindForm(), "Could not start the tool: " + e.Message, "What the game renders", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
 
         void StartManager()
