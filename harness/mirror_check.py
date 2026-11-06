@@ -85,7 +85,7 @@ rc, home = lib.b_run("echo %USERPROFILE%")
 base = f"{home.strip().splitlines()[-1].strip()}\\{lib.ROOTNAME}"
 bat = ("@echo off\r\ncall \"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul\r\n"
        f"cd /d {base}\\_tmp\\mirror\r\n"
-       "cl /nologo /EHsc /MD /O2 /std:c++17 /I. desktop_probe.cpp /Fe:desktop_probe.exe /link d3d11.lib dxgi.lib d3dcompiler.lib user32.lib wtsapi32.lib\r\n")
+       "cl /nologo /EHsc /MD /O2 /std:c++17 /I. desktop_probe.cpp /Fe:desktop_probe.exe /link d3d11.lib dxgi.lib d3dcompiler.lib user32.lib gdi32.lib wtsapi32.lib\r\n")
 lib.CACHE.mkdir(parents=True, exist_ok=True)
 (lib.CACHE / "mirror_build.bat").write_text(bat)
 lib.b_put(lib.CACHE / "mirror_build.bat", "_tmp/mirror/build.bat")
