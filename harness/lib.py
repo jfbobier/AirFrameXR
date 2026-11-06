@@ -1536,10 +1536,6 @@ def analyse_qpmap(sc, outdir, host):
     return out
 
 
-def analyse(sc, outdir: Path):
-    a = {}
-    a["host"] = jload(outdir / "host_report.json") or report_from_stdout(outdir / "host_stdout.txt")
-    a["client"] = jload(outdir / "client_report.json")
 def analyse_tool(sc, outdir):
     """The headset tools of docs/PICTURE_EDGES_DESIGN.md sections 6 and 6b (xr_probe XR_PROBE_TOOL=fit|restrict with scripted keys, XR_PROBE_KEYS): the probe's JSON lines
     (app_stdout.txt: the box per eye after every key) against the keys that were pressed, and the decoded stream against the box: where the blue box (fit) or the scene (restrict)
@@ -1638,6 +1634,12 @@ def analyse_tool(sc, outdir):
                 info["inside_lit"] = round(float((lum[core] >= 16).mean()), 4) if core.any() else 0.0
             res[f"eye{e}"] = info
     return out
+
+
+def analyse(sc, outdir: Path):
+    a = {}
+    a["host"] = jload(outdir / "host_report.json") or report_from_stdout(outdir / "host_stdout.txt")
+    a["client"] = jload(outdir / "client_report.json")
 
 
     # the host's verdict on what the game submitted (engine step C of docs/PICTURE_EDGES_DESIGN.md: one `game_fov_verdict` event, the last one wins)
