@@ -451,9 +451,10 @@ namespace AirFrameXR
             whole.CheckedChanged += (s, e) => Changed();
             mine.CheckedChanged += (s, e) => Changed();
             profiles.SelectedIndexChanged += (s, e) => { if (!loading && !mine.Checked) mine.Checked = true; else Changed(); };
-            watch.Tick += (s, e) => { if (proc != null && proc.HasExited) { proc = null; watch.Stop(); Reload(); } };
+            watch.Tick += (s, e) => { if (proc != null && proc.HasExited) { proc = null; watch.Stop(); Reload(); if (storePath == null) PipelineModel.PictureEdgesFoveation.ApplyToFiles(new AppSettings(), true); } };   // a fit finished: its profile is the choice now
             Disposed += (s, e) => { watch.Dispose(); tips.Dispose(); };
             Reload();
+            if (wizard && storePath == null) PipelineModel.PictureEdgesFoveation.ApplyToFiles(new AppSettings(), true);   // setting up: Apple's default (or the choice already made) gets its foveation now
         }
 
         public bool WholePanel => whole.Checked;
@@ -490,7 +491,7 @@ namespace AirFrameXR
                 Json.Set(st.Root, Key + "_profile", u.Id);
             }
             else { Json.Remove(st.Root, Key); Json.Remove(st.Root, Key + "_profile"); }
-            try { st.Save(); Log.Write("INFO", "picture edges: " + (mine.Checked && Selected != null ? "profile '" + Selected.Name + "'" : "whole panel")); } catch (Exception e) { note.Text = "Cannot write config\\airframexr.json: " + e.Message; note.ForeColor = Color.Firebrick; return; }
+            try { st.Save(); Log.Write("INFO", "picture edges: " + (mine.Checked && Selected != null ? "profile '" + Selected.Name + "'" : "whole panel")); if (storePath == null) PipelineModel.PictureEdgesFoveation.ApplyToFiles(st, true); } catch (Exception e) { note.Text = "Cannot write config\\airframexr.json: " + e.Message; note.ForeColor = Color.Firebrick; return; }
             Describe();
         }
 

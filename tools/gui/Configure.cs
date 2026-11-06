@@ -278,6 +278,11 @@ namespace AirFrameXR
             Json.Set(s, V + "bitrate.mode.variant", "ConstantMbps");
             Json.Set(s, V + "bitrate.mode.ConstantMbps", (int)bitrate.Value);
             Json.Set(s, V + "foveated_encoding.enabled", profFov.Checked);
+            {   // numbers that differ from what the session held are the user's: the foveation computed from the picture edges leaves them alone until a picture-edges choice is made again
+                var was = new[] { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" }.Select((k, i) => Json.Num(s, V + "foveated_encoding.content." + k, new[] { 0.45, 0.4, 0.4, 0.1, 4, 5 }[i])).ToArray();
+                var now = new[] { fcx.Value, fcy.Value, fsx.Value, fsy.Value, frx.Value, fry.Value }.Select(x => (double)x).ToArray();
+                if (Enumerable.Range(0, 6).Any(i => Math.Abs(was[i] - now[i]) > 0.0005)) settings.FoveationManual = true;
+            }
             Json.Set(s, V + "foveated_encoding.content.center_size_x", (double)fcx.Value);
             Json.Set(s, V + "foveated_encoding.content.center_size_y", (double)fcy.Value);
             Json.Set(s, V + "foveated_encoding.content.center_shift_x", (double)fsx.Value);

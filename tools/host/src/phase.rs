@@ -12,6 +12,10 @@
 //! cluster that starts after the largest empty gap, and steers the 10th percentile of that cluster to `margin`. Corrections are small, at most
 //! one every half second, and the window is cleared after each (the effect takes a pipeline's time to show).
 //!
+//! The loop must be closed: a slide of `step` ms moves the arrivals by about the same amount the other way. A headset whose reports do not follow (a constant queue, as the
+//! lab's mock client reports, or a client that does not report one worth the name) would leave the controller sliding the grid for ever (2 ms every 2 s, measured 2026-11-06:
+//! 8 ms in 14 s); two corrections in a row that moved the estimate by less than a third of their step switch the lock off for the rest of the connection.
+//!
 //! AIRFRAMEXR_PHASE_LOCK=0 disables it; AIRFRAMEXR_PHASE_MARGIN_MS (default 7) sets the margin. The margin was 3 ms until 2026-10-17: with
 //! an arrival spread of 8 ms a share of the frames landed after their tick and were shown a tick late, which the user saw as a loss of
 //! smoothness; a debug session that happened to delay every frame by 4.6 ms showed the cure (headset missed periods 0.5 % against 1.2-2.3 %,
@@ -42,6 +46,17 @@ struct State {
     total_ms: f64,
     corrections: u64,
     recent: Vec<f64>,
+    /// the estimate and the step of the last correction, until the next evaluation has judged its effect
+    pending: Option<(f64, f64)>,
+    /// corrections in a row whose effect did not show
+    no_response: u32,
+    /// the lock is off for this connection (the loop is open)
+    dead: bool,
+}
+
+/// Did a slide of `step` ms fail to move the estimate (ms before the render tick, from `before` to `now`) the other way by at least a third of it?
+fn open_loop(before: f64, now: f64, step: f64) -> bool {
+    step != 0.0 && -(now - before) / step < 0.33
 }
 
 pub fn enabled() -> bool {
@@ -86,7 +101,7 @@ pub fn observe(queue_ms: f64) {
     let period_ms = PERIOD_NS.load(Ordering::Relaxed) as f64 / 1e6;
     let margin = std::env::var("AIRFRAMEXR_PHASE_MARGIN_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(7.0);
     let mut g = STATE.lock();
-    let s = g.get_or_insert_with(|| State { phases_ms: vec![], ignore: 12, last: Instant::now(), total_ms: 0.0, corrections: 0, recent: vec![] });
+    let s = g.get_or_insert_with(|| State { phases_ms: vec![], ignore: 12, last: Instant::now(), total_ms: 0.0, corrections: 0, recent: vec![], pending: None, no_response: 0, dead: false });
     if s.ignore > 0 {
         s.ignore -= 1;
         return;
@@ -112,6 +127,13 @@ pub fn observe(queue_ms: f64) {
     rel.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let m0 = if start > period_ms / 2.0 { start - period_ms } else { start }; // negative: part of the cluster already missed its tick
     let p10 = m0 + rel[n / 10];
+    if let Some((before, step)) = s.pending.take() {
+        if open_loop(before, p10, step) { s.no_response += 1 } else { s.no_response = 0 }
+        if s.no_response >= 2 && !s.dead {
+            s.dead = true;
+            crate::logs::general("INFO", &format!("phase lock: the headset's reports did not follow the last two slides (the estimate stayed near {p10:.1} ms): the lock is off for this connection, the grid stays {:+.1} ms from where it began", s.total_ms));
+        }
+    }
     // the estimate is noisy (a 10th percentile of ~90 samples): act on the median of the last three, and only outside a dead band
     s.recent.push(p10);
     if s.recent.len() > 3 {
@@ -123,17 +145,37 @@ pub fn observe(queue_ms: f64) {
     let err = est - margin;
     s.phases_ms.clear();
     s.last = Instant::now();
-    let acted = s.recent.len() >= 2 && err.abs() > 1.2;
+    let acted = !s.dead && s.recent.len() >= 2 && err.abs() > 1.2;
     if acted {
         let step = (0.3 * err).clamp(-2.0, 2.0); // positive: arrivals too early, slide the grid later
         ADJUST_NS.store((step * 1e6) as i64, Ordering::Relaxed);
         s.total_ms += step;
         s.corrections += 1;
+        s.pending = Some((est, step));
         s.ignore = 12;
         s.recent.clear();
         crate::logs::general("INFO", &format!("phase lock: arrivals {est:.1} ms before the render tick (target {margin:.1}), sliding the grid {step:+.2} ms"));
     }
     if let Some(o) = ORIGIN.get() {
-        crate::event(*o, "phase_lock", serde_json::json!({ "p10_ms": p10, "est_ms": est, "cluster_start_ms": m0, "spread_ms": rel[n - 1], "period_ms": period_ms, "acted": acted, "total_slide_ms": s.total_ms, "corrections": s.corrections }));
+        crate::event(*o, "phase_lock", serde_json::json!({ "p10_ms": p10, "est_ms": est, "cluster_start_ms": m0, "spread_ms": rel[n - 1], "period_ms": period_ms, "acted": acted, "total_slide_ms": s.total_ms, "corrections": s.corrections, "no_response": s.no_response, "off": s.dead }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::open_loop;
+
+    #[test]
+    fn a_slide_that_moves_the_estimate_the_other_way_closes_the_loop() {
+        assert!(!open_loop(0.0, -1.9, 2.0));   // 2 ms later: the arrivals came 1.9 ms closer to the tick
+        assert!(!open_loop(10.0, 8.5, 2.0));   // three quarters of it
+        assert!(!open_loop(0.0, 1.5, -2.0));   // a slide earlier moves it the other way
+    }
+
+    #[test]
+    fn a_report_that_does_not_follow_is_an_open_loop() {
+        assert!(open_loop(0.0, 0.0, -2.0));    // the lab's mock: the queue is 0 whatever the slide
+        assert!(open_loop(5.0, 5.3, 2.0));     // moved the wrong way
+        assert!(open_loop(5.0, 4.6, 2.0));     // a fifth of the step: noise
     }
 }

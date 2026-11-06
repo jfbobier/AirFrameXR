@@ -682,6 +682,7 @@ namespace AirFrameXR
             if (!linkTimer.Enabled) { linkTimer.Tick += (s, e) => LinkTick(); linkTimer.Start(); }
             NeedFind(true);
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
+            PipelineModel.PictureEdgesFoveation.ApplyToFiles(new AppSettings(), false);   // the foveation from the picture edges and Apple's map, over the stream size as it is now (passive: hand-edited numbers stay)
             ApplyStreamFit(AppSettings.ReadClientFov(), false);   // the fit size into session.json before the host reads it (ALVR may have rewritten the file since)
             StartAudioRoute();
             var err = host.Start(args);

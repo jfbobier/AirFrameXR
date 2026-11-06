@@ -494,6 +494,39 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "ratemap.txt"), lines);
                 return 0;
             }
+            var peProfile = Arg("--picture-edges-selftest");   // harness/picture_edges_check.py: what the picture-edges wiring writes into the session, case by case (nothing is saved)
+            if (peProfile != null)
+            {
+                var lines = new List<string>(); var ic = CultureInfo.InvariantCulture;
+                var rm = global::AirFrameXR.PipelineModel.RateMapFoveation.FromProfile(global::AirFrameXR.Json.Parse(File.ReadAllText(peProfile)));
+                string[] ks = { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" };
+                List<object> L(params double[] v) => v.Select(x => (object)x).ToList();
+                void Case(string name, string headset, object view, int w, int h, bool manual, bool explicitChoice, bool wasManualExpected)
+                {
+                    var st = new AppSettings();
+                    global::AirFrameXR.Json.Set(st.Root, "headset.name", headset);
+                    global::AirFrameXR.Json.Remove(st.Root, "video.headset_view");
+                    if (view != null) global::AirFrameXR.Json.Set(st.Root, "video.headset_view", view);
+                    st.FoveationManual = manual;
+                    var s = new Dictionary<string, object>();
+                    global::AirFrameXR.PipelineModel.WriteStreamEye(s, w, h);
+                    var line = global::AirFrameXR.PipelineModel.PictureEdgesFoveation.Apply(st, s, explicitChoice, rm);
+                    var a = ks.Select(k => global::AirFrameXR.Json.Num(s, "session_settings.video.foveated_encoding.content." + k, -1)).ToArray();
+                    var b = ks.Select(k => global::AirFrameXR.Json.Num(s, "openvr_config.foveation_" + k, -1)).ToArray();
+                    string J(double[] v) => string.Join(",", v.Select(x => x.ToString("0.000", ic)));
+                    lines.Add($"{name}|wrote={(line != null ? 1 : 0)}|session={J(a)}|cache={J(b)}|manual_after={(st.FoveationManual ? 1 : 0)}");
+                }
+                Case("whole_3552x3200", "Apple Vision Pro", null, 3552, 3200, false, true, false);
+                Case("fit_3552x3200", "Apple Vision Pro", L(0.97, 0.71, 0.69, 0.63), 3552, 3200, false, true, false);
+                Case("fit_2848x2560", "Apple Vision Pro", L(0.97, 0.71, 0.69, 0.63), 2848, 2560, false, true, false);
+                Case("per_eye_union", "Apple Vision Pro", new Dictionary<string, object> { ["left"] = L(1.0, 0.7, 0.7, 0.65), ["right"] = L(0.9, 0.8, 0.69, 0.6) }, 3552, 3200, false, true, false);
+                Case("wider_than_panel", "Apple Vision Pro", L(2.0, 1.5, 1.5, 1.5), 3552, 3200, false, true, false);
+                Case("quest_writes_nothing", "Meta Quest 3", L(0.97, 0.71, 0.69, 0.63), 3552, 3200, false, true, false);
+                Case("manual_passive_leaves_it", "Apple Vision Pro", L(0.97, 0.71, 0.69, 0.63), 3552, 3200, true, false, true);
+                Case("manual_explicit_clears_it", "Apple Vision Pro", L(0.97, 0.71, 0.69, 0.63), 3552, 3200, true, true, false);
+                File.WriteAllLines(Path.Combine(outDir, "picture_edges.txt"), lines);
+                return 0;
+            }
             var pmCases = Arg("--pipeline-model-selftest");   // harness/pipeline_model_check.py: the C# pipeline model against the Python oracle, case by case
             if (pmCases != null)
             {

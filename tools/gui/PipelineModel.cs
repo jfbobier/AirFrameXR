@@ -376,6 +376,70 @@ namespace AirFrameXR
             }
         }
 
+        /// The step D wiring (docs/PICTURE_EDGES_DESIGN.md sections 5b and 9; owner 2026-11-06): the foveation of the stream is computed from the picture edges V (the Vision Pro
+        /// card's profile, or the whole panel the headset declares = "Apple's default") and Apple's rasterization map, over the stream size already in session.json. It compresses
+        /// nothing below what the map keeps at that angle (the zero-loss geometry), so it never costs picture, and it takes the place of the static numbers of the profile. Only the
+        /// foveation numbers are written: the stream size stays the user's choice (the density rule of section 5 is not applied).
+        public static class PictureEdgesFoveation
+        {
+            public static string ProfilePath => Path.Combine(Paths.Dir, "profiles", "apple-vision-pro.profile.json");
+
+            static double[] Four(object o) => (o as object[])?.Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
+
+            /// V as one box (outer, inner, upper, lower): the per-edge union of the two eyes of video.headset_view (four numbers, or {left, right}), never wider than the
+            /// panel the headset declares (the client declares the smaller of the two); absent = the whole panel; no headset seen yet = Apple's frustum from the map
+            public static double[] View(AppSettings st, RateMap rm)
+            {
+                var panel = AppSettings.ReadClientFov() ?? rm.P;
+                var t = Json.Get(st.Root, "video.headset_view");
+                double[] a = null, b = null;
+                if (t is Dictionary<string, object> d) { a = Four(d.ContainsKey("left") ? d["left"] : null); b = Four(d.ContainsKey("right") ? d["right"] : null); }
+                else a = b = Four(t);
+                if (a == null || a.Length != 4) return panel;
+                if (b == null || b.Length != 4) b = a;
+                var v = new double[4];
+                for (int k = 0; k < 4; k++) v[k] = Math.Min(Math.Max(a[k], b[k]), panel[k]);
+                return v.All(x => x > 0.05) ? v : panel;
+            }
+
+            static readonly string[] Keys = { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" };
+
+            /// Computes the foveation for the stream size in `session` and writes it there. Vision Pro only (the map is Apple's). `explicit`: the user just chose a picture-edges
+            /// profile, finished a fit, or is setting up (clears the hand-edit flag); false: a passive recompute (the streamer starting) that leaves hand-edited numbers alone.
+            /// Returns what it wrote, one line, or null when it wrote nothing. The caller saves the session (and the settings when the flag changed).
+            public static string Apply(AppSettings st, Dictionary<string, object> session, bool explicitChoice, RateMap rm = null)
+            {
+                if (st.Kind != HeadsetKind.VisionPro) return null;
+                rm = rm ?? RateMapFoveation.Load(ProfilePath);
+                if (rm == null) return null;
+                if (st.FoveationManual) { if (!explicitChoice) return null; st.FoveationManual = false; }
+                var eye = StreamEyeExpected(session);
+                if (eye == null || eye[0] < 256 || eye[1] < 256) return null;
+                var view = View(st, rm);
+                var g = RateMapFoveation.ZeroLoss(view, eye, rm);
+                RateMapFoveation.ApplyGeometry(session, g);
+                var c = CultureInfo.InvariantCulture;
+                return $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map, over {eye[0]} x {eye[1]} per eye: centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}";
+            }
+
+            /// Apply on the files: loads the session, writes it back when something changed, logs. Never throws (a failure is a warning in the log).
+            public static string ApplyToFiles(AppSettings st, bool explicitChoice)
+            {
+                try
+                {
+                    var flag = st.FoveationManual;
+                    var s = Session.Load();
+                    var line = Apply(st, s, explicitChoice);
+                    if (line == null) return null;
+                    Json.Save(Paths.Session, s);
+                    if (flag != st.FoveationManual) st.Save();
+                    Log.Write("INFO", line);
+                    return line;
+                }
+                catch (Exception e) { Log.Write("WARN", "foveation from the picture edges not written: " + e.Message); return null; }
+            }
+        }
+
         // ---- the files -------------------------------------------------------------------------------------------------------------------------
         /// encoder facts from the session and the settings: foveated, its geometry, split mode, preset, engines (-1 = unknown)
         public static void ReadEncoder(AppSettings st, Dictionary<string, object> session, Inputs i)
