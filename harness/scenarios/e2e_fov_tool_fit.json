@@ -50,7 +50,7 @@
     "seconds": 60,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "exit_after_frames": 1050,
+    "exit_after_frames": 1250,
     "gui": true
   },
   "client": {
@@ -68,7 +68,7 @@
     "timeout_s": 60,
     "env": {
       "XR_PROBE_TOOL": "fit",
-      "XR_PROBE_KEYS": "120:space,150:left,154:left,158:left,162:left,180:up,184:up,200:shift+right,204:shift+right,230:tab,250:right,254:right,800:enter"
+      "XR_PROBE_KEYS": "120:space,150:left,154:left,158:left,162:left,180:up,184:up,200:shift+right,204:shift+right,330:tab,350:right,354:right,1000:enter"
     }
   },
   "gpu_sample": true,
@@ -128,7 +128,7 @@
           ]
         },
         {
-          "app_frame": 215,
+          "app_frame": 300,
           "what": "left_eye",
           "edges_eyes": [
             0
@@ -144,7 +144,7 @@
           ]
         },
         {
-          "app_frame": 290,
+          "app_frame": 430,
           "what": "right_eye",
           "edges_eyes": [
             1
@@ -160,7 +160,7 @@
           ]
         },
         {
-          "app_frame": 760,
+          "app_frame": 880,
           "what": "faded",
           "no_text_eyes": [
             0,
@@ -168,7 +168,7 @@
           ]
         },
         {
-          "app_frame": 900,
+          "app_frame": 1100,
           "what": "saved",
           "text_eyes": [
             1

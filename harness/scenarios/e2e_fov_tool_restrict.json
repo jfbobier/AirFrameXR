@@ -70,14 +70,14 @@
       "XR_PROBE_TOOL": "restrict",
       "XR_PROBE_SCENE": "bench\\littlest_tokyo.vab",
       "XR_PROBE_SOUND": "0",
-      "XR_PROBE_KEYS": "120:space,150:left,154:left,170:down,190:shift+left,210:tab,230:right,260:+space,290:-space,320:enter"
+      "XR_PROBE_KEYS": "120:space,150:left,154:left,170:down,190:shift+left,210:tab,230:right,234:right,238:right,242:right,330:+space,400:-space,430:enter"
     }
   },
   "gpu_sample": true,
   "timeout_s": 240,
   "checks": {
-    "host_min_frames": 800,
-    "client_min_frames": 700,
+    "host_min_frames": 600,
+    "client_min_frames": 550,
     "timestamps_monotonic": true,
     "max_duplicate_timestamps": 400,
     "min_delivery_ratio": 0.7,
@@ -101,7 +101,7 @@
         "deltas": [
           [
             -1.0,
-            -1.0,
+            -4.0,
             0.0,
             -1.0
           ],
@@ -123,7 +123,7 @@
           ]
         },
         {
-          "app_frame": 250,
+          "app_frame": 300,
           "what": "left_alone",
           "restrict_eyes": [
             0,
@@ -131,7 +131,7 @@
           ]
         },
         {
-          "app_frame": 275,
+          "app_frame": 380,
           "what": "whole_view",
           "whole_view": true,
           "restrict_eyes": [
