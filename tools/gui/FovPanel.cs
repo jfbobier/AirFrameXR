@@ -423,7 +423,7 @@ namespace AirFrameXR
         readonly Button fit;
         // the restriction G derived from V: "the game renders X % of what you see" (video.restriction_share, percent of the pixels; 100 = no restriction)
         const string ShareKey = "video.restriction_share";
-        readonly TrackBar share = new TrackBar { Minimum = 70, Maximum = 100, Value = 90, TickStyle = TickStyle.None, SmallChange = 1, LargeChange = 5, Width = 220, AutoSize = false, Height = 26, AccessibleName = "Share of the view the game renders" };
+        readonly TrackBar share = new TrackBar { Minimum = 70, Maximum = 100, Value = 100, TickStyle = TickStyle.None, SmallChange = 1, LargeChange = 5, Width = 220, AutoSize = false, Height = 26, AccessibleName = "Share of the view the game renders" };
         readonly Label shareLabel = Ui.Line("");
         readonly Timer shareTimer = new Timer { Interval = 500 };
         readonly Label note = Ui.Line("");
@@ -493,7 +493,7 @@ namespace AirFrameXR
             else { whole.Checked = true; if (profiles.Items.Count > 0) profiles.SelectedIndex = 0; }
             mine.Enabled = profiles.Enabled = profiles.Items.Count > 0;
             loading = false;
-            { var v = (int)Math.Round(Json.Num(st.Root, ShareKey, 90)); loading = true; share.Value = Math.Max(share.Minimum, Math.Min(share.Maximum, v)); loading = false; }
+            { var v = (int)Math.Round(Json.Num(st.Root, ShareKey, 100)); loading = true; share.Value = Math.Max(share.Minimum, Math.Min(share.Maximum, v)); loading = false; }
             if (defaulted) Changed();   // written once, so the streamer sends it
             else if (storePath == null && Json.Get(st.Root, ShareKey) == null) ApplyShare();   // the default share, written once
             Describe(); DescribeShare();
