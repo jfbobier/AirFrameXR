@@ -63,10 +63,11 @@ static void findPrimaryMonitor() {
     const HMONITOR m = MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi{ sizeof mi }; if (GetMonitorInfoW(m, &mi)) g_mon = mi.rcMonitor;
 }
-static void mouseTo(float u, float v) {
+static POINT mouseTo(float u, float v) {
     const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN), vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
     const double px = g_mon.left + std::max(0.f, std::min(1.f, u)) * (g_mon.right - g_mon.left - 1), py = g_mon.top + std::max(0.f, std::min(1.f, v)) * (g_mon.bottom - g_mon.top - 1);
     sendMouse((LONG)((px - vx) * 65535.0 / std::max(1, vw - 1) + 0.5), (LONG)((py - vy) * 65535.0 / std::max(1, vh - 1) + 0.5), MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK);
+    return POINT{ (LONG)(px + 0.5), (LONG)(py + 0.5) };   // where the cursor should now be, to notice a physical mouse moving it elsewhere
 }
 static void wheel(int ticks) { INPUT i{}; i.type = INPUT_MOUSE; i.mi.dwFlags = MOUSEEVENTF_WHEEL; i.mi.mouseData = (DWORD)(ticks * WHEEL_DELTA); SendInput(1, &i, sizeof i); }
 
@@ -239,6 +240,7 @@ int main(int argc, char** argv) {
     LARGE_INTEGER qpf; QueryPerformanceFrequency(&qpf); auto qpcMs = [&] { LARGE_INTEGER t; QueryPerformanceCounter(&t); return (double)t.QuadPart * 1000.0 / (double)qpf.QuadPart; };
     double perfT0 = qpcMs(), frameStart = 0, frameMaxMs = 0, renderSumMs = 0; int perfFrames = 0;
     bool seenHand = false, seenHit = false; bool left = false, right = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, stickMax = 0; bool primSeen = false, secSeen = false; float su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
+    bool yielded = false, haveSent = false; POINT sent{}; float yU = 0, yV = 0;   // yielded: the physical mouse moved the cursor, so the beam stops moving it until a press or a deliberate sweep
     int activeHand = 1; bool swallow = false;   // the hand that holds the beam (the right one until the left trigger or grip is pressed); swallow: its take-over press does not click
     ULONGLONG t0 = GetTickCount64(); bool running = false, exiting = false, endKey = false; uint64_t frames = 0;
     int rc = 0; bool leaving = false; ULONGLONG leaveT0 = 0;
@@ -331,8 +333,17 @@ int main(int argc, char** argv) {
                     cu = su; cv = sv_;
                 } else { smoothing = false; pressing = false; }
                 {
-                    if (mouse && hit) mouseTo(su, sv_);
-                    const bool l = hit && lWant, r = hit && rWant;
+                    if (mouse) {
+                        // a physical mouse and the beam do not fight: when the cursor is somewhere other than where the beam put it, the mouse has it (the dot follows the real cursor)
+                        // until a button press or a deliberate sweep of the beam (120 desktop pixels from where it was) takes it back; a hand's small tremor does not
+                        POINT cp; const bool haveCp = GetCursorPos(&cp) != 0;
+                        const bool beamDown = trig > 0.3f || sq > 0.5f || sec || prim[0] || prim[1];
+                        if (!yielded && haveSent && haveCp && std::hypot((float)(cp.x - sent.x), (float)(cp.y - sent.y)) > 4.f && !left && !right) { yielded = true; yU = su; yV = sv_; event("mouse_takes", "physical mouse moved"); }
+                        if (yielded && hit && (beamDown || std::hypot((su - yU) * mirror.DesktopW(), (sv_ - yV) * mirror.DesktopH()) > 120.f)) { yielded = false; haveSent = false; event("beam_takes", beamDown ? "press" : "sweep"); }
+                        if (yielded && haveCp) { const float mu = (float)(cp.x - g_mon.left) / (float)std::max<LONG>(1, g_mon.right - g_mon.left - 1), mv = (float)(cp.y - g_mon.top) / (float)std::max<LONG>(1, g_mon.bottom - g_mon.top - 1); if (mu >= 0 && mu <= 1 && mv >= 0 && mv <= 1) { cu = mu; cv = mv; } else { cu = -1; cv = -1; } }
+                        else if (hit) { sent = mouseTo(su, sv_); haveSent = true; }
+                    }
+                    const bool l = hit && !yielded && lWant, r = hit && !yielded && rWant;
                     char det[96];
                     if (l != left) { snprintf(det, sizeof det, "trigger %.2f", trig); event(l ? "left_down" : "left_up", det); if (mouse) sendMouse(0, 0, l ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP); }
                     if (r != right) { snprintf(det, sizeof det, "grip %.2f B/Y %d", sq, sec ? 1 : 0); event(r ? "right_down" : "right_up", det); if (mouse) sendMouse(0, 0, r ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP); }

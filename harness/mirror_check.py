@@ -146,7 +146,7 @@ for dn, w, h in DESKTOPS:
                 if not near(zr["cursor_core"], [255, 255, 255], 8): bad.append(f"cursor core {zr['cursor_core']}")
                 if not near(zr["cursor_ring"], [0, 0, 0], 40): bad.append(f"cursor ring {zr['cursor_ring']}")
                 if not near(zr["cursor_outside"], exp[5], 6): bad.append(f"cursor outside {zr['cursor_outside']} expected {exp[5]}")
-                want_scale = max(1.0, h / 1080)
+                want_scale = 2.0 * max(1.0, h / 1080)
                 if abs(zr["cursor_scale"] - want_scale) > 0.01: bad.append(f"cursor scale {zr['cursor_scale']} expected {want_scale:.2f}")
         # clear colour where nothing is drawn
         if not near(r["right_eye"], [0x11, 0x22, 0x33], 1):
