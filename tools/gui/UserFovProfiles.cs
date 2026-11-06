@@ -14,10 +14,16 @@ namespace AirFrameXR
     public class UserFov
     {
         public string Id, Name, Headset = "", Source = "manual", Created = "", Note = "";
-        /// the headset app's own FoV scale recommended with it (0 = none), e.g. 0.8 for the Vision Pro's calibration
-        public double ClientScale;
         /// outer, inner, upper, lower (tangents)
         public double[] Tan = new double[4];
+        /// schema 2: each eye's own four tangents when the eyes were fitted apart (null = the eyes are mirrored); Tan stays the per-edge union, which is what a reader of schema 1 and the streamer (until the per-eye message exists) use
+        public double[] TanLeft, TanRight;
+        public bool PerEye => TanLeft != null && TanRight != null;
+        /// schema 2: how the numbers were found: quickfit | restriction | sweep | slider | manual ("" for a file written before)
+        public string Method = "";
+        /// schema 2: the light seal size the wearer named ("" = not asked / not known) and the panel (outer, inner, upper, lower of the left eye, then the right eye's) the numbers were measured against (null = not recorded)
+        public string LightSeal = "";
+        public double[] DeclaredAtMeasure;
         /// the game render quality that goes with it (0..1, video.fov_render_quality)
         public double Quality;
         /// the measured window of a calibration (tangent space, x outward from the nose, y up); empty for numbers typed by hand
@@ -33,7 +39,10 @@ namespace AirFrameXR
                 ["render_quality"] = Math.Round(Quality, 2),
             };
             if (Note.Length > 0) d["note"] = Note;
-            if (ClientScale > 0) d["client_scale"] = Math.Round(ClientScale, 2);
+            if (PerEye) { d["tan_left"] = TanLeft.Select(v => (object)Math.Round(v, 4)).ToList(); d["tan_right"] = TanRight.Select(v => (object)Math.Round(v, 4)).ToList(); }
+            if (Method.Length > 0) d["method"] = Method;
+            if (LightSeal.Length > 0) d["light_seal"] = LightSeal;
+            if (DeclaredAtMeasure != null) d["declared_at_measure"] = DeclaredAtMeasure.Select(v => (object)Math.Round(v, 4)).ToList();
             if (Window.Count > 0) d["window"] = Window.Select(p => (object)new List<object> { Math.Round(p[0], 4), Math.Round(p[1], 4) }).ToList();
             return d;
         }
@@ -47,9 +56,18 @@ namespace AirFrameXR
                 var u = new UserFov
                 {
                     Id = Json.Str(d, "id", ""), Name = Json.Str(d, "name", ""), Headset = Json.Str(d, "headset", ""), Source = Json.Str(d, "source", "manual"),
-                    Created = Json.Str(d, "created", ""), Note = Json.Str(d, "note", ""), ClientScale = Math.Max(0, Json.Num(d, "client_scale", 0)), Quality = Math.Max(0, Math.Min(1, Json.Num(d, "render_quality", 0))),
+                    Created = Json.Str(d, "created", ""), Note = Json.Str(d, "note", ""), Quality = Math.Max(0, Math.Min(1, Json.Num(d, "render_quality", 0))),
                     Tan = Enumerable.Range(0, 4).Select(i => Convert.ToDouble(t[i], CultureInfo.InvariantCulture)).ToArray(),
                 };
+                u.Method = Json.Str(d, "method", "");
+                u.LightSeal = Json.Str(d, "light_seal", "");
+                if (Json.Get(d, "declared_at_measure") is System.Collections.IList dm && dm.Count >= 8) u.DeclaredAtMeasure = Enumerable.Range(0, 8).Select(i => Convert.ToDouble(dm[i], CultureInfo.InvariantCulture)).ToArray();
+                if (Json.Get(d, "tan_left") is System.Collections.IList tl && tl.Count >= 4 && Json.Get(d, "tan_right") is System.Collections.IList tr && tr.Count >= 4)
+                {
+                    double[] Four(System.Collections.IList l) => Enumerable.Range(0, 4).Select(i => Convert.ToDouble(l[i], CultureInfo.InvariantCulture)).ToArray();
+                    var left = Four(tl); var right = Four(tr);
+                    if (left.Concat(right).All(v => !double.IsNaN(v) && v > 0)) { u.TanLeft = left; u.TanRight = right; }
+                }
                 if (u.Id.Length == 0 || u.Tan.Any(v => double.IsNaN(v) || !(v > 0))) return null;
                 if (u.Name.Length == 0) u.Name = u.Id;
                 if (Json.Get(d, "window") is System.Collections.IList w)
@@ -79,7 +97,7 @@ namespace AirFrameXR
 
         static void Save(IEnumerable<UserFov> all, List<string> seeded, string path)
         {
-            var root = new Dictionary<string, object> { ["version"] = 1.0, ["profiles"] = all.Select(u => (object)u.ToJson()).ToList() };
+            var root = new Dictionary<string, object> { ["version"] = 2.0, ["profiles"] = all.Select(u => (object)u.ToJson()).ToList() };
             if (seeded.Count > 0) root["seeded"] = seeded.Select(x => (object)x).ToList();
             Json.Save(path ?? FilePath, root);
         }
@@ -95,7 +113,7 @@ namespace AirFrameXR
         /// into the user's file once, so the list has something to choose from and every choice is one of the user's own (deletable). Returns how many were copied.
         public static int SeedFromShipped(string headsetName, string path = null, string profilesDir = null)
         {
-            if (string.IsNullOrEmpty(headsetName)) return 0;
+            headsetName = headsetName ?? "";
             int added = 0;
             try
             {
@@ -110,17 +128,17 @@ namespace AirFrameXR
                     var vis = fov == null ? null : Json.Get(fov, "visible_deg") as Dictionary<string, object>;
                     var names = (Json.Get(d, "match.name_contains") as System.Collections.IList)?.OfType<string>().ToList();
                     if (id.Length == 0 || vis == null || names == null || seeded.Contains(id)) continue;
-                    if (!names.Any(n => headsetName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                    // the Vision Pro's "AVP optimized" window is offered to everybody (a user can pick it before a headset was ever seen); the other shipped windows follow the headset's name
+                    if (id != "apple-vision-pro" && !names.Any(n => headsetName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
                     var margin = Math.Max(0, Math.Min(15, Json.Num(fov, "margin_deg", 3)));
                     var tan = new[] { "outer", "inner", "upper", "lower" }.Select(k => Math.Round(Math.Tan((Json.Num(vis, k, 0) + margin) * Math.PI / 180), 2)).ToArray();
                     if (tan.Any(v => !(v > 0))) continue;
-                    var scale = Json.Num(fov, "client_fov_scale", 0);
                     var standard = Json.Str(fov, "source", "standard");
                     all.RemoveAll(x => x.Id == "std-" + id);
                     all.Add(new UserFov
                     {
-                        Id = "std-" + id, Name = Json.Str(d, "display_name", id).Split('(')[0].Trim() + (standard == "starting-point" ? " (starting point, not measured)" : " (standard calibration)"), Headset = names[0], Source = standard,
-                        Created = "2026-01-01T00:00:00", Tan = tan, Quality = Math.Max(0, Math.Min(1, Json.Num(fov, "render_quality", 0))), ClientScale = scale >= 0.2 && scale <= 1.6 && Math.Abs(scale - 1) > 0.001 ? scale : 0, Note = Json.Str(fov, "note", ""),
+                        Id = "std-" + id, Name = standard == "author" ? "AVP optimized" : Json.Str(d, "display_name", id).Split('(')[0].Trim() + (standard == "starting-point" ? " (starting point, not measured)" : " (standard calibration)"), Headset = names[0], Source = standard,
+                        Created = "2026-01-01T00:00:00", Tan = tan, Quality = Math.Max(0, Math.Min(1, Json.Num(fov, "render_quality", 0))), Note = Json.Str(fov, "note", ""),
                     });
                     seeded.Add(id); added++;
                 }
@@ -176,7 +194,9 @@ namespace AirFrameXR
         public static void Apply(UserFov u, AppSettings st, double[] client, string headset)
         {
             var keys = new[] { "video.fov_outer", "video.fov_inner", "video.fov_upper", "video.fov_lower" };
+            // one box for both eyes, mirrored (Tan is the larger value of the two eyes when the tool measured them apart): the engine tells the game the same box in both eyes
             for (int k = 0; k < 4; k++) Json.Set(st.Root, keys[k], Math.Round(client != null ? Math.Min(u.Tan[k], client[k]) : u.Tan[k], 4));
+            Json.Remove(st.Root, "video.fov_override_right");
             Json.Set(st.Root, "video.fov_override", true);
             Json.Set(st.Root, "video.fov_profile", u.Id);
             if (client != null) Json.Set(st.Root, "video.fov_for", client.Select(x => (object)Math.Round(x, 4)).ToList());   // the headset these values were made for (they are absolute tangents)
@@ -201,6 +221,21 @@ namespace AirFrameXR
         }
 
         public static string NewId() => "u" + DateTime.Now.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
+
+        /// A box the probe's tool scenes produced (one per eye: outer, inner, upper, lower tangents) as a stored profile: method "quickfit" (the black-bar fit) or "restriction" (what the game renders).
+        /// Tan is the per-edge union of the two eyes, which is what schema 1 readers and the streamer's mirrored fields take; TanLeft / TanRight carry the eyes apart.
+        public static UserFov FromTool(string method, double[][] box, double[][] panel, string headset, string seal)
+        {
+            var u = new UserFov
+            {
+                Id = NewId(), Headset = headset ?? "", Source = method == "quickfit" ? "calibrated" : "manual", Method = method, LightSeal = seal ?? "", Quality = 0,
+                Name = (method == "quickfit" ? "Fit " : "Restriction ") + DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+                TanLeft = box[0].Select(v => Math.Round(v, 4)).ToArray(), TanRight = box[1].Select(v => Math.Round(v, 4)).ToArray(),
+            };
+            u.Tan = Enumerable.Range(0, 4).Select(k => Math.Round(Math.Max(box[0][k], box[1][k]), 4)).ToArray();
+            if (panel != null) u.DeclaredAtMeasure = panel[0].Concat(panel[1]).ToArray();
+            return u;
+        }
 
         /// A calibration result (FovFitResult.Profile's rectangle and window) as a stored profile.
         public static UserFov FromCalibration(FovFitResult r, string headset, string name = null)
@@ -270,13 +305,21 @@ namespace AirFrameXR
             }
             if (c.Level == FovLevel.Invalid) return c;
 
-            if (declared != null && declared.Length == 4)
-                for (int k = 0; k < 4; k++)
-                    if (c.Tan[k] > declared[k] * OverDeclaredTolerance)
-                        c.Red(Names[k] + " " + F(c.Tan[k]) + " is more than the headset shows (" + F(declared[k]) + ", " + F(Math.Atan(declared[k]) * 180 / Math.PI) + "°): a game cannot be given more than that.");
             c.TotalH = c.Deg[0] + c.Deg[1]; c.TotalV = c.Deg[2] + c.Deg[3];
-            if (declared != null && declared.Length == 4) c.AreaShare = (c.Tan[0] + c.Tan[1]) * (c.Tan[2] + c.Tan[3]) / ((declared[0] + declared[1]) * (declared[2] + declared[3]));
-            if (c.Level == FovLevel.Invalid) return c;
+            if (declared != null && declared.Length == 4)
+            {
+                // Above what the headset app declared at its last connection: not an error. A calibration measures the wearer, not the app; the streamer gives
+                // a game at most the declared box per edge (vision::fov_scale_from), so the extra is unused until the app declares more. The Vision Pro apps
+                // 1.2.0 to 1.3.1 declared a fixed box (about 1.04 / 0.79 / 0.76 / 0.87) that cut wearers who see more; 1.3.2 declares the whole panel.
+                var over = Enumerable.Range(0, 4).Where(k => c.Tan[k] > declared[k] * OverDeclaredTolerance).ToList();
+                if (over.Count > 0)
+                    c.Yellow(string.Join(", ", over.Select(k => Names[k] + " " + F(c.Tan[k]))) + (over.Count == 1 ? " is" : " are") + " more than the headset app declared at its last connection ("
+                             + string.Join(", ", over.Select(k => F(declared[k]) + " = " + F(Math.Atan(declared[k]) * 180 / Math.PI) + "°")) + "). Games get at most that until the app declares more:"
+                             + " with an older AirFrameXR Vision Pro app (1.2.0 to 1.3.1) update it to 1.3.2 or later and connect once; the values are kept as they are.");
+                // the share of the declared box a game renders: each edge counts at most the declared one (what the streamer gives)
+                double E(int k) => Math.Min(c.Tan[k], declared[k]);
+                c.AreaShare = (E(0) + E(1)) * (E(2) + E(3)) / ((declared[0] + declared[1]) * (declared[2] + declared[3]));
+            }
 
             if (unit == FovUnit.Tangent && c.Tan.Any(t => t > LooksLikeDegrees)) c.Yellow("A value above " + F(LooksLikeDegrees) + " is a tangent of more than 71°: did you type degrees?");
             if (Ratio(c.Tan[0], c.Tan[1]) > MaxSideRatio) c.Yellow("Outer and inner differ a lot (" + F(c.Tan[0]) + " against " + F(c.Tan[1]) + "); the nose side is usually the smaller, but not by that much.");

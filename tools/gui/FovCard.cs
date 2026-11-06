@@ -90,7 +90,7 @@ namespace AirFrameXR
         readonly Label details, message, note;
         readonly Button delete = new Button { Text = "Delete", AutoSize = true }, rename = new Button { Text = "Rename...", AutoSize = true };
         readonly Button add = new Button { Text = "Add to my profiles", AutoSize = true, Enabled = false, Margin = new Padding(12, 2, 3, 3) };
-        readonly Button calibrate = new Button { Text = "Calibrate now (30 min, needs the headset)...", AutoSize = true, Margin = new Padding(3, 8, 8, 3) };
+        readonly Button calibrate = new Button { Text = "Calibrate (1 min, headset on)...", AutoSize = true, Margin = new Padding(3, 8, 8, 3) };
         readonly Button import = new Button { Text = "Import a file...", AutoSize = true, Margin = new Padding(8, 8, 3, 3) };
         readonly Button grid = new Button { Text = "Check with fovgrid...", AutoSize = true, Margin = new Padding(3, 8, 3, 3) };
         readonly ComboBox unit = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100, AccessibleName = "Unit of the typed values" };
@@ -116,7 +116,7 @@ namespace AirFrameXR
         public UserFov Proposed => list.Items.Cast<UserFov>().FirstOrDefault(u => u.Source == "standard" || u.Source == "starting-point");
 
         /// A profile file's measured field of view as one of the user's profiles.
-        public static UserFov FromProfile(HmdProfile p) => new UserFov { Id = UserFovStore.NewId(), Name = p.DisplayName.Split('(')[0].Trim(), Headset = p.NameContains.FirstOrDefault() ?? "", Source = "imported", Tan = p.FovTangents(), Quality = p.FovRenderQuality, ClientScale = p.FovClientScale, Note = p.FovNote };
+        public static UserFov FromProfile(HmdProfile p) => new UserFov { Id = UserFovStore.NewId(), Name = p.DisplayName.Split('(')[0].Trim(), Headset = p.NameContains.FirstOrDefault() ?? "", Source = "imported", Tan = p.FovTangents(), Quality = p.FovRenderQuality, Note = p.FovNote };
         // the UI harness and the self-test
         public bool CanAdd => add.Enabled;
         public string Message => message.Text;
@@ -169,7 +169,7 @@ namespace AirFrameXR
 
             var rowB = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0) };
             calibrate.Click += (s, e) => Calibrate(); grid.Click += (s, e) => CheckWithGrid();
-            tips.SetToolTip(calibrate, "Measures the edges of what your headset shows with the eye calibration wizard (about 30 minutes, the headset on). The result is kept here as a new profile.");
+            tips.SetToolTip(calibrate, "Four bright lines in the headset: push each edge out until the lens cuts it, one eye at a time (about a minute). The result is kept here as a new profile. Any headset.");
             tips.SetToolTip(grid, "Starts the streamer if needed and draws the chosen rectangle on a degree grid in the headset (bench\\fovgrid.exe): the outline must sit just outside the picture you can see.");
             import.Click += (s, e) => ImportFile();
             tips.SetToolTip(import, "A calibration file someone shared, or the one fov_profile.exe wrote (a .profile.json with a measured field of view): it is added to your profiles.");

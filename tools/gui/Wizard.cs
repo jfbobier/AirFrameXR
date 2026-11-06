@@ -351,12 +351,12 @@ namespace AirFrameXR
                 // so every headset is offered it, the Vision Pro too since the AirFrameXR client handles the key colour and the margins itself (the stock App Store app has a fixed key colour and range).
                 if (!demo && !auto && !settings.ChromaAsked)
                     using (var dlg = new ChromaStepForm())
-                        if (dlg.ShowDialog(this) == DialogResult.OK)
-                        {
-                            chromaChoice = Tuple.Create(dlg.Transparent, dlg.Rgb);
-                            settings.ChromaAsked = true; settings.Save();
-                            Log.Write("INFO", $"wizard: chroma-key passthrough {(dlg.Transparent ? "on, key #" + dlg.Rgb : "off")}");
-                        }
+                    {
+                        dlg.ShowDialog(this);   // closing the window with its cross keeps the recommended answer (yes, #00FF00, for the Vision Pro and the Quest alike): passthrough is on unless the user ticks No
+                        chromaChoice = Tuple.Create(dlg.Transparent, dlg.Rgb);
+                        settings.ChromaAsked = true; settings.Save();
+                        Log.Write("INFO", $"wizard: chroma-key passthrough {(dlg.Transparent ? "on, key #" + dlg.Rgb : "off")}");
+                    }
                 GoTo(3);
             };
             p.Controls.Add(hsGo);
@@ -590,7 +590,7 @@ namespace AirFrameXR
                 return;
             }
             var fovLine = !p.HasFov ? "" : "A measured field of view is in the profile: it is offered at the Field of view step, at the end of the wizard."
-                + (p.FovClientScale > 0 ? " " + p.FovClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " client slider recommended (manually)." : "") + "\n";
+                + "\n";
             var text = $"Profile: {p.DisplayName}{(p.Author.Length > 0 ? " by " + p.Author : "")}\n{p.EyeW} x {p.EyeH} per eye at {p.Fps:0} fps, {p.Codec.ToUpperInvariant()} {p.BitDepth}-bit, " +
                        $"{(p.Foveated ? "foveated" : "full frame")}, split encode {p.SplitEncode}, {p.Variant(null).Mbps:0} Mbps, {p.SessionOverrides.Count} ALVR setting(s)\n{fovLine}\n" +
                        $"Your headset, as ALVR reports it:\n{HmdProfiles.Describe(hs)}\n\n";
