@@ -21,21 +21,14 @@ struct Eye { Q q; V3 p; float tl, tr, tu, td; };
 
 struct Screen { V3 center, right, up, normal; float width, height; };
 static const float kDistM = 1.5f, kFovDeg = 56.5f, kMaxTallDeg = 52.f;   // a large monitor at arm's length: 56.5 degrees wide (1.6 m) at 1.5 m
-static const float kFollowTurnDeg = 25.f, kFollowMoveM = 0.15f, kGlideS = 0.4f;
-static const float kQuadrantHysteresisDeg = 55.f;   // the screen stays in its quarter of the room until the head is this far from its direction
 static const float kPi = 3.14159265358979f;
 static float rad(float d) { return d * kPi / 180.f; }
 
-// The screen has four positions, a quarter turn apart (in front of the user's start direction, to its right, behind, to its left): it stays in one until the
-// user's head yaw is more than kQuadrantHysteresisDeg from it, then it moves to the nearest one. `ref` is the yaw the quarters count from (the head's yaw when
-// the mirror starts or is recentred), `cur` the quarter the screen is in.
+// The screen has one position: in front of the user's head (its horizontal direction) when the mirror starts or when a grip is pressed, and it stays there.
 static float headYaw(Q q) { const V3 f = rotate(q, { 0, 0, -1 }); return std::atan2(-f.x, -f.z); }
-static float wrapPi(float a) { while (a > kPi) a -= 2 * kPi; while (a <= -kPi) a += 2 * kPi; return a; }
-static int quadrantFor(float yaw, float ref, int cur) {
-    if (std::fabs(wrapPi(yaw - ref - cur * kPi / 2)) <= rad(kQuadrantHysteresisDeg)) return cur;
-    return ((int)std::lround(wrapPi(yaw - ref) / (kPi / 2)) % 4 + 4) % 4;
-}
-static V3 cardinal(float ref, int quad) { const float y = ref + quad * kPi / 2; return { -std::sin(y), 0.f, -std::cos(y) }; }
+static V3 facingYaw(float yaw) { return { -std::sin(yaw), 0.f, -std::cos(yaw) }; }
+// A grip press recentres the screen: down at 0.7, up again at 0.3 (a firm squeeze, one recentre per squeeze).
+static bool gripDown(float grip, bool was) { return grip > (was ? 0.3f : 0.7f); }
 
 // In front of the head in the horizontal direction `f` (a screen does not tilt with the head), a desktop-shaped rectangle facing the user.
 static Screen placeFacing(V3 f, V3 hp, float aspect) {
@@ -48,19 +41,6 @@ static Screen placeFacing(V3 f, V3 hp, float aspect) {
 }
 // The head's own direction (what the old continuous placement used): in front of the user wherever they look.
 static Screen place(Q hq, V3 hp, float aspect) { return placeFacing(rotate(hq, { 0, 0, -1 }), hp, aspect); }
-// Lazy follow: the screen stays while the head moves a little, and glides after the user when they walk away (or when its quarter changes).
-static Screen follow(const Screen& cur, const Screen& target, bool& moving, float dt) {
-    const float ang = std::acos(std::max(-1.f, std::min(1.f, dot(cur.normal, target.normal)))) * 180.f / kPi;
-    const V3 d = sub(target.center, cur.center); const float dist = std::sqrt(dot(d, d));
-    if (!moving && (ang > kFollowTurnDeg || dist > kFollowMoveM)) moving = true;
-    if (moving && ang < 2.f && dist < 0.03f) moving = false;
-    if (!moving) return cur;
-    const float a = 1.f - std::exp(-std::max(0.f, std::min(0.1f, dt)) / kGlideS);
-    V3 n = norm({ cur.normal.x + (target.normal.x - cur.normal.x) * a, 0.f, cur.normal.z + (target.normal.z - cur.normal.z) * a });
-    if (dot(n, n) < 0.5f) n = target.normal;
-    const V3 up{ 0, 1, 0 };
-    return { add(cur.center, mul(d, a)), norm(cross(mul(n, -1.f), up)), up, n, target.width, target.height };
-}
 // NDC of a point in one eye (x right, y up, -1..1 across the view's field of view); false when it is at or behind the eye.
 static bool ndcOf(const Eye& v, V3 p, float nearZ, float out[2]) {
     const V3 c = rotate(conj(v.q), sub(p, v.p));
@@ -94,9 +74,14 @@ static bool rayHit(const Screen& s, V3 o, V3 d, float& u, float& v) {
     u = dot(h, s.right) / s.width + 0.5f; v = 0.5f - dot(h, s.up) / s.height;
     return u >= 0.f && u <= 1.f && v >= 0.f && v <= 1.f;
 }
-// The beam's hand: a press of the trigger (above 0.5) or the grip (above 0.7) on the controller that does not hold it takes it over; that press is then
-// swallowed (it does not click) until the trigger, the grip and B / Y are all released.
-static bool takesBeam(float trigger, float grip) { return trigger > 0.5f || grip > 0.7f; }
-static bool takeOverReleased(float trigger, float grip, bool secondary) { return trigger < 0.15f && grip < 0.3f && !secondary; }
+// The beam's hand: a firm press of the trigger (above 0.5) on the controller that does not hold it takes it over; that press is then swallowed (it does not
+// click) until the trigger is released.
+static bool takesBeam(float trigger) { return trigger > 0.5f; }
+static bool takeOverReleased(float trigger) { return trigger < 0.15f; }
 static V3 screenPoint(const Screen& s, float u, float v) { return add(add(s.center, mul(s.right, (u - 0.5f) * s.width)), mul(s.up, (0.5f - v) * s.height)); }
 
+// The controls hint: a small badge under the screen ("? controls"); the beam on it opens the panel (the commands) in the same place, larger. Same plane as the screen.
+static const float kBadgeW = 0.30f, kBadgeH = 0.075f, kPanelW = 0.96f, kPanelH = 0.48f, kHintGapM = 0.04f;
+static Screen hintBelow(const Screen& s, float w, float h) {
+    return { add(s.center, mul(s.up, -(s.height / 2 + kHintGapM + h / 2))), s.right, s.up, s.normal, w, h };
+}

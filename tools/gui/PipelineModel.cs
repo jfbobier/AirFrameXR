@@ -214,6 +214,340 @@ namespace AirFrameXR
             return $"Foveation keeps full detail from {Math.Abs(r.BandX[0]).ToString("0.0", c)}° outward to {r.BandX[1].ToString("0.0", c)}° toward the nose, and from {Math.Abs(r.BandY[0]).ToString("0.0", c)}° down to {r.BandY[1].ToString("0.0", c)}° up; the rest of the frame is compressed.";
         }
 
+        // ---- foveation from Apple's rate map (docs/PICTURE_EDGES_DESIGN.md section 5b, step D) --------------------------------------------------
+        // A port of harness/fov_stream_geometry.py (load_ratemap .. density_eye); harness/ratemap_check.py compares the two. Settings only: the result goes to session.json
+        // (ApplyGeometry) through the foveation parameters the host already reads. Nothing calls ApplyGeometry yet: the A/B of the zero-loss geometry on the 5090 decides.
+
+        /// Apple's rasterization rate map: the panel's frustum P (outer, inner, upper, lower tangents), the full-rate density in px per tangent unit per axis, and one table
+        /// per axis of [degrees from the eye's axis, rate] (x: negative = outer; y: negative = down).
+        public class RateMap { public double[] P, Density; public double[][] X, Y; /** the profile's quality reference: bits per encoded pixel the stream is sized for (0 = none: the size stays the user's) */ public double Bpp; }
+
+        public static class RateMapFoveation
+        {
+            /// STEP 0 SWITCH (docs/PICTURE_EDGES_DESIGN.md section 11): true = the client declares the frustum upside down, so the vertical table is read mirrored (up becomes down).
+            /// Default false = the documented orientation (50 up / 45 down). Settled by the client's `[proj]` log line; this is the only place the vertical orientation lives.
+            public static bool VerticalFlipped = false;
+
+            static double[][] Table(object o) => ((object[])o).Select(r => ((object[])r).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray()).ToArray();
+
+            /// the headset profile's `ratemap` block (profiles/apple-vision-pro.profile.json); null when absent
+            public static RateMap FromProfile(Dictionary<string, object> profile)
+            {
+                if (profile == null || !profile.TryGetValue("ratemap", out var ro) || !(ro is Dictionary<string, object> rm)) return null;
+                var p = ((object[])rm["frustum_tan"]).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
+                var lp = ((object[])rm["logical_px"]).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
+                double bpp = profile.TryGetValue("stream_budget", out var sb) && sb is Dictionary<string, object> sbd && sbd.ContainsKey("reference_bits_per_pixel") ? Convert.ToDouble(sbd["reference_bits_per_pixel"], CultureInfo.InvariantCulture) : 0;
+                return new RateMap { P = p, Density = new[] { lp[0] / (p[0] + p[1]), lp[1] / (p[2] + p[3]) }, X = Table(rm["x"]), Y = Table(rm["y"]), Bpp = bpp };
+            }
+
+            public static RateMap Load(string path) { try { return FromProfile(Json.Load(path)); } catch { return null; } }
+
+            /// the rate at `d` degrees: linear between samples, the end value beyond them (never zero)
+            public static double RateAt(double[][] tbl, double d)
+            {
+                if (d <= tbl[0][0]) return tbl[0][1];
+                if (d >= tbl[tbl.Length - 1][0]) return tbl[tbl.Length - 1][1];
+                for (int k = 0; k + 1 < tbl.Length; k++)
+                    if (tbl[k][0] <= d && d <= tbl[k + 1][0]) return tbl[k][1] + (tbl[k + 1][1] - tbl[k][1]) * (d - tbl[k][0]) / (tbl[k + 1][0] - tbl[k][0]);
+                return tbl[tbl.Length - 1][1];
+            }
+
+            /// the rate on an axis (0 = x, 1 = y) at `d` degrees, with the step-0 switch applied to the vertical one
+            public static double Rate(RateMap rm, int axis, double d) => axis == 0 ? RateAt(rm.X, d) : RateAt(rm.Y, VerticalFlipped ? -d : d);
+
+            /// ALVR's compress shader, output -> source mapping of one axis (harness/lib.py _fov_f)
+            public static double FovF(double e, double cs, double sh, double er)
+            {
+                double c0 = (1.0 - cs) / 2.0, c1 = (er - 1.0) * c0 * (sh + 1.0) / er, c2 = (er - 1.0) * cs + 1.0;
+                double lo = c0 * (sh + 1.0) / c2, hi = c0 * (sh - 1.0) / c2 + 1.0, center = e * c2 / er + c1;
+                double d2 = e * c2, d3 = (e - 1.0) * c2 + 1.0;
+                if (e < lo) { var g1 = e / lo; return g1 * center + (1.0 - g1) * d2; }
+                if (e > hi) { var g2 = (1.0 - e) / (1.0 - hi); return g2 * center + (1.0 - g2) * d3; }
+                return center;
+            }
+
+            static double AxisDeg(double s, double loT, double hiT, int axis) => Deg(axis == 0 ? -loT + s * (loT + hiT) : hiT - s * (loT + hiT));
+
+            /// worst over-compression on one axis (r / max(1, m / rate)); cs, sh are ALVR's aligned values. loT / hiT: x outer / inner, y down / up tangents
+            public static double AxisLoss(double cs, double sh, double er, double loT, double hiT, int axis, RateMap rm, double m, int n, out double atDeg, out double rAt, out double allowAt, double[] freeDeg = null)
+            {
+                double fs = cs + (1.0 - cs) / er;
+                var es = new double[n]; var src = new double[n];
+                for (int i = 0; i < n; i++) { es[i] = i / (double)(n - 1); src[i] = FovF(es[i], cs, sh, er); }
+                double worst = 0; atDeg = 0; rAt = 0; allowAt = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    int a = Math.Max(0, i - 1), b = Math.Min(n - 1, i + 1);
+                    double r = (src[b] - src[a]) / (es[b] - es[a]) / fs;
+                    double d = AxisDeg(src[i], loT, hiT, axis);
+                    double allow = Math.Max(1.0, m / Math.Max(1e-6, Rate(rm, axis, d)));
+                    if (freeDeg != null && (d < freeDeg[0] || d > freeDeg[1])) allow = 1e9;   // outside the restriction window the game draws nothing: any compression is free
+                    if (r / allow > worst) { worst = r / allow; atDeg = Math.Round(d, 1); rAt = Math.Round(r, 2); allowAt = Math.Round(allow, 2); }
+                }
+                return worst;
+            }
+
+            /// the interval where rate >= contour, clipped to the view, in source eye uv (x from the outer edge, y from the top)
+            static void BandUv(double[] view, int axis, RateMap rm, double contour, out double u0, out double u1, out double d0, out double d1)
+            {
+                double loT = axis == 0 ? view[0] : view[3], hiT = axis == 0 ? view[1] : view[2];
+                double loD = -Deg(loT), hiD = Deg(hiT);
+                double first = double.NaN, last = double.NaN, near = 0, nearAbs = double.MaxValue;
+                for (int i = 0; i <= 2000; i++)
+                {
+                    double d = loD + (hiD - loD) * i / 2000;
+                    if (Math.Abs(d) < nearAbs) { nearAbs = Math.Abs(d); near = d; }
+                    if (Rate(rm, axis, d) >= contour) { if (double.IsNaN(first)) first = d; last = d; }
+                }
+                if (double.IsNaN(first)) { first = last = near; }
+                double a = Math.Tan(first * Math.PI / 180.0), b = Math.Tan(last * Math.PI / 180.0), span = loT + hiT;
+                d0 = first; d1 = last;
+                if (axis == 0) { u0 = (a + loT) / span; u1 = (b + loT) / span; }
+                else { u0 = (hiT - b) / span; u1 = (hiT - a) / span; }
+            }
+
+            /// rules 1-2 of section 5b: band = rate >= contour clipped to the view, er = (1 / rate at the edge that allows more + 1) / 2 in [1, 10]
+            /// (cs x, cs y, shift x, shift y, edge ratio x, edge ratio y)
+            public static double[] RuleGeometry(double[] view, RateMap rm, double contour = 0.5)
+            {
+                var o = new double[6];
+                for (int axis = 0; axis < 2; axis++)
+                {
+                    BandUv(view, axis, rm, contour, out var u0, out var u1, out _, out _);
+                    var bp = BandParams(u0, u1 - u0);
+                    double loT = axis == 0 ? view[0] : view[3], hiT = axis == 0 ? view[1] : view[2];
+                    double edge = Math.Max(Rate(rm, axis, -Deg(loT)), Rate(rm, axis, Deg(hiT)));
+                    o[axis] = bp[0]; o[2 + axis] = bp[1]; o[4 + axis] = Math.Min(10.0, Math.Max(1.0, (1.0 / edge + 1.0) / 2.0));
+                }
+                return o;
+            }
+
+            static double Worst(double size, double cs, double sh, double er, double loT, double hiT, int axis, RateMap rm, double m, out int opt, double[] freeDeg = null)
+            {
+                FfrVars((int)size, (int)size, cs, cs, sh, sh, er, er, out var ow, out _, out var cx, out _, out var sx, out _);
+                opt = ow;
+                return AxisLoss(cx, sx, er, loT, hiT, axis, rm, m, 801, out _, out _, out _, freeDeg);
+            }
+
+            /// rule 3 of section 5b, exact: per axis, over band contours 0.30 .. 0.95, the largest er (bisection) whose worst over-compression after ALVR's alignment is <= 1,
+            /// keeping the contour with the fewest encoded pixels on that axis. eye = the per-eye stream size; returns cs x, cs y, shift x, shift y, er x, er y
+            public static double[] ZeroLoss(double[] view, int[] eye, RateMap rm, double m = 1.0)
+            {
+                var best = new double[2][];
+                for (int axis = 0; axis < 2; axis++)
+                {
+                    double loT = axis == 0 ? view[0] : view[3], hiT = axis == 0 ? view[1] : view[2];
+                    double size = eye[axis];
+                    double[] cand = null; int candPx = 0;
+                    for (int k = 30; k < 96; k += 5)
+                    {
+                        BandUv(view, axis, rm, k / 100.0, out var u0, out var u1, out _, out _);
+                        var bp = BandParams(u0, u1 - u0);
+                        double cs = bp[0], sh = bp[1];
+                        if (Worst(size, cs, sh, 1.0, loT, hiT, axis, rm, m, out _) > 1.0 + 1e-6) continue;
+                        double a = 1.0, b = 10.0;
+                        if (Worst(size, cs, sh, b, loT, hiT, axis, rm, m, out _) <= 1.0 + 1e-6) a = b;
+                        else for (int it = 0; it < 22; it++) { double mid = (a + b) / 2; if (Worst(size, cs, sh, mid, loT, hiT, axis, rm, m, out _) <= 1.0 + 1e-6) a = mid; else b = mid; }
+                        Worst(size, cs, sh, a, loT, hiT, axis, rm, m, out var px);
+                        if (cand == null || px < candPx) { cand = new[] { cs, sh, a }; candPx = px; }
+                    }
+                    best[axis] = cand ?? new[] { 0.45, 0.0, 1.0 };   // nothing under the map even without compression: cannot happen with a map <= 1 everywhere, kept safe
+                }
+                return new[] { best[0][0], best[1][0], best[0][1], best[1][1], best[0][2], best[1][2] };
+            }
+
+            /// The share of Apple's loss the foveation may add (AirFrameXR 1.3.5, owner 2026-11-07): the zero-loss geometry compressed each angle exactly as much as Apple's map already
+            /// loses there, and on a headset that showed as soft, over-compressed edges (the decoder's own softening comes on top). The compression allowed is max(1, Margin / rate).
+            public const double Margin = 0.6;
+            /// ALVR's own defaults (center_size 0.45 x 0.40, edge_ratio 4 x 5): the foveation is always milder than these, whatever the map allows: a centre 10 % larger and an
+            /// edge ratio 20 % lower at the most.
+            public static readonly double[] AlvrCenter = { 0.45 * 1.1, 0.40 * 1.1 }, AlvrEdge = { 4.0 * 0.8, 5.0 * 0.8 };
+            const double WindowMarginDeg = 2.0;
+
+            /// The foveation the stream gets: the zero-loss geometry at `Margin`, never stronger than ALVR's defaults (a centre at least that large, an edge ratio at most that high),
+            /// and, when a restriction window is on (outer, inner, upper, lower tangents), centred on that window: outside it (plus two degrees) the game draws nothing, so the edge
+            /// may be compressed as far as the cap allows. (cs x, cs y, shift x, shift y, er x, er y)
+            public static double[] Milder(double[] view, int[] eye, RateMap rm, double[] window = null)
+            {
+                var o = new double[6];
+                for (int axis = 0; axis < 2; axis++)
+                {
+                    double loT = axis == 0 ? view[0] : view[3], hiT = axis == 0 ? view[1] : view[2], span = loT + hiT, size = eye[axis];
+                    double[] free = null; double[] best = null; int bestPx = 0;
+                    var bands = new List<double[]>();
+                    if (window != null)
+                    {
+                        double gLo = axis == 0 ? window[0] : window[3], gHi = axis == 0 ? window[1] : window[2];
+                        gLo = Math.Min(loT, Math.Tan(Math.Atan(gLo) + WindowMarginDeg * Math.PI / 180)); gHi = Math.Min(hiT, Math.Tan(Math.Atan(gHi) + WindowMarginDeg * Math.PI / 180));
+                        free = new[] { -Deg(gLo), Deg(gHi) };
+                        bands.Add(axis == 0 ? new[] { (loT - gLo) / span, (loT + gHi) / span } : new[] { (hiT - gHi) / span, (hiT + gLo) / span });
+                    }
+                    else for (int k = 30; k < 96; k += 5) { BandUv(view, axis, rm, k / 100.0, out var a0, out var a1, out _, out _); bands.Add(new[] { a0, a1 }); }
+                    foreach (var b in bands)
+                    {
+                        double u0 = Math.Max(0, Math.Min(1, b[0])), u1 = Math.Max(0, Math.Min(1, b[1]));
+                        if (u1 - u0 < AlvrCenter[axis])   // never a smaller centre than ALVR's default: widen the band around its middle, inside the frame
+                        {
+                            double mid = (u0 + u1) / 2, w = AlvrCenter[axis];
+                            u0 = Math.Max(0, Math.Min(1 - w, mid - w / 2)); u1 = u0 + w;
+                        }
+                        var bp = BandParams(u0, u1 - u0);
+                        double cs = bp[0], sh = bp[1];
+                        if (Worst(size, cs, sh, 1.0, loT, hiT, axis, rm, Margin, out _, free) > 1.0 + 1e-6) continue;
+                        double lo = 1.0, hi = AlvrEdge[axis];
+                        double er;
+                        if (Worst(size, cs, sh, hi, loT, hiT, axis, rm, Margin, out _, free) <= 1.0 + 1e-6) er = hi;
+                        else { for (int it = 0; it < 22; it++) { double mid2 = (lo + hi) / 2; if (Worst(size, cs, sh, mid2, loT, hiT, axis, rm, Margin, out _, free) <= 1.0 + 1e-6) lo = mid2; else hi = mid2; } er = lo; }
+                        Worst(size, cs, sh, er, loT, hiT, axis, rm, Margin, out var px, free);
+                        if (best == null || px < bestPx) { best = new[] { cs, sh, er }; bestPx = px; }
+                    }
+                    best = best ?? new[] { AlvrCenter[axis], 0.0, 1.0 };
+                    o[axis] = best[0]; o[2 + axis] = best[1]; o[4 + axis] = best[2];
+                }
+                return o;
+            }
+
+            /// section 5 density rule: eye = min(target density x the view's span per axis, NVENC's cap, what the encode test fits), 32-aligned (floor)
+            public static int[] DensityEye(double[] view, RateMap rm, double fraction = 1.0, int[] fits = null)
+            {
+                double rawX = rm.Density[0] * fraction * (view[0] + view[1]), rawY = rm.Density[1] * fraction * (view[2] + view[3]);
+                double limX = fits != null ? Math.Min(MaxEyeWidth, fits[0]) : MaxEyeWidth, limY = fits != null ? Math.Min(MaxEyeHeight, fits[1]) : MaxEyeHeight;
+                return new[] { Align32Floor(Math.Min(rawX, limX)), Align32Floor(Math.Min(rawY, limY)) };
+            }
+
+            /// writes the six foveation numbers where the host reads them (session_settings.video.foveated_encoding.content.* and ALVR's cache openvr_config.foveation_*),
+            /// rounded to 3 decimals as the scenarios carry them
+            public static void ApplyGeometry(Dictionary<string, object> session, double[] g)
+            {
+                string[] keys = { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" };
+                for (int k = 0; k < 6; k++)
+                {
+                    var v = Math.Round(g[k], 3);
+                    Json.Set(session, "session_settings.video.foveated_encoding.content." + keys[k], v);
+                    Json.Set(session, "openvr_config.foveation_" + keys[k], v);
+                }
+            }
+        }
+
+        /// The step D wiring (docs/PICTURE_EDGES_DESIGN.md sections 5b and 9; owner 2026-11-06): the foveation of the stream is computed from the picture edges V (the Vision Pro
+        /// card's profile, or the whole panel the headset declares = "Apple's default") and Apple's rasterization map, over the stream size already in session.json. It compresses
+        /// nothing below what the map keeps at that angle (the zero-loss geometry), so it never costs picture, and it takes the place of the static numbers of the profile. Only the
+        /// foveation numbers are written: the stream size stays the user's choice (the density rule of section 5 is not applied).
+        public static class PictureEdgesFoveation
+        {
+            public static string ProfilePath => Path.Combine(Paths.Dir, "profiles", "apple-vision-pro.profile.json");
+
+            // an array read from the file is an object[], a list the card has just set in the same settings object is a List<object>: both are the profile's numbers
+            static double[] Four(object o) => (o as System.Collections.IEnumerable)?.Cast<object>().Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
+
+            /// V as one box (outer, inner, upper, lower): the per-edge union of the two eyes of video.headset_view (four numbers, or {left, right}), never wider than the
+            /// panel the headset declares (the client declares the smaller of the two); absent = the whole panel; no headset seen yet = Apple's frustum from the map
+            /// The box the game is told (video.fov_override: outer, inner, upper, lower), never past the frame `view`; null when the restriction is off.
+            public static double[] RestrictionWindow(AppSettings st, double[] view)
+            {
+                if (!st.FovOverride) return null;
+                var w = new[] { st.FovOuter, st.FovInner, st.FovUpper, st.FovLower };
+                if (w.Any(x => !(x > 0.05))) return null;
+                for (int k = 0; k < 4; k++) w[k] = Math.Min(w[k], view[k]);
+                return w;
+            }
+
+            public static double[] View(AppSettings st, RateMap rm)
+            {
+                var panel = AppSettings.ReadClientFov() ?? rm.P;
+                var t = Json.Get(st.Root, "video.headset_view");
+                double[] a = null, b = null;
+                if (t is Dictionary<string, object> d) { a = Four(d.ContainsKey("left") ? d["left"] : null); b = Four(d.ContainsKey("right") ? d["right"] : null); }
+                else a = b = Four(t);
+                if (a == null || a.Length != 4) return panel;
+                if (b == null || b.Length != 4) b = a;
+                var v = new double[4];
+                for (int k = 0; k < 4; k++) v[k] = Math.Min(Math.Max(a[k], b[k]), panel[k]);
+                return v.All(x => x > 0.05) ? v : panel;
+            }
+
+            /// The stream size from the bitrate budget (the user's constant bitrate, the profile's default being 300 Mbps; owner 2026-11-06): the encoded frame gets
+            /// bitrate / (fps x the profile's bits per pixel) pixels, spent as density (px per tangent unit, equal on both axes) over V, never above Apple's own full-rate
+            /// density or NVENC's cap: the same bitrate costs what the shipped foveation cost, a lower bitrate gives a smaller stream (less to encode, send and decode), a higher
+            /// one more density up to Apple's. Null when the budget cannot be computed. `mpx` = the encoded megapixels of the answer.
+            public static int[] ChooseEye(double[] view, RateMap rm, double bitrateMbps, double fps, out double mpx, double[] window = null)
+            {
+                mpx = 0;
+                if (rm == null || rm.Bpp <= 0 || bitrateMbps <= 0 || fps <= 0) return null;
+                double budget = bitrateMbps * 1e6 / (fps * rm.Bpp), sx = view[0] + view[1], sy = view[2] + view[3];
+                int[] EyeAt(double d) => new[] { Math.Max(256, Math.Min(MaxEyeWidth, Align32Floor(d * sx))), Math.Max(256, Math.Min(MaxEyeHeight, Align32Floor(d * sy))) };
+                double Px(int[] e)
+                {
+                    var g = RateMapFoveation.Milder(view, e, rm, window);
+                    FfrVars(e[0], e[1], g[0], g[1], g[2], g[3], g[4], g[5], out var ow, out var oh, out _, out _, out _, out _);
+                    return 2.0 * ow * oh;
+                }
+                double hi = Math.Max(rm.Density[0], rm.Density[1]), lo = 600;
+                int[] best;
+                if (Px(EyeAt(hi)) <= budget) best = EyeAt(hi);
+                else if (Px(EyeAt(lo)) >= budget) best = EyeAt(lo);
+                else
+                {
+                    for (int i = 0; i < 20; i++) { var mid = (lo + hi) / 2; if (Px(EyeAt(mid)) <= budget) lo = mid; else hi = mid; }
+                    best = EyeAt(lo);
+                }
+                mpx = Px(best) / 1e6;
+                return best;
+            }
+
+            static readonly string[] Keys = { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" };
+
+            /// Computes the foveation for the stream size in `session` and writes it there. Vision Pro only (the map is Apple's). `explicit`: the user just chose a picture-edges
+            /// profile, finished a fit, or is setting up (clears the hand-edit flag); false: a passive recompute (the streamer starting) that leaves hand-edited numbers alone.
+            /// Returns what it wrote, one line, or null when it wrote nothing. The caller saves the session (and the settings when the flag changed).
+            public static string Apply(AppSettings st, Dictionary<string, object> session, bool explicitChoice, RateMap rm = null)
+            {
+                if (st.Kind != HeadsetKind.VisionPro) return null;
+                rm = rm ?? RateMapFoveation.Load(ProfilePath);
+                if (rm == null) return null;
+                if (st.FoveationManual) { if (!explicitChoice) return null; st.FoveationManual = false; }
+                var view = View(st, rm);
+                var window = RestrictionWindow(st, view);   // the restriction profile in force, capped at the frame: where the game draws; null = it draws everywhere
+                var eye = StreamEyeExpected(session);
+                var c = CultureInfo.InvariantCulture;
+                string sized = "";
+                // the stream size follows the bitrate (a constant bitrate, the user's: the profile only suggests 300 Mbps) unless the user fits the stream to the headset's window
+                // (the older tick) or set the size by hand (the flag above)
+                if (!st.StreamFitWindow && Json.Str(session, "session_settings.video.bitrate.mode.variant", "") == "ConstantMbps")
+                {
+                    double mbps = Json.Num(session, "session_settings.video.bitrate.mode.ConstantMbps", 0), fps = Json.Num(session, "session_settings.video.preferred_fps", 0);
+                    var chosen = ChooseEye(view, rm, mbps, fps, out var mpx, window);
+                    if (chosen != null)
+                    {
+                        sized = $" (stream sized for {mbps.ToString("0", c)} Mbps at {fps.ToString("0", c)} Hz: {mpx.ToString("0.0", c)} Mpx encoded{(eye != null && (eye[0] != chosen[0] || eye[1] != chosen[1]) ? $", was {eye[0]} x {eye[1]}" : "")})";
+                        eye = chosen;
+                        SaveEyeChoice(session, st, eye[0], eye[1]);
+                    }
+                }
+                if (eye == null || eye[0] < 256 || eye[1] < 256) return null;
+                var g = RateMapFoveation.Milder(view, eye, rm, window);
+                RateMapFoveation.ApplyGeometry(session, g);
+                return $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye: centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}" + (window != null ? $" (centred on the restriction {string.Join(" / ", window.Select(x => x.ToString("0.00", c)))})" : "") + " (never stronger than ALVR's 0.45 x 0.40, 4 / 5)";
+            }
+
+            /// Apply on the files: loads the session, writes it back when something changed, logs. Never throws (a failure is a warning in the log).
+            public static string ApplyToFiles(AppSettings st, bool explicitChoice)
+            {
+                try
+                {
+                    var flag = st.FoveationManual;
+                    var s = Session.Load();
+                    var line = Apply(st, s, explicitChoice);
+                    if (line == null) return null;
+                    Json.Save(Paths.Session, s);
+                    st.Save();   // the density reference and the flag may have changed with the size
+                    Log.Write("INFO", line);
+                    return line;
+                }
+                catch (Exception e) { Log.Write("WARN", "foveation from the picture edges not written: " + e.Message); return null; }
+            }
+        }
+
         // ---- the files -------------------------------------------------------------------------------------------------------------------------
         /// encoder facts from the session and the settings: foveated, its geometry, split mode, preset, engines (-1 = unknown)
         public static void ReadEncoder(AppSettings st, Dictionary<string, object> session, Inputs i)
@@ -250,6 +584,33 @@ namespace AirFrameXR
             return w > 0 && h > 0 ? new[] { w, h } : null;
         }
 
+        /// the stream's per-eye size as the next connection negotiates it: the Absolute transcoding size floored to 32 on both axes (server_core align32), else ALVR's
+        /// negotiated cache from the last connection. The setting first: the cache is stale between a save and the next connection (a user saw the old size in the FOV card, 2026-11-05)
+        public static int[] StreamEyeExpected(Dictionary<string, object> session)
+        {
+            var e = SessionEye(session);
+            return e != null ? new[] { e[0] / 32 * 32, e[1] / 32 * 32 } : StreamEye(session);
+        }
+
+        /// The per-eye size the user chose (the wizard's settings panel, the Settings window): it becomes the density reference of the stream fit (stream_reference_eye, with the
+        /// box the headset declared), the session gets the fit size over that box when the fit is on and the size itself otherwise, in both resolution keys and ALVR's negotiated
+        /// cache (what the FOV card and the encoder tests read before the next connection). The caller saves the settings and the session. Returns the size written.
+        public static int[] SaveEyeChoice(Dictionary<string, object> session, AppSettings settings, int w, int h)
+        {
+            settings.StreamReferenceEye = new[] { w, h };
+            var clientFov = AppSettings.ReadClientFov();
+            if (clientFov != null) settings.StreamReferenceFov = clientFov;
+            int sw = w, sh = h;
+            if (settings.StreamFitWindow && clientFov != null && settings.StreamReferenceFov != null)
+            {
+                var fe = FitEye(new[] { w, h }, settings.StreamReferenceFov, clientFov);
+                sw = Math.Min(fe[0], MaxEyeWidth); sh = Math.Min(fe[1], MaxEyeHeight);
+                settings.StreamFitEye = new[] { sw, sh };
+            }
+            WriteStreamEye(session, sw, sh);
+            return new[] { sw, sh };
+        }
+
         /// the session's transcoding size as the Settings panel writes it (Absolute), null when not Absolute
         public static int[] SessionEye(Dictionary<string, object> session)
         {
@@ -280,7 +641,7 @@ namespace AirFrameXR
         {
             var declared = AppSettings.ReadClientFov();
             if (declared == null) return null;
-            var i = new Inputs { Declared = declared, Eye = StreamEye(session) ?? SessionEye(session) ?? new[] { 3552, 3200 }, ReferenceEye = st.StreamReferenceEye, ReferenceFov = st.StreamReferenceFov, Fit = st.StreamFitWindow, Quality = st.FovRenderQuality };
+            var i = new Inputs { Declared = declared, Eye = StreamEyeExpected(session) ?? new[] { 3552, 3200 }, ReferenceEye = st.StreamReferenceEye, ReferenceFov = st.StreamReferenceFov, Fit = st.StreamFitWindow, Quality = st.FovRenderQuality };
             if (st.FovOverride && st.FovFits(declared))
             {
                 var saved = new[] { st.FovOuter, st.FovInner, st.FovUpper, st.FovLower };

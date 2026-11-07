@@ -268,17 +268,25 @@ namespace AirFrameXR
             int w = (int)eyeW.Value / 32 * 32, h = (int)eyeH.Value; // ALVR aligns widths to 32
             var tooBig = Nvenc.CheckEye(w, h);
             if (tooBig != null) { MessageBox.Show(this, tooBig, Text); return false; }
-            foreach (var k in new[] { "transcoding_view_resolution", "emulated_headset_view_resolution" })
-            {
-                Json.Set(s, V + k + ".variant", "Absolute");
-                Json.Set(s, V + k + ".Absolute.width", w);
-                Json.Set(s, V + k + ".Absolute.height.set", true);
-                Json.Set(s, V + k + ".Absolute.height.content", h);
+            // the density reference, the fit, both resolution keys and ALVR's negotiated cache, as the wizard's panel does (until 1.3.4 this window wrote the two resolution keys only:
+            // the FOV card kept showing the old size and the fit tick wrote the old reference back into the session, a user's report of 2026-11-05)
+            {   // a size the user typed is theirs: the size from the bitrate (PictureEdgesFoveation) leaves it until a picture-edges choice is made again
+                var was = PipelineModel.StreamEyeExpected(s);
+                if (was != null && (was[0] != w || was[1] != h)) settings.FoveationManual = true;
             }
-            Json.Set(s, V + "preferred_fps", double.Parse((string)fps.SelectedItem, CultureInfo.InvariantCulture));
+            PipelineModel.SaveEyeChoice(s, settings, w, h);
+            var rate = double.Parse((string)fps.SelectedItem, CultureInfo.InvariantCulture);
+            Json.Set(s, V + "preferred_fps", rate);
+            Json.Set(s, "openvr_config.refresh_rate", (int)rate);
+            Json.Set(s, "openvr_config.enable_foveated_encoding", profFov.Checked);
             Json.Set(s, V + "bitrate.mode.variant", "ConstantMbps");
             Json.Set(s, V + "bitrate.mode.ConstantMbps", (int)bitrate.Value);
             Json.Set(s, V + "foveated_encoding.enabled", profFov.Checked);
+            {   // numbers that differ from what the session held are the user's: the foveation computed from the picture edges leaves them alone until a picture-edges choice is made again
+                var was = new[] { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" }.Select((k, i) => Json.Num(s, V + "foveated_encoding.content." + k, new[] { 0.45, 0.4, 0.4, 0.1, 4, 5 }[i])).ToArray();
+                var now = new[] { fcx.Value, fcy.Value, fsx.Value, fsy.Value, frx.Value, fry.Value }.Select(x => (double)x).ToArray();
+                if (Enumerable.Range(0, 6).Any(i => Math.Abs(was[i] - now[i]) > 0.0005)) settings.FoveationManual = true;
+            }
             Json.Set(s, V + "foveated_encoding.content.center_size_x", (double)fcx.Value);
             Json.Set(s, V + "foveated_encoding.content.center_size_y", (double)fcy.Value);
             Json.Set(s, V + "foveated_encoding.content.center_shift_x", (double)fsx.Value);
@@ -299,6 +307,7 @@ namespace AirFrameXR
             settings.EncodeProfile = profFull.Checked ? "full-split" : "foveated";
             settings.Debug = debugDefault.Checked;
             settings.Save();
+            PipelineModel.PictureEdgesFoveation.ApplyToFiles(settings, false);   // a new bitrate or rate resizes the stream (and its foveation) now, as it will at the next start; hand-set sizes stay
             Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {fps.SelectedItem} Hz, {bitrate.Value} Mbps, {settings.EncodeProfile}, idle #{settings.IdleRgb}, audio {audio.Checked}, {proto.SelectedItem}, debug {settings.Debug}");
             if (confirm) MessageBox.Show(this, "Saved. The changes apply the next time AirFrameXR starts.", Text);
             return true;

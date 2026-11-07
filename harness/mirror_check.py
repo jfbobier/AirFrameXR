@@ -85,7 +85,7 @@ rc, home = lib.b_run("echo %USERPROFILE%")
 base = f"{home.strip().splitlines()[-1].strip()}\\{lib.ROOTNAME}"
 bat = ("@echo off\r\ncall \"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul\r\n"
        f"cd /d {base}\\_tmp\\mirror\r\n"
-       "cl /nologo /EHsc /MD /O2 /std:c++17 /I. desktop_probe.cpp /Fe:desktop_probe.exe /link d3d11.lib dxgi.lib d3dcompiler.lib user32.lib wtsapi32.lib\r\n")
+       "cl /nologo /EHsc /MD /O2 /std:c++17 /I. desktop_probe.cpp /Fe:desktop_probe.exe /link d3d11.lib dxgi.lib d3dcompiler.lib user32.lib gdi32.lib wtsapi32.lib\r\n")
 lib.CACHE.mkdir(parents=True, exist_ok=True)
 (lib.CACHE / "mirror_build.bat").write_text(bat)
 lib.b_put(lib.CACHE / "mirror_build.bat", "_tmp/mirror/build.bat")
@@ -146,7 +146,7 @@ for dn, w, h in DESKTOPS:
                 if not near(zr["cursor_core"], [255, 255, 255], 8): bad.append(f"cursor core {zr['cursor_core']}")
                 if not near(zr["cursor_ring"], [0, 0, 0], 40): bad.append(f"cursor ring {zr['cursor_ring']}")
                 if not near(zr["cursor_outside"], exp[5], 6): bad.append(f"cursor outside {zr['cursor_outside']} expected {exp[5]}")
-                want_scale = max(1.0, h / 1080)
+                want_scale = 2.0 * max(1.0, h / 1080)
                 if abs(zr["cursor_scale"] - want_scale) > 0.01: bad.append(f"cursor scale {zr['cursor_scale']} expected {want_scale:.2f}")
         # clear colour where nothing is drawn
         if not near(r["right_eye"], [0x11, 0x22, 0x33], 1):

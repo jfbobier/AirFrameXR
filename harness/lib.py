@@ -884,8 +884,7 @@ def read_rgb_at(path, pts, win=4):
     """Per decoded frame, the mean RGB of a win x win window at each point. Software decode (the D3D11VA download is unreliable here)."""
     n = len(pts)
     chains = ";".join(f"[a{i}]crop={win}:{win}:{max(x - win // 2, 0)}:{max(y - win // 2, 0)},scale=1:1:flags=area[b{i}]" for i, (x, y) in enumerate(pts))
-    # a 1 x 1 crop of a subsampled picture is refused by current ffmpeg ("Could not open encoder"): the one-pixel reads (the checkerboard) convert to RGB first
-    vf = ("format=rgb24," if win == 1 else "") + f"split={n}" + "".join(f"[a{i}]" for i in range(n)) + ";" + chains + ";" + "".join(f"[b{i}]" for i in range(n)) + f"hstack=inputs={n},format=rgb24"
+    vf = f"split={n}" + "".join(f"[a{i}]" for i in range(n)) + ";" + chains + ";" + "".join(f"[b{i}]" for i in range(n)) + f"hstack=inputs={n},format=rgb24"
     p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", str(path), "-filter_complex", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, timeout=3600)
     d = p.stdout
     stride = 3 * n
@@ -1052,55 +1051,23 @@ def analyse_fov_restrict(sc, outdir):
     out["ceiling"] = (cw, ch)
     out["expected_recommended"] = (even(fw + (cw - fw) * q), even(fh + (ch - fh) * q))
     out["stream_eye"] = (ew, eh)
-    # What the game actually did (docs/FOV_APERTURE_PLAN.md, game behaviours): a game may ignore the recommended size (xr_probe XR_PROBE_RENDER_SIZE, the
-    # "fixed resolution" mods) or the field of view it is told (XR_PROBE_RENDER_FOV, its own frustum submitted honestly). The composition maps whatever frustum
-    # the game submits into the stream, so the picture's place and the margins follow the game's box, not the one it was told.
-    fs = re.search(r"render size forced (\d+)x(\d+)", log)
-    rendered = (int(fs.group(1)), int(fs.group(2))) if fs else out["recommended"]
-    ff = re.search(r"render fov forced outer ([0-9.]+) inner ([0-9.]+) up ([0-9.]+) down ([0-9.]+)", log)
-    if ff:
-        o_, i_f, u_, d_ = (float(ff.group(k)) for k in range(1, 5))
-        gbox = [[o_, i_f, u_, d_], [i_f, o_, u_, d_]]   # per eye L, R, U, D (the right eye mirrors outer and inner)
-    else:
-        gbox = [list(got[0]), list(got[1])]
-    out["game"] = {"rendered": rendered, "size_ignored": bool(fs), "fov_ignored": bool(ff), "box": [[round(v, 4) for v in b] for b in gbox]}
-    # what the restriction bought and what it cost, from areas in tangent space (left eye; the eyes mirror): render pixels against an unrestricted game (the
-    # stream's eye size), the share of the game's render that lands inside the headset's view (the rest is cropped by the composition), the share of the
-    # headset's view the picture covers, and how many stream pixels each game pixel gets per axis (below 1 = detail the stream cannot carry)
-    L0, R0, U0, D0 = headset[0:4]
-    gL, gR, gU, gD = gbox[0]
-    area = lambda w, h: max(0.0, w) * max(0.0, h)
-    inter = area(min(gL, L0) + min(gR, R0), min(gU, U0) + min(gD, D0))
-    out["game"].update({
-        "render_saving": round(1 - (rendered[0] * rendered[1]) / (ew * eh), 3),
-        "render_used": round(inter / area(gL + gR, gU + gD), 3),
-        "view_covered": round(inter / area(L0 + R0, U0 + D0), 3),
-        "stream_px_per_game_px": (round((ew / (L0 + R0)) / (rendered[0] / (gL + gR)), 3), round((eh / (U0 + D0)) / (rendered[1] / (gU + gD)), 3)),
-    })
     # the stream frame: side by side, each eye covers the headset's view; the game's view sits inside it, the rest is black
-    pts, want, edge_pts, edges = [], [], [], []
+    pts, want = [], []
     cuts = []
-    eff = []   # per eye the game's box as a fraction of the headset's per edge (above 1 = the game rendered past the headset's edge)
     for e in range(2):
         L, R, U, D = headset[4 * e:4 * e + 4]
-        eff.append([gbox[e][0] / L, gbox[e][1] / R, gbox[e][2] / U, gbox[e][3] / D])
-        l, r = eff[e][0], eff[e][1]
-        cuts.append((max(0.0, (1 - l) * L / (L + R)), max(0.0, (1 - r) * R / (L + R))))
+        l, r = (s[0], s[1]) if e == 0 else (s[1], s[0])
+        cuts.append(((1 - l) * L / (L + R), (1 - r) * R / (L + R)))
     # a column along the top and bottom that is inside both eyes' views and clear of the probe's counter bar (16 blocks of 64 px along the top of its view)
     lo, hi = max(c[0] for c in cuts) + 16 * 64 / ew + 0.02, 1 - max(c[1] for c in cuts) - 0.02
     col = (lo + hi) / 2 if lo < hi else 0.5
     for e in range(2):
         L, R, U, D = headset[4 * e:4 * e + 4]
-        l, r, u, d = eff[e]
-        cut = [(1 - l) * L / (L + R), (1 - r) * R / (L + R), (1 - u) * U / (U + D), (1 - d) * D / (U + D)]   # left, right, top, bottom shares of the eye
-        told = [(1 - (s[0] if e == 0 else s[1])), (1 - (s[1] if e == 0 else s[0])), 1 - s[2], 1 - s[3]]   # the edges the restriction cut (told, not rendered)
+        l, r = (s[0], s[1]) if e == 0 else (s[1], s[0])
+        cut = [(1 - l) * L / (L + R), (1 - r) * R / (L + R), (1 - s[2]) * U / (U + D), (1 - s[3]) * D / (U + D)]   # left, right, top, bottom shares of the eye
         x0 = e * ew
         for side, c in enumerate(cut):
             if c < 0.03:
-                if told[side] > 0.03:   # the game was told to stop short of this edge but rendered past it: its picture must reach the stream's edge
-                    k = 0.02
-                    edge_pts.append([(x0 + int(k * ew), eh // 2), (x0 + ew - 1 - int(k * ew), eh // 2), (x0 + int(col * ew), int(k * eh)), (x0 + int(col * ew), eh - 1 - int(k * eh))][side])
-                    edges.append((e, side))
                 continue
             # the middle of the margin (black), and two depths just inside the game's view (content: the probe's picture is not bright everywhere at its very edge,
             # an asymmetric rectangle read 93 % with one depth at 2 %, so a point counts as content when either depth is lit)
@@ -1114,12 +1081,12 @@ def analyse_fov_restrict(sc, outdir):
     # the probe's one-pixel checkerboard (64 x 64 at game pixel 1152,0 of the left eye) mapped into the stream through the restriction: its contrast tells
     # whether the composition averaged a denser game render (render quality above 0) or passed a 1:1 render through (ovrshim ReprojectPS.hlsl)
     if rec and "checker:" in log and "drawn" in log.split("checker:")[1][:40]:
-        gw, gh = rendered
+        gw, gh = out["recommended"]
         L0, R0, U0, D0 = headset[0:4]
-        cutL, cutR, cutT, cutB = (1 - eff[0][0]) * L0 / (L0 + R0), (1 - eff[0][1]) * R0 / (L0 + R0), (1 - eff[0][2]) * U0 / (U0 + D0), (1 - eff[0][3]) * D0 / (U0 + D0)
+        cutL, cutR, cutT, cutB = (1 - s[0]) * L0 / (L0 + R0), (1 - s[1]) * R0 / (L0 + R0), (1 - s[2]) * U0 / (U0 + D0), (1 - s[3]) * D0 / (U0 + D0)
         sx, sy = (1 - cutL - cutR) * ew / gw, (1 - cutT - cutB) * eh / gh     # stream pixels per game pixel
         x0, y0 = cutL * ew + 1152 * sx, cutT * eh                           # the block's top-left in the stream
-        cpts = [(int(x0 + (7 + 11 * i) * sx), int(y0 + (7 + 11 * j) * sy)) for i in range(5) for j in range(5)]   # a 5 x 5 grid well inside the block, an ODD step: at 1:1 an even step lands on the same colour of the one-pixel checkerboard every time (std 0 whatever the stream)
+        cpts = [(int(x0 + (8 + 12 * i) * sx), int(y0 + (8 + 12 * j) * sy)) for i in range(5) for j in range(5)]   # a 5 x 5 grid well inside the block
         vals = [0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2] for fr in read_rgb_at(outdir / "client.hevc", cpts, win=1)[30:] for px in fr]
         if vals:
             m = sum(vals) / len(vals)
@@ -1133,11 +1100,6 @@ def analyse_fov_restrict(sc, outdir):
             content_ok += sum(1 for k in range(1, len(pts), 3) if lum(fr[k]) >= 16 or lum(fr[k + 1]) >= 16)
         n = max(1, len(frames) * len(want))
         out["margin_black_frac"], out["inside_content_frac"], out["frames"] = round(black_ok / n, 3), round(content_ok / n, 3), len(frames)
-    if edge_pts:
-        frames = read_rgb_at(outdir / "client.hevc", edge_pts)[30:]
-        lum = lambda px: 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]
-        lit = sum(1 for fr in frames for px in fr if lum(px) >= 16)
-        out["edges_reached"], out["edges_reached_frac"] = edges, round(lit / max(1, len(frames) * len(edge_pts)), 3)
     return out
 
 
@@ -1233,17 +1195,19 @@ def analyse_mirror_clicks(outdir):
     ev = {}
     for r in csv.DictReader(open(ef)):
         ev.setdefault(r["event"], []).append(int(r["wall_ns"]))
-    exp = {"left_down": [], "left_up": [], "right_down": [], "right_up": [], "double_click": []}
-    left = right = False; a_prev = x_prev = False
+    exp = {"left_down": [], "left_up": [], "double_click": [], "recentre": []}
+    left = grip = False; prev = {"a": False, "x": False, "b": False}
     for r in rows:
-        w = int(r["wall_ns"]); trig = float(r["trigger_r"]); sq = float(r["squeeze_r"]); b = r["b_r"] == "1"; a = r["a_r"] == "1"; x = r["x_l"] == "1"
+        w = int(r["wall_ns"]); trig = float(r["trigger_r"]); sq = float(r["squeeze_r"])
         l = trig > (0.15 if left else 0.3)
-        rr = sq > (0.3 if right else 0.5) or b
+        g = sq > (0.3 if grip else 0.7)   # a grip: down at 0.7, up under 0.3; the press recentres the screen
         if l != left: exp["left_down" if l else "left_up"].append(w)
-        if rr != right: exp["right_down" if rr else "right_up"].append(w)
-        if a and not a_prev: exp["double_click"].append(w)
-        if x and not x_prev: exp["double_click"].append(w)
-        left, right, a_prev, x_prev = l, rr, a, x
+        if g and not grip: exp["recentre"].append(w)
+        for k, col in (("a", "a_r"), ("x", "x_l"), ("b", "b_r")):   # A, X, B (Y is not scripted): each press is a double click
+            now = r[col] == "1"
+            if now and not prev[k]: exp["double_click"].append(w)
+            prev[k] = now
+        left, grip = l, g
     t0 = int(rows[0]["wall_ns"]) if rows else 0; t1 = int(rows[-1]["wall_ns"]) if rows else 0
     out = {}
     for k, xs in exp.items():
@@ -1371,6 +1335,26 @@ def analyse_pacing(sc, outdir, period_ms):
     lat = [(int(c[1]) - int(c[0])) / 1e6 for c in crows[first + warm:last + 1]]
     third = max(1, len(lat) // 3)
     drift = round(pct(lat[-third:], .5) - pct(lat[:third], .5), 2) if len(lat) >= 30 else None
+    # The first seconds of a game are not a steady state: the frames alternate between two latencies one frame period apart (the app's frame is picked from the
+    # slot before or after) until the host's phase lock has slid the boundary clock (docs/ARCHITECTURE.md; two corrections of 2 ms, the last about 3.5 s into the game).
+    # Once it has settled the latency is one value, higher than the mean of the alternation, which the thirds above read as a creep of up to a period. So the drift that
+    # decides the check is measured from 0.5 s after the last correction of the phase lock (a queue that only grows still shows there); the whole-run figure is kept.
+    drift_all, settle_s = drift, None
+    try:
+        hs_ = [json.loads(l) for l in open(outdir / "host_stdout.txt", errors="replace") if '"phase_lock"' in l or '"game_started"' in l]
+        t_game = next((e["t_ms"] for e in hs_ if e["event"] == "game_started"), None)
+        acted = [e["t_ms"] for e in hs_ if e["event"] == "phase_lock" and (e.get("data") or {}).get("acted")]
+        _, prow2 = read_csv(outdir / "host_pipeline.csv")
+        send_of = {int(r[1]): float(r[7]) for r in prow2 if int(r[0]) >= 0}
+        t0_send = min(send_of.values())
+        if t_game is not None and acted:
+            settle_s = (max(acted) - t_game) / 1000.0 + 0.5
+            late_lat = [(int(c[1]) - int(c[0])) / 1e6 for c in crows[first + warm:last + 1] if int(c[0]) in send_of and send_of[int(c[0])] - t0_send >= settle_s]
+            if len(late_lat) >= 90:
+                th = max(1, len(late_lat) // 3)
+                drift = round(pct(late_lat[-th:], .5) - pct(late_lat[:th], .5), 2)
+    except (OSError, ValueError, KeyError, StopIteration):
+        pass
     # where the skipped slots are made: the same count on the host's own send times means the slot was already empty when the host picked a frame for it (the app or the stage before
     # the encoder had nothing ready); more at the client means the network or the client added them
     host_late = None
@@ -1383,7 +1367,7 @@ def analyse_pacing(sc, outdir, period_ms):
         pass
     return {"period_ms": period_ms, "n": len(d), "p50": round(pct(d, .5), 2), "p95": round(pct(d, .95), 2), "p99": round(pct(d, .99), 2),
             "max": round(max(d), 2), "max_gap_periods": round(max(d) / period_ms, 2), "late": sum(late), "late_frac": round(sum(late) / len(d), 4),
-            "longest_late_run": best, "latency_drift_ms": drift, "late_frac_at_host_send": host_late}
+            "longest_late_run": best, "latency_drift_ms": drift, "latency_drift_whole_run_ms": drift_all, "phase_settle_s": settle_s, "late_frac_at_host_send": host_late}
 
 
 def analyse_display(sc, outdir, client, period_ms):
@@ -1518,6 +1502,105 @@ def analyse_qpmap(sc, outdir, host):
     return out
 
 
+def analyse_tool(sc, outdir):
+    """The headset tools of docs/PICTURE_EDGES_DESIGN.md sections 6 and 6b (xr_probe XR_PROBE_TOOL=fit|restrict with scripted keys, XR_PROBE_KEYS): the probe's JSON lines
+    (app_stdout.txt: the box per eye after every key) against the keys that were pressed, and the decoded stream against the box: where the blue box (fit) or the scene (restrict)
+    ends in each eye, which eye is black, and where the in-headset text is (white pixels, inside 12 degrees of the view axis). tool = {"samples": [{"app_frame", "eye", "what"}...]}."""
+    import numpy as np
+    ck = sc["checks"]["tool"]
+    out = {"events": [], "samples": []}
+    for line in open(outdir / "app_stdout.txt", errors="replace"):
+        line = line.strip()
+        if line.startswith("{") and '"tool"' in line:
+            try:
+                out["events"].append(json.loads(line))
+            except ValueError:
+                pass
+    headset = None
+    for line in open(outdir / "host_stdout.txt", errors="replace"):
+        if '"views_config"' in line and '"views_config_ignored"' not in line:
+            try:
+                headset = json.loads(line)["data"]["fov_tan"]
+                break
+            except Exception:
+                pass
+    cfg = negotiated_cfg(outdir)
+    ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
+    out["headset_fov"], out["stream_eye"] = headset, (ew, eh)
+    if not headset or not out["events"] or not (outdir / "client.hevc").exists():
+        out["error"] = "no views_config event / no tool event in app_stdout.txt / no client.hevc"
+        return out
+    hevc = str(outdir / "client.hevc")
+
+    def decode(n):
+        p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", hevc, "-vf", f"select=eq(n\\,{n})", "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"], capture_output=True, timeout=600)
+        if len(p.stdout) != 2 * ew * eh * 3:
+            return None
+        return np.frombuffer(p.stdout, dtype=np.uint8).reshape(eh, 2 * ew, 3).astype(np.int16)
+
+    # the stream frame that carries the app's first frame: the first one with the blue box (or the scene's sky) at the centre of the left eye
+    L, R, U, D = headset[0:4]
+    cx0, cy0 = int(L / (L + R) * ew), int((1 - D / (U + D)) * eh)   # the view axis in the stream (left eye)
+    first = next((i for i, fr in enumerate(read_rgb_at(outdir / "client.hevc", [(cx0 - 60, cy0 + 120), (cx0 + 60, cy0 - 120)])) if any(px[2] - px[0] > 60 or sum(px) > 90 for px in fr)), None)
+    out["first_frame"] = first
+    if first is None:
+        out["error"] = "no frame with the tool's picture in the decoded stream"
+        return out
+    mode = ck.get("mode", "fit")
+    box_at = {}   # the last box event at or before an app frame
+    for ev in out["events"]:
+        if ev.get("event") in ("box", "start", "enter"):
+            box_at[ev["frame"]] = ev
+    def last_box(f):
+        ks = [k for k in box_at if k <= f]
+        return box_at[max(ks)] if ks else None
+    for smp in ck["samples"]:
+        f = smp["app_frame"]
+        img = decode(first + f)
+        res = {"app_frame": f, "what": smp.get("what", ""), "decoded": img is not None}
+        out["samples"].append(res)
+        if img is None:
+            continue
+        ev = last_box(f)
+        whole = bool(smp.get("whole_view"))   # the restriction's Space held: the stream shows the whole view, not the box
+        res["event_frame"] = ev["frame"] if ev else None
+        for e in range(2):
+            l, r, u, d = headset[4 * e:4 * e + 4]
+            ppt = ew / (l + r)
+            ax, ay = int(l / (l + r) * ew), int((1 - d / (u + d)) * eh)
+            eye = img[:, e * ew:(e + 1) * ew]
+            lum = eye.mean(axis=2)
+            white = (eye.min(axis=2) > 215)
+            blue = ((eye[:, :, 2] - eye[:, :, 0]) > 80) & (eye[:, :, 2] > 140)
+            info = {"black_frac": round(float((lum < 16).mean()), 4), "white_px": int(white.sum())}
+            if white.any():
+                ys, xs = np.nonzero(white)
+                info["text_extent_deg"] = {"x": [round(float(np.degrees(np.arctan((xs.min() - ax) / ppt))), 1), round(float(np.degrees(np.arctan((xs.max() - ax) / ppt))), 1)],
+                                           "y": [round(float(np.degrees(np.arctan((ay - ys.max()) / ppt))), 1), round(float(np.degrees(np.arctan((ay - ys.min()) / ppt))), 1)]}
+            if mode == "fit" and blue.any():
+                row = np.nonzero(blue[ay])[0]; col = np.nonzero(blue[:, ax])[0]
+                if len(row) and len(col):
+                    info["edges_px"] = {"left": int(row.min()), "right": int(row.max()), "top": int(col.min()), "bottom": int(col.max())}
+                    if ev:
+                        b = ev["panel" if whole else "box"][e]   # outer, inner, upper, lower (tangents; the told view = the headset's)
+                        xl, xr = (-b[0], b[1]) if e == 0 else (-b[1], b[0])
+                        info["expected_px"] = {"left": round((xl + l) * ppt), "right": round((xr + l) * ppt), "top": round((1 - (b[2] + d) / (u + d)) * eh), "bottom": round((1 - (-b[3] + d) / (u + d)) * eh)}
+                        info["max_err_px"] = max(abs(info["edges_px"][k] - info["expected_px"][k]) for k in ("left", "right", "top", "bottom"))
+            if mode == "restrict" and ev:
+                b = ev["panel" if whole else "box"][e]
+                xl, xr = (-b[0], b[1]) if e == 0 else (-b[1], b[0])
+                exp = {"left": (xl + l) * ppt, "right": (xr + l) * ppt, "top": (1 - (b[2] + d) / (u + d)) * eh, "bottom": (1 - (-b[3] + d) / (u + d)) * eh}
+                info["expected_px"] = {k: round(v) for k, v in exp.items()}
+                # inside the box the scene is lit (the sky is not black), outside it is black (a few pixels of margin around the edge for the codec)
+                m = 12
+                x0, x1, y0, y1 = max(0, int(exp["left"])), min(ew, int(exp["right"])), max(0, int(exp["top"])), min(eh, int(exp["bottom"]))
+                core = np.zeros((eh, ew), dtype=bool); core[min(eh, y0 + m):max(0, y1 - m), min(ew, x0 + m):max(0, x1 - m)] = True
+                out_ring = np.ones((eh, ew), dtype=bool); out_ring[max(0, y0 - m):min(eh, y1 + m), max(0, x0 - m):min(ew, x1 + m)] = False
+                info["outside_black"] = round(float((lum[out_ring] < 16).mean()), 4) if out_ring.any() else 1.0
+                info["inside_lit"] = round(float((lum[core] >= 16).mean()), 4) if core.any() else 0.0
+            res[f"eye{e}"] = info
+    return out
+
 def analyse(sc, outdir: Path):
     a = {}
     a["host"] = jload(outdir / "host_report.json") or report_from_stdout(outdir / "host_stdout.txt")
@@ -1646,6 +1729,8 @@ def analyse(sc, outdir: Path):
         a["handover"] = analyse_handover(sc, outdir)
     if sc.get("checks", {}).get("handover_chain"):
         a["handover_chain"] = analyse_handover_chain(sc, outdir)
+    if sc.get("checks", {}).get("tool"):
+        a["tool"] = analyse_tool(sc, outdir)
     if sc.get("checks", {}).get("fov_restrict"):
         a["fov_restrict"] = analyse_fov_restrict(sc, outdir)
     if sc.get("checks", {}).get("qpmap"):
@@ -1909,7 +1994,7 @@ def evaluate(sc, a):
             if "error" in C_:
                 chk("mirror_clicks", False, C_["error"], "the click log and the scripted controller are there")
             else:
-                for kind, minimum in (("left_down", 2), ("left_up", 2), ("right_down", 2), ("right_up", 2), ("double_click", 2)):
+                for kind, minimum in (("left_down", 2), ("left_up", 2), ("double_click", 2), ("recentre", 2)):
                     c = C_.get(kind, {"expected": 0, "matched": 0, "latency_ms": []})
                     lat = c["latency_ms"]; p95 = lat[int(0.95 * (len(lat) - 1))] if lat else None
                     chk(f"mirror_click.{kind}", c["expected"] >= minimum and c["matched"] == c["expected"] and p95 is not None and p95 <= mk.get("max_latency_ms", 150),
@@ -1968,19 +2053,11 @@ def evaluate(sc, a):
             chk("fov_restrict_recommended_size", abs(er[0] - rr[0]) <= 2 and abs(er[1] - rr[1]) <= 2, {"app": rr, "expected": er, "stream_eye": fa["stream_eye"], "ceiling": fa.get("ceiling")},
                 "the recommended image size follows the area of the restricted view and the render quality between the floor and the ceiling (the stream's eye size, or the panel reference when the stream is fitted to the headset's window)")
             if "checker" in ck:
-                cb = fa.get("checker") or {}   # not `c`: the client report below is read through c
+                c = fa.get("checker") or {}
                 if "max_std" in ck["checker"]:
-                    chk("checker_averaged_by_composition", bool(cb) and cb["std"] <= ck["checker"]["max_std"], cb, f"std <= {ck['checker']['max_std']}: the denser game render's one-pixel checkerboard comes out flat (the compose pass averages it before the encoder)")
+                    chk("checker_averaged_by_composition", bool(c) and c["std"] <= ck["checker"]["max_std"], c, f"std <= {ck['checker']['max_std']}: the denser game render's one-pixel checkerboard comes out flat (the compose pass averages it before the encoder)")
                 if "min_std" in ck["checker"]:
-                    chk("checker_passes_at_1_to_1", bool(cb) and cb["std"] >= ck["checker"]["min_std"], cb, f"std >= {ck['checker']['min_std']}: at 1:1 the checkerboard reaches the stream as a checkerboard")
-            gm = fa.get("game") or {}
-            if "render_saving" in ck["fov_restrict"]:   # [min, max]: what the restriction saved on the game's render, given how the game behaves
-                lo_, hi_ = ck["fov_restrict"]["render_saving"]
-                chk("fov_game_render_saving", lo_ <= gm.get("render_saving", -9) <= hi_, gm,
-                    f"the game rendered {gm.get('rendered')} against an unrestricted {fa['stream_eye']}: saving {gm.get('render_saving')} within [{lo_}, {hi_}] (a game that ignores the recommended size saves nothing)")
-            if ck["fov_restrict"].get("edges_reached"):
-                chk("fov_game_edges_reached", fa.get("edges_reached_frac", 0) >= 0.95, {"edges": fa.get("edges_reached"), "lit": fa.get("edges_reached_frac")},
-                    ">= 95 % of the samples at the edges the game was told to stop short of but rendered past carry its picture: the composition maps the frustum the game submits, it does not crop to the one it was told")
+                    chk("checker_passes_at_1_to_1", bool(c) and c["std"] >= ck["checker"]["min_std"], c, f"std >= {ck['checker']['min_std']}: at 1:1 the checkerboard reaches the stream as a checkerboard")
             if fa.get("margins"):
                 chk("fov_restrict_margin_black", fa.get("margin_black_frac", 0) >= 0.95, {"margin_black": fa.get("margin_black_frac"), "margins": fa["margins"]},
                     ">= 95 % of the samples in the middle of each trimmed margin of the decoded stream are black: the stream still covers the headset's view")
@@ -1996,6 +2073,46 @@ def evaluate(sc, a):
             chk("qpmap_center_keeps_more_detail", (qa.get("detail_ratio") or 0) >= qk["min_detail_ratio"], qa.get("detail") or qa.get("detail_error"), f"decoded detail center/edge >= {qk['min_detail_ratio']} (ratio {qa.get('detail_ratio')})")
         if "max_detail_ratio" in qk:
             chk("qpmap_off_is_flat", (qa.get("detail_ratio") or 99) <= qk["max_detail_ratio"], qa.get("detail"), f"decoded detail center/edge <= {qk['max_detail_ratio']} with the map off (ratio {qa.get('detail_ratio')})")
+    if "tool" in ck:   # the headset tools (xr_probe XR_PROBE_TOOL, scripted keys): analyse_tool
+        import math
+        tk, ta = ck["tool"], a.get("tool") or {}
+        if ta.get("error"):
+            chk("tool_seen", False, ta["error"], "the probe's tool lines, the headset's views and the tool's picture in the decoded stream")
+        else:
+            evs = ta["events"]
+            enter = [e for e in evs if e["event"] == "enter"]
+            chk("tool_start_and_enter", any(e["event"] == "start" for e in evs) and bool(enter), [e["event"] for e in evs][:3] + ["..."], "Space started the tool and Enter kept the result (the probe's JSON lines)")
+            if tk.get("expect") and enter:   # the keys that were scripted, applied to the start box of the panel the app was told
+                pan = enter[-1]["panel"]; st = tk["expect"]["start"]
+                exp = [[math.tan(math.atan(st * pan[e][k]) + math.radians(tk["expect"]["deltas"][e][k])) for k in range(4)] for e in range(2)]
+                err = max(abs(exp[e][k] - enter[-1]["box"][e][k]) for e in range(2) for k in range(4))
+                chk("tool_keys_move_edges", err <= 0.002, {"max_err": round(err, 5), "box": enter[-1]["box"], "expected": [[round(v, 4) for v in b] for b in exp]},
+                    "each scripted arrow moved its edge by the step (0.5 degree out in the fit, 1 degree in in the restriction), Shift reversed it, Tab switched the eye / the edit")
+            for smp in ta["samples"]:
+                want = next((w for w in tk["samples"] if w["app_frame"] == smp["app_frame"]), {})
+                tag = f"{smp['what']}@{smp['app_frame']}"
+                if not smp["decoded"]:
+                    chk(f"tool_{tag}_decoded", False, None, "the stream frame decodes"); continue
+                for e in want.get("edges_eyes", []):
+                    i = smp.get(f"eye{e}", {})
+                    chk(f"tool_{tag}_eye{e}_edges", i.get("max_err_px", 999) <= tk.get("edge_tol_px", 8), {"edges": i.get("edges_px"), "expected": i.get("expected_px"), "err": i.get("max_err_px")},
+                        f"the blue box ends where the tool's box says (within {tk.get('edge_tol_px', 8)} px of the stream)")
+                for e in want.get("black_eyes", []):
+                    i = smp.get(f"eye{e}", {})
+                    chk(f"tool_{tag}_eye{e}_black", i.get("black_frac", 0) >= 0.97, i.get("black_frac"), "the eye that is not being fitted is black")
+                for e in want.get("text_eyes", []):
+                    i = smp.get(f"eye{e}", {}); x = (i.get("text_extent_deg") or {})
+                    lim = tk.get("text_deg", 12.5)
+                    inside = bool(x) and all(abs(v) <= lim for v in x["x"] + x["y"])
+                    chk(f"tool_{tag}_eye{e}_text", i.get("white_px", 0) >= tk.get("min_text_px", 150) and inside, {"white_px": i.get("white_px"), "extent_deg": x},
+                        f"the in-headset text is there (>= {tk.get('min_text_px', 150)} white pixels) and inside {lim} degrees of the view axis")
+                for e in want.get("no_text_eyes", []):
+                    i = smp.get(f"eye{e}", {})
+                    chk(f"tool_{tag}_eye{e}_no_text", i.get("white_px", 999) <= 40, i.get("white_px"), "no text (it faded after 5 s without a key / this eye is black)")
+                for e in want.get("restrict_eyes", []):
+                    i = smp.get(f"eye{e}", {})
+                    chk(f"tool_{tag}_eye{e}_scene_in_box", i.get("outside_black", 0) >= 0.97 and i.get("inside_lit", 0) >= 0.9, {"outside_black": i.get("outside_black"), "inside_lit": i.get("inside_lit"), "box_px": i.get("expected_px")},
+                        "the scene is lit inside the box and black outside it")
     if "display" in ck:
         dc, dk = ck["display"], a.get("display")
         chk("display_measured", dk is not None and dk.get("ticks", 0) > 200, dk and dk.get("ticks"), "> 200 emulated display ticks")

@@ -29,7 +29,7 @@ namespace AirFrameXR
             new Tool { Title = "Game statistics", Exe = @"bin\performance.exe", What = "How your games ran." },
             new Tool { Title = "Settings", Exe = @"bin\configure.exe", Args = "--settings", StopsStreamer = true, What = "Headset pairing, benchmarks, video, audio and network settings." },
             // experimental and tuning switches (docs/EXPERIMENTAL_SWITCHES.md): writes config files, the streamer picks the live ones up, so it can stay open
-            new Tool { Title = "Advanced video and performance settings", Exe = @"bin\configure.exe", Args = "--switches", What = "Frame generation, pacing, GPU and encoder switches, each with when it takes effect." },
+            new Tool { Title = "Advanced video and performance settings", Exe = @"bin\configure.exe", Args = "--switches", What = "The field of view the games are told (stock or a restriction, and its calibration), frame generation, pacing, GPU and encoder switches, each with when it takes effect." },
             // the rarely used ones, one card: the checkup (streamer closed) or the setup wizard again (streamer closed)
             new Tool { Title = "Diagnostics and headset setup", Exe = @"bin\configure.exe", What = "Check your setup and get suggestions, or run the setup wizard again to pair a headset and let the tests propose the settings.",
                 Choices = new[] {
@@ -64,7 +64,6 @@ namespace AirFrameXR
             foreach (var t in tools)
             {
                 body.Controls.Add(MakeCard(t));
-                if (ReferenceEquals(tools, Tools) && t.Primary) body.Controls.Add(MakeFovCard());   // the FOV restriction mini app, right under the Streamer (the Black Box package has none)
             }
             body.Controls.Add(sys);
             // quiet links: the full ALVR settings, and the help
@@ -111,22 +110,6 @@ namespace AirFrameXR
                 f.ShowDialog(this);
             }
             return picked;
-        }
-
-        FovRestrictionPanel fovPanel;
-
-        /// The FOV restriction and calibration mini app (docs/UI_SPEC.md): not a launch button but a card with its own controls (FovRestrictionPanel); its button opens the profile manager.
-        Control MakeFovCard()
-        {
-            var box = new Panel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(12, 10, 12, 10), Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(700, 0), AccessibleName = "FOV restriction and calibration" };
-            var col = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill, Margin = new Padding(0) };
-            col.Controls.Add(new Label { Text = "FOV restriction and calibration", AutoSize = true, Font = Ui.Big, Margin = new Padding(0, 0, 0, 2) });
-            col.Controls.Add(new Label { Text = "The game renders only the part of the picture you can see: fewer pixels, a faster game.", AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(620, 0), Margin = new Padding(0, 0, 0, 4) });
-            fovPanel = demoReady ? new FovRestrictionPanel(new[] { 1.045, 0.800, 0.759, 0.871 }, true, new[] { 3552, 3200 }, false, UserFovStore.DemoStore()) : new FovRestrictionPanel();   // the screenshot state: a made-up headset box and profiles
-            fovPanel.ManageRequested += () => Launch(new Tool { Title = "Field of view profiles", Exe = @"bin\configure.exe", Args = "--fov" }, Paths.Configure);
-            col.Controls.Add(fovPanel);
-            box.Controls.Add(col);
-            return box;
         }
 
         Control MakeCard(Tool t)
@@ -234,7 +217,6 @@ namespace AirFrameXR
             if ((launched != null && !launched.HasExited) || AnyToolOpen()) return;
             watch.Stop();
             RefreshSystem();      // the tool may have switched the runtime or the layers
-            fovPanel?.Reload();   // the profile manager or the calibration may have changed the list
             Show(); Activate();
             FlowLog("show: every tool closed");
             if (testFlow) { var c = new Timer { Interval = 2500 }; c.Tick += (s2, e2) => { FlowLog("sample"); Close(); }; c.Start(); }   // the test ends once the launcher is back

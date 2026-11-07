@@ -51,6 +51,7 @@
 #define XR_USE_PLATFORM_WIN32
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
+#include "xr_tool.h"   // XR_PROBE_TOOL=fit|restrict: the headset tools (docs/PICTURE_EDGES_DESIGN.md sections 6, 6b)
 
 static FILE* g_log;
 static void L(const char* fmt, ...) {
@@ -311,22 +312,6 @@ int main(int argc, char** argv) {
     std::vector<XrViewConfigurationView> vcv(n, { XR_TYPE_VIEW_CONFIGURATION_VIEW });
     CK(xrEnumerateViewConfigurationViews(inst, sys, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, n, &n, vcv.data()));
     L("views: %u, recommended %ux%u", n, vcv[0].recommendedImageRectWidth, vcv[0].recommendedImageRectHeight);
-    // A game (mod) that ignores the recommended size: XR_PROBE_RENDER_SIZE=WxH renders and submits a fixed size whatever the runtime asks
-    // (docs/FOV_APERTURE_PLAN.md, game behaviours). The line above keeps what the runtime recommended; the harness reads both.
-    if (const char* rs = getenv("XR_PROBE_RENDER_SIZE")) {
-        unsigned fw = 0, fh = 0;
-        if (sscanf(rs, "%ux%u", &fw, &fh) == 2 && fw >= 64 && fh >= 64) {
-            for (auto& v : vcv) { v.recommendedImageRectWidth = fw; v.recommendedImageRectHeight = fh; }
-            L("render size forced %ux%u (the game ignores the recommended size)", fw, fh);
-        }
-    }
-    // A game (mod) that ignores the runtime's field of view: XR_PROBE_RENDER_FOV=outer,inner,up,down tangents (left eye; the right eye mirrors it)
-    // renders with its own frustum and submits that frustum honestly in the projection layer. The runtime's own values are still logged first.
-    float forcedFov[4] = {0, 0, 0, 0};
-    const bool fovForced = getenv("XR_PROBE_RENDER_FOV") &&
-        sscanf(getenv("XR_PROBE_RENDER_FOV"), "%f,%f,%f,%f", &forcedFov[0], &forcedFov[1], &forcedFov[2], &forcedFov[3]) == 4 &&
-        forcedFov[0] > 0 && forcedFov[1] > 0 && forcedFov[2] > 0 && forcedFov[3] > 0;
-    if (fovForced) L("render fov forced outer %.4f inner %.4f up %.4f down %.4f (the game ignores the runtime's field of view)", forcedFov[0], forcedFov[1], forcedFov[2], forcedFov[3]);
 
     CK(xrEnumerateSwapchainFormats(sess, 0, &n, nullptr));
     std::vector<int64_t> fmts(n);
@@ -393,7 +378,9 @@ int main(int argc, char** argv) {
 
     bool running = false, exiting = false; int done = 0; bool sawReady = false, sawSync = false;
     int rc = 0;
-    while (!exiting && done < frames) {
+    XrTool tool; tool.Init(getenv("XR_PROBE_TOOL"), getenv("XR_PROBE_KEYS"));
+    if (tool.On()) L("headset tool: %s (keys %s)", getenv("XR_PROBE_TOOL"), tool.scripted ? "scripted" : "keyboard");
+    while (!exiting && !tool.quit && done < frames) {
         if (GetTickCount64() - t0 > (ULONGLONG)timeoutS * 1000) { L("FAIL timeout (done=%d/%d ready=%d)", done, frames, sawReady); rc = 3; break; }
         XrEventDataBuffer ev{ XR_TYPE_EVENT_DATA_BUFFER };
         XrResult pr = xrPollEvent(inst, &ev);
@@ -501,15 +488,6 @@ int main(int argc, char** argv) {
                 for (uint32_t k = 0; k < 2; k++)
                     L("view fov tan eye %u: L %.4f R %.4f U %.4f D %.4f", k, -tanf(views[k].fov.angleLeft), tanf(views[k].fov.angleRight), tanf(views[k].fov.angleUp), -tanf(views[k].fov.angleDown));
             }
-            if (fovForced) {   // after the log line above: the harness compares what the runtime told with what the game did
-                for (uint32_t k = 0; k < vc && k < 2; k++) {
-                    const float outer = forcedFov[0], inner = forcedFov[1];
-                    views[k].fov.angleLeft = -atanf(k == 0 ? outer : inner);
-                    views[k].fov.angleRight = atanf(k == 0 ? inner : outer);
-                    views[k].fov.angleUp = atanf(forcedFov[2]);
-                    views[k].fov.angleDown = -atanf(forcedFov[3]);
-                }
-            }
             if (done % 20 == 0) L("frame %d: viewState 0x%llx pos(%.3f %.3f %.3f) period %lld ns", done, (unsigned long long)vs.viewStateFlags,
                 views[0].pose.position.x, views[0].pose.position.y, views[0].pose.position.z, (long long)fs.predictedDisplayPeriod);
             if (poseF) {
@@ -533,6 +511,7 @@ int main(int argc, char** argv) {
                     L("scene placed at the head: eyes (%.2f %.2f %.2f), facing yaw %.0f deg", hp.position.x, hp.position.y, hp.position.z, yaw * 57.29578f);
                 }
             }
+            if (tool.On() && views.size() >= 2) { XrFovf tf[2] = { views[0].fov, views[1].fov }; tool.Update(done, qpcMs(), tf); }
             SceneFrame sceneFrame;
             if (sceneOn) BeginSceneFrame(scene, ctx, (qpcMs() - loopStartMs) / 1000.0, sceneFrame, scenePlace);
             for (size_t i = 0; i < vcv.size(); i++) {
@@ -682,6 +661,7 @@ int main(int argc, char** argv) {
                             gc->Release();
                         }
                     }
+                    if (tool.On() && i < 2) { tool.sceneDrawn = sceneOn; ID3D11DeviceContext1* tc = nullptr; if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&tc))) { tool.Draw((int)i, dev, ctx, tc, rtv, imgs[i][idx].texture, views[i].fov); tc->Release(); } }
                     if (markF && i < 2) {
                         FILETIME wft; GetSystemTimePreciseAsFileTime(&wft);
                         const unsigned long long wallNs = ((((unsigned long long)wft.dwHighDateTime << 32) | wft.dwLowDateTime) - 116444736000000000ull) * 100ull;
@@ -740,7 +720,7 @@ int main(int argc, char** argv) {
                         }
                     }
                     ID3D11DeviceContext1* c1 = nullptr;
-                    if (i == 0 && SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
+                    if (i == 0 && !tool.On() && SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
                         const uint32_t stamp = (uint32_t)(done + 1);
                         const float white[4] = { 1, 1, 1, 1 }, black[4] = { 0, 0, 0, 1 }, gray[4] = { 0.5f, 0.5f, 0.5f, 1 };
                         for (int bi = 0; bi < 16; bi++) {
@@ -847,7 +827,7 @@ int main(int argc, char** argv) {
     if (soundOn) mciSendStringA("close xrbgm", nullptr, 0, nullptr);
     L("loop done: frames=%d ready=%d synchronized=%d", done, sawReady, sawSync);
     if (done > 1) L("app fps %.2f over %d frames", (done - 1) * 1000.0 / (qpcMs() - loopStartMs), done - 1);
-    if (rc == 0 && done < frames) rc = 4;
+    if (rc == 0 && done < frames && !tool.quit) rc = 4;   // a tool that saved and quit on purpose is not a short run
     if (running) { xrRequestExitSession(sess); }
     xrDestroySession(sess); xrDestroyInstance(inst);
     L("%s (rc=%d)", rc == 0 ? "PASS" : "FAIL", rc);

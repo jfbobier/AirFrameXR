@@ -138,6 +138,12 @@ namespace AirFrameXR
             intro.MaximumSize = new Size(WrapWidth, 0); intro.ForeColor = Color.DimGray;
             body.Controls.Add(intro);
 
+            // the field of view (1.3.5): what the game renders. Set once and forgotten, so it lives here and not on the launcher; calibrating is in its Manage profiles window
+            Section(body, "Field of view (what the game renders)");
+            var fovHost = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0), AccessibleName = "Field of view" };
+            fovHost.Controls.Add(new FovRestrictionPanel());
+            body.Controls.Add(fovHost);
+
             Section(body, FG);
             Row(body, uncapped, "Experimental", Live, "Frame generation without a fixed rate. Normally frame generation holds the game to a fraction of the display rate (1/3, 1/2, 2/3); here the game runs at its own speed and every frame the headset gets is interpolated between the two newest rendered ones, shown a little behind so the next real frame is already known. It pays off when the game cannot hold half the display rate (below 50 fps: Carma 25 % repeats at half rate, 4.5 % uncapped) or runs well above it (Lies of P 74 fps rendered against 50). At exactly 50 fps it changes nothing and adds latency: about two game periods of scene latency (head turns stay immediate). Headset nights 2026-10-15/16; it has not worked reliably since, so treat it as a test. Hover for the numbers.", "Uncapped mode, what the headset nights measured (RTX 5090, Vision Pro 100 Hz, nine games, 16 runs, optical flow)\r\n" +
                 "\r\n" +

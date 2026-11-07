@@ -49,7 +49,7 @@ Copy `profiles\template.profile.json`, rename it `<headset>.profile.json`, fill 
 | `match` | `name_contains` [strings], `default_view_resolution` [w, h], `supported_refresh_rates_include` [Hz] |
 | `stream` | `eye_resolution` [w, h], `fps`, `codec` (hevc), `bit_depth`, `full_range`, `encoding_gamma`, `foveated`, `split_encode` (0-3), `protocol` (udp/tcp) |
 | `network` | `default` (variant id) and `variants[]`: `id`, `label`, `bitrate_mbps` |
-| `fov` | optional, a measured visible window (see below): `visible_deg` {outer, inner, upper, lower} (degrees from the view axis to the edge of what the headset shows), `margin_deg` (default 3), `render_quality` (0 to 1), `client_fov_scale` (the headset app's own FoV scale to recommend, 0.2 to 1.6), `note` |
+| `fov` | optional, a measured visible window (see below): `visible_deg` {outer, inner, upper, lower} (degrees from the view axis to the edge of what the headset shows), `margin_deg` (default 3), `render_quality` (0 to 1), `source` (`standard`, `starting-point`, or `author` = one wearer's fit, listed, never proposed), `note`; `client_fov_scale` was removed in 1.4 (dead advice on our client) |
 | `session_overrides` | ALVR session settings as dotted paths into `config\session.json`, for example `session_settings.video.encoder_config.nvenc.quality_preset.variant`: `"P3"` |
 | `notes`, `verified` | what another user should know; GPU, client, date and result of the runs that back the values |
 

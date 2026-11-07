@@ -47,7 +47,7 @@
     "session_settings.video.passthrough.content.RgbChromaKey.green": 255,
     "session_settings.video.passthrough.content.RgbChromaKey.red": 0,
     "session_settings.video.passthrough.content.variant": "RgbChromaKey",
-    "session_settings.video.passthrough.enabled": false
+    "session_settings.video.passthrough.enabled": true
   },
   "notes": [
     "Starting point compiled from public guidance, NOT verified by the AirFrameXR project on this headset (no `verified` entry). AirFrameXR's support for headsets other than the Apple Vision Pro is best effort.",

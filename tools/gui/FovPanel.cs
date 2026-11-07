@@ -21,13 +21,14 @@ namespace AirFrameXR
         readonly Label status = Ui.Line("");
         readonly Timer warnTimer = new Timer { Interval = 2000 };
         readonly List<UserFov> profiles = new List<UserFov>();
-        CheckBox fovTick; ComboBox profileBox; Label fovNote, fovShare, clientHint, closeWarn;
+        CheckBox fovTick = new CheckBox();   // the state behind the two radio buttons (never shown): ticked = the restriction
+        RadioButton stockRb, restrictRb; ComboBox profileBox; Label fovNote, fovShare, clientHint, closeWarn;
         TrackBar fovQ; FlowLayoutPanel fovQRow; Button manage;
         CheckBox fitTick; Label fitNote, pipeLine, pipeBand; FlowLayoutPanel pipeWarn;
         int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
         double[] clientFov;   // the headset's tangents per edge (outer, inner, upper, lower), averaged over the two eyes; null = no headset seen yet
         readonly double[] testClient; readonly bool testTick; readonly int[] testEye; readonly bool testFit;   // the UI harness: a pretend headset, the restriction ticked, a stream size, the fit on
-        bool loading;
+        bool loading, syncing;
 
         /// "Manage profiles and calibrate..." was pressed (the launcher opens configure.exe --fov and steps aside); without a handler the panel starts it itself.
         public event Action ManageRequested;
@@ -38,14 +39,22 @@ namespace AirFrameXR
             FlowDirection = FlowDirection.TopDown; WrapContents = false; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; Margin = new Padding(0);
             clientFov = testClient ?? AppSettings.ReadClientFov();
 
-            var top = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-            fovTick = new CheckBox { AutoSize = true, Text = "Restrict the field of view", AccessibleName = "Restrict the field of view", Margin = new Padding(3, 6, 12, 0) };
-            profileBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300, FormattingEnabled = true, AccessibleName = "Field of view profile", Margin = new Padding(3, 3, 8, 0) };
+            // the choice: the vendor's own view (Apple, Meta: what the headset declares) or a restriction, a rectangle the game is told (the same for every headset)
+            stockRb = new RadioButton { AutoSize = true, Text = "Stock vendor view (Apple, Meta): the game renders everything the headset declares", AccessibleName = "Stock vendor view", Margin = new Padding(3, 4, 3, 0) };
+            restrictRb = new RadioButton { AutoSize = true, Text = "FOV restriction:", AccessibleName = "FOV restriction", Margin = new Padding(3, 8, 6, 0) };
+            profileBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300, FormattingEnabled = true, AccessibleName = "Field of view profile", Margin = new Padding(3, 5, 8, 0) };
             profileBox.Format += (s, e) => { if (e.ListItem is UserFov u) e.Value = u.Name + "   " + string.Join(" / ", u.Tan.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))); };
             closeWarn = new Label { Text = "⚠ streamer will be closed", AutoSize = true, ForeColor = Color.Firebrick, Font = Ui.Bold, Margin = new Padding(4, 7, 3, 0), Visible = StreamerProc.Running };
-            top.Controls.Add(fovTick); top.Controls.Add(profileBox); top.Controls.Add(closeWarn);
-            Controls.Add(top);
-            tips.SetToolTip(fovTick, FovTip); tips.SetToolTip(profileBox, "The profiles you calibrated or entered (Manage profiles and calibrate...). The game is told this window, never more than the headset shows. " + Restart + ".");
+            Ui.Exclusive(stockRb, restrictRb);   // the second sits in a row panel of its own: Windows Forms would not make them one group
+            stockRb.CheckedChanged += (s, e) => { if (!syncing && stockRb.Checked) { syncing = true; fovTick.Checked = false; syncing = false; } };
+            restrictRb.CheckedChanged += (s, e) => { if (!syncing && restrictRb.Checked) { syncing = true; fovTick.Checked = true; syncing = false; } };
+            fovTick.CheckedChanged += (s, e) => { if (!syncing) { syncing = true; restrictRb.Checked = fovTick.Checked; stockRb.Checked = !fovTick.Checked; syncing = false; } };
+            var top = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            top.Controls.Add(restrictRb); top.Controls.Add(profileBox); top.Controls.Add(closeWarn);
+            Controls.Add(stockRb); Controls.Add(top);
+            stockRb.Checked = true;
+            tips.SetToolTip(stockRb, "The default: the game is told the whole view the headset declares (Apple's compositor frustum, the Quest's lens window).");
+            tips.SetToolTip(restrictRb, FovTip); tips.SetToolTip(profileBox, "AVP optimized, the profiles you calibrated or entered. The game is told this rectangle, never more than the headset shows. " + Restart + ".");
 
             fovNote = Ui.Line(""); fovNote.ForeColor = Color.DimGray; fovNote.Margin = new Padding(22, 2, 3, 0); fovNote.MaximumSize = new Size(WrapWidth, 0);
             fovShare = Ui.Line(""); fovShare.ForeColor = Color.SeaGreen; fovShare.Margin = new Padding(22, 0, 3, 2); fovShare.MaximumSize = new Size(WrapWidth, 0);
@@ -55,7 +64,7 @@ namespace AirFrameXR
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 0) };
             manage = new Button { Text = "Manage profiles and calibrate...", AutoSize = true, AccessibleName = "Manage profiles and calibrate", Margin = new Padding(22, 2, 8, 2) };
             manage.Click += (s, e) => { if (ManageRequested != null) ManageRequested(); else StartManager(); };
-            tips.SetToolTip(manage, "Your profiles: calibrate (30 minutes, the headset on), enter values by hand, check one with the FoV grid, rename, delete.");
+            tips.SetToolTip(manage, "Your profiles: calibrate (one minute, the headset on, once is enough), enter values by hand, check one with the FoV grid, rename, delete.");
             row.Controls.Add(manage);
             status.ForeColor = Color.SeaGreen; status.Margin = new Padding(3, 8, 3, 0); status.MaximumSize = new Size(WrapWidth, 0);
             row.Controls.Add(status);
@@ -86,6 +95,7 @@ namespace AirFrameXR
             fovTick.CheckedChanged += (s, e) => FovTickChanged();
             profileBox.SelectedIndexChanged += (s, e) => ProfileChanged();
             fitTick.CheckedChanged += (s, e) => FitChanged();
+            HandleCreated += (s, e) => { var f = FindForm(); if (f != null) f.Activated += (s2, e2) => { if (!loading) Reload(); }; };   // a tool (the wizard, the manager) may have changed the settings while this window was behind
             warnTimer.Tick += (s, e) => closeWarn.Visible = StreamerProc.Running;
             warnTimer.Start();
             Disposed += (s, e) => { warnTimer.Dispose(); tips.Dispose(); };
@@ -134,9 +144,10 @@ namespace AirFrameXR
             fovQ.Value = (int)Math.Round(st.FovRenderQuality * 100);
             fitTick.Enabled = clientFov != null;
             fitTick.Checked = clientFov != null && (testFit || st.StreamFitWindow);
-            fovTick.Enabled = clientFov != null && profiles.Count > 0;
-            profileBox.Enabled = clientFov != null && profiles.Count > 0;
+            fovTick.Enabled = profiles.Count > 0;   // a profile can be chosen before any headset was seen (the cap at the headset's box is applied when it is known)
+            profileBox.Enabled = profiles.Count > 0;
             fovTick.Checked = on && fovTick.Enabled;
+            restrictRb.Enabled = fovTick.Enabled; stockRb.Enabled = true;
             loading = false;
             FovLabels();
         }
@@ -157,15 +168,17 @@ namespace AirFrameXR
         void FovLabelsText()
         {
             var u = Selected;
-            clientHint.Text = u != null && u.ClientScale > 0 && fovTick.Checked ? u.ClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " recommended for the FoV Scale slider in the headset's app (set it there by hand)." : "";
+            // the sharper stream: the headset app's own FoV Scale (the slider of the 1.3.5 client), set by hand to what the profile recommends; with "Fit the stream to the headset's window" ticked below, the stream then covers only that angle at the same pixel density
+            clientHint.Text = u != null && u.ClientScale > 0 && fovTick.Checked ? u.ClientScale.ToString("0.##", CultureInfo.InvariantCulture) + " recommended for the FoV Scale slider in the headset's app (set it there by hand), and tick \"Fit the stream to the headset's window\" below to keep the pixel density." : "";
             if (clientFov == null)
             {
-                fovNote.Text = "The headset's field of view is not known yet: connect the headset once with the streamer (it is saved when it connects).";
+                fovNote.Text = fovTick.Checked ? "On: the game is told the chosen window (the headset has not connected yet: it is capped to the headset's own box once it has). " + RestartSentence
+                                               : "Off: the stock vendor view. The headset's own field of view is not known yet: connect it once with the streamer (it is saved when it connects).";
                 fovShare.Text = ""; UpdatePipeline(); return;
             }
             if (profiles.Count == 0)
             {
-                fovNote.Text = "No profile yet: calibrate (30 minutes, the headset on) or enter values by hand.";
+                fovNote.Text = "No profile yet: calibrate (one minute, the headset on) or enter values by hand.";
                 fovShare.Text = ""; UpdatePipeline(); return;
             }
             var v = FovValues();
@@ -199,7 +212,7 @@ namespace AirFrameXR
 
         void FovTickChanged()
         {
-            if (loading || clientFov == null) return;
+            if (loading) return;
             var st = new AppSettings();
             FovStore(st);
             Save(st, "field of view restriction " + (fovTick.Checked ? "on" : "off") + (fovTick.Checked && Selected != null ? " (" + Selected.Name + ")" : ""), Restart);
@@ -208,7 +221,7 @@ namespace AirFrameXR
 
         void ProfileChanged()
         {
-            if (loading || clientFov == null || Selected == null) return;
+            if (loading || Selected == null) return;
             var st = new AppSettings();
             if (fovTick.Checked) { FovStore(st); Save(st, "field of view profile " + Selected.Name, Restart); }
             else { Json.Set(st.Root, V + "fov_profile", Selected.Id); try { st.Save(); } catch { } }   // only remembered: nothing changes for the streamer
@@ -231,6 +244,8 @@ namespace AirFrameXR
             try { st.Save(); }
             catch (Exception e) { status.Text = "Cannot write config\\airframexr.json: " + e.Message; status.ForeColor = Color.Firebrick; return; }
             Log.Write("INFO", "fov: " + what + " (" + when + ")");
+            // the foveation follows the choice: centred on the restriction window (or the whole frame when it is off), at the same bitrate; a choice counts as explicit, so numbers set by hand give way
+            if (testEye == null && testClient == null && storePath == null) PipelineModel.PictureEdgesFoveation.ApplyToFiles(st, true);
             if (StreamerProc.Running && testEye == null && testClient == null)
             {
                 var host = FindForm(); if (host != null) host.UseWaitCursor = true;

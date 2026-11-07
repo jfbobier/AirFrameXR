@@ -1,0 +1,182 @@
+{
+  "description": "The fit tool (docs/PICTURE_EDGES_DESIGN.md section 6, step B): the probe's `fit` scene with scripted keys (XR_PROBE_KEYS feeds the same key handler as the keyboard). Space starts, arrows push the left eye's edges out 0.5 degree each and Shift reverses one, Tab switches to the right eye whose outer edge is pushed, Enter keeps it. Checked: the probe's JSON lines equal the keys, the decoded stream shows the blue box where the tool says (one eye at a time, the other black), the in-headset text is there inside 12 degrees of the view axis, fades after 5 s without a key and shows 'Saved'.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 1250,
+    "gui": true
+  },
+  "client": {
+    "seconds": 55,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "views_tan": "1.732,1.0,1.192,1.0"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 1400,
+    "timeout_s": 60,
+    "env": {
+      "XR_PROBE_TOOL": "fit",
+      "XR_PROBE_TOOL_START": "0.8",
+      "XR_PROBE_FIT_STYLE": "box",
+      "XR_PROBE_KEYS": "120:space,150:left,154:left,158:left,162:left,180:up,184:up,200:shift+right,204:shift+right,330:tab,350:right,354:right,1000:enter"
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 240,
+  "checks": {
+    "host_min_frames": 800,
+    "client_min_frames": 700,
+    "timestamps_monotonic": true,
+    "max_duplicate_timestamps": 400,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 3520,
+      "height": 1600,
+      "color_range": "pc"
+    },
+    "decode": true,
+    "refresh_hz": 90,
+    "max_pipeline_latency_ms": 150,
+    "decode_frame_slack": 60,
+    "tool": {
+      "mode": "fit",
+      "edge_tol_px": 10,
+      "text_deg": 12.5,
+      "min_text_px": 150,
+      "expect": {
+        "start": 0.8,
+        "deltas": [
+          [
+            2.0,
+            -1.0,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ]
+      },
+      "samples": [
+        {
+          "app_frame": 100,
+          "what": "intro",
+          "edges_eyes": [
+            0,
+            1
+          ],
+          "text_eyes": [
+            0,
+            1
+          ]
+        },
+        {
+          "app_frame": 300,
+          "what": "left_eye",
+          "edges_eyes": [
+            0
+          ],
+          "black_eyes": [
+            1
+          ],
+          "text_eyes": [
+            0
+          ],
+          "no_text_eyes": [
+            1
+          ]
+        },
+        {
+          "app_frame": 430,
+          "what": "right_eye",
+          "edges_eyes": [
+            1
+          ],
+          "black_eyes": [
+            0
+          ],
+          "text_eyes": [
+            1
+          ],
+          "no_text_eyes": [
+            0
+          ]
+        },
+        {
+          "app_frame": 880,
+          "what": "faded",
+          "no_text_eyes": [
+            0,
+            1
+          ]
+        },
+        {
+          "app_frame": 1100,
+          "what": "saved",
+          "text_eyes": [
+            1
+          ]
+        }
+      ]
+    }
+  }
+}

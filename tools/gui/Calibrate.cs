@@ -1,6 +1,7 @@
 // calibrate.exe: measures what the headset really shows and saves it as the field of view the games are told (docs/FOV_CALIBRATION.md).
-// It runs the sweep (bench\xr_probe.exe in its sweep mode: a dot drifts outward in 24 directions per eye, the wearer clicks when it is gone), twice (eyes
-// following, eyes fixed), then FovFit turns every run into a profile file. The result is applied here, or kept as a file for Import a calibration file...
+// Opens on the fit page (docs/PICTURE_EDGES_DESIGN.md section 6): the probe's `fit` scene is started as a child, its JSON lines (the box per eye) are shown live and Enter saves a profile (method quickfit).
+// `calibrate.exe --restrict` is the same app on the probe's `restrict` scene (section 6b, "Choose what the game renders", method restriction). The 1.3 ray sweep (30 minutes) is gone from the UI.
+// The result page and its saving remain: a result is applied here, or kept as a file for Import a calibration file...
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -14,8 +15,8 @@ namespace AirFrameXR
 {
     public class CalibrateForm : DpiForm
     {
-        const int Directions = 24, Eyes = 2, StepsPerPass = Directions * Eyes;
         const string Wearer = "my";
+        const int Directions = 24;   // the demo result only: synthetic rows in the shape FovFit reads (the 1.3 sweep's files), until step B has its own result
         static string Probe => Path.Combine(Paths.Dir, "bench", "xr_probe.exe");
         string RunDir => demoDir ?? Path.Combine(Paths.Config, "calibration");
         readonly string demoDir;   // the UI harness: synthetic sweeps in a temp folder instead of config\\calibration
@@ -23,18 +24,15 @@ namespace AirFrameXR
         readonly AppSettings settings = new AppSettings();
         readonly string headset, headsetSlug;
         readonly FlowLayoutPanel page = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(16, 12, 16, 12), BackColor = Color.White };
-        readonly Timer poll = new Timer { Interval = 500 };
-        Process probe;
-        string csv, fit, gaze;
-        int run, doneSince;
-        Label progressText; ProgressBar bar;
         FovFitResult result;
 
-        public CalibrateForm(string demoFolder = null)
+        readonly bool restrictTool;   // --restrict: "Choose what the game renders" (the probe's restrict scene) instead of the fit
+
+        public CalibrateForm(string demoFolder = null, bool restrict = false)
         {
-            demoDir = demoFolder;
+            demoDir = demoFolder; restrictTool = restrict;
             System.Threading.Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;   // numbers as in the docs and the other tools
-            Text = "AirFrameXR – Calibrate the field of view";
+            Text = restrictTool ? "AirFrameXR – Choose what the game renders" : "AirFrameXR – Calibrate the field of view";
             Icon = Ui.AppIcon();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -47,9 +45,8 @@ namespace AirFrameXR
             Controls.Add(page);
             headset = demoFolder != null ? "Apple Headset" : settings.HeadsetName;
             headsetSlug = FovFit.Slug(headset).Replace('_', '-');
-            poll.Tick += (s, e) => Poll();
-            FormClosing += (s, e) => StopProbe();
-            if (demoFolder == null) ShowIntro();
+            FormClosing += (s, e) => EndTool();
+            ShowIntro();
             Ui.ScreenshotWhenShown(this, 1500);
         }
 
@@ -75,43 +72,223 @@ namespace AirFrameXR
 
         // ---------------------------------------------------------------------------------------------------------- pages
 
-        void Reset(string title) { page.Controls.Clear(); progressText = null; bar = null; page.Controls.Add(Ui.Line(title, Ui.Big)); }
+        void Reset(string title) { page.Controls.Clear(); page.Controls.Add(Ui.Line(title, Ui.Big)); }
         Label Text_(string text, bool dim = false) { var l = Ui.Line(text); l.MaximumSize = new Size(Math.Max(300, page.ClientSize.Width - 40), 0); if (dim) l.ForeColor = Color.DimGray; page.Controls.Add(l); return l; }
-        Button Btn(string text, Action act) { var b = new Button { Text = text, AutoSize = true, Margin = new Padding(3, 10, 8, 3) }; b.Click += (s, e) => act(); return b; }
+        Button Btn(string text, Action act) { var b = new Button { Text = text, AutoSize = true, Margin = new Padding(3, 10, 8, 3), AccessibleName = text }; b.Click += (s, e) => act(); return b; }
         FlowLayoutPanel Buttons(params Button[] bs) { var f = new FlowLayoutPanel { AutoSize = true, WrapContents = false }; f.Controls.AddRange(bs); page.Controls.Add(f); return f; }
 
-        List<string> EarlierRuns() => Directory.Exists(RunDir) ? Directory.GetFiles(RunDir, $"fov_sweep_{Wearer}_{headsetSlug}_run*.csv").OrderBy(f => f).ToList() : new List<string>();
-
+        /// The page this window opens on (docs/PICTURE_EDGES_DESIGN.md section 6): "Fit the picture to your eyes", two minutes in the headset, no sweep. The probe's fit scene and the reading of its
+        /// result are step B; until then Retry says so (the old 30-minute ray sweep is gone from the product, git history has it).
         void ShowIntro()
         {
-            Reset("Measure what your headset shows");
-            Text_("The lens cuts the edges of the picture, and how much depends on your headset and on how it sits on your face. This test finds your own edges, so the games render only what you can see. It takes about 30 minutes (two passes of 48 short steps).");
-            Text_("In the headset: keep your head still, only your eyes move. A small square drifts outward from the centre. Follow it with your eyes and click once (controller trigger, or a pinch with hands as controllers) the moment it is gone and you see only black. Do not click when it appears or fades. The second pass is the same with your eyes fixed on the + in the middle.");
-            if (demoDir == null && Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime)) { StartStreamer(); return; }
+            if (restrictTool) { ShowRestrictIntro(); return; }
+            Reset("Fit the picture to your eyes");
+            Text_("Two minutes, the headset on, one eye at a time. Four bright lines mark the edges of the picture: look at a line and push it outward until it just disappears behind the lens edge, then bring it back until it is clearly visible again. When all four edges are done, press Enter: the other eye comes, and Enter on the second eye saves. The result is kept as one of your profiles.");
+            Text_("Press SPACE on the PC keyboard (or pinch with hands as controllers) to start; the text in the headset says which eye to close and which edge you are on.", true);
             var problems = new List<string>();
             if (headset.Length == 0) problems.Add("No headset is known yet: connect it once with the streamer.");
-            if (Process.GetProcessesByName("streamer").Length == 0) problems.Add("The streamer is not running and could not be started (bin\\streamer.exe).");
-            if (!File.Exists(Probe)) problems.Add("bench\\xr_probe.exe is missing from this package.");
-            var earlier = EarlierRuns();
-            if (problems.Count > 0)
-            {
-                foreach (var p in problems) { var l = Text_(p); l.ForeColor = Color.Firebrick; }
-                Buttons(Btn("Check again", ShowIntro), Btn("Close", Close));
-                return;
-            }
-            Text_("The streamer is open (minimized if this window started it). Open the ALVR app on your headset so that it is connected before you start; the streamer's link indicator turns green.", true);
-            Text_($"Headset: {headset}." + (earlier.Count > 0 ? $" {earlier.Count} earlier run(s) are kept and used together with this one: the larger window of all runs wins." : " Two or three runs, with the headset taken off and put back on between them, give a safer result; the first one is enough to start."), true);
-            Text_("Calibration needs the field of view override off, and the headset app's FoV scale at 1.0. Put the headset on only when the test says so.", true);
-            var b = new List<Button> { Btn("Start the test", StartRun) };
-            if (earlier.Count > 0)
-            {
-                b.Add(Btn("Make the profile from the earlier runs", () => ShowResult(99)));
-                b.Add(Btn("Forget earlier runs", () => { foreach (var f in earlier) try { File.Delete(f); } catch { } ShowIntro(); }));
-            }
-            Buttons(b.ToArray());
+            if (demoDir == null && Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime)) { StartStreamer(); return; }
+            if (demoDir == null && !File.Exists(Probe)) problems.Add("bench\\xr_probe.exe is missing from this package.");
+            foreach (var p in problems) { var l = Text_(p); l.ForeColor = Color.Firebrick; }
+            Text_($"Headset: {(headset.Length > 0 ? headset : "none seen yet")}.", true);
+            Buttons(Btn("Retry", Retry), Btn("Close", Close));
+            note = Text_("", true);
+        }
+        Label note;
+
+        void Retry() => StartTool();
+
+        void ShowRestrictIntro()
+        {
+            Reset("Choose what the game renders");
+            Text_("Two minutes, the headset on, both eyes open. The tool shows a scene inside a box and black outside it: exactly what a game that honours the restriction shows. Pull an edge in until you notice the black during normal looking around, then one step back. Start with the inner edges and the lower one. The result is kept as one of your profiles and used by the games.");
+            Text_("Press SPACE on the PC keyboard to start. Arrows pull an edge in, Shift + arrow pushes it back out, Tab switches between both eyes and one eye, hold SPACE to see the whole view, Enter saves, Esc leaves. Keep this window in front: it receives the keys.", true);
+            var problems = new List<string>();
+            if (headset.Length == 0) problems.Add("No headset is known yet: connect it once with the streamer.");
+            if (demoDir == null && Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime)) { StartStreamer(); return; }
+            if (demoDir == null && !File.Exists(Probe)) problems.Add("bench\\xr_probe.exe is missing from this package.");
+            foreach (var p in problems) { var l = Text_(p); l.ForeColor = Color.Firebrick; }
+            Text_($"Headset: {(headset.Length > 0 ? headset : "none seen yet")}.", true);
+            Buttons(Btn("Retry", Retry), Btn("Close", Close));
+            note = Text_("", true);
         }
 
-        /// The test needs the streamer (it is the OpenXR runtime's other half): start it, minimized so this window stays in front, and continue when it is up.
+        // ---------------------------------------------------------------------------------------------------- the tool (the probe's fit / restrict scene)
+
+        Process probe;
+        bool toolApplied, hostPrepared; bool? priorOverride;
+        double[][] liveBox, livePanel; double livePct; Label liveLabel, liveState;
+        static string ProbeLog => Path.Combine(Paths.Config, "calibration", "probe_tool.log");
+
+        /// While a tool runs the game must be told the whole panel (the fit measures P) and no headset view is sent: the settings the streamer forwards are set aside and put back at the end.
+        void PrepareHost()
+        {
+            var st = new AppSettings();
+            priorOverride = st.FovOverride;
+            Json.Set(st.Root, "video.fov_override", false);
+            st.Save(); hostPrepared = true;
+            Log.Write("INFO", "calibrate: the restriction and the headset view are set aside while the tool runs");
+        }
+
+        void RestoreHost()
+        {
+            if (!hostPrepared) return;
+            hostPrepared = false;
+            try
+            {
+                var st = new AppSettings();
+                if (!toolApplied && priorOverride == true) Json.Set(st.Root, "video.fov_override", true);
+                st.Save();
+            }
+            catch (Exception e) { Log.Write("WARN", "calibrate: could not put the settings back: " + e.Message); }
+        }
+
+        void EndTool()
+        {
+            try { if (probe != null && !probe.HasExited) probe.Kill(); } catch { }
+            probe = null;
+            guard.Stop();
+            RestoreHost();
+        }
+
+        // While the tool runs this window must be the one that has the keyboard, and nothing may move the Windows mouse: the desktop mirror (a controller / hand beam is its mouse) is stopped
+        // and kept stopped, and the keys the scene uses are swallowed here (a focused button would otherwise take Space / Enter as a click: Stop). The scene reads the keys itself.
+        readonly Timer guard = new Timer { Interval = 1000 };
+        bool toolKeys => probe != null && !probe.HasExited;
+        static void StopMirror() { foreach (var p in Process.GetProcessesByName("mirrordesktop")) { try { p.Kill(); } catch { } p.Dispose(); } }
+        void TakeFocus() { try { WindowState = FormWindowState.Normal; TopMost = true; TopMost = false; Activate(); } catch { } }
+        void StartGuard()
+        {
+            guardTicks = 0; StopMirror(); TakeFocus();
+            guard.Tick -= GuardTick; guard.Tick += GuardTick; guard.Start();
+        }
+        int guardTicks;
+        void GuardTick(object s, EventArgs e) { StopMirror(); if (guardTicks++ < 6 && toolKeys) TakeFocus(); }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (toolKeys)
+                switch (keyData & Keys.KeyCode)
+                {
+                    case Keys.Space: case Keys.Enter: case Keys.Tab: case Keys.Escape: case Keys.Left: case Keys.Right: case Keys.Up: case Keys.Down: return true;
+                }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        void StartTool()
+        {
+            if (demoDir != null) { if (note != null) note.Text = "Demo window: nothing is started."; return; }
+            if (probe != null && !probe.HasExited) return;
+            foreach (var stray in Process.GetProcessesByName("xr_probe")) { try { stray.Kill(); Log.Write("WARN", "calibrate: a stray xr_probe.exe was stopped"); } catch { } stray.Dispose(); }   // a scene left over from an earlier run would attach to the new host
+            if (!File.Exists(Probe)) { if (note != null) { note.Text = "bench\\xr_probe.exe is missing from this package."; note.ForeColor = Color.Firebrick; } return; }
+            if (Process.GetProcessesByName("streamer").Length == 0) { StartStreamer(); return; }
+            PrepareHost();
+            StartGuard();
+            Reset(restrictTool ? "Choose what the game renders" : "Fit the picture to your eyes");
+            Text_("Put the headset on. The instructions are in the headset; press SPACE on this PC's keyboard to start.");
+            liveState = Text_("Starting the OpenXR scene...", true);
+            liveLabel = Text_("", true);
+            Text_(restrictTool
+                ? "Four bright lines mark the edges of the picture the game renders: arrows pull a line in 1 degree, Shift + arrow pushes it back out, Tab: both eyes / one eye, hold SPACE: the whole view, Enter: save, Esc: leave. Keep this window in front: it receives the keys."
+                : "Arrows push an edge out until its black bar is gone, Shift + arrow pulls it back, hold SPACE: compare, Enter: this eye is finished (the second eye saves), Esc: leave. One eye at a time: close the other. Keep this window in front: it receives the keys.", true);
+            Buttons(Btn("Stop", () => { EndTool(); ShowIntro(); }));
+            // the streamer takes the settings change within a moment; the scene is started after it so the game is told the whole panel
+            var t = new Timer { Interval = 6000 };
+            t.Tick += (s, e) => { t.Stop(); t.Dispose(); if (hostPrepared) LaunchProbe(); };
+            t.Start();
+        }
+
+        void LaunchProbe()
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ProbeLog));
+                var psi = new ProcessStartInfo(Probe, "\"" + ProbeLog + "\" 100000000 86400") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(Probe) };
+                psi.EnvironmentVariables["XR_PROBE_TOOL"] = restrictTool ? "restrict" : "fit";
+                var author = UserFovStore.Load().FirstOrDefault(u => u.Source == "author");   // a Vision Pro's lines start on the AVP optimized window; any other headset starts at 85 % of what it declares
+                psi.EnvironmentVariables["XR_PROBE_PARENT_PID"] = Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);   // the scene ends with this window, whatever happens to it
+                if (author != null && (headset.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0 || headset.IndexOf("Vision", StringComparison.OrdinalIgnoreCase) >= 0)) psi.EnvironmentVariables["XR_PROBE_START_BOX"] = string.Join(",", author.Tan.Select(v => v.ToString("0.####", CultureInfo.InvariantCulture)));
+                var vab = Path.Combine(Paths.Dir, "bench", "littlest_tokyo.vab");
+                if (restrictTool && File.Exists(vab)) psi.EnvironmentVariables["XR_PROBE_SCENE"] = vab;
+                probe = Process.Start(psi);
+                probe.OutputDataReceived += (s, e) => { if (e.Data != null) try { BeginInvoke((Action)(() => HandleLine(e.Data))); } catch { } };
+                probe.EnableRaisingEvents = true;
+                probe.Exited += (s, e) => { try { BeginInvoke((Action)ProbeEnded); } catch { } };
+                probe.BeginOutputReadLine();
+                Log.Write("INFO", "calibrate: started the " + (restrictTool ? "restrict" : "fit") + " scene");
+            }
+            catch (Exception e) { EndTool(); Reset("The scene did not start"); Text_(e.Message); Buttons(Btn("Retry", Retry), Btn("Close", Close)); }
+        }
+
+        bool finished;
+        void ProbeEnded()
+        {
+            if (finished || liveLabel == null) return;
+            probe = null; RestoreHost();
+            ShowIntro();
+            if (note != null) { note.Text = "The scene ended without saving (is the headset connected and the game runtime AirFrameXR? See the log)."; note.ForeColor = Color.DarkGoldenrod; }
+        }
+
+        static double[][] Boxes(object o)
+        {
+            var l = o as System.Collections.IList; if (l == null || l.Count < 2) return null;
+            return new[] { 0, 1 }.Select(e => ((System.Collections.IList)l[e]).Cast<object>().Select(v => Convert.ToDouble(v, CultureInfo.InvariantCulture)).ToArray()).ToArray();
+        }
+
+        void HandleLine(string line)
+        {
+            if (line.Length == 0 || line[0] != '{') return;
+            Dictionary<string, object> d;
+            try { d = Json.Parse(line); } catch { return; }
+            var ev = Json.Str(d, "event", "");
+            var box = Boxes(Json.Get(d, "box")); var panel = Boxes(Json.Get(d, "panel"));
+            if (box != null) { liveBox = box; livePanel = panel; livePct = Json.Num(d, "pct", 100); }
+            string Deg(double t) => (Math.Atan(t) * 180 / Math.PI).ToString("0.0", CultureInfo.InvariantCulture);
+            if (liveLabel != null && liveBox != null)
+                liveLabel.Text = string.Join("\n", new[] { 0, 1 }.Select(e => (e == 0 ? "Left eye:  " : "Right eye: ") + $"outer {Deg(liveBox[e][0])}  inner {Deg(liveBox[e][1])}  up {Deg(liveBox[e][2])}  down {Deg(liveBox[e][3])} degrees")) + (restrictTool ? $"\nThe game renders {livePct:0} % of its pixels." : "");
+            if (ev == "start" && liveState != null) { liveState.Text = "Running."; }
+            else if (ev == "esc") { finished = true; EndTool(); ShowIntro(); if (note != null) note.Text = "You left without saving."; }
+            else if (ev == "enter" && liveBox != null) { finished = true; Finish(); }
+        }
+
+        string AskSeal()
+        {
+            string seal = "";
+            using (var f = new DpiForm { Text = "AirFrameXR – Light seal", Font = Ui.Body, StartPosition = FormStartPosition.CenterParent, BackColor = Color.White, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink })
+            {
+                var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(12) };
+                col.Controls.Add(Ui.Line("Which light seal do you wear? It explains why two people fit differently."));
+                var box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 260, AccessibleName = "Light seal" };
+                box.Items.AddRange(new object[] { "I don't know", "21W", "25W", "29W", "31W", "Other" }); box.SelectedIndex = 0;
+                col.Controls.Add(box);
+                var ok = new Button { Text = "OK", AutoSize = true, DialogResult = DialogResult.OK, Margin = new Padding(3, 10, 3, 3) };
+                col.Controls.Add(ok); f.Controls.Add(col); f.AcceptButton = ok;
+                f.ShowDialog(this);
+                seal = box.Text == "I don't know" ? "" : box.Text.Trim();
+            }
+            return seal;
+        }
+
+        void Finish()
+        {
+            try
+            {
+                var seal = restrictTool ? "" : AskSeal();
+                var u = UserFovStore.Add(UserFovStore.FromTool(restrictTool ? "restriction" : "quickfit", liveBox, livePanel, headset, seal));
+                var st = new AppSettings();
+                UserFovStore.Apply(u, st, AppSettings.ReadClientFov(), headset);   // as what the game renders (G); as the headset view V too once the headset-view message exists (step C)
+                st.Save(); toolApplied = true;
+                Log.Write("INFO", $"calibrate: '{u.Name}' ({u.Method}) kept and applied");
+                Reset(restrictTool ? "Saved" : "Your fit is saved");
+                Text_($"Kept as \"{u.Name}\" in your profiles and chosen: outer {u.Tan[0]:0.00}  inner {u.Tan[1]:0.00}  upper {u.Tan[2]:0.00}  lower {u.Tan[3]:0.00} (tangents, the larger of the two eyes).");
+                Text_("Needs a streamer restart for games that are already running; the next game gets it.", true);
+                var map = new FovMap { Rectangle = u.Tan, Declared = AppSettings.ReadClientFov(), Margin = new Padding(3, 6, 3, 2) }; page.Controls.Add(map);
+                Buttons(Btn("Close", Close));
+            }
+            catch (Exception e) { Reset("Could not save"); Text_(e.Message); Buttons(Btn("Retry", Retry), Btn("Close", Close)); Log.Write("WARN", "calibrate: could not save the tool's result: " + e.Message); }
+        }
+
+        /// The fit needs the streamer (it is the OpenXR runtime's other half): start it, minimized so this window stays in front, and continue when it is up.
         void StartStreamer()
         {
             Reset("Starting the streamer...");
@@ -129,96 +306,7 @@ namespace AirFrameXR
         }
         int startWait;
 
-        void StartRun()
-        {
-            if (settings.FovOverride)
-            {
-                if (MessageBox.Show(this, "The field of view override is on, and it would cut the measurement off. Turn it off for the test? (Your result is applied afterwards if you choose so.)", "Calibrate", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-                Json.Set(settings.Root, "video.fov_override", false); settings.Save();
-                Log.Write("INFO", "calibrate: field of view override turned off for the test");
-            }
-            Directory.CreateDirectory(RunDir);
-            run = EarlierRuns().Count + 1;
-            csv = Path.Combine(RunDir, $"fov_sweep_{Wearer}_{headsetSlug}_run{run}.csv");
-            fit = $"{headsetSlug}_{run}";
-            StartPass("following");
-        }
-
-        void StartPass(string g)
-        {
-            gaze = g; doneSince = 0;
-            Reset(g == "following" ? "Pass 1 of 2: follow the square" : "Pass 2 of 2: eyes on the +");
-            Text_(g == "following"
-                ? "Put the headset on and keep your head still. Click once to start; then, in each step, follow the square with your eyes and click when it is gone and you see black."
-                : "Same steps, but keep your eyes fixed on the + in the middle. Do not follow the square: click when, looking at the +, you can no longer see it at the edge of your view.");
-            Text_("One click per step. If you clicked too early, carry on. If you cannot see the square at all in a step, do not click: the step ends by itself after about 30 seconds.", true);
-            progressText = Text_("Starting...");
-            bar = new ProgressBar { Minimum = 0, Maximum = StepsPerPass, Width = 420, Margin = new Padding(3, 8, 3, 8) };
-            page.Controls.Add(bar);
-            Buttons(Btn("Stop", () => { StopProbe(); ShowIntro(); }));
-            var psi = new ProcessStartInfo(Probe, $"\"{Path.Combine(Paths.Logs, "fov_sweep.log")}\" 100000000 86400") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(Probe) };
-            Directory.CreateDirectory(Paths.Logs);
-            var env = psi.EnvironmentVariables;
-            env["XR_RUNTIME_JSON"] = Paths.Manifest;
-            env["XR_PROBE_SCENE"] = "fovgrid"; env["XR_PROBE_FOVGRID"] = "sweep";
-            env["XR_PROBE_SWEEP_FIT"] = fit; env["XR_PROBE_SWEEP_GAZE"] = g;
-            env["XR_PROBE_SWEEP_DEG_S"] = "2"; env["XR_PROBE_SWEEP_START_DEG"] = "15"; env["XR_PROBE_SWEEP_EYES"] = "01";
-            env["XR_PROBE_SWEEP_CSV"] = csv;
-            try { probe = Process.Start(psi); Log.Write("INFO", $"calibrate: pass {g}, run {run}, {csv}"); }
-            catch (Exception e) { MessageBox.Show(this, "Could not start the test: " + e.Message, "Calibrate", MessageBoxButtons.OK, MessageBoxIcon.Warning); ShowIntro(); return; }
-            poll.Start();
-        }
-
-        /// Steps this pass has written: the probe appends one row per direction, left eye first.
-        int StepsDone()
-        {
-            try
-            {
-                using (var fs = new FileStream(csv, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                using (var sr = new StreamReader(fs))
-                {
-                    sr.ReadLine();
-                    int n = 0; string line;
-                    while ((line = sr.ReadLine()) != null) { var c = line.Split(','); if (c.Length > 2 && c[1] == fit && c[2] == gaze) n++; }
-                    return n;
-                }
-            }
-            catch { return 0; }
-        }
-
-        void Poll()
-        {
-            if (progressText == null) return;
-            int n = Math.Min(StepsDone(), StepsPerPass);
-            bar.Value = n;
-            progressText.Text = n == 0 ? "Waiting for your first click (it only starts the test)..." : $"{(n <= Directions ? "Left" : "Right")} eye, step {Math.Min(n + (n < StepsPerPass ? 1 : 0), StepsPerPass) - (n > Directions ? Directions : 0)} of {Directions}";
-            if (n >= StepsPerPass && ++doneSince >= 3)   // the last row is in: give the probe a moment, then end it
-            {
-                poll.Stop(); StopProbe();
-                if (gaze == "following") ShowBetween(); else ShowResult(99);
-            }
-            else if (probe != null && probe.HasExited && n < StepsPerPass)
-            {
-                poll.Stop(); probe = null;
-                MessageBox.Show(this, "The test program stopped before the end. Check that the streamer is running and the headset connected (logs\\fov_sweep.log has the details), then run the test again.", "Calibrate", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                try { if (n < StepsPerPass) File.Delete(csv); } catch { }   // an incomplete run is not kept: it would skew the window
-                ShowIntro();
-            }
-        }
-
-        void StopProbe()
-        {
-            poll.Stop();
-            try { if (probe != null && !probe.HasExited) { probe.Kill(); probe.WaitForExit(3000); } } catch { }
-            probe = null;
-        }
-
-        void ShowBetween()
-        {
-            Reset("Pass 1 done");
-            Text_("Take a short break if you like; the headset can stay on. The second pass has the same 48 steps, but this time keep your eyes fixed on the + in the middle. Both passes matter: with the eyes following the square the window is smaller than with the eyes forward, and a game is played both ways.");
-            Buttons(Btn("Start pass 2", () => StartPass("fixed")), Btn("Stop here", () => { try { File.Delete(csv); } catch { } ShowIntro(); }));
-        }
+        List<string> EarlierRuns() => Directory.Exists(RunDir) ? Directory.GetFiles(RunDir, $"fov_sweep_{Wearer}_{headsetSlug}_run*.csv").OrderBy(f => f).ToList() : new List<string>();
 
         void ShowResult(double coverage)
         {
@@ -234,7 +322,7 @@ namespace AirFrameXR
             }
             var t = result.Rectangle;
             { var map = FovMap.FromResult(result); map.Margin = new Padding(3, 6, 3, 2); page.Controls.Add(map); }
-            Text_("Grey: the 24 directions the square travelled, with a dot where it vanished for you; the dark outline is what your headset shows; blue is the field of view the games are told.", true);
+            Text_("Blue is the field of view the games are told; the dark outline is what your headset shows.", true);
             Text_($"Outer {t.Outer:0.00}   Inner {t.Inner:0.00}   Upper {t.Upper:0.00}   Lower {t.Lower:0.00}   (tangents; the angles are {Math.Atan(t.Outer) * 180 / Math.PI:0.#} / {Math.Atan(t.Inner) * 180 / Math.PI:0.#} / {Math.Atan(t.Upper) * 180 / Math.PI:0.#} / {Math.Atan(t.Lower) * 180 / Math.PI:0.#} degrees)");
             Text_($"This rectangle covers {100 * result.Coverage:0.0} % of what you saw, from {result.Runs} run(s). It is {100 * result.SavedVsBox:0.0} % smaller than the box around your whole window, so the game renders that much less.");
             foreach (var w in result.Warnings) { var l = Text_("Note: " + w); l.ForeColor = Color.DarkGoldenrod; }
@@ -244,7 +332,7 @@ namespace AirFrameXR
             cov.SelectedIndexChanged += (s, e) => ShowResult(new[] { 99.0, 100.0, 97.0 }[cov.SelectedIndex]);
             page.Controls.Add(cov);
             Text_("Needs streamer restart. If a game shows black at an edge, choose 100 % or run the test again; the FOV restriction card in the launcher shows and changes the profile.", true);
-            Buttons(Btn("Use this field of view", Apply), Btn("Save a copy...", SaveCopy), Btn("Measure again", ShowIntro), Btn("Close", Close));
+            Buttons(Btn("Use this field of view", Apply), Btn("Save a copy...", SaveCopy), Btn("Retry", ShowIntro), Btn("Close", Close));
         }
 
         void Apply()
@@ -288,7 +376,7 @@ namespace AirFrameXR
             Log.Component = "calibrate";
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new CalibrateForm());
+            Application.Run(new CalibrateForm(null, Environment.GetCommandLineArgs().Contains("--restrict")));
         }
     }
 }

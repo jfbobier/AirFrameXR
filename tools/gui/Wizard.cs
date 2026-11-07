@@ -351,12 +351,13 @@ namespace AirFrameXR
                 // so every headset is offered it, the Vision Pro too since the AirFrameXR client handles the key colour and the margins itself (the stock App Store app has a fixed key colour and range).
                 if (!demo && !auto && !settings.ChromaAsked)
                     using (var dlg = new ChromaStepForm())
-                        if (dlg.ShowDialog(this) == DialogResult.OK)
-                        {
-                            chromaChoice = Tuple.Create(dlg.Transparent, dlg.Rgb);
-                            settings.ChromaAsked = true; settings.Save();
-                            Log.Write("INFO", $"wizard: chroma-key passthrough {(dlg.Transparent ? "on, key #" + dlg.Rgb : "off")}");
-                        }
+                    {
+                        dlg.ShowDialog(this);   // closing the window with its cross keeps the recommended answer (yes, #00FF00, for the Vision Pro and the Quest alike): passthrough is on unless the user ticks No
+                        chromaChoice = Tuple.Create(dlg.Transparent, dlg.Rgb);
+                        settings.ChromaAsked = true; settings.Save();
+                        Log.Write("INFO", $"wizard: chroma-key passthrough {(dlg.Transparent ? "on, key #" + dlg.Rgb : "off")}");
+                    }
+                else if (!demo && !auto && chromaChoice == null) { var cs = Session.Load(); chromaChoice = Tuple.Create(Chroma.Enabled(cs), Chroma.Rgb(cs)); }   // asked in an earlier run: that answer stays
                 GoTo(3);
             };
             p.Controls.Add(hsGo);
@@ -845,15 +846,15 @@ namespace AirFrameXR
         {
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
             p.Controls.Add(H("Field of view"));
-            var intro = Ui.Line("Your headset may not show everything a game renders, and a game can skip rendering what you cannot see: fewer pixels, a faster game. Choose what the games are told. A calibration takes about 30 minutes and needs the headset; otherwise take the proposed profile, or enter values by hand. You can change this any time in the launcher (FOV restriction)."); Ui.FitWidth(intro, 760, asMaximum: true);
+            var intro = Ui.Line("Your headset may not show everything a game renders, and a game can skip rendering what you cannot see: fewer pixels, a faster game. Choose what the games are told. The stock vendor view is the default. For a Vision Pro, AVP optimized is a window measured on a real headset; you can also calibrate your own in one minute (the headset on) or enter values by hand. What you pick here is what is used: you can change it any time in the launcher (FOV restriction)."); Ui.FitWidth(intro, 760, asMaximum: true);
             p.Controls.Add(intro);
-            fovNone = new RadioButton { Text = "No restriction: the games render everything the headset declares", AutoSize = true, Margin = new Padding(3, 8, 3, 3), AccessibleName = "No restriction" };
-            fovUse = new RadioButton { Text = "Restrict to a profile (choose one below)", AutoSize = true, AccessibleName = "Restrict to a profile" };
+            fovNone = new RadioButton { Text = "Stock vendor view (Apple, Meta): the games render everything the headset declares", AutoSize = true, Margin = new Padding(3, 8, 3, 3), AccessibleName = "No restriction" };
+            fovUse = new RadioButton { Text = "FOV restriction: the games are told the profile chosen below (AVP optimized, or your own)", AutoSize = true, AccessibleName = "Restrict to a profile" };
             p.Controls.Add(fovNone); p.Controls.Add(fovUse);
             fovCard = (demo ? new FovCard(UserFovStore.DemoStore(), new[] { 1.045, 0.800, 0.759, 0.871 }) : new FovCard()); fovCard.Margin = new Padding(22, 6, 0, 0);   // the screenshot state: made-up profiles
             p.Controls.Add(fovCard);
             var cur = new AppSettings();
-            var pick = demo ? fovCard.Selected : (FindCurrentProfile(cur) ?? fovCard.Proposed);   // what is in use now, else what we propose for this headset
+            var pick = demo ? fovCard.Selected : FindCurrentProfile(cur);   // what is in use now; otherwise the vendor's own view is the default
             if (pick != null) { fovCard.Select(pick.Id); fovUse.Checked = true; } else fovNone.Checked = true;
             fovNone.CheckedChanged += (s, e) => UpdateFovNext();
             fovUse.CheckedChanged += (s, e) => UpdateFovNext();
@@ -897,6 +898,7 @@ namespace AirFrameXR
             if (settingsPanel == null) return false;
             if (!settingsPanel.Save(out var err)) { MessageBox.Show(this, err, Text); return false; }
             if (autoconfig) HmdProfiles.ApplySessionOverrides(profile);
+            ApplyChromaChoice();   // the profile's overrides carry passthrough off (the Vision Pro's): the user's answer comes last
             return true;
         }
 

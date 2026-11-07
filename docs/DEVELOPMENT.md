@@ -76,6 +76,7 @@ analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin
 
 A release zip is built in the release flavour.
 
+0. **Since 1.3.5 every release ships the Black Box**: the release asset is the bundle (`python3 harness/bundle.py`: the release build and package, the personal package, the debug build and package, then the stock package with the Black Box nested in `blackbox\\`; the zips are fetched to `build/bundle/`). Publish `AirFrameXR-<version>-bundle.zip`, never the personal one. The steps below are what the bundle runs for its release part.
 1. `python3 harness/run.py build nvenc client host shim probe gui package --release` (`build` alone is client + host only), then
    `AIRFRAMEXR_PERSONAL=1 python3 harness/run.py build package --release` for the personal zip.
 2. Check the zip before publishing: `bin\flavour.txt` says release, no personal settings in the generic zip (no headset address in
