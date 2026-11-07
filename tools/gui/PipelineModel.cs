@@ -220,7 +220,7 @@ namespace AirFrameXR
 
         /// Apple's rasterization rate map: the panel's frustum P (outer, inner, upper, lower tangents), the full-rate density in px per tangent unit per axis, and one table
         /// per axis of [degrees from the eye's axis, rate] (x: negative = outer; y: negative = down).
-        public class RateMap { public double[] P, Density; public double[][] X, Y; /** the profile's quality reference: bits per encoded pixel the stream is sized for (0 = none: the size stays the user's) */ public double Bpp; }
+        public class RateMap { public double[] P, Density; public double[][] X, Y; /** the profile's recommended eye size (stream.eye_resolution): what the stock app renders, the default reference of the render choice */ public int[] RecommendedEye; /** the profile's quality reference: bits per encoded pixel the stream is sized for (0 = none: the size stays the user's) */ public double Bpp; }
 
         public static class RateMapFoveation
         {
@@ -237,7 +237,9 @@ namespace AirFrameXR
                 var p = ((object[])rm["frustum_tan"]).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
                 var lp = ((object[])rm["logical_px"]).Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
                 double bpp = profile.TryGetValue("stream_budget", out var sb) && sb is Dictionary<string, object> sbd && sbd.ContainsKey("reference_bits_per_pixel") ? Convert.ToDouble(sbd["reference_bits_per_pixel"], CultureInfo.InvariantCulture) : 0;
-                return new RateMap { P = p, Density = new[] { lp[0] / (p[0] + p[1]), lp[1] / (p[2] + p[3]) }, X = Table(rm["x"]), Y = Table(rm["y"]), Bpp = bpp };
+                int[] rec = null;
+                if (profile.TryGetValue("stream", out var so) && so is Dictionary<string, object> sd && sd.TryGetValue("eye_resolution", out var eo) && eo is object[] ea && ea.Length >= 2) rec = new[] { (int)Convert.ToDouble(ea[0], CultureInfo.InvariantCulture), (int)Convert.ToDouble(ea[1], CultureInfo.InvariantCulture) };
+                return new RateMap { P = p, Density = new[] { lp[0] / (p[0] + p[1]), lp[1] / (p[2] + p[3]) }, X = Table(rm["x"]), Y = Table(rm["y"]), Bpp = bpp, RecommendedEye = rec };
             }
 
             public static RateMap Load(string path) { try { return FromProfile(Json.Load(path)); } catch { return null; } }
@@ -429,6 +431,56 @@ namespace AirFrameXR
             }
         }
 
+        /// The game's render choice (AirFrameXR 1.3.5, owner 2026-11-07): what the game would render without the restriction (the declared resolution over the whole view: `Reference`),
+        /// what the restricted box costs at that same pixel density (`PixelForPixel`, 100 %), the cheapest (`Floor`: the stream's own density over the box) and the dearest useful
+        /// (`Ceiling`: the stream's own size, above 100 %: supersampling). The percentage is the number of pixels relative to `PixelForPixel`. The engine takes a quality between floor and
+        /// ceiling (ovrshim/render_size.h), so the percentage is turned into that quality here; nothing in the engine changed.
+        public static class RenderPlan
+        {
+            public class Plan
+            {
+                public int[] Reference, PixelForPixel, Floor, Ceiling, Chosen;
+                public double Quality, FloorPct, MaxPct, CeilingPct, ChosenPct, ReferenceMpx, ChosenMpx, SavingPct;
+            }
+
+            static double Area(int[] z) => (double)z[0] * z[1];
+
+            /// reference = the declared eye size, declared / box = outer, inner, upper, lower tangents (the headset's and the game's), stream = the stream's per-eye size,
+            /// pct = the requested percentage (0 or less = the floor), allowAbove = may the choice go above 100 %. Null when an input is missing.
+            public static Plan Make(int[] reference, double[] declared, double[] box, int[] stream, double pct, bool allowAbove)
+            {
+                if (reference == null || declared == null || box == null || stream == null) return null;
+                double pw = declared[0] + declared[1], ph = declared[2] + declared[3], gw = Math.Min(box[0], declared[0]) + Math.Min(box[1], declared[1]), gh = Math.Min(box[2], declared[2]) + Math.Min(box[3], declared[3]);
+                if (!(pw > 0) || !(ph > 0) || !(gw > 0) || !(gh > 0)) return null;
+                double wr = gw / pw, hr = gh / ph;
+                var floorBase = new[] { stream[0] * wr, stream[1] * hr }; var ceilD = new double[] { stream[0], stream[1] };
+                var p = new Plan { Reference = reference };
+                p.PixelForPixel = new[] { EvenAtLeast64(reference[0] * wr), EvenAtLeast64(reference[1] * hr) };
+                p.Floor = GameRenderSize(floorBase, ceilD, 0); p.Ceiling = GameRenderSize(floorBase, ceilD, 1);
+                double a1 = Area(p.PixelForPixel);
+                p.FloorPct = 100 * Area(p.Floor) / a1; p.CeilingPct = 100 * Area(p.Ceiling) / a1;
+                p.MaxPct = allowAbove ? p.CeilingPct : Math.Min(100, p.CeilingPct);
+                double q = 0;
+                if (pct > 0)
+                {
+                    double want = Math.Max(p.FloorPct, Math.Min(p.MaxPct, pct)) / 100 * a1;
+                    double lo = 0, hi = 1;
+                    for (int i = 0; i < 40; i++)
+                    {
+                        double mid = (lo + hi) / 2, w = floorBase[0] + (ceilD[0] - floorBase[0]) * mid, h = floorBase[1] + (ceilD[1] - floorBase[1]) * mid;
+                        if (w * h < want) lo = mid; else hi = mid;
+                    }
+                    q = (lo + hi) / 2;
+                }
+                p.Quality = Math.Round(Math.Max(0, Math.Min(1, q)), 3);
+                p.Chosen = GameRenderSize(floorBase, ceilD, p.Quality);
+                p.ChosenPct = 100 * Area(p.Chosen) / a1;
+                p.ReferenceMpx = Area(reference) / 1e6; p.ChosenMpx = Area(p.Chosen) / 1e6;
+                p.SavingPct = 100 * (1 - Area(p.Chosen) / Area(reference));
+                return p;
+            }
+        }
+
         /// The step D wiring (docs/PICTURE_EDGES_DESIGN.md sections 5b and 9; owner 2026-11-06): the foveation of the stream is computed from the picture edges V (the Vision Pro
         /// card's profile, or the whole panel the headset declares = "Apple's default") and Apple's rasterization map, over the stream size already in session.json. It compresses
         /// nothing below what the map keeps at that angle (the zero-loss geometry), so it never costs picture, and it takes the place of the static numbers of the profile. Only the
@@ -513,7 +565,7 @@ namespace AirFrameXR
                 string sized = "";
                 // the stream size follows the bitrate (a constant bitrate, the user's: the profile only suggests 300 Mbps) unless the user fits the stream to the headset's window
                 // (the older tick) or set the size by hand (the flag above)
-                if (!st.StreamFitWindow && Json.Str(session, "session_settings.video.bitrate.mode.variant", "") == "ConstantMbps")
+                if (!st.StreamFitWindow && !st.StreamSizeManual && Json.Str(session, "session_settings.video.bitrate.mode.variant", "") == "ConstantMbps")   // a size typed in Settings is kept (the foveation is still computed for it)
                 {
                     double mbps = Json.Num(session, "session_settings.video.bitrate.mode.ConstantMbps", 0), fps = Json.Num(session, "session_settings.video.preferred_fps", 0);
                     var chosen = ChooseEye(view, rm, mbps, fps, out var mpx, window);
@@ -527,7 +579,20 @@ namespace AirFrameXR
                 if (eye == null || eye[0] < 256 || eye[1] < 256) return null;
                 var g = RateMapFoveation.Milder(view, eye, rm, window);
                 RateMapFoveation.ApplyGeometry(session, g);
-                return $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye: centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}" + (window != null ? $" (centred on the restriction {string.Join(" / ", window.Select(x => x.ToString("0.00", c)))})" : "") + " (never stronger than ALVR's 0.45 x 0.40, 4 / 5)";
+                // the render choice follows the stream size and the box: the percentage the user chose is turned into the engine's quality again at every start and every choice
+                string render = "";
+                var reference = st.RenderReferenceEye ?? rm.RecommendedEye;
+                if (window != null)
+                {
+                    var plan = RenderPlan.Make(reference, view, window, eye, st.RenderSpendPct, st.RenderAboveStream);
+                    if (plan != null)
+                    {
+                        Json.Set(st.Root, "video.fov_render_quality", plan.Quality);
+                        render = $"; the game renders {plan.Chosen[0]} x {plan.Chosen[1]} ({plan.ChosenMpx.ToString("0.0", c)} Mpx, {plan.ChosenPct.ToString("0", c)} % of pixel for pixel, saves {plan.SavingPct.ToString("0", c)} % against {reference[0]} x {reference[1]})";
+                    }
+                }
+                var logLine = $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye: centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}" + (window != null ? $" (centred on the restriction {string.Join(" / ", window.Select(x => x.ToString("0.00", c)))})" : "") + " (never stronger than ALVR's 0.45 x 0.40, 4 / 5)";
+                return logLine + render;
             }
 
             /// Apply on the files: loads the session, writes it back when something changed, logs. Never throws (a failure is a warning in the log).

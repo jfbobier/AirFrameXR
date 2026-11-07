@@ -126,6 +126,7 @@ namespace AirFrameXR
             var avpBox = new[] { 1.045, 0.800, 0.759, 0.871 };   // the AirFrameXR client's declared box
             yield return new Case { Name = "fov-panel-off", Make = () => new FovPanelTestForm(avpBox, false, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()) };
             yield return new Case { Name = "fov-panel-on", Make = () => new FovPanelTestForm(avpBox, true, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()) };
+            yield return new Case { Name = "fov-panel-spend", Make = () => new FovPanelTestForm(new[] { 1.7879, 1.0207, 1.2196, 1.0207 }, true, new[] { 2720, 2144 }, false, FovManagerForm.DemoStore()) };
             yield return new Case { Name = "fov-panel-fit", Make = () => new FovPanelTestForm(avpBox, true, new[] { 3552, 3200 }, true, FovManagerForm.DemoStore()) };   // the stream fit on, the fold open: the quality row and the preview
             yield return new Case { Name = "fov-panel-empty", Make = () => new FovPanelTestForm(avpBox, false, new[] { 3552, 3200 }, false, Path.Combine(Path.GetTempPath(), "airframexr_fovpanel_empty_" + Guid.NewGuid().ToString("N") + ".json")) };
             yield return new Case { Name = "rec-idle", Make = () => { BenchRecorder.Enabled = true; try { return new RuntimeForm(null); } finally { BenchRecorder.Enabled = false; } }, Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).BenchDemoState("idle"); } };
@@ -375,6 +376,23 @@ namespace AirFrameXR
                     lines.Add(c["name"] + "|" + string.Join(",", g.Select(x => x.ToString("0.0000", ic))));
                 }
                 File.WriteAllLines(Path.Combine(outDir, "milder.txt"), lines);
+                return 0;
+            }
+            var planCases = Arg("--render-plan-selftest");   // harness/render_plan_check.py: PipelineModel.RenderPlan against the Python oracle
+            if (planCases != null)
+            {
+                var lines = new List<string>(); var ic = CultureInfo.InvariantCulture;
+                var root = global::AirFrameXR.Json.Parse(File.ReadAllText(planCases));
+                double[] Arr(object o) => ((object[])o).Select(x => Convert.ToDouble(x, ic)).ToArray();
+                foreach (var o in (object[])root["cases"])
+                {
+                    var c = (Dictionary<string, object>)o;
+                    int[] I(object x) { var a2 = Arr(x); return new[] { (int)a2[0], (int)a2[1] }; }
+                    var p = global::AirFrameXR.PipelineModel.RenderPlan.Make(I(c["reference"]), Arr(c["declared"]), Arr(c["box"]), I(c["stream"]), Convert.ToDouble(c["pct"], ic), Convert.ToBoolean(c["above"]));
+                    string Z(int[] z) => z[0] + "x" + z[1];
+                    lines.Add(c["name"] + "|" + (p == null ? "null" : $"q={p.Quality.ToString("0.000", ic)};chosen={Z(p.Chosen)};floor={Z(p.Floor)};ceiling={Z(p.Ceiling)};p4p={Z(p.PixelForPixel)};floorpct={p.FloorPct.ToString("0.00", ic)};maxpct={p.MaxPct.ToString("0.00", ic)};chosenpct={p.ChosenPct.ToString("0.00", ic)};saving={p.SavingPct.ToString("0.00", ic)}"));
+                }
+                File.WriteAllLines(Path.Combine(outDir, "render_plan.txt"), lines);
                 return 0;
             }
             var raceSecs = Arg("--json-race-selftest");   // harness/json_atomic_check.py: a writer saves a 20 KB JSON as fast as it can while a reader opens it the way the host does (share read/write/delete) and parses it

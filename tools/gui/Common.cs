@@ -450,6 +450,18 @@ namespace AirFrameXR
         /// the user edited the foveation numbers by hand (Settings): the passive recompute from the picture edges (PictureEdgesFoveation) leaves them alone; choosing a picture
         /// edges profile, or finishing a fit, computes them again and clears this
         public bool FoveationManual { get => Json.Bool(Root, "video.foveation_manual", false); set { if (value) Json.Set(Root, "video.foveation_manual", true); else Json.Remove(Root, "video.foveation_manual"); } }
+        /// the user typed a stream size in Settings: it is kept (the size no longer follows the bitrate), but the foveation is still computed for it; typing the size the bitrate would give clears it
+        public bool StreamSizeManual { get => Json.Bool(Root, "video.stream_size_manual", false); set { if (value) Json.Set(Root, "video.stream_size_manual", true); else Json.Remove(Root, "video.stream_size_manual"); } }
+        /// the resolution the user declared in Settings (per eye): what the game would render without the restriction, and the 100 % of the render choice; null = the headset profile's own (3552 x 3200 for a Vision Pro)
+        public int[] RenderReferenceEye
+        {
+            get { var a = Json.Get(Root, "video.render_reference_eye") as System.Collections.IList; if (a == null || a.Count < 2) return null; try { var v = new[] { Convert.ToInt32(a[0], CultureInfo.InvariantCulture), Convert.ToInt32(a[1], CultureInfo.InvariantCulture) }; return v[0] > 0 && v[1] > 0 ? v : null; } catch { return null; } }
+            set { if (value == null) Json.Remove(Root, "video.render_reference_eye"); else Json.Set(Root, "video.render_reference_eye", value.Select(x => (object)(double)x).ToList()); }
+        }
+        /// "Spend the savings on quality": the game's render size as a percentage of the pixels the restricted box would have at the declared resolution (100 = pixel for pixel); 0 = off (the minimum: the stream's own density)
+        public double RenderSpendPct { get => Json.Num(Root, "video.render_spend_pct", 0); set { if (value > 0) Json.Set(Root, "video.render_spend_pct", Math.Round(value, 1)); else Json.Remove(Root, "video.render_spend_pct"); } }
+        /// "allow above 100 %": supersampling, up to the stream's own size; off = at most pixel for pixel
+        public bool RenderAboveStream { get => Json.Bool(Root, "video.render_allow_above", false); set { if (value) Json.Set(Root, "video.render_allow_above", true); else Json.Remove(Root, "video.render_allow_above"); } }
         public bool StreamFitWindow { get => Json.Bool(Root, "video.stream_fit_window", false); set { if (value) Json.Set(Root, "video.stream_fit_window", true); else Json.Remove(Root, "video.stream_fit_window"); } }
         public int[] StreamReferenceEye
         {
@@ -1549,10 +1561,32 @@ namespace AirFrameXR
     /// Every window of the GUI: the designer pattern WinForms' own scaling needs. Built suspended with AutoScaleMode.Dpi (design values at 96 dpi), laid out once
     /// at load, where the framework scales the form, its docked panels and every control that is already in it to the monitor's dpi. Controls created later
     /// (a wizard page) are not scaled by it: Ui.LateScale. With bin\*.config (PerMonitorV2) it follows the window from monitor to monitor.
+    /// A mouse wheel over a number box or a slider that does not have the focus scrolls the page instead of changing the value (a value was changed by a scroll that merely passed over it: the game fps
+    /// lock of a user's session, 2026-11-07). Installed once per process, by the first window.
+    public class QuietWheel : IMessageFilter
+    {
+        const int WM_MOUSEWHEEL = 0x020A;
+        static bool installed;
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+        public static void Install() { if (installed) return; installed = true; Application.AddMessageFilter(new QuietWheel()); }
+        public bool PreFilterMessage(ref Message m)
+        {
+            if (m.Msg != WM_MOUSEWHEEL) return false;
+            var c = Control.FromHandle(m.HWnd) ?? Control.FromChildHandle(m.HWnd);
+            while (c != null && !(c is NumericUpDown) && !(c is TrackBar)) c = c.Parent;
+            if (c == null || c.ContainsFocus) return false;   // not a value control, or the user has it in hand
+            var p = c.Parent;
+            while (p != null && !(p is ScrollableControl sc && sc.AutoScroll)) p = p.Parent;
+            if (p != null && p.IsHandleCreated) SendMessage(p.Handle, WM_MOUSEWHEEL, m.WParam, m.LParam);
+            return true;
+        }
+    }
+
     public class DpiForm : Form
     {
         public DpiForm()
         {
+            QuietWheel.Install();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             SuspendLayout();

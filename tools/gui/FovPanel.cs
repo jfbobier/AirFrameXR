@@ -23,7 +23,9 @@ namespace AirFrameXR
         readonly List<UserFov> profiles = new List<UserFov>();
         CheckBox fovTick = new CheckBox();   // the state behind the two radio buttons (never shown): ticked = the restriction
         RadioButton stockRb, restrictRb; ComboBox profileBox; Label fovNote, fovShare, clientHint, closeWarn;
-        TrackBar fovQ; FlowLayoutPanel fovQRow; Button manage;
+        Button manage;
+        CheckBox spendTick, aboveTick; NumericUpDown spendBox; Label spendInfo, spendRange;   // "Spend the savings on quality": a percentage, committed once (Enter, leaving the box, or 0.8 s after the last change)
+        readonly Timer commitTimer = new Timer { Interval = 800 };
         CheckBox fitTick; Label fitNote, pipeLine, pipeBand; FlowLayoutPanel pipeWarn;
         int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
         double[] clientFov;   // the headset's tangents per edge (outer, inner, upper, lower), averaged over the two eyes; null = no headset seen yet
@@ -61,6 +63,23 @@ namespace AirFrameXR
             clientHint = Ui.Line(""); clientHint.ForeColor = Color.DimGray; clientHint.Margin = new Padding(22, 0, 3, 2); clientHint.MaximumSize = new Size(WrapWidth, 0);
             Controls.Add(fovNote); Controls.Add(fovShare); Controls.Add(clientHint);
 
+            // what the restriction saves, and how much of it to spend on the game's render quality: no slider (it committed on every move), one percentage box
+            spendInfo = Ui.Line(""); spendInfo.ForeColor = Color.SeaGreen; spendInfo.Margin = new Padding(22, 0, 3, 2); spendInfo.MaximumSize = new Size(WrapWidth, 0);
+            var spendRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 2, 0, 0) };
+            spendTick = new CheckBox { AutoSize = true, Text = "Spend the savings on quality:", AccessibleName = "Spend the savings on quality", Margin = new Padding(0, 4, 6, 0) };
+            spendBox = new NumericUpDown { Minimum = 50, Maximum = 100, Increment = 5, Value = 100, Width = 62, AccessibleName = "Share of pixel for pixel, percent", Enabled = false };
+            aboveTick = new CheckBox { AutoSize = true, Text = "allow above 100 % (supersampling)", AccessibleName = "Allow above 100 percent", Margin = new Padding(14, 4, 0, 0), Enabled = false };
+            spendRow.Controls.Add(spendTick); spendRow.Controls.Add(spendBox); spendRow.Controls.Add(new Label { Text = "% of pixel for pixel", AutoSize = true, Margin = new Padding(3, 6, 0, 0) }); spendRow.Controls.Add(aboveTick);
+            spendRange = Ui.Line(""); spendRange.ForeColor = Color.DimGray; spendRange.Margin = new Padding(22, 0, 3, 2); spendRange.MaximumSize = new Size(WrapWidth, 0);
+            Controls.Add(spendInfo); Controls.Add(spendRow); Controls.Add(spendRange);
+            tips.SetToolTip(spendTick, SpendTip); tips.SetToolTip(spendBox, SpendTip); tips.SetToolTip(aboveTick, "Above 100 % the game renders more pixels than the headset's declared resolution would give the same box: supersampling, filtered down to the stream. It costs GPU time and adds no detail the stream can carry (it carries about a thousand pixels per tangent at 275 Mbps), but cleaner edges. Up to the stream's own size.");
+            spendTick.CheckedChanged += (s, e) => { spendBox.Enabled = aboveTick.Enabled = spendTick.Checked; if (!loading) ScheduleCommit(true); };
+            spendBox.ValueChanged += (s, e) => { if (!loading && spendTick.Checked) ScheduleCommit(false); };
+            spendBox.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; CommitSpend(); } };
+            spendBox.Leave += (s, e) => { if (commitTimer.Enabled) CommitSpend(); };
+            aboveTick.CheckedChanged += (s, e) => { if (!loading) { RefreshSpend(); ScheduleCommit(true); } };
+            commitTimer.Tick += (s, e) => CommitSpend();
+
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 0) };
             manage = new Button { Text = "Manage profiles and calibrate...", AutoSize = true, AccessibleName = "Manage profiles and calibrate", Margin = new Padding(22, 2, 8, 2) };
             manage.Click += (s, e) => { if (ManageRequested != null) ManageRequested(); else StartManager(); };
@@ -72,13 +91,6 @@ namespace AirFrameXR
 
             // the render quality, the stream fit and the pipeline preview: behind a fold, so the card stays the size it was
             var more = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
-            fovQRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 0), Visible = false };
-            fovQ = new TrackBar { Minimum = 0, Maximum = 100, TickStyle = TickStyle.None, SmallChange = 5, LargeChange = 10, Width = 200, AutoSize = false, Height = 26, AccessibleName = "Game render quality" };
-            fovQ.ValueChanged += (s, e) => FovQualityChanged();
-            fovQRow.Controls.Add(new Label { Text = "Game render quality", AutoSize = true, Margin = new Padding(0, 5, 6, 0) });
-            fovQRow.Controls.Add(fovQ);
-            tips.SetToolTip(fovQ, FovQualityTip);
-            more.Controls.Add(fovQRow);
             fitTick = new CheckBox { AutoSize = true, Text = "Fit the stream to the headset's window (keep the pixel density)", AccessibleName = "Fit the stream to the headset's window" };
             tips.SetToolTip(fitTick, FitTip);
             more.Controls.Add(fitTick);
@@ -90,7 +102,7 @@ namespace AirFrameXR
             pipeBand = Ui.Line(""); pipeBand.ForeColor = Color.DimGray; pipeBand.Margin = new Padding(22, 0, 3, 0); pipeBand.MaximumSize = new Size(WrapWidth, 0);
             pipeWarn = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(22, 0, 3, 2) };
             more.Controls.Add(pipeLine); more.Controls.Add(pipeBand); more.Controls.Add(pipeWarn);
-            Controls.Add(Ui.Expander("Render quality, stream fit and what the pipeline does", more, testFit || testEye != null));
+            Controls.Add(Ui.Expander("Stream fit and what the pipeline does", more, testFit || testEye != null));
 
             fovTick.CheckedChanged += (s, e) => FovTickChanged();
             profileBox.SelectedIndexChanged += (s, e) => ProfileChanged();
@@ -98,7 +110,7 @@ namespace AirFrameXR
             HandleCreated += (s, e) => { var f = FindForm(); if (f != null) f.Activated += (s2, e2) => { if (!loading) Reload(); }; };   // a tool (the wizard, the manager) may have changed the settings while this window was behind
             warnTimer.Tick += (s, e) => closeWarn.Visible = StreamerProc.Running;
             warnTimer.Start();
-            Disposed += (s, e) => { warnTimer.Dispose(); tips.Dispose(); };
+            Disposed += (s, e) => { warnTimer.Dispose(); commitTimer.Dispose(); tips.Dispose(); };
             Reload();
         }
 
@@ -141,7 +153,10 @@ namespace AirFrameXR
             bool other = st.FovOverride && clientFov != null && !st.FovFits(clientFov);   // saved for a headset with another field of view (absolute tangents would cut this one)
             bool on = testTick || (st.FovOverride && !other);
             streamEye = testEye ?? ReadStreamEye();
-            fovQ.Value = (int)Math.Round(st.FovRenderQuality * 100);
+            spendTick.Checked = st.RenderSpendPct > 0;
+            spendBox.Value = Math.Max(spendBox.Minimum, Math.Min(spendBox.Maximum, (decimal)(st.RenderSpendPct > 0 ? st.RenderSpendPct : 100)));
+            aboveTick.Checked = st.RenderAboveStream;
+            spendBox.Enabled = aboveTick.Enabled = spendTick.Checked;
             fitTick.Enabled = clientFov != null;
             fitTick.Checked = clientFov != null && (testFit || st.StreamFitWindow);
             fovTick.Enabled = profiles.Count > 0;   // a profile can be chosen before any headset was seen (the cap at the headset's box is applied when it is known)
@@ -187,7 +202,7 @@ namespace AirFrameXR
             {
                 fovNote.Text = "Off: the game gets the headset's own field of view. " + (new AppSettings() is var cs && cs.FovOverride && !cs.FovFits(clientFov) ? "A restriction saved for a headset with another field of view is not applied to this one; tick to use the chosen profile. " : "") + RestartSentence;
                 fovShare.Text = "";
-                QualityLabel(1, 1);   // the slider still has room when the fit gives it a ceiling above the stream's size
+                RefreshSpend();
                 UpdatePipeline();
                 return;
             }
@@ -195,7 +210,7 @@ namespace AirFrameXR
             double w0 = clientFov[0] + clientFov[1], h0 = clientFov[2] + clientFov[3];
             double w = v[0] + v[1], h = v[2] + v[3];
             fovShare.Text = "The game renders " + (100 * w * h / (w0 * h0)).ToString("0", CultureInfo.InvariantCulture) + " % of the pixels the headset's whole view would.";
-            QualityLabel(w / w0, h / h0);   // appends its line to fovShare
+            RefreshSpend();
             UpdatePipeline();
         }
 
@@ -204,7 +219,7 @@ namespace AirFrameXR
             if (fovTick.Checked)
             {
                 if (Selected != null) UserFovStore.Apply(Selected, st, clientFov, st.HeadsetName);
-                Json.Set(st.Root, V + "fov_render_quality", Math.Round(fovQ.Value / 100.0, 2));
+                StoreQuality(st);
             }
             else Json.Remove(st.Root, V + "fov_override");   // the saved values stay: ticking again brings them back
         }
@@ -226,16 +241,6 @@ namespace AirFrameXR
             if (fovTick.Checked) { FovStore(st); Save(st, "field of view profile " + Selected.Name, Restart); }
             else { Json.Set(st.Root, V + "fov_profile", Selected.Id); try { st.Save(); } catch { } }   // only remembered: nothing changes for the streamer
             FovLabels();
-        }
-
-        void FovQualityChanged()
-        {
-            if (loading || clientFov == null) return;
-            FovLabels();
-            if (!fovTick.Checked && !fitTick.Checked) return;
-            var st = new AppSettings();
-            if (fovTick.Checked) FovStore(st); else FovStoreQuality(st);
-            Save(st, "game render quality " + fovQ.Value + " %", Restart);
         }
 
         /// Writes the settings; a change that needs a streamer restart closes the streamer (the window never starts it again: the user may go on and starts it by hand).
@@ -271,15 +276,6 @@ namespace AirFrameXR
                 "\r\n" +
                 "The Vision Pro's field of view as visionOS reports it (left eye): tangents 1.78 outer, 1.02 inner, 1.22 up, 1.02 down = 60.7, 45.5, 50.6, 45.5 degrees (about 106 x 96 degrees). Share of the pixels the game renders, for example: outer 1.60 and upper 1.10 -> 88.5 %; every edge 90 % of the headset's -> 81 %; 85 % -> 72 %. The fields need the headset's values: connect the headset once (they are saved when it connects).";
 
-        const string FovQualityTip =
-                "Game render quality\r\n" +
-                "\r\n" +
-                "What it is: how many pixels the game renders per eye, between two limits worked out from your settings. Left end: the stream's pixel density over the smaller view you chose (the fewest pixels, the biggest GPU saving). Right end: the stream's own per-eye size (the pixels an unrestricted game renders).\r\n" +
-                "What you get: the pixels the restriction saved can be spent on a finer render. The game's picture is filtered down to the stream's pixels, so you get cleaner edges and less shimmer (like supersampling); you do not get detail beyond what the stream carries.\r\n" +
-                "What it costs: game GPU time and video memory, rising with the pixels shown. Encode, decode and network are unchanged.\r\n" +
-                "The limits follow your resolution settings (the per-eye size of the stream, e.g. a Quest's lower one) and the field of view fields above; the slider only works while a restriction is on.\r\n" +
-                "When it applies: needs streamer restart, like the field of view.";
-
         const string FitTip =
                 "Fit the stream to the headset's window\r\n" +
                 "\r\n" +
@@ -287,7 +283,7 @@ namespace AirFrameXR
                 "What you get: every stage after the game works on fewer pixels at the same sharpness: the compose pass, frame generation, the encoder, the network at equal bits per pixel, the headset's decoder. Measured on the lab GPU: encode time -25 % for -30 % pixels, frame generation -30 %. With the full-frame encode profile the encoded frame itself is 30 % smaller.\r\n" +
                 "What does not change: what you see (the headset shows the same window), the game's own cost (it already renders only the window it is told).\r\n" +
                 "When it applies: the size is written to config\\session.json when the headset connects (its declared box arrives then) and taken at the next streamer start; the streamer window says so in its footer.\r\n" +
-                "The render quality slider: with the fit on its right end is the size in Settings, so the game can render the window at up to that size (supersampling, filtered down to the stream).";
+                "The game's render choice (Spend the savings on quality) is a percentage of pixel for pixel with the resolution declared in Settings; the stream's own size is its upper limit.";
 
         /// The stream's per-eye size from the user's resolution settings (session.json: the negotiated cache the host reads too), null when unknown.
         static int[] ReadStreamEye()
@@ -299,34 +295,6 @@ namespace AirFrameXR
                 return w > 0 && h > 0 ? new[] { w, h } : null;
             }
             catch { return null; }
-        }
-
-        /// the slider's right end: the size in Settings (the density reference) when the fit is on and it is larger than the stream's size, else the stream's size
-        int[] CeilingEye()
-        {
-            var st = new AppSettings();
-            var r = st.StreamReferenceEye;
-            if (streamEye != null && (testFit || st.StreamFitWindow) && r != null && (r[0] > streamEye[0] || r[1] > streamEye[1])) return new[] { Math.Max(r[0], streamEye[0]), Math.Max(r[1], streamEye[1]) };
-            return streamEye;
-        }
-
-        /// the render quality row: floor and ceiling from the stream's size, the restriction and the fit, the size at the slider; hidden when floor and ceiling are the same size
-        void QualityLabel(double wr, double hr)
-        {
-            var ceil = CeilingEye();
-            bool show = streamEye != null && ceil != null;
-            int[] floor = null, now = null;
-            if (show)
-            {
-                floor = PipelineModel.GameRenderSize(new double[] { streamEye[0] * wr, streamEye[1] * hr }, new double[] { ceil[0], ceil[1] }, 0);
-                now = PipelineModel.GameRenderSize(new double[] { streamEye[0] * wr, streamEye[1] * hr }, new double[] { ceil[0], ceil[1] }, fovQ.Value / 100.0);
-                show = floor[0] != ceil[0] || floor[1] != ceil[1];
-            }
-            fovQRow.Visible = show;   // not read back from Visible: it is false until the window is shown
-            if (!show) return;
-            double mpx(int[] z) { return z[0] * (double)z[1] / 1e6; }
-            fovShare.Text += (fovShare.Text.Length > 0 ? "\r\n" : "") + "In that view the game renders " + now[0] + " \u00D7 " + now[1] + " per eye (" + mpx(now).ToString("0.0", CultureInfo.InvariantCulture) + " Mpx, " + (100 * mpx(now) / mpx(new[] { streamEye[0], streamEye[1] })).ToString("0", CultureInfo.InvariantCulture)
-                + " % of the stream's own size). Left end of the slider: " + floor[0] + " \u00D7 " + floor[1] + ", right end: " + ceil[0] + " \u00D7 " + ceil[1] + (ceil == streamEye ? " (the stream's own size)." : " (the size in Settings).");
         }
 
         /// the preview block: the stage sizes and the warnings for the settings as they stand in this window (the override fields, the slider, the fit) and the files (encoder, session)
@@ -343,7 +311,7 @@ namespace AirFrameXR
             }
             Dictionary<string, object> session;
             try { session = Session.Load(); } catch { session = new Dictionary<string, object>(); }
-            var i = new PipelineModel.Inputs { Declared = clientFov, Eye = streamEye, ReferenceEye = st.StreamReferenceEye, ReferenceFov = st.StreamReferenceFov, Fit = fitTick.Checked, Quality = fovQ.Value / 100.0 };
+            var i = new PipelineModel.Inputs { Declared = clientFov, Eye = streamEye, ReferenceEye = st.StreamReferenceEye, ReferenceFov = st.StreamReferenceFov, Fit = fitTick.Checked, Quality = st.FovRenderQuality };
             if (fovTick.Checked) i.Rect = FovValues().Select((x, k) => Math.Min(x, clientFov[k])).ToArray();
             PipelineModel.ReadEncoder(st, session, i);
             if (testEye != null && i.Engines < 0) i.Engines = 3;   // the UI harness: a pretend GPU with three engines, so the strip line shows a number
@@ -385,7 +353,7 @@ namespace AirFrameXR
                 st.StreamFitEye = null;
                 if (st.StreamReferenceEye != null) WriteSessionEye(st.StreamReferenceEye);
             }
-            FovStoreQuality(st);
+            StoreQuality(st);
             Save(st, "stream fit " + (fitTick.Checked ? "on" : "off"), Restart);
             streamEye = testEye ?? ReadStreamEye();
             FovLabels();
@@ -398,10 +366,90 @@ namespace AirFrameXR
             catch (Exception e) { status.Text = "Cannot write config\\session.json: " + e.Message; status.ForeColor = Color.Firebrick; }
         }
 
-        /// the slider's value is kept whenever it has a meaning: with the override on, or with the fit giving it a ceiling
-        void FovStoreQuality(AppSettings st)
+        /// the engine's quality (video.fov_render_quality) from the percentage chosen, for the stream size and the box as they stand; untouched when they are not known yet
+        void StoreQuality(AppSettings st)
         {
-            if (fovTick.Checked || fitTick.Checked) Json.Set(st.Root, V + "fov_render_quality", Math.Round(fovQ.Value / 100.0, 2));
+            if (!fovTick.Checked) return;
+            var plan = CurrentPlan();
+            if (plan != null) Json.Set(st.Root, V + "fov_render_quality", plan.Quality);
         }
+
+        /// the headset's box for the plan: the one it declared, else (a Vision Pro before its first start) Apple's frustum from the profile's map
+        double[] PlanFov()
+        {
+            if (clientFov != null) return clientFov;
+            var st = new AppSettings();
+            if (AppSettings.KindOf(st.HeadsetName) != HeadsetKind.VisionPro) return null;
+            return PipelineModel.RateMapFoveation.Load(PipelineModel.PictureEdgesFoveation.ProfilePath)?.P;
+        }
+
+        /// what the game would render without the restriction: the resolution declared in Settings, else the headset profile's own (3552 x 3200 for a Vision Pro)
+        int[] ReferenceEye()
+        {
+            var st = new AppSettings();
+            if (st.RenderReferenceEye != null) return st.RenderReferenceEye;
+            if (testClient != null) return new[] { 3552, 3200 };   // the UI harness: a pretend Vision Pro
+            if (AppSettings.KindOf(st.HeadsetName) != HeadsetKind.VisionPro) return null;
+            return PipelineModel.RateMapFoveation.Load(PipelineModel.PictureEdgesFoveation.ProfilePath)?.RecommendedEye;
+        }
+
+        PipelineModel.RenderPlan.Plan CurrentPlan()
+        {
+            var fov = PlanFov();
+            if (!fovTick.Checked || Selected == null || fov == null || streamEye == null) return null;
+            return PipelineModel.RenderPlan.Make(ReferenceEye(), fov, FovValues().Zip(fov, (a, b) => Math.Min(a, b)).ToArray(), streamEye, spendTick.Checked ? (double)spendBox.Value : 0, aboveTick.Checked);
+        }
+
+        /// the savings against what the game would have rendered without the restriction, and the range of the percentage
+        void RefreshSpend()
+        {
+            bool restricted = fovTick.Checked;
+            var plan = CurrentPlan();
+            spendInfo.Visible = spendRange.Visible = restricted;
+            spendTick.Enabled = restricted && plan != null;
+            if (!restricted) { spendInfo.Text = ""; spendRange.Text = ""; return; }
+            if (plan == null)
+            {
+                spendInfo.Text = "The savings are shown once the stream size and your resolution are known (a Vision Pro: at its first start; another headset: save your resolution in Settings).";
+                spendRange.Text = ""; return;
+            }
+            fovShare.Text = "";   // the saving against your declared resolution (below) replaces the share of the whole view
+            string mp(double v) => v.ToString("0.0", CultureInfo.InvariantCulture);
+            string sz(int[] z) => z[0] + " \u00D7 " + z[1];
+            spendInfo.Text = "Without the restriction the game would render " + sz(plan.Reference) + " per eye (" + mp(plan.ReferenceMpx) + " Mpx). With it: " + sz(plan.Chosen) + " (" + mp(plan.ChosenMpx) + " Mpx), a saving of " + plan.SavingPct.ToString("0", CultureInfo.InvariantCulture) + " %.";
+            loading = true;
+            try
+            {
+                spendBox.Minimum = Math.Max(1, (decimal)Math.Ceiling(plan.FloorPct)); spendBox.Maximum = Math.Max(spendBox.Minimum, (decimal)Math.Floor(plan.MaxPct));
+                spendBox.Value = Math.Max(spendBox.Minimum, Math.Min(spendBox.Maximum, spendBox.Value));
+            }
+            finally { loading = false; }
+            bool room = spendBox.Maximum > spendBox.Minimum;
+            spendTick.Enabled = room; if (!room) { spendBox.Enabled = aboveTick.Enabled = false; }
+            else { spendBox.Enabled = aboveTick.Enabled = spendTick.Checked; }
+            if (!room) { spendRange.Text = "Nothing to choose here: the stream's own size and pixel for pixel with " + sz(plan.Reference) + " are the same (" + sz(plan.Chosen) + ")."; return; }
+            spendRange.Text = (spendTick.Checked ? "" : "Now the minimum: the stream's own pixel density over the box. ") + "From " + spendBox.Minimum.ToString("0", CultureInfo.InvariantCulture) + " % (that minimum) to " + spendBox.Maximum.ToString("0", CultureInfo.InvariantCulture)
+                + " % (" + (aboveTick.Checked || plan.CeilingPct < 100 ? "the stream's own size: " + sz(plan.Ceiling) : "pixel for pixel with " + sz(plan.Reference) + ": " + sz(plan.PixelForPixel)) + "). 100 % is " + sz(plan.PixelForPixel) + ".";
+        }
+
+        void ScheduleCommit(bool now) { commitTimer.Stop(); if (now) CommitSpend(); else commitTimer.Start(); }
+
+        /// one write for one decision: the percentage and its tick go to the settings with the quality the engine takes, the streamer is closed once as for any restart-needing change
+        void CommitSpend()
+        {
+            commitTimer.Stop();
+            if (loading) return;
+            var st = new AppSettings();
+            st.RenderSpendPct = spendTick.Checked ? (double)spendBox.Value : 0;
+            st.RenderAboveStream = aboveTick.Checked;
+            StoreQuality(st);
+            Save(st, "game render " + (spendTick.Checked ? spendBox.Value + " % of pixel for pixel" : "at the minimum (the stream's own density)"), Restart);
+            FovLabels();
+        }
+
+        const string SpendTip =
+                "Spend the savings on quality\r\n\r\n" +
+                "The restriction makes the game render fewer pixels. Unticked, it renders the least that matches the stream's own pixel density (the biggest saving). Ticked, you choose how many pixels it renders, as a percentage of the same box at the resolution you declared: 100 % is pixel for pixel with it.\r\n\r\n" +
+                "The game takes it when it starts. A change closes the streamer (start it again when you are done); it applies once, a moment after you stop typing, on Enter, or when you leave the box.";
     }
 }

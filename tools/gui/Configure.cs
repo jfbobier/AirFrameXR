@@ -165,7 +165,10 @@ namespace AirFrameXR
             Control flow(params Control[] cs) { var f = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) }; f.Controls.AddRange(cs); return f; }
 
             section("Video");
+            sizeAuto.Click += (s, e) => SizeAutomatic();
             row("Resolution per eye", flow(eyeW, Ui.Line("x"), eyeH, Ui.Line($"(Vision Pro default 3552 x 3200; at most {Nvenc.MaxEyeWidth} wide: the encoder's limit)")));
+            sizeNote.ForeColor = Color.DimGray; sizeNote.MaximumSize = new Size(560, 0);
+            row("", flow(sizeAuto, sizeNote));
             fps.Items.AddRange(new object[] { "90", "96", "100" });
             row("Refresh rate (Hz)", fps);
             row("Bitrate (Mbps)", flow(bitrate, Ui.Line("constant; the Benchmark tab can find yours")));
@@ -226,9 +229,27 @@ namespace AirFrameXR
 
         const string V = "session_settings.video.";
 
+        readonly Button sizeAuto = new Button { Text = "Automatic", AutoSize = true, AccessibleName = "Stream size from the bitrate" };
+        readonly Label sizeNote = new Label { AutoSize = true };
+
+        /// the stream size follows the bitrate again (the foveation numbers and the render choice are recomputed for it)
+        void SizeAutomatic()
+        {
+            settings.StreamSizeManual = false; settings.Save();
+            PipelineModel.PictureEdgesFoveation.ApplyToFiles(settings, true);
+            session = Session.Load(); LoadSettings();
+        }
+
+        void ShowSizeNote()
+        {
+            sizeNote.Text = settings.StreamSizeManual ? "Typed: this size is kept whatever the bitrate; the foveation is computed for it. Automatic gives the size the bitrate pays for." : "Automatic: the size the bitrate pays for (a Vision Pro). Typing another size here keeps it.";
+            sizeAuto.Enabled = settings.StreamSizeManual;
+        }
+
         void LoadSettings()
         {
             var s = session;
+            ShowSizeNote();
             eyeW.Value = Clamp(eyeW, Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552));
             eyeH.Value = Clamp(eyeH, Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200));
             var f = ((int)Json.Num(s, V + "preferred_fps", 90)).ToString(CultureInfo.InvariantCulture);
@@ -270,9 +291,9 @@ namespace AirFrameXR
             if (tooBig != null) { MessageBox.Show(this, tooBig, Text); return false; }
             // the density reference, the fit, both resolution keys and ALVR's negotiated cache, as the wizard's panel does (until 1.3.4 this window wrote the two resolution keys only:
             // the FOV card kept showing the old size and the fit tick wrote the old reference back into the session, a user's report of 2026-11-05)
-            {   // a size the user typed is theirs: the size from the bitrate (PictureEdgesFoveation) leaves it until a picture-edges choice is made again
+            {   // a size the user typed is theirs: it is kept (the size no longer follows the bitrate; the foveation is still computed for it) and it is the declared resolution of the game's render choice
                 var was = PipelineModel.StreamEyeExpected(s);
-                if (was != null && (was[0] != w || was[1] != h)) settings.FoveationManual = true;
+                if (was != null && (was[0] != w || was[1] != h)) { settings.StreamSizeManual = true; settings.RenderReferenceEye = new[] { w, h }; }
             }
             PipelineModel.SaveEyeChoice(s, settings, w, h);
             var rate = double.Parse((string)fps.SelectedItem, CultureInfo.InvariantCulture);
