@@ -377,6 +377,24 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "milder.txt"), lines);
                 return 0;
             }
+            var raceSecs = Arg("--json-race-selftest");   // harness/json_atomic_check.py: a writer saves a 20 KB JSON as fast as it can while a reader opens it the way the host does (share read/write/delete) and parses it
+            if (raceSecs != null)
+            {
+                var lines = new List<string>(); int secs = int.Parse(raceSecs, CultureInfo.InvariantCulture);
+                var dict = new Dictionary<string, object>(); for (int i = 0; i < 600; i++) dict["key" + i] = new Dictionary<string, object> { ["a"] = i, ["gamma"] = 1.5, ["text"] = new string('x', 12) };
+                foreach (var strategy in new[] { 0, 1 })
+                {
+                    global::AirFrameXR.Json.SaveStrategy = strategy;
+                    var path = Path.Combine(outDir, "race_" + strategy + ".json"); Directory.CreateDirectory(outDir); global::AirFrameXR.Json.Save(path, dict);
+                    long writes = 0, reads = 0, missing = 0, bad = 0, other = 0; bool stop = false;
+                    var writer = new System.Threading.Thread(() => { while (!stop) { try { global::AirFrameXR.Json.Save(path, dict); writes++; } catch { other++; } } });
+                    var reader = new System.Threading.Thread(() => { while (!stop) { System.Threading.Thread.Sleep(1); try { string t; using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) using (var sr = new StreamReader(fs)) t = sr.ReadToEnd(); reads++; if (t.Length < 1000 || !t.TrimEnd().EndsWith("}")) bad++; } catch (FileNotFoundException) { missing++; } catch (DirectoryNotFoundException) { missing++; } catch { other++; } } });
+                    writer.Start(); reader.Start(); System.Threading.Thread.Sleep(secs * 1000); stop = true; writer.Join(); reader.Join();
+                    lines.Add($"{(strategy == 0 ? "File.Replace" : "MoveFileEx")}|writes={writes}|reads={reads}|file_missing={missing}|partial={bad}|other_errors={other}");
+                }
+                File.WriteAllLines(Path.Combine(outDir, "json_race.txt"), lines);
+                return 0;
+            }
             var replay = Arg("--replay");   // harness/streamer_events.py: feed host events to the streamer window and dump what it shows
             if (replay != null) return Replay(replay, outDir);
             var perfGame = Arg("--dump-performance");

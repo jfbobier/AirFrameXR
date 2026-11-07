@@ -230,8 +230,21 @@ namespace AirFrameXR
             Write(sb, root, 0);
             var tmp = path + ".tmp";
             File.WriteAllText(tmp, sb.ToString(), new UTF8Encoding(false)); // no BOM: ALVR's serde_json rejects it
-            if (File.Exists(path)) File.Replace(tmp, path, null); else File.Move(tmp, path);
+            if (SaveStrategy == 0) { if (File.Exists(path)) File.Replace(tmp, path, null); else File.Move(tmp, path); return; }   // the pre-1.3.5 way (kept for the race test)
+            // An atomic rename over the target (MoveFileEx, MOVEFILE_REPLACE_EXISTING): a reader (the host reads session.json at every connection) sees the old file or the new one, never none.
+            // File.Replace (ReplaceFile) moves the old file aside first, so the name can be missing for a moment.
+            for (int i = 0; i < 100; i++)
+            {
+                if (MoveFileEx(tmp, path, 1 | 8)) return;
+                System.Threading.Thread.Sleep(10);   // a reader has the target open for a moment (a read takes a millisecond): wait for it, up to a second
+            }
+            if (File.Exists(path)) File.Replace(tmp, path, null); else File.Move(tmp, path);   // last resort, as before
         }
+
+        /// 1 = atomic rename (default), 0 = File.Replace (harness/json_atomic_check.py compares both)
+        public static int SaveStrategy = 1;
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        static extern bool MoveFileEx(string existing, string replacement, int flags);
 
         static void Write(StringBuilder sb, object v, int ind)
         {
