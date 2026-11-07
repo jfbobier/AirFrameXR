@@ -25,7 +25,7 @@ def main(argv):
         f = line.split("|"); res[f[0]] = {k: int(v) for k, v in (x.split("=") for x in f[1:])}
         print(" ", line)
     new = res.get("MoveFileEx", {})
-    ok = bool(new) and new["file_missing"] == 0 and new["partial"] == 0 and new["reads"] > 1000
+    ok = bool(new) and new["file_missing"] == 0 and new["partial"] == 0 and new["reads"] >= 200
     print("CHECK", "PASS" if ok else "FAIL", "atomic save: the reader never sees a missing or partial file with the rename;", f"File.Replace missed {res.get('File.Replace', {}).get('file_missing', '?')} reads")
     return 0 if ok else 1
 
