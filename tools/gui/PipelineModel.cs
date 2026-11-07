@@ -96,7 +96,12 @@ namespace AirFrameXR
         public static double[] BandSource(double cs, double sh) { var start = (1.0 - cs) * (1.0 + sh) / 2.0; return new[] { start, start + cs }; }
 
         /// centre size and shift for a wanted band [start, start + width]
-        public static double[] BandParams(double start, double width) => new[] { width, 2.0 * start / (1.0 - width) - 1.0 };
+        public static double[] BandParams(double start, double width)
+        {
+            // a band as wide as the frame has no room to shift: the formula divides 0 by 0 there (a NaN reached session.json once and the host refused to start)
+            if (!(width < 1.0 - 1e-9)) return new[] { Math.Min(1.0, Math.Max(0.0, width)), 0.0 };
+            return new[] { width, 2.0 * start / (1.0 - width) - 1.0 };
+        }
 
         /// strips NVENC is expected to encode for a frame of this height (SDK 13.0 guide 8.14), and why
         public static int SplitStrips(int height, int mode, int engines, int preset, string tuning, string codec, out string why)
@@ -424,6 +429,7 @@ namespace AirFrameXR
                 string[] keys = { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" };
                 for (int k = 0; k < 6; k++)
                 {
+                    if (double.IsNaN(g[k]) || double.IsInfinity(g[k])) continue;   // never write a number JSON cannot hold: the file keeps what it had for this key
                     var v = Math.Round(g[k], 3);
                     Json.Set(session, "session_settings.video.foveated_encoding.content." + keys[k], v);
                     Json.Set(session, "openvr_config.foveation_" + keys[k], v);
@@ -560,6 +566,9 @@ namespace AirFrameXR
                 if (st.FoveationManual) { if (!explicitChoice) return null; st.FoveationManual = false; }
                 var view = View(st, rm);
                 var window = RestrictionWindow(st, view);   // the restriction profile in force, capped at the frame: where the game draws; null = it draws everywhere
+                // a restriction as wide as the frame draws everywhere too: nothing outside it to compress, so the foveation follows Apple's map alone (with the window it came out as a
+                // centre as large as the frame, no foveation at all, and the stream sized for the bitrate fell to 1984 x 1600 over a 0.6 box)
+                var fovea = window != null && Enumerable.Range(0, 4).All(k => window[k] >= view[k] - 1e-6) ? null : window;
                 var eye = StreamEyeExpected(session);
                 var c = CultureInfo.InvariantCulture;
                 string sized = "";
@@ -568,7 +577,9 @@ namespace AirFrameXR
                 if (!st.StreamFitWindow && !st.StreamSizeManual && Json.Str(session, "session_settings.video.bitrate.mode.variant", "") == "ConstantMbps")   // a size typed in Settings is kept (the foveation is still computed for it)
                 {
                     double mbps = Json.Num(session, "session_settings.video.bitrate.mode.ConstantMbps", 0), fps = Json.Num(session, "session_settings.video.preferred_fps", 0);
-                    var chosen = ChooseEye(view, rm, mbps, fps, out var mpx, window);
+                    // the keep-size switch (Advanced): size for the whole panel the headset asks for at FoV 1, so a smaller declared view gets denser pixels instead of a smaller stream
+                    double mpx;
+                    var chosen = st.StreamKeepPanelSize ? ChooseEye(rm.P, rm, mbps, fps, out mpx, null) : ChooseEye(view, rm, mbps, fps, out mpx, fovea);
                     if (chosen != null)
                     {
                         sized = $" (stream sized for {mbps.ToString("0", c)} Mbps at {fps.ToString("0", c)} Hz: {mpx.ToString("0.0", c)} Mpx encoded{(eye != null && (eye[0] != chosen[0] || eye[1] != chosen[1]) ? $", was {eye[0]} x {eye[1]}" : "")})";
@@ -577,8 +588,9 @@ namespace AirFrameXR
                     }
                 }
                 if (eye == null || eye[0] < 256 || eye[1] < 256) return null;
-                var g = RateMapFoveation.Milder(view, eye, rm, window);
+                var g = RateMapFoveation.Milder(view, eye, rm, fovea);
                 RateMapFoveation.ApplyGeometry(session, g);
+                FfrVars(eye[0], eye[1], g[0], g[1], g[2], g[3], g[4], g[5], out var encW, out var encH, out _, out _, out _, out _);   // what the encoder is given, for the log
                 // the render choice follows the stream size and the box: the percentage the user chose is turned into the engine's quality again at every start and every choice
                 string render = "";
                 var reference = st.RenderReferenceEye ?? rm.RecommendedEye;
@@ -591,7 +603,7 @@ namespace AirFrameXR
                         render = $"; the game renders {plan.Chosen[0]} x {plan.Chosen[1]} ({plan.ChosenMpx.ToString("0.0", c)} Mpx, {plan.ChosenPct.ToString("0", c)} % of pixel for pixel, saves {plan.SavingPct.ToString("0", c)} % against {reference[0]} x {reference[1]})";
                     }
                 }
-                var logLine = $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye: centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}" + (window != null ? $" (centred on the restriction {string.Join(" / ", window.Select(x => x.ToString("0.00", c)))})" : "") + " (never stronger than ALVR's 0.45 x 0.40, 4 / 5)";
+                var logLine = $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye (encoded {encW} x {encH} per eye, {(2.0 * encW * encH / 1e6).ToString("0.0", c)} Mpx both): centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}" + (window != null ? $" (centred on the restriction {string.Join(" / ", window.Select(x => x.ToString("0.00", c)))})" : "") + " (never stronger than ALVR's 0.45 x 0.40, 4 / 5)";
                 return logLine + render;
             }
 

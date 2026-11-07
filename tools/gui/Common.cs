@@ -22,7 +22,7 @@ namespace AirFrameXR
 {
     public static class Version
     {
-        public const string Number = "1.3.5";
+        public const string Number = "1.3.6";
         /// "1.1.0", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
@@ -285,7 +285,8 @@ namespace AirFrameXR
             }
         }
 
-        static string Num(double d) => (d == Math.Floor(d) && Math.Abs(d) < 1e15) ? d.ToString("0.0", CultureInfo.InvariantCulture) : d.ToString("R", CultureInfo.InvariantCulture);
+        // JSON has no NaN or Infinity, and one of them in a settings file stops the host from starting: write 0 instead
+        static string Num(double d) => double.IsNaN(d) || double.IsInfinity(d) ? "0.0" : (d == Math.Floor(d) && Math.Abs(d) < 1e15) ? d.ToString("0.0", CultureInfo.InvariantCulture) : d.ToString("R", CultureInfo.InvariantCulture);
 
         public static object Get(Dictionary<string, object> root, string path)
         {
@@ -462,6 +463,9 @@ namespace AirFrameXR
         public double RenderSpendPct { get => Json.Num(Root, "video.render_spend_pct", 0); set { if (value > 0) Json.Set(Root, "video.render_spend_pct", Math.Round(value, 1)); else Json.Remove(Root, "video.render_spend_pct"); } }
         /// "allow above 100 %": supersampling, up to the stream's own size; off = at most pixel for pixel
         public bool RenderAboveStream { get => Json.Bool(Root, "video.render_allow_above", false); set { if (value) Json.Set(Root, "video.render_allow_above", true); else Json.Remove(Root, "video.render_allow_above"); } }
+        /// "Keep the stream as big as the whole panel's": the stream is sized for the whole panel the headset asks for at FoV 1 (what the bitrate pays for there), whatever box the headset declares,
+        /// so a smaller declared view (the client's FoV Scale) spends the same pixels on less angle: denser, as the stock client does; off (default) = the size follows the declared box
+        public bool StreamKeepPanelSize { get => Json.Bool(Root, "video.stream_keep_panel_size", false); set { if (value) Json.Set(Root, "video.stream_keep_panel_size", true); else Json.Remove(Root, "video.stream_keep_panel_size"); } }
         public bool StreamFitWindow { get => Json.Bool(Root, "video.stream_fit_window", false); set { if (value) Json.Set(Root, "video.stream_fit_window", true); else Json.Remove(Root, "video.stream_fit_window"); } }
         public int[] StreamReferenceEye
         {
