@@ -161,8 +161,11 @@ namespace AirFrameXR
             foreach (var k in knobs.Where(x => x.Section == FG)) AddKnob(body, k);
             Section(body, AR);
             foreach (var k in knobs.Where(x => x.Section == AR)) AddKnob(body, k);
+            Section(body, SS);
+            foreach (var k in knobs.Where(x => x.Section == SS)) AddKnob(body, k);
             Section(body, GE);
             foreach (var k in knobs.Where(x => x.Section == GE)) AddKnob(body, k);
+            var orphan = knobs.FirstOrDefault(x => x.Ctl == null); if (orphan != null) throw new InvalidOperationException("Advanced: the switch \"" + orphan.Key + "\" is in a section the window does not build");
             Section(body, "Frame-start gate (the OpenXR layer)");
             var gateRow = Row(body, gate, null, NextGame, "On (default): the game's xrWaitFrame waits for the shim's release, so the GPU throttle and the running start act at the game's frame start. Off: the pre-0.6 behaviour, where VDXR's own running start woke the game a display period minus 2 ms after its previous release, one frame ahead of the release, so the game's render queue sat at 2-3 frames. Lab A/B on a GPU-bound scene: frame start to GPU done 55 -> 42 ms (p50) at the same fps, one display period less between the pose being read and the frame being finished. On the headset: no fps loss in 6 h (Gears of War at 1/2: 49.0 fps median against a 50 fps cap). Needs bin\\virtualdesktop-openxr.dll of 0.6 or newer; changing it asks for administrator rights once. Hover for the numbers.", "Frame-start gate (VDXR patch 5)\r\n" +
                 "\r\n" +
