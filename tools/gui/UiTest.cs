@@ -126,6 +126,8 @@ namespace AirFrameXR
             var avpBox = new[] { 1.045, 0.800, 0.759, 0.871 };   // the AirFrameXR client's declared box
             yield return new Case { Name = "fov-panel-off", Make = () => new FovPanelTestForm(avpBox, false, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()) };
             yield return new Case { Name = "fov-panel-on", Make = () => new FovPanelTestForm(avpBox, true, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()) };
+            yield return new Case { Name = "fov-panel-spend-on", Make = () => new FovPanelTestForm(new[] { 1.7879, 1.0207, 1.2196, 1.0207 }, true, new[] { 2720, 2144 }, false, FovManagerForm.DemoStore()), Prepare = f => ((FovPanelTestForm)f).Panel.SpendForTest(100, false) };
+            yield return new Case { Name = "fov-panel-supersample", Make = () => new FovPanelTestForm(new[] { 1.7879, 1.0207, 1.2196, 1.0207 }, true, new[] { 2720, 2144 }, false, FovManagerForm.DemoStore()), Prepare = f => ((FovPanelTestForm)f).Panel.SpendForTest(130, true) };
             yield return new Case { Name = "fov-panel-spend", Make = () => new FovPanelTestForm(new[] { 1.7879, 1.0207, 1.2196, 1.0207 }, true, new[] { 2720, 2144 }, false, FovManagerForm.DemoStore()) };
             yield return new Case { Name = "fov-panel-fit", Make = () => new FovPanelTestForm(avpBox, true, new[] { 3552, 3200 }, true, FovManagerForm.DemoStore()) };   // the stream fit on, the fold open: the quality row and the preview
             yield return new Case { Name = "fov-panel-empty", Make = () => new FovPanelTestForm(avpBox, false, new[] { 3552, 3200 }, false, Path.Combine(Path.GetTempPath(), "airframexr_fovpanel_empty_" + Guid.NewGuid().ToString("N") + ".json")) };

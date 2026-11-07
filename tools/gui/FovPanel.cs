@@ -127,6 +127,17 @@ namespace AirFrameXR
         public bool TickEnabled => fovTick.Enabled;
         public int ProfileCount => profiles.Count;
         public string Note => fovNote.Text;
+        /// the UI harness: the savings tick and its percentage as they would look once chosen (nothing is written)
+        public void SpendForTest(double pct, bool above)
+        {
+            loading = true;
+            spendTick.Checked = pct > 0; aboveTick.Checked = above;
+            spendBox.Value = Math.Max(spendBox.Minimum, Math.Min(spendBox.Maximum, (decimal)(pct > 0 ? pct : 100)));
+            loading = false;
+            RefreshSpend();
+            if (pct > 0) { loading = true; spendBox.Value = Math.Max(spendBox.Minimum, Math.Min(spendBox.Maximum, (decimal)pct)); loading = false; RefreshSpend(); }
+        }
+
         /// the UI harness: choose a profile as a click would (ticking the restriction when it is off)
         public void SelectForTest(string id, bool tick) { var u = profiles.FirstOrDefault(p => p.Id == id); if (u != null) { profileBox.SelectedItem = u; if (tick) fovTick.Checked = true; } }
 
