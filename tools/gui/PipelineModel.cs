@@ -687,20 +687,7 @@ namespace AirFrameXR
         }
 
         /// writes the stream's per-eye size everywhere the Settings panel does (both resolution keys, Absolute, and ALVR's negotiated cache)
-        public static void WriteStreamEye(Dictionary<string, object> session, int w, int h)
-        {
-            foreach (var k in new[] { "session_settings.video.transcoding_view_resolution", "session_settings.video.emulated_headset_view_resolution" })
-            {
-                Json.Set(session, k + ".variant", "Absolute");
-                Json.Set(session, k + ".Absolute.width", w);
-                Json.Set(session, k + ".Absolute.height.set", true);
-                Json.Set(session, k + ".Absolute.height.content", h);
-            }
-            Json.Set(session, "openvr_config.eye_resolution_width", w);
-            Json.Set(session, "openvr_config.eye_resolution_height", h);
-            Json.Set(session, "openvr_config.target_eye_resolution_width", w);
-            Json.Set(session, "openvr_config.target_eye_resolution_height", h);
-        }
+        public static void WriteStreamEye(Dictionary<string, object> session, int w, int h) => Session.SetStreamEye(session, w, h);
 
         /// the inputs from the files: the headset's declared box (null = not known yet), the override, the session, the settings
         public static Inputs FromSettings(AppSettings st, Dictionary<string, object> session)

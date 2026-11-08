@@ -753,12 +753,29 @@ namespace AirFrameXR
                 {
                     var old = Json.Load(Paths.Session);
                     var chosen = new AppSettings().StreamReferenceEye;
-                    if (chosen != null) PipelineModel.WriteStreamEye(old, chosen[0], chosen[1]);
+                    if (chosen != null) SetStreamEye(old, chosen[0], chosen[1]);
                     Json.Save(Paths.SessionBase, old);
                 }
                 else if (File.Exists(Paths.SessionDefault)) File.Copy(Paths.SessionDefault, Paths.SessionBase);
             }
             return Json.Load(Paths.SessionBase);
+        }
+
+        /// The stream's per-eye size everywhere the Settings panel writes it (both resolution keys, Absolute, and ALVR's negotiated cache). Here, not in PipelineModel, so a program
+        /// that has Common.cs without the pipeline model (the Black Box analyzer) still builds.
+        public static void SetStreamEye(Dictionary<string, object> session, int w, int h)
+        {
+            foreach (var k in new[] { "session_settings.video.transcoding_view_resolution", "session_settings.video.emulated_headset_view_resolution" })
+            {
+                Json.Set(session, k + ".variant", "Absolute");
+                Json.Set(session, k + ".Absolute.width", w);
+                Json.Set(session, k + ".Absolute.height.set", true);
+                Json.Set(session, k + ".Absolute.height.content", h);
+            }
+            Json.Set(session, "openvr_config.eye_resolution_width", w);
+            Json.Set(session, "openvr_config.eye_resolution_height", h);
+            Json.Set(session, "openvr_config.target_eye_resolution_width", w);
+            Json.Set(session, "openvr_config.target_eye_resolution_height", h);
         }
 
         /// Writes the golden master (atomic). The streamer's session.json is not written by the windows: SessionCompiler makes it at the next start.
