@@ -59,7 +59,7 @@ namespace AirFrameXR
                 {
                     Directory.CreateDirectory(Paths.Config);
                     int n = 0;
-                    foreach (var f in new[] { "airframexr.json", "session.json" })
+                    foreach (var f in new[] { "airframexr.json", "session.base.json", "session.json" })
                     {
                         var src = Path.Combine(stock, "config", f);
                         if (!File.Exists(src)) continue;

@@ -52,7 +52,10 @@ namespace AirFrameXR
         public static string Config => Path.Combine(Dir, "config");
         public static string Logs => Path.Combine(Dir, "logs");
         public static string Docs => Path.Combine(Dir, "docs");
+        /// The transient session ALVR reads at the streamer start: compiled from SessionBase and the settings by SessionCompiler at every start, never edited by a window.
         public static string Session => Path.Combine(Config, "session.json");
+        /// The golden master of the ALVR settings: the only session file the windows (wizard, Settings, profiles, pairing) read and write.
+        public static string SessionBase => Path.Combine(Config, "session.base.json");
         public static string SessionDefault => Path.Combine(Config, "session.default.json");
         public static string Settings => Path.Combine(Config, "airframexr.json");
         // before 1.0 the project was called VisionALVR (config\visionalvr.json): a folder carried over keeps its settings, the old file stays as a backup
@@ -453,7 +456,7 @@ namespace AirFrameXR
         public bool FoveationManual { get => Json.Bool(Root, "video.foveation_manual", false); set { if (value) Json.Set(Root, "video.foveation_manual", true); else Json.Remove(Root, "video.foveation_manual"); } }
         /// the user typed a stream size in Settings: it is kept (the size no longer follows the bitrate), but the foveation is still computed for it; typing the size the bitrate would give clears it
         public bool StreamSizeManual { get => Json.Bool(Root, "video.stream_size_manual", false); set { if (value) Json.Set(Root, "video.stream_size_manual", true); else Json.Remove(Root, "video.stream_size_manual"); } }
-        /// the resolution the user declared in Settings (per eye): what the game would render without the restriction, and the 100 % of the render choice; null = the headset profile's own (3552 x 3200 for a Vision Pro)
+        /// the resolution the user declared in Settings (per eye): what the game would render without the restriction, and the 100 % of the render choice; null = the headset profile's own (3648 x 3200 for a Vision Pro)
         public int[] RenderReferenceEye
         {
             get { var a = Json.Get(Root, "video.render_reference_eye") as System.Collections.IList; if (a == null || a.Count < 2) return null; try { var v = new[] { Convert.ToInt32(a[0], CultureInfo.InvariantCulture), Convert.ToInt32(a[1], CultureInfo.InvariantCulture) }; return v[0] > 0 && v[1] > 0 ? v : null; } catch { return null; } }
@@ -696,8 +699,8 @@ namespace AirFrameXR
             {
                 Directory.CreateDirectory(Paths.Config);
                 string bak = null;
-                if (File.Exists(Paths.Session)) { bak = Paths.Session + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"); File.Copy(Paths.Session, bak, true); }
-                File.Copy(file, Paths.Session, true);
+                if (File.Exists(Paths.SessionBase)) { bak = Paths.SessionBase + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"); File.Copy(Paths.SessionBase, bak, true); }
+                File.Copy(file, Paths.SessionBase, true);
                 return bak ?? "";
             }
             catch (Exception e) { error = "Cannot import: " + e.Message; return null; }
@@ -740,11 +743,26 @@ namespace AirFrameXR
 
     public static class Session
     {
+        /// The golden master (config\session.base.json): what the windows show and edit. Created once from the session an older install had (its stream size put back to the
+        /// resolution the user chose: before the golden master the stream fit overwrote it), else from session.default.json.
         public static Dictionary<string, object> Load()
         {
-            if (!File.Exists(Paths.Session) && File.Exists(Paths.SessionDefault)) File.Copy(Paths.SessionDefault, Paths.Session);
-            return Json.Load(Paths.Session);
+            if (!File.Exists(Paths.SessionBase))
+            {
+                if (File.Exists(Paths.Session))
+                {
+                    var old = Json.Load(Paths.Session);
+                    var chosen = new AppSettings().StreamReferenceEye;
+                    if (chosen != null) PipelineModel.WriteStreamEye(old, chosen[0], chosen[1]);
+                    Json.Save(Paths.SessionBase, old);
+                }
+                else if (File.Exists(Paths.SessionDefault)) File.Copy(Paths.SessionDefault, Paths.SessionBase);
+            }
+            return Json.Load(Paths.SessionBase);
         }
+
+        /// Writes the golden master (atomic). The streamer's session.json is not written by the windows: SessionCompiler makes it at the next start.
+        public static void Save(Dictionary<string, object> s) => Json.Save(Paths.SessionBase, s);
 
         /// (hostname, display name, ip) of the trusted headset, or null.
         public static Tuple<string, string, string> Headset(Dictionary<string, object> s)

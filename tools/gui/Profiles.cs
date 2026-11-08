@@ -15,7 +15,7 @@ namespace AirFrameXR
     {
         public string Id = "", DisplayName = "", Source = "";
         public string[] NameContains = new string[0];
-        public int[] ViewRes;                       // default_view_resolution to match, null = any
+        public List<int[]> ViewRes;                  // default_view_resolution to match: one [w, h] or a list of them (a client that changed what it declares), null = any
         public double[] RatesInclude = new double[0];
         /// 0 = not given: ALVR's / the headset's own default (the handshake's panel resolution, its preferred gamma, a rate it supports)
         public int EyeW, EyeH, BitDepth, SplitEncode;
@@ -84,7 +84,8 @@ namespace AirFrameXR
                 var m = O(e, "match");
                 p.NameContains = A(m, "name_contains").OfType<string>().ToArray();
                 var vr = A(m, "default_view_resolution");
-                if (vr.Length >= 2) p.ViewRes = new[] { (int)D(vr[0]), (int)D(vr[1]) };
+                if (vr.Length >= 2 && vr[0] is object[] first) p.ViewRes = vr.OfType<object[]>().Where(x => x.Length >= 2).Select(x => new[] { (int)D(x[0]), (int)D(x[1]) }).ToList();
+                else if (vr.Length >= 2) p.ViewRes = new List<int[]> { new[] { (int)D(vr[0]), (int)D(vr[1]) } };
                 p.RatesInclude = A(m, "supported_refresh_rates_include").Select(D).ToArray();
                 var er = A(st, "eye_resolution");
                 if (er.Length >= 2) { p.EyeW = (int)D(er[0]); p.EyeH = (int)D(er[1]); }
@@ -179,7 +180,7 @@ namespace AirFrameXR
             {
                 var s = Session.Load();
                 foreach (var kv in p.SessionOverrides) Json.Set(s, kv.Key, kv.Value);
-                Json.Save(Paths.Session, s);
+                Session.Save(s);
                 Log.Write("INFO", $"profile '{p.Id}': {p.SessionOverrides.Count} session setting(s) applied");
                 return true;
             }
@@ -198,8 +199,8 @@ namespace AirFrameXR
             var w = new List<string>();
             if (p.NameContains.Length > 0 && !p.NameContains.Any(n => hs.DisplayName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0))
                 w.Add($"the profile is for a headset named like \"{string.Join("\" / \"", p.NameContains)}\", this one reports \"{hs.DisplayName}\"");
-            if (p.ViewRes != null && (hs.PanelW != p.ViewRes[0] || hs.PanelH != p.ViewRes[1]))
-                w.Add($"the profile expects a {p.ViewRes[0]} x {p.ViewRes[1]} panel, this headset reports {hs.PanelW} x {hs.PanelH}");
+            if (p.ViewRes != null && p.ViewRes.Count > 0 && !p.ViewRes.Any(r => hs.PanelW == r[0] && hs.PanelH == r[1]))
+                w.Add($"the profile expects a {string.Join(" or ", p.ViewRes.Select(r => r[0] + " x " + r[1]))} panel, this headset reports {hs.PanelW} x {hs.PanelH}");
             var missing = p.RatesInclude.Where(r => !hs.Rates.Any(x => Math.Abs(x - r) < 0.6)).ToList();
             if (missing.Count > 0) w.Add($"the profile expects the refresh rate(s) {string.Join(", ", missing.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture)))} Hz, which this headset does not offer");
             if (p.Fps > 0 && !hs.Rates.Any(x => Math.Abs(x - p.Fps) < 0.6)) w.Add($"the profile streams at {p.Fps:0} fps, which this headset does not list among its refresh rates");
@@ -268,7 +269,7 @@ namespace AirFrameXR
             var s = Session.Load();
             double N(string k, double d) => Json.Num(s, k, d);
             const string V = "session_settings.video.";
-            int w = (int)N(V + "transcoding_view_resolution.Absolute.width", 3552), h = (int)N(V + "transcoding_view_resolution.Absolute.height.content", 3200);
+            int w = (int)N(V + "transcoding_view_resolution.Absolute.width", 3648), h = (int)N(V + "transcoding_view_resolution.Absolute.height.content", 3200);
             double fps = N(V + "preferred_fps", 90), mbps = N(V + "bitrate.mode.ConstantMbps", 150);
             bool fov = Json.Bool(s, V + "foveated_encoding.enabled", false);
             var proto = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp").ToLowerInvariant();
@@ -328,7 +329,7 @@ namespace AirFrameXR
                 }
                 if (p.ViewRes != null)
                 {
-                    if (hs.PanelW != p.ViewRes[0] || hs.PanelH != p.ViewRes[1]) continue;
+                    if (p.ViewRes.Count > 0 && !p.ViewRes.Any(r => hs.PanelW == r[0] && hs.PanelH == r[1])) continue;
                     score += 2;
                 }
                 if (p.RatesInclude.Length > 0)

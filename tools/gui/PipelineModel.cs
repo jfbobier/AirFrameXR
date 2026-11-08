@@ -607,21 +607,16 @@ namespace AirFrameXR
                 return logLine + render;
             }
 
-            /// Apply on the files: loads the session, writes it back when something changed, logs. Never throws (a failure is a warning in the log).
+            /// A window's choice (a profile picked, a fit finished, the wizard saving): the picture-edges foveation is computed again at the next streamer start (SessionCompiler), so the
+            /// numbers set by hand give way here: the hand-edit flag is cleared when `explicitChoice`. Nothing is written to a session file: the golden master is never changed by a computation.
             public static string ApplyToFiles(AppSettings st, bool explicitChoice)
             {
                 try
                 {
-                    var flag = st.FoveationManual;
-                    var s = Session.Load();
-                    var line = Apply(st, s, explicitChoice);
-                    if (line == null) return null;
-                    Json.Save(Paths.Session, s);
-                    st.Save();   // the density reference and the flag may have changed with the size
-                    Log.Write("INFO", line);
-                    return line;
+                    if (explicitChoice && st.FoveationManual) { st.FoveationManual = false; st.Save(); Log.Write("INFO", "foveation: computed again at the next streamer start (the numbers set by hand give way)"); }
+                    return null;
                 }
-                catch (Exception e) { Log.Write("WARN", "foveation from the picture edges not written: " + e.Message); return null; }
+                catch (Exception e) { Log.Write("WARN", "foveation flag not saved: " + e.Message); return null; }
             }
         }
 
@@ -670,22 +665,16 @@ namespace AirFrameXR
         }
 
         /// The per-eye size the user chose (the wizard's settings panel, the Settings window): it becomes the density reference of the stream fit (stream_reference_eye, with the
-        /// box the headset declared), the session gets the fit size over that box when the fit is on and the size itself otherwise, in both resolution keys and ALVR's negotiated
-        /// cache (what the FOV card and the encoder tests read before the next connection). The caller saves the settings and the session. Returns the size written.
+        /// box the headset declared) and is written as it is into the session it is given (the golden master from a window; the compiled copy from SessionCompiler): the fit, the
+        /// restriction and the bitrate never change what the user chose, SessionCompiler derives the stream size from it at every streamer start. The caller saves the settings and
+        /// the session. Returns the size written.
         public static int[] SaveEyeChoice(Dictionary<string, object> session, AppSettings settings, int w, int h)
         {
             settings.StreamReferenceEye = new[] { w, h };
             var clientFov = AppSettings.ReadClientFov();
             if (clientFov != null) settings.StreamReferenceFov = clientFov;
-            int sw = w, sh = h;
-            if (settings.StreamFitWindow && clientFov != null && settings.StreamReferenceFov != null)
-            {
-                var fe = FitEye(new[] { w, h }, settings.StreamReferenceFov, clientFov);
-                sw = Math.Min(fe[0], MaxEyeWidth); sh = Math.Min(fe[1], MaxEyeHeight);
-                settings.StreamFitEye = new[] { sw, sh };
-            }
-            WriteStreamEye(session, sw, sh);
-            return new[] { sw, sh };
+            WriteStreamEye(session, w, h);
+            return new[] { w, h };
         }
 
         /// the session's transcoding size as the Settings panel writes it (Absolute), null when not Absolute
@@ -726,6 +715,78 @@ namespace AirFrameXR
             }
             ReadEncoder(st, session, i);
             return i;
+        }
+    }
+
+    /// session.json is not a setting file: it is compiled at every streamer start from the golden master (config\session.base.json, the only session file the windows edit), the
+    /// settings (config\airframexr.json) and the headset's declared box. The user's resolution, the restriction, the fit, the bitrate and the foveation are parameters; the stream
+    /// size and the foveation geometry are results. A hand-edit of session.json is lost at the next start on purpose. ALVR's own pairing is the one thing taken back from the
+    /// running session (a headset ALVR trusted while the streamer ran). The engine's render quality (video.fov_render_quality) is the one derived value the engine reads from
+    /// airframexr.json, so it is written there.
+    public static class SessionCompiler
+    {
+        static Dictionary<string, object> Clone(Dictionary<string, object> d) => Json.Parse(Json.Serialize(d));
+
+        /// The compiled session for these settings, nothing written (what the FOV panel shows, what Compile saves). `scratch` receives the derived settings.
+        public static Dictionary<string, object> Build(Dictionary<string, object> golden, double[] declared, out string log, out AppSettings scratch)
+        {
+            var s = Clone(golden);
+            scratch = new AppSettings();   // a private copy: the derived values below never reach the file but the one named in Compile
+            var chosen = PipelineModel.SessionEye(s) ?? PipelineModel.StreamEye(s) ?? scratch.StreamReferenceEye;
+            log = null;
+            if (chosen == null) return s;
+            var eye = chosen;
+            if (scratch.StreamFitWindow && declared != null && scratch.StreamReferenceEye != null && scratch.StreamReferenceFov != null)
+            {
+                var fe = PipelineModel.FitEye(scratch.StreamReferenceEye, scratch.StreamReferenceFov, declared);
+                eye = new[] { Math.Min(fe[0], PipelineModel.MaxEyeWidth), Math.Min(fe[1], PipelineModel.MaxEyeHeight) };
+            }
+            PipelineModel.WriteStreamEye(s, eye[0], eye[1]);
+            var fov = PipelineModel.PictureEdgesFoveation.Apply(scratch, s, false);
+            var now = PipelineModel.StreamEye(s) ?? eye;
+            log = $"session compiled: {now[0]} x {now[1]} per eye from the golden {chosen[0]} x {chosen[1]}" + (fov != null ? "; " + fov : "");
+            return s;
+        }
+
+        /// What the next start would compile; never writes.
+        public static Dictionary<string, object> Preview(AppSettings st, double[] declared)
+        {
+            try { return Build(Session.Load(), declared, out _, out _); }
+            catch (Exception e) { Log.Write("WARN", "session preview: " + e.Message); return Session.Load(); }
+        }
+
+        /// Before the host starts: takes ALVR's pairing back, compiles, writes config\session.json (atomic). Returns the log line; never throws (a failure is a warning and the
+        /// previous session.json stays).
+        public static string Compile(AppSettings st, double[] declared)
+        {
+            try
+            {
+                var golden = Session.Load();
+                AbsorbPairing(golden);
+                var s = Build(golden, declared, out var log, out var scratch);
+                Json.Save(Paths.Session, s);
+                var real = new AppSettings();
+                var q = Json.Get(scratch.Root, "video.fov_render_quality");
+                if (q != null && Math.Abs(Json.Num(real.Root, "video.fov_render_quality", -1) - Json.Num(scratch.Root, "video.fov_render_quality", -1)) > 1e-9)
+                { Json.Set(real.Root, "video.fov_render_quality", q); real.Save(); }
+                return log ?? "session compiled (no stream size known yet)";
+            }
+            catch (Exception e) { Log.Write("WARN", "session compile failed: " + e.Message); return null; }
+        }
+
+        /// A headset ALVR trusted while the streamer ran is in the live file only: taken into the golden master (as Disconnected) when the live file is newer than the master
+        /// (a pairing made in a window after that wins).
+        static void AbsorbPairing(Dictionary<string, object> golden)
+        {
+            if (!File.Exists(Paths.Session) || File.GetLastWriteTimeUtc(Paths.Session) <= File.GetLastWriteTimeUtc(Paths.SessionBase)) return;
+            var live = Json.Get(Json.Load(Paths.Session), "client_connections") as Dictionary<string, object>;
+            if (live == null || live.Count == 0) return;
+            var cc = Json.Parse(Json.Serialize(new Dictionary<string, object> { ["c"] = live }))["c"] as Dictionary<string, object>;
+            foreach (var v in cc.Values) if (v is Dictionary<string, object> c && c.ContainsKey("connection_state")) c["connection_state"] = "Disconnected";
+            if (Json.Serialize(cc) == Json.Serialize(Json.Get(golden, "client_connections"))) return;
+            golden["client_connections"] = cc;
+            Session.Save(golden);
+            Log.Write("INFO", "session: the pairing ALVR made while the streamer ran was taken into session.base.json");
         }
     }
 }

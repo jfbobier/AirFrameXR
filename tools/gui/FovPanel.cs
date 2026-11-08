@@ -301,9 +301,9 @@ namespace AirFrameXR
         {
             try
             {
-                var s = Session.Load();
-                int w = (int)Json.Num(s, "openvr_config.eye_resolution_width", 0), h = (int)Json.Num(s, "openvr_config.eye_resolution_height", 0);
-                return w > 0 && h > 0 ? new[] { w, h } : null;
+                var s = SessionCompiler.Preview(new AppSettings(), AppSettings.ReadClientFov());   // what the next streamer start compiles (the golden master is never changed by the restriction)
+                var e = PipelineModel.StreamEye(s);
+                return e ?? PipelineModel.StreamEye(Session.Load());
             }
             catch { return null; }
         }
@@ -341,40 +341,29 @@ namespace AirFrameXR
             else fitNote.Text = "On, but no density reference is saved yet: save a resolution in Settings or untick and tick again.";
         }
 
-        /// the fit tick: saves the density reference if there is none, writes the fit size (or the reference size back) into session.json, and the switch
+        /// the fit tick: saves the density reference if there is none and the switch (the stream size itself is compiled into session.json at the streamer start)
         void FitChanged()
         {
             if (loading || clientFov == null) return;
             var st = new AppSettings();
             if (fitTick.Checked)
             {
-                if ((st.StreamReferenceEye == null || st.StreamReferenceFov == null) && streamEye != null) { st.StreamReferenceEye = streamEye; st.StreamReferenceFov = clientFov; }
+                if ((st.StreamReferenceEye == null || st.StreamReferenceFov == null) && Session.Load() != null) { st.StreamReferenceEye = PipelineModel.SessionEye(Session.Load()) ?? streamEye; st.StreamReferenceFov = clientFov; }
                 st.StreamFitWindow = true;
                 if (st.StreamReferenceEye != null && st.StreamReferenceFov != null)
                 {
                     var fe = PipelineModel.FitEye(st.StreamReferenceEye, st.StreamReferenceFov, clientFov);
-                    var eye = new[] { Math.Min(fe[0], PipelineModel.MaxEyeWidth), Math.Min(fe[1], PipelineModel.MaxEyeHeight) };
-                    st.StreamFitEye = eye;
-                    WriteSessionEye(eye);
                 }
             }
             else
             {
                 st.StreamFitWindow = false;
                 st.StreamFitEye = null;
-                if (st.StreamReferenceEye != null) WriteSessionEye(st.StreamReferenceEye);
             }
             StoreQuality(st);
             Save(st, "stream fit " + (fitTick.Checked ? "on" : "off"), Restart);
             streamEye = testEye ?? ReadStreamEye();
             FovLabels();
-        }
-
-        void WriteSessionEye(int[] eye)
-        {
-            if (testEye != null) return;   // the UI harness: nothing written
-            try { var s = Session.Load(); PipelineModel.WriteStreamEye(s, eye[0], eye[1]); Json.Save(Paths.Session, s); }
-            catch (Exception e) { status.Text = "Cannot write config\\session.json: " + e.Message; status.ForeColor = Color.Firebrick; }
         }
 
         /// the engine's quality (video.fov_render_quality) from the percentage chosen, for the stream size and the box as they stand; untouched when they are not known yet
@@ -394,7 +383,7 @@ namespace AirFrameXR
             return PipelineModel.RateMapFoveation.Load(PipelineModel.PictureEdgesFoveation.ProfilePath)?.P;
         }
 
-        /// what the game would render without the restriction: the resolution declared in Settings, else the headset profile's own (3552 x 3200 for a Vision Pro)
+        /// what the game would render without the restriction: the resolution declared in Settings, else the headset profile's own (3648 x 3200 for a Vision Pro)
         int[] ReferenceEye()
         {
             var st = new AppSettings();

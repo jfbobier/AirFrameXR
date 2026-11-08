@@ -141,7 +141,7 @@ namespace AirFrameXR
                     all.RemoveAll(x => x.Id == "std-" + id);
                     all.Add(new UserFov
                     {
-                        Id = "std-" + id, Name = standard == "author" ? "AVP optimized" : Json.Str(d, "display_name", id).Split('(')[0].Trim() + (standard == "starting-point" ? " (starting point, not measured)" : " (standard calibration)"), Headset = names[0], Source = standard,
+                        Id = "std-" + id, Name = Json.Str(fov, "name", "") is string given && given.Length > 0 ? given : standard == "author" ? "AVP optimized" : Json.Str(d, "display_name", id).Split('(')[0].Trim() + (standard == "starting-point" ? " (starting point, not measured)" : " (standard calibration)"), Headset = names[0], Source = standard,
                         Created = "2026-01-01T00:00:00", Tan = tan, Quality = Math.Max(0, Math.Min(1, Json.Num(fov, "render_quality", 0))), ClientScale = scale >= 0.2 && scale <= 1.6 && Math.Abs(scale - 1) > 0.001 ? scale : 0, Note = Json.Str(fov, "note", ""),
                     });
                     seeded.Add(id); added++;

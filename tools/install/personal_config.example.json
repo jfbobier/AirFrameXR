@@ -6,9 +6,9 @@
     "openvr_config.enable_foveated_encoding": true,
     "session_settings.video.bitrate.mode.ConstantMbps": 300,
     "session_settings.video.preferred_fps": 90.0,
-    "session_settings.video.transcoding_view_resolution.Absolute.width": 3552,
+    "session_settings.video.transcoding_view_resolution.Absolute.width": 3648,
     "session_settings.video.transcoding_view_resolution.Absolute.height.content": 3200,
-    "session_settings.video.emulated_headset_view_resolution.Absolute.width": 3552,
+    "session_settings.video.emulated_headset_view_resolution.Absolute.width": 3648,
     "session_settings.video.emulated_headset_view_resolution.Absolute.height.content": 3200
   },
   "airframexr": {

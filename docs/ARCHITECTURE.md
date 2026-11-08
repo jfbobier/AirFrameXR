@@ -78,6 +78,32 @@ The engine tells a game **one box for both eyes** (IPC v36, `fovScale` mirrored)
 - **The calibration** is a scene of the probe (`tools/probe/xr_tool.h`, `XR_PROBE_TOOL=fit`): four bright line segments on the edges of a box, one eye at a time, keys read from the PC keyboard (`GetAsyncKeyState`, or scripted for the lab). `calibrate.exe` starts it with `XR_PROBE_PARENT_PID` (the scene ends when the window does: an orphaned scene once made every new host fail with `OpenSharedResource` in a restart loop), stops the desktop mirror, takes the keyboard focus, sets the restriction aside while the scene runs, and keeps the result as a profile (`UserFovStore`, per eye in the file, the larger value per edge in `Tan` and in what the engine gets).
 - **The launcher's side of the foveation** (`tools/gui/PipelineModel.cs` `PictureEdgesFoveation`, settings only, no engine; a Vision Pro on the foveated encode profile): from the frame the headset declares, Apple's rasterization rate map (`ratemap` in `apple-vision-pro.profile.json`) and the restriction in force, it writes the foveation (`RateMapFoveation.Milder`) and the stream size to `session.json` through the parameters the host already reads. The compression allowed at an angle is `max(1, 0.6 / rate)`, so a share of what Apple's map already loses; the centre is at least 10 % larger and the edge ratio at least 20 % below ALVR's defaults (0.45 x 0.40, 4 / 5); with a restriction on, the centre band is the window plus 2 degrees and the outside, which the game does not draw, compresses up to that cap. The size is the bitrate's (the user's constant bitrate and the display rate give a pixel budget at the profile's bits per pixel). It runs at each streamer start, after Settings saves and at every restriction choice; hand-typed foveation numbers are left alone (`video.foveation_manual`) until the next choice; a typed stream size is kept (`video.stream_size_manual`) but its foveation is still computed. The render choice is a percentage of pixel for pixel with the declared resolution (`PipelineModel.RenderPlan`, `video.render_spend_pct`, `video.render_allow_above`, `video.render_reference_eye`), turned into the engine's `fov_render_quality` at every start and choice (`harness/render_plan_check.py`). `harness/ratemap_check.py` compares the zero-loss geometry with the Python oracle (30 cases); `harness/milder_check.py` checks the caps.
 
+## Settings: golden master and compiled session
+
+Three files, three roles. Nothing but the first two is edited by a person or a window.
+
+| File (`config\`) | Role | Written by |
+|---|---|---|
+| `airframexr.json` | AirFrameXR's own settings: the stream fit switch, the density reference (`stream_reference_eye` / `stream_reference_fov`), the restriction (`video.fov_*`), "Spend the savings" percentage, hand-edit flags, display, audio | the windows (Settings, wizard, FOV panel, Advanced) |
+| `session.base.json` | **the golden master** of the ALVR settings: the resolution the user chose, fps, bitrate, codec, the foveation numbers the user typed, audio, chroma, the pairing | the windows only (`Session.Load()` / `Session.Save()`) |
+| `session.json` | **transient**: what ALVR and the host read for this streamer run | `SessionCompiler.Compile` before every streamer start (`tools/gui/PipelineModel.cs`), then ALVR itself while it runs |
+
+The compile step (`RuntimeForm.StartHost`, before `host.Start`) is a pure function of the golden master, `airframexr.json` and the headset's declared box (`airframexr_views.json`):
+
+1. Clone the golden master.
+2. **Stream size.** The golden size is the user's resolution. With the stream fit on, the size becomes `FitEye(reference eye, reference box, declared box)` (the same pixels per tangent unit over the smaller box the client declares), capped at what NVENC takes. Otherwise it stays as typed.
+3. **Foveation** (a Vision Pro on the foveated profile): `PictureEdgesFoveation.Apply` computes the geometry from the picture edges, Apple's rate map and the restriction window, over the size from step 2, and, when the size is not typed and the fit is off, sizes the stream for the bitrate. Foveation numbers the user edited by hand (`video.foveation_manual`) are left as they are.
+4. Write `session.json` atomically. The launcher then adds what depends on the audio route (ALVR's `mute_when_streaming`) to that file, and the host applies the NVIDIA profile and the encode profile to it as before.
+
+What follows from it:
+
+- **The restriction, the fit and the bitrate never change the resolution the user chose.** They change the compiled size, at every start, and the FOV panel shows the compiled size (`SessionCompiler.Preview`); Settings shows the golden one. Before 2026-11-08 the fit, the foveation and the FOV panel wrote the stream size into the only session file, over the user's resolution.
+- **A hand edit of `session.json` is lost at the next start**, on purpose. Edit the settings in the windows (or `session.base.json`).
+- **ALVR's own state is the one thing that flows back.** A headset ALVR trusted while the streamer ran is in the live file only; the next compile takes `client_connections` into the golden master (as Disconnected) when the live file is newer than the master, so a pairing made in a window in between wins.
+- **The one derived value outside `session.json`** is the engine's render quality (`video.fov_render_quality` in `airframexr.json`): the engine reads it from there, so the compile writes it there, from the "Spend the savings" percentage and the compiled size.
+- **Upgrade**: an install without `session.base.json` gets one from its `session.json`, with the stream size put back to the resolution the user chose (`stream_reference_eye`) instead of the fit size the old code had written.
+- **Lab and harness** start the host on a `session.json` they write themselves; the compile step belongs to the launcher, so those runs are unaffected. `harness/session_compile_check.py` tests the compile (fit, no-fit, hand edit, pairing both ways, migration, idempotence).
+
 ## Telemetry and the Black Box
 
 **Two builds of the same code, and the split is the performance guarantee.** The *stock* build (what people stream with) is compiled without the per-frame telemetry: the host without the

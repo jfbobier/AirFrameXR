@@ -380,6 +380,12 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "milder.txt"), lines);
                 return 0;
             }
+            if (args.Contains("--session-compile-selftest"))   // harness/session_compile_check.py: SessionCompiler over the config\ folder next to this exe (session.base.json, airframexr.json, airframexr_views.json, the live session.json)
+            {
+                var line = global::AirFrameXR.SessionCompiler.Compile(new global::AirFrameXR.AppSettings(), global::AirFrameXR.AppSettings.ReadClientFov());
+                File.WriteAllText(Path.Combine(outDir, "session_compile.txt"), line ?? "null");
+                return 0;
+            }
             var planCases = Arg("--render-plan-selftest");   // harness/render_plan_check.py: PipelineModel.RenderPlan against the Python oracle
             if (planCases != null)
             {

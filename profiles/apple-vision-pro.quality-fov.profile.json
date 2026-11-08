@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "apple-vision-pro-quality",
+  "display_name": "Apple Vision Pro (ALVR visionOS client), optimized visual quality",
+  "author": "AirFrameXR project (the author's second profile, created on the 5090)",
+  "match": {
+    "name_contains": [
+      "Apple Headset",
+      "Apple Vision Pro"
+    ]
+  },
+  "fov": {
+    "name": "AVP optimized quality",
+    "visible_deg": {
+      "outer": 50.7,
+      "inner": 39.0,
+      "upper": 42.0,
+      "lower": 37.6
+    },
+    "margin_deg": 0,
+    "render_quality": 0,
+    "source": "author",
+    "note": "Optimized visual quality: the field of view the games are told is 1.22 / 0.81 / 0.90 / 0.77 (outer / inner / upper / lower tangents, the author's profile of 2026-11-08), wider than AVP optimized performance (0.97 / 0.71 / 0.69 / 0.63): fewer black margins at the cost of more game pixels. A field of view only; the stream settings come from the headset profile."
+  }
+}

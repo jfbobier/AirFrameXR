@@ -176,7 +176,7 @@ namespace AirFrameXR
                 case 1:
                     if (string.IsNullOrEmpty(chosenIp)) { MessageBox.Show(this, "Select a headset first (open the ALVR app on the headset), or add its IP address.", Text); return; }
                     Session.Pair(session, chosenHost, chosenName, chosenIp);
-                    Json.Save(Paths.Session, session);
+                    Session.Save(session);
                     settings.HeadsetHost = chosenHost; settings.HeadsetName = chosenName; settings.HeadsetIp = chosenIp;
                     settings.Save();
                     Log.Write("INFO", $"paired headset {chosenName} ({chosenHost}) at {chosenIp}");
@@ -672,7 +672,7 @@ namespace AirFrameXR
             if (chromaChoice == null) return;
             var s = Session.Load();
             Chroma.Apply(s, settings, chromaChoice.Item1, chromaChoice.Item2);
-            try { Json.Save(Paths.Session, s); settings.Save(); session = s; } catch (Exception e) { Log.Write("WARN", "chroma choice not saved: " + e.Message); }
+            try { Session.Save(s); settings.Save(); session = s; } catch (Exception e) { Log.Write("WARN", "chroma choice not saved: " + e.Message); }
         }
 
         void StartTests()

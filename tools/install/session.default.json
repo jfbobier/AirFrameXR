@@ -1,9 +1,9 @@
 {
   "server_version": "20.14.1",
   "openvr_config": {
-    "eye_resolution_width": 3552,
+    "eye_resolution_width": 3648,
     "eye_resolution_height": 3200,
-    "target_eye_resolution_width": 3552,
+    "target_eye_resolution_width": 3648,
     "target_eye_resolution_height": 3200,
     "tracking_ref_only": false,
     "enable_vive_tracker_proxy": false,
@@ -315,7 +315,7 @@
       "transcoding_view_resolution": {
         "Scale": 1.0,
         "Absolute": {
-          "width": 3552,
+          "width": 3648,
           "height": {
             "set": true,
             "content": 3200
@@ -326,7 +326,7 @@
       "emulated_headset_view_resolution": {
         "Scale": 1.0,
         "Absolute": {
-          "width": 3552,
+          "width": 3648,
           "height": {
             "set": true,
             "content": 3200

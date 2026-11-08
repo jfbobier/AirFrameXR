@@ -335,7 +335,7 @@ namespace AirFrameXR
         readonly Timer linkTimer = new Timer { Interval = 1000 };
         static bool AlvrConnecting()
         {
-            try { if (Json.Get(Session.Load(), "client_connections") is Dictionary<string, object> cc) foreach (var v in cc.Values) if (v is Dictionary<string, object> c && c.TryGetValue("connection_state", out var st) && st as string == "Connecting") return true; } catch { }
+            try { if (Json.Get(Json.Load(Paths.Session), "client_connections") is Dictionary<string, object> cc) foreach (var v in cc.Values) if (v is Dictionary<string, object> c && c.TryGetValue("connection_state", out var st) && st as string == "Connecting") return true; } catch { }
             return false;
         }
         void SetLink(Link l, string text)
@@ -585,7 +585,7 @@ namespace AirFrameXR
         /// Before the host starts: ALVR's own mute_when_streaming mutes the captured device (the cable now), so the streamer switches it off in session.json.
         void StartAudioRoute()
         {
-            var s = Session.Load();
+            var s = Json.Load(Paths.Session);   // the session compiled for this start (StartHost compiled it just before)
             var enabled = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             var part = Json.Bool(s, "session_settings.audio.game_audio.content.device.set", false) ? Convert.ToString(Json.Get(s, "session_settings.audio.game_audio.content.device.content.NameSubstring")) : "";
             audio.Report += AudioNote;
@@ -634,8 +634,9 @@ namespace AirFrameXR
             if (!linkTimer.Enabled) { linkTimer.Tick += (s, e) => LinkTick(); linkTimer.Start(); }
             NeedFind(true);
             var args = $"--install-dir \"{Paths.Dir}\" --shim --daemon --gui" + (debug.Checked ? " --debug" : "");
-            PipelineModel.PictureEdgesFoveation.ApplyToFiles(new AppSettings(), false);   // the foveation from the picture edges and Apple's map, over the stream size as it is now (passive: hand-edited numbers stay)
-            ApplyStreamFit(AppSettings.ReadClientFov(), false);   // the fit size into session.json before the host reads it (ALVR may have rewritten the file since)
+            // session.json is transient: compiled from the golden master (session.base.json) and the settings at every start (the stream fit, the foveation, the render choice)
+            var compiled = SessionCompiler.Compile(new AppSettings(), AppSettings.ReadClientFov());
+            if (compiled != null) Log.Write("INFO", compiled);
             StartAudioRoute();
             var err = host.Start(args);
             if (err != null)
@@ -648,27 +649,23 @@ namespace AirFrameXR
             Log.Write("INFO", "streamer started: alvr_host " + args);
         }
 
-        /// The stream fit (docs/FOV_PIPELINE_OPTIM.md, Advanced window): the stream's per-eye size = the saved density over the box the headset declares. Writes
-        /// session.json when the size differs from what it holds; the running host keeps its negotiated stream, the next streamer start takes the new one.
+        /// The stream fit (docs/FOV_PIPELINE_OPTIM.md, Advanced window): writes nothing. The golden master keeps the resolution the user chose; the fit size is compiled into
+        /// session.json at the streamer start (SessionCompiler). Here only the footer says that a running streamer is on another size than the next start will give.
         void ApplyStreamFit(double[] declared, bool fromHeadset)
         {
             try
             {
+                if (!fromHeadset) return;
                 var st = new AppSettings();
                 if (!st.StreamFitWindow || declared == null || st.StreamReferenceEye == null || st.StreamReferenceFov == null) return;
                 var fe = PipelineModel.FitEye(st.StreamReferenceEye, st.StreamReferenceFov, declared);
                 int w = Math.Min(fe[0], PipelineModel.MaxEyeWidth), h = Math.Min(fe[1], PipelineModel.MaxEyeHeight);
-                var s = Session.Load();
-                var cur = PipelineModel.SessionEye(s);
+                var cur = PipelineModel.StreamEye(Json.Load(Paths.Session));
                 if (cur != null && cur[0] == w && cur[1] == h) return;
-                PipelineModel.WriteStreamEye(s, w, h);
-                Json.Save(Paths.Session, s);
-                st.StreamFitEye = new[] { w, h };
-                st.Save();
-                Log.Write("INFO", $"stream fit: {w} x {h} per eye over the headset's window (was {(cur == null ? "?" : cur[0] + " x " + cur[1])}), applies at the next streamer start");
-                if (fromHeadset) { footer.Text = $"Stream fit: {w} \u00D7 {h} per eye over the headset's window. Restart the streamer to apply it."; footer.ForeColor = Color.DarkGoldenrod; }
+                Log.Write("INFO", $"stream fit: {w} x {h} per eye over the headset's window (the running streamer has {(cur == null ? "?" : cur[0] + " x " + cur[1])}), compiled at the next streamer start");
+                footer.Text = $"Stream fit: {w} \u00D7 {h} per eye over the headset's window. Restart the streamer to apply it."; footer.ForeColor = Color.DarkGoldenrod;
             }
-            catch (Exception ex) { Log.Write("WARN", "stream fit: cannot write session.json: " + ex.Message); }
+            catch (Exception ex) { Log.Write("WARN", "stream fit: " + ex.Message); }
         }
 
         /// The streamer owns UDP 9943 (headset discovery), so it stops while the dialog searches; a chosen headset is paired (saved address) and
@@ -691,7 +688,7 @@ namespace AirFrameXR
                     {
                         var session = Session.Load();
                         Session.Pair(session, dlg.ChosenHost, dlg.ChosenName, dlg.ChosenIp);
-                        Json.Save(Paths.Session, session);
+                        Session.Save(session);
                         settings.HeadsetHost = dlg.ChosenHost; settings.HeadsetName = dlg.ChosenName; settings.HeadsetIp = dlg.ChosenIp;
                         settings.Save();
                         Log.Write("INFO", $"find headset: paired {dlg.ChosenName} ({dlg.ChosenHost}) at {dlg.ChosenIp}");

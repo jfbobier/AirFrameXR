@@ -146,7 +146,7 @@ namespace AirFrameXR
         void EndTool()
         {
             try { if (probe != null && !probe.HasExited) probe.Kill(); } catch { }
-            probe = null;
+            probe = null; starting = false;
             guard.Stop();
             RestoreHost();
         }
@@ -178,10 +178,11 @@ namespace AirFrameXR
         void StartTool()
         {
             if (demoDir != null) { if (note != null) note.Text = "Demo window: nothing is started."; return; }
-            if (probe != null && !probe.HasExited) return;
+            if (probe != null && !probe.HasExited || starting) return;   // starting: the 6 s before the scene launches, when probe is still null (a second click started a second scene and saved two profiles, 2026-11-08)
             foreach (var stray in Process.GetProcessesByName("xr_probe")) { try { stray.Kill(); Log.Write("WARN", "calibrate: a stray xr_probe.exe was stopped"); } catch { } stray.Dispose(); }   // a scene left over from an earlier run would attach to the new host
             if (!File.Exists(Probe)) { if (note != null) { note.Text = "bench\\xr_probe.exe is missing from this package."; note.ForeColor = Color.Firebrick; } return; }
             if (Process.GetProcessesByName("streamer").Length == 0) { StartStreamer(); return; }
+            starting = true;
             PrepareHost();
             StartGuard();
             Reset(restrictTool ? "Choose what the game renders" : "Fit the picture to your eyes");
@@ -194,12 +195,15 @@ namespace AirFrameXR
             Buttons(Btn("Stop", () => { EndTool(); ShowIntro(); }));
             // the streamer takes the settings change within a moment; the scene is started after it so the game is told the whole panel
             var t = new Timer { Interval = 6000 };
-            t.Tick += (s, e) => { t.Stop(); t.Dispose(); if (hostPrepared) LaunchProbe(); };
+            t.Tick += (s, e) => { t.Stop(); t.Dispose(); starting = false; if (hostPrepared) LaunchProbe(); };
             t.Start();
         }
 
+        bool starting;
+
         void LaunchProbe()
         {
+            if (probe != null && !probe.HasExited) return;
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(ProbeLog));

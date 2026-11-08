@@ -148,7 +148,7 @@ namespace AirFrameXR
             var f = (Discovery.Found)found.SelectedItems[0].Tag;
             var name = f.Hostname.EndsWith(".client.alvr") ? "Apple Vision Pro" : f.Hostname;
             Session.Pair(session, f.Hostname, name, f.Ip);
-            Json.Save(Paths.Session, session);
+            Session.Save(session);
             settings.HeadsetHost = f.Hostname; settings.HeadsetName = name; settings.HeadsetIp = f.Ip;
             settings.Save();
             Log.Write("INFO", $"paired headset {name} ({f.Hostname}) at {f.Ip}");
@@ -166,7 +166,7 @@ namespace AirFrameXR
 
             section("Video");
             sizeAuto.Click += (s, e) => SizeAutomatic();
-            row("Resolution per eye", flow(eyeW, Ui.Line("x"), eyeH, Ui.Line($"(Vision Pro default 3552 x 3200; at most {Nvenc.MaxEyeWidth} wide: the encoder's limit)")));
+            row("Resolution per eye", flow(eyeW, Ui.Line("x"), eyeH, Ui.Line($"(Vision Pro default 3648 x 3200, Apple's panel; at most {Nvenc.MaxEyeWidth} wide: the encoder's limit)")));
             sizeNote.ForeColor = Color.DimGray; sizeNote.MaximumSize = new Size(560, 0);
             row("", flow(sizeAuto, sizeNote));
             fps.Items.AddRange(new object[] { "90", "96", "100" });
@@ -250,7 +250,7 @@ namespace AirFrameXR
         {
             var s = session;
             ShowSizeNote();
-            eyeW.Value = Clamp(eyeW, Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552));
+            eyeW.Value = Clamp(eyeW, Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3648));
             eyeH.Value = Clamp(eyeH, Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200));
             var f = ((int)Json.Num(s, V + "preferred_fps", 90)).ToString(CultureInfo.InvariantCulture);
             fps.SelectedItem = fps.Items.Contains(f) ? f : "90";
@@ -323,7 +323,7 @@ namespace AirFrameXR
             Json.Set(s, "session_settings.connection.packet_size", (int)packet.Value);
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)haptics.Value);
             Chroma.Apply(s, settings, chromaOn.Checked, $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}");
-            try { Json.Save(Paths.Session, s); }
+            try { Session.Save(s); }
             catch (Exception e) { MessageBox.Show(this, "Cannot write config\\session.json: " + e.Message, Text); return false; }
             settings.EncodeProfile = profFull.Checked ? "full-split" : "foveated";
             settings.Debug = debugDefault.Checked;

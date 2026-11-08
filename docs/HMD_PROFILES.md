@@ -16,7 +16,7 @@ At the handshake the setup wizard (`configure.exe`) matches the headset's handsh
 against every profile it finds (`profiles\` shipped with the package, then `config\profiles\`; your file replaces a shipped one with the same `id`):
 
 1. **Identify.** The handshake gives the headset name, the default view resolution and the supported refresh rates. A profile matches when its
-   `match` fields hold: `name_contains` (any), `default_view_resolution` (equal), `supported_refresh_rates_include` (all present). No match: a generic
+   `match` fields hold: `name_contains` (any), `default_view_resolution` (equal to one of the pairs), `supported_refresh_rates_include` (all present). No match: a generic
    proposal built from what the headset advertised, marked as such.
 2. **Propose.** The profile's `stream` values and one **network variant** (the bitrate depends on your Wi-Fi: you pick the line that describes yours,
    for instance after a bad earlier run). The wizard shows everything and lets you change it before anything runs.
@@ -46,7 +46,7 @@ Copy `profiles\template.profile.json`, rename it `<headset>.profile.json`, fill 
 | key | meaning |
 |---|---|
 | `id`, `display_name`, `author` | identity; the same `id` replaces another file's profile |
-| `match` | `name_contains` [strings], `default_view_resolution` [w, h], `supported_refresh_rates_include` [Hz] |
+| `match` | `name_contains` [strings], `default_view_resolution` [w, h] or a list of them (the Vision Pro profile lists 3660x3200 and the 3776x3648 older clients declare), `supported_refresh_rates_include` [Hz] |
 | `stream` | `eye_resolution` [w, h], `fps`, `codec` (hevc), `bit_depth`, `full_range`, `encoding_gamma`, `foveated`, `split_encode` (0-3), `protocol` (udp/tcp) |
 | `network` | `default` (variant id) and `variants[]`: `id`, `label`, `bitrate_mbps` |
 | `fov` | optional, a measured visible window (see below): `visible_deg` {outer, inner, upper, lower} (degrees from the view axis to the edge of what the headset shows), `margin_deg` (default 3), `render_quality` (0 to 1), `source` (`standard`, `starting-point`, or `author` = one wearer's fit, listed, never proposed), `note`; `client_fov_scale` was removed in 1.4 (dead advice on our client) |
@@ -79,8 +79,8 @@ have run one of them, improve it and share it: that is what the `verified` secti
 
 ## The Apple Vision Pro profile
 
-`profiles\apple-vision-pro.profile.json`: 3552x3200 per eye at 90 fps, HEVC 10-bit, ALVR foveated encoding (centre 0.45 x 0.4, shift 0.4 / 0.1, edge
-ratio 4 x 5: a 4224x1664 encoded frame), split encoding 3, 300 Mbps on a good Wi-Fi 6/6E link, plus the 22 ALVR settings the author tuned by A/B testing on stock ALVR + SteamVR (QuestPro emulation, NVENC P3 without multi-pass,
+`profiles\apple-vision-pro.profile.json`: 3648x3200 per eye (Apple's panel, 3660x3200 floored to ALVR's 32-pixel alignment; it was 3552x3200 until 2026-11-08, within 3 % of the panel) at 90 fps, HEVC 10-bit, ALVR foveated encoding (centre 0.45 x 0.4, shift 0.4 / 0.1, edge
+ratio 4 x 5: a 4224x1664 encoded frame at the former 3552 wide, about 3 % more now), split encoding 3, 300 Mbps on a good Wi-Fi 6/6E link, plus the 22 ALVR settings the author tuned by A/B testing on stock ALVR + SteamVR (QuestPro emulation, NVENC P3 without multi-pass,
 CABAC, 1.5 buffered frames, no microphone, the VideoToolbox low-latency option, chroma-key passthrough, ...). They are also the defaults of
 `config\session.default.json` in the package (the author's session, foveated, 300 Mbps). Foveated is the measured choice on the RTX 5090: encode 3.1 ms against
 7.7 ms for the full 7104x3200 frame, a lighter headset decode, and three times the bits per pixel at the same bitrate; the full frame looked no better. The

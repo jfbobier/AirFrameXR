@@ -9,8 +9,8 @@
       "Apple Vision Pro"
     ],
     "default_view_resolution": [
-      3776,
-      3648
+      [3660, 3200],
+      [3776, 3648]
     ],
     "supported_refresh_rates_include": [
       90,
@@ -19,7 +19,7 @@
   },
   "stream": {
     "eye_resolution": [
-      3552,
+      3648,
       3200
     ],
     "fps": 90,
@@ -32,6 +32,7 @@
     "protocol": "udp"
   },
   "fov": {
+    "name": "AVP optimized performance",
     "visible_deg": { "outer": 44.1, "inner": 35.4, "upper": 34.6, "lower": 32.2 },
     "margin_deg": 0,
     "render_quality": 0,

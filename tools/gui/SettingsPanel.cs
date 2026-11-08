@@ -161,7 +161,7 @@ namespace AirFrameXR
         {
             session = Session.Load();
             var s = session;
-            EyeW.Value = Clamp(EyeW, Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3552));
+            EyeW.Value = Clamp(EyeW, Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3648));
             EyeH.Value = Clamp(EyeH, Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200));
             var f = ((int)Json.Num(s, V + "preferred_fps", 90)).ToString(CultureInfo.InvariantCulture);
             if (!Fps.Items.Contains(f)) Fps.Items.Add(f);
@@ -241,7 +241,7 @@ namespace AirFrameXR
             Json.Set(s, "session_settings.connection.packet_size", (int)Packet.Value);
             Json.Set(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", (double)Haptics.Value);
             Chroma.Apply(s, settings, ChromaOn.Checked, $"{idle.BackColor.R:x2}{idle.BackColor.G:x2}{idle.BackColor.B:x2}");
-            try { Json.Save(Paths.Session, s); }
+            try { Session.Save(s); }
             catch (Exception e) { error = "Cannot write config\\session.json: " + e.Message; return false; }
             settings.EncodeProfile = ProfFull.Checked ? "full-split" : "foveated";
             settings.SplitEncode = Split.Checked || ProfFull.Checked;   // the full-frame profile forces 3 strips whatever this says

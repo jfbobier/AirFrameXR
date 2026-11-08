@@ -10,7 +10,7 @@ namespace AirFrameXR
     public class Handshake
     {
         public string DisplayName = "", Hostname = "", Ip = "";
-        public int PanelW = 3552, PanelH = 3200;
+        public int PanelW = 3648, PanelH = 3200;
         public List<double> Rates = new List<double> { 90 };
         public int MicRate = 0;
         public bool Foveation = true, EncHigh = true, Enc10 = true, EncAv1 = false, Prefer10 = true, PreferFull = true, PreferHdr = false;
