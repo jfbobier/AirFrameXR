@@ -3,6 +3,8 @@
 Living document. Add a dated entry under "Sessions" after each log read, move settled items into "Findings", and strike or delete open questions that get answered.
 Evidence level words follow `docs/progress.md`: say what was measured, how, and what was not.
 
+The client code, the mock-client latency model and the `harness/scenarios/pace_*.json` scenarios this file refers to live on the branch `visionos_client_performance` (client fork `kteque/alvr-visionos` and this repository) until they are merged; the findings below stand on their own.
+
 ## How it is collected
 
 - Client branch `additional_telemetry` (fork `kteque/alvr-visionos`, from `kteque/1.3.6` `099e02c`). Read-only: it writes log lines and changes no state. Compiled in CI and uploaded to TestFlight through the fork's TestFlight workflow; not otherwise verified to leave behaviour unchanged.
