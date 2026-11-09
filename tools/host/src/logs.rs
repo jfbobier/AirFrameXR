@@ -322,8 +322,8 @@ pub mod client_stats {
         vsync_late: u32,     // samples whose vsync_queue wrapped: the client finished its frame after the vsync it aimed at
         since: Option<std::time::Instant>, // first sample of the window
         server_fps: f64,
-        throughput_bps: f64,
-        bitrate_bps: f64,
+        throughputs: Vec<f64>, // bit/s per sample: the window reports their median (see window_json: one frame presented right after another gives an absurd ratio)
+        bitrates: Vec<f64>,
         lat_n: u32,          // samples whose latency fields are sane (the others are outliers, see Sample::is_outlier)
         outliers: u32,
         totals: Vec<f64>,    // seconds, per sane sample: the window reports their median, a few garbage samples cannot move it
@@ -360,7 +360,7 @@ pub mod client_stats {
 
     const ZERO: Agg = Agg {
         n: 0, total: 0.0, game: 0.0, compositor: 0.0, encoder: 0.0, network: 0.0, decoder: 0.0, decoder_queue: 0.0,
-        client_compositor: 0.0, vsync_queue: 0.0, client_frame_s: 0.0, client_n: 0, vsync_n: 0, vsync_late: 0, since: None, server_fps: 0.0, throughput_bps: 0.0, bitrate_bps: 0.0,
+        client_compositor: 0.0, vsync_queue: 0.0, client_frame_s: 0.0, client_n: 0, vsync_n: 0, vsync_late: 0, since: None, server_fps: 0.0, throughputs: Vec::new(), bitrates: Vec::new(),
         lat_n: 0, outliers: 0, totals: Vec::new(), encoders: Vec::new(), networks: Vec::new(), decoders: Vec::new(),
     };
     /// Windows: 0 = encoder_stats (2 s), 1 = status (10 s), 2 = benchmark step.
@@ -411,8 +411,8 @@ pub mod client_stats {
                 self.client_n += 1;
             }
             self.server_fps += x.server_fps;
-            self.throughput_bps += x.throughput_bps;
-            self.bitrate_bps += x.bitrate_bps;
+            self.throughputs.push(x.throughput_bps);
+            self.bitrates.push(x.bitrate_bps);
         }
     }
 
@@ -469,6 +469,10 @@ pub mod client_stats {
         let (total_ms, encode_ms, network_ms, decode_ms) = (med(&mut a.totals), med(&mut a.encoders), med(&mut a.networks), med(&mut a.decoders));
         let n = a.n as f64;
         let r1 = |x: f64| (x * 10.0).round() / 10.0;
+        // ALVR's per-frame rate is the frame's bits over the gap since the previous frame was presented, the gap floored at 1 us: two frames
+        // presented back to back give a sample of 1e5 Mbit/s, and one such sample moved the mean of a 77 min Dead Space run to 6801 Mbps
+        // (ALVR's own per-second rate said 220-290 for a 275 Mbps stream, 2026-11-09). The median is not moved by a handful of them.
+        let mbps = |v: &mut Vec<f64>| median(v).map(|m| r1(m / 1e6)).unwrap_or(0.0);
         let client_fps = if a.client_n > 0 { r1(a.client_n as f64 / a.client_frame_s) } else { 0.0 };
         let vsync_queue_ms = if a.vsync_n > 0 { (a.vsync_queue / a.vsync_n as f64 * 1000.0 * 100.0).round() / 100.0 } else { 0.0 };
         // frames the headset reported as displayed, per second of window (frames it skipped never report)
@@ -481,7 +485,7 @@ pub mod client_stats {
             "encode_ms": encode_ms, "network_ms": network_ms, "decode_ms": decode_ms,
             "decoder_queue_ms": lat(a.decoder_queue), "client_compositor_ms": lat(a.client_compositor), "vsync_queue_ms": vsync_queue_ms, "vsync_late": a.vsync_late,
             "client_fps": client_fps, "displayed_fps": displayed_fps, "server_fps": (a.server_fps / n * 10.0).round() / 10.0,
-            "throughput_mbps": (a.throughput_bps / n / 1e6 * 10.0).round() / 10.0, "bitrate_mbps": (a.bitrate_bps / n / 1e6 * 10.0).round() / 10.0,
+            "throughput_mbps": mbps(&mut a.throughputs), "bitrate_mbps": mbps(&mut a.bitrates),
         }))
     }
 
@@ -530,6 +534,16 @@ pub mod client_stats {
             slow.total = 5.5;
             assert!(slow.is_outlier());
             assert!(!clean(200.0).is_outlier());
+        }
+
+        #[test]
+        fn a_few_absurd_rates_do_not_move_the_bitrate() {
+            // 2000 frames at 275 Mbit/s and 5 presented back to back (1 us gap: 1e11 bit/s)
+            let mut v: Vec<Sample> = (0..2000).map(|_| { let mut s = clean(50.0); s.bitrate_bps = 2.75e8; s.throughput_bps = 2.7e8; s }).collect();
+            for _ in 0..5 { let mut s = clean(50.0); s.bitrate_bps = 1.0e11; s.throughput_bps = 1.0e11; v.push(s); }
+            let w = window(&v);
+            assert_eq!(w["bitrate_mbps"].as_f64().unwrap(), 275.0);
+            assert_eq!(w["throughput_mbps"].as_f64().unwrap(), 270.0);
         }
 
         #[test]
