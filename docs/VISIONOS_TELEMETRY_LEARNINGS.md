@@ -30,6 +30,8 @@ Settled by measurement (logs below). Device: Apple Vision Pro M2, streamer 20.14
 
 ## Open questions
 
+- (answered by the `alvr(1).log` session, see Sessions) How many frames does the real client lose? 0.05 % to the queue cap and 0.04 % to missed deadlines in 16 minutes at 100 Hz.
+
 - **Is the display rate fixed for the whole session?** In every log so far, yes: each session's 10 s windows have the same mean interval (night 100 Hz, midday 90 Hz; sessions up to 36 minutes; no window between the two rates). That does not show the system never changes it (a lighting change mid-session was never tried). Build `visionos_client_performance` logs `DISPLAY RATE CHANGED x Hz -> y Hz` when a window's mean differs by more than 3 % from the previous one, so a switch cannot go unnoticed.
 
 - Why 100 Hz at night and 90 Hz at midday? Lighting is the hypothesis; stream settings differed too. Test: same session settings in daylight and under artificial light, compare the `display interval` lines.
@@ -79,3 +81,10 @@ Distinct frames that reached the mock client, against those shown at least once 
 - The loss grows with the assumed draw time, not with the queue: with the 4 ms draw of the first model, 2.9 % (probe at 100) and 5.1 % (probe at 90) of the frames were lost at the draw. So how many frames the real client loses at the draw depends on its real draw time, which nothing has measured. In the model a late draw loses the frame; whether visionOS shows a late submission at the next vsync is not known.
 - Frames above the display rate: host paced at 100 into a 90 Hz emulated display, app measured 90.0 fps, lost 0.3 %. The host follows the client's reported display timing, so it did not produce frames the display would drop (consistent with the field log, where `server_fps` stayed near 90 at a 90 Hz display).
 - Stale ticks (a tick with no new picture) are not frame drops: they come from ticks with no frame to show.
+
+### 2026-11-09 (evening): `alvr(1).log`, build `visionos_client_performance` 18918cf (queue overflow and display-rate-change lines, rate follows the negotiated stream rate; no draw-cost lines yet)
+- One session, 15:54:49 to 16:11, 97 ten-second windows (16 minutes). Session: 100 fps, 3552x3200 view, constant 300 Mbit/s, encoded 7104x3200; frame generation state not recorded in the log. Client: display 100 Hz in every window (99.0 to 100.0 per window, no `DISPLAY RATE CHANGED` line), `stream target 100 Hz` (the client followed the negotiated rate; the earlier build read 90), thermal 0.
+- **Frames lost by the client: about 0.1 %.** 53 queue-overflow drops in 97,044 frames (0.05 %, at most 3 per window, 41 windows with any), 41 deadline misses (0.04 %; every interval over 15 ms is a deadline miss; worst slack -10.3 ms). The queue never held more than 2. The client draws essentially every frame it receives, as the lab model predicted.
+- **Repeats follow the delivered rate.** 96.6 % of ticks showed a fresh frame, 3.4 % were reprojected, 12 had no frame at all; per window the repeat share correlates 0.95 with the shortfall of `client_fps` against the display rate (mean repeats 3.2 %, mean shortfall 3.1 %: the client adds about 0.3 points). Worst windows: 46 to 49 % repeats with 43 to 54 % shortfall (the stream stalled). `server_fps` 98.3, `client_fps` 96.8, encode 9.4 ms, decode 6.8 ms, network 3.1 ms, 225 Mbit/s on average.
+- Compared with the lab model (draw 2 ms): the same kind of game gives about 3 points of extra repeats in the lab and 0.3 in the field, so the model's draw/pick jitter is too pessimistic; a draw of about 1 ms (or less jitter) would match. The draw-cost telemetry (build `5a0bfd8`) measures it.
+- The display stayed at 100 Hz for 16 minutes (a fourth session without a change; the lighting did not change during any of them).
