@@ -101,3 +101,11 @@ Distinct frames that reached the mock client, against those shown at least once 
 - **Frames lost by the client again about 0.1 %**: 88 queue-overflow drops in 87,947 frames and the 79 misses.
 - **Repeats equal the delivered shortfall**: 94.7 % of ticks fresh, 5.3 % reprojected, 14 with no frame; `server_fps` 94.8, `client_fps` 93.2 (this game ran at about 95 fps), encode 9.3 ms, decode 6.4 ms, network 2.9 ms, 212 Mbit/s, no packet lost; mean repeats 5.3 %, mean shortfall 6.1 % (per-window correlation 1.0).
 - Next log: build `2c38a06` (bicubic luma periphery and chroma, two-plane path instead of the hardware formats): compare the `draw over` GPU mean against 2.23 ms, and check the picture's colours.
+
+### 2026-11-09 (builder): does the engine follow the headset clock, at start and when the rate switches mid-session? (lab)
+Scenarios `pace_fg23_100_on_90`, `pace_switch_100_90`, `pace_switch_fg23_100_90` (the mock client gained `--display-switch t:hz`), same latency model as the other `pace_*` runs, 1280x1120 per eye. The session and `host.fps` say 100 in all three.
+- **Mismatch from the start, frame generation 2/3, display 90 Hz**: after the first 5 s the client gets 90 ticks and 90 new frames per second, stale ticks 0 %. The host's vsync ticks have a 11.11 ms median (90 Hz), so frame generation paces to the real display rate, not the nominal 100.
+- **Display switches 100 to 90 Hz 30 s into the stream, frame generation 2/3**: arrivals per second 96 (the second of the switch), 92, 89, then 90; repeats 0 in every second from the switch on. The host re-locked within about 3 s with no repeat burst.
+- **Same switch, frame generation off** (game near 100 fps): arrivals 91, 88, 89, 89 per second after the switch; stale ticks stayed at the same 1 to 5 % as before it (the probe's own shortfall). No transient.
+- At a 100 Hz display with frame generation on the builder's laptop GPU delivers 96 to 97 fps (stale 3 to 4 %), which is its limit at this size, not a pacing fault; the same run at 90 Hz is clean.
+- Conclusion: the host follows the display rate at start and through a mid-session change; nothing needs forcing. Not covered: a switch to or from 96 Hz, a faster switch back and forth, a real headset's report timing.

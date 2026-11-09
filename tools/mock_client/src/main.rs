@@ -68,6 +68,8 @@ struct Args {
     /// probability p an extra spike, "p:ms"; FIFO, so a late frame holds the ones behind it), decode time = decode_ms mean + Gaussian sd,
     /// and the draw (CPU + GPU, mean + Gaussian sd) between the pick and the submission: a frame whose draw ends after the presentation tick is lost to the compositor
     /// (the tick repeats the previous picture). Values from the field logs: network 0.6-4 ms, decode 5.4-8.9 ms.
+    /// "t:hz": the emulated display changes its rate to hz t seconds after the stream started (the system switching 100 -> 90 Hz)
+    display_switch: String,
     net_ms: f64,
     net_sd_ms: f64,
     net_spike: String,
@@ -129,6 +131,7 @@ fn parse_args() -> Result<Args, String> {
         noise_mdeg: 0.0,
         bunch: false,
         track_late: String::new(),
+        display_switch: String::new(),
         net_ms: 0.0,
         net_sd_ms: 0.0,
         net_spike: String::new(),
@@ -183,6 +186,7 @@ fn parse_args() -> Result<Args, String> {
             "--noise-mdeg" => a.noise_mdeg = v()?.parse().map_err(|e| format!("{e}"))?,
             "--bunch" => a.bunch = true,
             "--track-late" => a.track_late = v()?,
+            "--display-switch" => a.display_switch = v()?,
             "--net-ms" => a.net_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--net-sd-ms" => a.net_sd_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--net-spike" => a.net_spike = v()?,
@@ -336,7 +340,8 @@ fn main() {
                         let after_frame = args.track_after_frame;
                         let need = args.track_frames_needed.max(1);
                         let draw = (args.draw_ms, args.draw_sd_ms);
-                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, replay_gate_arg, real_views_arg, views_tan_arg, late_views, blackouts, after_frame, need, draw)));
+                        let dswitch: Option<(f64, f64)> = args.display_switch.split_once(':').and_then(|(t, h)| Some((t.parse().ok()?, h.parse().ok()?)));
+                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, replay_gate_arg, real_views_arg, views_tan_arg, late_views, blackouts, after_frame, need, draw, dswitch)));
                     } else {
                         let views_tan_arg = args.views_tan;
                         tracking_thread = Some(thread::spawn(move || tracking(c, s, sh, origin, fps, motion, controllers, late_views, views_tan_arg)));
@@ -689,12 +694,14 @@ fn display(
     after_frame: bool,
     need: usize,
     draw: (f64, f64),
+    dswitch: Option<(f64, f64)>,
 ) {
     let started_at = Instant::now();
     let frames0 = shared.lock().frames.len(); // frames of earlier stream sessions of this process do not count
     let mut dark: Option<(usize, usize, Instant)> = None; // (blackout index, frames at its start, when it started)
     let mut done = vec![false; blackouts.len()];
-    let period = Duration::from_secs_f64(1.0 / fps as f64);
+    let mut period = Duration::from_secs_f64(1.0 / fps as f64);
+    let mut switched = false;
     let vp = ViewParams { pose: Pose::default(), fov: Fov { left: -1.0, right: 1.0, up: 1.0, down: -1.0 } };
     // what the Vision Pro client reports (host_events views_config of a real session): +-31.06 mm, asymmetric FoV (tangents l r u d)
     let mk = |x: f32, t: [f32; 4]| ViewParams {
@@ -849,6 +856,13 @@ fn display(
             }
             None => {
                 shared.lock().display.push(DisplayRec { tick_ns: now.duration_since(origin).as_nanos(), shown_ts_ns: last_shown.map(|t| t.as_nanos()).unwrap_or(0), repeat: true, dwell_ms: 0.0, queue_len });
+            }
+        }
+        if let Some((at, hz)) = dswitch {
+            if !switched && started_at.elapsed().as_secs_f64() >= at {
+                switched = true;
+                period = Duration::from_secs_f64(1.0 / hz);
+                event(origin, "display_rate_switch", json!({ "at_s": at, "hz": hz }));
             }
         }
         tick += period;
