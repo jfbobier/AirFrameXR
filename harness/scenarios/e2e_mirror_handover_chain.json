@@ -1,5 +1,5 @@
 {
-  "description": "Field report (stillhappens2): the mirror holds the headset, a game's launcher stub starts and ends within a second (the mirror leaves), the streamer starts the mirror again a moment later, and the real game starts while that second mirror runs. Every mirror instance must see its signal and leave within 2 s, the engine must end each mirror's run before recording the next app, and the last app must keep the headset. Regression for a second game that never took the headset from the mirror.",
+  "description": "Field report (stillhappens2): the mirror holds the headset, a game's launcher stub starts and ends within a second (the mirror leaves), the streamer starts the mirror again a moment later, and the real game starts while that second mirror runs. Every mirror instance must see its signal and leave within 2 s, the engine must end each mirror's run before recording the next app, and the last app must keep the headset. Regression for a second game that never took the headset from the mirror. The host runs as --daemon like the installed streamer: a game that starts and ends in 0.2 s recreates the shim's ring at another size, the encoder's first OpenSharedResource on it can fail (0x80070057) and a plain host stops on the first encode error (2026-11-09 12:00 run: every later app saw 'headset NOT connected'); the daemon drops the frame, reopens the slots and restarts from an IDR.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -49,7 +49,8 @@
     "fps": 90,
     "seconds": 90,
     "connect_timeout": 45,
-    "gpu_keepalive": 90
+    "gpu_keepalive": 90,
+    "daemon": true
   },
   "client": {
     "seconds": 85,

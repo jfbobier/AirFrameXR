@@ -70,13 +70,13 @@ def run(name):
     live.ps(f"""
 if (Test-Path '{wd}') {{ Remove-Item '{wd}' -Recurse -Force }}
 robocopy '{src}' '{wd}' /E /NFL /NDL /NJH /NJS | Out-Null
-Remove-Item '{wd}\\logs','{wd}\\config\\session.json','{wd}\\config\\airframexr.json' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item '{wd}\\logs','{wd}\\config\\session.json','{wd}\\config\\session.base.json','{wd}\\config\\airframexr.json' -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force '{wd}\\config' | Out-Null
 """)
     sess = live.SCRATCH / "find_session.json"
     live.SCRATCH.mkdir(parents=True, exist_ok=True)
     sess.write_text(json.dumps(session_for(None if name == "unpaired" else WRONG_IP), indent=2))
-    live.put(sess, f"{wdf}/config/session.json")
+    live.put(sess, f"{wdf}/config/session.base.json")   # the golden master: the windows read and save it, session.json is compiled from it at the start
     client = rf"{live.CLONE}\{lib.CLIENT_EXE}"
     ann = live.SCRATCH / "announce.ps1"
     ann.write_text(ANNOUNCE)
@@ -101,13 +101,13 @@ New-Item -ItemType Directory -Force '{wd}\\config' | Out-Null
     time.sleep(3)
     res = live.ROOT / "harness" / "results" / f"find_headset_{time.strftime('%Y%m%dT%H%M%S')}_{name}"
     res.mkdir(parents=True, exist_ok=True)
-    for f in ("config/session.json", "logs/AirFrameXR.log", "mock_stdout.txt"):
+    for f in ("config/session.base.json", "config/session.json", "logs/AirFrameXR.log", "mock_stdout.txt"):
         (res / Path(f).parent).mkdir(parents=True, exist_ok=True)
         live._retry(["scp", "-o", "BatchMode=yes", *live.MUX, "-q", f"{live.PC}:{wdf}/{f}", str(res / f)])
     stop()
     detail = []
     try:
-        s = json.loads((res / "config/session.json").read_text())
+        s = json.loads((res / "config/session.base.json").read_text())   # the dialog saves the master (and ALVR's pairing is taken into it at the next start)
         cc = s.get("client_connections", {}).get(host, {})
         detail.append(f"session: manual_ips={cc.get('manual_ips')} trusted={cc.get('trusted')} state={cc.get('connection_state')}")
         if name in ("button", "unpaired") and HMD_IP not in (cc.get("manual_ips") or []):
