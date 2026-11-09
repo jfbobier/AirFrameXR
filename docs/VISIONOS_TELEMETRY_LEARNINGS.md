@@ -32,6 +32,8 @@ Settled by measurement (logs below). Device: Apple Vision Pro M2, streamer 20.14
 
 ## Open questions
 
+- (answered, see Sessions 2026-11-09 evening 2) What is the client's real draw cost? GPU 2.2 ms mean, CPU 1.6 ms mean per frame, on the hardware YCbCr path without filters. This is the baseline for the bicubic filters.
+
 - (answered by the `alvr(1).log` session, see Sessions) How many frames does the real client lose? 0.05 % to the queue cap and 0.04 % to missed deadlines in 16 minutes at 100 Hz.
 
 - **Is the display rate fixed for the whole session?** In every log so far, yes: each session's 10 s windows have the same mean interval (night 100 Hz, midday 90 Hz; sessions up to 36 minutes; no window between the two rates). That does not show the system never changes it (a lighting change mid-session was never tried). Build `visionos_client_performance` logs `DISPLAY RATE CHANGED x Hz -> y Hz` when a window's mean differs by more than 3 % from the previous one, so a switch cannot go unnoticed.
@@ -90,3 +92,12 @@ Distinct frames that reached the mock client, against those shown at least once 
 - **Repeats follow the delivered rate.** 96.6 % of ticks showed a fresh frame, 3.4 % were reprojected, 12 had no frame at all; per window the repeat share correlates 0.95 with the shortfall of `client_fps` against the display rate (mean repeats 3.2 %, mean shortfall 3.1 %: the client adds about 0.3 points). Worst windows: 46 to 49 % repeats with 43 to 54 % shortfall (the stream stalled). `server_fps` 98.3, `client_fps` 96.8, encode 9.4 ms, decode 6.8 ms, network 3.1 ms, 225 Mbit/s on average.
 - Compared with the lab model (draw 2 ms): the same kind of game gives about 3 points of extra repeats in the lab and 0.3 in the field, so the model's draw/pick jitter is too pessimistic; a draw of about 1 ms (or less jitter) would match. The draw-cost telemetry (build `5a0bfd8`) measures it.
 - The display stayed at 100 Hz for 16 minutes (a fourth session without a change; the lighting did not change during any of them).
+
+
+### 2026-11-09 (evening 2): `alvr(2).log`, build `visionos_client_performance` 5a0bfd8 (draw-cost lines; hardware YCbCr path, no filters)
+- One session, 17:04:16 to about 17:19, 89 windows (14.9 minutes). Session: 100 fps, 3552x3200 view, constant 300 Mbit/s, encoded 7104x3200. Display 100 Hz in every window (the 0.0 Hz window is the first, empty one), `stream target 100 Hz`, thermal 0, no rate change line.
+- **Draw cost (the baseline for the filters): GPU mean 2.23 ms** (window means 2.05 to 2.42, max single frame 13.3 ms), **CPU from the end of the pick to `commit` mean 1.56 ms** (window maxima up to 14.5 ms). At 100 Hz the frame is 10 ms, so the client's own GPU work is about 22 % of it, before the compositor's.
+- **The GPU is never the reason for a miss**: 0 of 87,932 command buffers finished after the presentation time (smallest slack 2.1 ms). The 79 deadline misses (0.09 %, each one a doubled 20 ms display interval, worst 13.7 ms late) are submissions that ended after the compositor's rendering deadline, which comes before the presentation; the CPU maxima of 5 to 14 ms in the draw lines are the likely cause (not traced further).
+- **Frames lost by the client again about 0.1 %**: 88 queue-overflow drops in 87,947 frames and the 79 misses.
+- **Repeats equal the delivered shortfall**: 94.7 % of ticks fresh, 5.3 % reprojected, 14 with no frame; `server_fps` 94.8, `client_fps` 93.2 (this game ran at about 95 fps), encode 9.3 ms, decode 6.4 ms, network 2.9 ms, 212 Mbit/s, no packet lost; mean repeats 5.3 %, mean shortfall 6.1 % (per-window correlation 1.0).
+- Next log: build `2c38a06` (bicubic luma periphery and chroma, two-plane path instead of the hardware formats): compare the `draw over` GPU mean against 2.23 ms, and check the picture's colours.
