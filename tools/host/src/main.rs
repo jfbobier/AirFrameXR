@@ -1591,7 +1591,7 @@ fn net_summary_of(net: &[serde_json::Value], lost: u64) -> serde_json::Value {
     let (tot, enc, netw, dec) = (sorted("total_latency_ms"), sorted("encode_ms"), sorted("network_ms"), sorted("decode_ms"));
     let outliers: u64 = net.iter().filter_map(|w| w["latency_outliers"].as_u64()).sum();
     let samples: u64 = net.iter().filter_map(|w| w["samples"].as_u64()).sum();
-    json!({ "windows": net.len(), "bitrate_mbps": mean("bitrate_mbps"), "throughput_mbps": mean("throughput_mbps"), "displayed_fps": mean("displayed_fps"),
+    json!({ "windows": net.len(), "bitrate_mbps": at(&sorted("bitrate_mbps"), 0.5), "throughput_mbps": at(&sorted("throughput_mbps"), 0.5), "displayed_fps": mean("displayed_fps"),   // medians of the windows: one absurd window (Dead Space showed 6801 Mbps) must not move the run
         "latency_ms": at(&tot, 0.5), "latency_p95_ms": at(&tot, 0.95), "encode_ms": at(&enc, 0.5), "network_ms": at(&netw, 0.5), "decode_ms": at(&dec, 0.5),
         "latency_outliers": outliers, "latency_samples": samples, "packets_lost": lost })
 }
@@ -3155,6 +3155,11 @@ mod net_summary_tests {
         assert_eq!(s["latency_outliers"], 3);
         assert_eq!(s["latency_samples"], 4500);
         assert_eq!(s["packets_lost"], 7);
+        let mut bad = net.clone();
+        bad[2]["bitrate_mbps"] = json!(6_800_000.0);
+        bad[2]["throughput_mbps"] = json!(6_800_000.0);
+        let s2 = net_summary_of(&bad, 0);
+        assert!(s2["bitrate_mbps"].as_f64().unwrap() < 400.0 && s2["throughput_mbps"].as_f64().unwrap() < 400.0, "{s2}");
         assert!(s["latency_p95_ms"].as_f64().unwrap() >= 53.0);
     }
 

@@ -1569,6 +1569,14 @@ namespace AirFrameXR
         /// ALVR's own breakdown of the streamer's share of the latency: encoder + transport (network) + decoder, in ms; null when any part is missing or not believable.
         public static double? Streamer(double enc, double net, double dec, double outliers = 0, double samples = 0) =>
             double.IsNaN(enc) || double.IsNaN(net) || double.IsNaN(dec) || Absurd(enc, outliers, samples) || Absurd(net, outliers, samples) || Absurd(dec, outliers, samples) ? (double?)null : enc + net + dec;
+        public const string Meaning = "ALVR's total: from the head pose the headset sent to the picture shown on it. The streamer's own share (encode + network + decode) is small; the rest is the game's time from that pose to its frame (its render queue, the frame-generation hold) and the headset's queues. A low streamer share next to a high total means the time is spent before the encoder, not in the stream.";
+        /// "enc 6 + net 7 + dec 6 + game and queues 78": the total split so it adds up (what the streamer does, then the remainder).
+        public static string Split(double total, double enc, double net, double dec, string fmt = "0")
+        {
+            if (double.IsNaN(total) || double.IsNaN(enc) || double.IsNaN(net) || double.IsNaN(dec)) return "";
+            var rest = Math.Max(0, total - enc - net - dec);
+            return $"enc {enc.ToString(fmt, CultureInfo.InvariantCulture)} + net {net.ToString(fmt, CultureInfo.InvariantCulture)} + dec {dec.ToString(fmt, CultureInfo.InvariantCulture)} + game and queues {rest.ToString(fmt, CultureInfo.InvariantCulture)}";
+        }
         /// "-" when nothing was measured, "n/a" when it was and is not believable, else the number.
         public static string Text(double ms, double outliers = 0, double samples = 0, string fmt = "0") =>
             double.IsNaN(ms) ? "-" : Absurd(ms, outliers, samples) ? "n/a" : ms.ToString(fmt, CultureInfo.InvariantCulture);

@@ -821,7 +821,7 @@ namespace AirFrameXR
                         tShown.Set(F(D(net, "displayed_fps"), "0.0") + " fps", $"repeated periods {F(rep, "0.0")} %", rep >= 5 ? Color.Firebrick : (Color?)null);
                         tBitrate.Set(F(D(net, "bitrate_mbps"), "0") + " Mbps", "average");
                         var latBad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms"));
-                        tLatency.Set(latBad ? "n/a" : F(D(net, "latency_ms"), "0") + " ms", latBad ? "not measured" : $"p95 {F(D(net, "latency_p95_ms"), "0")}", null, latBad ? Latency.Why : null);
+                        tLatency.Set(latBad ? "n/a" : F(D(net, "latency_ms"), "0") + " ms", latBad ? "not measured" : $"p95 {F(D(net, "latency_p95_ms"), "0")}, streamer {F(D(net, "encode_ms") + D(net, "network_ms") + D(net, "decode_ms"), "0")}", null, latBad ? Latency.Why : Latency.Meaning + "  This run: " + Latency.Split(D(net, "latency_ms"), D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms")));
                         tLoss.Set(F(D(net, "packets_lost"), "0"), "packets lost", D(net, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
                         stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} %, skipped {F(D(d, "skipped") * 100, "0.0")} %." + (rec == null ? "" : $"  Next time: {(ri >= 0 ? names[ri] : rec.Value.level)}.");
                     }
@@ -846,7 +846,7 @@ namespace AirFrameXR
                         tShown.Set(F(double.IsNaN(D(c, "displayed_fps")) ? D(c, "client_fps") : D(c, "displayed_fps"), "0.0") + " fps", "");
                         tBitrate.Set(F(D(d, "mbps"), "0") + " Mbps", "");
                         var liveBad = Latency.Absurd(D(c, "total_latency_ms"), D(c, "latency_outliers"), D(c, "samples"));
-                        tLatency.Set(liveBad ? "n/a" : F(D(c, "total_latency_ms"), "0") + " ms", liveBad ? "not measured" : $"enc {F(D(c, "encode_ms"), "0")} + net {F(D(c, "network_ms"), "0")} + dec {F(D(c, "decode_ms"), "0")}", null, liveBad ? Latency.Why : null);
+                        tLatency.Set(liveBad ? "n/a" : F(D(c, "total_latency_ms"), "0") + " ms", liveBad ? "not measured" : $"enc {F(D(c, "encode_ms"), "0")} + net {F(D(c, "network_ms"), "0")} + dec {F(D(c, "decode_ms"), "0")} + rest {F(Math.Max(0, D(c, "total_latency_ms") - D(c, "encode_ms") - D(c, "network_ms") - D(c, "decode_ms")), "0")}", null, liveBad ? Latency.Why : Latency.Meaning);
                         tLoss.Set(S(d, "packets_lost"), "packets lost", D(d, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
                         stats.Text = "";
                     }

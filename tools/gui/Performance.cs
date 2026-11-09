@@ -167,7 +167,7 @@ namespace AirFrameXR
             if (net != null) main.Controls.Add(Ui.MakeTile("Headset shows", N(D(net, "displayed_fps")) + " fps", "repeated periods " + N(rep) + " %", rep >= 5 ? Color.Firebrick : (Color?)null));
             if (net != null) {
                 var bad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms"));
-                var lt = Ui.MakeTile("Latency", bad ? "n/a" : N(D(net, "latency_ms"), "0") + " ms", bad ? "not measured" : $"p95 {N(D(net, "latency_p95_ms"), "0")}; enc {N(D(net, "encode_ms"), "0")} + net {N(D(net, "network_ms"), "0")} + dec {N(D(net, "decode_ms"), "0")}");
+                var lt = Ui.MakeTile("Latency", bad ? "n/a" : N(D(net, "latency_ms"), "0") + " ms", bad ? "not measured" : $"p95 {N(D(net, "latency_p95_ms"), "0")}; " + Latency.Split(D(net, "latency_ms"), D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms")));
                 if (bad) lt.Set("n/a", "not measured", null, Latency.Why);
                 main.Controls.Add(lt);
             }
