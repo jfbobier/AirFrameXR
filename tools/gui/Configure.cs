@@ -166,7 +166,9 @@ namespace AirFrameXR
 
             section("Video");
             sizeAuto.Click += (s, e) => SizeAutomatic();
-            row("Resolution per eye", flow(eyeW, Ui.Line("x"), eyeH, Ui.Line($"(Vision Pro default 3648 x 3200, Apple's panel; at most {Nvenc.MaxEyeWidth} wide: the encoder's limit)")));
+            row("Resolution per eye", flow(eyeW, Ui.Line("x"), eyeH));
+            var eyeNote = Ui.Line($"Vision Pro default 3648 x 3200, Apple's panel; at most {Nvenc.MaxEyeWidth} wide: the encoder's limit."); eyeNote.ForeColor = Color.DimGray; eyeNote.MaximumSize = new Size(560, 0);   // on a line of its own: beside the boxes the row was wider than the tab
+            row("", eyeNote);
             sizeNote.ForeColor = Color.DimGray; sizeNote.MaximumSize = new Size(560, 0);
             row("", flow(sizeAuto, sizeNote));
             fps.Items.AddRange(new object[] { "90", "96", "100" });
