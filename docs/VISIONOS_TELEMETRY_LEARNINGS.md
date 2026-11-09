@@ -1,0 +1,92 @@
+# visionOS client telemetry: what we learned
+
+Living document. Add a dated entry under "Sessions" after each log read, move settled items into "Findings", and strike or delete open questions that get answered.
+Evidence level words follow `docs/progress.md`: say what was measured, how, and what was not.
+
+The client code, the mock-client latency model and the `harness/scenarios/pace_*.json` scenarios this file refers to live on the branch `visionos_client_performance` (client fork `kteque/alvr-visionos` and this repository) until they are merged; the findings below stand on their own.
+
+## How it is collected
+
+- Client branch `additional_telemetry` (fork `kteque/alvr-visionos`, from `kteque/1.3.6` `099e02c`). Read-only: it writes log lines and changes no state. Compiled in CI and uploaded to TestFlight through the fork's TestFlight workflow; not otherwise verified to leave behaviour unchanged.
+- Lines start with `[tele]` and go through `alvr_log` at error level (the only level the streamer logs while streaming), so they appear in the streamer's session log (`alvr.log`). Find them with `grep "\[tele\]"`.
+- Line types:
+  - `drawable color WxH layers N views N`, `view i viewport WxH at x,y`, `ratemap layer i screen WxH physical WxH` (or `ratemap none`): once per stream start (from build `b7b4e1a`; the first build logged them before the log connection existed, so they never appeared).
+  - `decoder hardware Optional(1) codec <fourcc> WxH`: once per decoder session. `Optional(1)` = hardware decoder in use. `1752589105` = `hvc1` (HEVC).
+  - `pick over N ticks: fresh / resubmit / reprojected / none, queue depth at pick, wait for a late frame, age of a fresh frame`: every 10 s (commit `61a8f6f`, added to the branch after `b7b4e1a`; not written in the session that wrote this file). Reprojected = the compositor tick had no new frame and the client reprojected the previous one.
+  - `display interval mean/min/max ... over N frames`: every 10 s and on a thermal change. From the compositor's presentation times. From `b7b4e1a` it also has `N over 15 ms`, `deadline misses`, `min slack` (end of `endSubmission` against the predicted `renderingDeadline`), `thermal` (0 = nominal) and `stream target` (the rate the stream was set to).
+- Earlier probes of the same kind: `[ratemap]` (1.3.2 to 1.3.4, result went into `RateMapFoveation.Milder`), `[proj]` and `[view]` (only on the archived 1.4 line, tag `archive/1.4-experiment`).
+
+## Findings
+
+Settled by measurement (logs below). Device: Apple Vision Pro M2, streamer 20.14.1 session, HEVC, stream target 90 Hz, constant 275 Mbit/s.
+
+1. **The display ran at 100 Hz for the whole session, with the stream target at 90.** 344 ten-second windows over two logs (about 57 minutes), mean interval 10.0 ms in every window; no switch to 90 or 96. The client offers `[100, 96, 90]`. Why the system chose 100 is not in the logs. Hypothesis (from the research notes, not shown by our data): visionOS picks 90/96/100 from the room's lighting (flicker sensor, 50 Hz mains in France), so the app cannot choose it.
+2. **Hardware HEVC decoding in use** in both sessions (`decoder hardware Optional(1)`), stream 3840x1664 as encoded.
+3. **Thermal state 0 (nominal)** in all 344 windows. Sessions were 36 and 21 minutes, so this says nothing about longer sessions.
+4. **Occasional doubled display intervals are client deadline misses.** In the 2026-11-09 midday log, every interval over 15 ms coincides with a submission that ended after the compositor's rendering deadline (48 of 48; min slack -5.8 ms, at 90 Hz = 11.1 ms frames). Earlier logs (night) had the same doubled intervals (~0.2 % of frames) but no deadline counter. Cause of the misses not established.
+5. **The display ran at 90 Hz in the midday log (13:00), 100 Hz in the night logs (23:55 to 00:39).** Consistent with the lighting hypothesis in finding 1, but the two sessions also differed in stream settings (see Sessions), so it is not isolated.
+6. **Geometry numbers visionOS gave the client** (midday log, one session, fit not recorded): drawable colour texture 2432x2368, 2 layers; each view's viewport 6261x5023 (larger than the texture, so not texture pixels: probably the screen-space size the rate map is defined over; interpretation unconfirmed); rate map `screenSize` read as 0x0 and `physicalSize` 2432x2368 per layer. A 0x0 screen size means the rate map was not usable as read; whether foveation was active is not established.
+7. **Repeats track the frames the stream actually delivers, not the pick policy** (midday log, 17 windows; the log's `[STATS]` lines give the streamer's `server_fps` and the client's `client_fps` per second). Per 10 s window, the share of compositor ticks without a fresh frame correlates 0.89 with the share the delivered rate cannot cover, (90 - client_fps) / 90. Windows at client_fps 90 had 0 to 3 % repeats; windows at client_fps 48 to 72 had 22 to 45 %, and `server_fps` in those windows was 50 to 72: the game or the streamer was not producing frames (a loading scene in the first minute). So in this log the repeats are born upstream of the client. Open: two windows repeat clearly more than the delivered rate explains (13:00:55 +3 points; 13:01:05 +13; 13:03:26 +30 with client_fps 65 and 58 % repeats). The client's queue holds 2 frames and discards the oldest on overflow, which would turn bursty arrival into extra repeats; the overflow drops were not counted until build `visionos_client_performance` (`queue overflow drops` line).
+8. **The streamer in that log was slow to encode**: `encode_latency_ms` 11 to 17 ms in most windows (above the 10 ms budget of a 100 fps stream), `server_fps` 42 to 109 and 84 to 96 in the steady part, constant 300 Mbit/s at 4096x3609. Which streamer and machine produced it is not recorded in the log; note it before reading it as a statement about the AirFrameXR engine.
+9. **Reprojection share varied a lot at a 100 fps stream on a 90 Hz display** (midday log): 15 % of compositor ticks overall, 0 to 58 % per 10 s window, 10 ticks with no frame at all. The windows with the most reprojection do not line up with the windows with the most deadline misses.
+
+## Open questions
+
+- (answered by the `alvr(1).log` session, see Sessions) How many frames does the real client lose? 0.05 % to the queue cap and 0.04 % to missed deadlines in 16 minutes at 100 Hz.
+
+- **Is the display rate fixed for the whole session?** In every log so far, yes: each session's 10 s windows have the same mean interval (night 100 Hz, midday 90 Hz; sessions up to 36 minutes; no window between the two rates). That does not show the system never changes it (a lighting change mid-session was never tried). Build `visionos_client_performance` logs `DISPLAY RATE CHANGED x Hz -> y Hz` when a window's mean differs by more than 3 % from the previous one, so a switch cannot go unnoticed.
+
+- Why 100 Hz at night and 90 Hz at midday? Lighting is the hypothesis; stream settings differed too. Test: same session settings in daylight and under artificial light, compare the `display interval` lines.
+- Why did the client's `stream target` read 90 Hz when the session asked for 100 fps (midday log)? Not looked into.
+- What makes the client miss the rendering deadline (up to 20 in one 10 s window, then 0 to 5)? Candidates, none tested: a late frame wait in the pick, work in the render path, the 100 fps stream against the 90 Hz display. Compare against the pick lines per window.
+- What the 6261x5023 viewport and the 0x0 rate-map screen size mean, and whether foveation was active. Panel resolution is still the estimate (3660x3200 from iFixit, 3648x3144 from Omdia); our default declared view size is a number, not a measurement.
+- Does the rate map change with gaze? Not tested; we do not depend on it either way.
+- Thermal behaviour over 30 to 60 minutes at the final profile: not tested.
+- Decode callback time and dropped-frame counts: not logged (would hook the decode path).
+
+## Background (not measured by us)
+
+From the research notes of 2026-11-08, secondary sources, treat as leads: Apple publishes no panel resolution or FOV; visionOS supplies projection, viewport and rasterization rate map per drawable; the M2 media engine lists H.264/HEVC/ProRes, not AV1; Wi-Fi is 802.11ax, 5 GHz, 80 MHz, 2 streams (1.2 Gbit/s PHY, application throughput unpublished); the compositor expects extended linear Display P3. Foveated Streaming/CloudXR is out of scope (no raw gaze for apps; we do not use it).
+
+## Sessions
+
+### 2026-11-09: first telemetry logs (build from `c7fca92`)
+- Files: `alvr1.log` (23:55 to 00:01+, 216 windows), `alvr2.log` (00:32 to 00:39+, 128 windows), from the owner's Downloads folder (not kept in the repo).
+- Result: findings 1 to 4 above. Missing: geometry lines (fixed in `b7b4e1a`).
+- Next: read a log from `b7b4e1a`; one session with the stream at 100 Hz; one in different lighting.
+
+### 2026-11-09 (midday): `alvr (2).log`, build with `61a8f6f`
+- One session, 13:00:37 to 13:03:36, 17 windows. Session asked for 100 fps, 4096x3609 view, constant 300 Mbit/s, HEVC; encoded 8192x3584 (foveated encoding). Display 11.1 ms (90 Hz) in every window, thermal 0, hardware decoder, 48 deadline misses (all the over-15 ms intervals), 15 % reprojected ticks. Findings 4 to 7.
+- Geometry lines now appear (stream start logged twice: the client reconnected at 13:00:45).
+- Next: same settings at night (does it go back to 100 Hz?); a longer session; compare misses against pick waits per window.
+
+### 2026-11-09 (lab): protocol harness, repeats at the display
+Client branch `visionos_client_performance` (from `additional_telemetry`). Not a device result: the Linux protocol harness runs the real `EventHandler.swift` against a scripted streamer and a render-loop model.
+- The harness counted a resubmitted frame as new; fixed. A tick is now new only when the pick took a frame from the queue.
+- Scenarios `pace_*`, `rate_follows_hint` (all pass; the existing 15 scenarios still pass). Share of display ticks showing a new frame: 90 fps stream on a 100 Hz display 90 %; free-running 95 / 97 / 98 fps into 100 Hz 95 / 97 / 97-98 %; 98 fps into 90 Hz 100 %; paced 100 fps on 100 Hz 100 %. So the lab reproduces drift ((display - fps) / display) and the rate mismatch, and nothing beyond it. It does not reproduce the 12 to 35 % repeats of the field and lab tables.
+- Change tested: the client's refresh rate (display link and `AVDisplayCriteria` request) follows the stream's negotiated rate (`refresh_rate_hint`) instead of the 90 default. `rate_follows_hint` fails with the old behaviour and passes with it. Not run on a device.
+- Reading of the pick-policy question: with the log's evidence (finding 7) and the lab's, a longer pick wait or a held frame has nothing to fix in the cases we can reproduce; no toggle was added.
+
+### 2026-11-09 (builder, 3080 Ti): the repeats reproduced, frame generation on against off
+Branch `visionos_client_performance`. Scenarios `harness/scenarios/pace_*.json` run the real chain (probe app, shim, host, NVENC) against the mock client's Vision Pro display emulation (`display_sim`, 100 Hz, poll 5 ms, queue 2). The mock client now has a latency model (`tools/mock_client`, `--net-ms/--net-sd-ms/--net-spike`, `--decode-ms/--decode-sd-ms`, `--draw-ms/--draw-sd-ms`, each a mean plus a Gaussian): network 2.5 ms and decode 7 ms from the field `[STATS]` means; draw time is an assumption (2 ms, sd 0.7) tuned so the paced case stays low, not measured. "Stale" = ticks with no new picture (no frame picked, or a frame with the previous timestamp).
+- **Frame generation off, free-running game 95-99 fps, 100 Hz: stale 10 to 14 %** (repeat ticks 9 to 13 %, same-timestamp frames 1.1 %, app measured 93 fps). This is the field range of 11.9 to 26.3 % (first reproduction of the repeats in the lab).
+- **Frame generation 2/3, game 60-75 fps, 100 Hz: stale 2.9 %** (the same client model; at a 4 ms draw 6.3 %). The field shows 0.3 %, so the model's draw/pick jitter still costs a few points the real client does not pay: the model is not yet calibrated to the real client (deadline misses in the field log were 0.3 %).
+- The builder's single NVENC engine cannot encode 3520x1600 at 100 fps (about 10 ms): at that size both runs were capped near 88 to 93 fps (stale 12 % with frame generation on). The pace scenarios use 1280x1120 per eye.
+- Where the off-case repeats come from: the shown timestamps step by one period 80 % of the time, by two periods 9 %, three or more 2 %: the repeats are mostly single ticks, close to the count the delivered rate forces ((100 - 93) / 100 = 7 %) plus 2 to 3 points of jitter. A client cannot show new pictures that the game did not produce; with frame generation every output is a distinct interpolated picture on the host's clock, so no tick is left without one.
+- Client pick tuning in the ideal paced case (probe at 100, model draw 4 ms): poll 3 ms 3.9 %, poll 5 ms 6.1 %, poll 7 ms 13.3 % (a longer wait pushes the draw past the presentation, the frame is lost and the tick repeats); queue 3 instead of 2: 5.7 %. These depend on the assumed draw time and say nothing about the real client until the draw time is measured.
+- Not shown by any lab run: how a repeated tick looks. The mock has no pose and no compositor, so it cannot tell whether the visionOS client's handling of a repeated frame (old anchor, reprojection, `useApplesReprojection` off) is what the wearer sees as trembling.
+
+### 2026-11-09 (builder): does the client draw every frame it receives? (model, draw 2 ms)
+Distinct frames that reached the mock client, against those shown at least once (display.csv against frames.csv; the rest were lost to the queue cap or, in the model, to a draw that ended after the presentation tick):
+- Frame generation off, 95-99 fps game: 5761 arrived, 6 lost (0.1 %), 3 of them queue overflow. Frame generation 2/3: 6244 arrived, 22 lost (0.35 %), 13 queue overflow.
+- A queue of 3 instead of 2 changes nothing that matters (lost 0.14 % and 0.18 %, repeat ticks 9.0 % against 9.2 % off, 3.7 % against 2.9 % with frame generation): the cap is not the lever.
+- The loss grows with the assumed draw time, not with the queue: with the 4 ms draw of the first model, 2.9 % (probe at 100) and 5.1 % (probe at 90) of the frames were lost at the draw. So how many frames the real client loses at the draw depends on its real draw time, which nothing has measured. In the model a late draw loses the frame; whether visionOS shows a late submission at the next vsync is not known.
+- Frames above the display rate: host paced at 100 into a 90 Hz emulated display, app measured 90.0 fps, lost 0.3 %. The host follows the client's reported display timing, so it did not produce frames the display would drop (consistent with the field log, where `server_fps` stayed near 90 at a 90 Hz display).
+- Stale ticks (a tick with no new picture) are not frame drops: they come from ticks with no frame to show.
+
+### 2026-11-09 (evening): `alvr(1).log`, build `visionos_client_performance` 18918cf (queue overflow and display-rate-change lines, rate follows the negotiated stream rate; no draw-cost lines yet)
+- One session, 15:54:49 to 16:11, 97 ten-second windows (16 minutes). Session: 100 fps, 3552x3200 view, constant 300 Mbit/s, encoded 7104x3200; frame generation state not recorded in the log. Client: display 100 Hz in every window (99.0 to 100.0 per window, no `DISPLAY RATE CHANGED` line), `stream target 100 Hz` (the client followed the negotiated rate; the earlier build read 90), thermal 0.
+- **Frames lost by the client: about 0.1 %.** 53 queue-overflow drops in 97,044 frames (0.05 %, at most 3 per window, 41 windows with any), 41 deadline misses (0.04 %; every interval over 15 ms is a deadline miss; worst slack -10.3 ms). The queue never held more than 2. The client draws essentially every frame it receives, as the lab model predicted.
+- **Repeats follow the delivered rate.** 96.6 % of ticks showed a fresh frame, 3.4 % were reprojected, 12 had no frame at all; per window the repeat share correlates 0.95 with the shortfall of `client_fps` against the display rate (mean repeats 3.2 %, mean shortfall 3.1 %: the client adds about 0.3 points). Worst windows: 46 to 49 % repeats with 43 to 54 % shortfall (the stream stalled). `server_fps` 98.3, `client_fps` 96.8, encode 9.4 ms, decode 6.8 ms, network 3.1 ms, 225 Mbit/s on average.
+- Compared with the lab model (draw 2 ms): the same kind of game gives about 3 points of extra repeats in the lab and 0.3 in the field, so the model's draw/pick jitter is too pessimistic; a draw of about 1 ms (or less jitter) would match. The draw-cost telemetry (build `5a0bfd8`) measures it.
+- The display stayed at 100 Hz for 16 minutes (a fourth session without a change; the lighting did not change during any of them).
