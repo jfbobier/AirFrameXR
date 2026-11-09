@@ -1,0 +1,86 @@
+{
+  "description": "Pacing experiment: as pace_probe_100 with a 3-frame client queue Client latency model: network 2.5 ms, decode 7 ms (field means, STATS lines of 2026-11-09), draw 4 ms (an assumption, not measured), each mean + Gaussian sd 1 / 1 / 1.5 ms.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 100,
+    "seconds": 70,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 100000
+  },
+  "client": {
+    "seconds": 65,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "display_sim": true,
+    "display_hz": 100,
+    "poll_ms": 5.0,
+    "queue_max": 3,
+    "motion": "yaw",
+    "net_ms": 2.5,
+    "net_sd_ms": 1.0,
+    "decode_ms": 7,
+    "decode_sd_ms": 1.0,
+    "draw_ms": 4.0,
+    "draw_sd_ms": 1.5
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 6000,
+    "timeout_s": 75
+  },
+  "gpu_sample": true,
+  "timeout_s": 200,
+  "checks": {
+    "host_min_frames": 250,
+    "client_min_frames": 200,
+    "max_duplicate_timestamps": 100000
+  }
+}

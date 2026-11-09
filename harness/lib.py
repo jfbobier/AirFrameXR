@@ -31,7 +31,7 @@ CLIENT_FLAGS = {"seconds": "--seconds", "connect_timeout": "--connect-timeout", 
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "track_blackout": "--track-blackout", "track_after_frame": "--track-after-frame", "track_frames_needed": "--track-frames-needed", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views", "views_tan": "--views-tan", "height": "--height"}
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "track_blackout": "--track-blackout", "track_after_frame": "--track-after-frame", "track_frames_needed": "--track-frames-needed", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "net_ms": "--net-ms", "net_sd_ms": "--net-sd-ms", "net_spike": "--net-spike", "decode_sd_ms": "--decode-sd-ms", "draw_ms": "--draw-ms", "draw_sd_ms": "--draw-sd-ms", "real_views": "--real-views", "views_tan": "--views-tan", "height": "--height"}
 
 
 class Blocked(Exception):
