@@ -39,7 +39,7 @@ def compile_session(golden, settings, views=None):
     for f in ("session.base.json", "airframexr.json"):
         lib.b_put(loc / "config" / f, f"runs/{rid}/{name}/config/{f}")
     if views:
-        (loc / "config" / "airframexr_views.json").write_text(json.dumps({"fov_tan": list(views) * 2}))
+        (loc / "config" / "airframexr_views.json").write_text(json.dumps({"fov_tan": list(views) + [views[1], views[0], views[2], views[3]]}))   # left eye l r u d, right eye mirrored (the real file)
         lib.b_put(loc / "config" / "airframexr_views.json", f"runs/{rid}/{name}/config/airframexr_views.json")
     for p in sorted((ROOT / "profiles").glob("apple-vision-pro*.profile.json")):   # the rate map the foveation and the bitrate sizing read
         lib.b_put(p, f"runs/{rid}/{name}/profiles/{p.name}")

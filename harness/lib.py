@@ -135,6 +135,12 @@ def derive_session(sc, dst: Path, pin=None):
         import sessioncompile
         s, line, _ = sessioncompile.compile_session(s, cmp_.get("settings", {}), cmp_.get("views"))
         print(f"  session compiled: {line}")
+        for path, val in sc.get("after_compile_overrides", {}).items():     # like session_overrides, but on the compiled session (to change one number the compile made)
+            d = s
+            keys = path.split(".")
+            for k in keys[:-1]:
+                d = d[k]
+            d[keys[-1]] = val
     dst.write_text(json.dumps(s, indent=1))
 
 
