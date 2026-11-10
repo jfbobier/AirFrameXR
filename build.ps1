@@ -99,3 +99,4 @@ if ($Targets -contains 'gui')     { Stage 'gui'     'stage16_gui.ps1'        'RE
 if ($Targets -contains 'package') { Stage 'package' 'stage13_package.ps1'    'RESULT: OK' }
 Write-Host "RESULT: OK ($($Targets -join ' '))"
 if ($Targets -contains 'package') { Write-Host "package: $repo\out\dist\AirFrameXR (+ zip)" }
+# AirFrameXR build script: see docs/DEVELOPMENT.md

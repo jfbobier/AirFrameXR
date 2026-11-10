@@ -1,3 +1,4 @@
+<!-- AirFrameXR pull request: read CONTRIBUTING.md first -->
 **What changes**
 
 **Tested** (harness scenarios / measurements / headset, with results):

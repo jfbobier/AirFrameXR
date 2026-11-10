@@ -13,3 +13,5 @@ are not supported): visionOS version, ALVR app version. **Network**: Wi-Fi band,
 
 **Logs** (please attach both): `logs\AirFrameXR.log`, and the `logs\debug\<time>\` folder of the run (turn debug on in
 AirFrameXR.exe, reproduce, then zip that folder). They contain your headset's name and LAN address; remove them if you prefer.
+
+<!-- AirFrameXR: attach the logs (Export logs in the streamer window) -->

@@ -1,5 +1,5 @@
 {
-  "_comment": "Resolved with git rev-parse on 2026-10-07. Entries with full_hash=null were only recorded as short hashes in docs and are NOT present locally; resolve before relying on them.",
+  "_comment": "Resolved with git rev-parse on 2026-10-07. Entries with full_hash=null were only recorded as short hashes in docs and are NOT present locally; resolve before relying on them. These are the pins of the AirFrameXR build.",
   "builder_sources": {
     "ALVR-v20.14.1": {
       "tag": "v20.14.1",
