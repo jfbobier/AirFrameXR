@@ -90,7 +90,7 @@ namespace AirFrameXR
             ChromaOn.CheckedChanged += (s, e) => { idle.Enabled = idleReset.Enabled = ChromaOn.Checked; };
             row("Chroma-key passthrough", ChromaOn, ChromaOn);
             row("Key colour (also the idle screen)", flow(idle, idleReset), idle);
-            var remind = Ui.Line("Optional, off by default (the desktop mirror shows between games instead). #00FF00 is recommended. The headset's ALVR app takes the colour from the streamer, except the Vision Pro App Store app, whose key is fixed: keep it off there unless you set the same colour in an ALVR app that has the picker.");
+            var remind = Ui.Line("Optional, off by default (the desktop mirror shows between games instead). #00FF00 is recommended. The headset app takes the colour from the streamer (the AirFrameXR clients and the Quest's ALVR app do), except the stock ALVR app on the Vision Pro (App Store), whose key is fixed: keep it off there unless you set the same colour in an ALVR app that has the picker.");
             remind.ForeColor = Color.DimGray;
             note(remind);
 

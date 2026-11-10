@@ -50,7 +50,7 @@ namespace AirFrameXR
             var title = Ui.Line("Find the headset on the network", Ui.Big);
             title.ForeColor = Ui.Accent;
             p.Controls.Add(title);
-            p.Controls.Add(Ui.Line("Open the ALVR app on the headset (same network as this PC). It appears below within a few seconds; a headset paired before is listed at once. " +
+            p.Controls.Add(Ui.Line("Open the headset app (same network as this PC). It appears below within a few seconds; a headset paired before is listed at once. " +
                                    "AirFrameXR normally dials the saved address and finds a paired headset again by name by itself: use this when that did not work."));
             Ui.Col(list, "Name (hostname)", 290);
             Ui.Col(list, "IP address", 120);
@@ -106,7 +106,7 @@ namespace AirFrameXR
 
         class Row { public string Host, Ip, Name; public bool Usable, Known, Moved; }
 
-        static string NameFor(string host) => host.EndsWith(".client.alvr") ? "Apple Vision Pro" : host.EndsWith(".client") ? "Headset (Quest or other ALVR client)" : host;
+        static string NameFor(string host) => HeadsetNames.FromHost(host);
 
         void StartDiscovery()
         {
@@ -169,7 +169,7 @@ namespace AirFrameXR
             if (!IPAddress.TryParse(ip, out _)) { MessageBox.Show(this, "That is not an IP address (like 192.168.1.50).", Text); return; }
             if (paired == null)
             {
-                MessageBox.Show(this, "A headset that was never paired has to be found on the network first (open the ALVR app on it): its name is needed to pair it. " +
+                MessageBox.Show(this, "A headset that was never paired has to be found on the network first (open the headset app on it): its name is needed to pair it. " +
                                       "An address alone only changes where the paired headset is dialled.", Text);
                 return;
             }

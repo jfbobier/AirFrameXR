@@ -364,6 +364,13 @@ namespace AirFrameXR
 
     public enum HeadsetKind { None, VisionPro, Quest, Other }
 
+    /// What a headset is called before it has told us: from the name its app announces on the network (docs: the visionOS client announces "NNNN.client.alvr",
+    /// the ALVR client core, so a Quest and other Android clients, "<words>.client"). Once connected the real name comes from the handshake.
+    public static class HeadsetNames
+    {
+        public static string FromHost(string host) => host.EndsWith(".client.alvr") ? "Apple Vision Pro" : host.EndsWith(".client") ? "Headset (Quest or other ALVR client)" : host;
+    }
+
     /// config\airframexr.json: AirFrameXR's own settings (the ALVR ones stay in session.json).
     public class AppSettings
     {
@@ -859,7 +866,7 @@ namespace AirFrameXR
                 p.Controls.Add(Ui.Line("A Quest on a USB cable is not on the network, so it is not found by itself. Two ways:"));
                 p.Controls.Add(Ui.Line("1. USB tethering (Quest: Settings, Network). The headset then has a network address like any other: use Search again."));
                 p.Controls.Add(Ui.Line("2. ADBForwarder (a small program from the ALVR project): download it, run it with the Quest plugged in and Developer Mode on, " +
-                                       "open the ALVR app on the headset, then use " + Address + " as the headset address (button below)."));
+                                       "open the headset app, then use " + Address + " as the headset address (button below)."));
                 var link = new LinkLabel { Text = DownloadUrl, AutoSize = true, Font = Ui.Body, Margin = new Padding(3) };
                 link.LinkClicked += (s, e) => { try { System.Diagnostics.Process.Start(DownloadUrl); } catch { } };
                 p.Controls.Add(link);

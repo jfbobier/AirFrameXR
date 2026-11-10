@@ -189,7 +189,7 @@ namespace AirFrameXR
                         // one step at the configured bitrate: pass or fail with the reasons, no search for another bitrate
                         string perr = null, verdict = null; bool ok = false; var why = new List<string>(); var plost = new List<double>();
                         var mbps = Math.Max(30, (int)Math.Round(ctx.ConfigMbps));
-                        ctx.Status($"Network check at {mbps} Mbps: waiting for the headset (open the ALVR app)...");
+                        ctx.Status($"Network check at {mbps} Mbps: waiting for the headset (open the headset app)...");
                         await Host(ctx, Base + $"--benchmark-network {mbps} --bench-step-s {Math.Max(ctx.StepSecs, 10)} --connect-timeout 120 --seconds 900 --encode-profile {ctx.EncodeProfileArg}", (n, d) =>
                         {
                             switch (n)
@@ -214,7 +214,7 @@ namespace AirFrameXR
                         return $"{mbps} Mbps ran clean (no packet loss, the headset kept its frame rate, the network latency did not rise)";
                     }
                     string error = null; int rec = 0; var lost = new List<double>(); string note = null;
-                    ctx.Status("Network test: waiting for the headset (open the ALVR app)...");
+                    ctx.Status("Network test: waiting for the headset (open the headset app)...");
                     await Host(ctx, Base + $"--benchmark-network {ctx.NetSteps} --bench-step-s {ctx.StepSecs} --connect-timeout 120 --seconds 900 --encode-profile foveated", (n, d) =>
                     {
                         switch (n)
@@ -295,7 +295,7 @@ namespace AirFrameXR
                     System.Diagnostics.Process app = null;
                     try
                     {
-                        ctx.Status("Scene test: waiting for the headset (open the ALVR app)...");
+                        ctx.Status("Scene test: waiting for the headset (open the headset app)...");
                         var t0 = DateTime.UtcNow;
                         while (!connected && error == null && !exited.Task.IsCompleted && (DateTime.UtcNow - t0).TotalSeconds < 120) await Task.Delay(300, ctx.Ct);
                         if (error != null) throw new TestFailed(error);
@@ -421,7 +421,7 @@ namespace AirFrameXR
                         {
                             ctx.R.AudioNote += "; you did not hear it in the headset";
                             st.Warn();
-                            return ctx.R.AudioNote + ". The PC side works, so check the headset side: the volume in the headset, the ALVR app's sound settings, and that \"Stream game audio\" is ticked in Settings.";
+                            return ctx.R.AudioNote + ". The PC side works, so check the headset side: the volume in the headset, the headset app's sound settings, and that \"Stream game audio\" is ticked in Settings.";
                         }
                         return ctx.R.AudioNote + (ctx.R.HeardMusic == true ? "; you heard it in the headset" : "") + ": the headset gets the PC's sound, no virtual cable needed (games started as administrator are captured too)";
                     }

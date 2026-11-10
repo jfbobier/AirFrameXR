@@ -94,7 +94,7 @@ namespace AirFrameXR
         {
             var t = new TabPage("1. Headset") { BackColor = Color.White, Padding = new Padding(10) };
             var p = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoScroll = true };
-            p.Controls.Add(Ui.Line("Open the ALVR app on the Vision Pro (same network as this PC). It appears below within a few seconds."));
+            p.Controls.Add(Ui.Line("Open the headset app (same network as this PC). It appears below within a few seconds."));
             Ui.Col(found, "Name (hostname)", 260);
             Ui.Col(found, "IP address", 140);
             Ui.Col(found, "ALVR version", 170);
@@ -144,9 +144,9 @@ namespace AirFrameXR
 
         void PairSelected()
         {
-            if (found.SelectedItems.Count == 0) { MessageBox.Show(this, "Select a headset first (open the ALVR app on the Vision Pro).", Text); return; }
+            if (found.SelectedItems.Count == 0) { MessageBox.Show(this, "Select a headset first (open the headset app).", Text); return; }
             var f = (Discovery.Found)found.SelectedItems[0].Tag;
-            var name = f.Hostname.EndsWith(".client.alvr") ? "Apple Vision Pro" : f.Hostname;
+            var name = HeadsetNames.FromHost(f.Hostname);
             Session.Pair(session, f.Hostname, name, f.Ip);
             Session.Save(session);
             settings.HeadsetHost = f.Hostname; settings.HeadsetName = name; settings.HeadsetIp = f.Ip;
@@ -167,7 +167,8 @@ namespace AirFrameXR
             section("Video");
             sizeAuto.Click += (s, e) => SizeAutomatic();
             row("Resolution per eye", flow(eyeW, Ui.Line("x"), eyeH));
-            var eyeNote = Ui.Line($"Vision Pro default 3648 x 3200, Apple's panel; at most {Nvenc.MaxEyeWidth} wide: the encoder's limit."); eyeNote.ForeColor = Color.DimGray; eyeNote.MaximumSize = new Size(560, 0);   // on a line of its own: beside the boxes the row was wider than the tab
+            var otherHeadset = AppSettings.KindOf(settings.HeadsetName) is HeadsetKind kn && (kn == HeadsetKind.Quest || kn == HeadsetKind.Other);
+            var eyeNote = Ui.Line(otherHeadset ? $"At most {Nvenc.MaxEyeWidth} wide: the encoder's limit." : $"Vision Pro default 3648 x 3200, Apple's panel; at most {Nvenc.MaxEyeWidth} wide: the encoder's limit."); eyeNote.ForeColor = Color.DimGray; eyeNote.MaximumSize = new Size(560, 0);   // on a line of its own: beside the boxes the row was wider than the tab
             row("", eyeNote);
             sizeNote.ForeColor = Color.DimGray; sizeNote.MaximumSize = new Size(560, 0);
             row("", flow(sizeAuto, sizeNote));
@@ -192,7 +193,7 @@ namespace AirFrameXR
             chromaOn.CheckedChanged += (s, e) => { idle.Enabled = idleReset.Enabled = chromaOn.Checked; };
             row("Chroma-key passthrough", chromaOn);
             row("Key colour (also the idle screen)", flow(idle, idleReset));
-            var remind = Ui.Line("Optional, off by default (the desktop mirror shows between games instead). #00FF00 is recommended. The headset's ALVR app takes the colour from the streamer, except the Vision Pro App Store app, whose key is fixed: keep it off there unless you set the same colour in an ALVR app that has the picker.");
+            var remind = Ui.Line("Optional, off by default (the desktop mirror shows between games instead). #00FF00 is recommended. The headset app takes the colour from the streamer (the AirFrameXR clients and the Quest's ALVR app do), except the stock ALVR app on the Vision Pro (App Store), whose key is fixed: keep it off there unless you set the same colour in an ALVR app that has the picker.");
             remind.MaximumSize = new Size(560, 0);   // wraps inside its column
             remind.ForeColor = Color.DimGray;
             g.Controls.Add(new Label()); g.Controls.Add(remind);
@@ -352,7 +353,7 @@ namespace AirFrameXR
             var credit = Ui.Line("Scene: \"Littlest Tokyo\" by Glen Fox (glenatron), CC-BY-4.0, shown in a room tiled with its own texture (see README.txt).");
             credit.ForeColor = Color.DimGray;
             p.Controls.Add(credit);
-            p.Controls.Add(Ui.Line("Network test (headset paired and the ALVR app open): random frames at rising bitrates; the headset shows noise.", Ui.Bold));
+            p.Controls.Add(Ui.Line("Network test (headset paired and the headset app open): random frames at rising bitrates; the headset shows noise.", Ui.Bold));
             var f = new FlowLayoutPanel { AutoSize = true };
             f.Controls.Add(Ui.Line("Bitrates (Mbps):")); f.Controls.Add(steps);
             f.Controls.Add(Ui.Line("seconds per step:")); stepSecs.Value = 8; f.Controls.Add(stepSecs);
@@ -481,7 +482,7 @@ namespace AirFrameXR
             SaveSettings(false);
             discovery?.Dispose();
             applyBitrate.Enabled = false;
-            benchStatus.Text = "Waiting for the headset (open the ALVR app on the Vision Pro)...";
+            benchStatus.Text = "Waiting for the headset (open the headset app)...";
             bench = new HostProcess();
             bench.OnEvent += (n, d) => BeginInvoke((Action)(() =>
             {

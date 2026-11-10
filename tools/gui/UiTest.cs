@@ -156,6 +156,11 @@ namespace AirFrameXR
                 int page = p;
                 yield return new Case { Name = "wizard-page" + page, Make = () => new WizardForm(null, true), Prepare = f => ((WizardForm)f).ForTest(page) };
             }
+            for (int p = 0; p <= 7; p++)   // the same pages with a Quest 3: nothing Vision Pro specific is expected, and nothing clipped
+            {
+                int page = p;
+                yield return new Case { Name = "wizard-quest-page" + page, Make = () => { WizardForm.DemoHeadsetForTest = "quest3"; return new WizardForm(null, true); }, Prepare = f => { ((WizardForm)f).ForTest(page); WizardForm.DemoHeadsetForTest = null; } };
+            }
             yield return new Case { Name = "configure-advanced", Make = () => new ConfigureForm(null) };
             var quest3 = new[] { 1.376, 0.839, 0.966, 1.428 };
             yield return new Case { Name = "fov-manager", Make = () => new FovManagerForm(FovManagerForm.DemoStore(), new[] { 1.045, 0.800, 0.759, 0.871 }) };

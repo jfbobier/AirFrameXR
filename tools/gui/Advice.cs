@@ -150,7 +150,7 @@ namespace AirFrameXR
                 s.Add(new Suggestion { Sev = Sev.Hint, Knob = "the headset's tracking stamps", Source = "from the wizard's scene test",
                     Title = "Some frames carry the same head sample as the one before",
                     Measured = $"{F(r.SameTsPct, "0.0")} % of frames share the previous frame's tracking timestamp",
-                    Do = "the headset skips them (shown fps a little under the host's). Known on the Vision Pro in heavy games: the game reads its pose in bursts; a fix needs a client change, nothing to set here" });
+                    Do = "the headset skips them (shown fps a little under the host's). Seen on the Vision Pro in heavy games: the game reads its pose in bursts; nothing to set here" });
 
             // arrival margin: the knob the UI should own (logs only: the wizard does not see the phase lock)
             if (facts.PhaseSamples >= 5 && !double.IsNaN(facts.SpreadMed))
@@ -177,8 +177,8 @@ namespace AirFrameXR
             if (hs != null && hs.Rates != null && hs.Rates.Count > 1)
                 s.Add(new Suggestion { Sev = Sev.Info, Knob = "display refresh rate", Source = "from the headset's handshake",
                     Title = $"The headset can run at {string.Join(" / ", hs.Rates.Select(x => F(x, "0")))} Hz",
-                    Measured = "the Vision Pro switches between 90 and 100 Hz as visionOS decides (100 under 50 Hz lighting); the generation caps move with it (30 fps at 90 Hz, 33 at 100)",
-                    Do = "nothing to choose: if a game flips between clean and dirty with the room's lighting, that is why" });
+                    Measured = (hs.IsVisionPro ? "the Vision Pro switches between 90 and 100 Hz as visionOS decides (100 under 50 Hz lighting); " : "the rate in force is the one the headset or its app set; ") + "the generation caps move with it (30 fps at 90 Hz, 33 at 100)",
+                    Do = hs.IsVisionPro ? "nothing to choose: if a game flips between clean and dirty with the room's lighting, that is why" : "nothing to choose here: the rate is set in the headset or its app" });
 
             // debug logging costs send delay
             if (debugOn)
