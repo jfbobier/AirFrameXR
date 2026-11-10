@@ -144,10 +144,10 @@ namespace AirFrameXR
             if (ours)
             {
                 var prev = demoReady ? "" : OpenXr.Previous();
-                lines.Add(Row("\u2713", "Your VR games use AirFrameXR.", Color.SeaGreen, prev.Length > 0 ? new[] { ("Switch back to " + OpenXr.Name(prev), (Action)SwitchBack) } : new (string, Action)[0]));
+                lines.Add(Row("\u2713", "OpenXR: AirFrameXR is registered.", Color.SeaGreen, prev.Length > 0 ? new[] { ("Switch back to " + OpenXr.Name(prev), (Action)SwitchBack) } : new (string, Action)[0]));
             }
             else
-                lines.Add(Row("\u26A0", "Your VR games are set to use " + OpenXr.Name(OpenXr.ActiveRuntime()) + ", not AirFrameXR.", Color.Firebrick, File.Exists(Paths.Manifest) ? new[] { ("Use AirFrameXR", (Action)UseAirFrameXR) } : new (string, Action)[0]));
+                lines.Add(Row("\u26A0", "OpenXR: set to " + OpenXr.Name(OpenXr.ActiveRuntime()) + ", not AirFrameXR.", Color.Firebrick, File.Exists(Paths.Manifest) ? new[] { ("Use AirFrameXR", (Action)UseAirFrameXR) } : new (string, Action)[0]));
             var risky = demoReady ? new System.Collections.Generic.List<XrLayer>() : XrLayers.ActiveImplicit().Where(l => l.MayCaptureInput).ToList();
             if (risky.Count > 0)
                 lines.Add(Row("\u26A0", risky.Count == 1 ? "An OpenXR layer may take your controllers before the game sees them." : risky.Count + " OpenXR layers may take your controllers before the game sees them.", Color.Firebrick, new[] { ("Review", (Action)(() => { using (var f = new LayersForm()) f.ShowDialog(this); RefreshSystem(); })) }));
@@ -156,9 +156,9 @@ namespace AirFrameXR
             bool allGood = lines.Count == 1 && ours;
             // OpenVR games: SteamVR (the default) or OpenComposite, which translates them to OpenXR, so they run on AirFrameXR without SteamVR. Informational: never "Needs attention".
             if (installingOc) lines.Add(Row("\u2022", "Downloading OpenComposite...", Color.DimGray, new (string, Action)[0]));
-            else if (!demoReady && OpenComposite.Active) lines.Add(Row("\u2713", "Your OpenVR games run through OpenComposite, on AirFrameXR (no SteamVR).", Color.SeaGreen, new[] { ("Switch back to SteamVR", (Action)(() => OcSwitch(false))) }));
-            else if (!demoReady && OpenComposite.Installed) lines.Add(Row("\u2022", "Your OpenVR games use SteamVR.", Color.DimGray, new[] { ("Use OpenComposite", (Action)(() => OcSwitch(true))) }));
-            else lines.Add(Row("\u2022", "Your OpenVR games use SteamVR. OpenComposite can run them on AirFrameXR instead.", Color.DimGray, new[] { ("Install OpenComposite...", (Action)OcInstall) }));
+            else if (!demoReady && OpenComposite.Active) lines.Add(Row("\u2713", "OpenVR: OpenComposite is active (games run on AirFrameXR, no SteamVR).", Color.SeaGreen, new[] { ("Switch back to SteamVR", (Action)(() => OcSwitch(false))) }));
+            else if (!demoReady && OpenComposite.Installed) lines.Add(Row("\u2022", "OpenVR: SteamVR.", Color.DimGray, new[] { ("Use OpenComposite", (Action)(() => OcSwitch(true))) }));
+            else lines.Add(Row("\u2022", "OpenVR: SteamVR.", Color.DimGray, new[] { ("Install OpenComposite", (Action)OcInstall) }));
             sys.Controls.Add(new Label { Text = allGood ? "Ready" : "Needs attention", AutoSize = true, Font = Ui.Big, ForeColor = allGood ? Color.SeaGreen : Color.Firebrick, Margin = new Padding(0, 0, 0, 4) });
             foreach (var l in lines) sys.Controls.Add(l);
             sys.ResumeLayout();
@@ -171,7 +171,7 @@ namespace AirFrameXR
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 2, 0, 2), MaximumSize = new Size(660, 0) };
             row.Controls.Add(new Label { Text = icon, AutoSize = true, ForeColor = c, Font = Ui.Bold, Margin = new Padding(0, 6, 6, 0) });
             row.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 6, 10, 0), MaximumSize = new Size(480, 0) });
-            foreach (var b in buttons) { var bt = new Button { Text = b.label, AutoSize = true, Margin = new Padding(0, 0, 6, 0) }; var act = b.act; bt.Click += (s, e) => act(); row.Controls.Add(bt); }
+            foreach (var b in buttons) { var bt = new Button { Text = b.label, AutoSize = true, Margin = new Padding(0, 2, 6, 0), Font = new Font(Ui.Body.FontFamily, 8.5f), Padding = new Padding(2, 0, 2, 0) }; var act = b.act; bt.Click += (s, e) => act(); row.Controls.Add(bt); }
             return row;
         }
 
