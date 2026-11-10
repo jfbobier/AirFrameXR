@@ -57,26 +57,27 @@ AirFrameXR is built for people with a wireless headset and an NVIDIA GPU who wan
 <!-- End AirFrameXR overview -->
 
 > [!WARNING]
-> **VERSION 1.1.1 (PRE-RELEASE): TEST AT YOUR OWN RISK.**
-> On real headsets it has been tested by one person, on one PC (RTX 5090) with one Vision Pro and one Quest 3, frame generation included
-> (plus automated tests on a laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
+> **TEST AT YOUR OWN RISK.**
+> On real headsets it has been tested by a small group of testers (the maintainer's own PC, an RTX 5090, with a Vision Pro and a Quest 3, frame generation included, plus automated tests on a laptop GPU). Games may crash, fail to start, or show a broken image; the stream may stutter or have high latency. It changes your PC's OpenXR runtime registration and adds a firewall rule
 > (both undone by the launcher's OpenXR runtime button, "Switch back"). Keep comfort in mind: a frozen or juddering image in a headset can cause
 > discomfort; take the headset off if anything looks wrong. Provided "as is", without warranty of any kind (see [LICENSE](LICENSE)).
 
-**Main focus:** the **Windows** streamer on an **NVIDIA** GPU (RTX 40 series or newer recommended; any NVENC 12.2 driver runs), with the **ALVR app (20.14.x) on
-Apple Vision Pro**. That is what is built, tuned and tested here.
+**Main focus:** the **Windows** streamer on an **NVIDIA** GPU (RTX 40 series or newer recommended; any NVENC 12.2 driver runs), with an **Apple Vision Pro** or a **Meta Quest 3** (the AirFrameXR clients, or the stock ALVR app 20.14.x). That is what is built, tuned and tested here.
 
-This is a **personal project**. It targets NVIDIA because that is what I run, and the Vision Pro because that is my headset.
+This is a **personal project**. It targets NVIDIA because that is what I run, and the Apple Vision Pro and the Meta Quest 3 because I own these headsets.
 It is not affiliated with or supported by NVIDIA, Apple or the ALVR project.
 
 **Relationship to ALVR.** AirFrameXR implements the ALVR streaming protocol (version 20) so that the existing ALVR headset apps work with it, and it is
 built on ALVR's open-source server libraries (MIT). It is a separate project: it is **not ALVR**, not affiliated with or endorsed by the ALVR
 project, and the ALVR developers' own streamer remains the place for SteamVR-based streaming. Formerly published as "VisionALVR" (before 1.0); the
 name was changed at the ALVR developers' request, so that nothing suggests an affiliation.
-- **Other headsets**: the ALVR protocol is device agnostic, so **other headsets with an ALVR client (Quest, Pico, ...) are expected to
-  work**. The Quest 3 has been tested here with the Meta-store ALVR client, frame generation included; others are not, and the encoder
-  settings, defaults and the idle chroma-key frame are tuned for the Vision Pro. Reports and small fixes for them are welcome, with no
-  promise of an answer or a fix; nothing that makes the Vision Pro path worse will be merged.
+- **Headset clients.** The streamer speaks the ALVR protocol (20.14.x), so there are two kinds of clients:
+  - **AirFrameXR clients**, built for the two headsets this project targets, so that the optimizations run end to end (the field of view limit, the chroma-key passthrough, timing and latency logs):
+    - **Apple Vision Pro**: the [AirFrameXR visionOS client](https://github.com/jfbobier/airframexr-visionos) (source on GitHub), distributed through **TestFlight**. <!-- TODO: add the public TestFlight link from kteque -->
+    - **Meta Quest 3**: the [AirFrameXR Quest client](https://github.com/jfbobier/airframexr-metaquest), a full **Vulkan** rewrite of the ALVR client's renderer; **sideload** the APK from the fork's [releases](https://github.com/jfbobier/airframexr-metaquest/releases) (tested on a Quest 3 only).
+  - **The stock ALVR clients** (the ALVR app on the Vision Pro, the Meta-store ALVR app on the Quest) work natively with the streamer, frame generation included, but with fewer end-to-end optimizations.
+
+  Other headsets with an ALVR client (Pico, ...) are not targeted for now.
 - **A plain colour when the headset connects, before a game starts, is normal**: it is the streamer's idle frame while no game runs. What you see there is your choice, made in the setup wizard and the streamer: the **desktop mirror** (a floating Windows screen, on by default) or **chroma-key passthrough** (your room: on the Vision Pro, turn on the ALVR app's **Enable Chroma Keyed Passthrough**; the key colour is #00FF00 and the idle frame follows it). Passthrough is optional and off by default; with it off the idle frame is black. If you chose passthrough and the headset shows plain green, the chroma key is not set in the ALVR app. Details: [docs/INSTALL.md](docs/INSTALL.md).
 - **AMD / Intel GPUs**: not supported and not planned. The encode path is NVENC only; you are welcome to fork and adapt it.
   [ALVR](https://github.com/alvr-org/ALVR) itself supports them.
@@ -146,19 +147,17 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <p align="center"><img src="docs/images/ui_wizard.png" width="640" alt="The setup wizard: choose a setup"></p>
 
-**Your field of view, your profiles.** *Manage profiles and calibrate...* (the FOV card) opens the profile manager: every calibration you keep and every set of values you type is stored in `config\user_fov_profiles.json`, apart from the settings, so an upgrade does not lose it. Pick one to see its map (the headset's own box dashed, your measured window with its rays), delete the bad ones (a lot of people do not calibrate well the first time), enter values by hand (red when the numbers cannot be a field of view, yellow when they can but look strange), import a file someone shared, or check one with `fovgrid` in the headset. The standard Vision Pro calibration, and a starting point for the Quest 3 (about 10 % fewer game pixels, from one published measurement, not tested here), are copied in for the matching headset.
+**Your field of view, your profiles.** *Manage profiles and calibrate...* opens the profile manager (in the field of view section at the top of the advanced settings): every calibration you keep and every set of values you type is stored in `config\user_fov_profiles.json`, apart from the settings, so an upgrade does not lose it. Pick one to see its map (the headset's own box dashed, your measured window with its rays), delete the bad ones (a lot of people do not calibrate well the first time), enter values by hand (red when the numbers cannot be a field of view, yellow when they can but look strange), import a file someone shared, or check one with `fovgrid` in the headset. The standard Vision Pro calibration, and a starting point for the Quest 3 (about 10 % fewer game pixels, from one published measurement, not tested here), are copied in for the matching headset.
 
-<p align="center"><img src="docs/images/ui_fov_manager.png" width="640" alt="The profile manager: the list of profiles, the map of the selected one, the values entered by hand with the red / yellow check, and the calibrate, fovgrid and import buttons"></p>
+<p align="center"><img src="docs/images/ui_fov_manager.png" width="640" alt="The field of view profile manager: the list of profiles, the map of the selected one (the headset's box dashed, the measured window with its rays, the rectangle the games are told), the values entered by hand with the red / yellow check, and the calibrate, fovgrid and import buttons"></p>
 
 **Calibrate your own field of view.** *Manage profiles and calibrate...* > *Calibrate (1 min, headset on)* starts a scene in the headset: four bright lines mark the edges of the picture, one eye at a time (close the other). Press SPACE to start. Look at a line and push it outward with the arrow keys until the lens cuts it and it disappears, then bring it back until it is clearly visible again (Shift + arrow moves it back); **Enter** ends the eye, and Enter on the second eye saves. On a Vision Pro the lines start on the AVP optimized window, on another headset at 85 % of what it declares, and they never go past what the headset declares. The keys are read from the PC keyboard while the calibration window is in front (the tool stops the desktop mirror and takes focus, so nothing moves the Windows mouse). The result is kept in your profiles as the larger value of the two eyes on each edge, because the engine tells the game one box for both eyes. Same tool for every headset. The 1.3 ray wizard (30 minutes) is gone from the interface; its maths stay in [docs/FOV_CALIBRATION.md](docs/FOV_CALIBRATION.md).
 
-<p align="center"><img src="docs/images/ui_calibrate.png" width="640" alt="The eye calibration result: 24 grey rays from the centre with a dot where the square vanished on each, the dark outline of the visible window and the blue rectangle the games are told"></p>
 
-*The pictures show made-up demo data from the UI harness (invented windows, not a person's measurement). The calibration itself has not been run on a headset yet.*
+*The picture shows made-up demo data from the UI harness (invented profiles and windows, not a person's measurement).*
 
 **In the setup wizard.** The last step asks for the field of view with the same two choices: *Stock vendor view* is the default, and what you pick there is what is used afterwards (*AVP optimized*, a profile of yours, or values typed by hand). The passthrough question comes earlier and defaults to Yes for the Vision Pro and the Quest alike.
 
-<p align="center"><img src="docs/images/ui_wizard_fov.png" width="640" alt="The setup wizard's Field of view step: no restriction or a profile, with the list, the map and the values entered by hand"></p>
 
 **Firewall rules.** Finds the rule for this folder's exact `alvr_host.exe`, offers one only if none is in place, and lists the leftovers Windows keeps (stale, duplicate, blocking) with one click to remove them.
 
@@ -247,13 +246,10 @@ What changed in each version: [docs/releases/](docs/releases/) (1.0 onward; earl
   UEVR games, Luke Ross mods (Dead Space Remake), native VR games, controllers (ALVR's Quest/Touch emulation), haptics, game audio,
   discovery/pairing with the stock app.
 - **Known issues**:
-  - Frame generation is still experimental.
   - Some OpenXR games need the SteamVR + ALVR fallback. OpenVR games are not supported natively: the bundled OpenComposite translation worked on about 60 % of the old OpenVR games we tried (see above); the rest need SteamVR.
   - No USB streaming, except when bridged with ALVR's own tools.
   - HEVC encoding is baked in for maximum split-encoding performance: no H.264 or AV1.
-  - On the Vision Pro, in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips them (shown fps a little under the host
-    fps). A host-side fix was built and parked (tag `archive/exp-restamp-2026-10-13`); it needs a change in the visionOS client, so it is not in the release.
-  - The new field of view tool (the line test), the restriction radio buttons and the automatic foveation have been checked on the PC and in the lab (the tool's scenarios on a mock headset, the foveation numbers against a Python oracle), not yet on a headset with a real game.
+  - The diagnostics tool is still experimental: for example, its network bandwidth assessment is still reported as not reliable.
 - **Perceived quality varies a lot from one setup to another, especially with frame generation on.** Every time the same build felt different on the same PC and headset, the
   cause was a condition of the setup, not a game: the Wi-Fi channel (a neighbour's network produced micro-stutters that stock ALVR showed too; channel 149 cured them), the panel
   running 100 Hz instead of 90, the margin frames need before the headset's tick (7 ms is the default), the generation rate per game, the Quest tracking at 270 Hz being read as
@@ -324,7 +320,7 @@ The game's sound reaches the headset without installing anything: the host captu
 
 ## Requirements
 - Windows 10/11, an **NVIDIA** GPU with a current driver (NVENC API 12.2+); RTX 40 series or newer recommended (several NVENC chips enable split encoding).
-- Apple Vision Pro with the **ALVR** app (20.14.x), PC and headset on the same LAN (Wi-Fi 6 on 5 GHz for the first Vision Pro; 6 GHz is for newer models and Quest 3). Other headsets with an ALVR client: see above.
+- An **Apple Vision Pro** or a **Meta Quest 3** with the AirFrameXR client (or the stock **ALVR** app, 20.14.x; see above); PC and headset on the same LAN (Wi-Fi 6 on 5 GHz for the first Vision Pro; 6 GHz is for newer models and Quest 3). Only these two headsets are targeted for now.
 - **Wired connection**: a Meta Quest on USB works through **USB tethering** (the headset then appears to the PC as a network interface) or through [ADBForwarder](https://github.com/alvr-org/ADBForwarder) (ALVR's small adb helper; run it, open the ALVR app on the Quest, and use `127.0.0.1` as the headset address: the wizard shows a *Meta Quest on a USB cable?* link when nothing is found). AirFrameXR itself does not run adb. The Vision Pro Developer Strap works as a network link the same way.
 - SteamVR and ALVR's own launcher closed while streaming (same ports).
 

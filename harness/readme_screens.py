@@ -9,8 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SHOTS = {   # harness case -> README image (the size the picture is taken at is the second item when it is not 1080p / 125 %)
     "launcher-ready": "ui_launcher", "streamer-clean": "ui_streamer", "performance": "ui_performance", "wizard-page3": "ui_wizard",
-    "suggestions": "ui_suggestions", "firewall-rules": "ui_firewall", "calibrate-result": "ui_calibrate",
-    "fov-manager": "ui_fov_manager", "wizard-page7": "ui_wizard_fov",   # the profile manager and the wizard's Field of view step (made-up profiles)
+    "suggestions": "ui_suggestions", "firewall-rules": "ui_firewall",
+    "fov-manager": "ui_fov_manager",   # the profile manager: the one picture of the field of view tool (made-up profiles)
     "rec-recording": "ui_blackbox_recorder",                              # the Black Box (docs/BENCH_UI.md)
     "analyze-problem-tall": ("ui_blackbox_analyzer", "2560x1440@100"),    # as tall as the screen allows: the resource table and the charts together
 }
