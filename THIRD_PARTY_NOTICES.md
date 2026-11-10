@@ -26,6 +26,10 @@ Versions, sources and checksums: `third_party/README.md`, `deps.lock.json`.
   except six under **MPL-2.0** (`symphonia*`, `webpki-roots`, `option-ext`), used unmodified; their source is at crates.io.
 - `virtualdesktop-openxr.dll` / `.json`: VirtualDesktop-OpenXR (MIT), patched as above.
 - `LibOVRRT64_1.dll`: OVRShim (MIT).
+- `opencomposite\bin\vrclient.dll`, `vrclient_x64.dll`: **OpenComposite** (OpenVR -> OpenXR, https://gitlab.com/znixian/OpenOVR), **GPL-3.0-or-later**, the
+  project's own prebuilt DLLs, unmodified, revision `a27e7e6a64bdcd1eff6b7fba1ea2ea34bcf1273d` (1.0.1539). They are separate programs that games load; AirFrameXR does not link to
+  them and only points the system-wide OpenVR runtime path at them when the user switches the launcher's OpenVR translation on. Licence texts: `docs\licenses\OpenComposite-*.txt`
+  (GPL-3, Valve's OpenVR headers, inih); the corresponding source (`OpenOVR-a27e7e6...tar.gz`), the hashes and the origin are in `opencomposite\` (`SOURCE.txt`).
 - `bench\littlest_tokyo.vab`: **"Littlest Tokyo" by Glen Fox** (glenatron, https://sketchfab.com/glenatron), licensed
   **CC-BY-4.0** (https://creativecommons.org/licenses/by/4.0/), from the three.js examples (r169). Changes: converted to
   AirFrameXR's format (meshes decompressed, simplified shading), shown inside a room tiled with the scene's own texture.

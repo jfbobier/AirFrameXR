@@ -1107,6 +1107,18 @@ extern "C" fn on_params(user: *mut std::ffi::c_void, bitrate: *mut u64, fps: *mu
     }
 }
 
+/// One foveation geometry value from the session: `openvr_config[k]`, else the session's foveation settings `[sk]` (ALVR writes zeros to openvr_config
+/// when foveation is off). Sizes and ratios are positive. The centre SHIFT is signed (negative = towards the left / top; the session compile makes
+/// negative shifts from the headset's picture edges) and zero is a real value, so it is taken as it is whenever the geometry is on: a `> 0` filter
+/// here once left the host at its 0.4 / 0.1 defaults while the client was sent the real shift (e2e_session_compiled, 2026-11-09).
+fn fov_geometry(c: &serde_json::Value, fset: &serde_json::Value, k: &str, sk: &str) -> Option<f64> {
+    let shift = k.contains("shift");
+    let on = c["foveation_center_size_x"].as_f64().map_or(false, |v| v > 0.0);
+    let ok = |v: &f64| v.is_finite() && (shift || *v > 0.0);
+    let from_c = if shift && !on { None } else { c[k].as_f64().filter(ok) };
+    from_c.or_else(|| fset[sk].as_f64().filter(ok))
+}
+
 /// Pushes the encoder configuration to the NVENC code: the encoder parameters are the hardcoded NVIDIA profile, the stream
 /// parameters (refresh rate, eye resolution, foveation) come from the session's `openvr_config` as before.
 fn configure_encoder(session_path: &std::path::Path, split_mode: i64, qp_map: bool, host_keys: &[(&std::ffi::CStr, i64)]) -> (i32, i32, f64) {
@@ -1134,7 +1146,7 @@ fn configure_encoder(session_path: &std::path::Path, split_mode: i64, qp_map: bo
     ] {
         // ALVR writes zeros to openvr_config when foveation is off (and its FFR code divides by them): then use the geometry from the
         // session's foveation settings (still the user's values; the QP map follows them even without the warp)
-        if let Some(v) = c[k].as_f64().filter(|v| *v > 0.0).or_else(|| fset[sk].as_f64().filter(|v| *v > 0.0)) {
+        if let Some(v) = fov_geometry(c, fset, k, sk) {
             let ck = std::ffi::CString::new(k).unwrap();
             unsafe { nvh::nvh_set_f(ck.as_ptr(), v) };
         }
@@ -1211,7 +1223,7 @@ fn run_quality_bench(origin: Instant, args: &Args, layout: &alvr_filesystem::Lay
     let s: serde_json::Value = fs::read_to_string(&session).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
     let c = &s["openvr_config"];
     let fset = &s["session_settings"]["video"]["foveated_encoding"];
-    let g = |k: &str, sk: &str, d: f64| c[k].as_f64().filter(|v| *v > 0.0).or_else(|| fset["content"][sk].as_f64().filter(|v| *v > 0.0)).unwrap_or(d) as f32;
+    let g = |k: &str, sk: &str, d: f64| fov_geometry(c, &fset["content"], k, sk).unwrap_or(d) as f32;
     let (fov, ipd) = match load_views(&args.config_dir.join("airframexr_views.json")) {
         Some((f, o)) if f.iter().all(|x| x.is_finite() && *x > 0.0) => (f, (o[3] - o[0]).abs().max(0.04)),
         _ => (AVP_DEFAULT_FOV, AVP_DEFAULT_IPD),
@@ -1579,7 +1591,7 @@ fn net_summary_of(net: &[serde_json::Value], lost: u64) -> serde_json::Value {
     let (tot, enc, netw, dec) = (sorted("total_latency_ms"), sorted("encode_ms"), sorted("network_ms"), sorted("decode_ms"));
     let outliers: u64 = net.iter().filter_map(|w| w["latency_outliers"].as_u64()).sum();
     let samples: u64 = net.iter().filter_map(|w| w["samples"].as_u64()).sum();
-    json!({ "windows": net.len(), "bitrate_mbps": mean("bitrate_mbps"), "throughput_mbps": mean("throughput_mbps"), "displayed_fps": mean("displayed_fps"),
+    json!({ "windows": net.len(), "bitrate_mbps": at(&sorted("bitrate_mbps"), 0.5), "throughput_mbps": at(&sorted("throughput_mbps"), 0.5), "displayed_fps": mean("displayed_fps"),   // medians of the windows: one absurd window (Dead Space showed 6801 Mbps) must not move the run
         "latency_ms": at(&tot, 0.5), "latency_p95_ms": at(&tot, 0.95), "encode_ms": at(&enc, 0.5), "network_ms": at(&netw, 0.5), "decode_ms": at(&dec, 0.5),
         "latency_outliers": outliers, "latency_samples": samples, "packets_lost": lost })
 }
@@ -3143,6 +3155,11 @@ mod net_summary_tests {
         assert_eq!(s["latency_outliers"], 3);
         assert_eq!(s["latency_samples"], 4500);
         assert_eq!(s["packets_lost"], 7);
+        let mut bad = net.clone();
+        bad[2]["bitrate_mbps"] = json!(6_800_000.0);
+        bad[2]["throughput_mbps"] = json!(6_800_000.0);
+        let s2 = net_summary_of(&bad, 0);
+        assert!(s2["bitrate_mbps"].as_f64().unwrap() < 400.0 && s2["throughput_mbps"].as_f64().unwrap() < 400.0, "{s2}");
         assert!(s["latency_p95_ms"].as_f64().unwrap() >= 53.0);
     }
 
@@ -3152,5 +3169,18 @@ mod net_summary_tests {
         w["total_latency_ms"] = serde_json::Value::Null;
         let s = net_summary_of(&[w, win(50.0, 0)], 0);
         assert_eq!(s["latency_ms"].as_f64().unwrap(), 50.0);
+    }
+    #[test]
+    fn a_negative_foveation_shift_reaches_the_encoder_and_zero_geometry_falls_back() {
+        let c = json!({"foveation_center_size_x": 0.538, "foveation_center_shift_x": -0.036, "foveation_center_shift_y": 0.0, "foveation_edge_ratio_x": 2.2});
+        let f = json!({"center_shift_x": 0.4, "edge_ratio_x": 4.0});
+        assert_eq!(fov_geometry(&c, &f, "foveation_center_shift_x", "center_shift_x"), Some(-0.036));
+        assert_eq!(fov_geometry(&c, &f, "foveation_center_shift_y", "center_shift_y"), Some(0.0));
+        assert_eq!(fov_geometry(&c, &f, "foveation_edge_ratio_x", "edge_ratio_x"), Some(2.2));
+        // foveation off: ALVR writes zeros, the session's own settings (also negative) are used
+        let off = json!({"foveation_center_size_x": 0.0, "foveation_center_shift_x": 0.0, "foveation_edge_ratio_x": 0.0});
+        let f = json!({"center_shift_x": -0.2, "edge_ratio_x": 3.0});
+        assert_eq!(fov_geometry(&off, &f, "foveation_center_shift_x", "center_shift_x"), Some(-0.2));
+        assert_eq!(fov_geometry(&off, &f, "foveation_edge_ratio_x", "edge_ratio_x"), Some(3.0));
     }
 }

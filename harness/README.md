@@ -174,6 +174,10 @@ This machine has a `swiftc-linux` wrapper in `~/.local/bin`; elsewhere set `SWIF
 - The scripted IDR is instant and nothing is lost on the way, so recovery times are best cases.
 - A field symptom still needs the client's `[stream]` lines from the host log (`Client : [Error] [ALVR NATIVE] [stream] ...`).
 
+## The session the host runs (golden master, 2026-11-09)
+
+Since 1.3.7 `config\session.json` is compiled by the launcher at every streamer start from the golden master `config\session.base.json`. The scenarios start the host directly, so by default they run the fixture `fixtures/session.user.json` as it is (the golden baseline, unchanged). A scenario with a `"compile": {"settings": {...airframexr.json...}, "views": [outer, inner, upper, lower]}` block runs what the real `SessionCompiler` makes of that fixture instead (`harness/sessioncompile.py`: it builds `uitest.exe` on the builder and runs `--session-compile-selftest`, the same code the launcher calls; the Vision Pro foveation and bitrate sizing only run when `headset.name` is an Apple one). `e2e_session_compiled` is `e2e_baseline` with that block. `find_headset_e2e.py` and `wizard_e2e.py` write and read `session.base.json` (the windows' file); `session_compile_check.py` tests the compiler itself.
+
 ## Topology
 Note: a client on a loopback address makes `server_core` treat it as *wired* and force the **TCP** stream protocol, so loopback
 scenarios do not exercise ALVR's UDP stream (the real AVP uses UDP).

@@ -68,10 +68,10 @@ namespace AirFrameXR
             var spendRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 2, 0, 0) };
             spendTick = new CheckBox { AutoSize = true, Text = "Spend the savings on quality:", AccessibleName = "Spend the savings on quality", Margin = new Padding(0, 4, 6, 0) };
             spendBox = new NumericUpDown { Minimum = 50, Maximum = 100, Increment = 5, Value = 100, Width = 62, AccessibleName = "Share of pixel for pixel, percent", Enabled = false };
-            aboveTick = new CheckBox { AutoSize = true, Text = "allow above 100 % (supersampling)", AccessibleName = "Allow above 100 percent", Margin = new Padding(14, 4, 0, 0), Enabled = false };
-            spendRow.Controls.Add(spendTick); spendRow.Controls.Add(spendBox); spendRow.Controls.Add(new Label { Text = "% of pixel for pixel", AutoSize = true, Margin = new Padding(3, 6, 0, 0) }); spendRow.Controls.Add(aboveTick);
+            aboveTick = new CheckBox { AutoSize = true, Text = "allow above 100 % (supersampling)", AccessibleName = "Allow above 100 percent", Margin = new Padding(22 + 20, 0, 0, 0), Enabled = false };
+            spendRow.Controls.Add(spendTick); spendRow.Controls.Add(spendBox); spendRow.Controls.Add(new Label { Text = "% of pixel for pixel", AutoSize = true, Margin = new Padding(3, 6, 0, 0) });   // the supersampling tick has a line of its own: beside the box the row was wider than the panel
             spendRange = Ui.Line(""); spendRange.ForeColor = Color.DimGray; spendRange.Margin = new Padding(22, 0, 3, 2); spendRange.MaximumSize = new Size(WrapWidth, 0);
-            Controls.Add(spendInfo); Controls.Add(spendRow); Controls.Add(spendRange);
+            Controls.Add(spendInfo); Controls.Add(spendRow); Controls.Add(aboveTick); Controls.Add(spendRange);
             tips.SetToolTip(spendTick, SpendTip); tips.SetToolTip(spendBox, SpendTip); tips.SetToolTip(aboveTick, "Above 100 % the game renders more pixels than the headset's declared resolution would give the same box: supersampling, filtered down to the stream. It costs GPU time and adds no detail the stream can carry (it carries about a thousand pixels per tangent at 275 Mbps), but cleaner edges. Up to the stream's own size.");
             spendTick.CheckedChanged += (s, e) => { spendBox.Enabled = aboveTick.Enabled = spendTick.Checked; if (!loading) ScheduleCommit(true); };
             spendBox.ValueChanged += (s, e) => { if (!loading && spendTick.Checked) ScheduleCommit(false); };

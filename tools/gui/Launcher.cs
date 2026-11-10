@@ -73,7 +73,7 @@ namespace AirFrameXR
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             scroller.Controls.Add(body);
             Controls.Add(scroller);
-            var hdr = Ui.CompactHeader("Launcher");
+            var hdr = Ui.CompactHeader("");
             Controls.Add(hdr);
             Ui.AutoFitWindow(this, hdr, body);
             RefreshSystem();
@@ -144,16 +144,24 @@ namespace AirFrameXR
             if (ours)
             {
                 var prev = demoReady ? "" : OpenXr.Previous();
-                lines.Add(Row("\u2713", "Your VR games use AirFrameXR.", Color.SeaGreen, prev.Length > 0 ? new[] { ("Switch back to " + OpenXr.Name(prev), (Action)SwitchBack) } : new (string, Action)[0]));
+                lines.Add(ToggleRow("\u2713", Color.SeaGreen, "OpenXR runtime: AirFrameXR", true, prev.Length > 0 || demoReady, on => { if (!on) SwitchBack(); }, prev.Length > 0 ? "Off: your VR games use " + OpenXr.Name(prev) + " again." : "AirFrameXR is the only OpenXR runtime that was set up: there is none to go back to."));
             }
             else
-                lines.Add(Row("\u26A0", "Your VR games are set to use " + OpenXr.Name(OpenXr.ActiveRuntime()) + ", not AirFrameXR.", Color.Firebrick, File.Exists(Paths.Manifest) ? new[] { ("Use AirFrameXR", (Action)UseAirFrameXR) } : new (string, Action)[0]));
+                lines.Add(ToggleRow("\u26A0", Color.Firebrick, "OpenXR runtime: " + OpenXr.Name(OpenXr.ActiveRuntime()), false, File.Exists(Paths.Manifest), on => { if (on) UseAirFrameXR(); }, "On: your VR games use AirFrameXR (administrator permission)."));
             var risky = demoReady ? new System.Collections.Generic.List<XrLayer>() : XrLayers.ActiveImplicit().Where(l => l.MayCaptureInput).ToList();
             if (risky.Count > 0)
                 lines.Add(Row("\u26A0", risky.Count == 1 ? "An OpenXR layer may take your controllers before the game sees them." : risky.Count + " OpenXR layers may take your controllers before the game sees them.", Color.Firebrick, new[] { ("Review", (Action)(() => { using (var f = new LayersForm()) f.ShowDialog(this); RefreshSystem(); })) }));
             if (firewall != null && (firewall.State == FirewallState.Missing || firewall.State == FirewallState.Blocked))
                 lines.Add(Row("\u26A0", firewall.State == FirewallState.Blocked ? "Windows Firewall blocks the streamer: the headset cannot connect." : "Windows Firewall has no rule for the streamer: the headset will not be found.", Color.Firebrick, new[] { ("Fix", (Action)(() => { using (var f = new FirewallForm()) f.ShowDialog(this); firewall = null; Shown_Recheck(); })) }));
             bool allGood = lines.Count == 1 && ours;
+            // OpenVR games: SteamVR (the default) or OpenComposite (shipped in opencomposite\, GPLv3), which translates them to OpenXR, so they run on AirFrameXR without SteamVR.
+            // One switch; informational, never "Needs attention". Not shown where the folder has no OpenComposite (a developer folder).
+            if (demoReady || OpenComposite.Installed || OpenComposite.Active)
+            {
+                bool oc = demoReady || OpenComposite.Active;   // the demo (tests, README screenshot) shows it on
+                lines.Add(ToggleRow("\u2713", oc ? Color.SeaGreen : Color.White, oc ? "OpenVR: OpenComposite OpenXR translation" : "OpenVR: SteamVR", oc, true, on => OcSwitch(on),
+                    "On: OpenVR games load OpenComposite, which translates them to OpenXR so they run on AirFrameXR without SteamVR. Off: they use SteamVR again. Takes effect at the next game start."));
+            }
             sys.Controls.Add(new Label { Text = allGood ? "Ready" : "Needs attention", AutoSize = true, Font = Ui.Big, ForeColor = allGood ? Color.SeaGreen : Color.Firebrick, Margin = new Padding(0, 0, 0, 4) });
             foreach (var l in lines) sys.Controls.Add(l);
             sys.ResumeLayout();
@@ -166,8 +174,30 @@ namespace AirFrameXR
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 2, 0, 2), MaximumSize = new Size(660, 0) };
             row.Controls.Add(new Label { Text = icon, AutoSize = true, ForeColor = c, Font = Ui.Bold, Margin = new Padding(0, 6, 6, 0) });
             row.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 6, 10, 0), MaximumSize = new Size(480, 0) });
-            foreach (var b in buttons) { var bt = new Button { Text = b.label, AutoSize = true, Margin = new Padding(0, 0, 6, 0) }; var act = b.act; bt.Click += (s, e) => act(); row.Controls.Add(bt); }
+            foreach (var b in buttons) { var bt = new Button { Text = b.label, AutoSize = true, Margin = new Padding(0, 2, 6, 0), Font = new Font(Ui.Body.FontFamily, 8.5f), Padding = new Padding(2, 0, 2, 0) }; var act = b.act; bt.Click += (s, e) => act(); row.Controls.Add(bt); }
             return row;
+        }
+
+        static readonly ToolTip rowTip = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
+        /// A status line with a small switch: a tick (or a warning) while it is as wanted, the switch, the state in words. The window is rebuilt after the change, so a refused change flips back.
+        Control ToggleRow(string glyph, Color glyphColor, string text, bool on, bool enabled, Action<bool> change, string tip)
+        {
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 2), MaximumSize = new Size(660, 0) };
+            var sw = new ToggleSwitch { AccessibleName = text, Margin = new Padding(0, 3, 8, 0), Size = new Size(Ui.Px(this, 36), Ui.Px(this, 20)), Enabled = enabled };
+            sw.SetCheckedInstant(on);
+            row.Controls.Add(new Label { Text = glyph, AutoSize = true, ForeColor = glyphColor, Font = Ui.Bold, Margin = new Padding(0, 4, 6, 0) });
+            row.Controls.Add(sw);
+            row.Controls.Add(new Label { Text = text, AutoSize = true, Margin = new Padding(0, 4, 10, 0), MaximumSize = new Size(480, 0) });
+            sw.CheckedChanged += (s, e) => change(sw.Checked);
+            rowTip.SetToolTip(sw, tip);
+            return row;
+        }
+
+        void OcSwitch(bool on)
+        {
+            var err = on ? OpenComposite.Enable() : OpenComposite.Disable();
+            if (err != null) MessageBox.Show(this, err, "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            RefreshSystem();
         }
 
         void UseAirFrameXR()

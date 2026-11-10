@@ -129,6 +129,12 @@ def derive_session(sc, dst: Path, pin=None):
     if not oc.get("enable_foveated_encoding") and not sc.get("keep_cache_stale"):
         for k in [k for k in oc if k.startswith("foveation_")]:    # what ALVR itself persists when foveation is off
             oc[k] = 0.0
+    cmp_ = sc.get("compile")
+    if cmp_ is not None:
+        # the scenario runs the session the streamer would compile from this one as the golden master (SessionCompiler itself, on the builder), not the fixture as it is
+        import sessioncompile
+        s, line, _ = sessioncompile.compile_session(s, cmp_.get("settings", {}), cmp_.get("views"))
+        print(f"  session compiled: {line}")
     dst.write_text(json.dumps(s, indent=1))
 
 
@@ -884,7 +890,8 @@ def read_rgb_at(path, pts, win=4):
     """Per decoded frame, the mean RGB of a win x win window at each point. Software decode (the D3D11VA download is unreliable here)."""
     n = len(pts)
     chains = ";".join(f"[a{i}]crop={win}:{win}:{max(x - win // 2, 0)}:{max(y - win // 2, 0)},scale=1:1:flags=area[b{i}]" for i, (x, y) in enumerate(pts))
-    vf = f"split={n}" + "".join(f"[a{i}]" for i in range(n)) + ";" + chains + ";" + "".join(f"[b{i}]" for i in range(n)) + f"hstack=inputs={n},format=rgb24"
+    # a 1 x 1 window cannot be cropped from 4:2:0 (newer ffmpeg: the chroma plane would be 0 wide, "Invalid too big or non positive size"): convert to a full-resolution RGB format first
+    vf = ("format=gbrp," if win < 2 else "") + f"split={n}" + "".join(f"[a{i}]" for i in range(n)) + ";" + chains + ";" + "".join(f"[b{i}]" for i in range(n)) + f"hstack=inputs={n},format=rgb24"
     p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", str(path), "-filter_complex", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, timeout=3600)
     d = p.stdout
     stride = 3 * n
@@ -1086,7 +1093,7 @@ def analyse_fov_restrict(sc, outdir):
         cutL, cutR, cutT, cutB = (1 - s[0]) * L0 / (L0 + R0), (1 - s[1]) * R0 / (L0 + R0), (1 - s[2]) * U0 / (U0 + D0), (1 - s[3]) * D0 / (U0 + D0)
         sx, sy = (1 - cutL - cutR) * ew / gw, (1 - cutT - cutB) * eh / gh     # stream pixels per game pixel
         x0, y0 = cutL * ew + 1152 * sx, cutT * eh                           # the block's top-left in the stream
-        cpts = [(int(x0 + (8 + 12 * i) * sx), int(y0 + (8 + 12 * j) * sy)) for i in range(5) for j in range(5)]   # a 5 x 5 grid well inside the block
+        cpts = [(int(x0 + (8 + 11 * i) * sx), int(y0 + (8 + 11 * j) * sy)) for i in range(5) for j in range(5)]   # a 5 x 5 grid well inside the block; an ODD step: at 1:1 the points alternate between the checkerboard's two colours (an even step reads one colour only: std 0 on a perfect checkerboard)
         vals = [0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2] for fr in read_rgb_at(outdir / "client.hevc", cpts, win=1)[30:] for px in fr]
         if vals:
             m = sum(vals) / len(vals)
@@ -2052,11 +2059,11 @@ def evaluate(sc, a):
             chk("fov_restrict_recommended_size", abs(er[0] - rr[0]) <= 2 and abs(er[1] - rr[1]) <= 2, {"app": rr, "expected": er, "stream_eye": fa["stream_eye"], "ceiling": fa.get("ceiling")},
                 "the recommended image size follows the area of the restricted view and the render quality between the floor and the ceiling (the stream's eye size, or the panel reference when the stream is fitted to the headset's window)")
             if "checker" in ck:
-                c = fa.get("checker") or {}
+                cb = fa.get("checker") or {}  # not "c": the client report below (pipeline latency) is read from c
                 if "max_std" in ck["checker"]:
-                    chk("checker_averaged_by_composition", bool(c) and c["std"] <= ck["checker"]["max_std"], c, f"std <= {ck['checker']['max_std']}: the denser game render's one-pixel checkerboard comes out flat (the compose pass averages it before the encoder)")
+                    chk("checker_averaged_by_composition", bool(cb) and cb["std"] <= ck["checker"]["max_std"], cb, f"std <= {ck['checker']['max_std']}: the denser game render's one-pixel checkerboard comes out flat (the compose pass averages it before the encoder)")
                 if "min_std" in ck["checker"]:
-                    chk("checker_passes_at_1_to_1", bool(c) and c["std"] >= ck["checker"]["min_std"], c, f"std >= {ck['checker']['min_std']}: at 1:1 the checkerboard reaches the stream as a checkerboard")
+                    chk("checker_passes_at_1_to_1", bool(cb) and cb["std"] >= ck["checker"]["min_std"], cb, f"std >= {ck['checker']['min_std']}: at 1:1 the checkerboard reaches the stream as a checkerboard")
             if fa.get("margins"):
                 chk("fov_restrict_margin_black", fa.get("margin_black_frac", 0) >= 0.95, {"margin_black": fa.get("margin_black_frac"), "margins": fa["margins"]},
                     ">= 95 % of the samples in the middle of each trimmed margin of the decoded stream are black: the stream still covers the headset's view")

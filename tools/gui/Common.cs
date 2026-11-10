@@ -22,7 +22,7 @@ namespace AirFrameXR
 {
     public static class Version
     {
-        public const string Number = "1.3.7";
+        public const string Number = "1.3.8";
         /// "1.1.0", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
@@ -487,7 +487,7 @@ namespace AirFrameXR
             set { if (value == null) Json.Remove(Root, "video.stream_fit_eye"); else Json.Set(Root, "video.stream_fit_eye", value.Select(x => (object)(double)x).ToList()); }
         }
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
-        public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", true); set => Json.Set(Root, "video.frame_gen_recommended", value); }
+        public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", false); set => Json.Set(Root, "video.frame_gen_recommended", value); }
         /// arrival margin of the phase lock in ms (host default 7; the host reads it at start) and the GPU keepalive duty in % (0 = off); 0 = not set
         public double PhaseMarginMs { get => Json.Num(Root, "video.phase_margin_ms", 0); set => Json.Set(Root, "video.phase_margin_ms", value); }
         public int GpuKeepalive { get => (int)Json.Num(Root, "video.gpu_keepalive", 0); set => Json.Set(Root, "video.gpu_keepalive", (double)value); }
@@ -644,6 +644,8 @@ namespace AirFrameXR
                 items.Add(r); Controls.Add(r);
             }
         }
+        /// Every segment exactly this big (a 96-dpi design size, scaled with the window): the segments, and a button beside them, then have one size.
+        public Size MinButton { set { foreach (var r in items) { r.AutoSize = false; r.Size = value; } } }
         public int Value
         {
             get { for (int i = 0; i < items.Count; i++) if (items[i].Checked) return i; return -1; }
@@ -1569,6 +1571,14 @@ namespace AirFrameXR
         /// ALVR's own breakdown of the streamer's share of the latency: encoder + transport (network) + decoder, in ms; null when any part is missing or not believable.
         public static double? Streamer(double enc, double net, double dec, double outliers = 0, double samples = 0) =>
             double.IsNaN(enc) || double.IsNaN(net) || double.IsNaN(dec) || Absurd(enc, outliers, samples) || Absurd(net, outliers, samples) || Absurd(dec, outliers, samples) ? (double?)null : enc + net + dec;
+        public const string Meaning = "ALVR's total: from the head pose the headset sent to the picture shown on it. The streamer's own share (encode + network + decode) is small; the rest is the game's time from that pose to its frame (its render queue, the frame-generation hold) and the headset's queues. A low streamer share next to a high total means the time is spent before the encoder, not in the stream.";
+        /// "enc 6 + net 7 + dec 6 + game and queues 78": the total split so it adds up (what the streamer does, then the remainder).
+        public static string Split(double total, double enc, double net, double dec, string fmt = "0")
+        {
+            if (double.IsNaN(total) || double.IsNaN(enc) || double.IsNaN(net) || double.IsNaN(dec)) return "";
+            var rest = Math.Max(0, total - enc - net - dec);
+            return $"enc {enc.ToString(fmt, CultureInfo.InvariantCulture)} + net {net.ToString(fmt, CultureInfo.InvariantCulture)} + dec {dec.ToString(fmt, CultureInfo.InvariantCulture)} + game and queues {rest.ToString(fmt, CultureInfo.InvariantCulture)}";
+        }
         /// "-" when nothing was measured, "n/a" when it was and is not believable, else the number.
         public static string Text(double ms, double outliers = 0, double samples = 0, string fmt = "0") =>
             double.IsNaN(ms) ? "-" : Absurd(ms, outliers, samples) ? "n/a" : ms.ToString(fmt, CultureInfo.InvariantCulture);
@@ -1693,7 +1703,7 @@ namespace AirFrameXR
                 var chrome = new Size(f.Width - f.ClientSize.Width, f.Height - f.ClientSize.Height);
                 var bs = body.PreferredSize;
                 body.PerformLayout();
-                int cw = Math.Max(bs.Width, body.Width) + 4, ch = (header != null ? header.Height : 0) + body.Height + 2;   // the body is AutoSize: its real height after a layout is the content
+                int cw = Math.Max(Math.Max(bs.Width, body.Width) + 4, header != null ? header.PreferredSize.Width : 0), ch = (header != null ? header.Height : 0) + body.Height + 2;   // the body is AutoSize: its real height after a layout is the content
                 int maxW = wa.Width - chrome.Width, maxH = wa.Height - chrome.Height;
                 if (ch > maxH) { ch = maxH; cw += SystemInformation.VerticalScrollBarWidth; }
                 if (cw > maxW) { cw = maxW; ch = Math.Min(maxH, ch + SystemInformation.HorizontalScrollBarHeight); }
@@ -1808,7 +1818,7 @@ namespace AirFrameXR
             var logo = Resource("logo_640.png");
             if (logo != null) p.Controls.Add(new PictureBox { Image = logo, SizeMode = PictureBoxSizeMode.Zoom, Width = 180, Height = 76, Margin = new Padding(0) });
             var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(16, 26, 0, 0) };   // centred against the logo
-            col.Controls.Add(new Label { Text = $"{subtitle}   \u00B7   version {Version.Text}", AutoSize = true, Font = Body, ForeColor = Color.DimGray });
+            col.Controls.Add(new Label { Text = subtitle.Length > 0 ? $"{subtitle}   \u00B7   version {Version.Text}" : Version.Text, AutoSize = true, Font = Body, ForeColor = Color.DimGray });
             p.Controls.Add(col);
             return p;
         }
@@ -1855,6 +1865,8 @@ namespace AirFrameXR
         }
 
         /// A statistics tile: small title, a big value, a one-line note. Sizes from its text (no fixed width), so it follows the display scale.
+        /// The name of a frame generation rate everywhere in the UI: the multiplier of the game's frames (the settings keep third | half | two_thirds, the share the game renders).
+        public static string FgName(string level) => level == "third" ? "x3" : level == "half" ? "x2" : level == "two_thirds" ? "x1.5" : level;
         public static Tile MakeTile(string title, string value = "-", string note = "", Color? color = null) { var t = new Tile(title, value, note); if (color != null) t.Set(value, note, color); return t; }
 
         /// A small coloured tag next to a label (instead of a suffix in its text).

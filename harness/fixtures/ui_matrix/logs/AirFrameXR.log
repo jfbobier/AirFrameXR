@@ -1,0 +1,573 @@
+2025-10-19 20:52:30.123 [gui] INFO  streamer.exe 1.3.8 start (C:\AirFrameXR)
+2025-10-19 20:53:00.123 [host] INFO  game started: Cyberpunk2077.exe
+2025-10-19 20:53:01.222 [host] INFO  phase lock: arrivals 6.3 ms before the render tick (target 7.0), sliding the grid +0.09 ms
+2025-10-19 20:53:03.222 [host] INFO  phase lock: arrivals 6.5 ms before the render tick (target 7.0), sliding the grid +0.21 ms
+2025-10-19 20:53:05.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid -0.87 ms
+2025-10-19 20:53:07.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid +0.67 ms
+2025-10-19 20:53:09.222 [host] INFO  phase lock: arrivals 6.5 ms before the render tick (target 7.0), sliding the grid -0.53 ms
+2025-10-19 20:53:10.123 [host] INFO  frame generation perf: app 30.9 fps (envelope 1.0 ms, 3/310 releases late), stream 89.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 39.3 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:53:11.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.06 ms
+2025-10-19 20:53:13.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.05 ms
+2025-10-19 20:53:15.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid -0.70 ms
+2025-10-19 20:53:17.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid +0.74 ms
+2025-10-19 20:53:19.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid +0.48 ms
+2025-10-19 20:53:20.123 [host] INFO  frame generation perf: app 30.6 fps (envelope 1.0 ms, 3/310 releases late), stream 88.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 38.9 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:53:21.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.87 ms
+2025-10-19 20:53:23.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.18 ms
+2025-10-19 20:53:25.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid -0.94 ms
+2025-10-19 20:53:27.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid -0.05 ms
+2025-10-19 20:53:29.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid +0.76 ms
+2025-10-19 20:53:30.123 [host] INFO  frame generation perf: app 31.0 fps (envelope 1.0 ms, 3/310 releases late), stream 88.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 38.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:53:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9081 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:53:31.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid +0.84 ms
+2025-10-19 20:53:33.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid +0.60 ms
+2025-10-19 20:53:35.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid +0.87 ms
+2025-10-19 20:53:37.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.81 ms
+2025-10-19 20:53:39.222 [host] INFO  phase lock: arrivals 6.9 ms before the render tick (target 7.0), sliding the grid -0.57 ms
+2025-10-19 20:53:40.123 [host] INFO  frame generation perf: app 32.5 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 40.9 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:53:41.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid -0.13 ms
+2025-10-19 20:53:43.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid -0.40 ms
+2025-10-19 20:53:45.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.23 ms
+2025-10-19 20:53:47.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.17 ms
+2025-10-19 20:53:49.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.81 ms
+2025-10-19 20:53:50.123 [host] INFO  frame generation perf: app 31.8 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 43.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:53:51.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid +0.86 ms
+2025-10-19 20:53:53.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid +0.98 ms
+2025-10-19 20:53:55.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.67 ms
+2025-10-19 20:53:57.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid +0.93 ms
+2025-10-19 20:53:59.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid +0.14 ms
+2025-10-19 20:54:00.123 [host] INFO  frame generation perf: app 33.9 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 40.0 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:54:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9169 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:54:01.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid -0.58 ms
+2025-10-19 20:54:03.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid +0.15 ms
+2025-10-19 20:54:05.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.87 ms
+2025-10-19 20:54:07.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid +0.98 ms
+2025-10-19 20:54:09.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid +0.60 ms
+2025-10-19 20:54:10.123 [host] INFO  frame generation perf: app 33.5 fps (envelope 1.0 ms, 3/310 releases late), stream 88.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 40.4 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:54:11.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.70 ms
+2025-10-19 20:54:13.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid +0.54 ms
+2025-10-19 20:54:15.222 [host] INFO  phase lock: arrivals 8.2 ms before the render tick (target 7.0), sliding the grid -0.91 ms
+2025-10-19 20:54:17.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid -0.91 ms
+2025-10-19 20:54:19.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid -0.34 ms
+2025-10-19 20:54:20.123 [host] INFO  frame generation perf: app 35.2 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:54:21.222 [host] INFO  phase lock: arrivals 8.2 ms before the render tick (target 7.0), sliding the grid +0.96 ms
+2025-10-19 20:54:23.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid +1.00 ms
+2025-10-19 20:54:25.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.85 ms
+2025-10-19 20:54:27.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid -0.94 ms
+2025-10-19 20:54:29.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.18 ms
+2025-10-19 20:54:30.123 [host] INFO  frame generation perf: app 33.2 fps (envelope 1.0 ms, 3/310 releases late), stream 89.1 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 44.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:54:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9116 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:54:31.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid -0.69 ms
+2025-10-19 20:54:33.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.74 ms
+2025-10-19 20:54:35.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.92 ms
+2025-10-19 20:54:37.222 [host] INFO  phase lock: arrivals 8.3 ms before the render tick (target 7.0), sliding the grid -0.24 ms
+2025-10-19 20:54:39.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid +0.04 ms
+2025-10-19 20:54:40.123 [host] INFO  frame generation perf: app 33.4 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.7 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:54:41.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid +0.19 ms
+2025-10-19 20:54:43.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid +0.24 ms
+2025-10-19 20:54:45.222 [host] INFO  phase lock: arrivals 8.3 ms before the render tick (target 7.0), sliding the grid +0.01 ms
+2025-10-19 20:54:47.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid +0.44 ms
+2025-10-19 20:54:49.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid -0.40 ms
+2025-10-19 20:54:50.123 [host] INFO  frame generation perf: app 33.6 fps (envelope 1.0 ms, 3/310 releases late), stream 88.6 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 43.3 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:54:51.222 [host] INFO  phase lock: arrivals 8.3 ms before the render tick (target 7.0), sliding the grid +0.04 ms
+2025-10-19 20:54:53.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.98 ms
+2025-10-19 20:54:55.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.16 ms
+2025-10-19 20:54:57.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid +0.23 ms
+2025-10-19 20:54:59.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid -0.88 ms
+2025-10-19 20:55:00.123 [host] INFO  frame generation perf: app 35.2 fps (envelope 1.0 ms, 3/310 releases late), stream 88.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 43.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:55:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9200 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:55:01.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 20:55:03.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid -0.29 ms
+2025-10-19 20:55:05.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid +0.48 ms
+2025-10-19 20:55:07.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid -0.88 ms
+2025-10-19 20:55:09.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid +0.93 ms
+2025-10-19 20:55:10.123 [host] INFO  frame generation perf: app 34.9 fps (envelope 1.0 ms, 3/310 releases late), stream 88.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 42.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:55:11.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid -0.09 ms
+2025-10-19 20:55:13.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.36 ms
+2025-10-19 20:55:15.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.37 ms
+2025-10-19 20:55:17.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid +0.19 ms
+2025-10-19 20:55:19.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid -0.25 ms
+2025-10-19 20:55:20.123 [host] INFO  frame generation perf: app 34.2 fps (envelope 1.0 ms, 3/310 releases late), stream 89.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 43.7 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:55:21.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.95 ms
+2025-10-19 20:55:23.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid +0.47 ms
+2025-10-19 20:55:25.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.55 ms
+2025-10-19 20:55:27.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.52 ms
+2025-10-19 20:55:29.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid -0.13 ms
+2025-10-19 20:55:30.123 [host] INFO  frame generation perf: app 33.7 fps (envelope 1.0 ms, 3/310 releases late), stream 89.1 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 42.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:55:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9257 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:55:31.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.80 ms
+2025-10-19 20:55:33.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid -0.33 ms
+2025-10-19 20:55:35.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.12 ms
+2025-10-19 20:55:37.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.66 ms
+2025-10-19 20:55:39.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid +0.30 ms
+2025-10-19 20:55:40.123 [host] INFO  frame generation perf: app 35.6 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 43.7 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:55:41.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.10 ms
+2025-10-19 20:55:43.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid -0.76 ms
+2025-10-19 20:55:45.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid -0.62 ms
+2025-10-19 20:55:47.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid +0.68 ms
+2025-10-19 20:55:49.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid -0.44 ms
+2025-10-19 20:55:50.123 [host] INFO  frame generation perf: app 33.7 fps (envelope 1.0 ms, 3/310 releases late), stream 89.0 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 42.3 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:55:51.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.28 ms
+2025-10-19 20:55:53.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid -0.31 ms
+2025-10-19 20:55:55.222 [host] INFO  phase lock: arrivals 6.4 ms before the render tick (target 7.0), sliding the grid -0.42 ms
+2025-10-19 20:55:57.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.46 ms
+2025-10-19 20:55:59.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid -0.17 ms
+2025-10-19 20:56:00.123 [host] INFO  frame generation perf: app 33.6 fps (envelope 1.0 ms, 3/310 releases late), stream 88.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 38.9 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:56:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9239 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:56:01.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid -0.18 ms
+2025-10-19 20:56:03.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.69 ms
+2025-10-19 20:56:05.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid +0.89 ms
+2025-10-19 20:56:07.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid +0.97 ms
+2025-10-19 20:56:09.222 [host] INFO  phase lock: arrivals 6.5 ms before the render tick (target 7.0), sliding the grid +0.90 ms
+2025-10-19 20:56:10.123 [host] INFO  frame generation perf: app 35.2 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.6 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:56:11.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid -0.56 ms
+2025-10-19 20:56:13.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid +0.67 ms
+2025-10-19 20:56:15.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid +0.04 ms
+2025-10-19 20:56:17.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid -0.32 ms
+2025-10-19 20:56:19.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid -0.86 ms
+2025-10-19 20:56:20.123 [host] INFO  frame generation perf: app 33.6 fps (envelope 1.0 ms, 3/310 releases late), stream 88.7 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 39.8 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:56:21.222 [host] INFO  phase lock: arrivals 6.5 ms before the render tick (target 7.0), sliding the grid -0.43 ms
+2025-10-19 20:56:23.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid -0.91 ms
+2025-10-19 20:56:25.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid +0.39 ms
+2025-10-19 20:56:27.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid +0.79 ms
+2025-10-19 20:56:29.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid +0.15 ms
+2025-10-19 20:56:30.123 [host] INFO  frame generation perf: app 34.1 fps (envelope 1.0 ms, 3/310 releases late), stream 89.0 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 40.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:56:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9339 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:56:31.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid +0.49 ms
+2025-10-19 20:56:33.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid -0.40 ms
+2025-10-19 20:56:35.222 [host] INFO  phase lock: arrivals 6.3 ms before the render tick (target 7.0), sliding the grid +0.05 ms
+2025-10-19 20:56:37.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid +0.88 ms
+2025-10-19 20:56:39.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid -0.32 ms
+2025-10-19 20:56:40.123 [host] INFO  frame generation perf: app 33.5 fps (envelope 1.0 ms, 3/310 releases late), stream 88.7 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 36.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:56:41.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid +0.72 ms
+2025-10-19 20:56:43.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid +0.56 ms
+2025-10-19 20:56:45.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid -0.61 ms
+2025-10-19 20:56:47.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid +0.63 ms
+2025-10-19 20:56:49.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid +0.58 ms
+2025-10-19 20:56:50.123 [host] INFO  frame generation perf: app 33.8 fps (envelope 1.0 ms, 3/310 releases late), stream 88.7 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 39.3 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:56:51.222 [host] INFO  phase lock: arrivals 6.3 ms before the render tick (target 7.0), sliding the grid +0.61 ms
+2025-10-19 20:56:53.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid -0.98 ms
+2025-10-19 20:56:55.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid +0.73 ms
+2025-10-19 20:56:57.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid -0.46 ms
+2025-10-19 20:56:59.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid +0.05 ms
+2025-10-19 20:57:00.123 [host] INFO  frame generation perf: app 33.8 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 36.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:57:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9408 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:57:01.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid -0.05 ms
+2025-10-19 20:57:03.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -1.00 ms
+2025-10-19 20:57:05.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid -0.75 ms
+2025-10-19 20:57:07.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid -0.86 ms
+2025-10-19 20:57:09.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid +0.71 ms
+2025-10-19 20:57:10.123 [host] INFO  frame generation perf: app 31.0 fps (envelope 1.0 ms, 3/310 releases late), stream 88.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 34.6 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:57:11.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid +0.00 ms
+2025-10-19 20:57:13.222 [host] INFO  phase lock: arrivals 5.3 ms before the render tick (target 7.0), sliding the grid -0.37 ms
+2025-10-19 20:57:15.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid +0.29 ms
+2025-10-19 20:57:17.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid -0.28 ms
+2025-10-19 20:57:19.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid -0.34 ms
+2025-10-19 20:57:20.123 [host] INFO  frame generation perf: app 30.9 fps (envelope 1.0 ms, 3/310 releases late), stream 89.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 36.4 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:57:21.222 [host] INFO  phase lock: arrivals 5.0 ms before the render tick (target 7.0), sliding the grid +0.11 ms
+2025-10-19 20:57:23.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid -0.24 ms
+2025-10-19 20:57:25.222 [host] INFO  phase lock: arrivals 5.0 ms before the render tick (target 7.0), sliding the grid -0.64 ms
+2025-10-19 20:57:27.222 [host] INFO  phase lock: arrivals 5.3 ms before the render tick (target 7.0), sliding the grid +0.21 ms
+2025-10-19 20:57:29.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid -0.24 ms
+2025-10-19 20:57:30.123 [host] INFO  frame generation perf: app 30.5 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 34.3 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:57:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9497 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:57:31.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid +0.25 ms
+2025-10-19 20:57:33.222 [host] INFO  phase lock: arrivals 5.3 ms before the render tick (target 7.0), sliding the grid -0.26 ms
+2025-10-19 20:57:35.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid +0.41 ms
+2025-10-19 20:57:37.222 [host] INFO  phase lock: arrivals 5.3 ms before the render tick (target 7.0), sliding the grid +0.39 ms
+2025-10-19 20:57:39.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid -0.51 ms
+2025-10-19 20:57:40.123 [host] INFO  frame generation perf: app 29.9 fps (envelope 1.0 ms, 3/310 releases late), stream 89.0 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 34.4 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:57:41.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid +0.39 ms
+2025-10-19 20:57:43.222 [host] INFO  phase lock: arrivals 4.9 ms before the render tick (target 7.0), sliding the grid -0.15 ms
+2025-10-19 20:57:45.222 [host] INFO  phase lock: arrivals 5.3 ms before the render tick (target 7.0), sliding the grid +0.76 ms
+2025-10-19 20:57:47.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.25 ms
+2025-10-19 20:57:49.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid +0.58 ms
+2025-10-19 20:57:50.123 [host] INFO  frame generation perf: app 31.8 fps (envelope 1.0 ms, 3/310 releases late), stream 88.5 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 35.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:57:51.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 20:57:53.222 [host] INFO  phase lock: arrivals 5.0 ms before the render tick (target 7.0), sliding the grid +0.63 ms
+2025-10-19 20:57:55.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid +0.77 ms
+2025-10-19 20:57:57.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid +0.34 ms
+2025-10-19 20:57:59.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid +0.13 ms
+2025-10-19 20:58:00.123 [host] INFO  frame generation perf: app 29.6 fps (envelope 1.0 ms, 3/310 releases late), stream 89.0 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 32.9 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:58:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9517 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:58:01.222 [host] INFO  phase lock: arrivals 5.0 ms before the render tick (target 7.0), sliding the grid +0.18 ms
+2025-10-19 20:58:03.222 [host] INFO  phase lock: arrivals 4.9 ms before the render tick (target 7.0), sliding the grid -0.71 ms
+2025-10-19 20:58:05.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid -0.91 ms
+2025-10-19 20:58:07.222 [host] INFO  phase lock: arrivals 5.0 ms before the render tick (target 7.0), sliding the grid -0.80 ms
+2025-10-19 20:58:09.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.64 ms
+2025-10-19 20:58:10.123 [host] INFO  frame generation perf: app 31.2 fps (envelope 1.0 ms, 3/310 releases late), stream 89.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 31.9 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:58:11.222 [host] INFO  phase lock: arrivals 4.9 ms before the render tick (target 7.0), sliding the grid +0.68 ms
+2025-10-19 20:58:13.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid +0.69 ms
+2025-10-19 20:58:15.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid +0.67 ms
+2025-10-19 20:58:17.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid +0.16 ms
+2025-10-19 20:58:19.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.93 ms
+2025-10-19 20:58:20.123 [host] INFO  frame generation perf: app 28.6 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 33.0 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:58:21.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid +0.02 ms
+2025-10-19 20:58:23.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.79 ms
+2025-10-19 20:58:25.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid +0.87 ms
+2025-10-19 20:58:27.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid -0.35 ms
+2025-10-19 20:58:29.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid +0.66 ms
+2025-10-19 20:58:30.123 [host] INFO  frame generation perf: app 29.3 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 31.0 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:58:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9577 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:58:31.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid -0.64 ms
+2025-10-19 20:58:33.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid +0.23 ms
+2025-10-19 20:58:35.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid -0.21 ms
+2025-10-19 20:58:37.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid -0.21 ms
+2025-10-19 20:58:39.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid -0.16 ms
+2025-10-19 20:58:40.123 [host] INFO  frame generation perf: app 28.7 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 32.3 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:58:41.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid +0.00 ms
+2025-10-19 20:58:43.222 [host] INFO  phase lock: arrivals 6.5 ms before the render tick (target 7.0), sliding the grid -0.17 ms
+2025-10-19 20:58:45.222 [host] INFO  phase lock: arrivals 6.3 ms before the render tick (target 7.0), sliding the grid -0.68 ms
+2025-10-19 20:58:47.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid +0.51 ms
+2025-10-19 20:58:49.222 [host] INFO  phase lock: arrivals 6.3 ms before the render tick (target 7.0), sliding the grid +0.03 ms
+2025-10-19 20:58:50.123 [host] INFO  frame generation perf: app 27.2 fps (envelope 1.0 ms, 3/310 releases late), stream 88.5 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 35.0 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:58:51.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid +0.29 ms
+2025-10-19 20:58:53.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid -0.70 ms
+2025-10-19 20:58:55.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid +0.50 ms
+2025-10-19 20:58:57.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid +0.03 ms
+2025-10-19 20:58:59.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid +0.44 ms
+2025-10-19 20:59:00.123 [host] INFO  frame generation perf: app 28.4 fps (envelope 1.0 ms, 3/310 releases late), stream 88.6 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 33.3 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:59:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9663 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:59:01.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.47 ms
+2025-10-19 20:59:03.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid +0.17 ms
+2025-10-19 20:59:05.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid -0.54 ms
+2025-10-19 20:59:07.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid +0.91 ms
+2025-10-19 20:59:09.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid +0.41 ms
+2025-10-19 20:59:10.123 [host] INFO  frame generation perf: app 27.4 fps (envelope 1.0 ms, 3/310 releases late), stream 89.0 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 32.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:59:11.222 [host] INFO  phase lock: arrivals 6.4 ms before the render tick (target 7.0), sliding the grid +0.71 ms
+2025-10-19 20:59:13.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid -0.47 ms
+2025-10-19 20:59:15.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid -0.95 ms
+2025-10-19 20:59:17.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid -0.23 ms
+2025-10-19 20:59:19.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid -0.28 ms
+2025-10-19 20:59:20.123 [host] INFO  frame generation perf: app 27.9 fps (envelope 1.0 ms, 3/310 releases late), stream 89.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 32.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:59:21.222 [host] INFO  phase lock: arrivals 6.4 ms before the render tick (target 7.0), sliding the grid +0.55 ms
+2025-10-19 20:59:23.222 [host] INFO  phase lock: arrivals 6.3 ms before the render tick (target 7.0), sliding the grid +0.98 ms
+2025-10-19 20:59:25.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid +0.20 ms
+2025-10-19 20:59:27.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid +0.67 ms
+2025-10-19 20:59:29.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid +0.11 ms
+2025-10-19 20:59:30.123 [host] INFO  frame generation perf: app 26.4 fps (envelope 1.0 ms, 3/310 releases late), stream 89.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 34.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:59:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9583 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 20:59:31.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid +0.44 ms
+2025-10-19 20:59:33.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid -0.20 ms
+2025-10-19 20:59:35.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid +0.92 ms
+2025-10-19 20:59:37.222 [host] INFO  phase lock: arrivals 6.9 ms before the render tick (target 7.0), sliding the grid -0.54 ms
+2025-10-19 20:59:39.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid +0.44 ms
+2025-10-19 20:59:40.123 [host] INFO  frame generation perf: app 25.9 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 35.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:59:41.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.92 ms
+2025-10-19 20:59:43.222 [host] INFO  phase lock: arrivals 5.0 ms before the render tick (target 7.0), sliding the grid -0.52 ms
+2025-10-19 20:59:45.222 [host] INFO  phase lock: arrivals 4.2 ms before the render tick (target 7.0), sliding the grid -0.48 ms
+2025-10-19 20:59:47.222 [host] INFO  phase lock: arrivals 4.3 ms before the render tick (target 7.0), sliding the grid +0.41 ms
+2025-10-19 20:59:49.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid +0.80 ms
+2025-10-19 20:59:50.123 [host] INFO  frame generation perf: app 19.4 fps (envelope 1.0 ms, 3/310 releases late), stream 82.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 48.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 20:59:51.222 [host] INFO  phase lock: arrivals 4.4 ms before the render tick (target 7.0), sliding the grid +0.73 ms
+2025-10-19 20:59:53.222 [host] INFO  phase lock: arrivals 4.5 ms before the render tick (target 7.0), sliding the grid -0.15 ms
+2025-10-19 20:59:55.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid -0.83 ms
+2025-10-19 20:59:57.222 [host] INFO  phase lock: arrivals 4.3 ms before the render tick (target 7.0), sliding the grid +0.67 ms
+2025-10-19 20:59:59.222 [host] INFO  phase lock: arrivals 4.6 ms before the render tick (target 7.0), sliding the grid -0.29 ms
+2025-10-19 21:00:00.123 [host] INFO  frame generation perf: app 17.1 fps (envelope 1.0 ms, 3/310 releases late), stream 83.0 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 51.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:00:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9708 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:00:01.222 [host] INFO  phase lock: arrivals 5.0 ms before the render tick (target 7.0), sliding the grid +0.35 ms
+2025-10-19 21:00:03.222 [host] INFO  phase lock: arrivals 4.3 ms before the render tick (target 7.0), sliding the grid -0.33 ms
+2025-10-19 21:00:05.222 [host] INFO  phase lock: arrivals 4.9 ms before the render tick (target 7.0), sliding the grid -0.03 ms
+2025-10-19 21:00:07.222 [host] INFO  phase lock: arrivals 4.6 ms before the render tick (target 7.0), sliding the grid +0.17 ms
+2025-10-19 21:00:09.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid -0.22 ms
+2025-10-19 21:00:10.123 [host] INFO  frame generation perf: app 18.3 fps (envelope 1.0 ms, 3/310 releases late), stream 82.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 49.8 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:00:11.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid -0.76 ms
+2025-10-19 21:00:13.222 [host] INFO  phase lock: arrivals 4.8 ms before the render tick (target 7.0), sliding the grid +0.33 ms
+2025-10-19 21:00:15.222 [host] INFO  phase lock: arrivals 4.6 ms before the render tick (target 7.0), sliding the grid +0.77 ms
+2025-10-19 21:00:17.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid -0.81 ms
+2025-10-19 21:00:19.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid -0.25 ms
+2025-10-19 21:00:20.123 [host] INFO  frame generation perf: app 18.0 fps (envelope 1.0 ms, 3/310 releases late), stream 82.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 51.9 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:00:21.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid +0.51 ms
+2025-10-19 21:00:23.222 [host] INFO  phase lock: arrivals 4.9 ms before the render tick (target 7.0), sliding the grid +0.35 ms
+2025-10-19 21:00:25.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid +0.61 ms
+2025-10-19 21:00:27.222 [host] INFO  phase lock: arrivals 4.9 ms before the render tick (target 7.0), sliding the grid +0.51 ms
+2025-10-19 21:00:29.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid +0.35 ms
+2025-10-19 21:00:30.123 [host] INFO  frame generation perf: app 17.6 fps (envelope 1.0 ms, 3/310 releases late), stream 83.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 53.7 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:00:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9737 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:00:31.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.77 ms
+2025-10-19 21:00:33.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.30 ms
+2025-10-19 21:00:35.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid +0.36 ms
+2025-10-19 21:00:37.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.64 ms
+2025-10-19 21:00:39.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid +0.26 ms
+2025-10-19 21:00:40.123 [host] INFO  frame generation perf: app 27.2 fps (envelope 1.0 ms, 3/310 releases late), stream 88.7 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 39.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:00:41.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid +0.78 ms
+2025-10-19 21:00:43.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid -0.75 ms
+2025-10-19 21:00:45.222 [host] INFO  phase lock: arrivals 8.3 ms before the render tick (target 7.0), sliding the grid -0.72 ms
+2025-10-19 21:00:47.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.44 ms
+2025-10-19 21:00:49.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid +0.11 ms
+2025-10-19 21:00:50.123 [host] INFO  frame generation perf: app 26.6 fps (envelope 1.0 ms, 3/310 releases late), stream 88.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 39.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:00:51.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid -0.08 ms
+2025-10-19 21:00:53.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.65 ms
+2025-10-19 21:00:55.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.43 ms
+2025-10-19 21:00:57.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid +0.09 ms
+2025-10-19 21:00:59.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid -0.28 ms
+2025-10-19 21:01:00.123 [host] INFO  frame generation perf: app 28.3 fps (envelope 1.0 ms, 3/310 releases late), stream 88.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.7 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:01:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9796 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:01:01.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid -0.23 ms
+2025-10-19 21:01:03.222 [host] INFO  phase lock: arrivals 8.2 ms before the render tick (target 7.0), sliding the grid -0.92 ms
+2025-10-19 21:01:05.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.51 ms
+2025-10-19 21:01:07.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid -0.29 ms
+2025-10-19 21:01:09.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.19 ms
+2025-10-19 21:01:10.123 [host] INFO  frame generation perf: app 29.5 fps (envelope 1.0 ms, 3/310 releases late), stream 88.5 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 42.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:01:11.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid +0.54 ms
+2025-10-19 21:01:13.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.69 ms
+2025-10-19 21:01:15.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.46 ms
+2025-10-19 21:01:17.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.77 ms
+2025-10-19 21:01:19.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid +0.45 ms
+2025-10-19 21:01:20.123 [host] INFO  frame generation perf: app 27.6 fps (envelope 1.0 ms, 3/310 releases late), stream 89.1 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 40.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:01:21.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid -0.62 ms
+2025-10-19 21:01:23.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid +0.49 ms
+2025-10-19 21:01:25.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid +0.50 ms
+2025-10-19 21:01:27.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.71 ms
+2025-10-19 21:01:29.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid -0.61 ms
+2025-10-19 21:01:30.123 [host] INFO  frame generation perf: app 29.5 fps (envelope 1.0 ms, 3/310 releases late), stream 88.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 43.3 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:01:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9854 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:01:31.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.14 ms
+2025-10-19 21:01:33.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.50 ms
+2025-10-19 21:01:35.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.94 ms
+2025-10-19 21:01:37.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid +0.78 ms
+2025-10-19 21:01:39.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid -0.23 ms
+2025-10-19 21:01:40.123 [host] INFO  frame generation perf: app 29.5 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 43.7 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:01:41.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid +0.17 ms
+2025-10-19 21:01:43.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.95 ms
+2025-10-19 21:01:45.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.40 ms
+2025-10-19 21:01:47.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.03 ms
+2025-10-19 21:01:49.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid +0.45 ms
+2025-10-19 21:01:50.123 [host] INFO  frame generation perf: app 30.2 fps (envelope 1.0 ms, 3/310 releases late), stream 89.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.8 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:01:51.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid +0.54 ms
+2025-10-19 21:01:53.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.02 ms
+2025-10-19 21:01:55.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.08 ms
+2025-10-19 21:01:57.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid +0.06 ms
+2025-10-19 21:01:59.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid +0.00 ms
+2025-10-19 21:02:00.123 [host] INFO  frame generation perf: app 29.6 fps (envelope 1.0 ms, 3/310 releases late), stream 88.5 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.8 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:02:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9946 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:02:01.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid -0.11 ms
+2025-10-19 21:02:03.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid +0.92 ms
+2025-10-19 21:02:05.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid -0.73 ms
+2025-10-19 21:02:07.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.25 ms
+2025-10-19 21:02:09.222 [host] INFO  phase lock: arrivals 6.4 ms before the render tick (target 7.0), sliding the grid -0.28 ms
+2025-10-19 21:02:10.123 [host] INFO  frame generation perf: app 29.9 fps (envelope 1.0 ms, 3/310 releases late), stream 89.5 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:02:11.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid -0.84 ms
+2025-10-19 21:02:13.222 [host] INFO  phase lock: arrivals 6.9 ms before the render tick (target 7.0), sliding the grid +0.86 ms
+2025-10-19 21:02:15.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid +0.74 ms
+2025-10-19 21:02:17.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid -0.73 ms
+2025-10-19 21:02:19.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid +0.20 ms
+2025-10-19 21:02:20.123 [host] INFO  frame generation perf: app 30.1 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 43.7 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:02:21.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid +0.43 ms
+2025-10-19 21:02:23.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid -0.31 ms
+2025-10-19 21:02:25.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid +0.86 ms
+2025-10-19 21:02:27.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid -0.13 ms
+2025-10-19 21:02:29.222 [host] INFO  phase lock: arrivals 6.9 ms before the render tick (target 7.0), sliding the grid -0.03 ms
+2025-10-19 21:02:30.123 [host] INFO  frame generation perf: app 32.6 fps (envelope 1.0 ms, 3/310 releases late), stream 89.0 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 44.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:02:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 9959 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:02:31.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.91 ms
+2025-10-19 21:02:33.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.60 ms
+2025-10-19 21:02:35.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.01 ms
+2025-10-19 21:02:37.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid +0.07 ms
+2025-10-19 21:02:39.222 [host] INFO  phase lock: arrivals 6.3 ms before the render tick (target 7.0), sliding the grid +0.30 ms
+2025-10-19 21:02:40.123 [host] INFO  frame generation perf: app 33.0 fps (envelope 1.0 ms, 3/310 releases late), stream 89.1 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.4 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:02:41.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 21:02:43.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid -0.20 ms
+2025-10-19 21:02:45.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid +0.80 ms
+2025-10-19 21:02:47.222 [host] INFO  phase lock: arrivals 6.5 ms before the render tick (target 7.0), sliding the grid -0.27 ms
+2025-10-19 21:02:49.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid +0.06 ms
+2025-10-19 21:02:50.123 [host] INFO  frame generation perf: app 31.3 fps (envelope 1.0 ms, 3/310 releases late), stream 89.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.0 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:02:51.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid -0.55 ms
+2025-10-19 21:02:53.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid -0.58 ms
+2025-10-19 21:02:55.222 [host] INFO  phase lock: arrivals 6.4 ms before the render tick (target 7.0), sliding the grid -0.71 ms
+2025-10-19 21:02:57.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.61 ms
+2025-10-19 21:02:59.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid -0.66 ms
+2025-10-19 21:03:00.123 [host] INFO  frame generation perf: app 32.9 fps (envelope 1.0 ms, 3/310 releases late), stream 88.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 43.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:03:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10042 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:03:01.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid -0.66 ms
+2025-10-19 21:03:03.222 [host] INFO  phase lock: arrivals 5.3 ms before the render tick (target 7.0), sliding the grid -0.78 ms
+2025-10-19 21:03:05.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid -0.02 ms
+2025-10-19 21:03:07.222 [host] INFO  phase lock: arrivals 5.3 ms before the render tick (target 7.0), sliding the grid -0.96 ms
+2025-10-19 21:03:09.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid -0.18 ms
+2025-10-19 21:03:10.123 [host] INFO  frame generation perf: app 34.1 fps (envelope 1.0 ms, 3/310 releases late), stream 89.1 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.8 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:03:11.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.90 ms
+2025-10-19 21:03:13.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid -0.21 ms
+2025-10-19 21:03:15.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid +0.93 ms
+2025-10-19 21:03:17.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid -0.81 ms
+2025-10-19 21:03:19.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid -0.67 ms
+2025-10-19 21:03:20.123 [host] INFO  frame generation perf: app 34.3 fps (envelope 1.0 ms, 3/310 releases late), stream 89.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 40.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:03:21.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid -0.31 ms
+2025-10-19 21:03:23.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid -0.90 ms
+2025-10-19 21:03:25.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.45 ms
+2025-10-19 21:03:27.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 21:03:29.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid -0.40 ms
+2025-10-19 21:03:30.123 [host] INFO  frame generation perf: app 34.3 fps (envelope 1.0 ms, 3/310 releases late), stream 89.3 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 41.6 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:03:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10081 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:03:31.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid -0.47 ms
+2025-10-19 21:03:33.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid +0.26 ms
+2025-10-19 21:03:35.222 [host] INFO  phase lock: arrivals 5.3 ms before the render tick (target 7.0), sliding the grid -0.81 ms
+2025-10-19 21:03:37.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid +0.94 ms
+2025-10-19 21:03:39.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid -0.99 ms
+2025-10-19 21:03:40.123 [host] INFO  frame generation perf: app 34.8 fps (envelope 1.0 ms, 3/310 releases late), stream 89.1 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 40.6 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:03:41.222 [host] INFO  phase lock: arrivals 4.9 ms before the render tick (target 7.0), sliding the grid -0.82 ms
+2025-10-19 21:03:43.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid -0.93 ms
+2025-10-19 21:03:45.222 [host] INFO  phase lock: arrivals 4.9 ms before the render tick (target 7.0), sliding the grid +0.31 ms
+2025-10-19 21:03:47.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.60 ms
+2025-10-19 21:03:49.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.05 ms
+2025-10-19 21:03:50.123 [host] INFO  frame generation perf: app 35.6 fps (envelope 1.0 ms, 3/310 releases late), stream 89.0 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 38.3 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:03:51.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid +0.83 ms
+2025-10-19 21:03:53.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.93 ms
+2025-10-19 21:03:55.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid +0.21 ms
+2025-10-19 21:03:57.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.82 ms
+2025-10-19 21:03:59.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid +0.70 ms
+2025-10-19 21:04:00.123 [host] INFO  frame generation perf: app 35.8 fps (envelope 1.0 ms, 3/310 releases late), stream 88.6 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 36.7 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:04:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10052 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:04:01.222 [host] INFO  phase lock: arrivals 4.9 ms before the render tick (target 7.0), sliding the grid -0.22 ms
+2025-10-19 21:04:03.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid +0.36 ms
+2025-10-19 21:04:05.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.65 ms
+2025-10-19 21:04:07.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid +0.47 ms
+2025-10-19 21:04:09.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid +0.11 ms
+2025-10-19 21:04:10.123 [host] INFO  frame generation perf: app 33.3 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 37.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:04:11.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.27 ms
+2025-10-19 21:04:13.222 [host] INFO  phase lock: arrivals 5.3 ms before the render tick (target 7.0), sliding the grid -0.54 ms
+2025-10-19 21:04:15.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid -0.04 ms
+2025-10-19 21:04:17.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid -0.66 ms
+2025-10-19 21:04:19.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid +0.21 ms
+2025-10-19 21:04:20.123 [host] INFO  frame generation perf: app 35.3 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 37.0 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:04:21.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid -0.23 ms
+2025-10-19 21:04:23.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid -0.69 ms
+2025-10-19 21:04:25.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid -0.95 ms
+2025-10-19 21:04:27.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid +0.52 ms
+2025-10-19 21:04:29.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid -0.81 ms
+2025-10-19 21:04:30.123 [host] INFO  frame generation perf: app 34.9 fps (envelope 1.0 ms, 3/310 releases late), stream 88.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 34.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:04:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10210 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:04:31.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid +0.69 ms
+2025-10-19 21:04:33.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid +0.76 ms
+2025-10-19 21:04:35.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.10 ms
+2025-10-19 21:04:37.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid +0.47 ms
+2025-10-19 21:04:39.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid -0.26 ms
+2025-10-19 21:04:40.123 [host] INFO  frame generation perf: app 33.9 fps (envelope 1.0 ms, 3/310 releases late), stream 89.5 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 37.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:04:41.222 [host] INFO  phase lock: arrivals 5.1 ms before the render tick (target 7.0), sliding the grid -0.20 ms
+2025-10-19 21:04:43.222 [host] INFO  phase lock: arrivals 6.2 ms before the render tick (target 7.0), sliding the grid -0.79 ms
+2025-10-19 21:04:45.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid -0.78 ms
+2025-10-19 21:04:47.222 [host] INFO  phase lock: arrivals 5.2 ms before the render tick (target 7.0), sliding the grid +0.30 ms
+2025-10-19 21:04:49.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid -0.90 ms
+2025-10-19 21:04:50.123 [host] INFO  frame generation perf: app 35.4 fps (envelope 1.0 ms, 3/310 releases late), stream 88.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 36.4 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:04:51.222 [host] INFO  phase lock: arrivals 5.4 ms before the render tick (target 7.0), sliding the grid +0.29 ms
+2025-10-19 21:04:53.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid -0.98 ms
+2025-10-19 21:04:55.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid +0.93 ms
+2025-10-19 21:04:57.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid +0.12 ms
+2025-10-19 21:04:59.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid +0.56 ms
+2025-10-19 21:05:00.123 [host] INFO  frame generation perf: app 34.8 fps (envelope 1.0 ms, 3/310 releases late), stream 88.5 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 35.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:05:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10174 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:05:01.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid +0.58 ms
+2025-10-19 21:05:03.222 [host] INFO  phase lock: arrivals 6.0 ms before the render tick (target 7.0), sliding the grid -0.62 ms
+2025-10-19 21:05:05.222 [host] INFO  phase lock: arrivals 5.6 ms before the render tick (target 7.0), sliding the grid -0.84 ms
+2025-10-19 21:05:07.222 [host] INFO  phase lock: arrivals 6.5 ms before the render tick (target 7.0), sliding the grid -0.77 ms
+2025-10-19 21:05:09.222 [host] INFO  phase lock: arrivals 5.5 ms before the render tick (target 7.0), sliding the grid +0.93 ms
+2025-10-19 21:05:10.123 [host] INFO  frame generation perf: app 33.5 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 33.8 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:05:11.222 [host] INFO  phase lock: arrivals 5.8 ms before the render tick (target 7.0), sliding the grid +0.79 ms
+2025-10-19 21:05:13.222 [host] INFO  phase lock: arrivals 5.7 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 21:05:15.222 [host] INFO  phase lock: arrivals 5.9 ms before the render tick (target 7.0), sliding the grid +0.66 ms
+2025-10-19 21:05:17.222 [host] INFO  phase lock: arrivals 6.4 ms before the render tick (target 7.0), sliding the grid +0.28 ms
+2025-10-19 21:05:19.222 [host] INFO  phase lock: arrivals 6.6 ms before the render tick (target 7.0), sliding the grid +0.74 ms
+2025-10-19 21:05:20.123 [host] INFO  frame generation perf: app 35.5 fps (envelope 1.0 ms, 3/310 releases late), stream 89.1 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 33.6 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:05:21.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid +0.21 ms
+2025-10-19 21:05:23.222 [host] INFO  phase lock: arrivals 6.3 ms before the render tick (target 7.0), sliding the grid -0.78 ms
+2025-10-19 21:05:25.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid +0.19 ms
+2025-10-19 21:05:27.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid -0.59 ms
+2025-10-19 21:05:29.222 [host] INFO  phase lock: arrivals 6.5 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 21:05:30.123 [host] INFO  frame generation perf: app 35.6 fps (envelope 1.0 ms, 3/310 releases late), stream 89.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 34.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:05:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10287 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:05:31.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid -0.85 ms
+2025-10-19 21:05:33.222 [host] INFO  phase lock: arrivals 6.4 ms before the render tick (target 7.0), sliding the grid -0.03 ms
+2025-10-19 21:05:35.222 [host] INFO  phase lock: arrivals 6.1 ms before the render tick (target 7.0), sliding the grid +0.11 ms
+2025-10-19 21:05:37.222 [host] INFO  phase lock: arrivals 6.9 ms before the render tick (target 7.0), sliding the grid -0.15 ms
+2025-10-19 21:05:39.222 [host] INFO  phase lock: arrivals 6.9 ms before the render tick (target 7.0), sliding the grid +0.21 ms
+2025-10-19 21:05:40.123 [host] INFO  frame generation perf: app 34.8 fps (envelope 1.0 ms, 3/310 releases late), stream 88.5 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 33.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:05:41.222 [host] INFO  phase lock: arrivals 6.4 ms before the render tick (target 7.0), sliding the grid -0.30 ms
+2025-10-19 21:05:43.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.33 ms
+2025-10-19 21:05:45.222 [host] INFO  phase lock: arrivals 6.7 ms before the render tick (target 7.0), sliding the grid -0.83 ms
+2025-10-19 21:05:47.222 [host] INFO  phase lock: arrivals 6.5 ms before the render tick (target 7.0), sliding the grid -0.67 ms
+2025-10-19 21:05:49.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid +0.45 ms
+2025-10-19 21:05:50.123 [host] INFO  frame generation perf: app 35.0 fps (envelope 1.0 ms, 3/310 releases late), stream 88.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 31.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:05:51.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid +0.97 ms
+2025-10-19 21:05:53.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid +0.86 ms
+2025-10-19 21:05:55.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid -0.16 ms
+2025-10-19 21:05:57.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.81 ms
+2025-10-19 21:05:59.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.03 ms
+2025-10-19 21:06:00.123 [host] INFO  frame generation perf: app 32.7 fps (envelope 1.0 ms, 3/310 releases late), stream 88.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 34.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:06:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10266 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:06:01.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.19 ms
+2025-10-19 21:06:03.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid +0.84 ms
+2025-10-19 21:06:05.222 [host] INFO  phase lock: arrivals 6.9 ms before the render tick (target 7.0), sliding the grid +0.87 ms
+2025-10-19 21:06:07.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid -0.81 ms
+2025-10-19 21:06:09.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid -0.41 ms
+2025-10-19 21:06:10.123 [host] INFO  frame generation perf: app 33.7 fps (envelope 1.0 ms, 3/310 releases late), stream 88.6 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 31.8 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:06:11.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.28 ms
+2025-10-19 21:06:13.222 [host] INFO  phase lock: arrivals 6.8 ms before the render tick (target 7.0), sliding the grid +0.49 ms
+2025-10-19 21:06:15.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid -0.14 ms
+2025-10-19 21:06:17.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid +0.48 ms
+2025-10-19 21:06:19.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.43 ms
+2025-10-19 21:06:20.123 [host] INFO  frame generation perf: app 32.0 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 31.9 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:06:21.222 [host] INFO  phase lock: arrivals 7.0 ms before the render tick (target 7.0), sliding the grid -0.40 ms
+2025-10-19 21:06:23.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.84 ms
+2025-10-19 21:06:25.222 [host] INFO  phase lock: arrivals 7.1 ms before the render tick (target 7.0), sliding the grid +0.53 ms
+2025-10-19 21:06:27.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid +0.95 ms
+2025-10-19 21:06:29.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid +0.75 ms
+2025-10-19 21:06:30.123 [host] INFO  frame generation perf: app 31.3 fps (envelope 1.0 ms, 3/310 releases late), stream 88.7 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 33.9 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:06:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10393 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:06:31.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.68 ms
+2025-10-19 21:06:33.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 21:06:35.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.08 ms
+2025-10-19 21:06:37.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid +0.71 ms
+2025-10-19 21:06:39.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 21:06:40.123 [host] INFO  frame generation perf: app 33.1 fps (envelope 1.0 ms, 3/310 releases late), stream 89.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 34.5 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:06:41.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid +0.61 ms
+2025-10-19 21:06:43.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.51 ms
+2025-10-19 21:06:45.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid -0.98 ms
+2025-10-19 21:06:47.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.06 ms
+2025-10-19 21:06:49.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.67 ms
+2025-10-19 21:06:50.123 [host] INFO  frame generation perf: app 31.1 fps (envelope 1.0 ms, 3/310 releases late), stream 89.2 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 35.8 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:06:51.222 [host] INFO  phase lock: arrivals 7.2 ms before the render tick (target 7.0), sliding the grid -0.59 ms
+2025-10-19 21:06:53.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 21:06:55.222 [host] INFO  phase lock: arrivals 8.3 ms before the render tick (target 7.0), sliding the grid +0.57 ms
+2025-10-19 21:06:57.222 [host] INFO  phase lock: arrivals 8.4 ms before the render tick (target 7.0), sliding the grid -0.93 ms
+2025-10-19 21:06:59.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.97 ms
+2025-10-19 21:07:00.123 [host] INFO  frame generation perf: app 31.4 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 36.4 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:07:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10336 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:07:01.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.32 ms
+2025-10-19 21:07:03.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.09 ms
+2025-10-19 21:07:05.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid -0.38 ms
+2025-10-19 21:07:07.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid +0.60 ms
+2025-10-19 21:07:09.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.48 ms
+2025-10-19 21:07:10.123 [host] INFO  frame generation perf: app 30.8 fps (envelope 1.0 ms, 3/310 releases late), stream 88.8 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 36.0 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:07:11.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid -0.14 ms
+2025-10-19 21:07:13.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid +0.35 ms
+2025-10-19 21:07:15.222 [host] INFO  phase lock: arrivals 8.3 ms before the render tick (target 7.0), sliding the grid +0.62 ms
+2025-10-19 21:07:17.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid -0.73 ms
+2025-10-19 21:07:19.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid +0.58 ms
+2025-10-19 21:07:20.123 [host] INFO  frame generation perf: app 30.5 fps (envelope 1.0 ms, 3/310 releases late), stream 88.7 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 36.4 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:07:21.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid +0.66 ms
+2025-10-19 21:07:23.222 [host] INFO  phase lock: arrivals 7.8 ms before the render tick (target 7.0), sliding the grid -0.44 ms
+2025-10-19 21:07:25.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.97 ms
+2025-10-19 21:07:27.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid +0.79 ms
+2025-10-19 21:07:29.222 [host] INFO  phase lock: arrivals 8.2 ms before the render tick (target 7.0), sliding the grid -0.07 ms
+2025-10-19 21:07:30.123 [host] INFO  frame generation perf: app 30.1 fps (envelope 1.0 ms, 3/310 releases late), stream 88.9 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 39.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:07:30.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10503 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:07:31.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid +0.86 ms
+2025-10-19 21:07:33.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid +0.21 ms
+2025-10-19 21:07:35.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid +0.04 ms
+2025-10-19 21:07:37.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid -0.63 ms
+2025-10-19 21:07:39.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid +0.98 ms
+2025-10-19 21:07:40.123 [host] INFO  frame generation perf: app 30.7 fps (envelope 1.0 ms, 3/310 releases late), stream 88.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 37.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:07:41.222 [host] INFO  phase lock: arrivals 7.7 ms before the render tick (target 7.0), sliding the grid -0.18 ms
+2025-10-19 21:07:43.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.09 ms
+2025-10-19 21:07:45.222 [host] INFO  phase lock: arrivals 8.0 ms before the render tick (target 7.0), sliding the grid -0.09 ms
+2025-10-19 21:07:47.222 [host] INFO  phase lock: arrivals 8.1 ms before the render tick (target 7.0), sliding the grid -0.69 ms
+2025-10-19 21:07:49.222 [host] INFO  phase lock: arrivals 7.3 ms before the render tick (target 7.0), sliding the grid +0.04 ms
+2025-10-19 21:07:50.123 [host] INFO  frame generation perf: app 29.4 fps (envelope 1.0 ms, 3/310 releases late), stream 88.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 40.1 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:07:51.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid +0.70 ms
+2025-10-19 21:07:53.222 [host] INFO  phase lock: arrivals 7.9 ms before the render tick (target 7.0), sliding the grid +0.86 ms
+2025-10-19 21:07:55.222 [host] INFO  phase lock: arrivals 7.6 ms before the render tick (target 7.0), sliding the grid -0.94 ms
+2025-10-19 21:07:57.222 [host] INFO  phase lock: arrivals 7.5 ms before the render tick (target 7.0), sliding the grid +0.10 ms
+2025-10-19 21:07:59.222 [host] INFO  phase lock: arrivals 7.4 ms before the render tick (target 7.0), sliding the grid -0.44 ms
+2025-10-19 21:08:00.123 [host] INFO  frame generation perf: app 27.7 fps (envelope 1.0 ms, 3/310 releases late), stream 89.4 fps, game period 32.2 ms (p50 32.0 p95 36.1 max 41.0), lag 39.2 ms (slack p5 2.0 p50 5.1), mean t 0.50 mean age 0.40, behind 0 ahead 0, gpu [2,0,7,0,2505,14001,2152,75.1,43,P0,1507,0x400]
+2025-10-19 21:08:00.456 [host] INFO  memory: host 625 MB private (173 MB working set), 848 handles; RAM 54357 of 63159 MB free; GPU 10438 of 32607 MB used, host process 470 MB of a 31419 MB VRAM budget
+2025-10-19 21:08:05.123 [host] INFO  game ended: Cyberpunk2077.exe after 15m05s, 28000 frames rendered (31.0 fps), 80000 streamed (89.5 fps)

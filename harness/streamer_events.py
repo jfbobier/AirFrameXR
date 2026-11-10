@@ -29,7 +29,7 @@ EXPECT = {
         ("run_clean", ["57 ms", "p95 70"], ["n/a"]),   # 2 outliers of 800 samples: still believable
     ],
     "controls_avp": [
-        ("avp_auto", ["headset reports 1.62 m", "Eye height", "Debug logging", "Export logs...", "Open logs folder", "Frame generation", "Position", "Picture", "Desktop mirror"], ["Between games"]),
+        ("avp_auto", ["headset reports 1.62 m", "Eye height", "Debug logging", "Export logs...", "Open logs folder", "Features", "Frame generation", "Position", "Picture", "Desktop mirror", "button \u2630", "x1.5", "x2", "x3"], ["Between games", "vectors", "1/3", "1/2", "2/3"]),
         ("frame_gen_on", ["sent frame_gen on"], []),
         ("rate", ["sent frame_gen_rate two_thirds"], []),
         ("uncapped_on", [], []),   # the Uncapped tick lives in the Advanced window since 2026-10-23 (hidden in the streamer): nothing here to drive or read
@@ -49,11 +49,11 @@ EXPECT = {
         ("quest", ["Meta Quest 3"], ["headset reports"]),
         ("quest_manual", ["sent height 0.00"], []),   # a Quest's floor is right: whatever the choice, the engine is told 0
     ],
-    "audio_line": [
-        ("quiet", [], ["Audio:"]),   # nothing reported, nothing said
-        ("forced", ["Audio: CABLE Input (VB-Audio Virtual Cable) was at 40 %, set back to 100 %"], []),
-        ("failed", ["Audio: CABLE Input (VB-Audio Virtual Cable) could not be set to 100 %"], []),
-        ("channels", ["has 16 channels: ALVR cannot capture more than 8"], []),
+    "audio_line": [   # the audio notes are in the log, not in the window (2026-11-10)
+        ("quiet", [], ["Audio:"]),
+        ("forced", [], ["Audio:", "set back to 100 %"]),
+        ("failed", [], ["Audio:", "could not be set"]),
+        ("channels", [], ["Audio:", "16 channels"]),
     ],
     "fov_forward": [
         ("fov_on", ["sent fov_override on 1.50 1.02 1.22 1.02"], []),

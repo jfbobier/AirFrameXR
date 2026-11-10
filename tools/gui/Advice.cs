@@ -193,18 +193,18 @@ namespace AirFrameXR
                 string who = $"{g.Name} ({g.When:yyyy-MM-dd})";
                 string src = $"from your records, last session of {who} on {g.Headset}";
                 bool gen = g.Level.Length > 0 && g.Level != "off";
-                string lvl = g.Level == "third" ? "1/3" : g.Level == "half" ? "1/2" : g.Level == "two_thirds" ? "2/3" : "off";
+                string lvl = g.Level == "off" ? "off" : Ui.FgName(g.Level);
                 if (!gen && g.Hz > 0 && g.Fps > 0 && g.Fps < 0.9 * g.Hz && g.RepTyp > 5)
                     s.Add(new Suggestion { Sev = Sev.Hint, Knob = "Frame generation", Source = src, Title = $"{g.Name}: frame generation would probably help",
                         Measured = $"it ran at {F(g.Fps, "0")} fps on a {F(g.Hz, "0")} Hz panel and the headset repeated {F(g.RepTyp)} % of its refreshes",
-                        Do = "switch Frame generation on in the streamer window and leave it on Auto; some games look better raw (a 56 fps game was preferred to 2/3), so it is a taste, not a rule",
+                        Do = "switch Frame generation on in the streamer window and leave it on Auto; some games look better raw (a 56 fps game was preferred to x1.5), so it is a taste, not a rule",
                         Apply = () => { var st = new AppSettings(); st.FrameGen = true; st.FrameGenRecommended = true; st.Save(); }, ApplyText = "Turn frame generation on (Auto)" });
                 if (gen && g.HostRep >= 5)
                     s.Add(new Suggestion { Sev = Sev.Hint, Knob = "Frame generation rate", Source = src, Title = $"{g.Name}: the game could not keep up with its rate ({lvl})",
                         Measured = $"the streamer re-sent {F(g.HostRep)} % of its outputs because the game had not delivered (frozen content the headset counts as shown); the headset itself repeated {F(g.RepTyp)} %",
-                        Do = "choose the next lower rate (1/3 under 1/2): Auto does it after one more run",
+                        Do = "choose the next lower rate (x3 under x2): Auto does it after one more run",
                         Apply = g.Level == "half" || g.Level == "two_thirds" ? (Action)(() => { var st = new AppSettings(); st.FrameGen = true; st.FrameGenRate = g.Level == "half" ? "third" : "half"; st.FrameGenRecommended = false; st.Save(); }) : null,
-                        ApplyText = g.Level == "half" ? "Use 1/3" : "Use 1/2" });
+                        ApplyText = g.Level == "half" ? "Use x3" : "Use x2" });
                 else if (gen && g.RepTyp >= 5)
                     s.Add(new Suggestion { Sev = Sev.Hint, Knob = "Arrival / Wi-Fi", Source = src, Title = $"{g.Name}: the headset still repeated {F(g.RepTyp)} % of its refreshes at {lvl}",
                         Measured = $"typical window {F(g.RepTyp)} %, heavy parts {F(g.RepP90)} %, host repeats {F(g.HostRep)} %",

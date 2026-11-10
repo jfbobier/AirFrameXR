@@ -26,7 +26,7 @@ schtasks /delete /tn va_mock /f 2>$null | Out-Null; schtasks /delete /tn va_wiz 
 if (Test-Path '{wd}') {{ Remove-Item '{wd}' -Recurse -Force }}
 New-Item -ItemType Directory -Force '{wd}' | Out-Null
 robocopy '{tmpl}' '{wd}' /E /NFL /NDL /NJH /NJS | Out-Null
-Remove-Item '{wd}\\config\\session.json','{wd}\\config\\airframexr.json','{wd}\\logs' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item '{wd}\\config\\session.json','{wd}\\config\\session.base.json','{wd}\\config\\airframexr.json','{wd}\\logs' -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force '{wd}\\bin' | Out-Null
 Copy-Item '{root}\\out\\gui\\configure.exe' '{wd}\\bin\\configure.exe' -Force
 Copy-Item '{root}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wd}\\bin\\alvr_host.exe' -Force
@@ -67,7 +67,7 @@ out.mkdir(parents=True, exist_ok=True)
 live.ps("Stop-Process -Name configure,alvr_host -Force -ErrorAction SilentlyContinue; schtasks /delete /tn va_mock /f 2>$null | Out-Null; Stop-Process -Name alvr_client_headless -Force -ErrorAction SilentlyContinue; Stop-Process -Name cmd -Force -ErrorAction SilentlyContinue")
 time.sleep(2)
 live.get_dir(wd.replace("\\", "/"), out / "folder_files") if False else None
-for f in ("report.json", "mock_stdout.txt", "config/session.json", "config/airframexr.json", "logs/AirFrameXR.log"):
+for f in ("report.json", "mock_stdout.txt", "config/session.base.json", "config/session.json", "config/airframexr.json", "logs/AirFrameXR.log"):
     (out / Path(f).parent).mkdir(parents=True, exist_ok=True)
     live._retry(["scp", "-o", "BatchMode=yes", *live.MUX, "-q", f"{live.PC}:{wd.replace(chr(92), '/')}/{f}", str(out / f)])
 rep = out / "report.json"

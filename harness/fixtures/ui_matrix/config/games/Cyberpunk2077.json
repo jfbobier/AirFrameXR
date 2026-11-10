@@ -38,11 +38,6 @@
     "decode_ms": 14,
     "packets_lost": 3
    },
-   "mv": {
-    "enabled": true,
-    "frames": 53000,
-    "used_eyes": 100000
-   },
    "gpu": {
     "name": "RTX 5090",
     "driver": "617.42"
@@ -71,11 +66,6 @@
     "network_ms": 12,
     "decode_ms": 15,
     "packets_lost": 0
-   },
-   "mv": {
-    "enabled": true,
-    "frames": 0,
-    "used_eyes": 0
    },
    "gpu": {
     "name": "RTX 5090",

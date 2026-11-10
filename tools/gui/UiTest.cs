@@ -118,11 +118,15 @@ namespace AirFrameXR
             yield return new Case { Name = "streamer-empty", Make = () => new RuntimeForm(null) };
             yield return new Case { Name = "streamer-avp-auto", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };   // the fixture config has no height set: a Vision Pro starts on Auto
             yield return new Case { Name = "streamer-quest", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_connected", new Dictionary<string, object> { { "name", "Meta Quest 3" }, { "ip", "192.168.1.60" } }); } };
-            yield return new Case { Name = "streamer-audio-bad", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoAudio(true); } };
             yield return new Case { Name = "streamer-debug-on", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoDebugOn(); } };
             yield return new Case { Name = "streamer-headset-seen", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); ((RuntimeForm)f).HostEvent("headset_seen", new Dictionary<string, object> { { "hostname", "1234.client.alvr" }, { "ip", "192.168.1.50" } }); } };
             yield return new Case { Name = "streamer-headset-lost", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); } };
             yield return new Case { Name = "advanced-switches", Make = () => new AdvancedForm() };
+            yield return new Case { Name = "advanced-experimental", Make = () => new AdvancedForm(), Prepare = f =>   // the Experimental fold opened: every switch the window has is on screen
+            {
+                Button Find(Control c) { foreach (Control k in c.Controls) { if (k is Button b && b.Text.Contains("Experimental:")) return b; var r = Find(k); if (r != null) return r; } return null; }
+                Find(f)?.PerformClick();
+            } };
             var avpBox = new[] { 1.045, 0.800, 0.759, 0.871 };   // the AirFrameXR client's declared box
             yield return new Case { Name = "fov-panel-off", Make = () => new FovPanelTestForm(avpBox, false, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()) };
             yield return new Case { Name = "fov-panel-on", Make = () => new FovPanelTestForm(avpBox, true, new[] { 3552, 3200 }, false, FovManagerForm.DemoStore()) };
@@ -339,6 +343,15 @@ namespace AirFrameXR
             Application.SetCompatibleTextRenderingDefault(false);
             string Arg(string k) { for (int i = 0; i + 1 < args.Length; i++) if (args[i] == k) return args[i + 1]; return null; }
             var outDir = Arg("--out") ?? Path.Combine(Paths.Dir, "uitest");
+            var showCase = args.Contains("--show-streamer") ? "streamer-clean" : Arg("--show");   // a person looks at a window as the matrix renders it (its demo state, no host); closes with the window
+            if (showCase != null)
+            {
+                var c = Cases().FirstOrDefault(x => x.Name == showCase);
+                if (c == null) { Console.Error.WriteLine("no such case: " + showCase); return 2; }
+                var f = c.Make(); f.StartPosition = FormStartPosition.CenterScreen;
+                f.Shown += (o, e) => c.Prepare?.Invoke(f);
+                Application.Run(f); return 0;
+            }
             Directory.CreateDirectory(outDir);
             var only = Arg("--only");
             if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);
@@ -401,6 +414,41 @@ namespace AirFrameXR
                     lines.Add(c["name"] + "|" + (p == null ? "null" : $"q={p.Quality.ToString("0.000", ic)};chosen={Z(p.Chosen)};floor={Z(p.Floor)};ceiling={Z(p.Ceiling)};p4p={Z(p.PixelForPixel)};floorpct={p.FloorPct.ToString("0.00", ic)};maxpct={p.MaxPct.ToString("0.00", ic)};chosenpct={p.ChosenPct.ToString("0.00", ic)};saving={p.SavingPct.ToString("0.00", ic)}"));
                 }
                 File.WriteAllLines(Path.Combine(outDir, "render_plan.txt"), lines);
+                return 0;
+            }
+            var tlLog = Arg("--log-timeline-selftest");   // harness/log_timeline_check.py: what the stats window reads from the general log, for a game
+            if (tlLog != null)
+            {
+                var lines = new List<string>();
+                foreach (var exe in (Arg("--exes") ?? "").Split(','))
+                {
+                    var r = global::AirFrameXR.LogTimeline.Last(tlLog, exe);
+                    lines.Add(r == null ? exe + "|none" : string.Format(CultureInfo.InvariantCulture, "{0}|start={1:yyyy-MM-dd HH:mm:ss}|end={2:yyyy-MM-dd HH:mm:ss}|ended={3}|perf={4}|gpu={5}|arr={8}|app_max={6:0.0}|gpu_max={7:0}", exe, r.Start, r.End, r.Ended, r.PerfT.Count, r.GpuT.Count, r.App.Count > 0 ? r.App.Max() : 0, r.GpuMb.Count > 0 ? r.GpuMb.Max() : 0, r.ArrT.Count));
+                }
+                Directory.CreateDirectory(outDir); File.WriteAllLines(Path.Combine(outDir, "log_timeline.txt"), lines);
+                return 0;
+            }
+            var ocDir = Arg("--opencomposite-selftest");   // harness/opencomposite_check.py: the switch with the package's DLLs, in a temporary folder, never the real OpenVR files
+            if (ocDir != null)
+            {
+                var lines = new List<string>();
+                var tmp = Path.Combine(ocDir, "oc"); Directory.CreateDirectory(tmp);
+                global::AirFrameXR.OpenComposite.Root = Path.Combine(tmp, "opencomposite");
+                global::AirFrameXR.OpenComposite.VrPath = Path.Combine(tmp, "openvr", "openvrpaths.vrpath");
+                Directory.CreateDirectory(Path.GetDirectoryName(global::AirFrameXR.OpenComposite.VrPath));
+                File.WriteAllText(global::AirFrameXR.OpenComposite.VrPath, "{\n\t\"config\" : [ \"C:\\\\x\" ],\n\t\"external_drivers\" : [ \"C:\\\\Games\\\\ALVR\" ],\n\t\"jsonid\" : \"vrpathreg\",\n\t\"runtime\" : [ \"C:\\\\Steam\\\\SteamVR\" ],\n\t\"version\" : 1\n}\n");
+                string R() => string.Join(";", global::AirFrameXR.OpenComposite.Runtimes());
+                lines.Add("start|active=" + global::AirFrameXR.OpenComposite.Active + "|installed=" + global::AirFrameXR.OpenComposite.Installed + "|runtime=" + R());
+                lines.Add("enable_without_bundle|" + global::AirFrameXR.OpenComposite.Enable());
+                var oc = global::AirFrameXR.OpenComposite.Root; Directory.CreateDirectory(Path.Combine(oc, "bin"));
+                foreach (var dll in new[] { "vrclient.dll", "vrclient_x64.dll" }) File.Copy(Path.Combine(ocDir, "bundle", dll), Path.Combine(oc, "bin", dll), true);   // what the package ships
+                lines.Add("bundle|installed=" + global::AirFrameXR.OpenComposite.Installed + "|dll32=" + new FileInfo(Path.Combine(oc, "bin", "vrclient.dll")).Length + "|dll64=" + new FileInfo(Path.Combine(oc, "bin", "vrclient_x64.dll")).Length);
+                lines.Add("enable|" + (global::AirFrameXR.OpenComposite.Enable() ?? "ok") + "|active=" + global::AirFrameXR.OpenComposite.Active + "|runtime=" + R());
+                var after = global::AirFrameXR.Json.Load(global::AirFrameXR.OpenComposite.VrPath);
+                lines.Add("kept_keys|" + string.Join(",", after.Keys.OrderBy(k => k)) + "|backup=" + File.Exists(global::AirFrameXR.OpenComposite.VrPath + ".airframexr.bak"));
+                lines.Add("enable_twice|" + (global::AirFrameXR.OpenComposite.Enable() ?? "ok") + "|runtime=" + R());
+                lines.Add("disable|" + (global::AirFrameXR.OpenComposite.Disable() ?? "ok") + "|active=" + global::AirFrameXR.OpenComposite.Active + "|runtime=" + R());
+                File.WriteAllLines(Path.Combine(ocDir, "opencomposite.txt"), lines);
                 return 0;
             }
             var raceSecs = Arg("--json-race-selftest");   // harness/json_atomic_check.py: a writer saves a 20 KB JSON as fast as it can while a reader opens it the way the host does (share read/write/delete) and parses it

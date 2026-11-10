@@ -106,7 +106,7 @@ concerned; the launcher owns the judgement.
   `game_run`. The host decides nothing.
 - **The launcher proposes.** A game is only known once it streams, so the proposal is applied at game start (the first second runs at the
   slider's level, the record restarts at the switch); the slider is the default for a game without a record, and the user's choice with the
-  tick off. The "Recommended" tick (`video.frame_gen_recommended`, on by default) reads games.json when a game starts on the connected headset: the fastest level whose last run was clean (typical window: the headset repeated under 5 % of its periods AND the
+  tick off. The "Recommended" tick (`video.frame_gen_recommended`, off by default since 2026-11-10) reads games.json when a game starts on the connected headset: the fastest level whose last run was clean (typical window: the headset repeated under 5 % of its periods AND the
   host repeated under 5 % of its outputs, run of 30 s or more) is set on the
   slider, which is greyed while the tick is on; if that run filled its cap (rendered at least 95 % of the level's fps) and the next level
   has no run yet, the next level is proposed once, and its run then speaks for itself. No clean level: the one with the fewest repeats.

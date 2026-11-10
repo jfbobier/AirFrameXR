@@ -26,7 +26,7 @@ Performance changes need a baseline, controlled conditions, and a repeatable tes
 
 ### 5. Favor honest scope over universal compatibility
 
-The maintained target is a Windows PC with an NVIDIA GPU, OpenXR applications and ALVR v20 headset clients. The Vision Pro is the primary tuning target, with Quest 3 verified. SteamVR/OpenVR-only applications, AMD/Intel encoding, and maintaining every possible headset profile are outside the project's core goals. A clean fallback to SteamVR + stock ALVR is better than an enormous compatibility layer.
+The maintained target is a Windows PC with an NVIDIA GPU, OpenXR applications and ALVR v20 headset clients. The Vision Pro is the primary tuning target, with Quest 3 verified. SteamVR/OpenVR-only applications beyond what the bundled OpenComposite translation layer runs (limited OpenVR support, a launcher switch; no driver of our own), AMD/Intel encoding, and maintaining every possible headset profile are outside the project's core goals. A clean fallback to SteamVR + stock ALVR is better than an enormous compatibility layer.
 
 ### 6. AI contributions are welcome, not exempt
 
