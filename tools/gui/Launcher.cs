@@ -158,7 +158,7 @@ namespace AirFrameXR
             if (installingOc) lines.Add(Row("\u2022", "Downloading OpenComposite...", Color.DimGray, new (string, Action)[0]));
             else if (!demoReady && OpenComposite.Active) lines.Add(Row("\u2713", "OpenVR: OpenComposite is active (games run on AirFrameXR, no SteamVR).", Color.SeaGreen, new[] { ("Switch back to SteamVR", (Action)(() => OcSwitch(false))) }));
             else if (!demoReady && OpenComposite.Installed) lines.Add(Row("\u2022", "OpenVR: SteamVR.", Color.DimGray, new[] { ("Use OpenComposite", (Action)(() => OcSwitch(true))) }));
-            else lines.Add(Row("\u2022", "OpenVR: SteamVR.", Color.DimGray, new[] { ("Install OpenComposite", (Action)OcInstall) }));
+            else lines.Add(Row("\u2022", "OpenVR: SteamVR (OpenComposite is not installed).", Color.DimGray, new[] { ("Install", (Action)OcInstall) }));
             sys.Controls.Add(new Label { Text = allGood ? "Ready" : "Needs attention", AutoSize = true, Font = Ui.Big, ForeColor = allGood ? Color.SeaGreen : Color.Firebrick, Margin = new Padding(0, 0, 0, 4) });
             foreach (var l in lines) sys.Controls.Add(l);
             sys.ResumeLayout();
