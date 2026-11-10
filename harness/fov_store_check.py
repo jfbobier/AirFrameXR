@@ -24,6 +24,8 @@ WANT = [
     "vertical_ratio_yellow=Strange",
     "tiny_yellow=Strange",
     "small_share_yellow=Strange area=0.27",
+    "thin_edges_yellow=Strange area=0.64 explained",
+    "shipped_in_box_valid=Valid area=0.65",
     "avp_total=79.5x66.8",
     "empty=0",
     "after_add=b:mine (2),a:Mine window_b=2 quality_b=0.5",
