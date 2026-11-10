@@ -1,6 +1,6 @@
 # AirFrameXR: notes for Claude
 
-Wireless PCVR for NVIDIA: OpenXR runtime (VDXR + our shim `ovrshim/`) -> Rust host `tools/host/` (frame generation, foveation, NVENC via `nvenc/`) -> ALVR v20 streaming -> headset (Apple Vision Pro primary, Quest 3 verified). Windows + NVIDIA only; no OpenVR/SteamVR. Philosophy: performance first, no feature bloat, measurements beat intuition (`docs/DEVELOPMENT_PHILOSOPHY.md`).
+Wireless PCVR for NVIDIA: OpenXR runtime (VDXR + our shim `ovrshim/`) -> Rust host `tools/host/` (frame generation, foveation, NVENC via `nvenc/`) -> ALVR v20 streaming -> headset (Apple Vision Pro primary, Quest 3 verified). Windows + NVIDIA only; no SteamVR or own OpenVR driver, limited OpenVR support only through the bundled OpenComposite OpenVR-to-OpenXR translation layer (GPL, separate files, a launcher switch; `opencomposite/`). Philosophy: performance first, no feature bloat, measurements beat intuition (`docs/DEVELOPMENT_PHILOSOPHY.md`).
 
 ## Rules
 
