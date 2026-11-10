@@ -69,8 +69,7 @@ It is not affiliated with or supported by NVIDIA, Apple or the ALVR project.
 
 **Relationship to ALVR.** AirFrameXR implements the ALVR streaming protocol (version 20) so that the existing ALVR headset apps work with it, and it is
 built on ALVR's open-source server libraries (MIT). It is a separate project: it is **not ALVR**, not affiliated with or endorsed by the ALVR
-project, and the ALVR developers' own streamer remains the place for SteamVR-based streaming. Formerly published as "VisionALVR" (before 1.0); the
-name was changed at the ALVR developers' request, so that nothing suggests an affiliation.
+project, and the ALVR developers' own streamer remains the place for SteamVR-based streaming.
 - **Headset clients.** The streamer speaks the ALVR protocol (20.14.x), so there are two kinds of clients:
   - **AirFrameXR clients**, built for the two headsets this project targets, so that the optimizations run end to end (the field of view limit, the chroma-key passthrough, timing and latency logs):
     - **Apple Vision Pro**: the [AirFrameXR visionOS client](https://github.com/jfbobier/airframexr-visionos) (source on GitHub), distributed through **TestFlight**. <!-- TODO: add the public TestFlight link from kteque -->
