@@ -1,3 +1,4 @@
+# AirFrameXR repository attributes
 * text=auto
 # Windows scripts keep CRLF (cmd.exe needs it for .bat/.cmd; PowerShell is happier with it)
 *.bat  text eol=crlf
