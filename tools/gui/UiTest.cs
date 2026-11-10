@@ -118,7 +118,6 @@ namespace AirFrameXR
             yield return new Case { Name = "streamer-empty", Make = () => new RuntimeForm(null) };
             yield return new Case { Name = "streamer-avp-auto", Make = () => new RuntimeForm(null), Prepare = f => ((RuntimeForm)f).ApplyDemoState(false) };   // the fixture config has no height set: a Vision Pro starts on Auto
             yield return new Case { Name = "streamer-quest", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_connected", new Dictionary<string, object> { { "name", "Meta Quest 3" }, { "ip", "192.168.1.60" } }); } };
-            yield return new Case { Name = "streamer-audio-bad", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoAudio(true); } };
             yield return new Case { Name = "streamer-debug-on", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(true); ((RuntimeForm)f).DemoDebugOn(); } };
             yield return new Case { Name = "streamer-headset-seen", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); ((RuntimeForm)f).HostEvent("headset_seen", new Dictionary<string, object> { { "hostname", "1234.client.alvr" }, { "ip", "192.168.1.50" } }); } };
             yield return new Case { Name = "streamer-headset-lost", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); } };
@@ -339,6 +338,11 @@ namespace AirFrameXR
             Application.SetCompatibleTextRenderingDefault(false);
             string Arg(string k) { for (int i = 0; i + 1 < args.Length; i++) if (args[i] == k) return args[i + 1]; return null; }
             var outDir = Arg("--out") ?? Path.Combine(Paths.Dir, "uitest");
+            if (args.Contains("--show-streamer"))   // a person looks at the streamer window as the matrix renders it (demo state, no host); closes with the window
+            {
+                var f = new RuntimeForm(null); f.StartPosition = FormStartPosition.CenterScreen; f.Shown += (o, e) => f.ApplyDemoState(false);
+                Application.Run(f); return 0;
+            }
             Directory.CreateDirectory(outDir);
             var only = Arg("--only");
             if (args.Contains("--advice-selftest")) return AdviceSelfTest(outDir);

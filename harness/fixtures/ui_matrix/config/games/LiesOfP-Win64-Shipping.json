@@ -32,11 +32,6 @@
     "latency_outliers": 40,
     "latency_samples": 800
    },
-   "mv": {
-    "enabled": true,
-    "frames": 0,
-    "used_eyes": 0
-   },
    "gpu": {
     "name": "RTX 5090",
     "driver": "617.42"

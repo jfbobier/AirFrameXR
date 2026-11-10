@@ -487,7 +487,7 @@ namespace AirFrameXR
             set { if (value == null) Json.Remove(Root, "video.stream_fit_eye"); else Json.Set(Root, "video.stream_fit_eye", value.Select(x => (object)(double)x).ToList()); }
         }
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
-        public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", true); set => Json.Set(Root, "video.frame_gen_recommended", value); }
+        public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", false); set => Json.Set(Root, "video.frame_gen_recommended", value); }
         /// arrival margin of the phase lock in ms (host default 7; the host reads it at start) and the GPU keepalive duty in % (0 = off); 0 = not set
         public double PhaseMarginMs { get => Json.Num(Root, "video.phase_margin_ms", 0); set => Json.Set(Root, "video.phase_margin_ms", value); }
         public int GpuKeepalive { get => (int)Json.Num(Root, "video.gpu_keepalive", 0); set => Json.Set(Root, "video.gpu_keepalive", (double)value); }
@@ -644,6 +644,8 @@ namespace AirFrameXR
                 items.Add(r); Controls.Add(r);
             }
         }
+        /// Every segment exactly this big (a 96-dpi design size, scaled with the window): the segments, and a button beside them, then have one size.
+        public Size MinButton { set { foreach (var r in items) { r.AutoSize = false; r.Size = value; } } }
         public int Value
         {
             get { for (int i = 0; i < items.Count; i++) if (items[i].Checked) return i; return -1; }
@@ -1701,7 +1703,7 @@ namespace AirFrameXR
                 var chrome = new Size(f.Width - f.ClientSize.Width, f.Height - f.ClientSize.Height);
                 var bs = body.PreferredSize;
                 body.PerformLayout();
-                int cw = Math.Max(bs.Width, body.Width) + 4, ch = (header != null ? header.Height : 0) + body.Height + 2;   // the body is AutoSize: its real height after a layout is the content
+                int cw = Math.Max(Math.Max(bs.Width, body.Width) + 4, header != null ? header.PreferredSize.Width : 0), ch = (header != null ? header.Height : 0) + body.Height + 2;   // the body is AutoSize: its real height after a layout is the content
                 int maxW = wa.Width - chrome.Width, maxH = wa.Height - chrome.Height;
                 if (ch > maxH) { ch = maxH; cw += SystemInformation.VerticalScrollBarWidth; }
                 if (cw > maxW) { cw = maxW; ch = Math.Min(maxH, ch + SystemInformation.HorizontalScrollBarHeight); }
@@ -1816,7 +1818,7 @@ namespace AirFrameXR
             var logo = Resource("logo_640.png");
             if (logo != null) p.Controls.Add(new PictureBox { Image = logo, SizeMode = PictureBoxSizeMode.Zoom, Width = 180, Height = 76, Margin = new Padding(0) });
             var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(16, 26, 0, 0) };   // centred against the logo
-            col.Controls.Add(new Label { Text = $"{subtitle}   \u00B7   version {Version.Text}", AutoSize = true, Font = Body, ForeColor = Color.DimGray });
+            col.Controls.Add(new Label { Text = subtitle.Length > 0 ? $"{subtitle}   \u00B7   version {Version.Text}" : Version.Text, AutoSize = true, Font = Body, ForeColor = Color.DimGray });
             p.Controls.Add(col);
             return p;
         }
@@ -1863,6 +1865,8 @@ namespace AirFrameXR
         }
 
         /// A statistics tile: small title, a big value, a one-line note. Sizes from its text (no fixed width), so it follows the display scale.
+        /// The name of a frame generation rate everywhere in the UI: the multiplier of the game's frames (the settings keep third | half | two_thirds, the share the game renders).
+        public static string FgName(string level) => level == "third" ? "x3" : level == "half" ? "x2" : level == "two_thirds" ? "x1.5" : level;
         public static Tile MakeTile(string title, string value = "-", string note = "", Color? color = null) { var t = new Tile(title, value, note); if (color != null) t.Set(value, note, color); return t; }
 
         /// A small coloured tag next to a label (instead of a suffix in its text).

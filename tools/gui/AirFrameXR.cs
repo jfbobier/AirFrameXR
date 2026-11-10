@@ -31,6 +31,14 @@ namespace AirFrameXR
         // the Streaming box: tiles (live numbers during a game, the last session's after it) and one line of text under them
         readonly Tile tGame = Ui.MakeTile("Game"), tStreamed = Ui.MakeTile("Streamed"), tShown = Ui.MakeTile("Headset shows"), tBitrate = Ui.MakeTile("Bitrate"), tLatency = Ui.MakeTile("Latency"), tLoss = Ui.MakeTile("Loss");
         readonly Label stats = Ui.Line("Waiting for the first statistics (every 10 s)...");
+        readonly Label statsSub = Ui.Line("", new Font("Segoe UI", 9f));   // streamed fps, bitrate and packet loss: read less often than fps and latency
+        // the tiles that are not shown still hold their numbers; the line is made from them
+        void SubLine()
+        {
+            var loss = tLoss.Value; bool bad = tLoss.ValueColor == Color.Firebrick;
+            statsSub.Text = tStreamed.Value == "-" ? "" : $"Streamed {tStreamed.Value}  ·  {tBitrate.Value}  ·  {loss} packets lost";
+            statsSub.ForeColor = bad ? Color.Firebrick : Color.DimGray;
+        }
         // the Streaming box shows live numbers while a game runs and, once it has ended, the run's record and what will be proposed next time
         readonly GroupBox statsBox = new GroupBox { Text = "Streaming (updated every 10 s)", AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(8), Font = Ui.Bold };
         bool lastSession;
@@ -48,18 +56,17 @@ namespace AirFrameXR
         readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Frame generation" };
         readonly ToggleSwitch mirror = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Mirror the Windows desktop between sessions" };
         // the game's rate as a fraction of the display rate: 1/3, 1/2 (default), 2/3 (settings video.frame_gen_rate third | half | two_thirds)
-        static readonly string[] FgRates = { "third", "half", "two_thirds" };
+        static readonly string[] FgRates = { "two_thirds", "half", "third" };   // the segments, left to right: x1.5, x2, x3
         static readonly string[] FgRateText = {
-            "1/3: two generated frames per rendered one (games at 34-49 fps).",
-            "1/2: one generated frame per rendered one (default).",
-            "2/3: every frame sent is interpolated (games above 67 fps)." };
-        readonly Segmented fgRate = new Segmented("1/3", "1/2", "2/3") { AccessibleName = "Game rate" };
+            "x1.5 (the game renders 2 of every 3 frames): every frame sent is interpolated (games above 67 fps).",
+            "x2 (the game renders 1 of every 2 frames): one generated frame per rendered one (default).",
+            "x3 (the game renders 1 of every 3 frames): two generated frames per rendered one (games at 34-49 fps)." };
+        readonly Segmented fgRate = new Segmented("x1.5", "x2", "x3") { AccessibleName = "Frame generation multiplier" };
         class TipText { public Action<string> On; public string Text { set { On?.Invoke(value); } } }   // explanations go to tooltips, not to the window
         readonly TipText fgRateText = new TipText();
         readonly Segmented heightMode = new Segmented("Auto", "Manual") { AccessibleName = "Eye height mode" };
         readonly NumericUpDown heightBox = new NumericUpDown { DecimalPlaces = 2, Increment = 0.05m, Minimum = 0.5m, Maximum = 2.2m, Width = 64, AccessibleName = "Eye height in metres" };
         readonly Label heightReport = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(8, 7, 0, 0), Visible = false };
-        readonly Label audioLine = new Label { AutoSize = true, Visible = false, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };   // the virtual audio device's volume, only when it matters
         readonly Label exportStatus = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };
         readonly LinkLabel exportLink = new LinkLabel { Text = "Open folder", AutoSize = true, Margin = new Padding(3, 4, 3, 0) };
         // uncapped generation (settings video.frame_gen_rate uncapped, docs/FRAME_GENERATION_UNCAPPED.md): the game runs at its own rate, every output interpolated
@@ -121,10 +128,12 @@ namespace AirFrameXR
             stats.MinimumSize = new Size(0, 22);   // its line is reserved
             stats.ForeColor = Color.DimGray;
             var tiles = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Font = Ui.Body };
-            foreach (var t in new[] { tGame, tStreamed, tShown, tBitrate, tLatency, tLoss }) tiles.Controls.Add(t);
+            foreach (var t in new[] { tGame, tShown, tLatency }) tiles.Controls.Add(t);   // fps first; streamed fps, bitrate and loss are one line under them (SubLine)
             var statsCol = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill, Font = Ui.Body };
             statsCol.Controls.Add(tiles);
             statsCol.Controls.Add(stats);
+            statsSub.MinimumSize = new Size(0, 22);   // its line is reserved
+            statsCol.Controls.Add(statsSub);
             box.Controls.Add(statsCol);
             body.Controls.Add(box);
 
@@ -143,13 +152,29 @@ namespace AirFrameXR
             // Frame generation: the switch and the game's rate (Auto = proposed from the game's recorded runs, or 1/3, 1/2, 2/3 of the display rate). The explanations
             // are tooltips.
             fgRateText.On = t => { foreach (var c in new Control[] { frameGen, fgRecommend }.Concat(fgRate.Controls.Cast<Control>())) tips.SetToolTip(c, t); };
-            var fgCol = Col();
-            var fgRow = Row();
+            // Features: one column of switches (Frame generation, Desktop mirror), the same column for both so the switches line up; the label and the choices go to their right
+            var feat = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Margin = new Padding(0) };
+            feat.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); feat.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); feat.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             fgUnc.Margin = new Padding(14, 8, 0, 0);
-            fgRow.Controls.Add(frameGen); fgRow.Controls.Add(fgRecommend); fgRow.Controls.Add(fgRate);
-            fgCol.Controls.Add(fgRow);
+            var fgChoices = Row();
+            // x1.5, x2, x3 and Auto are one size (a design size, scaled with the window); Auto sits a little apart: it is not a rate
+            var segSize = new Size(58, 28);
+            fgRate.MinButton = segSize; fgRecommend.AutoSize = false; fgRecommend.Size = segSize; fgRecommend.Padding = new Padding(0);
+            fgChoices.Controls.Add(fgRate); fgChoices.Controls.Add(fgRecommend);
+            fgRecommend.Margin = new Padding(22, 0, 0, 0);
+            // no top margins: anchored left only, every control is centred on its row, so the switch, the text and the buttons share one centre line
+            frameGen.Margin = new Padding(3, 3, 10, 3); mirror.Margin = new Padding(3, 3, 10, 3);
+            Label FeatLabel(string t) => new Label { Text = t, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 0, 14, 0) };
+            foreach (var c in new Control[] { frameGen, mirror, fgChoices }) c.Anchor = AnchorStyles.Left;
+            feat.Controls.Add(frameGen, 0, 0);
+            feat.Controls.Add(FeatLabel("Frame generation"), 1, 0);
+            feat.Controls.Add(fgChoices, 2, 0);
+            feat.Controls.Add(mirror, 0, 1);
+            feat.Controls.Add(FeatLabel("Desktop mirror"), 1, 1);
+            var fgCol = Col();
+            fgCol.Controls.Add(feat);
             fgCol.Controls.Add(fgUncNote);
-            body.Controls.Add(Group("Frame generation", fgCol));
+            body.Controls.Add(Group("Features", fgCol));
 
             // Position and Picture side by side, each a short stack (the window stays narrow); the desktop mirror switch sits with Recenter, the Advanced picture
             // settings open full width below. Not one titled box per feature: the space goes where the controls are.
@@ -163,12 +188,11 @@ namespace AirFrameXR
             posCol.Controls.Add(heightRow);
             heightReport.Margin = new Padding(3, 0, 0, 2);
             posCol.Controls.Add(heightReport);
-            var posRow = Row();
-            recenter.Margin = new Padding(3, 3, 18, 3);
-            posRow.Controls.Add(recenter);
-            posRow.Controls.Add(new Label { Text = "Desktop mirror", AutoSize = true, Margin = new Padding(3, 8, 0, 0) });
-            posRow.Controls.Add(mirror);
-            posCol.Controls.Add(posRow);
+            // Recenter at the bottom of its box, on the line of Defaults in Picture (both boxes are as tall as the taller one)
+            recenter.Margin = new Padding(3, 4, 3, 3); recenter.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            var posTable = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, RowCount = 2, Dock = DockStyle.Fill, Margin = new Padding(0) };
+            posTable.RowStyles.Add(new RowStyle(SizeType.AutoSize)); posTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            posTable.Controls.Add(posCol, 0, 0); posTable.Controls.Add(recenter, 0, 1);
 
             // Picture: the two settings people touch, stacked; the rest behind Advanced
             var pic = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Font = Ui.Body, Margin = new Padding(0) };
@@ -186,11 +210,11 @@ namespace AirFrameXR
             picCol.Controls.Add(reset);
             var pair = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Dock = DockStyle.Fill, Margin = new Padding(0) };
             pair.Controls.Add(Group("Picture", picCol));
-            pair.Controls.Add(Group("Position", posCol));
+            pair.Controls.Add(Group("Position", posTable));
             body.Controls.Add(pair);
             body.Controls.Add(Ui.Expander("Advanced", adv, false, () => Ui.Refit(this)));
             tips.SetToolTip(mirror, "Between games the headset shows the Windows desktop on a floating screen; your hand is the mouse (pinch = click). Off by default.");
-            tips.SetToolTip(fgRecommend, "Auto: the rate is set from this game's recorded runs on this headset, the fastest one that stayed clean. Pick 1/3, 1/2 or 2/3 yourself to leave Auto.");
+            tips.SetToolTip(fgRecommend, "Auto: the rate is set from this game's recorded runs on this headset, the fastest one that stayed clean. Pick x1.5, x2 or x3 yourself to leave Auto.");
             tips.SetToolTip(recenter, "Forward becomes forward and your position the origin. Done at every game start; the recenter key (End by default) does the same while playing.");
             tips.SetToolTip(heightMode, "Auto: the headset's own floor estimate, right when it saw the room (start standing). Manual: the value you type (about 1.30 m seated).");
             tips.SetToolTip(heightBox, "Eye height above the floor, 0.5-2.2 m.");
@@ -207,32 +231,50 @@ namespace AirFrameXR
             debug.Margin = new Padding(3, 6, 12, 0);
             tips.SetToolTip(debug, "Writes files to logs\\debug\\ (costs about 4.6 ms per frame): turn it on to report a problem, off after.");
             // the main window (settings, game statistics, headset setup): starts the launcher, or brings the one that stepped aside for this window back
-            var mainMenu = new Button { Text = "Main menu", AutoSize = true };
-            mainMenu.Click += (s, e) =>
+            // other tools: the hamburger in the header (below), one click away; the bottom row keeps only the log buttons
+            Action<string, string> openTool = (file, args) =>
             {
-                var exe = Path.Combine(Paths.Bin, "launcher.exe");
-                try { if (File.Exists(exe)) Process.Start(exe); else MessageBox.Show(this, "bin\\launcher.exe is missing from this folder.", "AirFrameXR"); }
-                catch (Exception ex) { footer.Text = "Cannot open the main menu: " + ex.Message; footer.ForeColor = Color.Firebrick; }
+                var exe = Path.Combine(Paths.Bin, file);
+                try { if (File.Exists(exe)) Process.Start(exe, args); else MessageBox.Show(this, "bin\\" + file + " is missing from this folder.", "AirFrameXR"); }
+                catch (Exception ex) { footer.Text = "Cannot open " + file + ": " + ex.Message; footer.ForeColor = Color.Firebrick; }
             };
-            tips.SetToolTip(mainMenu, "Open the main window (settings, game statistics, restart headset setup). The streamer keeps running.");
-            dbgRow.Controls.Add(debug); dbgRow.Controls.Add(exportBtn); dbgRow.Controls.Add(openLogs); dbgRow.Controls.Add(mainMenu);
+            var menu = new ContextMenuStrip();
+            menu.Items.Add("Main menu", null, (o, e) => openTool("launcher.exe", ""));
+            menu.Items.Add("Game statistics", null, (o, e) => openTool("performance.exe", ""));
+            menu.Items.Add("Advanced video and performance settings", null, (o, e) => openTool("configure.exe", "--switches"));
+            var menuBtn = new Button { Text = "\u2630", Font = new Font("Segoe UI Symbol", 14f), AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Color.White, Anchor = AnchorStyles.Top | AnchorStyles.Right, Margin = new Padding(0, 14, 14, 0), Padding = new Padding(4, 0, 4, 0), AccessibleName = "Menu" };
+            menuBtn.FlatAppearance.BorderSize = 0;
+            menuBtn.Click += (o, e) => menu.Show(menuBtn, new Point(menuBtn.Width, menuBtn.Height), ToolStripDropDownDirection.BelowLeft);
+            tips.SetToolTip(menuBtn, "Main menu, game statistics and the advanced settings. The streamer keeps running.");
+            dbgRow.Controls.Add(debug); dbgRow.Controls.Add(exportBtn); dbgRow.Controls.Add(openLogs);
+            // the bottom row: the log tools on the left, the way back to the main window on the right
+            var bottom = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Dock = DockStyle.Fill, Margin = new Padding(0, 8, 0, 0) };
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            dbgRow.Margin = new Padding(0);
+            bottom.Controls.Add(dbgRow, 0, 0);
             BenchBuild(body);   // the Bench package's recording panel (tools/gui/BenchRecorder.cs); not compiled into the stock streamer: the call vanishes
-            body.Controls.Add(dbgRow);
+            body.Controls.Add(bottom);
             var exportRow = Row();
             exportRow.Controls.Add(exportStatus); exportRow.Controls.Add(exportLink);
             footer.ForeColor = Color.DimGray;
-            // one slot for the notices (export result, audio, the footer line): two lines are reserved, so they never move the window
-            var notices = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0), MinimumSize = new Size(0, 46) };
-            notices.Controls.Add(exportRow); notices.Controls.Add(audioLine); notices.Controls.Add(footer);
+            // one slot, one reserved line, for the notices: the footer (status and problems) and the export result take turns (a problem hides the export result, the export result hides the footer)
+            var notices = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0), MinimumSize = new Size(0, 24) };
+            exportStatus.VisibleChanged += (o, e) => footer.Visible = !exportStatus.Visible;
+            footer.TextChanged += (o, e) => { if (footer.Text.Length > 0 && exportStatus.Visible) { exportStatus.Visible = false; exportLink.Visible = false; } };
+            notices.Controls.Add(exportRow); notices.Controls.Add(footer);
             body.Controls.Add(notices);
 
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             scroller.Controls.Add(body);
             Controls.Add(scroller);
-            var hdr = Ui.CompactHeader("Integrated OpenXR renderer + streamer for ALVR client VR headsets");
+            var hdr = Ui.CompactHeader("");   // the version only (2026-11-10)
             BenchHeader(ref hdr);   // the Black Box recorder swaps in its own header; not compiled into the stock streamer: the call vanishes
-            Controls.Add(hdr);
-            Ui.AutoFitWindow(this, hdr, body, false, WithWorstCase);   // fixed size: only Advanced changes it
+            // the header and the menu button on its right (a table: no overlap, the width counts both)
+            var hdrRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, BackColor = Color.White, Margin = new Padding(0) };
+            hdrRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); hdrRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            hdr.Dock = DockStyle.Fill; hdrRow.Controls.Add(hdr, 0, 0); hdrRow.Controls.Add(menuBtn, 1, 0);
+            Controls.Add(hdrRow);
+            Ui.AutoFitWindow(this, hdrRow, body, false, WithWorstCase);   // fixed size: only Advanced changes it
 
 
             debug.Checked = settings.Debug;
@@ -515,7 +557,7 @@ namespace AirFrameXR
                     if (clean || (!bestClean && (best < 0 || headsetRep + hostRep < bestScore))) { best = i; bestClean = clean; bestScore = headsetRep + hostRep; bestRun = run; }
                 }
                 if (best < 0) return null;
-                string[] names = { "1/3", "1/2", "2/3" };
+                string[] names = { "x3", "x2", "x1.5" };   // in the order of Levels
                 var fps = D(bestRun, "rendered_fps"); var hz = D(bestRun, "display_hz");
                 var low = D(bestRun, "rendered_fps_low");
                 var text = $"{names[best]}: last run {fps:0} fps{(low > 0 ? $", {low:0} in its slowest tenth" : "")}, headset repeated {D(bestRun, "headset_repeated_typ") * 100:0.0} % typical ({D(bestRun, "headset_repeated_p90") * 100:0.0} % in its heavy parts), host repeats {D(bestRun, "host_repeats_typ") * 100:0.0} %";
@@ -588,7 +630,6 @@ namespace AirFrameXR
             var s = Json.Load(Paths.Session);   // the session compiled for this start (StartHost compiled it just before)
             var enabled = Json.Bool(s, "session_settings.audio.game_audio.enabled", true);
             var part = Json.Bool(s, "session_settings.audio.game_audio.content.device.set", false) ? Convert.ToString(Json.Get(s, "session_settings.audio.game_audio.content.device.content.NameSubstring")) : "";
-            audio.Report += AudioNote;
             var cfg = new AppSettings();
             var micOn = Json.Bool(s, "session_settings.audio.microphone.enabled", false);
             // the headset microphone and the cable route cannot coexist (ALVR refuses a microphone that points at the captured cable): the microphone wants process loopback
@@ -617,11 +658,6 @@ namespace AirFrameXR
             }
             var plan = new AppSettings().PowerPlan;
             if (plan.Length > 0) System.Threading.Tasks.Task.Run(() => { var m = PowerPlan.Apply(plan); if (m != null) Log.Write("INFO", m); });
-        }
-
-        void AudioNote(string level, string text)
-        {
-            try { BeginInvoke((Action)(() => { if (!closing) SetAudioLine("Audio: " + text, level == "WARN" ? Color.DarkOrange : Color.DimGray); })); } catch { }
         }
 
         void StartHost()
@@ -810,7 +846,7 @@ namespace AirFrameXR
                         lastSession = true;
                         var mins = D(d, "seconds") / 60;
                         statsBox.Text = $"Streaming: last session, {S(d, "exe")}, {F(mins, "0.0")} min, {S(d, "headset")}";
-                        string[] names = { "1/3", "1/2", "2/3" };
+                        string[] names = { "x1.5", "x2", "x3" };   // in the order of FgRates
                         var lvl = S(d, "level"); var li = Array.IndexOf(FgRates, lvl);
                         var rec = Recommend(S(d, "exe"), S(d, "headset"));
                         var ri = rec == null ? -1 : Array.IndexOf(FgRates, rec.Value.level);
@@ -823,6 +859,7 @@ namespace AirFrameXR
                         var latBad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms"));
                         tLatency.Set(latBad ? "n/a" : F(D(net, "latency_ms"), "0") + " ms", latBad ? "not measured" : $"p95 {F(D(net, "latency_p95_ms"), "0")}, streamer {F(D(net, "encode_ms") + D(net, "network_ms") + D(net, "decode_ms"), "0")}", null, latBad ? Latency.Why : Latency.Meaning + "  This run: " + Latency.Split(D(net, "latency_ms"), D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms")));
                         tLoss.Set(F(D(net, "packets_lost"), "0"), "packets lost", D(net, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
+                        SubLine();
                         stats.Text = $"Host repeats {F(D(d, "host_repeats_typ") * 100, "0.0")} %, skipped {F(D(d, "skipped") * 100, "0.0")} %." + (rec == null ? "" : $"  Next time: {(ri >= 0 ? names[ri] : rec.Value.level)}.");
                     }
                     break;
@@ -848,11 +885,11 @@ namespace AirFrameXR
                         var liveBad = Latency.Absurd(D(c, "total_latency_ms"), D(c, "latency_outliers"), D(c, "samples"));
                         tLatency.Set(liveBad ? "n/a" : F(D(c, "total_latency_ms"), "0") + " ms", liveBad ? "not measured" : $"enc {F(D(c, "encode_ms"), "0")} + net {F(D(c, "network_ms"), "0")} + dec {F(D(c, "decode_ms"), "0")} + rest {F(Math.Max(0, D(c, "total_latency_ms") - D(c, "encode_ms") - D(c, "network_ms") - D(c, "decode_ms")), "0")}", null, liveBad ? Latency.Why : Latency.Meaning);
                         tLoss.Set(S(d, "packets_lost"), "packets lost", D(d, "packets_lost") > 0 ? Color.Firebrick : (Color?)null);
+                        SubLine();
                         stats.Text = "";
                     }
                     break;
-                case "audio_note":   // what AudioRoute reports (also replayed by the streamer_events harness)
-                    SetAudioLine("Audio: " + S(d, "text"), S(d, "level") == "WARN" ? Color.DarkOrange : Color.DimGray);   // already on the UI thread here
+                case "audio_note":   // what AudioRoute reports (replayed by the streamer_events harness): in the log (AudioRoute writes it), no longer in the window (2026-11-10)
                     break;
                 case "height_calibrated":
                     reportedHeight = D(d, "headset_y"); UpdateHeightUi();
@@ -911,15 +948,13 @@ namespace AirFrameXR
         public decimal HeightMin => heightBox.Minimum;
         public decimal HeightMax => heightBox.Maximum;
 
-        void SetAudioLine(string text, Color c) { audioLine.Text = text; audioLine.ForeColor = c; audioLine.Visible = text.Length > 0; }
-        public void DemoAudio(bool bad) => SetAudioLine(bad ? "Audio: cannot set CABLE Input (VB-Audio Virtual Cable) to 100 %. The headset's volume follows the PC's." : "Audio: CABLE Input (VB-Audio Virtual Cable) held at 100 % (was 40 %)", bad ? Color.DarkOrange : Color.DimGray);
-        /// Runs `doFit` with everything that can appear showing at its longest (the firewall warning, Find headset, the audio and export lines, the height
+        /// Runs `doFit` with everything that can appear showing at its longest (the firewall warning, Find headset, the export line, the height
         /// report, the long footer, the widest tiles), then puts the window's real state back: the window is sized for the fullest case once.
         void WithWorstCase(Action doFit)
         {
             var tiles = new[] { tGame, tStreamed, tShown, tBitrate, tLatency, tLoss };
-            var labels = new Control[] { headset, game, runtime, heightReport, stats, statsBox, audioLine };
-            var shown = new Control[] { find, heightReport, audioLine };   // the audio line at its longest (two lines): the window is not taller than the line it may have to show
+            var labels = new Control[] { headset, game, runtime, heightReport, stats, statsSub, statsBox };
+            var shown = new Control[] { find, heightReport };
             var hidden = new Control[] { exportStatus, exportLink };   // their line is reserved by the notices slot
             var hidBack = hidden.Select(c => (c, c.Visible)).ToList();
             var textBack = labels.Select(c => (c, c.Text, c.ForeColor)).ToList();
@@ -927,14 +962,13 @@ namespace AirFrameXR
             var tileBack = tiles.Select(t => (t, t.Value, t.Note, t.ValueColor)).ToList();
             try
             {
-                headset.Text = "Headset: connected - Apple Vision Pro (192.168.100.123)";
+                headset.Text = "Headset: connected - Apple Vision Pro of a person with a long name (192.168.100.123)";
                 game.Text = "Game: Cyberpunk2077.exe (last: Cyberpunk2077.exe, 123.4 min)";
                 heightReport.Text = "headset reports 1.62 m";
-                audioLine.Text = "Audio: cannot set CABLE Input (VB-Audio Virtual Cable) to 100 %. The headset's volume follows the PC's.";
-                stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: 1/2.";
+                stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: x2.";
                 statsBox.Text = "Streaming: last session, Cyberpunk2077.exe, 123.4 min, Apple Vision Pro";
-                tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at 1/2"); tShown.Set("144.4 fps", "repeated periods 12.3 %");
-                tBitrate.Set("1000 Mbps", "average"); tLatency.Set("123 ms", "enc 12 + net 12 + dec 12"); tLoss.Set("1234", "packets lost");
+                tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at x2"); tShown.Set("144.4 fps", "repeated periods 12.3 %");
+                tBitrate.Set("1000 Mbps", "average"); tLatency.Set("123 ms", "enc 12 + net 12 + dec 12"); tLoss.Set("1234", "packets lost"); SubLine();
                 foreach (var c in shown) c.Visible = true;
                 foreach (var c in hidden) c.Visible = false;
                 doFit();
@@ -960,18 +994,18 @@ namespace AirFrameXR
             {
                 NeedFind(false);
                 game.Text = "Game: Cyberpunk2077.exe";
-                tGame.Set("44.8 fps", "average, slowest tenth 38.2"); tStreamed.Set("89.7 fps", "25.0 min at 1/2"); tShown.Set("89.1 fps", "repeated periods 1.0 %");
-                tBitrate.Set("120 Mbps", "average"); tLatency.Set("57 ms", "enc 6 + net 9 + dec 14"); tLoss.Set("0", "packets lost");
+                tGame.Set("44.8 fps", "average, slowest tenth 38.2"); tStreamed.Set("89.7 fps", "25.0 min at x2"); tShown.Set("89.1 fps", "repeated periods 1.0 %");
+                tBitrate.Set("120 Mbps", "average"); tLatency.Set("57 ms", "enc 6 + net 9 + dec 14"); tLoss.Set("0", "packets lost"); SubLine();
                 stats.Text = ""; frameGen.SetCheckedInstant(true);
                 return;
             }
             NeedFind(true);
             fwWarn.Text = "Windows Firewall blocks alvr_host.exe: the headset cannot connect."; fwWarn.Visible = fwFix.Visible = true;
             game.Text = "Game: Cyberpunk2077.exe (Cyberpunk 2077) after 123 min";
-            tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at 1/2"); tShown.Set("144.4 fps", "repeated periods 12.3 %", Color.Firebrick);
-            tBitrate.Set("1000 Mbps", "average"); tLatency.Set("123 ms", "enc 12 + net 12 + dec 12"); tLoss.Set("1234", "packets lost", Color.Firebrick);
-            stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: 1/2.";
-            fgRateText.Text = FgRateText[2];
+            tGame.Set("144.4 fps", "average, slowest tenth 120.0"); tStreamed.Set("144.4 fps", "123.4 min at x2"); tShown.Set("144.4 fps", "repeated periods 12.3 %", Color.Firebrick);
+            tBitrate.Set("1000 Mbps", "average"); tLatency.Set("123 ms", "enc 12 + net 12 + dec 12"); tLoss.Set("1234", "packets lost", Color.Firebrick); SubLine();
+            stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: x2.";
+            fgRateText.Text = FgRateText[0];
             footer.Text = "config\\session.json is missing: this folder is incomplete. Unzip the release again (keep your config\\ folder).";
             footer.ForeColor = Color.Firebrick;
         }

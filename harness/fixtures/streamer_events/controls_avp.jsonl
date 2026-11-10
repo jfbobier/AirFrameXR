@@ -3,7 +3,7 @@
 {"dump": "avp_auto"}
 {"ui": "frame_gen", "value": "on"}
 {"dump": "frame_gen_on"}
-{"ui": "rate", "value": "2"}
+{"ui": "rate", "value": "0"}
 {"dump": "rate"}
 {"ui": "uncapped", "value": "on"}
 {"dump": "uncapped_on"}

@@ -148,7 +148,7 @@ namespace AirFrameXR
             right.AutoScrollPosition = Point.Empty;   // a rebuilt pane starts at its top, whatever the last one was scrolled to
         }
 
-        static string Mode(string level) => level == "off" ? "generation off" : level == "third" ? "generation 1/3" : level == "half" ? "generation 1/2" : level == "two_thirds" ? "generation 2/3" : level;
+        static string Mode(string level) => level == "off" ? "generation off" : "generation " + Ui.FgName(level);
         static string When(Dictionary<string, object> ses)
         {
             var t = D(ses, "start");
