@@ -64,6 +64,18 @@ struct Args {
     /// "p:ms": each tracking sample is delayed by `ms` with probability p (FIFO: later samples queue behind it), plus 0-2 ms of
     /// jitter: the headset's uplink arriving late and bunched (measured on the real headset: gaps p95 13-16 ms, max 40)
     track_late: String,
+    /// latency model (all 0 = the old ideal client): network transit before the decoder sees a frame (mean + Gaussian sd, clamped at 0, and with
+    /// probability p an extra spike, "p:ms"; FIFO, so a late frame holds the ones behind it), decode time = decode_ms mean + Gaussian sd,
+    /// and the draw (CPU + GPU, mean + Gaussian sd) between the pick and the submission: a frame whose draw ends after the presentation tick is lost to the compositor
+    /// (the tick repeats the previous picture). Values from the field logs: network 0.6-4 ms, decode 5.4-8.9 ms.
+    /// "t:hz": the emulated display changes its rate to hz t seconds after the stream started (the system switching 100 -> 90 Hz)
+    display_switch: String,
+    net_ms: f64,
+    net_sd_ms: f64,
+    net_spike: String,
+    decode_sd_ms: f64,
+    draw_ms: f64,
+    draw_sd_ms: f64,
     /// "start:dur[:frame][,start:dur[:frame]...]" (seconds after the stream started): the tracking uplink goes silent for `dur` seconds (stability
     /// harness). With `:frame` tracking only resumes once a new frame has arrived after the silence (the visionOS client sends views and tracking
     /// only while it is being fed frames: a host that waits for a pose before sending anything then never gets one)
@@ -119,6 +131,13 @@ fn parse_args() -> Result<Args, String> {
         noise_mdeg: 0.0,
         bunch: false,
         track_late: String::new(),
+        display_switch: String::new(),
+        net_ms: 0.0,
+        net_sd_ms: 0.0,
+        net_spike: String::new(),
+        decode_sd_ms: 0.0,
+        draw_ms: 0.0,
+        draw_sd_ms: 0.0,
         track_blackout: String::new(),
         track_after_frame: false,
         track_frames_needed: 1,
@@ -167,6 +186,13 @@ fn parse_args() -> Result<Args, String> {
             "--noise-mdeg" => a.noise_mdeg = v()?.parse().map_err(|e| format!("{e}"))?,
             "--bunch" => a.bunch = true,
             "--track-late" => a.track_late = v()?,
+            "--display-switch" => a.display_switch = v()?,
+            "--net-ms" => a.net_ms = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--net-sd-ms" => a.net_sd_ms = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--net-spike" => a.net_spike = v()?,
+            "--decode-sd-ms" => a.decode_sd_ms = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--draw-ms" => a.draw_ms = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--draw-sd-ms" => a.draw_sd_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--track-blackout" => a.track_blackout = v()?,
             "--track-after-frame" => a.track_after_frame = true,
             "--track-frames-needed" => a.track_frames_needed = v()?.parse().map_err(|e| format!("{e}"))?,
@@ -313,7 +339,9 @@ fn main() {
                         let blackouts = parse_blackouts(&args.track_blackout);
                         let after_frame = args.track_after_frame;
                         let need = args.track_frames_needed.max(1);
-                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, replay_gate_arg, real_views_arg, views_tan_arg, late_views, blackouts, after_frame, need)));
+                        let draw = (args.draw_ms, args.draw_sd_ms);
+                        let dswitch: Option<(f64, f64)> = args.display_switch.split_once(':').and_then(|(t, h)| Some((t.parse().ok()?, h.parse().ok()?)));
+                        tracking_thread = Some(thread::spawn(move || display(c, s, sh, origin, fps, motion, poll, bunch, late, args.ts_jitter_ns, replay_samples, replay_gate_arg, real_views_arg, views_tan_arg, late_views, blackouts, after_frame, need, draw, dswitch)));
                     } else {
                         let views_tan_arg = args.views_tan;
                         tracking_thread = Some(thread::spawn(move || tracking(c, s, sh, origin, fps, motion, controllers, late_views, views_tan_arg)));
@@ -338,7 +366,17 @@ fn main() {
                     let weak: Weak<ClientCoreContext> = Arc::downgrade(&ctx);
                     let (sh, of, decode_ms) = (Arc::clone(&shared), out_file.clone(), args.decode_ms);
                     let (display_sim, queue_max) = (args.display_sim, args.queue_max);
+                    let (net_ms, net_sd_ms, decode_sd_ms) = (args.net_ms, args.net_sd_ms, args.decode_sd_ms);
+                    let net_spike: (f64, f64) = args.net_spike.split_once(':').map(|(p, m)| (p.parse().unwrap_or(0.0), m.parse().unwrap_or(0.0))).unwrap_or((0.0, 0.0));
                     ctx.set_decoder_input_callback(Box::new(move |ts, data| {
+                        // network transit: the callback runs on the receive thread, so a delayed frame holds the ones behind it (bunching)
+                        let mut net = gauss_ms(net_ms, net_sd_ms);
+                        if net_spike.0 > 0.0 && model_rand() < net_spike.0 {
+                            net += net_spike.1;
+                        }
+                        if net > 0.0 {
+                            thread::sleep(Duration::from_secs_f64(net / 1000.0));
+                        }
                         let arrival = origin.elapsed();
                         if let Some(f) = &of {
                             f.lock().write_all(data).ok();
@@ -352,7 +390,7 @@ fn main() {
                             s.bytes += data.len();
                         }
                         if let Some(c) = weak.upgrade() {
-                            thread::sleep(Duration::from_millis(decode_ms));
+                            thread::sleep(Duration::from_secs_f64(gauss_ms(decode_ms as f64, decode_sd_ms) / 1000.0));
                             c.report_frame_decoded(ts);
                             {
                                 let mut s = sh.lock();
@@ -615,6 +653,27 @@ fn head_motion(m: &Motion, ts: Duration, seed: u64) -> (f32, DeviceMotion) {
 /// the next presentation (what the visionOS client does once per display frame) and picks the frame to show with the client's
 /// rule (poll the decoded queue up to poll_ms, else re-present the last frame), reporting ALVR's client statistics from that.
 #[allow(clippy::too_many_arguments)]
+/// xorshift in [0,1) shared by the latency model (not for anything that needs quality)
+fn model_rand() -> f64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static S: AtomicU64 = AtomicU64::new(0x2545F4914F6CDD1D);
+    let mut x = S.load(Ordering::Relaxed);
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    S.store(x, Ordering::Relaxed);
+    (x >> 11) as f64 / 9007199254740992.0
+}
+
+/// a latency in ms: mean + Gaussian(sd), never negative (Box-Muller on the shared xorshift)
+fn gauss_ms(mean: f64, sd: f64) -> f64 {
+    if sd <= 0.0 {
+        return mean.max(0.0);
+    }
+    let (u1, u2) = (model_rand().max(1e-12), model_rand());
+    (mean + sd * (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()).max(0.0)
+}
+
 fn display(
     ctx: Arc<ClientCoreContext>,
     streaming: Arc<RelaxedAtomic>,
@@ -634,12 +693,15 @@ fn display(
     blackouts: Vec<Blackout>,
     after_frame: bool,
     need: usize,
+    draw: (f64, f64),
+    dswitch: Option<(f64, f64)>,
 ) {
     let started_at = Instant::now();
     let frames0 = shared.lock().frames.len(); // frames of earlier stream sessions of this process do not count
     let mut dark: Option<(usize, usize, Instant)> = None; // (blackout index, frames at its start, when it started)
     let mut done = vec![false; blackouts.len()];
-    let period = Duration::from_secs_f64(1.0 / fps as f64);
+    let mut period = Duration::from_secs_f64(1.0 / fps as f64);
+    let mut switched = false;
     let vp = ViewParams { pose: Pose::default(), fov: Fov { left: -1.0, right: 1.0, up: 1.0, down: -1.0 } };
     // what the Vision Pro client reports (host_events views_config of a real session): +-31.06 mm, asymmetric FoV (tangents l r u d)
     let mk = |x: f32, t: [f32; 4]| ViewParams {
@@ -768,13 +830,39 @@ fn display(
         match picked {
             Some(q) => {
                 let dwell = now.duration_since(q.decoded_at);
-                ctx.report_compositor_start(q.ts);
-                ctx.report_submit(q.ts, dwell);
-                last_shown = Some(q.ts);
-                shared.lock().display.push(DisplayRec { tick_ns: now.duration_since(origin).as_nanos(), shown_ts_ns: q.ts.as_nanos(), repeat: false, dwell_ms: dwell.as_secs_f64() * 1000.0, queue_len });
+                let modelled_draw = draw.0 > 0.0 || draw.1 > 0.0;
+                // draw model: CPU + GPU work between the pick and the submission; the compositor presents at tick + period
+                let (late_draw, submit_dwell) = if modelled_draw {
+                    let d = Duration::from_secs_f64(gauss_ms(draw.0, draw.1) / 1000.0);
+                    ctx.report_compositor_start(q.ts);
+                    thread::sleep(d);
+                    let present = tick + period;
+                    let after = Instant::now();
+                    (after > present, present.saturating_duration_since(after))
+                } else {
+                    (false, dwell)
+                };
+                if late_draw {
+                    // submitted after the presentation: the compositor shows the previous picture again, this frame is lost
+                    shared.lock().display.push(DisplayRec { tick_ns: now.duration_since(origin).as_nanos(), shown_ts_ns: last_shown.map(|t| t.as_nanos()).unwrap_or(0), repeat: true, dwell_ms: 0.0, queue_len });
+                } else {
+                    if !modelled_draw {
+                        ctx.report_compositor_start(q.ts);
+                    }
+                    ctx.report_submit(q.ts, submit_dwell);
+                    last_shown = Some(q.ts);
+                    shared.lock().display.push(DisplayRec { tick_ns: now.duration_since(origin).as_nanos(), shown_ts_ns: q.ts.as_nanos(), repeat: false, dwell_ms: dwell.as_secs_f64() * 1000.0, queue_len });
+                }
             }
             None => {
                 shared.lock().display.push(DisplayRec { tick_ns: now.duration_since(origin).as_nanos(), shown_ts_ns: last_shown.map(|t| t.as_nanos()).unwrap_or(0), repeat: true, dwell_ms: 0.0, queue_len });
+            }
+        }
+        if let Some((at, hz)) = dswitch {
+            if !switched && started_at.elapsed().as_secs_f64() >= at {
+                switched = true;
+                period = Duration::from_secs_f64(1.0 / hz);
+                event(origin, "display_rate_switch", json!({ "at_s": at, "hz": hz }));
             }
         }
         tick += period;

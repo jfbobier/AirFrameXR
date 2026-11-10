@@ -31,7 +31,7 @@ CLIENT_FLAGS = {"seconds": "--seconds", "connect_timeout": "--connect-timeout", 
                               "no_10bit": "--no-10bit", "no_foveation": "--no-foveation", "controllers": "--controllers",
                               "views_after_first_frame": "--views-after-first-frame", "encoding_gamma": "--encoding-gamma",
                               "display_sim": "--display-sim", "poll_ms": "--poll-ms", "queue_max": "--queue-max", "motion": "--motion",
-                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "track_blackout": "--track-blackout", "track_after_frame": "--track-after-frame", "track_frames_needed": "--track-frames-needed", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "real_views": "--real-views", "views_tan": "--views-tan", "height": "--height"}
+                              "noise_mdeg": "--noise-mdeg", "bunch": "--bunch", "track_late": "--track-late", "track_blackout": "--track-blackout", "track_after_frame": "--track-after-frame", "track_frames_needed": "--track-frames-needed", "ts_jitter_ns": "--ts-jitter-ns", "display_hz": "--display-hz", "display_switch": "--display-switch", "net_ms": "--net-ms", "net_sd_ms": "--net-sd-ms", "net_spike": "--net-spike", "decode_sd_ms": "--decode-sd-ms", "draw_ms": "--draw-ms", "draw_sd_ms": "--draw-sd-ms", "real_views": "--real-views", "views_tan": "--views-tan", "height": "--height"}
 
 
 class Blocked(Exception):
@@ -1196,15 +1196,14 @@ def analyse_mirror_clicks(outdir):
     for r in csv.DictReader(open(ef)):
         ev.setdefault(r["event"], []).append(int(r["wall_ns"]))
     exp = {"left_down": [], "left_up": [], "double_click": [], "recentre": []}
-    left = grip = False; prev = {"a": False, "x": False, "b": False}
+    left = grip = False; prev = {"r": False, "x": False}   # per hand: the app's rule (mirrordesktop prim[h] = primary || secondary of that hand): A and B alike on the right, X (and Y) on the left
     for r in rows:
         w = int(r["wall_ns"]); trig = float(r["trigger_r"]); sq = float(r["squeeze_r"])
         l = trig > (0.15 if left else 0.3)
         g = sq > (0.3 if grip else 0.7)   # a grip: down at 0.7, up under 0.3; the press recentres the screen
         if l != left: exp["left_down" if l else "left_up"].append(w)
         if g and not grip: exp["recentre"].append(w)
-        for k, col in (("a", "a_r"), ("x", "x_l"), ("b", "b_r")):   # A, X, B (Y is not scripted): each press is a double click
-            now = r[col] == "1"
+        for k, now in (("r", r["a_r"] == "1" or r["b_r"] == "1"), ("x", r["x_l"] == "1")):   # one double click per hand, on the press: A and B together are one, B taking over from A (no gap) is none
             if now and not prev[k]: exp["double_click"].append(w)
             prev[k] = now
         left, grip = l, g
