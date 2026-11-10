@@ -154,11 +154,9 @@ namespace AirFrameXR
             if (firewall != null && (firewall.State == FirewallState.Missing || firewall.State == FirewallState.Blocked))
                 lines.Add(Row("\u26A0", firewall.State == FirewallState.Blocked ? "Windows Firewall blocks the streamer: the headset cannot connect." : "Windows Firewall has no rule for the streamer: the headset will not be found.", Color.Firebrick, new[] { ("Fix", (Action)(() => { using (var f = new FirewallForm()) f.ShowDialog(this); firewall = null; Shown_Recheck(); })) }));
             bool allGood = lines.Count == 1 && ours;
-            // OpenVR games: SteamVR (the default) or OpenComposite, which translates them to OpenXR, so they run on AirFrameXR without SteamVR. Informational: never "Needs attention".
-            if (installingOc) lines.Add(Row("\u2022", "Downloading OpenComposite...", Color.DimGray, new (string, Action)[0]));
-            else if (!demoReady && OpenComposite.Active) lines.Add(Row("\u2713", "OpenVR: OpenComposite is active (games run on AirFrameXR, no SteamVR).", Color.SeaGreen, new[] { ("Switch back to SteamVR", (Action)(() => OcSwitch(false))) }));
-            else if (!demoReady && OpenComposite.Installed) lines.Add(Row("\u2022", "OpenVR: SteamVR.", Color.DimGray, new[] { ("Use OpenComposite", (Action)(() => OcSwitch(true))) }));
-            else lines.Add(Row("\u2022", "OpenVR: SteamVR (OpenComposite is not installed).", Color.DimGray, new[] { ("Install", (Action)OcInstall) }));
+            // OpenVR games: SteamVR (the default) or OpenComposite (shipped in opencomposite\, GPLv3), which translates them to OpenXR, so they run on AirFrameXR without SteamVR.
+            // One switch; informational, never "Needs attention". Not shown where the folder has no OpenComposite (a developer folder).
+            if (demoReady || OpenComposite.Installed || OpenComposite.Active) lines.Add(OpenVrRow(!demoReady && OpenComposite.Active));
             sys.Controls.Add(new Label { Text = allGood ? "Ready" : "Needs attention", AutoSize = true, Font = Ui.Big, ForeColor = allGood ? Color.SeaGreen : Color.Firebrick, Margin = new Padding(0, 0, 0, 4) });
             foreach (var l in lines) sys.Controls.Add(l);
             sys.ResumeLayout();
@@ -175,16 +173,17 @@ namespace AirFrameXR
             return row;
         }
 
-        bool installingOc;
-        void OcInstall()
+        Control OpenVrRow(bool on)
         {
-            if (MessageBox.Show(this, "OpenComposite is a separate, free project (GPLv3, gitlab.com/znixian/OpenOVR) that makes OpenVR games run on OpenXR.\n\nAirFrameXR downloads its two small DLLs from the project's server into this folder (opencomposite\\) and changes nothing else until you press \"Use OpenComposite\". Download now?",
-                "AirFrameXR", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
-            installingOc = true; RefreshSystem();
-            System.Threading.Tasks.Task.Run(() => OpenComposite.Install()).ContinueWith(t =>
-            {
-                try { BeginInvoke((Action)(() => { installingOc = false; if (t.Result != null) MessageBox.Show(this, t.Result, "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Warning); RefreshSystem(); })); } catch { }
-            });
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 2), MaximumSize = new Size(660, 0) };
+            var sw = new ToggleSwitch { AccessibleName = "Use OpenComposite for OpenVR games", Margin = new Padding(0, 2, 8, 0) };
+            sw.SetCheckedInstant(on);
+            row.Controls.Add(new Label { Text = "\u2713", AutoSize = true, ForeColor = on ? Color.SeaGreen : Color.White,   /* empty (white) while off: the tick lines up with the OpenXR line */ Font = Ui.Bold, Margin = new Padding(0, 6, 6, 0) });
+            row.Controls.Add(sw);
+            row.Controls.Add(new Label { Text = "OpenComposite (OpenVR) translation", AutoSize = true, Margin = new Padding(0, 6, 10, 0), MaximumSize = new Size(480, 0) });
+            sw.CheckedChanged += (s, e) => OcSwitch(sw.Checked);
+            new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 }.SetToolTip(sw, "On: OpenVR games load OpenComposite, which translates them to OpenXR so they run on AirFrameXR without SteamVR. Off: they use SteamVR again. Takes effect at the next game start.");
+            return row;
         }
 
         void OcSwitch(bool on)

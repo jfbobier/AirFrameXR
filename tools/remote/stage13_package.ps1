@@ -30,6 +30,12 @@ if (Test-Path "$root\_tmp\install\LICENSE.txt") { Copy-Item "$root\_tmp\install\
 # the repo has dropped since, which must not ship
 $licenses = @(Get-Content "$root\_tmp\install\licenses.txt" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 foreach ($l in $licenses) { Copy-Item "$root\_tmp\install\licenses\$l" "$pkg\docs\licenses" -Force }
+# OpenComposite (GPLv3, unmodified): the two DLLs the launcher's OpenVR switch points the system at, with SOURCE.txt and the source archive they were built from
+New-Item -ItemType Directory -Force "$pkg\opencomposite\bin" | Out-Null
+foreach ($d in 'vrclient.dll', 'vrclient_x64.dll') { Copy-Item "$root\_tmp\install\opencomposite\$d" "$pkg\opencomposite\bin" -Force }
+Copy-Item "$root\_tmp\install\opencomposite\SOURCE.txt" "$pkg\opencomposite" -Force
+$ocSource = @(Get-ChildItem "$root\_tmp\install\opencomposite" -Filter 'OpenOVR-*.tar.gz' | ForEach-Object { $_.Name })
+foreach ($t in $ocSource) { Copy-Item "$root\_tmp\install\opencomposite\$t" "$pkg\opencomposite" -Force }
 # the benchmark scene (tools/bench_scene/build.sh, uploaded by `run.py build host`)
 New-Item -ItemType Directory -Force "$pkg\bench" | Out-Null
 if (Test-Path "$root\bench\littlest_tokyo.vab") { Copy-Item "$root\bench\littlest_tokyo.vab" "$pkg\bench\littlest_tokyo.vab" -Force }
@@ -77,12 +83,14 @@ $zip = "$root\out\dist\AirFrameXR-$version.zip"
 # everything sits under AirFrameXR\ so it unzips to one folder. logs\ and the user's config files are created on first use.
 $ship = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\calibrate.exe', 'bin\launcher.exe', 'bin\mirrordesktop.exe', 'bin\streamer.exe.config', 'bin\configure.exe.config', 'bin\performance.exe.config', 'bin\calibrate.exe.config', 'bin\launcher.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\flavour.txt',
           'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json',
+          'opencomposite\bin\vrclient.dll', 'opencomposite\bin\vrclient_x64.dll', 'opencomposite\SOURCE.txt',
           'config\session.default.json', 'bench\littlest_tokyo.vab', 'bench\sakura_breeze.mp3', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\README.txt', 'docs\THIRD_PARTY_NOTICES.md', 'docs\LICENSE.txt')
 if ($flavour -ne 'release') { $ship += ($benchFiles | Where-Object { Test-Path "$pkg\bin\$_" } | ForEach-Object { "bin\$_" }) }
 $ship += $persShip
 $ship += $persFiles
 $ship += Get-ChildItem "$pkg\profiles" -File -Filter *.json | ForEach-Object { "profiles\$($_.Name)" }
 $ship += $licenses | ForEach-Object { "docs\licenses\$_" }
+$ship += $ocSource | ForEach-Object { "opencomposite\$_" }
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $fs = [IO.File]::Open($zip, [IO.FileMode]::Create)
 $za = New-Object IO.Compression.ZipArchive($fs, [IO.Compression.ZipArchiveMode]::Create)
@@ -91,7 +99,7 @@ foreach ($f in $ship) {
 }
 $za.Dispose(); $fs.Dispose()
 Get-ChildItem $pkg -Recurse -File | Select-Object @{n='file';e={$_.FullName.Substring($pkg.Length + 1)}}, Length | Format-Table -AutoSize | Out-String -Width 200
-$missing = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\launcher.exe.config', 'bin\streamer.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\THIRD_PARTY_NOTICES.md', 'docs\licenses\ALVR-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
+$missing = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\launcher.exe.config', 'bin\streamer.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\THIRD_PARTY_NOTICES.md', 'docs\licenses\ALVR-LICENSE.txt', 'opencomposite\bin\vrclient.dll', 'opencomposite\bin\vrclient_x64.dll', 'opencomposite\SOURCE.txt', 'docs\licenses\OpenComposite-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
 $rootFiles = @(Get-ChildItem $pkg -File | ForEach-Object { $_.Name })
 if ($rootFiles.Count -ne 1 -or $rootFiles[0] -ne 'AirFrameXR.exe') { Write-Host "RESULT: FAILED the root must hold only AirFrameXR.exe, found: $($rootFiles -join ', ')"; exit 1 }
 if ($missing) { Write-Host "RESULT: FAILED missing $($missing -join ', ')" } else { Write-Host "RESULT: OK $pkg ($zip)" }

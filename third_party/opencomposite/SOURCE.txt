@@ -1,0 +1,19 @@
+OpenComposite (OpenVR -> OpenXR), the two DLLs next to this file in bin\: vrclient.dll (32-bit) and vrclient_x64.dll (64-bit).
+
+Project:   OpenComposite, https://gitlab.com/znixian/OpenOVR  (branch openxr)
+License:   GNU General Public License, version 3 or later: docs\licenses\OpenComposite-LICENSE.txt
+           (it also contains Valve's OpenVR headers, MIT/BSD: docs\licenses\OpenComposite-OpenVR-headers-LICENSE.txt,
+            inih, BSD: docs\licenses\OpenComposite-inih-LICENSE.txt, and the OpenXR SDK, Apache-2.0)
+Version:   a27e7e6a64bdcd1eff6b7fba1ea2ea34bcf1273d
+           (1.0.1539, "Set Quest ModelNumber_string prop to Oculus Quest", 2025-05-30; the revision the DLLs print at start)
+Binaries:  the project's own prebuilt DLLs, downloaded unmodified from https://znix.xyz/OpenComposite/download.php?branch=openxr on 2026-11-10
+           vrclient.dll        sha256 096095dc592d606d7e085cc5780fac342d4a84174acb0d55a56f40b70e080a18
+           vrclient_x64.dll    sha256 827ad85f3606a4dc4a8f5561a8ca69e4c6c1b5d2b9cd3315a461b9270b08242c
+
+Corresponding source (GPL-3.0 section 6): OpenOVR-a27e7e6a64bdcd1eff6b7fba1ea2ea34bcf1273d.tar.gz in this folder, unmodified from
+https://gitlab.com/znixian/OpenOVR/-/archive/a27e7e6a64bdcd1eff6b7fba1ea2ea34bcf1273d/OpenOVR-a27e7e6a64bdcd1eff6b7fba1ea2ea34bcf1273d.tar.gz
+           sha256 bf4974c13e571096ffe8675415a1812e618697fed5c4280025890054caf4b610
+
+AirFrameXR does not link to these DLLs and does not change them. It copies nothing into a game: the launcher's OpenVR line only points the system-wide
+OpenVR runtime path (%LOCALAPPDATA%\openvr\openvrpaths.vrpath) at this folder, or back at SteamVR. OpenVR games then load these DLLs, which translate
+OpenVR into OpenXR for the active OpenXR runtime (AirFrameXR). Deleting this folder removes OpenComposite.
