@@ -112,6 +112,7 @@ namespace AirFrameXR
         public string Title, Unit;
         public List<TrendSeries> Series = new List<TrendSeries>();
         public string[] Labels = new string[0];   // per session: "2026-11-10 12:03  x2"
+        public Func<string, string> AxisLabel = l => l.Length >= 10 ? l.Substring(5, 5) : l;   // what is written under the first and the last point (the date of a session; a timeline sets the time)
         int hover = -1;
         readonly Dictionary<string, Font> fonts = new Dictionary<string, Font>();
         Font Sized(float pt, FontStyle st = FontStyle.Regular) { var key = pt + "/" + st + "/" + Font.Size; if (!fonts.TryGetValue(key, out var f)) fonts[key] = f = new Font("Segoe UI", pt * Font.Size / 9.5f, st); return f; }
@@ -157,7 +158,7 @@ namespace AirFrameXR
                 }
             if (Labels.Length > 0 && N > 1)   // the first and the last session's date under the plot
             {
-                string D(string l) => l.Length >= 10 ? l.Substring(5, 5) : l;
+                Func<string, string> D = AxisLabel;
                 TextRenderer.DrawText(g, D(Labels[0]), SmallFont, new Point((int)p.X, (int)(p.Bottom + 3 * K)), Color.DimGray, TextFormatFlags.NoPadding);
                 var last = D(Labels[Math.Min(Labels.Length, N) - 1]);
                 TextRenderer.DrawText(g, last, SmallFont, new Point((int)(p.Right - TextRenderer.MeasureText(last, SmallFont).Width + 4 * K), (int)(p.Bottom + 3 * K)), Color.DimGray, TextFormatFlags.NoPadding);
@@ -208,5 +209,77 @@ namespace AirFrameXR
             if (h != hover) { hover = h; Invalidate(); }
         }
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (hover != -1) { hover = -1; Invalidate(); } }
+    }
+
+    /// The last run of a game in the general log (logs\AirFrameXR.log): what the host wrote every 10 s or 30 s while it ran. Only what is logged: the game's and the stream's fps and
+    /// the generation lag (when frame generation is on), the GPU memory in use. Nothing is recorded for this: it reads the log that is already there.
+    public static class LogTimeline
+    {
+        /// at most `max` points: the mean of each bucket, at the bucket's last time
+        public static void Downsample(List<DateTime> t, List<double> v, int max, out List<DateTime> ot, out List<double> ov)
+        {
+            ot = new List<DateTime>(); ov = new List<double>();
+            if (t.Count <= max) { ot.AddRange(t); ov.AddRange(v); return; }
+            double per = t.Count / (double)max;
+            for (int b = 0; b < max; b++)
+            {
+                int i0 = (int)Math.Floor(b * per), i1 = Math.Min(t.Count, (int)Math.Floor((b + 1) * per)); if (i1 <= i0) continue;
+                double sum = 0; for (int i = i0; i < i1; i++) sum += v[i];
+                ot.Add(t[i1 - 1]); ov.Add(sum / (i1 - i0));
+            }
+        }
+        public class Run
+        {
+            public string Exe; public DateTime Start, End; public bool Ended;
+            public List<DateTime> PerfT = new List<DateTime>(); public List<double> App = new List<double>(), Stream = new List<double>(), Lag = new List<double>();
+            public List<DateTime> GpuT = new List<DateTime>(); public List<double> GpuMb = new List<double>();
+            public List<DateTime> ArrT = new List<DateTime>(); public List<double> Arr = new List<double>(); public double ArrTarget = double.NaN;   // phase lock: how long before the render tick the frames arrive
+        }
+        static readonly System.Text.RegularExpressions.Regex Head = new System.Text.RegularExpressions.Regex(@"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ \[host\] INFO  (game started|game ended): (.+?)(?: after .*)?\s*$", System.Text.RegularExpressions.RegexOptions.Compiled);   // a name may have spaces (Dead Space.exe)
+        static readonly System.Text.RegularExpressions.Regex Perf = new System.Text.RegularExpressions.Regex(@"frame generation perf: app ([\d.]+) fps.*? stream ([\d.]+) fps.*? lag ([\d.]+) ms", System.Text.RegularExpressions.RegexOptions.Compiled);
+        static readonly System.Text.RegularExpressions.Regex Arrival = new System.Text.RegularExpressions.Regex(@"phase lock: arrivals (-?[\d.]+) ms before the render tick \(target ([\d.]+)\)", System.Text.RegularExpressions.RegexOptions.Compiled);
+        static readonly System.Text.RegularExpressions.Regex Gpu = new System.Text.RegularExpressions.Regex(@"GPU (\d+) of \d+ MB used", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        public static Run Last(string logFile, string exe)
+        {
+            try
+            {
+                if (!System.IO.File.Exists(logFile) || string.IsNullOrEmpty(exe)) return null;
+                Run cur = null, last = null;
+                using (var fs = new System.IO.FileStream(logFile, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete))
+                using (var rd = new System.IO.StreamReader(fs, System.Text.Encoding.UTF8))
+                {
+                    string line; DateTime lastT = DateTime.MinValue;
+                    while ((line = rd.ReadLine()) != null)
+                    {
+                        if (line.Length < 24) continue;
+                        DateTime t; bool okT = DateTime.TryParseExact(line.Substring(0, 19), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out t);
+                        if (!okT) continue;
+                        lastT = t;
+                        var m = Head.Match(line);
+                        if (m.Success && string.Equals(m.Groups[3].Value, exe, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (m.Groups[2].Value == "game started") { cur = new Run { Exe = exe, Start = t }; last = cur; }
+                            else if (cur != null) { cur.End = t; cur.Ended = true; cur = null; }
+                            continue;
+                        }
+                        if (cur == null) continue;
+                        var p = Perf.Match(line);
+                        if (p.Success)
+                        {
+                            cur.PerfT.Add(t); cur.App.Add(double.Parse(p.Groups[1].Value, CultureInfo.InvariantCulture)); cur.Stream.Add(double.Parse(p.Groups[2].Value, CultureInfo.InvariantCulture)); cur.Lag.Add(double.Parse(p.Groups[3].Value, CultureInfo.InvariantCulture));
+                            continue;
+                        }
+                        var g = Gpu.Match(line);
+                        if (g.Success) { cur.GpuT.Add(t); cur.GpuMb.Add(double.Parse(g.Groups[1].Value, CultureInfo.InvariantCulture)); continue; }
+                        var a = Arrival.Match(line);
+                        if (a.Success) { cur.ArrT.Add(t); cur.Arr.Add(double.Parse(a.Groups[1].Value, CultureInfo.InvariantCulture)); cur.ArrTarget = double.Parse(a.Groups[2].Value, CultureInfo.InvariantCulture); }
+                    }
+                    if (last != null && !last.Ended) last.End = lastT;
+                }
+                return last;
+            }
+            catch { return null; }
+        }
     }
 }

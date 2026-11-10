@@ -127,6 +127,12 @@ namespace AirFrameXR
                     right.Controls.Add(new Label { Text = $"Trends over the last {sessions.Count} sessions", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                     right.Controls.Add(Trends(sessions));
                 }
+                var timeline = Timeline(LogTimeline.Last(Path.Combine(Paths.Logs, "AirFrameXR.log"), exe));
+                if (timeline != null)
+                {
+                    right.Controls.Add(new Label { Text = "The last run over time (what the general log recorded: logs\\AirFrameXR.log)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
+                    right.Controls.Add(timeline);
+                }
                 right.Controls.Add(new Label { Text = $"Sessions (the last {sessions.Count}, newest first)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                 right.Controls.Add(SessionList(sessions));
             }
@@ -218,6 +224,47 @@ namespace AirFrameXR
             if (pipe != null) all.Controls.Add(Ui.Expander("Frame pipeline details (sizes and settings)", PipelineRow(pipe, net, maxW, rep)));
             all.Controls.Add(Ui.Expander("More numbers", more));
             return all;
+        }
+
+        /// the last run of this game as the general log saw it: a chart for each series the log has (fps, the generation lag, the GPU memory)
+        Control Timeline(LogTimeline.Run run)
+        {
+            if (run == null) return null;
+            string Lbl(DateTime t) => t.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+            var blue = Ui.Accent; var orange = Color.FromArgb(0xF5, 0x8A, 0x1F); var grey = Color.FromArgb(0x7A, 0x84, 0x99);
+            var charts = new List<TrendChart>();
+            if (run.PerfT.Count >= 2 && run.App.Concat(run.Stream).Any(v => v > 0))
+            {
+                LogTimeline.Downsample(run.PerfT, run.App, 240, out var pt, out var pa); LogTimeline.Downsample(run.PerfT, run.Stream, 240, out _, out var ps); LogTimeline.Downsample(run.PerfT, run.Lag, 240, out _, out var pl);
+                var fps = new TrendChart { Title = "Frames per second", Labels = pt.Select(Lbl).ToArray(), AxisLabel = l => l.Substring(11, 5) };
+                fps.Series.Add(new TrendSeries { Name = "game", Color = blue, V = pa.ToArray() });
+                fps.Series.Add(new TrendSeries { Name = "streamed", Color = orange, V = ps.ToArray() });
+                charts.Add(fps);
+                var lag = new TrendChart { Title = "Generation lag (ms)", Unit = " ms", Labels = pt.Select(Lbl).ToArray(), AxisLabel = l => l.Substring(11, 5) };
+                lag.Series.Add(new TrendSeries { Name = "lag", Color = grey, V = pl.ToArray() });
+                charts.Add(lag);
+            }
+            if (run.GpuT.Count >= 2)
+            {
+                LogTimeline.Downsample(run.GpuT, run.GpuMb, 240, out var gt, out var gv);
+                var gpu = new TrendChart { Title = "GPU memory in use (MB)", Unit = " MB", Labels = gt.Select(Lbl).ToArray(), AxisLabel = l => l.Substring(11, 5) };
+                gpu.Series.Add(new TrendSeries { Name = "used", Color = blue, V = gv.ToArray() });
+                charts.Add(gpu);
+            }
+            if (run.ArrT.Count >= 4)
+            {
+                LogTimeline.Downsample(run.ArrT, run.Arr, 240, out var at, out var av);
+                var arr = new TrendChart { Title = "Arrival before the render tick" + (double.IsNaN(run.ArrTarget) ? " (ms)" : " (target " + run.ArrTarget.ToString("0.#", CultureInfo.InvariantCulture) + " ms)"), Unit = " ms", Labels = at.Select(Lbl).ToArray(), AxisLabel = l => l.Substring(11, 5) };
+                arr.Series.Add(new TrendSeries { Name = "arrival", Color = orange, V = av.ToArray() });
+                charts.Add(arr);
+            }
+            if (charts.Count == 0) return null;
+            int cols = charts.Count > 3 ? 2 : charts.Count, rows = (charts.Count + cols - 1) / cols;   // four charts: two by two
+            var row = new TableLayoutPanel { ColumnCount = cols, RowCount = rows, Margin = new Padding(3, 0, 3, 6), Tag = "noscale", Height = rows * Ui.Px(this, 148) };
+            for (int i = 0; i < cols; i++) row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / cols));
+            for (int i = 0; i < rows; i++) row.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / rows));
+            foreach (var c in charts) { c.Dock = DockStyle.Fill; c.Margin = new Padding(0, 0, 8, 8); row.Controls.Add(c); }
+            return row;
         }
 
         /// a small chart per question, over the stored sessions, oldest on the left

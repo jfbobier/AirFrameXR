@@ -416,6 +416,18 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "render_plan.txt"), lines);
                 return 0;
             }
+            var tlLog = Arg("--log-timeline-selftest");   // harness/log_timeline_check.py: what the stats window reads from the general log, for a game
+            if (tlLog != null)
+            {
+                var lines = new List<string>();
+                foreach (var exe in (Arg("--exes") ?? "").Split(','))
+                {
+                    var r = global::AirFrameXR.LogTimeline.Last(tlLog, exe);
+                    lines.Add(r == null ? exe + "|none" : string.Format(CultureInfo.InvariantCulture, "{0}|start={1:yyyy-MM-dd HH:mm:ss}|end={2:yyyy-MM-dd HH:mm:ss}|ended={3}|perf={4}|gpu={5}|arr={8}|app_max={6:0.0}|gpu_max={7:0}", exe, r.Start, r.End, r.Ended, r.PerfT.Count, r.GpuT.Count, r.App.Count > 0 ? r.App.Max() : 0, r.GpuMb.Count > 0 ? r.GpuMb.Max() : 0, r.ArrT.Count));
+                }
+                Directory.CreateDirectory(outDir); File.WriteAllLines(Path.Combine(outDir, "log_timeline.txt"), lines);
+                return 0;
+            }
             var ocDir = Arg("--opencomposite-selftest");   // harness/opencomposite_check.py: the switch with the package's DLLs, in a temporary folder, never the real OpenVR files
             if (ocDir != null)
             {
