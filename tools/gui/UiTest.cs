@@ -412,6 +412,29 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "render_plan.txt"), lines);
                 return 0;
             }
+            var ocDir = Arg("--opencomposite-selftest");   // harness/opencomposite_check.py: install (a real download) and the switch, in a temporary folder, never the real OpenVR files
+            if (ocDir != null)
+            {
+                var lines = new List<string>();
+                var tmp = Path.Combine(ocDir, "oc"); Directory.CreateDirectory(tmp);
+                global::AirFrameXR.OpenComposite.Root = Path.Combine(tmp, "opencomposite");
+                global::AirFrameXR.OpenComposite.VrPath = Path.Combine(tmp, "openvr", "openvrpaths.vrpath");
+                Directory.CreateDirectory(Path.GetDirectoryName(global::AirFrameXR.OpenComposite.VrPath));
+                File.WriteAllText(global::AirFrameXR.OpenComposite.VrPath, "{\n\t\"config\" : [ \"C:\\\\x\" ],\n\t\"external_drivers\" : [ \"C:\\\\Games\\\\ALVR\" ],\n\t\"jsonid\" : \"vrpathreg\",\n\t\"runtime\" : [ \"C:\\\\Steam\\\\SteamVR\" ],\n\t\"version\" : 1\n}\n");
+                string R() => string.Join(";", global::AirFrameXR.OpenComposite.Runtimes());
+                lines.Add("start|active=" + global::AirFrameXR.OpenComposite.Active + "|installed=" + global::AirFrameXR.OpenComposite.Installed + "|runtime=" + R());
+                lines.Add("enable_before_install|" + global::AirFrameXR.OpenComposite.Enable());
+                var inst = global::AirFrameXR.OpenComposite.Install();
+                var oc = global::AirFrameXR.OpenComposite.Root;
+                lines.Add("install|error=" + (inst ?? "none") + "|installed=" + global::AirFrameXR.OpenComposite.Installed + "|dll32=" + (File.Exists(Path.Combine(oc, "bin", "vrclient.dll")) ? new FileInfo(Path.Combine(oc, "bin", "vrclient.dll")).Length : -1) + "|dll64=" + (File.Exists(Path.Combine(oc, "bin", "vrclient_x64.dll")) ? new FileInfo(Path.Combine(oc, "bin", "vrclient_x64.dll")).Length : -1));
+                lines.Add("enable|" + (global::AirFrameXR.OpenComposite.Enable() ?? "ok") + "|active=" + global::AirFrameXR.OpenComposite.Active + "|runtime=" + R());
+                var after = global::AirFrameXR.Json.Load(global::AirFrameXR.OpenComposite.VrPath);
+                lines.Add("kept_keys|" + string.Join(",", after.Keys.OrderBy(k => k)) + "|backup=" + File.Exists(global::AirFrameXR.OpenComposite.VrPath + ".airframexr.bak"));
+                lines.Add("enable_twice|" + (global::AirFrameXR.OpenComposite.Enable() ?? "ok") + "|runtime=" + R());
+                lines.Add("disable|" + (global::AirFrameXR.OpenComposite.Disable() ?? "ok") + "|active=" + global::AirFrameXR.OpenComposite.Active + "|runtime=" + R());
+                File.WriteAllLines(Path.Combine(ocDir, "opencomposite.txt"), lines);
+                return 0;
+            }
             var raceSecs = Arg("--json-race-selftest");   // harness/json_atomic_check.py: a writer saves a 20 KB JSON as fast as it can while a reader opens it the way the host does (share read/write/delete) and parses it
             if (raceSecs != null)
             {
