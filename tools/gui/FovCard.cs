@@ -355,7 +355,7 @@ namespace AirFrameXR
                     Process.Start(new ProcessStartInfo(Paths.Runtime) { WorkingDirectory = Paths.Bin, WindowStyle = ProcessWindowStyle.Minimized });
                 var arg = string.Join(",", t.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture)));
                 Process.Start(new ProcessStartInfo(bat, arg) { WorkingDirectory = Path.GetDirectoryName(bat), UseShellExecute = true });
-                note.Text = "Open the ALVR app on the headset: the grid starts in it once it is connected. The white outline is the rectangle " + arg + "; close the grid's console window when done.";
+                note.Text = "Open the headset app: the grid starts in it once it is connected. The white outline is the rectangle " + arg + "; close the grid's console window when done.";
                 Log.Write("INFO", "fov profiles: fovgrid with " + arg);
             }
             catch (Exception e) { MessageBox.Show(FindForm(), "Could not start the grid: " + e.Message, "Field of view profiles", MessageBoxButtons.OK, MessageBoxIcon.Warning); }

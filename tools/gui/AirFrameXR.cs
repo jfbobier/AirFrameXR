@@ -595,7 +595,7 @@ namespace AirFrameXR
         {
             if (string.IsNullOrEmpty(headsetName)) return;
             this.headsetName = headsetName;
-            var fromHeadset = !headsetName.Contains("Apple");
+            var fromHeadset = AppSettings.KindOf(headsetName) != HeadsetKind.VisionPro;   // Auto eye height is the Vision Pro's; the others report their floor
             if (fromHeadset == heightFromHeadset) return;
             heightFromHeadset = fromHeadset;
             UpdateHeightUi();

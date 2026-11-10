@@ -60,7 +60,8 @@ namespace AirFrameXR
         bool auto => cmd.Contains("--auto");
         // --diagnose: the same handshake, tests and verdict on the settings as they are (no choice of setup, no configuration page); Close at the end
         bool diagnose => cmd.Contains("--diagnose");
-        string Arg(string k) { for (int i = 1; i + 1 < cmd.Length; i++) if (cmd[i] == k) return cmd[i + 1]; return null; }
+        public static string DemoHeadsetForTest;   // the UI harness: show the pages with a Quest 3 instead of the Vision Pro demo data
+        string Arg(string k) { if (k == "--demo-headset" && DemoHeadsetForTest != null) return DemoHeadsetForTest; for (int i = 1; i + 1 < cmd.Length; i++) if (cmd[i] == k) return cmd[i + 1]; return null; }
 
         public WizardForm(Dictionary<string, object> check, bool demo)
         {
@@ -317,7 +318,7 @@ namespace AirFrameXR
             {
                 if (step != 1) return;
                 seenOnNetwork = true; usbHint.Visible = false;
-                var name = f.Hostname.EndsWith(".client.alvr") ? "Apple Vision Pro" : f.Hostname.EndsWith(".client") ? "Headset (Quest or other ALVR client)" : f.Hostname;
+                var name = HeadsetNames.FromHost(f.Hostname);
                 AddRow(f.Hostname, f.Ip, name, f.Compatible ? $"detected on the network (ALVR protocol {f.Protocol})" : $"INCOMPATIBLE ({f.Protocol}, streamer {f.ServerProtocol})", false);
             }));
             discovery.OnError += m => BeginInvoke((Action)(() => { discStatus.Text = "Discovery failed: " + m; discStatus.ForeColor = Color.Firebrick; }));
@@ -947,7 +948,7 @@ namespace AirFrameXR
                 Rates = new List<double> { 90, 96, 100 }, MicRate = 48000, Gamma = 1.0,
             };
             if (Arg("--demo-headset") == "quest3")
-                hs = new Handshake { FromHeadset = true, DisplayName = "Oculus Quest3", Hostname = "quest3.client.alvr_", Ip = "192.168.1.30", PanelW = 2064, PanelH = 2208, Rates = new List<double> { 72, 80, 90, 120 }, MicRate = 48000, EncAv1 = true, Gamma = 2.2 };
+                hs = new Handshake { FromHeadset = true, DisplayName = "Oculus Quest3", Hostname = "quest3.client", Ip = "192.168.1.30", PanelW = 2064, PanelH = 2208, Rates = new List<double> { 72, 80, 90, 120 }, MicRate = 48000, EncAv1 = true, Gamma = 2.2 };
             chosenHost = hs.Hostname; chosenIp = hs.Ip; chosenName = hs.DisplayName; ctxFps = hs.Rates.Contains(90) ? 90 : hs.Rates.Max();
             ctx = new TestContext { HS = hs, Check = check, HeadsetAvailable = true };
             ctx.R = new Results

@@ -296,7 +296,7 @@ namespace AirFrameXR
         void StartStreamer()
         {
             Reset("Starting the streamer...");
-            Text_("Open the ALVR app on your headset. This page continues by itself once the streamer is up.");
+            Text_("Open the headset app. This page continues by itself once the streamer is up.");
             try { Process.Start(new ProcessStartInfo(Paths.Runtime) { WorkingDirectory = Paths.Bin, WindowStyle = ProcessWindowStyle.Minimized }); Log.Write("INFO", "calibrate: started the streamer"); }
             catch (Exception e) { Reset("The streamer did not start"); Text_(e.Message); Buttons(Btn("Try again", ShowIntro), Btn("Close", Close)); return; }
             int waited = 0;
