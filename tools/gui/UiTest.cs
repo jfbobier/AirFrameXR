@@ -343,9 +343,13 @@ namespace AirFrameXR
             Application.SetCompatibleTextRenderingDefault(false);
             string Arg(string k) { for (int i = 0; i + 1 < args.Length; i++) if (args[i] == k) return args[i + 1]; return null; }
             var outDir = Arg("--out") ?? Path.Combine(Paths.Dir, "uitest");
-            if (args.Contains("--show-streamer"))   // a person looks at the streamer window as the matrix renders it (demo state, no host); closes with the window
+            var showCase = args.Contains("--show-streamer") ? "streamer-clean" : Arg("--show");   // a person looks at a window as the matrix renders it (its demo state, no host); closes with the window
+            if (showCase != null)
             {
-                var f = new RuntimeForm(null); f.StartPosition = FormStartPosition.CenterScreen; f.Shown += (o, e) => f.ApplyDemoState(false);
+                var c = Cases().FirstOrDefault(x => x.Name == showCase);
+                if (c == null) { Console.Error.WriteLine("no such case: " + showCase); return 2; }
+                var f = c.Make(); f.StartPosition = FormStartPosition.CenterScreen;
+                f.Shown += (o, e) => c.Prepare?.Invoke(f);
                 Application.Run(f); return 0;
             }
             Directory.CreateDirectory(outDir);

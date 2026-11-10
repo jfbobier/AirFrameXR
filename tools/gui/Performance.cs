@@ -52,6 +52,7 @@ namespace AirFrameXR
             Controls.Add(left);
             Controls.Add(bottom);
             games.SelectedIndexChanged += (s, e) => Render();
+            right.SizeChanged += (s, e) => FitDrawings();
             if (settings.AutoDeleteGameLogs) Scan();
             Fill(select);
             Load += (s, e) => { ActiveControl = games; right.AutoScrollPosition = Point.Empty; };   // focus on the list of games: a control lower in the right pane would scroll it
@@ -119,7 +120,13 @@ namespace AirFrameXR
             {
                 var last = sessions[sessions.Count - 1];
                 right.Controls.Add(new Label { Text = $"Last session: {When(last)}, {N(D(last, "seconds") / 60)} min on {S(last, "headset")}, {Mode(S(last, "level"))}", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 0, 3, 4) });
-                right.Controls.Add(Tiles(last));
+                right.Controls.Add(Strip(last));
+                right.Controls.Add(Details(last));
+                if (sessions.Count >= 2)
+                {
+                    right.Controls.Add(new Label { Text = $"Trends over the last {sessions.Count} sessions", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
+                    right.Controls.Add(Trends(sessions));
+                }
                 right.Controls.Add(new Label { Text = $"Sessions (the last {sessions.Count}, newest first)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                 right.Controls.Add(SessionList(sessions));
             }
@@ -143,7 +150,8 @@ namespace AirFrameXR
             var result = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
             result.Controls.Add(exported); result.Controls.Add(reveal);
             right.Controls.Add(result);
-            foreach (Control c in right.Controls) Ui.LateScale(c, this);   // rebuilt after the window loaded; widths above are design units
+            foreach (Control c in right.Controls) if (!(c.Tag is string t && t == "noscale")) Ui.LateScale(c, this);   // rebuilt after the window loaded; widths above are design units (the drawings size themselves in pixels)
+            FitDrawings();
             right.ResumeLayout();
             right.AutoScrollPosition = Point.Empty;   // a rebuilt pane starts at its top, whatever the last one was scrolled to
         }
@@ -155,22 +163,46 @@ namespace AirFrameXR
             return double.IsNaN(t) ? "?" : DateTimeOffset.FromUnixTimeSeconds((long)t).LocalDateTime.ToString("yyyy-MM-dd HH:mm");
         }
 
-        Control Tiles(Dictionary<string, object> s)
+        // the drawings are as wide as the page, in pixels
+        void FitDrawings()
+        {
+            int w = Math.Max(Ui.Px(this, 400), right.ClientSize.Width - Ui.Px(this, 40) - (right.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0));
+            foreach (Control c in right.Controls) if (c.Tag is string t && t == "noscale") { c.Width = w; if (c is PipelineStrip ps) ps.Rebuild(); }
+        }
+
+        /// the way of a frame, left to right: game, generation, encoder, network, decoder, headset; the latency split under it
+        Control Strip(Dictionary<string, object> s)
+        {
+            var net = O(s, "net"); var pipe = O(s, "pipeline"); var nv = O(pipe, "nvenc");
+            var rep = D(s, "headset_repeated_typ") * 100; var hostRep = D(s, "host_repeats_typ") * 100;
+            var strip = new PipelineStrip();
+            var game = D(s, "rendered_fps_low");
+            strip.Stages.Add(new Stage { Title = "Game", Value = N(D(s, "rendered_fps")) + " fps", Note = "slowest tenth " + N(game) + (I2(pipe, "game_render") != null ? ", " + X(I2(pipe, "game_render")) + " per eye" : "") });
+            var lvl = S(s, "level");
+            strip.Stages.Add(new Stage { Title = "Generation", Value = N(D(s, "streamed_fps")) + " fps", Note = (lvl == "off" || lvl.Length == 0 ? "off" : Ui.FgName(lvl)) + ", host repeats " + N(hostRep) + " %", Alarm = hostRep >= 5 ? Color.Firebrick : (Color?)null });
+            double enc = D(net, "encode_ms"), tr = D(net, "network_ms"), dec = D(net, "decode_ms");
+            bool foveated = pipe != null && pipe.TryGetValue("foveated", out var fv) && fv is bool fvb && fvb;
+            double seen = D(nv, "slices_seen"), want = D(nv, "expected_strips"); bool split = !double.IsNaN(seen) && !double.IsNaN(want) && want > 0 && seen + 0.05 < want;
+            strip.Stages.Add(new Stage { Title = "Encode", Value = N(enc, "0") + " ms", Note = split ? "split encoding did not engage: " + N(seen, "0") + " strip(s), " + N(want, "0") + " expected" : ((nv != null ? "NVENC p95 " + N(D(nv, "encode_p95_ms")) + " ms, " : "") + (pipe == null ? "" : foveated ? X(I2(pipe, "encoded")) + " foveated" : "full frame")), Alarm = split ? Color.Firebrick : (Color?)null });
+            var lost = D(net, "packets_lost");
+            strip.Stages.Add(new Stage { Title = "Network", Value = net != null ? N(D(net, "bitrate_mbps"), "0") + " Mbps" : "-", Note = $"{N(tr, "0")} ms, {N(lost, "0")} packets lost", Alarm = lost > 0 ? Color.Firebrick : (Color?)null });
+            strip.Stages.Add(new Stage { Title = "Decode", Value = N(dec, "0") + " ms", Note = "on the headset" });
+            strip.Stages.Add(new Stage { Title = "Headset", Value = net != null ? N(D(net, "displayed_fps")) + " fps" : "-", Note = "shown, repeated periods " + N(rep) + " %", Alarm = rep >= 5 ? Color.Firebrick : (Color?)null });
+            if (net != null)
+            {
+                bool bad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms")) || double.IsNaN(enc) || double.IsNaN(tr) || double.IsNaN(dec);
+                strip.Latency = new LatencyParts { Total = D(net, "latency_ms"), Enc = enc, Net = tr, Dec = dec, Bad = bad };
+            }
+            return strip;
+        }
+
+        /// what is not in the strip, one click away: the pipeline's sizes and settings, the other numbers
+        Control Details(Dictionary<string, object> s)
         {
             var net = O(s, "net");
             int maxW = Math.Max(400, Ui.Design(right, right.ClientSize.Width - 40));
-            var main = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(maxW, 0), Margin = new Padding(0) };
             var more = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(maxW, 0), Margin = new Padding(0) };
             var rep = D(s, "headset_repeated_typ") * 100; var hostRep = D(s, "host_repeats_typ") * 100;
-            // the four numbers that answer "how did it go"; the rest is one click away
-            main.Controls.Add(Ui.MakeTile("Game", N(D(s, "rendered_fps")) + " fps", "slowest tenth " + N(D(s, "rendered_fps_low"))));
-            if (net != null) main.Controls.Add(Ui.MakeTile("Headset shows", N(D(net, "displayed_fps")) + " fps", "repeated periods " + N(rep) + " %", rep >= 5 ? Color.Firebrick : (Color?)null));
-            if (net != null) {
-                var bad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms"));
-                var lt = Ui.MakeTile("Latency", bad ? "n/a" : N(D(net, "latency_ms"), "0") + " ms", bad ? "not measured" : $"p95 {N(D(net, "latency_p95_ms"), "0")}; " + Latency.Split(D(net, "latency_ms"), D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms")));
-                if (bad) lt.Set("n/a", "not measured", null, Latency.Why);
-                main.Controls.Add(lt);
-            }
             more.Controls.Add(Ui.MakeTile("Streamed", N(D(s, "streamed_fps")) + " fps", "display " + N(D(s, "display_hz"), "0") + " Hz"));
             more.Controls.Add(Ui.MakeTile("Host repeats", N(hostRep) + " %", "of its outputs"));
             if (net != null)
@@ -178,24 +210,38 @@ namespace AirFrameXR
                 more.Controls.Add(Ui.MakeTile("Bitrate", N(D(net, "bitrate_mbps"), "0") + " Mbps", "sent " + N(D(net, "throughput_mbps"), "0")));
                 var lost = D(net, "packets_lost");
                 more.Controls.Add(Ui.MakeTile("Packets lost", N(lost, "0"), "during the session", lost > 0 ? Color.Firebrick : (Color?)null));
+                var p95 = D(net, "latency_p95_ms");
+                more.Controls.Add(Ui.MakeTile("Latency p95", Latency.Absurd(p95) ? "n/a" : N(p95, "0") + " ms", "slowest twentieth"));
             }
             var all = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
-            all.Controls.Add(main);
             var pipe = O(s, "pipeline");
-            if (pipe != null)
-            {
-                all.Controls.Add(new Label { Text = "Frame pipeline (what happened to each frame, stage by stage)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 6, 3, 2) });
-                all.Controls.Add(PipelineRow(pipe, net, maxW, rep));
-            }
-            if (net != null)
-            {
-                // ALVR's own stats line, to tell a slow encoder or decoder from a slow network: streamer latency = encoder + transport + decoder
-                double enc = D(net, "encode_ms"), tr = D(net, "network_ms"), dec = D(net, "decode_ms");
-                var st = Latency.Streamer(enc, tr, dec, D(net, "latency_outliers"), D(net, "latency_samples"));
-                all.Controls.Add(new Label { AutoSize = true, Font = Ui.Body, Margin = new Padding(3, 0, 3, 4),
-                    Text = st == null ? "Streamer latency: n/a" : $"Streamer latency {N(st.Value, "0")} ms = encoder {N(enc, "0")} + transport {N(tr, "0")} + decoder {N(dec, "0")}" });
-            } all.Controls.Add(Ui.Expander("More numbers", more));
+            if (pipe != null) all.Controls.Add(Ui.Expander("Frame pipeline details (sizes and settings)", PipelineRow(pipe, net, maxW, rep)));
+            all.Controls.Add(Ui.Expander("More numbers", more));
             return all;
+        }
+
+        /// a small chart per question, over the stored sessions, oldest on the left
+        Control Trends(List<Dictionary<string, object>> sessions)
+        {
+            double[] V(Func<Dictionary<string, object>, double> f) => sessions.Select(f).ToArray();
+            double Lat(Dictionary<string, object> x) { var n = O(x, "net"); return n == null || Latency.Absurd(D(n, "latency_ms"), D(n, "latency_outliers"), D(n, "latency_samples")) ? double.NaN : D(n, "latency_ms"); }
+            double Str(Dictionary<string, object> x) { var n = O(x, "net"); return n == null ? double.NaN : Latency.Streamer(D(n, "encode_ms"), D(n, "network_ms"), D(n, "decode_ms"), D(n, "latency_outliers"), D(n, "latency_samples")) ?? double.NaN; }
+            var labels = sessions.Select(x => When(x) + "  " + (S(x, "level") == "off" || S(x, "level").Length == 0 ? "no generation" : Ui.FgName(S(x, "level")))).ToArray();
+            var blue = Ui.Accent; var orange = Color.FromArgb(0xF5, 0x8A, 0x1F); var grey = Color.FromArgb(0x7A, 0x84, 0x99);
+            var fps = new TrendChart { Title = "Frames per second", Unit = "", Labels = labels };
+            fps.Series.Add(new TrendSeries { Name = "game", Color = blue, V = V(x => D(x, "rendered_fps")) });
+            fps.Series.Add(new TrendSeries { Name = "headset shows", Color = orange, V = V(x => { var n = O(x, "net"); return n == null ? double.NaN : D(n, "displayed_fps"); }) });
+            var lat = new TrendChart { Title = "Latency (ms)", Unit = " ms", Labels = labels };
+            lat.Series.Add(new TrendSeries { Name = "total", Color = blue, V = V(Lat) });
+            lat.Series.Add(new TrendSeries { Name = "enc + net + dec", Color = grey, V = V(Str) });
+            var rpt = new TrendChart { Title = "Repeated frames (%)", Unit = " %", Labels = labels };
+            rpt.Series.Add(new TrendSeries { Name = "headset", Color = orange, V = V(x => D(x, "headset_repeated_typ") * 100) });
+            rpt.Series.Add(new TrendSeries { Name = "host", Color = grey, V = V(x => D(x, "host_repeats_typ") * 100) });
+            var row = new TableLayoutPanel { ColumnCount = 3, RowCount = 1, Margin = new Padding(3, 0, 3, 6), Tag = "noscale", Height = Ui.Px(this, 140) };
+            for (int i = 0; i < 3; i++) row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            row.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            foreach (var c in new[] { fps, lat, rpt }) { c.Dock = DockStyle.Fill; row.Controls.Add(c); }
+            return row;
         }
 
         static int[] I2(Dictionary<string, object> d, string k)
@@ -225,12 +271,7 @@ namespace AirFrameXR
             row.Controls.Add(Ui.MakeTile("Encoder", N(D(nv, "encode_p50_ms")) + " ms", $"p95 {N(D(nv, "encode_p95_ms"))} ms, {N(seen)} strip(s) seen, {N(want, "0")} expected" + (double.IsNaN(preset) ? "" : ", P" + N(preset, "0")), bad ? Color.Firebrick : (Color?)null));
             row.Controls.Add(Ui.MakeTile("Network", net != null ? N(D(net, "bitrate_mbps"), "0") + " Mbps" : "-", ""));
             row.Controls.Add(Ui.MakeTile("Headset", net != null ? "decode " + N(D(net, "decode_ms"), "0") + " ms" : "-", "repeated " + N(repeatedPct) + " %"));
-            if (!bad) return row;
-            var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
-            col.Controls.Add(row);
-            var eng = D(nv, "engines");
-            col.Controls.Add(new Label { Text = $"Split encoding did not engage: {N(seen)} strip(s) for {N(want, "0")} expected ({N(eng, "0")} NVENC engines).", AutoSize = true, ForeColor = Color.Firebrick, Font = Ui.Body, Margin = new Padding(3, 0, 3, 4), MaximumSize = new Size(maxW, 0) });
-            return col;
+            return row;
         }
 
         Control SessionList(List<Dictionary<string, object>> sessions)
