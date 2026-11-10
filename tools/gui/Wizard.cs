@@ -174,7 +174,7 @@ namespace AirFrameXR
             {
                 case 0: Close(); break;
                 case 1:
-                    if (string.IsNullOrEmpty(chosenIp)) { MessageBox.Show(this, "Select a headset first (open the ALVR app on the headset), or add its IP address.", Text); return; }
+                    if (string.IsNullOrEmpty(chosenIp)) { MessageBox.Show(this, "Select a headset first (open the headset app), or add its IP address.", Text); return; }
                     Session.Pair(session, chosenHost, chosenName, chosenIp);
                     Session.Save(session);
                     settings.HeadsetHost = chosenHost; settings.HeadsetName = chosenName; settings.HeadsetIp = chosenIp;
@@ -213,7 +213,7 @@ namespace AirFrameXR
             found = new ListView { View = View.Details, FullRowSelect = true, Height = 200, Width = 780, HideSelection = false, MultiSelect = false };
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
             p.Controls.Add(H("Your headset"));
-            p.Controls.Add(Ui.Line("Open the ALVR app on the headset (same network as this PC). It appears below within a few seconds. A headset you paired before is listed at once."));
+            p.Controls.Add(Ui.Line("Open the headset app (same network as this PC). It appears below within a few seconds. A headset you paired before is listed at once."));
             found.Columns.Clear(); found.Items.Clear(); rows.Clear();
             Ui.Col(found, "Name (hostname)", 300);
             Ui.Col(found, "IP address", 140);
@@ -303,7 +303,7 @@ namespace AirFrameXR
             Task.Run(() =>
             {
                 string res;
-                try { using (var pg = new Ping()) res = pg.Send(ip, 1500).Status == IPStatus.Success ? "reachable" : "no answer to ping (it may still be found by the ALVR app)"; }
+                try { using (var pg = new Ping()) res = pg.Send(ip, 1500).Status == IPStatus.Success ? "reachable" : "no answer to ping (it may still be found by the headset app)"; }
                 catch { res = "not checked"; }
                 try { BeginInvoke((Action)(() => { if (!item.ListView?.IsDisposed ?? false) item.SubItems[2].Text = item.SubItems[2].Text.Split('-')[0].Trim() + " - " + res; })); } catch { }
             });
@@ -331,7 +331,7 @@ namespace AirFrameXR
         {
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
             p.Controls.Add(H("What we learned from your headset"));
-            hsStatus = Ui.Line($"{chosenName} is detected at {chosenIp}; connecting... open the ALVR app on the headset and leave it on its start screen.");
+            hsStatus = Ui.Line($"{chosenName} is detected at {chosenIp}; connecting... open the headset app and leave it on its start screen.");
             p.Controls.Add(hsStatus);
             hsBar = new ProgressBar { Style = ProgressBarStyle.Marquee, Width = 500, Height = 14 };
             p.Controls.Add(hsBar);
@@ -368,7 +368,7 @@ namespace AirFrameXR
         void BeginHandshake()
         {
             hsRetry.Visible = false; hsSkip.Visible = false; hsBar.Visible = true;
-            hsStatus.Text = $"{chosenName} is detected at {chosenIp}; connecting... open the ALVR app on the headset and leave it on its start screen.";
+            hsStatus.Text = $"{chosenName} is detected at {chosenIp}; connecting... open the headset app and leave it on its start screen.";
             hsStatus.ForeColor = Color.Black;
             handshakeHost?.Stop(1000);
             handshakeHost = new HostProcess();
@@ -386,7 +386,7 @@ namespace AirFrameXR
                 hsBar.Visible = false;
                 if (caps == null)
                 {
-                    if (hsStatus.ForeColor != Color.Firebrick) { hsStatus.Text = "The headset did not answer. Is the ALVR app open on it, on the same network (and is AirFrameXR allowed through the firewall)?"; hsStatus.ForeColor = Color.DarkOrange; }
+                    if (hsStatus.ForeColor != Color.Firebrick) { hsStatus.Text = "The headset did not answer. Is the headset app open on it, on the same network (and is AirFrameXR allowed through the firewall)?"; hsStatus.ForeColor = Color.DarkOrange; }
                     hsRetry.Visible = true; hsSkip.Visible = true;
                     return;
                 }
@@ -641,7 +641,7 @@ namespace AirFrameXR
         {
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
             p.Controls.Add(H("Testing your setup"));
-            p.Controls.Add(Ui.Line("Each test is ticked off when it is done. This takes a few minutes; the headset ones need the ALVR app open on it."));
+            p.Controls.Add(Ui.Line("Each test is ticked off when it is done. This takes a few minutes; the headset ones need the headset app open on it."));
             testList = new ListView { View = View.Details, FullRowSelect = true, Width = 790, Height = 300, HeaderStyle = ColumnHeaderStyle.None, ShowItemToolTips = true };
             Ui.Col(testList, "Test", 330); Ui.Col(testList, "Result", 440);
             p.Controls.Add(testList); Ui.FitWidth(testList, 790);
