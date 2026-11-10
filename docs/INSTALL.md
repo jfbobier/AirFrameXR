@@ -22,7 +22,7 @@ Requirements: Windows 10/11, an NVIDIA GPU with a current driver (RTX 40 series 
 | `config\session.default.json` | shipped ALVR settings; `config\session.json` (yours), `config\airframexr.json` and `config\games\<exe>.json` are created on first use |
 | `logs\` | created on first use (see below) |
 
-Build it with `python3 harness/run.py build gui package` (on the builder: `out\dist\AirFrameXR` and `out\dist\VisionALVR-0.1-alpha.zip`;
+Build it with `python3 harness/run.py build gui package` (on the builder: `out\dist\AirFrameXR` and `out\dist\AirFrameXR-<version>.zip`;
 the zip holds exactly the files above under one `AirFrameXR\` folder, never logs or user config).
 `python3 harness/run.py test-zip` unzips it into a fresh folder on the builder and runs from there (logs created on first run,
 general log appended by every run, one `logs\debug\<time>\` per debug run, config seeded, benchmark finds its scene).
