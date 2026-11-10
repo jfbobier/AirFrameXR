@@ -808,7 +808,7 @@ namespace AirFrameXR
                         lastSeen = DateTime.UtcNow;
                         var seenName = S(d, "hostname"); var seenIp = S(d, "ip");
                         var paired = pairedName.Length > 0 && (seenName == settings.HeadsetHost || seenIp == pairedIp);
-                        SetLink(Link.Orange, paired ? $"Headset: detected - {pairedName} seen at {seenIp}, waiting for it to connect..." : $"Headset: detected - {seenName} seen at {seenIp}, not paired (click Find headset)");
+                        SetLink(Link.Orange, paired ? $"Headset: detected - {pairedName} seen at {seenIp}, waiting to connect" : $"Headset: detected - {seenName} at {seenIp}, not paired");
                         if (paired && seenIp.Length > 0 && seenIp != settings.HeadsetIp) { settings.HeadsetIp = seenIp; settings.Save(); pairedIp = seenIp; }
                     }
                     break;
@@ -962,7 +962,7 @@ namespace AirFrameXR
             var tileBack = tiles.Select(t => (t, t.Value, t.Note, t.ValueColor)).ToList();
             try
             {
-                headset.Text = "Headset: connected - Apple Vision Pro of a person with a long name (192.168.100.123)";
+                headset.Text = "Headset: connected - Apple Vision Pro of a person with a long name (192.168.100.123)";   // the longest line the headset row can show (the "detected" lines are shorter)
                 game.Text = "Game: Cyberpunk2077.exe (last: Cyberpunk2077.exe, 123.4 min)";
                 heightReport.Text = "headset reports 1.62 m";
                 stats.Text = "Host repeats 12.3 %, skipped 12.3 %.  Next time: x2.";

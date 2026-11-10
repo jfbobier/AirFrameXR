@@ -33,7 +33,7 @@ For the Quest there is a dedicated **AirFrameXR Quest client** ([releases](https
 | Encoding | General-purpose ALVR configuration | NVIDIA-specific NVENC HEVC 10-bit path |
 | Frame generation | Requires a separate approach if desired | Optional, built into the frame pipeline with NVIDIA Optical Flow and edge-aware synthesis |
 | Headset | ALVR client | **Same ALVR client — no custom headset app required** |
-| Compatibility priority | Broad SteamVR ecosystem | Lean OpenXR-first path; **SteamVR/OpenVR-only titles are not supported directly** (try [OpenComposite](#openvr-only-games-opencomposite)) |
+| Compatibility priority | Broad SteamVR ecosystem | Lean OpenXR-first path; **OpenVR-only titles go through the bundled [OpenComposite](#openvr-only-games-opencomposite) translation** (one switch in the launcher), the rest need SteamVR |
 
 ### Why build it this way?
 
@@ -89,16 +89,15 @@ already open source [ALVR](https://github.com/alvr-org/ALVR) as the infrastructu
 > to run every VR game. **For a game that does not work, use SteamVR + ALVR**: SteamVR is excellent at compatibility and at
 > configurability, and this project does not try to compete with that. In testing, the vast majority of **UEVR games**, the
 > **Luke Ross mods** and **native OpenXR / VR games** worked, but some games still have controller problems, crashes or both.
-> Not supported directly: SteamVR/OpenVR-only games. Try [OpenComposite](#openvr-only-games-opencomposite) first, otherwise they need SteamVR.
+> OpenVR-only games: turn on the launcher's **OpenComposite (OpenVR) translation** switch ([below](#openvr-only-games-opencomposite)); a game it cannot run needs SteamVR.
 
 #### OpenVR-only games: OpenComposite
 
-AirFrameXR only speaks OpenXR and has no OpenVR support. For older OpenVR games we recommend
-[OpenComposite](https://github.com/QuestCraftPlusPlus/OpenComposite), which translates OpenVR calls to OpenXR. In our tests it worked
-on about 60 % of the "old" OpenVR games we tried. Use its Runtime Switcher to select **OpenComposite (OpenXR)**; to go back, press
-**Switch to SteamVR** (or start SteamVR from Steam's VR button). Games that still fail need SteamVR + stock ALVR.
+AirFrameXR itself only speaks OpenXR. For older OpenVR games it ships [OpenComposite](https://gitlab.com/znixian/OpenOVR) (GPL-3.0-or-later; also on [GitHub](https://github.com/QuestCraftPlusPlus/OpenComposite)), which translates OpenVR calls to OpenXR, so those games run on AirFrameXR without SteamVR. In our tests it worked
+on about 60 % of the "old" OpenVR games we tried. In the launcher, turn on **OpenComposite (OpenVR) translation**: OpenVR games then load the copy in the `opencomposite\` folder of the package; turn it off and the
+system-wide OpenVR runtime goes back to what it was (SteamVR). It takes effect at the next game start. Games that still fail need SteamVR + stock ALVR.
 
-<p align="center"><img src="docs/images/opencomposite-switcher.jpg" alt="OpenComposite Runtime Switcher showing the status OpenComposite (OpenXR) and a Switch to SteamVR button" width="420"></p>
+OpenComposite is a separate program: its two DLLs ship unmodified with the source they were built from and the licence texts (`opencomposite\SOURCE.txt`, `docs\licenses\`); AirFrameXR does not link to them, it only changes the OpenVR runtime path.
 
 How it is built: the headset's ALVR app sees an ordinary ALVR 20.14.1 server; in between there is no SteamVR compositor, no extra frame copies
 between processes, and an encode path written for NVENC only.
@@ -127,17 +126,17 @@ flowchart LR
 The windows, at 1080p and 125 % scale, rendered by the project's own UI harness with demo data (a made-up game history and headset, no real person's data).
 Regenerate them with `python3 harness/readme_screens.py`.
 
-**One front door.** Double-click `AirFrameXR.exe`: a card per tool, the OpenXR runtime switch (it switches back, too), and reviews of the OpenXR layers and the firewall rules. Right under the Streamer, the **field of view** card, two radio buttons: *Stock vendor view (Apple, Meta)*, the default, or *FOV restriction* with one of your profiles (*AVP optimized* is always there), and the game renders only that part of the picture (fewer pixels, a faster game). It is meant to be set once and forgotten: calibrating lives in *Manage profiles and calibrate...*. A change needs a streamer restart: the card says so in red and closes the streamer for you (it never starts it again, so you can go on ticking and start it when you are done).
+**One front door.** Double-click `AirFrameXR.exe`: a card per tool (the streamer, game statistics, settings, the advanced video and performance settings, diagnostics and headset setup) and, at the bottom, two small switches: **OpenXR runtime** (AirFrameXR, or back to the one you had) and **OpenComposite (OpenVR) translation** (OpenVR games on AirFrameXR, or back to SteamVR). Reviews of the OpenXR layers and the firewall rules appear there when something needs attention. The field of view the games are told (stock vendor view, or a restriction from one of your profiles, with its calibration) is at the top of the advanced settings: set once and forgotten.
 
-<p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, the FOV restriction and calibration card with its profile list, Game statistics, Settings, Advanced video and performance settings, Diagnostics and headset setup, and the status card"></p>
+<p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, Game statistics, Settings, Advanced video and performance settings, Diagnostics and headset setup, and the two switches: OpenXR runtime AirFrameXR and OpenVR through OpenComposite"></p>
 
-**The streamer.** Live numbers as tiles (the game's fps, what is streamed, what the headset shows, bitrate, latency split, loss), display settings, frame generation with its rate, Recenter, and the optional desktop mirror.
+**The streamer.** Three live tiles (the game's fps, what the headset shows, the latency), a line under them with the streamed fps, the bitrate and the packets lost, then **Features**: frame generation (x1.5, x2 or x3, or Auto) and the optional desktop mirror, aligned switches; gamma and sharpening, eye height and Recenter. The menu in the header (the three bars) opens the main menu, the game statistics and the advanced settings.
 
-<p align="center"><img src="docs/images/ui_streamer.png" width="640" alt="The streamer window with live statistics tiles and the frame generation controls"></p>
+<p align="center"><img src="docs/images/ui_streamer.png" width="640" alt="The streamer window: three live tiles and a line of numbers, the Features box with frame generation x1.5 / x2 / x3 and the desktop mirror, picture and position"></p>
 
-**What happened in each game.** One record per game: the last sessions with fps, latency, network and GPU; export a log zip.
+**What happened in each game.** One record per game. The last session is drawn from the game (left) to the headset (right): its fps, the frame generation, encode, network and decode times, what the headset shows, and the latency split into its parts. Trend charts over the last sessions (fps, latency, repeated frames), the last run over time from the general log (fps, generation lag, GPU memory, how early frames arrive), the session history, and a log export.
 
-<p align="center"><img src="docs/images/ui_performance.png" width="720" alt="Logs and performance: the games played, a session's statistics as tiles, the session history"></p>
+<p align="center"><img src="docs/images/ui_performance.png" width="860" alt="Game statistics: a session drawn from the game to the headset as six stages with the latency split, trend charts over the sessions, and the last run over time from the log"></p>
 
 **Diagnose, with suggestions.** The wizard's checks on your settings as they are, and a list of suggestions taken from [docs/PERFORMANCE_KNOBS.md](docs/PERFORMANCE_KNOBS.md): each says what it measured (this run's tests, or your logs and game records) and which knob it is about. Nothing changes unless you press a button.
 
@@ -249,7 +248,7 @@ What changed in each version: [docs/releases/](docs/releases/) (1.0 onward; earl
   discovery/pairing with the stock app.
 - **Known issues**:
   - Frame generation is still experimental.
-  - Some OpenXR games need the SteamVR + ALVR fallback. OpenVR games are not supported natively and none is planned; OpenComposite worked on about 60 % of the old OpenVR games we tried (see above).
+  - Some OpenXR games need the SteamVR + ALVR fallback. OpenVR games are not supported natively: the bundled OpenComposite translation worked on about 60 % of the old OpenVR games we tried (see above); the rest need SteamVR.
   - No USB streaming, except when bridged with ALVR's own tools.
   - HEVC encoding is baked in for maximum split-encoding performance: no H.264 or AV1.
   - On the Vision Pro, in heavy games 5-10 % of frames carry the same tracking timestamp as the previous one and the headset skips them (shown fps a little under the host
@@ -413,16 +412,19 @@ AirFrameXR stands on the shoulders of giants: the projects below made it possibl
 - **[VectorXR](https://github.com/DienerTech/vectorxr)** (MPL-2.0) by DienerTech: the edge-aware synthesis (vector median, source-solved
   flow, per-pixel candidate choice at motion boundaries, doubtful motion shrinking toward the real frame) was studied from its code and
   re-implemented here.
+- **[OpenComposite](https://gitlab.com/znixian/OpenOVR)** (GPL-3.0-or-later) by znixian and its contributors: the OpenVR-to-OpenXR translation that lets
+  old OpenVR games run on AirFrameXR without SteamVR. Its project's own prebuilt DLLs ship unmodified in `opencomposite\` with their source and
+  licences; they are separate programs (not linked into AirFrameXR), loaded by the games when the launcher's OpenVR switch is on.
 - NVIDIA Video Codec SDK and Optical Flow SDK headers (MIT). cgltf (MIT), stb_image (public domain / MIT), Draco (Apache-2.0, offline converter only).
 - Benchmark scene: "Littlest Tokyo" by Glen Fox ([glenatron](https://sketchfab.com/glenatron)), CC-BY-4.0, converted and placed
   in a textured room. Its music: "Sakura Breeze" by [Roa Music](https://soundcloud.com/roa_music1031), royalty-free music from
   [free-stock-music.com](https://www.free-stock-music.com), CC BY 3.0 ([licence](https://creativecommons.org/licenses/by/3.0/deed.en_US)), shortened and re-encoded.
 
 Details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). AirFrameXR is not affiliated with or endorsed by the ALVR project,
-Apple, NVIDIA, Virtual Desktop, OFXR-Bridge or VectorXR. Apple Vision Pro and visionOS are trademarks of Apple Inc.
+Apple, NVIDIA, Virtual Desktop, OFXR-Bridge, VectorXR or OpenComposite. Apple Vision Pro and visionOS are trademarks of Apple Inc.
 
 ## License
-MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)); OpenComposite, shipped as separate files, is GPL-3.0-or-later (`docs\licenses\OpenComposite-LICENSE.txt`).
 
 ## Documentation
 

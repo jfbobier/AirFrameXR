@@ -158,7 +158,7 @@ namespace AirFrameXR
             // One switch; informational, never "Needs attention". Not shown where the folder has no OpenComposite (a developer folder).
             if (demoReady || OpenComposite.Installed || OpenComposite.Active)
             {
-                bool oc = !demoReady && OpenComposite.Active;
+                bool oc = demoReady || OpenComposite.Active;   // the demo (tests, README screenshot) shows it on
                 lines.Add(ToggleRow("\u2713", oc ? Color.SeaGreen : Color.White, oc ? "OpenVR: OpenComposite OpenXR translation" : "OpenVR: SteamVR", oc, true, on => OcSwitch(on),
                     "On: OpenVR games load OpenComposite, which translates them to OpenXR so they run on AirFrameXR without SteamVR. Off: they use SteamVR again. Takes effect at the next game start."));
             }
