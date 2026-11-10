@@ -141,6 +141,7 @@ struct DesktopMirror::Impl {
             { L"Thumbstick up / down", L"scroll" },
             { L"Grip (either)", L"put the screen in front of you again" },
             { L"Other trigger", L"gives it the beam (left-handed: press it)" },
+            { L"Xbox pad", L"sticks move the cursor, A click, B double click" },
             { L"Mouse", L"move it to use it; a button or a sweep of the beam takes back" },
         };
         const int dims[2][2] = { { kBadgePxW, kBadgePxH }, { kPanelPxW, kPanelPxH } };
