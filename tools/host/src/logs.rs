@@ -370,6 +370,37 @@ pub mod client_stats {
     /// 1.5 periods = that many periods without a new frame); cumulative, for the automatic level's verdict on "generation off"
     static CLIENT_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     static CLIENT_MISSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    /// The gaps between two displayed frames, in display periods, binned (1.3.10, read-only): below 0.75, about 1, 1.25 to 1.75 (not a whole
+    /// number of periods: a late frame, not a skipped refresh), about 2, 2.25 to 3.25, above 3.25. One line per minute in the general log, so
+    /// "headset repeated" can be checked against what the gaps really are. See `gap_bin`.
+    static GAP_BINS: [std::sync::atomic::AtomicU64; 6] = [
+        std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0),
+    ];
+    static GAP_LOGGED: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+    /// Bin of a gap `ratio` display periods long (see GAP_BINS). The edges sit halfway between whole periods, so a gap of 2 periods with a
+    /// millisecond of jitter is still "about 2", and 1.5 periods (a late frame, no skipped refresh) has a bin of its own.
+    pub(super) fn gap_bin(ratio: f64) -> usize {
+        if ratio < 0.75 { 0 } else if ratio < 1.25 { 1 } else if ratio < 1.75 { 2 } else if ratio < 2.25 { 3 } else if ratio < 3.25 { 4 } else { 5 }
+    }
+
+    /// Once a minute while frames arrive: the bins since the last line, with the repeat share they imply (whole periods skipped, counted from the
+    /// "about 2" and later bins) and the share of irregular gaps (1.25 to 1.75 periods).
+    fn log_gap_bins() {
+        let mut last = GAP_LOGGED.lock().unwrap();
+        let now = std::time::Instant::now();
+        let due = match *last { Some(t) => now.duration_since(t).as_secs() >= 60, None => { *last = Some(now); false } };
+        if !due { return; }
+        *last = Some(now);
+        let b: Vec<u64> = GAP_BINS.iter().map(|a| a.swap(0, std::sync::atomic::Ordering::Relaxed)).collect();
+        let n: u64 = b.iter().sum();
+        if n == 0 { return; }
+        let skipped = b[3] + 2 * b[4] + 3 * b[5];   // periods without a new frame, from the whole-period bins (the >3.25 bin counted as 3 at least)
+        super::general("INFO", &format!(
+            "client frame gaps (display periods) over the last minute, {n} frames: <0.75 {}, ~1 {}, 1.25-1.75 {} ({:.1} %, late but not skipped), ~2 {}, 2.25-3.25 {}, >3.25 {}; periods skipped {:.1} % of periods shown",
+            b[0], b[1], b[2], 100.0 * b[2] as f64 / n as f64, b[3], b[4], b[5], 100.0 * skipped as f64 / (n + skipped) as f64));
+    }
 
     /// (frames the headset displayed, display periods it repeated) so far
     pub fn client_frames_missed() -> (u64, u64) {
@@ -433,6 +464,8 @@ pub mod client_stats {
             let gap_s = 1.0 / g.client_fps;
             let period_s = crate::phase::period_ns() as f64 / 1e9;
             CLIENT_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            GAP_BINS[gap_bin(gap_s / period_s)].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            log_gap_bins();
             if gap_s > 1.5 * period_s {
                 CLIENT_MISSED.fetch_add(((gap_s / period_s).round() as u64).saturating_sub(1), std::sync::atomic::Ordering::Relaxed);
             }
@@ -492,6 +525,20 @@ pub mod client_stats {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn gap_bins_sit_between_whole_periods() {
+            // 100 Hz: a 20 ms gap with a millisecond of jitter is still "about 2" periods, a 15 ms one is a late frame, not a skipped refresh
+            let p = 10.0;
+            assert_eq!(gap_bin(9.9 / p), 1);
+            assert_eq!(gap_bin(20.9 / p), 3);
+            assert_eq!(gap_bin(19.0 / p), 3);
+            assert_eq!(gap_bin(15.0 / p), 2);
+            assert_eq!(gap_bin(17.4 / p), 2);
+            assert_eq!(gap_bin(30.0 / p), 4);
+            assert_eq!(gap_bin(80.0 / p), 5);
+            assert_eq!(gap_bin(3.0 / p), 0);
+        }
 
         fn clean(total_ms: f64) -> Sample {
             Sample { total: total_ms / 1000.0, game: 0.011, compositor: 0.002, encoder: 0.006, network: 0.009, decoder: 0.014, decoder_queue: 0.003, client_compositor: 0.002,
