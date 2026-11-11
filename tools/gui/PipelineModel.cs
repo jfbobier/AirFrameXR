@@ -409,9 +409,34 @@ namespace AirFrameXR
                         if (best == null || px < bestPx) { best = new[] { cs, sh, er }; bestPx = px; }
                     }
                     best = best ?? new[] { AlvrCenter[axis], 0.0, 1.0 };
-                    o[axis] = best[0]; o[2 + axis] = best[1]; o[4 + axis] = best[2];
+                    o[axis] = best[0]; o[2 + axis] = SafeShift(size, best[0], best[1], best[2]); o[4 + axis] = best[2];
                 }
                 return o;
+            }
+
+            /// ALVR's compress shader (CompressAxisAlignedPixelShader.hlsl) divides by (1 - hiBound) and by loBound, with hiBound = c0 (shift - 1) / c2 + 1 and loBound = c0 (shift + 1) / c2
+            /// over the numbers FFR.cpp aligns (float32). A centre that touches a frame edge asks for a shift of +-1, and the alignment rounds it to exactly +-1 (or within a float's last
+            /// digit of it): hiBound is then exactly 1 (loBound 0), the division gives infinity, every uv is NaN and the headset shows black or garbage (2026-11-10: restriction
+            /// 0.8 / 0.7 / 0.65 / 0.8 on a 1.22 / 0.70 / 0.96 / 0.81 box; harness/milder_check.py). The shift is taken towards 0 in 0.001 steps (the three numbers are written with 3 decimals)
+            /// until the aligned one is clear of +-1: the band loses a sliver of full density at the frame edge (a few tenths of a percent of the eye), never the picture.
+            public static double SafeShift(double size, double centre, double shift, double edgeRatio)
+            {
+                double cs = Math.Round(centre, 3), er = Math.Round(edgeRatio, 3), sh = Math.Round(shift, 3);
+                if (cs >= 0.999 || er <= 1.0 || size < 2) return sh;   // no compressed edge: nothing to divide
+                for (int i = 0; i < 2000; i++)
+                {
+                    float tw = (float)size, c = (float)cs, s = (float)sh, r = (float)er;
+                    float e = (float)(tw - (float)(c * tw));
+                    float ca = (float)(1.0 - Math.Ceiling((double)e / ((double)r * 2.0)) * ((double)r * 2.0) / (double)tw);
+                    float ea = (float)(tw - (float)(ca * tw));
+                    if (!(ea > 0)) return sh;
+                    float sa = (float)(Math.Ceiling((double)(float)(s * ea) / ((double)r * 2.0)) * ((double)r * 2.0) / (double)ea);
+                    float c0 = (1f - ca) / 2f, c2 = (r - 1f) * ca + 1f;
+                    float lo = c0 * (sa + 1f) / c2, hi = c0 * (sa - 1f) / c2 + 1f;
+                    if (Math.Abs(1f - hi) >= 1e-4f && Math.Abs(lo) >= 1e-4f) return sh;
+                    sh = Math.Round(sh - Math.Sign(sh) * 0.001, 3);
+                }
+                return sh;
             }
 
             /// section 5 density rule: eye = min(target density x the view's span per axis, NVENC's cap, what the encode test fits), 32-aligned (floor)

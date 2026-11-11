@@ -1,5 +1,5 @@
 {
-  "description": "SESSION COMPILED LIKE THE STREAMER: e2e_baseline, but the session the host runs is what SessionCompiler (the launcher's own start-up compile, run on the builder) makes from the fixture as the golden master for a Vision Pro (bitrate-sized stream, foveation from the picture edges and Apple's map, pairing). Same checks as the baseline: the compiled session must stream, decode and pace like it. 3 runs of this must not differ from e2e_baseline beyond noise before the compile is trusted for more scenarios. negotiated.view_resolution is what the compile makes of 250 Mbps at 90 Hz for the Apple profile (2400 x 1856 per eye, 2026-11-09), not the golden 3552 x 3200. FIXED in 1.3.8 (2026-11-09): this scenario found that the host dropped a NEGATIVE foveation centre shift (tools/host/src/main.rs set the geometry keys only when > 0, so shift -0.036 / -0.374 stayed at the defaults 0.4 / 0.1 while the client was sent the real one); the decoded stamp edges matched the oracle (lib.py fov_vars / fov_forward) run with 0.4 / 0.1. Now fov_geometry() takes any finite shift and the stamp readback passes. The pacing check is left out here until 3 runs are compared with e2e_baseline",
+  "description": "SESSION COMPILED LIKE THE STREAMER: e2e_baseline, but the session the host runs is what SessionCompiler (the launcher's own start-up compile, run on the builder) makes from the fixture as the golden master for a Vision Pro (bitrate-sized stream, foveation from the picture edges and Apple's map, pairing). Same checks as the baseline: the compiled session must stream, decode and pace like it. 3 runs of this must not differ from e2e_baseline beyond noise before the compile is trusted for more scenarios. negotiated.view_resolution is what the compile makes of 250 Mbps at 90 Hz for the Apple profile (2336 x 1856 per eye, 2026-11-10; it was 2400 x 1856 until the harness wrote the headset's box with the right eye mirrored), not the golden 3552 x 3200. FIXED in 1.3.8 (2026-11-09): this scenario found that the host dropped a NEGATIVE foveation centre shift (tools/host/src/main.rs set the geometry keys only when > 0, so shift -0.036 / -0.374 stayed at the defaults 0.4 / 0.1 while the client was sent the real one); the decoded stamp edges matched the oracle (lib.py fov_vars / fov_forward) run with 0.4 / 0.1. Now fov_geometry() takes any finite shift and the stamp readback passes. The pacing check is left out here until 3 runs are compared with e2e_baseline",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -58,7 +58,7 @@
     "max_pipeline_latency_ms": 150,
     "negotiated": {
       "view_resolution": [
-        2400,
+        2336,
         1856
       ],
       "use_full_range": true,

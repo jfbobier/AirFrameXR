@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "1.3.8";
+pub const VERSION: &str = "1.3.9";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
 /// `config/` (session.json, airframexr.json) and `logs/` inside it.
@@ -480,6 +480,111 @@ impl RateEstimator {
             self.cand_count = 1;
         }
         if self.cand_count >= 3 { Some(self.cand) } else { None }
+    }
+}
+
+/// One axis of ALVR's foveation as FFR.cpp aligns it (float32) and as its compress shader (CompressAxisAlignedPixelShader.hlsl) then uses it:
+/// `lo = c0 (shift + 1) / c2`, `hi = c0 (shift - 1) / c2 + 1`, divisions by `lo` and by `1 - hi`. A shift that the alignment rounds to exactly +-1 (or within a float's
+/// last digit of it) makes one of them 0: every uv is NaN and the headset shows black or garbage (a tester's report, 2026-11-10; the launcher's session compile avoids it
+/// since 1.3.9, this is the same test for a session that did not come from it). True when both are clear of 0 by at least 1e-4. Mirrors `PipelineModel.RateMapFoveation.SafeShift`.
+pub fn foveation_shift_is_clear(size: f32, center: f32, shift: f32, ratio: f32) -> bool {
+    if center >= 0.999 || ratio <= 1.0 || !(size >= 2.0) || !shift.is_finite() { return true; }   // no compressed edge: nothing to divide
+    let e = size - center * size;
+    let ca = (1.0f64 - (e as f64 / (ratio as f64 * 2.0)).ceil() * (ratio as f64 * 2.0) / size as f64) as f32;
+    let ea = size - ca * size;
+    if !(ea > 0.0) { return true; }
+    let sa = (((shift * ea) as f64 / (ratio as f64 * 2.0)).ceil() * (ratio as f64 * 2.0) / ea as f64) as f32;
+    let c0 = (1.0 - ca) / 2.0;
+    let c2 = (ratio - 1.0) * ca + 1.0;
+    let lo = c0 * (sa + 1.0) / c2;
+    let hi = c0 * (sa - 1.0) / c2 + 1.0;
+    (1.0 - hi).abs() >= 1e-4 && lo.abs() >= 1e-4
+}
+
+/// The shift taken towards 0 in 0.001 steps until `foveation_shift_is_clear` (the numbers reach the session with 3 decimals).
+pub fn foveation_safe_shift(size: f32, center: f32, shift: f32, ratio: f32) -> f32 {
+    let r3 = |v: f32| (v * 1000.0).round() / 1000.0;
+    let (center, ratio) = (r3(center), r3(ratio));
+    let mut s = r3(shift);
+    for _ in 0..2000 {
+        if foveation_shift_is_clear(size, center, s, ratio) { break; }
+        s = r3(s - s.signum() * 0.001);
+    }
+    s
+}
+
+/// Before ALVR reads the session: a centre shift whose aligned value would divide by zero in the compress shader is taken off +-1 (see `foveation_shift_is_clear`), in
+/// the session settings and in `openvr_config` alike (the encoder and the headset must be given the same numbers). Returns one log line per change, empty when the
+/// session is fine, absent, or has no foveation. A file it cannot read or write is left alone.
+pub fn guard_foveation_session(session: &Path) -> Vec<String> {
+    let mut lines = Vec::new();
+    let Ok(text) = std::fs::read_to_string(session) else { return lines };
+    let Ok(mut s) = serde_json::from_str::<Value>(&text) else { return lines };
+    if s["openvr_config"]["enable_foveated_encoding"].as_bool() != Some(true) { return lines; }
+    let (ew, eh) = (s["openvr_config"]["eye_resolution_width"].as_f64().unwrap_or(0.0) as f32, s["openvr_config"]["eye_resolution_height"].as_f64().unwrap_or(0.0) as f32);
+    let mut changed = false;
+    for (axis, size) in [("x", ew), ("y", eh)] {
+        let (ck, sk, rk) = (format!("foveation_center_size_{axis}"), format!("foveation_center_shift_{axis}"), format!("foveation_edge_ratio_{axis}"));
+        let (cs, sh, er) = (s["openvr_config"][&ck].as_f64(), s["openvr_config"][&sk].as_f64(), s["openvr_config"][&rk].as_f64());
+        let (Some(cs), Some(sh), Some(er)) = (cs, sh, er) else { continue };
+        let (cs, sh, er) = (cs as f32, sh as f32, er as f32);
+        if foveation_shift_is_clear(size, cs, sh, er) { continue; }
+        let fixed = foveation_safe_shift(size, cs, sh, er);
+        lines.push(format!("foveation: the centre shift {axis} {sh:.3} would divide by zero in ALVR's compress shader (black or garbage on the headset); using {fixed:.3}"));
+        s["openvr_config"][&sk] = json!(fixed as f64);
+        let v = &mut s["session_settings"]["video"]["foveated_encoding"]["content"][format!("center_shift_{axis}")];
+        if v.is_number() { *v = json!(fixed as f64); }
+        changed = true;
+    }
+    if changed {
+        let tmp = session.with_extension("json.guard");
+        if std::fs::write(&tmp, serde_json::to_string_pretty(&s).unwrap_or_default()).is_ok() && std::fs::rename(&tmp, session).is_err() { let _ = std::fs::remove_file(&tmp); }
+    }
+    lines
+}
+
+#[cfg(test)]
+mod foveation_guard_tests {
+    use super::*;
+
+    #[test]
+    fn a_shift_that_aligns_to_exactly_one_is_taken_off_it() {
+        // the tester's stream 2848 x 2624, centre 0.812 x 0.854, edge ratio 3.2 / 4, shift 1.0 on both axes: both aligned to +-1 (hiBound exactly 1)
+        assert!(!foveation_shift_is_clear(2848.0, 0.812, 1.0, 3.2));
+        assert!(!foveation_shift_is_clear(2624.0, 0.854, 1.0, 4.0));
+        assert!(!foveation_shift_is_clear(2624.0, 0.854, -1.0, 4.0));
+        let (x, y) = (foveation_safe_shift(2848.0, 0.812, 1.0, 3.2), foveation_safe_shift(2624.0, 0.854, 1.0, 4.0));
+        assert!(x < 1.0 && x > 0.95 && y < 1.0 && y > 0.95, "{x} {y}");
+        assert!(foveation_shift_is_clear(2848.0, 0.812, x, 3.2) && foveation_shift_is_clear(2624.0, 0.854, y, 4.0));
+    }
+
+    #[test]
+    fn the_shipped_shapes_are_left_alone() {
+        // the Vision Pro performance restriction's compile (x pinned at 1.0 aligns to 1.0244, y 0.267) and the stock foveation
+        assert!(foveation_shift_is_clear(2784.0, 0.906, 1.0, 3.2));
+        assert!(foveation_shift_is_clear(2560.0, 0.807, 0.267, 4.0));
+        assert!(foveation_shift_is_clear(4064.0, 0.495, 0.539, 2.826));
+        assert!(foveation_shift_is_clear(2624.0, 1.0, 0.0, 1.0), "no compressed edge: nothing to divide");
+        assert_eq!(foveation_safe_shift(2560.0, 0.807, 0.267, 4.0), 0.267);
+    }
+
+    #[test]
+    fn the_session_is_corrected_in_both_places() {
+        let dir = std::env::temp_dir().join(format!("fovguard_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("session.json");
+        let s = json!({"openvr_config": {"enable_foveated_encoding": true, "eye_resolution_width": 2848, "eye_resolution_height": 2624,
+            "foveation_center_size_x": 0.812, "foveation_center_size_y": 0.854, "foveation_center_shift_x": 1.0, "foveation_center_shift_y": 1.0,
+            "foveation_edge_ratio_x": 3.2, "foveation_edge_ratio_y": 4.0},
+            "session_settings": {"video": {"foveated_encoding": {"content": {"center_shift_x": 1.0, "center_shift_y": 1.0}}}}});
+        std::fs::write(&p, s.to_string()).unwrap();
+        let lines = guard_foveation_session(&p);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        let r: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        let (a, b) = (r["openvr_config"]["foveation_center_shift_y"].as_f64().unwrap(), r["session_settings"]["video"]["foveated_encoding"]["content"]["center_shift_y"].as_f64().unwrap());
+        assert!(a < 1.0 && a == b, "{a} {b}");
+        assert!(guard_foveation_session(&p).is_empty(), "a second pass changes nothing");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

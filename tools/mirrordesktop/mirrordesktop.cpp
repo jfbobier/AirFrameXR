@@ -1,7 +1,7 @@
 // mirrordesktop.exe: the Windows desktop in the headset, as an ordinary OpenXR application. The streamer knows nothing about it: it is an app like any game
 // (it connects through the runtime and the shim, renders a projection layer with the views the runtime gives it, reads the controllers through OpenXR
 // actions), except that the host does not record it as a game. Its own jobs: a monitor-sized screen that floats in front of the user, a laser beam from the controller, and the mouse (SendInput): the beam moves the cursor,
-// trigger = left button, A / X / B / Y = double click, thumbstick = scroll, grip (either) = the screen back in front of you (the beam is the right controller's until a
+// trigger = left button, A / X / B / Y = double click, thumbstick = scroll, an Xbox pad (XInput: sticks = cursor, A = click, B = double click), grip (either) = the screen back in front of you (the beam is the right controller's until a
 // press of the left trigger hands it over, and back). The screen has one place, in front of the user at the start; a "? controls" badge under it opens the commands
 // when the beam is on it. A physical mouse takes the cursor when it moves; a button press or a sweep of the beam gives it back.
 // Everything that is not the screen is the idle colour (107C10 by default), which the headset shows as passthrough.
@@ -17,6 +17,7 @@
 #include <windows.h>
 #include <sddl.h>
 #include <tlhelp32.h>
+#include <xinput.h>
 #include <atomic>
 #include <thread>
 #include <d3d11.h>
@@ -70,6 +71,28 @@ static POINT mouseTo(float u, float v) {
     return POINT{ (LONG)(px + 0.5), (LONG)(py + 0.5) };   // where the cursor should now be, to notice a physical mouse moving it elsewhere
 }
 static void wheel(int ticks) { INPUT i{}; i.type = INPUT_MOUSE; i.mi.dwFlags = MOUSEEVENTF_WHEEL; i.mi.mouseData = (DWORD)(ticks * WHEEL_DELTA); SendInput(1, &i, sizeof i); }
+
+// An Xbox controller (XInput, loaded at run time, optional): the sticks move the cursor, A = click, B = double click. It acts like a physical mouse: the cursor moves
+// where it is, so the beam yields to it (below) until a press or a sweep of the beam takes it back. The cursor is set absolutely from the real position (no Windows
+// pointer acceleration), and the pad needs no focus.
+struct Pad {
+    typedef DWORD(WINAPI* GetState)(DWORD, XINPUT_STATE*);
+    GetState get = nullptr; int idx = -1; ULONGLONG scanned = 0; WORD was = 0; float x = 0, y = 0; POINT last{ -1, -1 };
+    Pad() { if (HMODULE m = LoadLibraryW(L"xinput1_4.dll")) get = (GetState)GetProcAddress(m, "XInputGetState"); }
+    bool read(XINPUT_STATE& s) {   // the first connected pad; a missing one is looked for once a second only
+        if (!get) return false;
+        if (idx >= 0 && get((DWORD)idx, &s) == ERROR_SUCCESS) return true;
+        idx = -1; const ULONGLONG now = GetTickCount64(); if (now - scanned < 1000) return false; scanned = now;
+        for (int i = 0; i < 4; i++) if (get((DWORD)i, &s) == ERROR_SUCCESS) { idx = i; return true; }
+        return false;
+    }
+};
+// one stick with a radial dead zone (0.25) rescaled to 0..1, as a vector
+static void padStick(SHORT sx, SHORT sy, float& ox, float& oy) {
+    float fx = sx / 32767.f, fy = sy / 32767.f; const float m = std::hypot(fx, fy);
+    if (m < 0.25f) { ox = oy = 0; return; }
+    const float k = std::min(1.f, (m - 0.25f) / 0.75f) / m; ox = fx * k; oy = fy * k;
+}
 
 // The streamer's idle colour (what the headset takes as alpha) from config\airframexr.json: video.idle_rgb, "RRGGBB" (or "#RRGGBB"); 107C10 when absent.
 static uint32_t idleColour(const std::string& path) {
@@ -244,6 +267,7 @@ int main(int argc, char** argv) {
     double perfT0 = qpcMs(), frameStart = 0, frameMaxMs = 0, renderSumMs = 0; int perfFrames = 0;
     bool seenHand = false, seenHit = false; bool left = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, stickMax = 0; bool primSeen = false; float su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
     bool yielded = false, haveSent = false; POINT sent{}; float yU = 0, yV = 0;   // yielded: the physical mouse moved the cursor, so the beam stops moving it until a press or a deliberate sweep
+    Pad pad;
     int activeHand = 1; bool swallow = false;   // the hand that holds the beam (the right one until the left trigger is pressed); swallow: its take-over press does not click
     ULONGLONG t0 = GetTickCount64(); bool running = false, exiting = false, endKey = false; uint64_t frames = 0;
     int rc = 0; bool leaving = false; ULONGLONG leaveT0 = 0;
@@ -373,6 +397,25 @@ int main(int argc, char** argv) {
                             if (mouse) { INPUT in[4]{}; const DWORD fl[4] = { MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP }; for (int i = 0; i < 4; i++) { in[i].type = INPUT_MOUSE; in[i].mi.dwFlags = fl[i]; } SendInput(4, in, sizeof(INPUT)); }
                         }
                         primWas[h] = prim[h];
+                    }
+                    // the Xbox pad: the stronger stick moves the cursor (up to ~1600 px/s on a 1920 px screen, eased), A clicks, B double clicks, wherever the cursor is
+                    XINPUT_STATE ps{};
+                    if (mouse && pad.read(ps)) {
+                        float ax, ay, bx, by; padStick(ps.Gamepad.sThumbLX, ps.Gamepad.sThumbLY, ax, ay); padStick(ps.Gamepad.sThumbRX, ps.Gamepad.sThumbRY, bx, by);
+                        if (std::hypot(bx, by) > std::hypot(ax, ay)) { ax = bx; ay = by; }
+                        const float mag = std::hypot(ax, ay);
+                        if (mag > 0.f) {
+                            POINT cp; if (GetCursorPos(&cp)) {
+                                if (pad.last.x < 0 || std::abs(cp.x - pad.last.x) > 1 || std::abs(cp.y - pad.last.y) > 1) { pad.x = (float)cp.x; pad.y = (float)cp.y; }   // something else moved it: start from there
+                                const float k = 1600.f * (float)(g_mon.right - g_mon.left) / 1920.f * mag * dt;   // px per frame: quadratic in the deflection (fine near the centre, fast at the edge)
+                                pad.x = std::max((float)g_mon.left, std::min((float)g_mon.right - 1, pad.x + ax * k)); pad.y = std::max((float)g_mon.top, std::min((float)g_mon.bottom - 1, pad.y - ay * k));
+                                const float u = (pad.x - g_mon.left) / (float)std::max<LONG>(1, g_mon.right - g_mon.left - 1), v = (pad.y - g_mon.top) / (float)std::max<LONG>(1, g_mon.bottom - g_mon.top - 1);
+                                pad.last = mouseTo(u, v);
+                            }
+                        }
+                        const WORD b = ps.Gamepad.wButtons, edge = (WORD)(b & ~pad.was); pad.was = b;
+                        if (edge & XINPUT_GAMEPAD_A) { event("pad_click", "A"); INPUT in[2]{}; in[0].type = in[1].type = INPUT_MOUSE; in[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN; in[1].mi.dwFlags = MOUSEEVENTF_LEFTUP; SendInput(2, in, sizeof(INPUT)); }
+                        if (edge & XINPUT_GAMEPAD_B) { event("pad_double_click", "B"); INPUT in[4]{}; const DWORD fl[4] = { MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP }; for (int i = 0; i < 4; i++) { in[i].type = INPUT_MOUSE; in[i].mi.dwFlags = fl[i]; } SendInput(4, in, sizeof(INPUT)); }
                     }
                     // the thumbstick scrolls (a tick every 120 ms at full deflection, over the screen only)
                     if (hit && std::fabs(stickY) > 0.5f && GetTickCount64() - lastWheel > (ULONGLONG)(220 - 100 * std::fabs(stickY))) { event("wheel", stickY > 0 ? "up" : "down"); if (mouse) wheel(stickY > 0 ? 1 : -1); lastWheel = GetTickCount64(); }

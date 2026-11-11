@@ -611,6 +611,9 @@ namespace AirFrameXR
                 lines.Add("vertical_ratio_yellow=" + Show(new[] { 0.9, 0.8, 1.4, 0.5 }, FovUnit.Tangent, null));
                 lines.Add("tiny_yellow=" + Show(new[] { 0.2, 0.2, 0.2, 0.2 }, FovUnit.Tangent, null));
                 lines.Add("small_share_yellow=" + Show(new[] { 0.7, 0.5, 0.5, 0.7 }, FovUnit.Tangent, quest));
+                var avpBox = new[] { 1.221, 0.704, 0.959, 0.805 };   // a Vision Pro's declared box (a tester's, 2026-11-10)
+                lines.Add("thin_edges_yellow=" + Show(new[] { 0.8, 0.7, 0.65, 0.8 }, FovUnit.Tangent, avpBox) + " " + (FovValidator.Check(new[] { 0.8, 0.7, 0.65, 0.8 }, FovUnit.Tangent, avpBox).Messages.Any(m => m.Contains("Outer 0.8 is only 66 %") && m.Contains("black")) ? "explained" : "silent"));
+                lines.Add("shipped_in_box_valid=" + Show(new[] { 0.97, 0.71, 0.69, 0.63 }, FovUnit.Tangent, new[] { 1.221, 0.714, 0.959, 0.805 }));   // the shipped restriction in a box that holds it: no warning
                 var fcheck = FovValidator.Check(new[] { 0.97, 0.71, 0.69, 0.63 }, FovUnit.Tangent, null);
                 lines.Add(string.Format(CultureInfo.InvariantCulture, "avp_total={0:0.0}x{1:0.0}", fcheck.TotalH, fcheck.TotalV));
                 var tmp = Path.Combine(outDir, "user_fov_profiles_test.json");

@@ -22,7 +22,43 @@ def cases(rm):
         out.append({"name": f"panel_{eye[0]}x{eye[1]}", "view": P, "eye": list(eye), "window": None})
         out.append({"name": f"author_{eye[0]}x{eye[1]}", "view": P, "eye": list(eye), "window": author})
         out.append({"name": f"tight_{eye[0]}x{eye[1]}", "view": P, "eye": list(eye), "window": tight})
+    # the case of the 2026-11-10 report: a Vision Pro box of 1.221 / 0.704 / 0.959 / 0.805 and the restriction 0.8 / 0.7 / 0.65 / 0.8 (inner and lower equal the box's)
+    tester_box = [1.221, 0.704, 0.959, 0.805]
+    for eye in ((2848, 2624), (2016, 1856), (4096, 3680)):
+        out.append({"name": f"tester_{eye[0]}x{eye[1]}", "view": tester_box, "eye": list(eye), "window": [0.8, 0.7, 0.65, 0.8]})
+    # a sweep with windows on and near the box edges: the shift ALVR ends up with (after its own alignment) must never make its compress shader divide by zero
+    n = 0
+    for box in (tester_box, P):
+        for fo in (0.7, 0.85, 1.0):
+            for fi in (0.8, 1.0):
+                for fu in (0.7, 1.0):
+                    for fl in (0.8, 1.0):
+                        w = [round(box[0] * fo, 3), round(box[1] * fi, 3), round(box[2] * fu, 3), round(box[3] * fl, 3)]
+                        for eye in ((2848, 2624), (3104, 2592), (4096, 3680)):
+                            out.append({"name": f"sweep{n}", "view": box, "eye": list(eye), "window": w}); n += 1
     return out
+
+
+def shader_degenerate(size, cs, sh, er):
+    """ALVR's compress shader (CompressAxisAlignedPixelShader.hlsl) with the numbers as they reach it: written to session.json with 3 decimals, aligned by FFR.cpp
+    (float32). It divides by (1 - hiBound) and by loBound, so a shift whose aligned value makes hiBound exactly 1 (or loBound 0) turns every sampled uv into NaN:
+    the picture the headset gets is black or garbage. Returns a text when that is the case (or within 1e-4 of it), else None."""
+    import math
+    import numpy as np
+    f = np.float32
+    cs, sh, er = round(cs, 3), round(sh, 3), round(er, 3)
+    if cs >= 0.999 or er <= 1.0:   # no compressed edge: the shader has nothing to divide
+        return None
+    tw, c, s, r = f(size), f(cs), f(sh), f(er)
+    e = f(tw - f(c * tw))
+    ca = f(1.0 - math.ceil(float(e) / (float(r) * 2.0)) * (float(r) * 2.0) / float(tw))
+    ea = f(tw - f(ca * tw))
+    sa = f(math.ceil(float(f(s * ea)) / (float(r) * 2.0)) * (float(r) * 2.0) / float(ea))
+    c0 = f((f(1) - ca) / f(2)); c2 = f(f(f(r - f(1)) * ca) + f(1))
+    lo = f(f(c0 * f(sa + f(1))) / c2); hi = f(f(f(c0 * f(sa - f(1))) / c2) + f(1))
+    if abs(float(f(f(1) - hi))) < 1e-4 or abs(float(lo)) < 1e-4:
+        return f"aligned shift {float(sa):.7f} (asked {sh}): loBound {float(lo):.6f}, 1 - hiBound {float(f(f(1) - hi)):.2e}"
+    return None
 
 
 def main(argv):
@@ -48,11 +84,15 @@ def main(argv):
         g = got.get(c["name"])
         if g is None:
             fails.append((c["name"], "no line from uitest")); continue
-        print(f"  {c['name']:22s} centre {g[0]:.3f} x {g[1]:.3f}  shift {g[2]:+.3f} / {g[3]:+.3f}  edge {g[4]:.3f} / {g[5]:.3f}")
+        if not c["name"].startswith("sweep"): print(f"  {c['name']:22s} centre {g[0]:.3f} x {g[1]:.3f}  shift {g[2]:+.3f} / {g[3]:+.3f}  edge {g[4]:.3f} / {g[5]:.3f}")
         if g[0] < STD_CS[0] or g[1] < STD_CS[1]:
             fails.append((c["name"], f"centre {g[0]:.3f} x {g[1]:.3f} is not larger than ALVR's default 0.45 x 0.40 by 5 %"))
         if g[4] > STD_ER[0] or g[5] > STD_ER[1]:
             fails.append((c["name"], f"edge ratio {g[4]:.3f} / {g[5]:.3f} is not 10 % below ALVR's default 4 / 5"))
+        for axis, name in ((0, "x"), (1, "y")):
+            bad = shader_degenerate(c["eye"][axis], g[axis], g[2 + axis], g[4 + axis])
+            if bad:
+                fails.append((c["name"], f"{name}: ALVR's compress shader divides by zero ({bad})"))
         if c["window"]:
             P = c["view"]; w = c["window"]
             for axis, (lo, hi, plo, phi) in enumerate(((w[0], w[1], P[0], P[1]), (w[3], w[2], P[3], P[2]))):

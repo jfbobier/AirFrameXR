@@ -281,7 +281,7 @@ namespace AirFrameXR
         static readonly string[] Names = { "Outer", "Inner", "Upper", "Lower" };
         // Thresholds for "valid but strange". They are judgement, not measurement: the values we have are the Vision Pro fit (outer / inner 1.24, upper / lower 1.13) and the
         // Quest 3's declared box (outer / inner 1.35, upper / lower 0.80). Tune them when more calibrations are in.
-        const double MaxSideRatio = 1.8, MaxVertRatio = 2.0, MinTotalDeg = 40, MaxTotalDeg = 130, MinAreaShare = 0.5, LooksLikeDegrees = 3.0, OverDeclaredTolerance = 1.005;
+        const double MaxSideRatio = 1.8, MaxVertRatio = 2.0, MinTotalDeg = 40, MaxTotalDeg = 130, MinAreaShare = 0.5, MinEdgeShare = 0.70, LooksLikeDegrees = 3.0, OverDeclaredTolerance = 1.005;
 
         /// text -> number (the invariant point or the local comma); NaN when it is not one
         public static double Parse(string s)
@@ -325,6 +325,16 @@ namespace AirFrameXR
                 c.AreaShare = (E(0) + E(1)) * (E(2) + E(3)) / ((declared[0] + declared[1]) * (declared[2] + declared[3]));
             }
 
+            if (declared != null && declared.Length == 4)
+            {
+                // an edge far inside the headset's own: the game is told that much and no more, so the rest of that side of the view stays black (2026-11-10: a tester typed 0.80 outer / 0.65 upper
+                // on a headset declaring 1.22 / 0.96 and saw black bands). Not wrong in itself (the measured fits are 0.72 to 0.79 of the box on some edges), so a warning, with the reason.
+                var thin = Enumerable.Range(0, 4).Where(k => c.Tan[k] < declared[k] * MinEdgeShare).ToList();
+                if (thin.Count > 0)
+                    c.Yellow(string.Join(", ", thin.Select(k => Names[k] + " " + F(c.Tan[k]) + " is only " + (100 * c.Tan[k] / declared[k]).ToString("0", CultureInfo.InvariantCulture) + " % of the headset's " + F(declared[k])
+                             + " (" + c.Deg[k].ToString("0", CultureInfo.InvariantCulture) + "° of " + (Math.Atan(declared[k]) * 180 / Math.PI).ToString("0", CultureInfo.InvariantCulture) + "°)"))
+                             + ": the game picture stops there, so everything beyond it on that side of the view is black. That is right if you really see that little; if you see black bands, raise the value.");
+            }
             if (unit == FovUnit.Tangent && c.Tan.Any(t => t > LooksLikeDegrees)) c.Yellow("A value above " + F(LooksLikeDegrees) + " is a tangent of more than 71°: did you type degrees?");
             if (Ratio(c.Tan[0], c.Tan[1]) > MaxSideRatio) c.Yellow("Outer and inner differ a lot (" + F(c.Tan[0]) + " against " + F(c.Tan[1]) + "); the nose side is usually the smaller, but not by that much.");
             if (Ratio(c.Tan[2], c.Tan[3]) > MaxVertRatio) c.Yellow("Upper and lower differ a lot (" + F(c.Tan[2]) + " against " + F(c.Tan[3]) + ").");

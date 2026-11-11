@@ -1848,6 +1848,7 @@ fn main() {
             None => logs::general("WARN", "no paired headset in config/session.json: run configure.exe"),
         }
     }
+    for l in vision::guard_foveation_session(&layout.session()) { logs::general("WARN", &l); }   // before ALVR reads the session (the encoder and the headset get the same numbers)
     alvr_server_core::initialize_environment(layout.clone()); // (logging: logs::init above replaces server_core's init_logging)
 
     let (ctx, events) = ServerCoreContext::new();
