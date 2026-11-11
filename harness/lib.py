@@ -330,6 +330,11 @@ def launch_app(app, rid, rd, log):
               (f"build\\probe\\xr_modsim.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "xr_modsim" else
   f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n")) +
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
+    if app.get("exe") == "custom":   # any program (a game): `command` runs in `cwd`, bounded by the scenario's app timeout (the command itself ends it)
+        lines = cmd.split("\r\n")
+        k = next(i for i, l in enumerate(lines) if l.startswith(("build\\probe\\xr_probe.exe", "out\\mirrordesktop")))
+        lines[k] = f'cd /d "{app["cwd"]}" & {app["command"]} > {home}\\{ROOTNAME}\\{rd}\\app_stdout.txt 2>&1'
+        cmd = "\r\n".join(lines)
     local = CACHE / "app.cmd"
     CACHE.mkdir(parents=True, exist_ok=True)
     local.write_text(cmd)
