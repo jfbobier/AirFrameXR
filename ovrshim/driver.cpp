@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <condition_variable>
 #include <deque>
 #include <mmdeviceapi.h>
 
@@ -60,6 +61,7 @@ using namespace airframexr_ipc;
 
 namespace shimlog {
     static std::mutex g_mutex;
+    static std::mutex g_fileMutex;               // the file handles (g_env, g_session) and the writes to them
     static FILE* g_env = nullptr;     // OVRSHIM_LOG (harness / manual debugging)
     static FILE* g_session = nullptr; // shim_<exe>_<pid>.log in the host's debug session folder
     static std::vector<std::string> g_pending;
@@ -109,11 +111,70 @@ namespace shimlog {
         return b;
     }
 
+    // The host's log ring (ipc.h LogRing): set when the IPC block is open. Lines go to the host, whose writer thread owns the files.
+    static airframexr_ipc::LogRing* g_ring = nullptr;
+    static const volatile uint32_t* g_hostAlive = nullptr;
+    static const volatile uint32_t* g_hostLevel = nullptr;
+
+    static void SetRing(airframexr_ipc::IpcState* st) {
+        g_hostAlive = st ? &st->host.hostAlive : nullptr;
+        g_hostLevel = st ? &st->host.logLevel : nullptr;
+        g_ring = st ? &st->log : nullptr;
+    }
+
+    // The host's verbosity (error 0 .. debug 4); info until a host says otherwise.
+    static uint32_t HostLevel() { return g_hostLevel ? (*g_hostLevel ? *g_hostLevel : 2u) : 2u; }
+
+    // Is a host alive to drain the ring? Its heartbeat moves every vsync: unchanged for 2 s = gone (the line then goes to the file itself).
+    static bool HostDraining() {
+        if (!g_ring || !g_hostAlive) return false;
+        static uint32_t last = 0;
+        static DWORD changed = 0;
+        const uint32_t now = *g_hostAlive;
+        const DWORD t = GetTickCount();
+        if (now != last || changed == 0) { last = now; changed = t; }
+        return now != 0 && (t - changed) < 2000;
+    }
+
+    // One line into the ring. True when the ring took it (or counted it as dropped: a full ring is the host not draining, the file would not help).
+    static bool Push(uint32_t level, const char* comp, const std::string& stamp, const std::string& text) {
+        if (!HostDraining()) return false;
+        airframexr_ipc::LogRing& r = *g_ring;
+        const uint32_t me = GetTickCount() | 1u;
+        bool locked = false;
+        for (int spin = 0; spin < 20000 && !locked; spin++) {
+            uint32_t exp = 0;
+            if (r.lock.compare_exchange_weak(exp, me)) { locked = true; break; }
+            if (exp != 0 && spin % 256 == 255 && (GetTickCount() - (exp & ~1u)) > 50 && r.lock.compare_exchange_strong(exp, me)) { locked = true; break; }   // a dead owner
+            YieldProcessor();
+        }
+        if (!locked) { r.dropped.fetch_add(1); return true; }
+        const uint32_t e = r.enq.load(std::memory_order_relaxed);
+        if (e - r.deq.load(std::memory_order_acquire) >= airframexr_ipc::kLogSlots) {
+            r.dropped.fetch_add(1);
+        } else {
+            airframexr_ipc::LogSlot& s = r.slot[e % airframexr_ipc::kLogSlots];
+            s.pid = GetCurrentProcessId();
+            s.level = level;
+            strncpy_s(s.stamp, sizeof(s.stamp), stamp.c_str(), _TRUNCATE);
+            strncpy_s(s.comp, sizeof(s.comp), comp, _TRUNCATE);
+            strncpy_s(s.text, sizeof(s.text), text.c_str(), _TRUNCATE);
+            r.enq.store(e + 1, std::memory_order_release);
+        }
+        r.lock.store(0, std::memory_order_release);
+        return true;
+    }
+
     static void General(const char* level, const char* fmt, ...) {
         va_list a;
         va_start(a, fmt);
         const std::string msg = Format(fmt, a);
         va_end(a);
+        const std::string who = "shim:" + Utf8(ExeName());
+        const uint32_t lvl = _stricmp(level, "ERROR") == 0 ? 0u : _stricmp(level, "WARN") == 0 ? 1u : 2u;
+        if (lvl > HostLevel()) return;
+        if (Push(lvl, who.c_str(), Now(), msg)) return;
+        // no host to take it (the game runs alone, or the host is gone): the line is appended to the file here, one WriteFile
         static const std::wstring path = [] {
             // the DLL sits in <package>\bin\: the logs are in the package root
             std::wstring root = DllDir();
@@ -122,12 +183,11 @@ namespace shimlog {
             CreateDirectoryW(logs.c_str(), nullptr);
             return logs + L"\\AirFrameXR.log";
         }();
-        static const std::string who = "[shim:" + Utf8(ExeName()) + "]";
         std::string lv = level;
         if (lv.size() < 5) {
             lv.append(5 - lv.size(), ' ');
         }
-        const std::string line = Now() + " " + who + " " + lv + " " + msg + "\r\n";
+        const std::string line = Now() + " [" + who + "] " + lv + " " + msg + "\r\n";
         HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS,
                                FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h != INVALID_HANDLE_VALUE) {
@@ -155,6 +215,7 @@ namespace shimlog {
     // Opens the debug log in the host's debug session folder (empty: debug off).
     static void SetDebugDir(const std::wstring& dir) {
         std::lock_guard lock(g_mutex);
+        std::lock_guard fl(g_fileMutex);
         InitEnvLocked();
         if (g_dirKnown && dir == g_debugDir) {
             return;
@@ -185,6 +246,34 @@ namespace shimlog {
         g_pending.clear();
     }
 
+    // The debug log is written by a thread of its own (no disk write, and no lock held across one, on the game's threads): Debug() formats the line and
+    // queues it (bounded; a full queue drops and counts), the thread appends the batch to the files every 200 ms.
+    static std::deque<std::string> g_queue;      // guarded by g_mutex
+    static std::condition_variable_any g_queueCv;
+    static std::atomic<uint64_t> g_queueDropped{0};
+    static bool g_writerStarted = false;
+
+    static void WriterLoop() {
+        uint64_t reported = 0;
+        for (;;) {
+            std::deque<std::string> batch;
+            {
+                std::unique_lock lock(g_mutex);
+                g_queueCv.wait_for(lock, std::chrono::milliseconds(200), [] { return !g_queue.empty(); });
+                batch.swap(g_queue);
+            }
+            std::lock_guard fl(g_fileMutex);
+            const uint64_t d = g_queueDropped.load();
+            if (d > reported) { batch.push_back(Now() + " [" + std::to_string(GetCurrentProcessId()) + "] shim debug log: " + std::to_string(d - reported) + " lines dropped (queue full)\n"); reported = d; }
+            if (batch.empty()) continue;
+            for (FILE* f : { g_env, g_session }) {
+                if (!f) continue;
+                for (const auto& l : batch) fputs(l.c_str(), f);
+                fflush(f);
+            }
+        }
+    }
+
     static void Debug(const char* fmt, ...) {
         std::lock_guard lock(g_mutex);
         InitEnvLocked();
@@ -194,16 +283,14 @@ namespace shimlog {
         snprintf(pid, sizeof(pid), " [%lu] ", GetCurrentProcessId());
         const std::string line = Now() + pid + Format(fmt, a) + "\n";
         va_end(a);
-        if (g_env) {
-            fputs(line.c_str(), g_env);
-            fflush(g_env);
+        if (!g_writerStarted) { g_writerStarted = true; std::thread(WriterLoop).detach(); }
+        if (!g_dirKnown && !g_env) {
+            if (g_pending.size() < 200) g_pending.push_back(line); // until the host says whether debug is on
+            return;
         }
-        if (g_session) {
-            fputs(line.c_str(), g_session);
-            fflush(g_session);
-        } else if (!g_dirKnown && g_pending.size() < 200) {
-            g_pending.push_back(line); // until the host says whether debug is on
-        }
+        if (g_queue.size() >= 8192) { g_queueDropped++; return; }
+        g_queue.push_back(line);
+        g_queueCv.notify_one();
     }
 
     // Per-frame trace (follow-the-frames harness): one CSV line per published frame, in the debug session folder
@@ -2011,7 +2098,9 @@ namespace {
         void OpenHost() {
             char exe[MAX_PATH] = {};
             GetModuleFileNameA(nullptr, exe, MAX_PATH);
-            if (!OpenIpc(m_ipc)) {
+            const bool opened = OpenIpc(m_ipc);
+            if (opened) shimlog::SetRing(m_ipc.state);   // the shim's lines go to the host from here on
+            if (!opened) {
                 m_ipc = {}; // run standalone (keyboard-driven, like OVRNull)
                 ShimLog("start: %s: host IPC not available (alvr_host not running, or a different IPC version): standalone", exe);
                 shimlog::General("WARN", "AirFrameXR host not reachable (not running, or a different version): this game will not reach the headset");

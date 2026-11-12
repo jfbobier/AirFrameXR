@@ -251,6 +251,10 @@ def build(what):
             continue
         if w == "mirrordesktop":   # the desktop mirror, an OpenXR app: tools/mirrordesktop/*.cpp|h compiled on the builder
             lib.b_run("if not exist tools\\mirrordesktop mkdir tools\\mirrordesktop")
+            lib.b_run("if not exist tools\\common mkdir tools\\common")
+            for f in sorted((lib.ROOT / "tools/common").glob("*")):   # aflog.h: the in-process log writer the mirror (and the shim's fallback) include
+                if f.is_file():
+                    lib.b_put(f, f"tools/common/{f.name}")
             for f in sorted((lib.ROOT / "tools/mirrordesktop").glob("*")):
                 if f.suffix in (".cpp", ".h"):
                     lib.b_put(f, f"tools/mirrordesktop/{f.name}")

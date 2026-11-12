@@ -1,14 +1,16 @@
-//! AirFrameXR logging.
+//! AirFrameXR logging (design and status: docs/ARCHITECTURE.md, "Logging"). The files are owned by the writer thread of `logsink.rs`;
+//! this module is the host's API to it and the host-side aggregation.
 //!
-//! * General log `logs/AirFrameXR.log`: appended by every component (host, shim inside each game, GUIs), one line per fact that
-//!   matters later: start/stop, headset connect/disconnect, negotiated stream, game start/end, warnings and errors. Small.
-//! * Debug session (only when debug is on): `logs/debug/<yyyymmdd-hhmmss>/` per host run with the verbose files: `host_events.jsonl`
-//!   (every host event, `encoder_stats` every 2 s), `alvr.log` (server_core's own log), `gpu.csv` (NVML, 1 Hz), and one
-//!   `shim_<exe>_<pid>.log` per game (the shim finds the folder through the IPC block).
+//! * `logs/AirFrameXR.log`: one line per fact that matters later (start/stop, headset connect, negotiated stream, game start/end,
+//!   warnings and errors), ALVR's own warnings, errors and info lines as `[alvr]`. Small. Verbosity: `log_level` (info by default).
+//! * `logs/games/<exe>/<yyyymmdd-hhmmss>.log`: one file per game run, its timeline lines (frame generation perf, memory, and at verbose
+//!   the phase lock).
+//! * Debug session (debug level only): `logs/debug/<yyyymmdd-hhmmss>/` per host run: `host_events.jsonl`, `alvr.log` (the raw ALVR
+//!   stream: events, `[STATS]`, `[CAPS]`), `gpu.csv` (NVML, 1 Hz), the CSVs and one `shim_<exe>_<pid>.log` per game.
 //!
-//! The host also installs the logger behind server_core (ALVR): its log lines go to `alvr.log`, its warnings/errors to the
-//! general log, and its client statistics events (`StatisticsSummary` every second, `GraphStatistics` per frame: total / encode /
-//! network / decode latency, packets lost, client fps) are captured for the status lines and the network benchmark.
+//! The host installs the logger behind server_core (ALVR): its client statistics events (`StatisticsSummary` every second,
+//! `GraphStatistics` per frame: total / encode / network / decode latency, packets lost, client fps) are captured for the status
+//! lines and the network benchmark.
 use alvr_common::{log, parking_lot::Mutex};
 use alvr_events::EventType;
 use serde_json::{json, Value};
@@ -90,7 +92,8 @@ pub fn init(logs_dir: Option<&Path>, alvr_default: Option<&Path>, debug: bool, l
             logsink::install(logsink::Sink::start(logsink::Config::new(d), if debug { Level::Debug } else { level }));
         }
         s.alvr_default = alvr_default.map(Path::to_path_buf);
-        s.alvr = alvr_default.and_then(|p| fs::File::create(p).ok());
+        // with an install the raw ALVR stream exists only in the debug session folder; without one (harness runs) it is the session log file
+        s.alvr = if logs_dir.is_none() { alvr_default.and_then(|p| fs::File::create(p).ok()) } else { None };
     }
     if debug {
         set_debug(true);
@@ -163,6 +166,21 @@ pub fn general(level: &str, msg: &str) {
     log_line(l, "host", false, msg.to_string());
 }
 
+/// A line the shim logged inside a game (read from its ring buffer by main.rs): kept with the time the shim stamped it.
+pub fn shim_line(level: u32, comp: &str, stamp: &str, text: &str) {
+    if let Some(s) = logsink::global() {
+        let l = match level {
+            0 => Level::Error,
+            1 => Level::Warn,
+            2 => Level::Info,
+            3 => Level::Verbose,
+            _ => Level::Debug,
+        };
+        let at = logsink::Stamp::parse(stamp).unwrap_or_else(logsink::Stamp::now);
+        s.log_at(at, l, comp.to_string(), text, Dest::Main);
+    }
+}
+
 /// A timeline line of the running game (frame generation perf, memory, GPU): in the game's log only, nothing when no game runs.
 /// `level` Verbose for the detail that is only wanted when looking for something (phase lock, tracking samples).
 pub fn run_line(level: Level, component: &'static str, msg: String) {
@@ -171,9 +189,28 @@ pub fn run_line(level: Level, component: &'static str, msg: String) {
     }
 }
 
+/// The run log of the last game that started, relative to the logs folder (`games/<exe>/<yyyymmdd-hhmmss>.log`): what a run record (games.json) points at.
+static LAST_RUN_LOG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn last_run_log() -> Option<String> {
+    LAST_RUN_LOG.lock().ok().and_then(|g| g.clone())
+}
+
+pub fn forget_run_log() {
+    if let Ok(mut g) = LAST_RUN_LOG.lock() {
+        *g = None;
+    }
+}
+
 /// A game started: its detail lines go to `logs/games/<exe>/<time>.log`. Returns that file.
 pub fn game_start(exe: &str) -> Option<PathBuf> {
-    logsink::global().map(|s| s.game_start(exe))
+    let p = logsink::global()?.game_start(exe);
+    if let (Some(dir), Some(file)) = (p.parent().and_then(|d| d.file_name()), p.file_name()) {
+        if let Ok(mut g) = LAST_RUN_LOG.lock() {
+            *g = Some(format!("games/{}/{}", dir.to_string_lossy(), file.to_string_lossy()));
+        }
+    }
+    Some(p)
 }
 
 pub fn game_end(summary: &str) {
@@ -190,7 +227,7 @@ pub fn set_debug(on: bool) -> Option<PathBuf> {
     let mut s = state().lock();
     if !on {
         s.events = None;
-        s.alvr = s.alvr_default.as_ref().and_then(|p| open_append(p));
+        s.alvr = if s.logs_dir.is_none() { s.alvr_default.as_ref().and_then(|p| open_append(p)) } else { None };
         return None;
     }
     if s.debug_dir.is_none() {
@@ -288,6 +325,7 @@ impl log::Log for AlvrLogger {
         if let Some(inner) = msg.strip_prefix("{\"va_client_caps\":").and_then(|s| s.strip_suffix('}')) {
             if let (Ok(v), Some(o)) = (serde_json::from_str::<Value>(inner), crate::phase::origin()) {
                 write_alvr("CAPS", inner);
+                log_line(Level::Verbose, "alvr", false, format!("client capabilities {inner}"));
                 *CLIENT_REFRESH_RATES.lock().unwrap() = v["supported_refresh_rates"].as_array().map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default();
                 let rates = CLIENT_REFRESH_RATES.lock().unwrap().iter().map(|r| format!("{r:.0}")).collect::<Vec<_>>().join(" / ");
                 general("INFO", &format!("headset refresh rates: {}", if rates.is_empty() { "none declared".to_string() } else { rates + " Hz" }));
@@ -342,16 +380,15 @@ impl log::Log for AlvrLogger {
             }
             seen.push(name.to_string());
         }
-        let level = match record.level() {
-            log::Level::Error => "ERROR",
-            log::Level::Warn => "WARN",
-            log::Level::Info => "INFO",
-            _ => "DEBUG",
+        // server_core's own text lines: the unified log (the raw stream stays in the debug folder's alvr.log)
+        let (level, lvl) = match record.level() {
+            log::Level::Error => ("ERROR", Level::Error),
+            log::Level::Warn => ("WARN", Level::Warn),
+            log::Level::Info => ("INFO", Level::Info),
+            _ => ("DEBUG", Level::Debug),
         };
         write_alvr(level, &msg);
-        if record.level() <= log::Level::Warn {
-            general(level, &format!("alvr: {msg}"));
-        }
+        log_line(lvl, "alvr", false, msg);
     }
 
     fn flush(&self) {}

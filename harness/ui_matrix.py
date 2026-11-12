@@ -38,6 +38,10 @@ dest = ROOT / "harness/results/ui_matrix" / time.strftime("%Y%m%dT%H%M%SZ", time
 dest.mkdir(parents=True, exist_ok=True)
 lib.b_get(f"runs/{rid}/out", dest)
 dest = dest / "out"   # scp -r puts the folder inside
+try:   # the UI log of the run (logs\\ui\\<time>-uitest.log of uitest's folder): one line per case and per finding, the same lines as the table below, kept with the PNGs
+    lib.b_get("_tmp/uitest/run/logs/ui", dest / "ui_log")
+except Exception as e:
+    print("note: no UI log fetched:", e)
 res_file = dest / "results.json"
 if not res_file.exists():
     print("BLOCKED: no results.json (see harness/results/ui_matrix)"); sys.exit(2)
@@ -66,5 +70,10 @@ for r, i in fails + warns:
 def case_order(c): return (int(c.split("p@")[0]), int(c.split("@")[1]))
 for (lvl, form, _), g in sorted(groups.items(), key=lambda kv: (kv[0][0] != "FAIL", kv[0][1])):
     print(f"{lvl} {form}: {g['example'][:170]}   [{', '.join(sorted(g['cases'], key=case_order))}]")
+ui_logs = sorted((dest / "ui_log").rglob("*-uitest.log")) if (dest / "ui_log").exists() else []
+if ui_logs:
+    ul = ui_logs[-1].read_text(errors="replace")
+    n_case = len(re.findall(r"\] (INFO |WARN |ERROR) case ", ul))
+    print(f"UI log {ui_logs[-1].name}: {n_case} case lines, {len(re.findall(r'\] ERROR', ul))} ERROR lines (the same findings as above; an unhandled exception would be here too)")
 print(f"\nui_matrix: {len(res)} renders, {len(fails)} FAIL, {len(warns)} warnings; PNGs in {dest}")
 sys.exit(1 if fails or warns else 0)   # a warning (a sideways scroll bar) fails the run too: the matrix is meant to stay at 0 / 0

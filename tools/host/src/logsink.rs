@@ -133,6 +133,15 @@ impl Stamp {
         let y = (yoe + era * 400 + if mo <= 2 { 1 } else { 0 }) as u16;
         Stamp { y, mo, d, h: (rem / 3600) as u8, mi: (rem % 3600 / 60) as u8, s: (rem % 60) as u8, ms }
     }
+    /// "yyyy-mm-dd hh:mm:ss.mmm" (what the shim's log ring carries), None when it is not that.
+    pub fn parse(t: &str) -> Option<Stamp> {
+        let b = t.as_bytes();
+        if b.len() < 23 || b[4] != b'-' || b[7] != b'-' || b[10] != b' ' || b[13] != b':' || b[16] != b':' || b[19] != b'.' {
+            return None;
+        }
+        let n = |a: usize, z: usize| t.get(a..z)?.parse::<u16>().ok();
+        Some(Stamp { y: n(0, 4)?, mo: n(5, 7)? as u8, d: n(8, 10)? as u8, h: n(11, 13)? as u8, mi: n(14, 16)? as u8, s: n(17, 19)? as u8, ms: n(20, 23)? })
+    }
     pub fn date(&self) -> (u16, u8, u8) {
         (self.y, self.mo, self.d)
     }
@@ -217,6 +226,13 @@ impl Sink {
     pub fn log(&self, level: Level, comp: impl Into<Cow<'static, str>>, text: impl Into<String>, dest: Dest) {
         if self.enabled(level) {
             self.send(Msg::Line { at: Stamp::now(), level, comp: comp.into(), text: text.into(), dest });
+        }
+    }
+
+    /// A line stamped elsewhere (the shim's, read from its ring buffer): `at` is when it was logged, not when it was written.
+    pub fn log_at(&self, at: Stamp, level: Level, comp: impl Into<Cow<'static, str>>, text: impl Into<String>, dest: Dest) {
+        if self.enabled(level) {
+            self.send(Msg::Line { at, level, comp: comp.into(), text: text.into(), dest });
         }
     }
 
@@ -611,6 +627,19 @@ mod tests {
         s.flush();
         assert!(!read(&d.join("AirFrameXR.log")).contains("perf"));
         assert!(read(&p).contains("in game"));
+    }
+
+    #[test]
+    fn stamps_parse_and_a_stamped_line_keeps_its_time() {
+        let st = Stamp::parse("2026-11-12 13:14:15.678").unwrap();
+        assert_eq!((st.y, st.mo, st.d, st.h, st.mi, st.s, st.ms), (2026, 11, 12, 13, 14, 15, 678));
+        assert!(Stamp::parse("nonsense").is_none());
+        let d = tmp("stamped");
+        let s = Sink::start(Config::new(&d), Level::Info);
+        s.log_at(st, Level::Info, "shim:g.exe", "game start", Dest::Main);
+        s.flush();
+        let t = read(&d.join("AirFrameXR.log"));
+        assert!(t.starts_with("2026-11-12 13:14:15.678 [shim:g.exe] INFO  game start"), "{t}");
     }
 
     #[test]

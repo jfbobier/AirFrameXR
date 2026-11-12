@@ -971,6 +971,9 @@ mod nvh {
         pub fn nvh_ipc_set_user(ipc: *mut c_void, user_gamma: f32, debug_on: i32, debug_dir: *const u16);
         pub fn nvh_ipc_app_exe(ipc: *mut c_void, buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_ipc_set_color(ipc: *mut c_void, brightness: f32, contrast: f32, saturation: f32, sharpening: f32);
+        pub fn nvh_ipc_set_log_level(ipc: *mut c_void, level: u32);
+        pub fn nvh_ipc_log_pop(ipc: *mut c_void, level: *mut u32, pid: *mut u32, stamp: *mut c_char, comp: *mut c_char, text: *mut c_char) -> i32;
+        pub fn nvh_ipc_log_dropped(ipc: *mut c_void) -> u32;
         pub fn nvh_gpu_info(buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_gpu_sample(buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_mem_sample(buf: *mut c_char, len: i32) -> i32;
@@ -1353,6 +1356,29 @@ fn bench_recommendation(results: &[serde_json::Value], fps: f64) -> serde_json::
 }
 
 /// The user's display gamma and the debug session folder, for the shim.
+/// The shim's log lines (its ring buffer in the IPC block) into the host's writer, and the host's log level to the shim. Called every loop turn: a few atomics when nothing is queued.
+fn pump_shim_log(ipc: *mut std::ffi::c_void, level_sent: &mut u32, dropped_seen: &mut u32) {
+    let lv = logs::level() as u32;
+    if lv != *level_sent {
+        unsafe { nvh::nvh_ipc_set_log_level(ipc, lv) };
+        *level_sent = lv;
+    }
+    let (mut level, mut pid) = (0u32, 0u32);
+    let (mut st, mut co, mut tx) = ([0 as std::ffi::c_char; 24], [0 as std::ffi::c_char; 32], [0 as std::ffi::c_char; 192]);
+    for _ in 0..256 {
+        if unsafe { nvh::nvh_ipc_log_pop(ipc, &mut level, &mut pid, st.as_mut_ptr(), co.as_mut_ptr(), tx.as_mut_ptr()) } == 0 {
+            break;
+        }
+        let s = |p: *const std::ffi::c_char| unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned();
+        logs::shim_line(level, &s(co.as_ptr()), &s(st.as_ptr()), &s(tx.as_ptr()));
+    }
+    let d = unsafe { nvh::nvh_ipc_log_dropped(ipc) };
+    if d != *dropped_seen {
+        logs::general("WARN", &format!("shim log: {} lines lost in the ring buffer (host not draining fast enough, or the ring full)", d.wrapping_sub(*dropped_seen)));
+        *dropped_seen = d;
+    }
+}
+
 fn push_user(ipc: *mut std::ffi::c_void, gamma: f32, debug: bool) {
     #[cfg(windows)]
     let dir: Vec<u16> = {
@@ -1630,6 +1656,7 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
         ses["level"] = json!(level);
         ses["net"] = run.net_summary();
         ses["gpu"] = json!({ "name": gpu["name"], "driver": gpu["driver"] });
+        if let Some(l) = logs::last_run_log() { ses["log"] = json!(l); }   // the run's own log, relative to the logs folder (1.3.10)
         ses["pipeline"] = pipeline.clone();   // the frame pipeline strip of the Game statistics app (docs/FOV_PIPELINE_OPTIM.md S8)
         ses
     };
@@ -2496,6 +2523,7 @@ fn main() {
         }
     };
     let mut status_at = Instant::now();
+    let (mut shim_log_level, mut shim_log_dropped) = (u32::MAX, 0u32);   // the host's log level as the shim last saw it, lines the shim lost so far
     let (mut perf_rel, mut perf_late) = (0u64, 0u64);   // shim release counters at the last fg_perf line
     let mut perf_fg = [0u64; 8];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand, stale_stamps, regime_switches
     struct BenchState {
@@ -2517,6 +2545,7 @@ fn main() {
             break;
         }
         if !ipc.is_null() {
+            pump_shim_log(ipc, &mut shim_log_level, &mut shim_log_dropped);
             // live settings from AirFrameXR.exe
             if vision::COLOR_PENDING.swap(false, Ordering::SeqCst) {
                 let c = [0, 1, 2, 3].map(|k| f32::from_bits(vision::COLOR_REQ[k].load(Ordering::SeqCst)));
@@ -2591,6 +2620,8 @@ fn main() {
                 logs::general("INFO", &format!("game started: {exe}"));
                 if !is_mirror(&exe) {
                     logs::game_start(&exe);   // the run's timeline lines go to logs/games/<exe>/<time>.log from here to the game's end
+                } else {
+                    logs::forget_run_log();   // the desktop mirror has no run log: its record must not point at the last game's
                 }
                 event(origin, "game_started", json!({ "exe": exe }));
                 vision::RECENTER_REQ.store(true, Ordering::SeqCst);   // the player's forward and position at game start are the game's forward and origin, on every headset, with or without the launcher

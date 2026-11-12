@@ -1639,7 +1639,8 @@ def analyse(sc, outdir: Path):
                              "debug_files": sorted(p.name for p in dbg[-1].iterdir()) if dbg else [],
                              # logs\games\<exe>\<yyyymmdd-hhmmss>.log: one file per run (the writer thread, tools/host/src/logsink.rs)
                              "game_logs": {d.name: {f.name: f.read_text(errors="replace") for f in sorted(d.glob("*.log"))} for d in sorted((lg / "games").glob("*"))} if (lg / "games").exists() else {},
-                             "log_files": sorted(p.name for p in lg.glob("AirFrameXR*.log"))}
+                             "log_files": sorted(p.name for p in lg.glob("AirFrameXR*.log")),
+                             "alvr_log_at_root": (lg / "alvr.log").exists()}
     if sc.get("reconnect"):
         a["client2"] = jload(outdir / "client2_report.json")
     if sc.get("app"):
@@ -2291,9 +2292,16 @@ def evaluate(sc, a):
         gen = il.get("general", "") + "\n".join(t for r in (il.get("game_logs") or {}).values() for t in r.values())
         chk("log_level_lines", all(w in gen for w in want) and not any(w in gen for w in forbid), {"missing": [w for w in want if w not in gen], "unexpected": [w for w in forbid if w in gen]},
             f"present {want}, absent {forbid}")
+    if ck.get("alvr_in_unified_log"):
+        # 1.3.10: ALVR's own lines are in AirFrameXR.log as [alvr]; the raw stream (alvr.log) exists only in the debug session folder
+        il = a.get("install_logs") or {}
+        chk("alvr_lines_in_unified_log", "[alvr] INFO" in il.get("general", "") and not il.get("alvr_log_at_root"),
+            {"alvr_lines": "[alvr] INFO" in il.get("general", ""), "alvr.log at the logs root": il.get("alvr_log_at_root")}, "'[alvr] INFO' lines in AirFrameXR.log and no logs\\alvr.log (it is in logs\\debug\\<time>\\ at the debug level only)")
     if ck.get("log_line_format"):
         gen = (a.get("install_logs") or {}).get("general", "")
         bad = [l for l in gen.splitlines() if l.strip() and not re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[[^\]]+\] (ERROR|WARN |INFO |VERB |DEBUG) ", l)]
+        lost = [k for k in ("log lines dropped", "lines lost in the ring buffer") if k in gen]
+        chk("no_log_lines_lost", not lost, lost or "none", "no 'log lines dropped' (the writer's queue) and no shim ring buffer losses in a normal run")
         chk("log_line_format", not bad and gen.strip() != "", bad[:3] or "all lines match", "every line: 'yyyy-mm-dd hh:mm:ss.mmm [component] LEVEL message'")
     if ck.get("bench_tracks_target"):
         st = a.get("bench_steps") or []

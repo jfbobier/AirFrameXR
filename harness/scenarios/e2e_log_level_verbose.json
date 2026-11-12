@@ -111,7 +111,8 @@
         "phase lock:"
       ],
       "absent": []
-    }
+    },
+    "alvr_in_unified_log": true
   },
   "install": true
 }

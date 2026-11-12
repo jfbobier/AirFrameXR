@@ -127,10 +127,10 @@ namespace AirFrameXR
                     right.Controls.Add(new Label { Text = $"Trends over the last {sessions.Count} sessions", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                     right.Controls.Add(Trends(sessions));
                 }
-                var timeline = Timeline(LogTimeline.Last(Path.Combine(Paths.Logs, "AirFrameXR.log"), exe));
+                var timeline = Timeline(LogTimeline.ForRecord(Paths.Logs, S(last, "log"), exe));
                 if (timeline != null)
                 {
-                    right.Controls.Add(new Label { Text = "The last run over time (what the general log recorded: logs\\AirFrameXR.log)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
+                    right.Controls.Add(new Label { Text = "The last run over time (what the run's log recorded: logs\\games\\<game>\\)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                     right.Controls.Add(timeline);
                 }
                 right.Controls.Add(new Label { Text = $"Sessions (the last {sessions.Count}, newest first)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });

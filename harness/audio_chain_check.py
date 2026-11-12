@@ -166,7 +166,7 @@ try:
     for f in ("app.log", "client_stdout.txt"):
         lib.b_get(f"{rd.replace(chr(92), '/')}/{f}", ROOT / "harness/cache" / f"chain_{f}")
     applog = (ROOT / "harness/cache/chain_app.log").read_text(errors="replace") if (ROOT / "harness/cache/chain_app.log").exists() else ""
-    hostlog = lib.b_run(f"findstr /s /i /c:\"process loopback\" {rd}\\AirFrameXR\\logs\\alvr.log {rd}\\AirFrameXR\\logs\\debug\\*\\alvr.log")[1]
+    hostlog = lib.b_run(f"findstr /s /i /c:\"process loopback\" {rd}\\AirFrameXR\\logs\\AirFrameXR.log {rd}\\AirFrameXR\\logs\\debug\\*\\alvr.log")[1]
     check("the host captured with process loopback" if MODE == "process" else "the host did not use process loopback", ("process loopback" in hostlog) == (MODE == "process"), hostlog[-300:])
     check("the scene app started its music", "scene sound" in applog and "playing" in applog, applog[-400:])
 finally:

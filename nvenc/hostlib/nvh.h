@@ -117,6 +117,11 @@ void nvh_ipc_close(void* ipc);
 void nvh_ipc_set_user(void* ipc, float user_gamma, int debug_on, const wchar_t* debug_dir);
 // The user's colour correction (0 = neutral each), applied by the shim on the encoded output.
 void nvh_ipc_set_color(void* ipc, float brightness, float contrast, float saturation, float sharpening);
+// The host's log verbosity for the shim (0 error .. 4 debug), and the shim's log ring (ipc.h LogRing): one line per call, 1 = a line was taken, 0 = empty.
+// `stamp` 24 bytes, `comp` 32, `text` 192 (all NUL-terminated). `dropped` is the number of lines the shim lost since the host started (ring full, lock busy).
+void nvh_ipc_set_log_level(void* ipc, uint32_t level);
+int nvh_ipc_log_pop(void* ipc, uint32_t* level, uint32_t* pid, char* stamp, char* comp, char* text);
+uint32_t nvh_ipc_log_dropped(void* ipc);
 // The app's executable name as published by the shim (UTF-8). Returns bytes written incl. the terminator.
 int nvh_ipc_app_exe(void* ipc, char* buf, int len);
 // NVML: GPU identity as JSON ({"nvml":1,"name","driver","arch","arch_name","vram_mb"}; arch Ada = 8, Blackwell = 10), and one CSV

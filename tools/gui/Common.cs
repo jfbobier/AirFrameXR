@@ -111,7 +111,16 @@ namespace AirFrameXR
                 }
                 if (!string.IsNullOrEmpty(stem)) add(Games.FileOf(stem), "game/" + stem + ".json");
                 add(Path.Combine(Paths.Logs, "AirFrameXR.log"), "AirFrameXR.log");
-                add(Path.Combine(Paths.Logs, "mirrordesktop.log"), "mirrordesktop.log");   // the desktop mirror's own log (what it saw of the controllers and of a game starting)
+                // the game's newest run logs (logs\\games\\<exe>\\<time>.log, 1.3.10) and the newest rolled-over main log (the day before)
+                var games = Path.Combine(Paths.Logs, "games");
+                if (!string.IsNullOrEmpty(stem) && Directory.Exists(games))
+                    foreach (var gd in new DirectoryInfo(games).GetDirectories().Where(d => d.Name.StartsWith(stem, StringComparison.OrdinalIgnoreCase)))
+                        foreach (var f in gd.GetFiles("*.log").OrderByDescending(x => x.Name).Take(3)) add(f.FullName, "games/" + gd.Name + "/" + f.Name);
+                var rolled = new DirectoryInfo(Paths.Logs).GetFiles("AirFrameXR.*.log").OrderByDescending(x => x.Name).FirstOrDefault();
+                if (rolled != null) add(rolled.FullName, rolled.Name);
+                add(Path.Combine(Paths.Logs, "mirrordesktop.log"), "mirrordesktop.log");   // before 1.3.10: the desktop mirror's own log
+                var md = Path.Combine(Paths.Logs, "mirrordesktop");   // 1.3.10: one file per run (what the mirror saw of the controllers and of a game starting)
+                if (Directory.Exists(md)) foreach (var f in new DirectoryInfo(md).GetFiles("*.log").OrderByDescending(x => x.Name).Take(3)) add(f.FullName, "mirrordesktop/" + f.Name);
                 var dbg = Path.Combine(Paths.Logs, "debug");
                 if (Directory.Exists(dbg))
                 {
@@ -337,11 +346,60 @@ namespace AirFrameXR
         public static string Serialize(object o) => Ser.Serialize(o);
     }
 
-    /// The general log logs\AirFrameXR.log, shared with the host and the shim (one appended write per line).
+    /// One writer thread behind a bounded queue (the same rules as the host's logsink.rs, docs/ARCHITECTURE.md "Logging"): `Add` never waits for the disk and never throws;
+    /// a full queue drops the line and counts it; the thread appends what is queued in one write every 200 ms (at once for a warning or an error).
+    /// `reopen`: the file is opened for each batch, so a roll-over by the host (a rename at midnight) is followed; otherwise it stays open.
+    public sealed class LogWriter
+    {
+        readonly string path; readonly bool reopen;
+        readonly System.Collections.Concurrent.BlockingCollection<string> q = new System.Collections.Concurrent.BlockingCollection<string>(4096);
+        readonly Thread th; FileStream keep; long dropped, reported; volatile bool stop; readonly ManualResetEvent idle = new ManualResetEvent(true);
+        public LogWriter(string path, bool reopen)
+        {
+            this.path = path; this.reopen = reopen;
+            th = new Thread(Run) { IsBackground = true, Name = "log-writer" }; th.Start();
+        }
+        public void Add(string line)
+        {
+            idle.Reset();
+            if (!q.TryAdd(line)) Interlocked.Increment(ref dropped);
+        }
+        /// Waits (2 s at most) until what is queued is on disk: at exit.
+        public void Flush() { try { idle.WaitOne(2000); } catch { } }
+        void Run()
+        {
+            var sb = new StringBuilder();
+            while (!stop)
+            {
+                string s;
+                if (!q.TryTake(out s, 200)) { idle.Set(); continue; }
+                sb.Clear(); sb.Append(s);
+                while (q.TryTake(out s)) sb.Append(s);
+                long d = Interlocked.Read(ref dropped);
+                if (d > reported) { sb.Append($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [log] WARN  {d - reported} log lines dropped (queue full)\r\n"); reported = d; }
+                try
+                {
+                    var b = Encoding.UTF8.GetBytes(sb.ToString());
+                    if (reopen) { using (var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) fs.Write(b, 0, b.Length); }
+                    else { if (keep == null) keep = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete); keep.Write(b, 0, b.Length); keep.Flush(); }
+                }
+                catch { }
+                if (q.Count == 0) idle.Set();
+            }
+        }
+    }
+
+    /// The general log logs\AirFrameXR.log, shared with the host (its own writer thread) and the shim: this process queues its lines and a thread appends them in batches,
+    /// and, since 1.3.10, the UI's own log for what is only about the windows: logs\ui\<yyyymmdd-hhmmss>-<component>.log, one file per process and run (no appends from several
+    /// processes), the last 20 per component kept. `Ui` lines follow the level of `log_level` in airframexr.json (error, warn, info; verbose; debug).
     public static class Log
     {
-        public static string Component = "gui";
+        static string component = "gui";
+        public static string Component { get => component; set { component = value; UiStart(); } }
         static readonly object Lock = new object();
+        static LogWriter general, ui;
+        public static int UiLevel = 2;   // 0 error, 1 warn, 2 info, 3 verbose, 4 debug
+        static readonly string[] Names = { "ERROR", "WARN", "INFO", "VERB", "DEBUG" };
 
         public static void Write(string level, string msg)
         {
@@ -349,16 +407,119 @@ namespace AirFrameXR
             {
                 lock (Lock)
                 {
-                    Directory.CreateDirectory(Paths.Logs);
-                    var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{Component}] {level,-5} {msg}\r\n";
-                    using (var fs = new FileStream(Path.Combine(Paths.Logs, "AirFrameXR.log"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+                    if (general == null) { Directory.CreateDirectory(Paths.Logs); general = new LogWriter(Path.Combine(Paths.Logs, "AirFrameXR.log"), true); }
+                    general.Add($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{Component}] {level,-5} {msg}\r\n");
+                }
+                if (level == "WARN" || level == "ERROR") Ui(level, msg);   // the trail of the UI log has the warnings and errors of the general one
+            }
+            catch { }
+        }
+
+        public static bool UiEnabled(int lvl) => ui != null && lvl <= UiLevel;
+
+        /// A line of the UI log: `level` is "ERROR", "WARN", "INFO", "VERB" or "DEBUG".
+        public static void Ui(string level, string msg)
+        {
+            try
+            {
+                int lv = Array.IndexOf(Names, level == "VERBOSE" ? "VERB" : level); if (lv < 0) lv = 2;
+                if (ui == null || lv > UiLevel) return;
+                ui.Add($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{Component}] {Names[lv],-5} {msg}\r\n");
+            }
+            catch { }
+        }
+
+        public static void Flush() { try { general?.Flush(); ui?.Flush(); } catch { } }
+
+        static bool started;
+        static void UiStart()
+        {
+            lock (Lock) { if (started) return; started = true; }
+            try
+            {
+                var root = Json.Load(Paths.Settings);
+                var lvl = Json.Str(root, "log_level", Json.Bool(root, "debug", false) ? "debug" : "info");
+                var li = Array.IndexOf(new[] { "error", "warn", "info", "verbose", "debug" }, lvl.ToLowerInvariant());
+                UiLevel = li < 0 ? 2 : li;
+                var dir = Path.Combine(Paths.Logs, "ui");
+                Directory.CreateDirectory(dir);
+                var mine = Path.GetFileNameWithoutExtension(component);
+                var old = new DirectoryInfo(dir).GetFiles("*-" + component + ".log").OrderBy(f => f.Name).ToList();
+                for (int i = 0; i + 19 < old.Count; i++) { try { old[i].Delete(); } catch { } }   // 20 per component, this run's included
+                ui = new LogWriter(Path.Combine(dir, DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + component + ".log"), false);
+                AppDomain.CurrentDomain.ProcessExit += (s, e) => Flush();
+                Ui("INFO", $"{component} {Version.Text} started: {Environment.OSVersion}, CLR {Environment.Version}, {(Environment.Is64BitProcess ? "64" : "32")}-bit, args: {string.Join(" ", Environment.GetCommandLineArgs().Skip(1))}");
+                AppDomain.CurrentDomain.UnhandledException += (s, e) => { Ui("ERROR", "unhandled exception" + (e.IsTerminating ? " (the process ends)" : "") + ": " + e.ExceptionObject); Write("ERROR", "unhandled exception: " + (e.ExceptionObject as Exception)?.Message); Flush(); };
+                Application.ThreadException += (s, e) =>
+                {
+                    Ui("ERROR", "unhandled exception on the UI thread: " + e.Exception); Write("ERROR", "unhandled exception on the UI thread: " + e.Exception.Message);
+                    using (var d = new ThreadExceptionDialog(e.Exception)) d.ShowDialog();   // what WinForms shows without a handler (Continue / Quit)
+                };
+                if (UiLevel >= 4)
+                {
+                    int first = 0;
+                    AppDomain.CurrentDomain.FirstChanceException += (s, e) => { if (Interlocked.Increment(ref first) <= 100) Ui("DEBUG", "first-chance exception: " + e.Exception.GetType().Name + ": " + e.Exception.Message); };
+                }
+                Application.Idle += WatchForms;
+            }
+            catch { }
+        }
+
+        // the windows: each one that opens (found on the message loop's idle) gets its geometry, DPI and monitor logged, and its closing
+        static readonly HashSet<Form> Seen = new HashSet<Form>();
+        static bool envLogged;
+        static void WatchForms(object s, EventArgs e)
+        {
+            try
+            {
+                if (Application.OpenForms.Count == Seen.Count && envLogged) return;
+                if (!envLogged)
+                {
+                    envLogged = true;
+                    var sc = Screen.AllScreens;
+                    Ui("INFO", $"{sc.Length} monitor(s): " + string.Join("; ", sc.Select(m => $"{m.DeviceName} {m.Bounds.Width}x{m.Bounds.Height}{(m.Primary ? " primary" : "")}, work area {m.WorkingArea.Width}x{m.WorkingArea.Height}")));
+                    using (var g = Graphics.FromHwnd(IntPtr.Zero)) Ui("INFO", $"system DPI {g.DpiX:0}x{g.DpiY:0} ({g.DpiX / 96 * 100:0} %), font {SystemFonts.MessageBoxFont.Name} {SystemFonts.MessageBoxFont.SizeInPoints} pt");
+                    if (UiLevel >= 4) StartStallWatch();
+                }
+                foreach (Form f in Application.OpenForms)
+                {
+                    if (!Seen.Add(f)) continue;
+                    var t0 = DateTime.Now; var kind = f.GetType().Name;
+                    Ui("INFO", $"window opened: {kind} '{f.Text}' {f.Width}x{f.Height} at {f.Left},{f.Top} on {Screen.FromControl(f).DeviceName}, DPI {f.DeviceDpi}");
+                    f.ResizeEnd += (a, b) => Ui("VERB", $"window {kind} now {f.Width}x{f.Height} at {f.Left},{f.Top} on {Screen.FromControl(f).DeviceName}");
+                    f.DpiChanged += (a, b) => Ui("VERB", $"window {kind}: DPI changed to {b.DeviceDpiNew}");
+                    f.FormClosed += (a, b) =>
                     {
-                        var b = Encoding.UTF8.GetBytes(line);
-                        fs.Write(b, 0, b.Length);
-                    }
+                        Ui("INFO", $"window closed: {kind} after {(DateTime.Now - t0).TotalSeconds:0} s ({b.CloseReason})");
+                        if (UiLevel >= 4) Ui("DEBUG", $"GDI objects {NativeCounts(0)}, USER objects {NativeCounts(1)}");
+                        Seen.Remove(f);
+                    };
                 }
             }
             catch { }
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern uint GetGuiResources(IntPtr hProcess, uint flags);
+        static uint NativeCounts(uint kind) { try { return GetGuiResources(Process.GetCurrentProcess().Handle, kind); } catch { return 0; } }
+
+        // debug: the UI thread's message loop must turn every 100 ms; a gap over 300 ms is a freeze the user saw as a window not drawing
+        static long beat;
+        static void StartStallWatch()
+        {
+            var timer = new System.Windows.Forms.Timer { Interval = 100 };
+            timer.Tick += (a, b) => Interlocked.Exchange(ref beat, Stopwatch.GetTimestamp());
+            Interlocked.Exchange(ref beat, Stopwatch.GetTimestamp()); timer.Start();
+            new Thread(() =>
+            {
+                bool stalled = false; long since = 0;
+                while (true)
+                {
+                    Thread.Sleep(100);
+                    double ms = (Stopwatch.GetTimestamp() - Interlocked.Read(ref beat)) * 1000.0 / Stopwatch.Frequency;
+                    if (ms > 300 && !stalled) { stalled = true; since = Stopwatch.GetTimestamp(); }
+                    else if (ms <= 300 && stalled) { stalled = false; Ui("DEBUG", $"UI thread did not run for {(Stopwatch.GetTimestamp() - since) * 1000.0 / Stopwatch.Frequency + 300:0} ms"); }
+                }
+            }) { IsBackground = true, Name = "ui-stall-watch" }.Start();
         }
     }
 
@@ -952,7 +1113,7 @@ namespace AirFrameXR
         int SafeExitCode() { try { return p.ExitCode; } catch { return -1; } }
 
         public event Action<string> OnSend;   // every command, running or not (harness/streamer_events.py)
-        public void Send(string line) { OnSend?.Invoke(line); try { if (Running) { p.StandardInput.WriteLine(line); p.StandardInput.Flush(); } } catch { } }
+        public void Send(string line) { Log.Ui("INFO", "host command: " + line); OnSend?.Invoke(line); try { if (Running) { p.StandardInput.WriteLine(line); p.StandardInput.Flush(); } } catch { } }
 
         /// Asks the host to quit (it un-mutes the PC speakers on the way out); kills it after the timeout.
         public void Stop(int timeoutMs = 6000)

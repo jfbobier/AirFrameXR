@@ -211,7 +211,7 @@ namespace AirFrameXR
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (hover != -1) { hover = -1; Invalidate(); } }
     }
 
-    /// The last run of a game in the general log (logs\AirFrameXR.log): what the host wrote every 10 s or 30 s while it ran. Only what is logged: the game's and the stream's fps and
+    /// The last run of a game: since 1.3.10 the run's own log (logs\games\<exe>\<yyyymmdd-hhmmss>.log, `ForGame`), before that the general log (logs\AirFrameXR.log, `Last`): what the host wrote every 10 s or 30 s while it ran. Only what is logged: the game's and the stream's fps and
     /// the generation lag (when frame generation is on), the GPU memory in use. Nothing is recorded for this: it reads the log that is already there.
     public static class LogTimeline
     {
@@ -240,6 +240,95 @@ namespace AirFrameXR
         static readonly System.Text.RegularExpressions.Regex Arrival = new System.Text.RegularExpressions.Regex(@"phase lock: arrivals (-?[\d.]+) ms before the render tick \(target ([\d.]+)\)", System.Text.RegularExpressions.RegexOptions.Compiled);
         static readonly System.Text.RegularExpressions.Regex Gpu = new System.Text.RegularExpressions.Regex(@"GPU (\d+) of \d+ MB used", System.Text.RegularExpressions.RegexOptions.Compiled);
 
+        /// The folder name the host gives a game's run logs (logsink.rs `sanitize`: letters, digits, . - _ and space; the rest becomes _).
+        public static string SanitizeExe(string exe)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in exe ?? "") sb.Append((c < 128 && char.IsLetterOrDigit(c)) || c == '.' || c == '-' || c == '_' || c == ' ' ? c : '_');
+            var r = sb.ToString().Trim().Trim('.');
+            return r.Length == 0 ? "unknown" : r;
+        }
+
+        /// The newest run log of `exe` in `logsDir`\games\<exe>\ (null when the game has none: older host, or never run).
+        public static string NewestRunLog(string logsDir, string exe)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(exe)) return null;
+                var dir = System.IO.Path.Combine(logsDir, "games", SanitizeExe(exe));
+                if (!System.IO.Directory.Exists(dir)) return null;
+                string best = null;
+                foreach (var f in System.IO.Directory.GetFiles(dir, "*.log")) if (best == null || string.CompareOrdinal(System.IO.Path.GetFileName(f), System.IO.Path.GetFileName(best)) > 0) best = f;   // names are the start time: they sort
+                return best;
+            }
+            catch { return null; }
+        }
+
+        /// The last run of `exe`: its run log when there is one, else what the general log (logsDir\AirFrameXR.log) says.
+        public static Run ForGame(string logsDir, string exe)
+        {
+            var f = NewestRunLog(logsDir, exe);
+            return (f != null ? ParseRunLog(f, exe) : null) ?? Last(System.IO.Path.Combine(logsDir, "AirFrameXR.log"), exe);
+        }
+
+        /// The run a games.json session points at (`log`, relative to the logs folder), else the game's newest run log, else the general log.
+        public static Run ForRecord(string logsDir, string relLog, string exe)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(relLog) && relLog.IndexOf("..", StringComparison.Ordinal) < 0)
+                {
+                    var f = System.IO.Path.Combine(logsDir, relLog.Replace('/', System.IO.Path.DirectorySeparatorChar));
+                    if (System.IO.File.Exists(f)) { var r = ParseRunLog(f, exe); if (r != null) return r; }
+                }
+            }
+            catch { }
+            return ForGame(logsDir, exe);
+        }
+
+        static readonly System.Text.RegularExpressions.Regex RunEnd = new System.Text.RegularExpressions.Regex(@"\[log\] INFO  (game ended: |log closed)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// One run's own log: every line belongs to the run; it starts at the first line and ends at "game ended" (or at the last line when the host died).
+        public static Run ParseRunLog(string file, string exe)
+        {
+            try
+            {
+                var cur = new Run { Exe = exe }; bool first = true; DateTime lastT = DateTime.MinValue;
+                using (var fs = new System.IO.FileStream(file, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete))
+                using (var rd = new System.IO.StreamReader(fs, System.Text.Encoding.UTF8))
+                {
+                    string line;
+                    while ((line = rd.ReadLine()) != null)
+                    {
+                        if (line.Length < 24) continue;
+                        DateTime t; if (!DateTime.TryParseExact(line.Substring(0, 19), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out t)) continue;
+                        lastT = t;
+                        if (first) { cur.Start = t; first = false; }
+                        if (RunEnd.IsMatch(line)) { cur.End = t; cur.Ended = true; continue; }
+                        Collect(cur, line, t);
+                    }
+                }
+                if (first) return null;
+                if (!cur.Ended) cur.End = lastT;
+                return cur;
+            }
+            catch { return null; }
+        }
+
+        static void Collect(Run cur, string line, DateTime t)
+        {
+            var p = Perf.Match(line);
+            if (p.Success)
+            {
+                cur.PerfT.Add(t); cur.App.Add(double.Parse(p.Groups[1].Value, CultureInfo.InvariantCulture)); cur.Stream.Add(double.Parse(p.Groups[2].Value, CultureInfo.InvariantCulture)); cur.Lag.Add(double.Parse(p.Groups[3].Value, CultureInfo.InvariantCulture));
+                return;
+            }
+            var g = Gpu.Match(line);
+            if (g.Success) { cur.GpuT.Add(t); cur.GpuMb.Add(double.Parse(g.Groups[1].Value, CultureInfo.InvariantCulture)); return; }
+            var a = Arrival.Match(line);
+            if (a.Success) { cur.ArrT.Add(t); cur.Arr.Add(double.Parse(a.Groups[1].Value, CultureInfo.InvariantCulture)); cur.ArrTarget = double.Parse(a.Groups[2].Value, CultureInfo.InvariantCulture); }
+        }
+
         public static Run Last(string logFile, string exe)
         {
             try
@@ -264,16 +353,7 @@ namespace AirFrameXR
                             continue;
                         }
                         if (cur == null) continue;
-                        var p = Perf.Match(line);
-                        if (p.Success)
-                        {
-                            cur.PerfT.Add(t); cur.App.Add(double.Parse(p.Groups[1].Value, CultureInfo.InvariantCulture)); cur.Stream.Add(double.Parse(p.Groups[2].Value, CultureInfo.InvariantCulture)); cur.Lag.Add(double.Parse(p.Groups[3].Value, CultureInfo.InvariantCulture));
-                            continue;
-                        }
-                        var g = Gpu.Match(line);
-                        if (g.Success) { cur.GpuT.Add(t); cur.GpuMb.Add(double.Parse(g.Groups[1].Value, CultureInfo.InvariantCulture)); continue; }
-                        var a = Arrival.Match(line);
-                        if (a.Success) { cur.ArrT.Add(t); cur.Arr.Add(double.Parse(a.Groups[1].Value, CultureInfo.InvariantCulture)); cur.ArrTarget = double.Parse(a.Groups[2].Value, CultureInfo.InvariantCulture); }
+                        Collect(cur, line, t);
                     }
                     if (last != null && !last.Ended) last.End = lastT;
                 }

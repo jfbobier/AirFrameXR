@@ -32,20 +32,16 @@
 #include <algorithm>
 #include "desktop.cpp"
 #include "mirror_math.h"
+#include "../common/aflog.h"
 #define XR_USE_GRAPHICS_API_D3D11
 #define XR_USE_PLATFORM_WIN32
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
-static FILE* g_log;
-static void L(const char* fmt, ...) {
-    if (!g_log) return;
-    va_list a; va_start(a, fmt);
-    SYSTEMTIME t; GetLocalTime(&t);
-    fprintf(g_log, "%04d-%02d-%02d %02d:%02d:%02d.%03d [mirrordesktop] ", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
-    vfprintf(g_log, fmt, a); fputc('\n', g_log); fflush(g_log);
-    va_end(a);
-}
+// The mirror is an OpenXR client like any game: its log is its own (one file per run, logs\\mirrordesktop\\<yyyymmdd-hhmmss>.log, its own writer thread), never the
+// host's writer (docs/ARCHITECTURE.md, "Logging"). L() is an info line.
+static aflog::Writer g_w;
+#define L(...) g_w.log(aflog::Info, __VA_ARGS__)
 #define CK(x) do { XrResult r_ = (x); if (XR_FAILED(r_)) { L("FAIL %s -> %d", #x, (int)r_); return 1; } } while (0)
 
 static Q toQ(XrQuaternionf q) { return { q.x, q.y, q.z, q.w }; }
@@ -127,9 +123,10 @@ static std::string otherRuntimeUser() {
 }
 
 int main(int argc, char** argv) {
-    std::string logPath, inputLogPath; int seconds = 0; bool mouse = true, synthetic = false; std::string imageFile; uint32_t clear = 0x107C10; bool clearGiven = false, ignoreSignal = false;
+    std::string logPath, inputLogPath; aflog::Level logLevel = aflog::Info; int seconds = 0; bool mouse = true, synthetic = false; std::string imageFile; uint32_t clear = 0x107C10; bool clearGiven = false, ignoreSignal = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--log") && i + 1 < argc) logPath = argv[++i];
+        else if (!strcmp(argv[i], "--log-level") && i + 1 < argc) aflog::parseLevel(argv[++i], logLevel);
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-mouse")) mouse = false;
         else if (!strcmp(argv[i], "--clear") && i + 1 < argc) { clear = (uint32_t)strtoul(argv[++i], nullptr, 16) & 0xFFFFFF; clearGiven = true; }
@@ -138,17 +135,17 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--image-rgba") && i + 1 < argc) imageFile = argv[++i];   // with --synthetic: a 1920 x 1080 raw BGRA picture instead of the grey patches (the README's demo desktop)
         else if (!strcmp(argv[i], "--input-log") && i + 1 < argc) inputLogPath = argv[++i];
     }
-    if (logPath.empty()) {   // <package>\logs\mirrordesktop.log (the exe is in <package>\bin)
+    if (logPath.empty()) {   // <package>\logs\mirrordesktop\<time>.log, the last 20 runs kept (the exe is in <package>\bin)
         char exe[MAX_PATH]; GetModuleFileNameA(nullptr, exe, MAX_PATH);
         std::string d = exe; d = d.substr(0, d.find_last_of("\\/")); d = d.substr(0, d.find_last_of("\\/"));
         CreateDirectoryA((d + "\\logs").c_str(), nullptr);
-        logPath = d + "\\logs\\mirrordesktop.log";
+        logPath = aflog::runFile(d + "\\logs\\mirrordesktop");
     }
     std::string pkgDir; { char exe[MAX_PATH]; GetModuleFileNameA(nullptr, exe, MAX_PATH); pkgDir = exe; pkgDir = pkgDir.substr(0, pkgDir.find_last_of("\\/")); pkgDir = pkgDir.substr(0, pkgDir.find_last_of("\\/")); }
     if (!clearGiven) clear = idleColour(pkgDir + "\\config\\airframexr.json");
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     findPrimaryMonitor();
-    g_log = fopen(logPath.c_str(), "a");
+    g_w.start(logPath, "mirrordesktop", logLevel);
     L("start (background %06x%s, mouse %s%s)", clear, clearGiven ? " from the command line" : " from the config", mouse ? "on" : "off", synthetic ? ", synthetic desktop" : "");
     FILE* inLog = inputLogPath.empty() ? nullptr : fopen(inputLogPath.c_str(), "w");
     if (inLog) fprintf(inLog, "wall_ns,event,detail\n");
