@@ -64,6 +64,9 @@ def run_one(name):
     except lib.Blocked as e:
         result.update(status="BLOCKED", reason=str(e), checks=[])
         outdir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:   # the scenario left nothing to analyse (a process killed, the host never started): a failed scenario, not the end of the suite
+        result.update(status="FAIL", checks=[{"name": "scenario_ran", "ok": False, "value": f"{type(e).__name__}: {e}"[:300], "expected": "artifacts to analyse"}])
+        outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "result.json").write_text(json.dumps(result, indent=1))
     latest = lib.RESULTS / "latest"
     try:

@@ -1627,6 +1627,9 @@ def analyse(sc, outdir: Path):
         ts_ = [int(r["ts_ns"]) for r in fr[first:]]
         a["client"]["timestamps_monotonic_tracked"] = all(y >= x for x, y in zip(ts_, ts_[1:]))
         a["client"]["frames_before_tracking"] = first
+        # duplicates likewise: the frames before the first tracking sample carry the host's own clock, so consecutive ones are identical whatever the pipeline does, and how many there are
+        # is the rig's start (about 5 frames, or 22 to 28 in the slow start the mock client shows on every build, bimodal for weeks): only the duplicates among the tracked frames count
+        a["client"]["duplicate_timestamps_tracked"] = sum(1 for x, y in zip(ts_, ts_[1:]) if x == y)
     hs = (outdir / "host_stdout.txt").read_text(errors="replace") if (outdir / "host_stdout.txt").exists() else ""
     a["host_event_names"] = sorted(set(re.findall(r'"event":"([a-z_]+)"', hs)))
     a["bench_steps"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"bench_step"' in l]
@@ -1939,7 +1942,9 @@ def evaluate(sc, a):
     if ck.get("timestamps_monotonic", True):
         mono = c.get("timestamps_monotonic_tracked", c.get("timestamps_monotonic"))
         chk("timestamps_monotonic", mono, {"all": c.get("timestamps_monotonic"), "from_first_tracked_frame": mono, "frames_before_tracking": c.get("frames_before_tracking")}, "non-decreasing from the first frame that carries a pose the client sent (frames stamped before the first tracking sample use the host's clock)")
-    chk("duplicate_timestamps", c.get("duplicate_timestamps", 0) <= ck.get("max_duplicate_timestamps", 0), c.get("duplicate_timestamps"), f"<={ck.get('max_duplicate_timestamps', 0)}")
+    dups = c.get("duplicate_timestamps_tracked", c.get("duplicate_timestamps", 0))   # from the first frame that carries a client pose (see analyse)
+    chk("duplicate_timestamps", dups <= ck.get("max_duplicate_timestamps", 0), {"tracked": dups, "all": c.get("duplicate_timestamps"), "frames_before_tracking": c.get("frames_before_tracking")},
+        f"<={ck.get('max_duplicate_timestamps', 0)} among the frames from the first tracked one")
     if "min_delivery_ratio" in ck and h and h.get("frames_sent"):
         r = c["frames"] / h["frames_sent"]
         chk("delivery_ratio", r >= ck["min_delivery_ratio"], round(r, 3), f">={ck['min_delivery_ratio']} (client frames / host frames sent; UDP loss)")
