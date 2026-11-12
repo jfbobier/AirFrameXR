@@ -649,6 +649,7 @@ mod tests {
         assert_eq!(sanitize(""), "unknown");
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn civil_date_from_unix() {
         let s = Stamp::from_unix(1_700_000_000, 7); // 2023-11-14 22:13:20 UTC

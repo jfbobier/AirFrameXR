@@ -92,6 +92,25 @@ Observed on 2026-11-10/11 logs, and ideas that follow:
     reports, TestFlight feedback). An "export for sharing" action that redacts IPs, hostnames and user paths would be cheap and avoids leaks
     like the contact-details one of 2026-11-11.
 
+## 6b. The headset's own tick counts (2026-11-12, 1.3.10)
+
+The gap inference above is replaced, where the client can do it, by the headset's own count: **every display tick is counted by the client and one `va_ticks` line goes
+to the host every 10 s** (`ClientControlPacket::Log`, sent at error level because that is what the clients forward; the host reads the line before it counts it as an error).
+One definition on both platforms: `{"v":1,"client":"visionos"|"quest","t":secs,"ticks":N,"fresh":N,"resubmit":N,"reprojected":N,"none":N,"drops":N}`; the counts must add up
+to `ticks`. **Headset repeated = (ticks - fresh) / ticks.**
+
+| Client | Where | What it counts |
+|---|---|---|
+| visionOS | `EventHandler.pollFrameForDisplay` (the pick of every tick; integers on the render thread) and `reportTicksIfDue` (Renderer, after the pick) | fresh, resubmit (visionOS skipped our last submission), reprojected (no new frame in time), none; drops = decoder queue overflow + the catch-up rule |
+| Quest | `client_openxr/src/stream.rs` `render()` | fresh (a decoded frame was there), none; Quest has no resubmit or reprojected notion visible to ALVR, so those are 0 |
+
+Host: `logs::client_stats::parse_ticks` / `ticks` (one run-log line per window), `client_frames_missed` continues from the gap-based counters at the first window, so a run's baseline never jumps.
+The gap bins (S1) stay as the fallback for a client that sends no counts (stock ALVR, an older build) and as the cross-check for H1 to H4.
+
+Status: host parsing unit-tested; visionOS `EventHandler.swift` compiled and run in the Linux protocol harness (the render-thread pick counts are not asserted there yet; `Renderer.swift` compiles only in CI);
+Quest change syntax-checked only (`rustfmt`), **not built**. Neither client has run with a headset; the first field window decides whether the two clients' numbers agree.
+
 ## 7. Log of steps
 
 - 2026-11-11: this document; S1 committed (`12104ae`, branch `1.3.10`, local, not pushed).
+- 2026-11-12: `va_ticks` on both clients and in the host (branches `1.3.10-ticks` of the visionOS and Quest repos, local, not pushed); logging framework steps 1 and 2 committed on `1.3.10` (`f4c5aad`, `afeaaa5`).

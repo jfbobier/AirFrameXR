@@ -344,6 +344,10 @@ impl log::Log for AlvrLogger {
             }
             return;
         }
+        if let Some(t) = client_stats::parse_ticks(&msg) {
+            client_stats::ticks(&t);   // the headset's own display-tick counts (not an error: the client sends it at error level so it is forwarded)
+            return;
+        }
         if msg.starts_with('{') && msg.ends_with('}') {
             match serde_json::from_str::<EventType>(&msg) {
                 Ok(EventType::GraphStatistics(g)) => {
@@ -511,9 +515,78 @@ pub mod client_stats {
             b[0], b[1], b[2], 100.0 * b[2] as f64 / n as f64, b[3], b[4], b[5], 100.0 * skipped as f64 / (n + skipped) as f64));
     }
 
-    /// (frames the headset displayed, display periods it repeated) so far
+    /// The headset's own display-tick counts (1.3.10): the visionOS and the Quest client each send a `va_ticks {...}` line through the client log every 10 s:
+    /// what each of its display ticks showed (`fresh` = a new frame; `resubmit`, `reprojected`, `none` = the same frame again or nothing; `drops` = frames its
+    /// decoder queue discarded). This is what "headset repeated" is made of when it is there; the gaps between reported frames (above) are the fallback
+    /// for a client that does not send it (stock ALVR, an older build). One definition on both platforms: repeated = (resubmit + reprojected + none) / ticks.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Ticks {
+        pub client: String,
+        pub secs: f64,
+        pub ticks: u64,
+        pub fresh: u64,
+        pub resubmit: u64,
+        pub reprojected: u64,
+        pub none: u64,
+        pub drops: u64,
+    }
+
+    impl Ticks {
+        /// Share of the ticks that did not show a new frame (0 when no tick was counted).
+        pub fn repeated(&self) -> f64 {
+            if self.ticks == 0 { 0.0 } else { (self.ticks.saturating_sub(self.fresh)) as f64 / self.ticks as f64 }
+        }
+    }
+
+    /// The `va_ticks` line inside a client log message ("Client name: [error] va_ticks {...}" or the bare line), None when the message has none or it is not valid.
+    pub fn parse_ticks(msg: &str) -> Option<Ticks> {
+        let at = msg.find("va_ticks {")?;
+        let v: Value = serde_json::from_str(msg[at + "va_ticks ".len()..].trim()).ok()?;
+        let n = |k: &str| v[k].as_u64().unwrap_or(0);
+        let t = Ticks { client: v["client"].as_str().unwrap_or("?").to_string(), secs: v["t"].as_f64().unwrap_or(0.0), ticks: n("ticks"), fresh: n("fresh"),
+            resubmit: n("resubmit"), reprojected: n("reprojected"), none: n("none"), drops: n("drops") };
+        // the counts must add up (a client that miscounts must not move the figure)
+        if t.ticks == 0 || t.fresh + t.resubmit + t.reprojected + t.none != t.ticks || t.secs <= 0.0 { return None; }
+        Some(t)
+    }
+
+    static TICKS_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static TICKS_FRESH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    /// the gap-based counters when the first `va_ticks` window arrived: the figure continues from there, so the totals never jump (a run's baseline may predate it)
+    static TICKS_ANCHOR: std::sync::Mutex<Option<(u64, u64)>> = std::sync::Mutex::new(None);
+
+    /// A `va_ticks` window arrived: counted, and one line in the run's log.
+    pub fn ticks(t: &Ticks) {
+        use std::sync::atomic::Ordering::Relaxed;
+        {
+            let mut a = TICKS_ANCHOR.lock().unwrap();
+            if a.is_none() {
+                *a = Some((CLIENT_FRAMES.load(Relaxed), CLIENT_MISSED.load(Relaxed)));
+            }
+        }
+        TICKS_TOTAL.fetch_add(t.ticks, Relaxed);
+        TICKS_FRESH.fetch_add(t.fresh, Relaxed);
+        super::run_line(super::Level::Info, "client", format!(
+            "headset ticks ({}): {:.0} s, {} ticks, {:.1} % without a new frame (resubmit {}, reprojected {}, none {}), {} frames dropped by its queue",
+            t.client, t.secs, t.ticks, 100.0 * t.repeated(), t.resubmit, t.reprojected, t.none, t.drops));
+    }
+
+    /// (frames the headset displayed new, display ticks that showed no new frame) so far: from the headset's own tick counts when it sends them, else from the gaps between
+    /// the frames it reported.
     pub fn client_frames_missed() -> (u64, u64) {
-        (CLIENT_FRAMES.load(std::sync::atomic::Ordering::Relaxed), CLIENT_MISSED.load(std::sync::atomic::Ordering::Relaxed))
+        use std::sync::atomic::Ordering::Relaxed;
+        match *TICKS_ANCHOR.lock().unwrap() {
+            Some((f0, m0)) => {
+                let (total, fresh) = (TICKS_TOTAL.load(Relaxed), TICKS_FRESH.load(Relaxed));
+                (f0 + fresh, m0 + total.saturating_sub(fresh))
+            }
+            None => (CLIENT_FRAMES.load(Relaxed), CLIENT_MISSED.load(Relaxed)),
+        }
+    }
+
+    /// Does the figure come from the headset's own counts?
+    pub fn ticks_reported() -> bool {
+        TICKS_ANCHOR.lock().unwrap().is_some()
     }
     static LAST_SUMMARY: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
 
@@ -633,6 +706,18 @@ pub mod client_stats {
 
     #[cfg(test)]
     mod tests {
+        #[test]
+        fn va_ticks_line_is_parsed_and_checked() {
+            let line = "Client Vision Pro: [error] va_ticks {\"v\":1,\"client\":\"visionos\",\"t\":10.01,\"ticks\":1000,\"fresh\":960,\"resubmit\":10,\"reprojected\":20,\"none\":10,\"drops\":3}";
+            let t = super::parse_ticks(line).unwrap();
+            assert_eq!((t.client.as_str(), t.ticks, t.fresh, t.drops), ("visionos", 1000, 960, 3));
+            assert!((t.repeated() - 0.04).abs() < 1e-9);
+            // counts that do not add up, an empty window, or no line at all
+            assert!(super::parse_ticks("va_ticks {\"t\":10,\"ticks\":10,\"fresh\":5,\"none\":1}").is_none());
+            assert!(super::parse_ticks("va_ticks {\"t\":10,\"ticks\":0}").is_none());
+            assert!(super::parse_ticks("Client x: [info] hello").is_none());
+        }
+
         use super::*;
 
         #[test]
