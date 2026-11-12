@@ -74,6 +74,8 @@ pub struct Settings {
     pub stream_fit_window: Option<bool>,
     pub stream_reference_eye: Option<[i64; 2]>,
     pub debug: Option<bool>,
+    /// verbosity of AirFrameXR.log: error | warn | info (default) | verbose | debug (docs/EXPERIMENTAL_SWITCHES.md)
+    pub log_level: Option<String>,
     pub gamma: Option<f32>,
     /// headset height above the floor handed to games (m); 0 = the headset's own floor estimate
     pub height_m: Option<f32>,
@@ -141,6 +143,7 @@ pub fn load_settings(path: &Path) -> Settings {
         stream_fit_window: video["stream_fit_window"].as_bool(),
         stream_reference_eye: video["stream_reference_eye"].as_array().and_then(|a| Some([a.first()?.as_i64()?, a.get(1)?.as_i64()?])),
         debug: v["debug"].as_bool(),
+        log_level: v["log_level"].as_str().map(str::to_string),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
         height_m: v["headset"]["height_m"].as_f64().map(|g| g as f32),
         recenter_key: v["controls"]["recenter_key"].as_str().map(str::to_string),
@@ -332,6 +335,12 @@ pub fn spawn_stdin_control() {
                 (Some("gamma"), Some(g)) => {
                     if let Ok(g) = g.parse::<f32>() {
                         GAMMA_REQ.store(g.clamp(0.5, 2.0).to_bits(), Ordering::SeqCst);
+                    }
+                }
+                (Some("log_level"), Some(v)) => {
+                    if let Some(l) = crate::logs::Level::parse(v) {
+                        crate::logs::set_level(l);
+                        crate::logs::general("INFO", &format!("log level {}", l.name().to_lowercase()));
                     }
                 }
                 (Some("debug"), Some(v)) => DEBUG_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),

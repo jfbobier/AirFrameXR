@@ -496,7 +496,7 @@ def run_scenario(sc, outdir: Path, log=print):
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "gui": "--gui", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
                                      "width": "--width", "height": "--height", "height_m": "--height-m", "noise": "--noise", "qp_map": "--qp-map",
                                      "idle_rgb": "--idle-rgb", "gpu_priority": "--gpu-priority", "encode_profile": "--encode-profile",
-                                     "install_dir": "--install-dir", "debug": "--debug", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
+                                     "install_dir": "--install-dir", "debug": "--debug", "log_level": "--log-level", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
@@ -1636,7 +1636,10 @@ def analyse(sc, outdir: Path):
     if lg.exists():
         dbg = sorted((lg / "debug").glob("*")) if (lg / "debug").exists() else []
         a["install_logs"] = {"general": (lg / "AirFrameXR.log").read_text(errors="replace") if (lg / "AirFrameXR.log").exists() else "",
-                             "debug_files": sorted(p.name for p in dbg[-1].iterdir()) if dbg else []}
+                             "debug_files": sorted(p.name for p in dbg[-1].iterdir()) if dbg else [],
+                             # logs\games\<exe>\<yyyymmdd-hhmmss>.log: one file per run (the writer thread, tools/host/src/logsink.rs)
+                             "game_logs": {d.name: {f.name: f.read_text(errors="replace") for f in sorted(d.glob("*.log"))} for d in sorted((lg / "games").glob("*"))} if (lg / "games").exists() else {},
+                             "log_files": sorted(p.name for p in lg.glob("AirFrameXR*.log"))}
     if sc.get("reconnect"):
         a["client2"] = jload(outdir / "client2_report.json")
     if sc.get("app"):
@@ -2268,6 +2271,30 @@ def evaluate(sc, a):
         files, need = il.get("debug_files", []), ["host_events.jsonl", "alvr.log", "gpu.csv"]
         chk("debug_session_files", bool(files) and all(n in files for n in need) and any(n.startswith("shim_xr_probe_") for n in files), files,
             "logs\\debug\\<time>\\ has " + ", ".join(need) + ", shim_xr_probe_<pid>.log")
+    if ck.get("game_log"):
+        # the run's own log: logs\games\xr_probe.exe\<yyyymmdd-hhmmss>.log with the start line, the run's timeline lines and the end line; none of those lines in the main log
+        il = a.get("install_logs") or {}
+        runs = (il.get("game_logs") or {}).get("xr_probe.exe", {})
+        names_ok = bool(runs) and all(re.fullmatch(r"\d{8}-\d{6}\.log", n) for n in runs)
+        txt = next(iter(runs.values()), "")
+        chk("game_log_file", names_ok and "run log started" in txt and "game ended: xr_probe.exe" in txt, list(runs) or "none",
+            "logs\\games\\xr_probe.exe\\<yyyymmdd-hhmmss>.log with 'run log started' and 'game ended: xr_probe.exe'")
+        main = il.get("general", "")
+        chk("timeline_lines_only_in_game_log", "frame generation perf" not in main and "memory: host" not in main and "phase lock:" not in main,
+            [k for k in ("frame generation perf", "memory: host", "phase lock:") if k in main] or "none in the main log", "the run's periodic lines are in the game log, not in AirFrameXR.log")
+        if "game_log_min_lines" in ck:
+            n = len(txt.splitlines())
+            chk("game_log_lines", n >= ck["game_log_min_lines"], n, f">= {ck['game_log_min_lines']} lines in the run's log")
+    if "log_level_main" in ck:
+        il = a.get("install_logs") or {}
+        want, forbid = ck["log_level_main"].get("present", []), ck["log_level_main"].get("absent", [])
+        gen = il.get("general", "") + "\n".join(t for r in (il.get("game_logs") or {}).values() for t in r.values())
+        chk("log_level_lines", all(w in gen for w in want) and not any(w in gen for w in forbid), {"missing": [w for w in want if w not in gen], "unexpected": [w for w in forbid if w in gen]},
+            f"present {want}, absent {forbid}")
+    if ck.get("log_line_format"):
+        gen = (a.get("install_logs") or {}).get("general", "")
+        bad = [l for l in gen.splitlines() if l.strip() and not re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[[^\]]+\] (ERROR|WARN |INFO |VERB |DEBUG) ", l)]
+        chk("log_line_format", not bad and gen.strip() != "", bad[:3] or "all lines match", "every line: 'yyyy-mm-dd hh:mm:ss.mmm [component] LEVEL message'")
     if ck.get("bench_tracks_target"):
         st = a.get("bench_steps") or []
         ok = bool(st) and all(abs(x["actual_mbps"] - x["target_mbps"]) <= 0.2 * x["target_mbps"] and x.get("client_fps", 0) >= 80 for x in st)

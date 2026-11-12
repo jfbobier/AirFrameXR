@@ -110,7 +110,7 @@ fn run(origin: Instant, shared: Arc<Shared>) {
                 let row = unsafe { std::ffi::CStr::from_ptr(b.as_ptr()) }.to_string_lossy().to_string();
                 let v: Vec<u64> = row.split(',').filter_map(|x| x.parse().ok()).collect();
                 if v.len() == 9 {
-                    logs::general("INFO", &format!("memory: host {} MB private ({} MB working set), {} handles; RAM {} of {} MB free; GPU {} of {} MB used, host process {} MB of a {} MB VRAM budget",
+                    logs::run_line(logs::Level::Info, "memory", format!("memory: host {} MB private ({} MB working set), {} handles; RAM {} of {} MB free; GPU {} of {} MB used, host process {} MB of a {} MB VRAM budget",
                         v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]));
                     event(origin, "memory", json!({ "private_mb": v[0], "ws_mb": v[1], "handles": v[2], "ram_free_mb": v[3], "ram_total_mb": v[4],
                         "gpu_used_mb": v[5], "gpu_total_mb": v[6], "host_vram_mb": v[7], "vram_budget_mb": v[8] }));

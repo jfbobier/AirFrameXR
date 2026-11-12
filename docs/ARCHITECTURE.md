@@ -122,3 +122,32 @@ encode envelope, shim running-start envelope and late releases, GPU class), `hos
 encode start, encode ms, send time, hold), `tracking.csv`, the shim log (`pacing:` line every 900 frames), and with the
 client-statistics patch `client_frames.csv` / `client_graph.csv` (the headset's per-frame report). The pacing lab (`harness/run.py pacing`) measures
 the same things against an emulated Vision Pro display without the headset; `harness/live.py` drives real headset runs.
+
+## Logging (1.3.10)
+
+**One writer thread per process owns the log files; everything else only queues lines.** The code is `tools/host/src/logsink.rs` (std only, no ALVR types; its unit tests run on their own with `rustc --test`) behind the `logs::` API of the host (`general`, `run_line`, `game_start`, `game_end`, `set_level`, `flush`).
+
+```
+host code / ALVR's log crate ──► Sink::log ──► bounded queue ──► log-writer thread ──► logs\AirFrameXR.log
+ (any thread, never blocks)       stamp + level check (one          (format, batch, flush        logs\games\<exe>\<yyyymmdd-hhmmss>.log
+                                  atomic read), try_send            every 200 ms and at once     logs\debug\<time>\...  (debug level only)
+                                                                    for warnings, roll, prune)
+```
+
+- **Callers never wait for the disk.** `log` stamps the line, `try_send`s it and returns. A full queue drops the line and counts it; the writer then writes `N log lines dropped (queue full)` once. A log that stalls a frame is worse than a gap. The frame path logs nothing at the default level: it increments counters, and the writer's side prints the summary lines.
+- **Verbosity is one scale** (`logsink::Level`): `error`, `warn`, `info` (default: events, warnings, errors), `verbose` (the periodic detail lines: phase lock, tracking samples), `debug` (the debug session folder with its CSVs and raw streams). It is set by `log_level` in `airframexr.json`, `--log-level`, the stdin command `log_level <level>` (live), and the old `debug` switch is kept as an alias for the `debug` level (turning it off returns to the chosen level). The filter is one atomic read on the caller's side, so a line that is filtered out costs no allocation.
+- **Line format** (unchanged, so the old readers keep working): `yyyy-mm-dd hh:mm:ss.mmm [component] LEVEL message`.
+- **Two destinations.** `AirFrameXR.log` has what matters later, small: start and stop, headset connect, negotiated stream, game start and end, the run record, warnings and errors. The **run's own log**, `logs\games\<exe>\<yyyymmdd-hhmmss>.log`, opens at `game started` and closes at `game ended`; it has the run's timeline lines (frame generation perf every 10 s, memory every 30 s; `verbose`: phase lock, tracking samples), which are not written to the main log. Lines meant for the run (`Dest::RunOnly`) are dropped when no game runs. The desktop mirror does not get a run log.
+- **History.** `AirFrameXR.log` rolls over at midnight to `AirFrameXR.<yyyy-mm-dd>.log` (and past 10 MB to `AirFrameXR.<yyyy-mm-dd>-<n>.log`); the last 7 days are kept. A run's log is named by its start time, so a game's folder sorts as its history; the last 20 runs per game are kept. A failed rename (another process holds the file) keeps appending to the same file.
+- **A panic or exit flushes**: the panic hook and `host stop` wait (up to 2 s) until the queue is on disk.
+- **The telemetry build uses the same framework.** It differs only in what it sends to it (the per-frame traces and CSVs at `verbose` and `debug`); there is no second logging path. The stock build keeps the frame path free of per-frame records, as before ([Telemetry and the Black Box](#telemetry-and-the-black-box)).
+
+**Two logs that deliberately stay outside this framework** (decided 2026-11-12):
+- **`mirrordesktop`** is an OpenXR client like any game, so it has its own writer, its own files and no channel to the host: `logs\mirrordesktop\<yyyymmdd-hhmmss>.log` per run (last 20 kept), the same line format, its own in-process queue and thread so its render loop never waits on the disk. The host does not open a run log for it either. (Today it still writes the single `logs\mirrordesktop.log`.)
+- **The UIs** get a log of their own for pure UI problems (windows, DPI, layout, unhandled exceptions, host launch and exit, the commands a user action sent): `logs\ui\<yyyymmdd-hhmmss>-<component>.log`, one file per process and run (no concurrent appends), last 20 per component. The lines that tell the host's story (host launched, host exit code, errors the user must see) stay in `AirFrameXR.log`. Planned, not built.
+
+**Status on 2026-11-12** (what is built, what is not):
+- Built and unit-tested alone: the writer thread, levels, drop on overflow, midnight roll, size roll, day pruning, run logs and their pruning.
+- Built, harness result in `docs/progress.md`: the host's lines go through the writer; `log_level`; run logs; scenarios `e2e_log_level_info`, `e2e_log_level_verbose`, `e2e_installed_layout` (log format, run log file, timeline lines only in the run's log).
+- **Not yet through the writer:** the shim (it still appends to `AirFrameXR.log` itself: the plan is a ring buffer in the IPC block that the host drains, so lines survive a game crash), the GUIs (they append themselves; with no host running there is nothing to hand lines to), and `alvr.log` (still a separate file; the plan folds ALVR's warnings, `[CAPS]`, the session event once and 10 s aggregates in place of `[STATS]` into the unified log, the raw stream staying in the debug folder).
+- **Readers to update:** the stats window's `LogTimeline`, the Black Box analyzer and the game-stats code still read the timeline lines from `AirFrameXR.log`; they move to the run's log.

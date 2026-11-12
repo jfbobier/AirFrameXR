@@ -21,7 +21,6 @@ use std::{
 
 struct State {
     logs_dir: Option<PathBuf>,
-    general: Option<fs::File>,
     debug_dir: Option<PathBuf>,
     events: Option<fs::File>,
     alvr: Option<fs::File>,
@@ -31,7 +30,7 @@ struct State {
 static STATE: OnceLock<Mutex<State>> = OnceLock::new();
 
 fn state() -> &'static Mutex<State> {
-    STATE.get_or_init(|| Mutex::new(State { logs_dir: None, general: None, debug_dir: None, events: None, alvr: None, alvr_default: None }))
+    STATE.get_or_init(|| Mutex::new(State { logs_dir: None, debug_dir: None, events: None, alvr: None, alvr_default: None }))
 }
 
 #[cfg(windows)]
@@ -79,19 +78,16 @@ fn open_append(path: &Path) -> Option<fs::File> {
 }
 
 /// `logs_dir`: the install's `logs/` (None in harness runs: no general log). `alvr_default`: where server_core's log goes when
-/// debug is off (the harness reads `<config>/session_log.txt`).
-pub fn init(logs_dir: Option<&Path>, alvr_default: Option<&Path>, debug: bool) {
+/// debug is off (the harness reads `<config>/session_log.txt`). `level`: the verbosity of `AirFrameXR.log` (debug on = Debug).
+pub fn init(logs_dir: Option<&Path>, alvr_default: Option<&Path>, debug: bool, level: Level) {
+    BASE_LEVEL.store(level as u8, std::sync::atomic::Ordering::Relaxed);
     {
         let mut s = state().lock();
         if let Some(d) = logs_dir {
             fs::create_dir_all(d).ok();
-            let g = d.join("AirFrameXR.log");
-            // keep the general log bounded: past 10 MB the old one is kept as .1
-            if fs::metadata(&g).map(|m| m.len() > 10 << 20).unwrap_or(false) {
-                fs::rename(&g, d.join("AirFrameXR.log.1")).ok();
-            }
-            s.general = open_append(&g);
             s.logs_dir = Some(d.to_path_buf());
+            // one writer thread owns AirFrameXR.log and the per-game logs (logsink.rs); callers only queue lines
+            logsink::install(logsink::Sink::start(logsink::Config::new(d), if debug { Level::Debug } else { level }));
         }
         s.alvr_default = alvr_default.map(Path::to_path_buf);
         s.alvr = alvr_default.and_then(|p| fs::File::create(p).ok());
@@ -102,19 +98,95 @@ pub fn init(logs_dir: Option<&Path>, alvr_default: Option<&Path>, debug: bool) {
     log::set_boxed_logger(Box::new(AlvrLogger)).ok();
     log::set_max_level(log::LevelFilter::Info);
     alvr_common::set_panic_hook();
+    // the panic hook above logs through `log`: wait for the writer before the process dies
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |i| {
+        prev(i);
+        flush();
+    }));
 }
 
-/// One line in the general log: "time [host] LEVEL message".
+pub use crate::logsink::Level;
+use crate::logsink::{self, Dest};
+
+/// The verbosity chosen at start (airframexr.json `log_level`, `--log-level`); debug on raises it to Debug, off returns to this.
+static BASE_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(Level::Info as u8);
+
+fn base_level() -> Level {
+    match BASE_LEVEL.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => Level::Error,
+        1 => Level::Warn,
+        2 => Level::Info,
+        3 => Level::Verbose,
+        _ => Level::Debug,
+    }
+}
+
+/// Sets the verbosity of `AirFrameXR.log` live (stdin `log_level <error|warn|info|verbose|debug>`).
+pub fn set_level(l: Level) {
+    BASE_LEVEL.store(l as u8, std::sync::atomic::Ordering::Relaxed);
+    if let Some(s) = logsink::global() {
+        s.set_level(if debug_dir().is_some() { Level::Debug } else { l });
+    }
+}
+
+pub fn level() -> Level {
+    logsink::global().map(|s| s.level()).unwrap_or(Level::Info)
+}
+
+/// Is a line of this level written? (one atomic read: test before formatting a detail line)
+pub fn enabled(l: Level) -> bool {
+    logsink::global().map_or(false, |s| s.enabled(l))
+}
+
+/// Waits until the queued lines are on disk (exit, panic).
+pub fn flush() {
+    if let Some(s) = logsink::global() {
+        s.flush();
+    }
+}
+
+/// A line of `component` in `AirFrameXR.log` (`run`: in the running game's log instead, when one is open).
+pub fn log_line(level: Level, component: &'static str, run: bool, msg: String) {
+    if let Some(s) = logsink::global() {
+        s.log(level, component, msg, if run { Dest::Run } else { Dest::Main });
+    }
+}
+
+/// One line in the general log, from the host: "time LEVEL [host] message". `level` is "INFO", "WARN" or "ERROR".
 pub fn general(level: &str, msg: &str) {
-    let mut s = state().lock();
-    if let Some(f) = s.general.as_mut() {
-        writeln!(f, "{} [host] {level:<5} {msg}", local_time(true, false)).ok();
-        f.flush().ok();
+    let l = match level {
+        "ERROR" => Level::Error,
+        "WARN" => Level::Warn,
+        _ => Level::Info,
+    };
+    log_line(l, "host", false, msg.to_string());
+}
+
+/// A timeline line of the running game (frame generation perf, memory, GPU): in the game's log only, nothing when no game runs.
+/// `level` Verbose for the detail that is only wanted when looking for something (phase lock, tracking samples).
+pub fn run_line(level: Level, component: &'static str, msg: String) {
+    if let Some(s) = logsink::global() {
+        s.log(level, component, msg, Dest::RunOnly);
+    }
+}
+
+/// A game started: its detail lines go to `logs/games/<exe>/<time>.log`. Returns that file.
+pub fn game_start(exe: &str) -> Option<PathBuf> {
+    logsink::global().map(|s| s.game_start(exe))
+}
+
+pub fn game_end(summary: &str) {
+    if let Some(s) = logsink::global() {
+        s.game_end(summary);
     }
 }
 
 /// Turns the debug session on (creates `logs/debug/<time>/` the first time) or off. Returns the session folder when on.
 pub fn set_debug(on: bool) -> Option<PathBuf> {
+    if let Some(g) = logsink::global() {
+        g.set_level(if on { Level::Debug } else { base_level() });
+    }
     let mut s = state().lock();
     if !on {
         s.events = None;
