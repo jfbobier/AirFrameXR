@@ -1,7 +1,7 @@
 // mirrordesktop.exe: the Windows desktop in the headset, as an ordinary OpenXR application. The streamer knows nothing about it: it is an app like any game
 // (it connects through the runtime and the shim, renders a projection layer with the views the runtime gives it, reads the controllers through OpenXR
 // actions), except that the host does not record it as a game. Its own jobs: a monitor-sized screen that floats in front of the user, a laser beam from the controller, and the mouse (SendInput): the beam moves the cursor,
-// trigger = left button, A / X / B / Y = double click, thumbstick = scroll, an Xbox pad (XInput: sticks = cursor, A = click, B = double click), grip (either) = the screen back in front of you (the beam is the right controller's until a
+// trigger = left button, A / X / B / Y = double click, right thumbstick = scroll, left thumbstick and an Xbox pad's d-pad = arrow keys (one per push), an Xbox pad (XInput: sticks = cursor, A = click, B = double click), grip (either) = the screen back in front of you (the beam is the right controller's until a
 // press of the left trigger hands it over, and back). The screen has one place, in front of the user at the start; a "? controls" badge under it opens the commands
 // when the beam is on it. A physical mouse takes the cursor when it moves; a button press or a sweep of the beam gives it back.
 // Everything that is not the screen is the idle colour (107C10 by default), which the headset shows as passthrough.
@@ -65,6 +65,12 @@ static POINT mouseTo(float u, float v) {
     const double px = g_mon.left + std::max(0.f, std::min(1.f, u)) * (g_mon.right - g_mon.left - 1), py = g_mon.top + std::max(0.f, std::min(1.f, v)) * (g_mon.bottom - g_mon.top - 1);
     sendMouse((LONG)((px - vx) * 65535.0 / std::max(1, vw - 1) + 0.5), (LONG)((py - vy) * 65535.0 / std::max(1, vh - 1) + 0.5), MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK);
     return POINT{ (LONG)(px + 0.5), (LONG)(py + 0.5) };   // where the cursor should now be, to notice a physical mouse moving it elsewhere
+}
+// An arrow key press (down and up) as a keyboard would send it: the arrows are extended keys. One press per call: a held d-pad or stick sends it once.
+static void sendArrow(WORD vk) {
+    INPUT in[2]{}; in[0].type = in[1].type = INPUT_KEYBOARD; in[0].ki.wVk = in[1].ki.wVk = vk;
+    in[0].ki.dwFlags = KEYEVENTF_EXTENDEDKEY; in[1].ki.dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP;
+    SendInput(2, in, sizeof(INPUT));
 }
 static void wheel(int ticks) { INPUT i{}; i.type = INPUT_MOUSE; i.mi.dwFlags = MOUSEEVENTF_WHEEL; i.mi.mouseData = (DWORD)(ticks * WHEEL_DELTA); SendInput(1, &i, sizeof i); }
 
@@ -264,7 +270,7 @@ int main(int argc, char** argv) {
     double perfT0 = qpcMs(), frameStart = 0, frameMaxMs = 0, renderSumMs = 0; int perfFrames = 0;
     bool seenHand = false, seenHit = false; bool left = false; ULONGLONG lastWheel = 0; float trigMax = 0, sqMax = 0, stickMax = 0; bool primSeen = false; float su = 0, sv_ = 0, pressU = 0, pressV = 0; bool smoothing = false, pressing = false;
     bool yielded = false, haveSent = false; POINT sent{}; float yU = 0, yV = 0;   // yielded: the physical mouse moved the cursor, so the beam stops moving it until a press or a deliberate sweep
-    Pad pad;
+    Pad pad; StickArrows leftArrows;   // the left controller's thumbstick as arrow keys (mirror_math.h)
     int activeHand = 1; bool swallow = false;   // the hand that holds the beam (the right one until the left trigger is pressed); swallow: its take-over press does not click
     ULONGLONG t0 = GetTickCount64(); bool running = false, exiting = false, endKey = false; uint64_t frames = 0;
     int rc = 0; bool leaving = false; ULONGLONG leaveT0 = 0;
@@ -331,7 +337,7 @@ int main(int argc, char** argv) {
                     }
                     if (used || movedFromHead) { confirmed[h] = true; L("the %s controller is confirmed in use (%s): its beam is drawn", h ? "right" : "left", used ? "input" : "its pose moves away from the head"); event("controller_confirmed", h ? "right" : "left"); }
                 }
-                bool aimOk = false; V3 o{}, d{}; int hand = activeHand; float trig = 0, stickY = 0; bool prim[2] = { false, false };
+                bool aimOk = false; V3 o{}, d{}; int hand = activeHand; float trig = 0, stickY = 0, leftX = 0, leftY = 0; bool prim[2] = { false, false };
                 for (int k = 0; k < 2 && !aimOk; k++) {
                     hand = k == 0 ? activeHand : 1 - activeHand;
                     XrSpaceLocation al;
@@ -344,7 +350,9 @@ int main(int argc, char** argv) {
                 // the thumbsticks and A / X / B / Y work on either controller whichever one holds the beam
                 for (int h = 0; h < 2; h++) {
                     gi.subactionPath = hands[h]; gi.action = aStick; XrActionStateVector2f sv{ XR_TYPE_ACTION_STATE_VECTOR2F }; xrGetActionStateVector2f(sess, &gi, &sv);
-                    const float y = sv.isActive ? sv.currentState.y : 0.f; if (std::fabs(y) > std::fabs(stickY)) stickY = y;
+                    const float x = sv.isActive ? sv.currentState.x : 0.f, y = sv.isActive ? sv.currentState.y : 0.f;
+                    if (h == 0) { leftX = x; leftY = y; }   // the left stick sends arrow keys (below)
+                    else if (std::fabs(y) > std::fabs(stickY)) stickY = y;   // the right stick scrolls
                     prim[h] = btn(aPrimary, h) || btn(aSecondary, h);   // A, X, B and Y alike: a double click
                 }
                 // the controls hint under the screen: the beam on its badge opens the panel (the commands) in the same place, until the beam leaves it
@@ -412,9 +420,20 @@ int main(int argc, char** argv) {
                         }
                         const WORD b = ps.Gamepad.wButtons, edge = (WORD)(b & ~pad.was); pad.was = b;
                         if (edge & XINPUT_GAMEPAD_A) { event("pad_click", "A"); INPUT in[2]{}; in[0].type = in[1].type = INPUT_MOUSE; in[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN; in[1].mi.dwFlags = MOUSEEVENTF_LEFTUP; SendInput(2, in, sizeof(INPUT)); }
+                        // the d-pad: one arrow key per press (the edge of the button, so a held direction sends nothing more; press again for the next)
+                        if (edge & XINPUT_GAMEPAD_DPAD_UP) { event("arrow", "up (d-pad)"); sendArrow(VK_UP); }
+                        if (edge & XINPUT_GAMEPAD_DPAD_DOWN) { event("arrow", "down (d-pad)"); sendArrow(VK_DOWN); }
+                        if (edge & XINPUT_GAMEPAD_DPAD_LEFT) { event("arrow", "left (d-pad)"); sendArrow(VK_LEFT); }
+                        if (edge & XINPUT_GAMEPAD_DPAD_RIGHT) { event("arrow", "right (d-pad)"); sendArrow(VK_RIGHT); }
                         if (edge & XINPUT_GAMEPAD_B) { event("pad_double_click", "B"); INPUT in[4]{}; const DWORD fl[4] = { MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP }; for (int i = 0; i < 4; i++) { in[i].type = INPUT_MOUSE; in[i].mi.dwFlags = fl[i]; } SendInput(4, in, sizeof(INPUT)); }
                     }
-                    // the thumbstick scrolls (a tick every 120 ms at full deflection, over the screen only)
+                    // the left thumbstick is a d-pad: one arrow key per push (StickArrows: past 0.6 along one axis, then latched until it comes back under 0.3)
+                    if (const int ad = leftArrows.step(leftX, leftY)) {
+                        static const char* const nm[] = { "", "up (stick)", "down (stick)", "left (stick)", "right (stick)" };
+                        static const WORD vk[] = { 0, VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT };
+                        event("arrow", nm[ad]); if (mouse) sendArrow(vk[ad]);
+                    }
+                    // the right thumbstick scrolls (a tick every 120 ms at full deflection, over the screen only)
                     if (hit && std::fabs(stickY) > 0.5f && GetTickCount64() - lastWheel > (ULONGLONG)(220 - 100 * std::fabs(stickY))) { event("wheel", stickY > 0 ? "up" : "down"); if (mouse) wheel(stickY > 0 ? 1 : -1); lastWheel = GetTickCount64(); }
                 }
 
@@ -441,6 +460,7 @@ int main(int argc, char** argv) {
                 const double r0 = qpcMs();
                 ID3D11Texture2D* tex = mirror.Render(ndc, extra, clear, err, 256);
                 renderSumMs += qpcMs() - r0;
+                { char cs[200]; if (mirror.TakeCaptureStatus(cs, sizeof cs)) g_w.log(aflog::Warn, "%s", cs); }   // the capture never delivered a picture (desktop.cpp)
                 for (int e = 0; e < 2 && tex; e++) {
                     XrSwapchainImageAcquireInfo ai{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO }; uint32_t idx; CK(xrAcquireSwapchainImage(sc[e], &ai, &idx));
                     XrSwapchainImageWaitInfo wi{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO }; wi.timeout = XR_INFINITE_DURATION; CK(xrWaitSwapchainImage(sc[e], &wi));

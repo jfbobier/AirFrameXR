@@ -130,6 +130,8 @@ struct DesktopMirror::Impl {
     ComPtr<ID3D11Device> capDev; ComPtr<ID3D11DeviceContext> capCtx; ComPtr<IDXGIOutputDuplication> dup; ComPtr<IDXGIOutput> output; ComPtr<IDXGIAdapter1> adapter;
     ComPtr<ID3D11Texture2D> staging;
     DXGI_FORMAT dfmt = DXGI_FORMAT_B8G8R8A8_UNORM; int dw = 0, dh = 0; bool hdr = false; float white = 1.f; bool have = false;
+    // what the duplication has answered so far (for the log line when no picture ever arrives): waits that timed out, access lost, updates without a present (the cursor only), pictures taken
+    int nTimeout = 0, nLost = 0, nNoPresent = 0, nFrames = 0, noPicFrames = 0; bool statusPending = false; char status[200] = {};
     // encoder side
     ComPtr<ID3D11Texture2D> src; ComPtr<ID3D11ShaderResourceView> srcSrv;
     ComPtr<ID3D11Texture2D> target; ComPtr<ID3D11RenderTargetView> rtv;
@@ -138,7 +140,8 @@ struct DesktopMirror::Impl {
         static const HelpLine lines[] = {
             { L"Trigger", L"left click (the controller that holds the beam)" },
             { L"A / X / B / Y", L"double click" },
-            { L"Thumbstick up / down", L"scroll" },
+            { L"Right stick up / down", L"scroll" },
+            { L"Left stick / D-pad", L"arrow keys, one per push" },
             { L"Grip (either)", L"put the screen in front of you again" },
             { L"Other trigger", L"gives it the beam (left-handed: press it)" },
             { L"Xbox pad", L"sticks move the cursor, A click, B double click" },
@@ -249,10 +252,13 @@ struct DesktopMirror::Impl {
         if (!dup) { char e[8]; if (!OpenDuplication(e, 8)) return; }
         DXGI_OUTDUPL_FRAME_INFO info; ComPtr<IDXGIResource> res;
         HRESULT hr = dup->AcquireNextFrame(0, &info, &res);
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT) return;
-        if (hr == DXGI_ERROR_ACCESS_LOST) { dup.Reset(); return; }   // a mode change, the secure desktop, a display switch: reopened on the next call
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { nTimeout++; return; }
+        if (hr == DXGI_ERROR_ACCESS_LOST) { nLost++; dup.Reset(); return; }   // a mode change, the secure desktop, a display switch: reopened on the next call
         if (FAILED(hr)) return;
-        if (info.LastPresentTime.QuadPart != 0) {
+        // an update without a present (the cursor moved) carries no new picture, but the very first one is the desktop as it is: a screen that never changes must still be shown
+        if (info.LastPresentTime.QuadPart == 0 && !have) nNoPresent++;
+        if (info.LastPresentTime.QuadPart != 0 || !have) {
+            nFrames++;
             ComPtr<ID3D11Texture2D> tex;
             if (SUCCEEDED(res.As(&tex))) {
                 D3D11_TEXTURE2D_DESC d; tex->GetDesc(&d);
@@ -281,7 +287,10 @@ struct DesktopMirror::Impl {
         Capture();
         const float clear[4] = { ((clearRgb >> 16) & 0xFF) / 255.f, ((clearRgb >> 8) & 0xFF) / 255.f, (clearRgb & 0xFF) / 255.f, 1.f };
         ctx->ClearRenderTargetView(rtv.Get(), clear);
-        if (!have) return target.Get();   // nothing captured yet: the plain colour
+        if (!have) {   // nothing captured yet: the plain colour; a log line says so when it lasts (3 s): a screen the duplication does not feed is otherwise a silent green picture
+            if (++noPicFrames == 270) { snprintf(status, sizeof status, "desktop capture: no picture after 3 s (waits that timed out %d, access lost %d, updates without a present %d, pictures taken %d)", nTimeout, nLost, nNoPresent, nFrames); statusPending = true; }
+            return target.Get();
+        }
         ctx->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
         ctx->RSSetState(rs.Get());
         ctx->VSSetShader(vs.Get(), nullptr, 0); ctx->PSSetShader(ps.Get(), nullptr, 0);
@@ -335,6 +344,7 @@ void DesktopMirror::SetTestImage(const void* pixels) {
 }
 int DesktopMirror::DesktopW() const { return I->dw; }
 int DesktopMirror::DesktopH() const { return I->dh; }
+bool DesktopMirror::TakeCaptureStatus(char* out, int n) { if (!I->statusPending) return false; I->statusPending = false; snprintf(out, (size_t)n, "%s", I->status); return true; }
 void DesktopMirror::SetHint(const float ndc[16], int mode) { memcpy(I->hintNdc, ndc, 16 * sizeof(float)); I->hintMode = mode; }
 bool DesktopMirror::Hdr() const { return I->hdr; }
 ID3D11Texture2D* DesktopMirror::Render(const float ndc[16], const float cursor[10], uint32_t clearRgb, char* err, int errlen) { return I->Render(ndc, cursor, clearRgb, err, errlen); }

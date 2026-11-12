@@ -77,7 +77,7 @@
     "RUST_LOG": "warn"
   },
   "app": {
-    "frames": 7000,
+    "frames": 3900,
     "timeout_s": 80,
     "env": {
       "XR_PROBE_CPU_MS": "1",
