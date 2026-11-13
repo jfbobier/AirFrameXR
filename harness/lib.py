@@ -447,15 +447,15 @@ def run_scenario(sc, outdir: Path, log=print):
             raise Blocked("portable package missing (build it first: python3 harness/run.py build gui package): " + out[-300:])
         if not sc.get("keep_package_config"):   # a user's fresh unzip has no personal settings: the lab starts from the defaults whatever the builder's folder holds
             b_run(f"echo {{}}> {inst}\\config\\airframexr.json")   # emptied, not deleted (the builder wrapper refuses deletes): {} = every default
+        if sc.get("airframexr_json"):   # the user's settings file as the host reads it at start (H6: log_level from airframexr.json)
+            CACHE.mkdir(parents=True, exist_ok=True)
+            (CACHE / "airframexr_scenario.json").write_text(json.dumps(sc["airframexr_json"]))
+            b_put(CACHE / "airframexr_scenario.json", f"{inst}/config/airframexr.json".replace("\\", "/"))
         if sc.get("fov_settings_from_gui"):
             # the settings file a user's choice in the launcher's FOV card leaves (the GUI's own code, UserFovStore.Apply, through uitest.exe), not a lab flag: the host reads it at its start
             fg = sc["fov_settings_from_gui"]
             rc, out = b_run(f"if exist _tmp\\uitest\\run\\uitest.exe (_tmp\\uitest\\run\\uitest.exe --fov-apply-to {inst}\\config\\airframexr.json --tan {','.join(map(str, fg['tan']))} --client {','.join(map(str, fg['client']))} && echo APPLIED) else echo NOUITEST")
             if "APPLIED" not in out:
-        if sc.get("airframexr_json"):   # the user's settings file as the host reads it at start (H6: log_level from airframexr.json)
-            CACHE.mkdir(parents=True, exist_ok=True)
-            (CACHE / "airframexr_scenario.json").write_text(json.dumps(sc["airframexr_json"]))
-            b_put(CACHE / "airframexr_scenario.json", f"{inst}/config/airframexr.json".replace("\\", "/"))
                 raise Blocked("uitest.exe missing or failed (python3 harness/ui_matrix.py builds it): " + out[-300:])
         host_exe = f"{inst}\\bin\\alvr_host.exe"
         h = sc["host"] = {**sc["host"], "install_dir": f"%USERPROFILE%\\{ROOTNAME}\\{inst}"}
@@ -1479,11 +1479,6 @@ def analyse_pipeline(outdir):
     return out
 
 
-def analyse_app_timing(outdir, period_ms):
-    """The game side (xr_probe XR_PROBE_TIMING_CSV): frame time = xrWaitFrame return to xrEndFrame return, and the release cadence."""
-    _, rows = read_csv(outdir / "app_timing.csv")   # frame,display_time_ns,t_wait_return_ms,t_end_ms,load_factor
-    if len(rows) < 60:
-        return None
 def analyse_ts(outdir):
     """H5: repeated timestamps on the frames the host sent, summed over every encoder_stats window: same_ts_frames, frames, and how the shim stamped them (pose match vs fallback)."""
     tot = {"frames": 0, "same_ts_frames": 0, "ts_matched": 0, "ts_fallback": 0, "windows": 0}
@@ -1504,6 +1499,11 @@ def analyse_ts(outdir):
     return tot
 
 
+def analyse_app_timing(outdir, period_ms):
+    """The game side (xr_probe XR_PROBE_TIMING_CSV): frame time = xrWaitFrame return to xrEndFrame return, and the release cadence."""
+    _, rows = read_csv(outdir / "app_timing.csv")   # frame,display_time_ns,t_wait_return_ms,t_end_ms,load_factor
+    if len(rows) < 60:
+        return None
     rows = rows[30:]
     ft = [float(r[3]) - float(r[2]) for r in rows]
     rel = [float(b[2]) - float(a[2]) for a, b in zip(rows, rows[1:])]
@@ -1797,12 +1797,12 @@ def analyse(sc, outdir: Path):
         a["display"] = analyse_display(sc, outdir, a.get("client"), period)
     if (outdir / "host_stdout.txt").exists():
         a["pipeline"] = analyse_pipeline(outdir)
+        a["ts"] = analyse_ts(outdir)
     if (outdir / "app_timing.csv").exists():
         a["app_timing"] = analyse_app_timing(outdir, period)
     if sc.get("checks", {}).get("frame_classes") and cl.exists() and cl.stat().st_size > 0:
         classes = read_frame_classes(cl)
         runs, stray = rle(classes)
-        a["ts"] = analyse_ts(outdir)
         a["classes"] = {"frames": len(classes), "runs": runs, "stray_frames": stray}
     if sc.get("checks", {}).get("counter_readback") and cl.exists() and cl.stat().st_size > 0:
         if sc["checks"].get("foveation") is not None:
@@ -2348,15 +2348,15 @@ def evaluate(sc, a):
             runs = (il.get("game_logs") or {}).get("xr_probe.exe", {})
             ok, d = lh.routing(il.get("general", ""), next(iter(runs.values()), ""))
             chk("log_routing", ok, d, "every WARN/ERROR, [shim: and client-frame-gaps line of the main log inside the run's window is in the run's log too")
-    if ck.get("log_line_format"):
-        gen = (a.get("install_logs") or {}).get("general", "")
-        bad = [l for l in gen.splitlines() if l.strip() and not re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[[^\]]+\] (ERROR|WARN |INFO |VERB |DEBUG) ", l)]
-        lost = [k for k in ("log lines dropped", "lines lost in the ring buffer") if k in gen]
-        chk("no_log_lines_lost", not lost, lost or "none", "no 'log lines dropped' (the writer's queue) and no shim ring buffer losses in a normal run")
     if "log_level_live" in ck:   # H6: after a live `log_level` line on stdin, the run log has the periodic lines and none of them is older than the change
         il = a.get("install_logs") or {}
         tag, what = ck["log_level_live"]["announce"], ck["log_level_live"]["line"]
         stamp = lambda l: l[:23]
+        ann = [stamp(l) for l in il.get("general", "").splitlines() if l.endswith(tag)]
+        runs = "\n".join(t for r in (il.get("game_logs") or {}).values() for t in r.values())
+        lines = [stamp(l) for l in runs.splitlines() if what in l]
+        chk("log_level_live", bool(ann) and bool(lines) and min(lines) >= ann[0], {"announced": ann[:1], "lines": len(lines), "first_line": min(lines) if lines else None},
+            f"'{tag}' in the main log, then '{what}' lines in the run log, none older than the announcement")
     if ck.get("killed_game_logs"):   # H6: the game died with no exit path: the shim lines it had written are still in the run log (the host read them from the ring), and the host ended the run
         il = a.get("install_logs") or {}
         runs = "\n".join((il.get("game_logs") or {}).get("xr_probe.exe", {}).values())
@@ -2364,16 +2364,16 @@ def evaluate(sc, a):
         chk("killed_game_logs", len(shim) >= 1 and "game exit" not in runs and "game ended: xr_probe.exe" in il.get("general", "") + runs,
             {"shim_lines": len(shim), "shim_game_exit": "game exit" in runs, "game_ended": "game ended: xr_probe.exe" in il.get("general", "") + runs},
             "the run log holds the shim's lines from before the kill, no 'game exit' (it never ran), and the host's 'game ended' line")
-        ann = [stamp(l) for l in il.get("general", "").splitlines() if l.endswith(tag)]
-        runs = "\n".join(t for r in (il.get("game_logs") or {}).values() for t in r.values())
-        lines = [stamp(l) for l in runs.splitlines() if what in l]
-        chk("log_level_live", bool(ann) and bool(lines) and min(lines) >= ann[0], {"announced": ann[:1], "lines": len(lines), "first_line": min(lines) if lines else None},
-            f"'{tag}' in the main log, then '{what}' lines in the run log, none older than the announcement")
     if ck.get("alvr_in_unified_log"):
         # 1.3.10: ALVR's own lines are in AirFrameXR.log as [alvr]; the raw stream (alvr.log) exists only in the debug session folder
         il = a.get("install_logs") or {}
         chk("alvr_lines_in_unified_log", "[alvr] INFO" in il.get("general", "") and not il.get("alvr_log_at_root"),
             {"alvr_lines": "[alvr] INFO" in il.get("general", ""), "alvr.log at the logs root": il.get("alvr_log_at_root")}, "'[alvr] INFO' lines in AirFrameXR.log and no logs\\alvr.log (it is in logs\\debug\\<time>\\ at the debug level only)")
+    if ck.get("log_line_format"):
+        gen = (a.get("install_logs") or {}).get("general", "")
+        bad = [l for l in gen.splitlines() if l.strip() and not re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[[^\]]+\] (ERROR|WARN |INFO |VERB |DEBUG) ", l)]
+        lost = [k for k in ("log lines dropped", "lines lost in the ring buffer") if k in gen]
+        chk("no_log_lines_lost", not lost, lost or "none", "no 'log lines dropped' (the writer's queue) and no shim ring buffer losses in a normal run")
         chk("log_line_format", not bad and gen.strip() != "", bad[:3] or "all lines match", "every line: 'yyyy-mm-dd hh:mm:ss.mmm [component] LEVEL message'")
     if ck.get("bench_tracks_target"):
         st = a.get("bench_steps") or []
