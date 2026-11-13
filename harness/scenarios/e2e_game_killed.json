@@ -99,7 +99,8 @@
     },
     "app_killed": true,
     "killed_game_logs": true,
-    "alvr_in_unified_log": true
+    "alvr_in_unified_log": true,
+    "max_duplicate_timestamps": 1000
   },
   "install": true
 }
