@@ -73,6 +73,8 @@ pub enum Dest {
     Main,
     Run,
     RunOnly,
+    /// the main log and, while a game runs, its run log too (every WARN/ERROR line gets this)
+    Both,
 }
 
 /// Local wall-clock time, taken by the caller when the line is logged.
@@ -345,9 +347,16 @@ impl Writer {
     fn handle(&mut self, m: Msg) {
         match m {
             Msg::Line { at, level, comp, text, dest } => {
-                if dest == Dest::RunOnly && self.game.is_none() {
+                let dest = if level <= Level::Warn && dest == Dest::Main { Dest::Both } else { dest };
+                if dest == Dest::Both && self.game.is_some() {
+                    let line = format!("{} [{}] {:<5} {}\n", at.full(), comp, level.name(), text);
+                    if let Some(g) = self.game.as_mut() {
+                        g.write_all(line.as_bytes()).ok();
+                    }
+                    self.write_main(at, level, &comp, &text);
+                } else if dest == Dest::RunOnly && self.game.is_none() {
                     // no game: nothing to attach the line to
-                } else if dest != Dest::Main && self.game.is_some() {
+                } else if dest != Dest::Main && dest != Dest::Both && self.game.is_some() {
                     let line = format!("{} [{}] {:<5} {}\n", at.full(), comp, level.name(), text);
                     if let Some(g) = self.game.as_mut() {
                         g.write_all(line.as_bytes()).ok();
@@ -570,6 +579,30 @@ mod tests {
         s.flush();
         let t = read(&d.join("AirFrameXR.log"));
         assert!(t.contains("log lines dropped (queue full)"));
+    }
+
+    #[test]
+    fn warn_and_both_lines_reach_the_run_log_too() {
+        let d = tmp("both");
+        let s = Sink::start(Config::new(&d), Level::Info);
+        s.log(Level::Warn, "host", "warn no game", Dest::Main);
+        s.log(Level::Info, "host", "both no game", Dest::Both);
+        let p = s.game_start("G.exe");
+        s.log(Level::Warn, "host", "stall detected", Dest::Main);
+        s.log(Level::Error, "host", "an error", Dest::Run);
+        s.log(Level::Info, "shim", "shim line", Dest::Both);
+        s.log(Level::Info, "host", "main only", Dest::Main);
+        s.log(Level::Verbose, "host", "filtered", Dest::Both);
+        s.game_end("done");
+        s.flush();
+        let main = read(&d.join("AirFrameXR.log"));
+        let run = read(&d.join(&p));
+        for t in ["warn no game", "both no game", "stall detected", "shim line", "main only"] {
+            assert!(main.contains(t), "main has {t}");
+        }
+        assert!(run.contains("stall detected") && run.contains("shim line") && run.contains("an error"));
+        assert!(!run.contains("main only") && !run.contains("warn no game") && !run.contains("filtered"));
+        assert!(!main.contains("filtered"));
     }
 
     #[test]
