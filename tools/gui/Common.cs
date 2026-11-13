@@ -1729,6 +1729,19 @@ namespace AirFrameXR
         void SetColour(Color c) { pick.BackColor = c; pick.Text = $"#{c.R:X2}{c.G:X2}{c.B:X2}"; pick.ForeColor = c.GetBrightness() > 0.5 ? Color.Black : Color.White; }
     }
 
+    /// "Headset shows" (1.3.10): frames the headset really displayed per second = its display rate x the share of its display ticks that showed a new frame
+    /// (`headset_repeated_typ` is made of the headset's own tick counts). The host's `displayed_fps` counts unique timestamps, which under-counts when
+    /// two frames carry one timestamp (Dead Space: 86 reported, 97 shown), so it stays as the "reported" figure only.
+    public static class HeadsetShown
+    {
+        /// run record `s` (display_hz, headset_repeated_typ, net.displayed_fps); falls back to the reported figure when the rate or the share is missing
+        public static double Fps(double displayHz, double repeatedShare, double reportedFps)
+        {
+            if (!double.IsNaN(displayHz) && displayHz > 0 && !double.IsNaN(repeatedShare) && repeatedShare >= 0 && repeatedShare <= 1) return displayHz * (1 - repeatedShare);
+            return reportedFps;
+        }
+    }
+
     /// A latency the engine could not measure is shown as n/a, not as a number: above one second, or when over 10 % of the run's client samples were dropped
     /// by the engine's aggregator as garbage (`latency_outliers` of `samples`; docs/permanent_record/PLAN_0.5.md U7).
     public static class Latency

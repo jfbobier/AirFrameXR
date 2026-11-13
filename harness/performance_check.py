@@ -16,7 +16,7 @@ def check(name, ok, detail=""):
     global fails
     fails += not ok
     print(f"CHECK {'PASS' if ok else 'FAIL'} {name}" + ("" if ok else f": {detail}"))
-for game in ("Cyberpunk2077.exe", "LiesOfP-Win64-Shipping.exe", "mirrordesktop.exe"):
+for game in ("Cyberpunk2077.exe", "LiesOfP-Win64-Shipping.exe", "mirrordesktop.exe", "DeadSpace.exe"):
     stem = game[:-4]
     lib.b_run(f"if not exist runs\\{rid}\\{stem} mkdir runs\\{rid}\\{stem}")
     proc = lib.start_limited(rid, "va_perf_check", f"perf_{stem}.bat", f"_tmp\\uitest\\run\\uitest.exe --dump-performance {game} --out runs\\{rid}\\{stem} > runs\\{rid}\\{stem}.txt 2>&1\r\n", f"rc_{stem}.txt")
@@ -32,6 +32,8 @@ for game in ("Cyberpunk2077.exe", "LiesOfP-Win64-Shipping.exe", "mirrordesktop.e
     check(f"{stem}: the mirror is not listed", "mirror" not in txt.lower() and "mirrordesktop" not in txt.lower(), "the mirror shows in the window")
     if stem == "LiesOfP-Win64-Shipping":
         check("absurd latency shows n/a", "n/a" in txt and "4958802102" not in txt and "4958802102" not in txt.replace(" ", ""), "no n/a or the number leaked")
+    if stem == "DeadSpace":   # H4: 100 Hz display, 3 % of its ticks repeat, the host counted 86 unique timestamps per second: shown 97, reported 86
+        check("headset shows 97 (display rate x fresh share), not the 86 reported by timestamp", "|98.0|97.0|3.0|" in txt, " | ".join(l for l in txt.splitlines() if l.startswith("  row"))[:300])
     if stem == "Cyberpunk2077":
         check("streamer latency line (encoder + transport + decoder)", "Streamer latency 33 ms = encoder 6 + transport 12 + decoder 15" in txt, "line missing or wrong")
         check("list holds the real games", "item Lies of P" in txt, "games missing")
