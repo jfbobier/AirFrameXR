@@ -381,14 +381,6 @@ impl log::Log for AlvrLogger {
                 Err(_) => {}
             }
         }
-        // the visionOS client's `[floor]` line (clients up to build 75 send it every 2 s): the first one and any whose floor y or offset changes at
-        // the normal level, the rest at Verbose
-        if msg.contains("[floor]") {
-            static LAST: Mutex<Option<String>> = Mutex::new(None);
-            let changed = floor_changed(&msg, &mut LAST.lock());
-            log_line(if changed { Level::Info } else { Level::Verbose }, "alvr", false, msg);
-            return;
-        }
         // server_core logs this for every input sample of a button it has no mapping for (~400 lines/s from the AVP client):
         // keep the first line per button name
         if let Some(name) = msg.strip_prefix("Received button not mapped: ") {
@@ -411,17 +403,6 @@ impl log::Log for AlvrLogger {
     }
 
     fn flush(&self) {}
-}
-
-/// Is this `[floor]` line news? The key is its "floor y" text and its "offset" (head y moves all the time and is not part of it); `last` keeps the key.
-fn floor_changed(msg: &str, last: &mut Option<String>) -> bool {
-    let after = |tag: &str| msg.find(tag).map(|i| msg[i + tag.len()..].split_whitespace().next().unwrap_or("")).unwrap_or("");
-    let key = format!("{}|{}", after("floor y "), after("offset "));
-    if last.as_deref() == Some(key.as_str()) {
-        return false;
-    }
-    *last = Some(key);
-    true
 }
 
 fn write_alvr(kind: &str, msg: &str) {
@@ -822,23 +803,5 @@ pub mod client_stats {
             assert!(w["total_latency_ms"].is_null() && w["game_ms"].is_null() && w["decode_ms"].is_null());
             assert!(w["displayed_fps"].as_f64().is_some());   // the frame counts still stand
         }
-    }
-}
-
-#[cfg(test)]
-mod floor_tests {
-    use super::floor_changed;
-
-    #[test]
-    fn floor_line_is_news_only_when_floor_or_offset_changes() {
-        let l = |head: &str, floor: &str, off: i32| format!("Client X: [floor] head y {head} floor y {floor} (head above floor 1.60) offset {off} cm");
-        let mut last = None;
-        assert!(floor_changed(&l("1.60", "0.00", 0), &mut last), "first line");
-        assert!(!floor_changed(&l("1.62", "0.00", 0), &mut last), "head y moves, same floor");
-        assert!(!floor_changed(&l("1.58", "0.00", 0), &mut last));
-        assert!(floor_changed(&l("1.60", "0.05", 0), &mut last), "floor y changed");
-        assert!(!floor_changed(&l("1.61", "0.05", 0), &mut last));
-        assert!(floor_changed(&l("1.61", "0.05", 3), &mut last), "offset changed");
-        assert!(!floor_changed(&l("1.61", "0.05", 3), &mut last));
     }
 }
