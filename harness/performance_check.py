@@ -35,6 +35,6 @@ for game in ("Cyberpunk2077.exe", "LiesOfP-Win64-Shipping.exe", "mirrordesktop.e
     if stem == "DeadSpace":   # H4: 100 Hz display, 3 % of its ticks repeat, the host counted 86 unique timestamps per second: shown 97, reported 86
         check("headset shows 97 (display rate x fresh share), not the 86 reported by timestamp", "|98.0|97.0|3.0|" in txt, " | ".join(l for l in txt.splitlines() if l.startswith("  row"))[:300])
     if stem == "Cyberpunk2077":
-        check("streamer latency line (encoder + transport + decoder)", "Streamer latency 33 ms = encoder 6 + transport 12 + decoder 15" in txt, "line missing or wrong")
+        check("streamer latency column (encoder + transport + decoder = 6 + 12 + 15)", "|66|33" in txt, " | ".join(l for l in txt.splitlines() if l.startswith("  row"))[:300])
         check("list holds the real games", "item Lies of P" in txt, "games missing")
 sys.exit(1 if fails else 0)
