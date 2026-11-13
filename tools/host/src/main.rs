@@ -17,6 +17,7 @@ mod fg_judge;
 mod discovery;
 mod games;
 mod logs;
+mod logsink;
 mod nvidia_profile;
 mod phase;
 mod pipeline;
@@ -106,6 +107,7 @@ struct Args {
     install_dir: Option<PathBuf>,
     logs_dir: Option<PathBuf>,
     debug: Option<bool>,
+    log_level: Option<String>,
     gui: bool,
     system_check: bool,
     /// run only the headset discovery for this many seconds (headset_seen events), then exit
@@ -206,6 +208,7 @@ fn parse_args() -> Result<Args, String> {
         install_dir: None,
         logs_dir: None,
         debug: None,
+        log_level: None,
         gui: false,
         system_check: false,
         discover: None,
@@ -262,6 +265,7 @@ fn parse_args() -> Result<Args, String> {
             "--install-dir" => a.install_dir = Some(v()?.into()),
             "--logs-dir" => a.logs_dir = Some(v()?.into()),
             "--debug" => a.debug = Some(true),
+            "--log-level" => a.log_level = Some(v()?.to_string()),
             "--gui" => a.gui = true, // started by AirFrameXR.exe: control commands on stdin, end of stdin = quit
             "--system-check" => a.system_check = true,
             "--discover" => a.discover = Some(v()?.parse().map_err(|e| format!("{e}"))?),
@@ -549,6 +553,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if a.debug.is_none() {
         a.debug = st.debug;
+    }
+    if a.log_level.is_none() {
+        a.log_level = st.log_level.clone();
     }
     if a.gamma.is_none() {
         a.gamma = st.gamma;
@@ -964,6 +971,9 @@ mod nvh {
         pub fn nvh_ipc_set_user(ipc: *mut c_void, user_gamma: f32, debug_on: i32, debug_dir: *const u16);
         pub fn nvh_ipc_app_exe(ipc: *mut c_void, buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_ipc_set_color(ipc: *mut c_void, brightness: f32, contrast: f32, saturation: f32, sharpening: f32);
+        pub fn nvh_ipc_set_log_level(ipc: *mut c_void, level: u32);
+        pub fn nvh_ipc_log_pop(ipc: *mut c_void, level: *mut u32, pid: *mut u32, stamp: *mut c_char, comp: *mut c_char, text: *mut c_char) -> i32;
+        pub fn nvh_ipc_log_dropped(ipc: *mut c_void) -> u32;
         pub fn nvh_gpu_info(buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_gpu_sample(buf: *mut c_char, len: i32) -> i32;
         pub fn nvh_mem_sample(buf: *mut c_char, len: i32) -> i32;
@@ -1346,6 +1356,29 @@ fn bench_recommendation(results: &[serde_json::Value], fps: f64) -> serde_json::
 }
 
 /// The user's display gamma and the debug session folder, for the shim.
+/// The shim's log lines (its ring buffer in the IPC block) into the host's writer, and the host's log level to the shim. Called every loop turn: a few atomics when nothing is queued.
+fn pump_shim_log(ipc: *mut std::ffi::c_void, level_sent: &mut u32, dropped_seen: &mut u32) {
+    let lv = logs::level() as u32;
+    if lv != *level_sent {
+        unsafe { nvh::nvh_ipc_set_log_level(ipc, lv) };
+        *level_sent = lv;
+    }
+    let (mut level, mut pid) = (0u32, 0u32);
+    let (mut st, mut co, mut tx) = ([0 as std::ffi::c_char; 24], [0 as std::ffi::c_char; 32], [0 as std::ffi::c_char; 192]);
+    for _ in 0..256 {
+        if unsafe { nvh::nvh_ipc_log_pop(ipc, &mut level, &mut pid, st.as_mut_ptr(), co.as_mut_ptr(), tx.as_mut_ptr()) } == 0 {
+            break;
+        }
+        let s = |p: *const std::ffi::c_char| unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned();
+        logs::shim_line(level, &s(co.as_ptr()), &s(st.as_ptr()), &s(tx.as_ptr()));
+    }
+    let d = unsafe { nvh::nvh_ipc_log_dropped(ipc) };
+    if d != *dropped_seen {
+        logs::general("WARN", &format!("shim log: {} lines lost in the ring buffer (host not draining fast enough, or the ring full)", d.wrapping_sub(*dropped_seen)));
+        *dropped_seen = d;
+    }
+}
+
 fn push_user(ipc: *mut std::ffi::c_void, gamma: f32, debug: bool) {
     #[cfg(windows)]
     let dir: Vec<u16> = {
@@ -1623,6 +1656,7 @@ fn games_record_run(args: &Args, origin: Instant, exe: &str, headset: &str, hz: 
         ses["level"] = json!(level);
         ses["net"] = run.net_summary();
         ses["gpu"] = json!({ "name": gpu["name"], "driver": gpu["driver"] });
+        if let Some(l) = logs::last_run_log() { ses["log"] = json!(l); }   // the run's own log, relative to the logs folder (1.3.10)
         ses["pipeline"] = pipeline.clone();   // the frame pipeline strip of the Game statistics app (docs/FOV_PIPELINE_OPTIM.md S8)
         ses
     };
@@ -1732,7 +1766,7 @@ fn main() {
         None => layout.session_log(),
     };
     fs::create_dir_all(alvr_log.parent().unwrap_or(&args.config_dir)).ok();
-    logs::init(logs_dir.as_deref(), Some(&alvr_log), args.debug == Some(true));
+    logs::init(logs_dir.as_deref(), Some(&alvr_log), args.debug == Some(true), args.log_level.as_deref().and_then(logs::Level::parse).unwrap_or(logs::Level::Info));
     telemetry::start();
     let mut debug_on = args.debug == Some(true);
     let mut user_gamma = args.gamma.unwrap_or(1.0).clamp(0.5, 2.0);
@@ -2489,6 +2523,7 @@ fn main() {
         }
     };
     let mut status_at = Instant::now();
+    let (mut shim_log_level, mut shim_log_dropped) = (u32::MAX, 0u32);   // the host's log level as the shim last saw it, lines the shim lost so far
     let (mut perf_rel, mut perf_late) = (0u64, 0u64);   // shim release counters at the last fg_perf line
     let mut perf_fg = [0u64; 8];   // pipeline counters at the last fg_perf line: synths, reals, no_sample, sample_waits, sample_wait_us, in_hand, stale_stamps, regime_switches
     struct BenchState {
@@ -2510,6 +2545,7 @@ fn main() {
             break;
         }
         if !ipc.is_null() {
+            pump_shim_log(ipc, &mut shim_log_level, &mut shim_log_dropped);
             // live settings from AirFrameXR.exe
             if vision::COLOR_PENDING.swap(false, Ordering::SeqCst) {
                 let c = [0, 1, 2, 3].map(|k| f32::from_bits(vision::COLOR_REQ[k].load(Ordering::SeqCst)));
@@ -2582,6 +2618,11 @@ fn main() {
             let displaced = alive && game.as_ref().map_or(false, |g| is_mirror(&g.exe)) && !is_mirror(&exe);
             if alive && game.is_none() {
                 logs::general("INFO", &format!("game started: {exe}"));
+                if !is_mirror(&exe) {
+                    logs::game_start(&exe);   // the run's timeline lines go to logs/games/<exe>/<time>.log from here to the game's end
+                } else {
+                    logs::forget_run_log();   // the desktop mirror has no run log: its record must not point at the last game's
+                }
                 event(origin, "game_started", json!({ "exe": exe }));
                 vision::RECENTER_REQ.store(true, Ordering::SeqCst);   // the player's forward and position at game start are the game's forward and origin, on every headset, with or without the launcher
                 run_windows.clear();
@@ -2597,9 +2638,11 @@ fn main() {
                 let secs = g.start.elapsed().as_secs_f64();
                 let frames = shared.frames_sent.load(Ordering::Relaxed) - g.frames0;
                 let submitted = shim_submitted(ipc).wrapping_sub(g.submitted0);
-                logs::general("INFO", &format!(
+                let ended = format!(
                     "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps){}",
-                    g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline)));
+                    g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline));
+                logs::general("INFO", &ended);
+                logs::game_end(&ended);
                 event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames }));
                 let seg_secs = g.seg_start.elapsed().as_secs_f64();
                 if seg_secs > 2.0 {
@@ -2687,7 +2730,7 @@ fn main() {
                     // the shim's counters restart with every game: a smaller value is a new game's own count, not a negative delta (gears 2026-10-20: 1.8e19 "releases late")
                     let (d_rel, d_late) = if rel < perf_rel || late < perf_late { (rel, late) } else { (rel - perf_rel, late - perf_late) };
                     (perf_rel, perf_late) = (rel, late);
-                    logs::general("INFO", &format!("frame generation perf: app {:.1} fps (envelope {app_ms:.1} ms, {d_late}/{d_rel} releases late), stream {:.1} fps, game period {:.1} ms (p50 {:.1} p95 {:.1} max {:.1}), lag {:.1} ms (slack p5 {:.1} p50 {:.1}), mean t {:.2} mean age {:.2}, behind {} ahead {}, gpu [{gpu}]",
+                    logs::run_line(logs::Level::Info, "perf", format!("frame generation perf: app {:.1} fps (envelope {app_ms:.1} ms, {d_late}/{d_rel} releases late), stream {:.1} fps, game period {:.1} ms (p50 {:.1} p95 {:.1} max {:.1}), lag {:.1} ms (slack p5 {:.1} p50 {:.1}), mean t {:.2} mean age {:.2}, behind {} ahead {}, gpu [{gpu}]",
                         rendered as f64 / secs, streamed as f64 / secs, u.game_period_ms, u.interval_p50, u.interval_p95, u.interval_max, u.lag_ms, u.slack_p5, u.slack_p50, u.mean_t, u.mean_age, u.behind, u.ahead));
                     // the tracking samples the outputs are stamped with: skipped boundaries (none newer than the last sent frame), waits for one,
                     // stamps that left one in hand, and the spacing of the headset's samples at the host (the cause of the misses, 2026-10-16)
@@ -2699,7 +2742,7 @@ fn main() {
                     let outputs = d[0] + d[1];
                     let (gap_p95, gap_max, gap_over15, gap_n) = *TRACKING_GAP_LAST.lock();
                     if outputs + d[2] > 0 {
-                        logs::general("INFO", &format!("frame generation samples: {} outputs, {} boundaries skipped for want of a tracking sample ({:.1} %), {} waited for one (mean {:.1} ms), {} stamped with one in hand, {} with a stale one (tracking dark), {} stamp regime switches; tracking spacing p95 {gap_p95:.1} ms max {gap_max:.1} ({gap_over15}/{gap_n} gaps over 15 ms)",
+                        logs::run_line(logs::Level::Verbose, "perf", format!("frame generation samples: {} outputs, {} boundaries skipped for want of a tracking sample ({:.1} %), {} waited for one (mean {:.1} ms), {} stamped with one in hand, {} with a stale one (tracking dark), {} stamp regime switches; tracking spacing p95 {gap_p95:.1} ms max {gap_max:.1} ({gap_over15}/{gap_n} gaps over 15 ms)",
                             outputs, d[2], 100.0 * d[2] as f64 / (outputs + d[2]) as f64, d[3], if d[3] > 0 { d[4] as f64 / 1000.0 / d[3] as f64 } else { 0.0 }, d[5], d[6], d[7]));
                     }
                     event(origin, "fg_perf", json!({ "app_fps": rendered as f64 / secs, "stream_fps": streamed as f64 / secs, "app_envelope_ms": app_ms,
@@ -3020,10 +3063,12 @@ fn main() {
         let secs = g.start.elapsed().as_secs_f64();
         let frames = shared.frames_sent.load(Ordering::Relaxed) - g.frames0;
         let submitted = shim_submitted(ipc).wrapping_sub(g.submitted0);
-        logs::general("INFO", &format!(
+        let ended = format!(
             "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps){} (streamer stopping)",
-            g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline)));
+            g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline));
+        logs::general("INFO", &ended);
         event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames, "host_stopping": true }));
+        logs::game_end(&ended);
     }
     let frames = shared.frames_sent.load(Ordering::Relaxed);
     let connected = connected_at.is_some();
@@ -3137,6 +3182,7 @@ fn main() {
     // dropping ServerCoreContext joins its threads (ALVR un-mutes the PC speakers here); do it explicitly before exit
     drop(ctx);
     logs::general("INFO", &format!("host stop ({} frames streamed{})", frames, if encode_errors > 0 { format!(", {encode_errors} encode errors") } else { String::new() }));
+    logs::flush();   // the writer thread owns the files: wait until the last lines are on disk
     exit_now(if !connected { 2 } else if pass { 0 } else { 1 });
 }
 

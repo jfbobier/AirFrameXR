@@ -64,5 +64,21 @@ int main() {
     check(takesBeam(0.6f) && !takesBeam(0.4f), "beam hand: trigger above 0.5 takes it, less does not");
     check(!takeOverReleased(0.3f) && takeOverReleased(0.1f), "beam hand: the take-over press ends when the trigger is released");
     printf("math_test: %s\n", fails ? "FAILED" : "OK");
+    // the left stick as arrow keys: one per push, none while held, again after a release or a clear change of direction
+    {
+        StickArrows a;
+        check(a.step(0.5f, 0.f) == kArrowNone, "stick: a small push (0.5) sends nothing");
+        check(a.step(0.9f, 0.1f) == kArrowRight, "stick: a push to the right sends right");
+        check(a.step(1.0f, 0.f) == kArrowNone && a.step(0.95f, 0.05f) == kArrowNone && a.step(0.7f, 0.f) == kArrowNone, "stick: held to the right, nothing more is sent");
+        check(a.step(0.4f, 0.f) == kArrowNone && a.step(0.9f, 0.f) == kArrowNone, "stick: eased to 0.4 (above the release) and pushed again: still the same push");
+        check(a.step(0.1f, 0.f) == kArrowNone && a.step(0.9f, 0.f) == kArrowRight, "stick: released, then pushed again: right again");
+        check(a.step(0.f, 0.9f) == kArrowUp, "stick: swept clearly to up without a release: up");
+        check(a.step(0.f, -0.1f) == kArrowNone && a.step(0.f, -1.f) == kArrowDown, "stick: down after a release");
+        check(a.step(0.7f, -0.7f) == kArrowNone, "stick: a diagonal (no clear axis) sends nothing");
+        check(a.step(0.f, 0.f) == kArrowNone && a.step(-0.8f, 0.2f) == kArrowLeft, "stick: left");
+        StickArrows b;
+        check(b.step(0.f, 0.f) == kArrowNone && b.step(0.65f, 0.f) == kArrowRight, "stick: just past 0.6 counts");
+        check(b.step(0.f, 0.f) == kArrowNone && b.step(0.59f, 0.f) == kArrowNone, "stick: just under 0.6 does not");
+    }
     return fails ? 1 : 0;
 }

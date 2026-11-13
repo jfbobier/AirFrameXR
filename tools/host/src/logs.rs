@@ -1,14 +1,16 @@
-//! AirFrameXR logging.
+//! AirFrameXR logging (design and status: docs/ARCHITECTURE.md, "Logging"). The files are owned by the writer thread of `logsink.rs`;
+//! this module is the host's API to it and the host-side aggregation.
 //!
-//! * General log `logs/AirFrameXR.log`: appended by every component (host, shim inside each game, GUIs), one line per fact that
-//!   matters later: start/stop, headset connect/disconnect, negotiated stream, game start/end, warnings and errors. Small.
-//! * Debug session (only when debug is on): `logs/debug/<yyyymmdd-hhmmss>/` per host run with the verbose files: `host_events.jsonl`
-//!   (every host event, `encoder_stats` every 2 s), `alvr.log` (server_core's own log), `gpu.csv` (NVML, 1 Hz), and one
-//!   `shim_<exe>_<pid>.log` per game (the shim finds the folder through the IPC block).
+//! * `logs/AirFrameXR.log`: one line per fact that matters later (start/stop, headset connect, negotiated stream, game start/end,
+//!   warnings and errors), ALVR's own warnings, errors and info lines as `[alvr]`. Small. Verbosity: `log_level` (info by default).
+//! * `logs/games/<exe>/<yyyymmdd-hhmmss>.log`: one file per game run, its timeline lines (frame generation perf, memory, and at verbose
+//!   the phase lock).
+//! * Debug session (debug level only): `logs/debug/<yyyymmdd-hhmmss>/` per host run: `host_events.jsonl`, `alvr.log` (the raw ALVR
+//!   stream: events, `[STATS]`, `[CAPS]`), `gpu.csv` (NVML, 1 Hz), the CSVs and one `shim_<exe>_<pid>.log` per game.
 //!
-//! The host also installs the logger behind server_core (ALVR): its log lines go to `alvr.log`, its warnings/errors to the
-//! general log, and its client statistics events (`StatisticsSummary` every second, `GraphStatistics` per frame: total / encode /
-//! network / decode latency, packets lost, client fps) are captured for the status lines and the network benchmark.
+//! The host installs the logger behind server_core (ALVR): its client statistics events (`StatisticsSummary` every second,
+//! `GraphStatistics` per frame: total / encode / network / decode latency, packets lost, client fps) are captured for the status
+//! lines and the network benchmark.
 use alvr_common::{log, parking_lot::Mutex};
 use alvr_events::EventType;
 use serde_json::{json, Value};
@@ -21,7 +23,6 @@ use std::{
 
 struct State {
     logs_dir: Option<PathBuf>,
-    general: Option<fs::File>,
     debug_dir: Option<PathBuf>,
     events: Option<fs::File>,
     alvr: Option<fs::File>,
@@ -31,7 +32,7 @@ struct State {
 static STATE: OnceLock<Mutex<State>> = OnceLock::new();
 
 fn state() -> &'static Mutex<State> {
-    STATE.get_or_init(|| Mutex::new(State { logs_dir: None, general: None, debug_dir: None, events: None, alvr: None, alvr_default: None }))
+    STATE.get_or_init(|| Mutex::new(State { logs_dir: None, debug_dir: None, events: None, alvr: None, alvr_default: None }))
 }
 
 #[cfg(windows)]
@@ -79,22 +80,20 @@ fn open_append(path: &Path) -> Option<fs::File> {
 }
 
 /// `logs_dir`: the install's `logs/` (None in harness runs: no general log). `alvr_default`: where server_core's log goes when
-/// debug is off (the harness reads `<config>/session_log.txt`).
-pub fn init(logs_dir: Option<&Path>, alvr_default: Option<&Path>, debug: bool) {
+/// debug is off (the harness reads `<config>/session_log.txt`). `level`: the verbosity of `AirFrameXR.log` (debug on = Debug).
+pub fn init(logs_dir: Option<&Path>, alvr_default: Option<&Path>, debug: bool, level: Level) {
+    BASE_LEVEL.store(level as u8, std::sync::atomic::Ordering::Relaxed);
     {
         let mut s = state().lock();
         if let Some(d) = logs_dir {
             fs::create_dir_all(d).ok();
-            let g = d.join("AirFrameXR.log");
-            // keep the general log bounded: past 10 MB the old one is kept as .1
-            if fs::metadata(&g).map(|m| m.len() > 10 << 20).unwrap_or(false) {
-                fs::rename(&g, d.join("AirFrameXR.log.1")).ok();
-            }
-            s.general = open_append(&g);
             s.logs_dir = Some(d.to_path_buf());
+            // one writer thread owns AirFrameXR.log and the per-game logs (logsink.rs); callers only queue lines
+            logsink::install(logsink::Sink::start(logsink::Config::new(d), if debug { Level::Debug } else { level }));
         }
         s.alvr_default = alvr_default.map(Path::to_path_buf);
-        s.alvr = alvr_default.and_then(|p| fs::File::create(p).ok());
+        // with an install the raw ALVR stream exists only in the debug session folder; without one (harness runs) it is the session log file
+        s.alvr = if logs_dir.is_none() { alvr_default.and_then(|p| fs::File::create(p).ok()) } else { None };
     }
     if debug {
         set_debug(true);
@@ -102,23 +101,140 @@ pub fn init(logs_dir: Option<&Path>, alvr_default: Option<&Path>, debug: bool) {
     log::set_boxed_logger(Box::new(AlvrLogger)).ok();
     log::set_max_level(log::LevelFilter::Info);
     alvr_common::set_panic_hook();
+    // the panic hook above logs through `log`: wait for the writer before the process dies
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |i| {
+        prev(i);
+        flush();
+    }));
 }
 
-/// One line in the general log: "time [host] LEVEL message".
+pub use crate::logsink::Level;
+use crate::logsink::{self, Dest};
+
+/// The verbosity chosen at start (airframexr.json `log_level`, `--log-level`); debug on raises it to Debug, off returns to this.
+static BASE_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(Level::Info as u8);
+
+fn base_level() -> Level {
+    match BASE_LEVEL.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => Level::Error,
+        1 => Level::Warn,
+        2 => Level::Info,
+        3 => Level::Verbose,
+        _ => Level::Debug,
+    }
+}
+
+/// Sets the verbosity of `AirFrameXR.log` live (stdin `log_level <error|warn|info|verbose|debug>`).
+pub fn set_level(l: Level) {
+    BASE_LEVEL.store(l as u8, std::sync::atomic::Ordering::Relaxed);
+    if let Some(s) = logsink::global() {
+        s.set_level(if debug_dir().is_some() { Level::Debug } else { l });
+    }
+}
+
+pub fn level() -> Level {
+    logsink::global().map(|s| s.level()).unwrap_or(Level::Info)
+}
+
+/// Is a line of this level written? (one atomic read: test before formatting a detail line)
+pub fn enabled(l: Level) -> bool {
+    logsink::global().map_or(false, |s| s.enabled(l))
+}
+
+/// Waits until the queued lines are on disk (exit, panic).
+pub fn flush() {
+    if let Some(s) = logsink::global() {
+        s.flush();
+    }
+}
+
+/// A line of `component` in `AirFrameXR.log` (`run`: in the running game's log instead, when one is open).
+pub fn log_line(level: Level, component: &'static str, run: bool, msg: String) {
+    if let Some(s) = logsink::global() {
+        s.log(level, component, msg, if run { Dest::Run } else { Dest::Main });
+    }
+}
+
+/// A line in the main log and, while a game runs, in its run log too.
+pub fn log_line_both(level: Level, component: &'static str, msg: String) {
+    if let Some(s) = logsink::global() {
+        s.log(level, component, msg, Dest::Both);
+    }
+}
+
+/// One line in the general log, from the host: "time LEVEL [host] message". `level` is "INFO", "WARN" or "ERROR".
 pub fn general(level: &str, msg: &str) {
-    let mut s = state().lock();
-    if let Some(f) = s.general.as_mut() {
-        writeln!(f, "{} [host] {level:<5} {msg}", local_time(true, false)).ok();
-        f.flush().ok();
+    let l = match level {
+        "ERROR" => Level::Error,
+        "WARN" => Level::Warn,
+        _ => Level::Info,
+    };
+    log_line(l, "host", false, msg.to_string());
+}
+
+/// A line the shim logged inside a game (read from its ring buffer by main.rs): kept with the time the shim stamped it.
+pub fn shim_line(level: u32, comp: &str, stamp: &str, text: &str) {
+    if let Some(s) = logsink::global() {
+        let l = match level {
+            0 => Level::Error,
+            1 => Level::Warn,
+            2 => Level::Info,
+            3 => Level::Verbose,
+            _ => Level::Debug,
+        };
+        let at = logsink::Stamp::parse(stamp).unwrap_or_else(logsink::Stamp::now);
+        s.log_at(at, l, comp.to_string(), text, Dest::Both);
+    }
+}
+
+/// A timeline line of the running game (frame generation perf, memory, GPU): in the game's log only, nothing when no game runs.
+/// `level` Verbose for the detail that is only wanted when looking for something (phase lock, tracking samples).
+pub fn run_line(level: Level, component: &'static str, msg: String) {
+    if let Some(s) = logsink::global() {
+        s.log(level, component, msg, Dest::RunOnly);
+    }
+}
+
+/// The run log of the last game that started, relative to the logs folder (`games/<exe>/<yyyymmdd-hhmmss>.log`): what a run record (games.json) points at.
+static LAST_RUN_LOG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn last_run_log() -> Option<String> {
+    LAST_RUN_LOG.lock().ok().and_then(|g| g.clone())
+}
+
+pub fn forget_run_log() {
+    if let Ok(mut g) = LAST_RUN_LOG.lock() {
+        *g = None;
+    }
+}
+
+/// A game started: its detail lines go to `logs/games/<exe>/<time>.log`. Returns that file.
+pub fn game_start(exe: &str) -> Option<PathBuf> {
+    let p = logsink::global()?.game_start(exe);
+    if let (Some(dir), Some(file)) = (p.parent().and_then(|d| d.file_name()), p.file_name()) {
+        if let Ok(mut g) = LAST_RUN_LOG.lock() {
+            *g = Some(format!("games/{}/{}", dir.to_string_lossy(), file.to_string_lossy()));
+        }
+    }
+    Some(p)
+}
+
+pub fn game_end(summary: &str) {
+    if let Some(s) = logsink::global() {
+        s.game_end(summary);
     }
 }
 
 /// Turns the debug session on (creates `logs/debug/<time>/` the first time) or off. Returns the session folder when on.
 pub fn set_debug(on: bool) -> Option<PathBuf> {
+    if let Some(g) = logsink::global() {
+        g.set_level(if on { Level::Debug } else { base_level() });
+    }
     let mut s = state().lock();
     if !on {
         s.events = None;
-        s.alvr = s.alvr_default.as_ref().and_then(|p| open_append(p));
+        s.alvr = if s.logs_dir.is_none() { s.alvr_default.as_ref().and_then(|p| open_append(p)) } else { None };
         return None;
     }
     if s.debug_dir.is_none() {
@@ -216,6 +332,7 @@ impl log::Log for AlvrLogger {
         if let Some(inner) = msg.strip_prefix("{\"va_client_caps\":").and_then(|s| s.strip_suffix('}')) {
             if let (Ok(v), Some(o)) = (serde_json::from_str::<Value>(inner), crate::phase::origin()) {
                 write_alvr("CAPS", inner);
+                log_line(Level::Verbose, "alvr", false, format!("client capabilities {inner}"));
                 *CLIENT_REFRESH_RATES.lock().unwrap() = v["supported_refresh_rates"].as_array().map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default();
                 let rates = CLIENT_REFRESH_RATES.lock().unwrap().iter().map(|r| format!("{r:.0}")).collect::<Vec<_>>().join(" / ");
                 general("INFO", &format!("headset refresh rates: {}", if rates.is_empty() { "none declared".to_string() } else { rates + " Hz" }));
@@ -232,6 +349,10 @@ impl log::Log for AlvrLogger {
                     &format!("{:.6},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}", qpc_now(), v["ts"].as_u64().unwrap_or(0), ms("frame_interval_us"),
                         ms("decode_us"), ms("decoder_queue_us"), ms("rendering_us"), ms("vsync_queue_us"), ms("total_us")));
             }
+            return;
+        }
+        if let Some(t) = client_stats::parse_ticks(&msg) {
+            client_stats::ticks(&t);   // the headset's own display-tick counts (not an error: the client sends it at error level so it is forwarded)
             return;
         }
         if msg.starts_with('{') && msg.ends_with('}') {
@@ -270,16 +391,15 @@ impl log::Log for AlvrLogger {
             }
             seen.push(name.to_string());
         }
-        let level = match record.level() {
-            log::Level::Error => "ERROR",
-            log::Level::Warn => "WARN",
-            log::Level::Info => "INFO",
-            _ => "DEBUG",
+        // server_core's own text lines: the unified log (the raw stream stays in the debug folder's alvr.log)
+        let (level, lvl) = match record.level() {
+            log::Level::Error => ("ERROR", Level::Error),
+            log::Level::Warn => ("WARN", Level::Warn),
+            log::Level::Info => ("INFO", Level::Info),
+            _ => ("DEBUG", Level::Debug),
         };
         write_alvr(level, &msg);
-        if record.level() <= log::Level::Warn {
-            general(level, &format!("alvr: {msg}"));
-        }
+        log_line(lvl, "alvr", false, msg);
     }
 
     fn flush(&self) {}
@@ -370,10 +490,110 @@ pub mod client_stats {
     /// 1.5 periods = that many periods without a new frame); cumulative, for the automatic level's verdict on "generation off"
     static CLIENT_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     static CLIENT_MISSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    /// The gaps between two displayed frames, in display periods, binned (1.3.10, read-only): below 0.75, about 1, 1.25 to 1.75 (not a whole
+    /// number of periods: a late frame, not a skipped refresh), about 2, 2.25 to 3.25, above 3.25. One line per minute in the general log, so
+    /// "headset repeated" can be checked against what the gaps really are. See `gap_bin`.
+    static GAP_BINS: [std::sync::atomic::AtomicU64; 6] = [
+        std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0),
+    ];
+    static GAP_LOGGED: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
-    /// (frames the headset displayed, display periods it repeated) so far
+    /// Bin of a gap `ratio` display periods long (see GAP_BINS). The edges sit halfway between whole periods, so a gap of 2 periods with a
+    /// millisecond of jitter is still "about 2", and 1.5 periods (a late frame, no skipped refresh) has a bin of its own.
+    pub(super) fn gap_bin(ratio: f64) -> usize {
+        if ratio < 0.75 { 0 } else if ratio < 1.25 { 1 } else if ratio < 1.75 { 2 } else if ratio < 2.25 { 3 } else if ratio < 3.25 { 4 } else { 5 }
+    }
+
+    /// Once a minute while frames arrive: the bins since the last line, with the repeat share they imply (whole periods skipped, counted from the
+    /// "about 2" and later bins) and the share of irregular gaps (1.25 to 1.75 periods).
+    fn log_gap_bins() {
+        let mut last = GAP_LOGGED.lock().unwrap();
+        let now = std::time::Instant::now();
+        let due = match *last { Some(t) => now.duration_since(t).as_secs() >= 60, None => { *last = Some(now); false } };
+        if !due { return; }
+        *last = Some(now);
+        let b: Vec<u64> = GAP_BINS.iter().map(|a| a.swap(0, std::sync::atomic::Ordering::Relaxed)).collect();
+        let n: u64 = b.iter().sum();
+        if n == 0 { return; }
+        let skipped = b[3] + 2 * b[4] + 3 * b[5];   // periods without a new frame, from the whole-period bins (the >3.25 bin counted as 3 at least)
+        super::log_line_both(Level::Info, "host", format!(
+            "client frame gaps (display periods) over the last minute, {n} frames: <0.75 {}, ~1 {}, 1.25-1.75 {} ({:.1} %, late but not skipped), ~2 {}, 2.25-3.25 {}, >3.25 {}; periods skipped {:.1} % of periods shown",
+            b[0], b[1], b[2], 100.0 * b[2] as f64 / n as f64, b[3], b[4], b[5], 100.0 * skipped as f64 / (n + skipped) as f64));
+    }
+
+    /// The headset's own display-tick counts (1.3.10): the visionOS and the Quest client each send a `va_ticks {...}` line through the client log every 10 s:
+    /// what each of its display ticks showed (`fresh` = a new frame; `resubmit`, `reprojected`, `none` = the same frame again or nothing; `drops` = frames its
+    /// decoder queue discarded). This is what "headset repeated" is made of when it is there; the gaps between reported frames (above) are the fallback
+    /// for a client that does not send it (stock ALVR, an older build). One definition on both platforms: repeated = (resubmit + reprojected + none) / ticks.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Ticks {
+        pub client: String,
+        pub secs: f64,
+        pub ticks: u64,
+        pub fresh: u64,
+        pub resubmit: u64,
+        pub reprojected: u64,
+        pub none: u64,
+        pub drops: u64,
+    }
+
+    impl Ticks {
+        /// Share of the ticks that did not show a new frame (0 when no tick was counted).
+        pub fn repeated(&self) -> f64 {
+            if self.ticks == 0 { 0.0 } else { (self.ticks.saturating_sub(self.fresh)) as f64 / self.ticks as f64 }
+        }
+    }
+
+    /// The `va_ticks` line inside a client log message ("Client name: [error] va_ticks {...}" or the bare line), None when the message has none or it is not valid.
+    pub fn parse_ticks(msg: &str) -> Option<Ticks> {
+        let at = msg.find("va_ticks {")?;
+        let v: Value = serde_json::from_str(msg[at + "va_ticks ".len()..].trim()).ok()?;
+        let n = |k: &str| v[k].as_u64().unwrap_or(0);
+        let t = Ticks { client: v["client"].as_str().unwrap_or("?").to_string(), secs: v["t"].as_f64().unwrap_or(0.0), ticks: n("ticks"), fresh: n("fresh"),
+            resubmit: n("resubmit"), reprojected: n("reprojected"), none: n("none"), drops: n("drops") };
+        // the counts must add up (a client that miscounts must not move the figure)
+        if t.ticks == 0 || t.fresh + t.resubmit + t.reprojected + t.none != t.ticks || t.secs <= 0.0 { return None; }
+        Some(t)
+    }
+
+    static TICKS_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static TICKS_FRESH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    /// the gap-based counters when the first `va_ticks` window arrived: the figure continues from there, so the totals never jump (a run's baseline may predate it)
+    static TICKS_ANCHOR: std::sync::Mutex<Option<(u64, u64)>> = std::sync::Mutex::new(None);
+
+    /// A `va_ticks` window arrived: counted, and one line in the run's log.
+    pub fn ticks(t: &Ticks) {
+        use std::sync::atomic::Ordering::Relaxed;
+        {
+            let mut a = TICKS_ANCHOR.lock().unwrap();
+            if a.is_none() {
+                *a = Some((CLIENT_FRAMES.load(Relaxed), CLIENT_MISSED.load(Relaxed)));
+            }
+        }
+        TICKS_TOTAL.fetch_add(t.ticks, Relaxed);
+        TICKS_FRESH.fetch_add(t.fresh, Relaxed);
+        super::run_line(super::Level::Info, "client", format!(
+            "headset ticks ({}): {:.0} s, {} ticks, {:.1} % without a new frame (resubmit {}, reprojected {}, none {}), {} frames dropped by its queue",
+            t.client, t.secs, t.ticks, 100.0 * t.repeated(), t.resubmit, t.reprojected, t.none, t.drops));
+    }
+
+    /// (frames the headset displayed new, display ticks that showed no new frame) so far: from the headset's own tick counts when it sends them, else from the gaps between
+    /// the frames it reported.
     pub fn client_frames_missed() -> (u64, u64) {
-        (CLIENT_FRAMES.load(std::sync::atomic::Ordering::Relaxed), CLIENT_MISSED.load(std::sync::atomic::Ordering::Relaxed))
+        use std::sync::atomic::Ordering::Relaxed;
+        match *TICKS_ANCHOR.lock().unwrap() {
+            Some((f0, m0)) => {
+                let (total, fresh) = (TICKS_TOTAL.load(Relaxed), TICKS_FRESH.load(Relaxed));
+                (f0 + fresh, m0 + total.saturating_sub(fresh))
+            }
+            None => (CLIENT_FRAMES.load(Relaxed), CLIENT_MISSED.load(Relaxed)),
+        }
+    }
+
+    /// Does the figure come from the headset's own counts?
+    pub fn ticks_reported() -> bool {
+        TICKS_ANCHOR.lock().unwrap().is_some()
     }
     static LAST_SUMMARY: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
 
@@ -433,6 +653,8 @@ pub mod client_stats {
             let gap_s = 1.0 / g.client_fps;
             let period_s = crate::phase::period_ns() as f64 / 1e9;
             CLIENT_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            GAP_BINS[gap_bin(gap_s / period_s)].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            log_gap_bins();
             if gap_s > 1.5 * period_s {
                 CLIENT_MISSED.fetch_add(((gap_s / period_s).round() as u64).saturating_sub(1), std::sync::atomic::Ordering::Relaxed);
             }
@@ -491,7 +713,33 @@ pub mod client_stats {
 
     #[cfg(test)]
     mod tests {
+        #[test]
+        fn va_ticks_line_is_parsed_and_checked() {
+            let line = "Client Vision Pro: [error] va_ticks {\"v\":1,\"client\":\"visionos\",\"t\":10.01,\"ticks\":1000,\"fresh\":960,\"resubmit\":10,\"reprojected\":20,\"none\":10,\"drops\":3}";
+            let t = super::parse_ticks(line).unwrap();
+            assert_eq!((t.client.as_str(), t.ticks, t.fresh, t.drops), ("visionos", 1000, 960, 3));
+            assert!((t.repeated() - 0.04).abs() < 1e-9);
+            // counts that do not add up, an empty window, or no line at all
+            assert!(super::parse_ticks("va_ticks {\"t\":10,\"ticks\":10,\"fresh\":5,\"none\":1}").is_none());
+            assert!(super::parse_ticks("va_ticks {\"t\":10,\"ticks\":0}").is_none());
+            assert!(super::parse_ticks("Client x: [info] hello").is_none());
+        }
+
         use super::*;
+
+        #[test]
+        fn gap_bins_sit_between_whole_periods() {
+            // 100 Hz: a 20 ms gap with a millisecond of jitter is still "about 2" periods, a 15 ms one is a late frame, not a skipped refresh
+            let p = 10.0;
+            assert_eq!(gap_bin(9.9 / p), 1);
+            assert_eq!(gap_bin(20.9 / p), 3);
+            assert_eq!(gap_bin(19.0 / p), 3);
+            assert_eq!(gap_bin(15.0 / p), 2);
+            assert_eq!(gap_bin(17.4 / p), 2);
+            assert_eq!(gap_bin(30.0 / p), 4);
+            assert_eq!(gap_bin(80.0 / p), 5);
+            assert_eq!(gap_bin(3.0 / p), 0);
+        }
 
         fn clean(total_ms: f64) -> Sample {
             Sample { total: total_ms / 1000.0, game: 0.011, compositor: 0.002, encoder: 0.006, network: 0.009, decoder: 0.014, decoder_queue: 0.003, client_compositor: 0.002,

@@ -85,3 +85,22 @@ static const float kBadgeW = 0.30f, kBadgeH = 0.075f, kPanelW = 0.96f, kPanelH =
 static Screen hintBelow(const Screen& s, float w, float h) {
     return { add(s.center, mul(s.up, -(s.height / 2 + kHintGapM + h / 2))), s.right, s.up, s.normal, w, h };
 }
+
+// A thumbstick as a d-pad (the left stick of a controller sends arrow keys): one arrow per PUSH. A push is a deflection past 0.6 that is clearly along one axis (at least 1.5
+// times the other); the stick then stays latched on that direction, whatever it does, until it comes back under 0.3 (the hysteresis) or is pushed clearly along ANOTHER
+// direction past 0.6. Holding it sends nothing more: the user pushes again for the next arrow, like pressing the d-pad again. Returns 0 (nothing), 1 up, 2 down, 3 left, 4 right.
+enum { kArrowNone = 0, kArrowUp, kArrowDown, kArrowLeft, kArrowRight };
+struct StickArrows {
+    int latched = kArrowNone;
+    int step(float x, float y) {
+        const float ax = std::fabs(x), ay = std::fabs(y), m = std::hypot(x, y);
+        if (m < 0.3f) { latched = kArrowNone; return kArrowNone; }   // released: the next push counts
+        if (m < 0.6f) return kArrowNone;                              // not far enough yet (a latched stick stays latched down to 0.3)
+        int d = kArrowNone;
+        if (ax >= 1.5f * ay) d = x > 0 ? kArrowRight : kArrowLeft;
+        else if (ay >= 1.5f * ax) d = y > 0 ? kArrowUp : kArrowDown;  // y > 0 is up on an OpenXR thumbstick
+        if (d == kArrowNone || d == latched) return kArrowNone;
+        latched = d;
+        return d;
+    }
+};

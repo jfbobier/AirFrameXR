@@ -54,15 +54,21 @@ def run_one(name):
     result = {"scenario": name, "started": stamp, "outdir": str(outdir)}
     try:
         steps = lib.run_scenario(sc, outdir, log=print)
-        marker = sc.get("blocked_if_app_log")   # an environment the scenario cannot measure in (e.g. a screen the OS does not let a program duplicate) is BLOCKED, not a failed product
-        if marker and marker in ((outdir / "app.log").read_text(errors="replace") if (outdir / "app.log").exists() else ""):
-            raise lib.Blocked(f"the app reports {marker!r}: this machine cannot run the scenario (see the app.log)")
+        markers = sc.get("blocked_if_app_log") or []   # an environment the scenario cannot measure in (e.g. a screen the OS does not let a program duplicate) is BLOCKED, not a failed product
+        markers = [markers] if isinstance(markers, str) else markers
+        app_log = (outdir / "app.log").read_text(errors="replace") if (outdir / "app.log").exists() else ""
+        for marker in markers:
+            if marker in app_log:
+                raise lib.Blocked(f"the app reports {marker!r}: this machine cannot run the scenario (see the app.log)")
         a = lib.analyse(sc, outdir)
         checks = lib.evaluate(sc, a)
         result.update(status=verdict(checks), steps=steps, checks=checks)
         (outdir / "analysis.json").write_text(json.dumps(a, indent=1, default=str))
     except lib.Blocked as e:
         result.update(status="BLOCKED", reason=str(e), checks=[])
+        outdir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:   # the scenario left nothing to analyse (a process killed, the host never started): a failed scenario, not the end of the suite
+        result.update(status="FAIL", checks=[{"name": "scenario_ran", "ok": False, "value": f"{type(e).__name__}: {e}"[:300], "expected": "artifacts to analyse"}])
         outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "result.json").write_text(json.dumps(result, indent=1))
     latest = lib.RESULTS / "latest"
@@ -251,6 +257,10 @@ def build(what):
             continue
         if w == "mirrordesktop":   # the desktop mirror, an OpenXR app: tools/mirrordesktop/*.cpp|h compiled on the builder
             lib.b_run("if not exist tools\\mirrordesktop mkdir tools\\mirrordesktop")
+            lib.b_run("if not exist tools\\common mkdir tools\\common")
+            for f in sorted((lib.ROOT / "tools/common").glob("*")):   # aflog.h: the in-process log writer the mirror (and the shim's fallback) include
+                if f.is_file():
+                    lib.b_put(f, f"tools/common/{f.name}")
             for f in sorted((lib.ROOT / "tools/mirrordesktop").glob("*")):
                 if f.suffix in (".cpp", ".h"):
                     lib.b_put(f, f"tools/mirrordesktop/{f.name}")

@@ -127,10 +127,10 @@ namespace AirFrameXR
                     right.Controls.Add(new Label { Text = $"Trends over the last {sessions.Count} sessions", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                     right.Controls.Add(Trends(sessions));
                 }
-                var timeline = Timeline(LogTimeline.Last(Path.Combine(Paths.Logs, "AirFrameXR.log"), exe));
+                var timeline = Timeline(LogTimeline.ForRecord(Paths.Logs, S(last, "log"), exe));
                 if (timeline != null)
                 {
-                    right.Controls.Add(new Label { Text = "The last run over time (what the general log recorded: logs\\AirFrameXR.log)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
+                    right.Controls.Add(new Label { Text = "The last run over time (what the run's log recorded: logs\\games\\<game>\\)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
                     right.Controls.Add(timeline);
                 }
                 right.Controls.Add(new Label { Text = $"Sessions (the last {sessions.Count}, newest first)", AutoSize = true, Font = Ui.Bold, Margin = new Padding(3, 8, 3, 4) });
@@ -193,7 +193,7 @@ namespace AirFrameXR
             var lost = D(net, "packets_lost");
             strip.Stages.Add(new Stage { Title = "Network", Value = net != null ? N(D(net, "bitrate_mbps"), "0") + " Mbps" : "-", Note = $"{N(tr, "0")} ms, {N(lost, "0")} packets lost", Alarm = lost > 0 ? Color.Firebrick : (Color?)null });
             strip.Stages.Add(new Stage { Title = "Decode", Value = N(dec, "0") + " ms", Note = "on the headset" });
-            strip.Stages.Add(new Stage { Title = "Headset", Value = net != null ? N(D(net, "displayed_fps")) + " fps" : "-", Note = "shown, repeated periods " + N(rep) + " %", Alarm = rep >= 5 ? Color.Firebrick : (Color?)null });
+            strip.Stages.Add(new Stage { Title = "Headset", Value = net != null ? N(HeadsetShown.Fps(D(s, "display_hz"), D(s, "headset_repeated_typ"), D(net, "displayed_fps"))) + " fps" : "-", Note = "shown, repeated periods " + N(rep) + " %, " + N(D(net, "displayed_fps"), "0") + " reported by timestamp", Alarm = rep >= 5 ? Color.Firebrick : (Color?)null });
             if (net != null)
             {
                 bool bad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms")) || double.IsNaN(enc) || double.IsNaN(tr) || double.IsNaN(dec);
@@ -277,7 +277,7 @@ namespace AirFrameXR
             var blue = Ui.Accent; var orange = Color.FromArgb(0xF5, 0x8A, 0x1F); var grey = Color.FromArgb(0x7A, 0x84, 0x99);
             var fps = new TrendChart { Title = "Frames per second", Unit = "", Labels = labels };
             fps.Series.Add(new TrendSeries { Name = "game", Color = blue, V = V(x => D(x, "rendered_fps")) });
-            fps.Series.Add(new TrendSeries { Name = "headset shows", Color = orange, V = V(x => { var n = O(x, "net"); return n == null ? double.NaN : D(n, "displayed_fps"); }) });
+            fps.Series.Add(new TrendSeries { Name = "headset shows", Color = orange, V = V(x => { var n = O(x, "net"); return n == null ? double.NaN : HeadsetShown.Fps(D(x, "display_hz"), D(x, "headset_repeated_typ"), D(n, "displayed_fps")); }) });
             var lat = new TrendChart { Title = "Latency (ms)", Unit = " ms", Labels = labels };
             lat.Series.Add(new TrendSeries { Name = "total", Color = blue, V = V(Lat) });
             lat.Series.Add(new TrendSeries { Name = "enc + net + dec", Color = grey, V = V(Str) });
@@ -331,7 +331,7 @@ namespace AirFrameXR
             foreach (var s in Enumerable.Reverse(sessions))
             {
                 var net = O(s, "net");
-                lv.Items.Add(new ListViewItem(new[] { When(s), S(s, "headset"), Mode(S(s, "level")).Replace("generation ", ""), N(D(s, "seconds") / 60), N(D(s, "rendered_fps")), net != null ? N(D(net, "displayed_fps")) : "-",
+                lv.Items.Add(new ListViewItem(new[] { When(s), S(s, "headset"), Mode(S(s, "level")).Replace("generation ", ""), N(D(s, "seconds") / 60), N(D(s, "rendered_fps")), net != null ? N(HeadsetShown.Fps(D(s, "display_hz"), D(s, "headset_repeated_typ"), D(net, "displayed_fps"))) : "-",
                     N(D(s, "headset_repeated_typ") * 100), net != null ? Latency.Text(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) : "-",
                     net != null ? (Latency.Streamer(D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) is double sl ? N(sl, "0") : "n/a") : "-" }));
             }

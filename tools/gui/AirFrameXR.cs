@@ -854,7 +854,7 @@ namespace AirFrameXR
                         var rep = D(d, "headset_repeated_typ") * 100;
                         tGame.Set(F(D(d, "rendered_fps"), "0.0") + " fps", $"average, slowest tenth {F(D(d, "rendered_fps_low"), "0.0")}");
                         tStreamed.Set(F(D(d, "streamed_fps"), "0.0") + " fps", $"{F(D(d, "seconds") / 60, "0.0")} min at {(li >= 0 ? names[li] : lvl)}");
-                        tShown.Set(F(D(net, "displayed_fps"), "0.0") + " fps", $"repeated periods {F(rep, "0.0")} %", rep >= 5 ? Color.Firebrick : (Color?)null);
+                        tShown.Set(F(HeadsetShown.Fps(D(d, "display_hz"), D(d, "headset_repeated_typ"), D(net, "displayed_fps")), "0.0") + " fps", $"repeated periods {F(rep, "0.0")} %, {F(D(net, "displayed_fps"), "0")} reported by timestamp", rep >= 5 ? Color.Firebrick : (Color?)null);
                         tBitrate.Set(F(D(net, "bitrate_mbps"), "0") + " Mbps", "average");
                         var latBad = Latency.Absurd(D(net, "latency_ms"), D(net, "latency_outliers"), D(net, "latency_samples")) || Latency.Absurd(D(net, "latency_p95_ms"));
                         tLatency.Set(latBad ? "n/a" : F(D(net, "latency_ms"), "0") + " ms", latBad ? "not measured" : $"p95 {F(D(net, "latency_p95_ms"), "0")}, streamer {F(D(net, "encode_ms") + D(net, "network_ms") + D(net, "decode_ms"), "0")}", null, latBad ? Latency.Why : Latency.Meaning + "  This run: " + Latency.Split(D(net, "latency_ms"), D(net, "encode_ms"), D(net, "network_ms"), D(net, "decode_ms")));

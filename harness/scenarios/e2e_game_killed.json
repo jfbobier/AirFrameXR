@@ -1,0 +1,106 @@
+{
+  "description": "LOGGING FRAMEWORK (H6): the game is killed (taskkill /f) about 20 s in, so its own exit path never runs: the shim's lines written before the kill are still in the run log (the host reads them from the shared ring), no 'game exit' line, and the host ends the run.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 45,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 1000000,
+    "log_level": "info"
+  },
+  "client": {
+    "seconds": 40,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 100000,
+    "timeout_s": 90,
+    "kill_after_s": 20
+  },
+  "gpu_sample": true,
+  "timeout_s": 200,
+  "checks": {
+    "host_min_frames": 100,
+    "client_min_frames": 100,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 3520,
+      "height": 1600,
+      "color_range": "pc"
+    },
+    "refresh_hz": 90,
+    "install_logs": false,
+    "host_events": [
+      "host_start",
+      "client_connected",
+      "game_started",
+      "game_ended"
+    ],
+    "game_log": true,
+    "log_level_main": {
+      "present": [],
+      "absent": [
+        "phase lock:"
+      ]
+    },
+    "app_killed": true,
+    "killed_game_logs": true,
+    "alvr_in_unified_log": true,
+    "max_duplicate_timestamps": 1000
+  },
+  "install": true
+}

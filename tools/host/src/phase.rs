@@ -131,7 +131,7 @@ pub fn observe(queue_ms: f64) {
         s.corrections += 1;
         s.ignore = 12;
         s.recent.clear();
-        crate::logs::general("INFO", &format!("phase lock: arrivals {est:.1} ms before the render tick (target {margin:.1}), sliding the grid {step:+.2} ms"));
+        crate::logs::run_line(crate::logs::Level::Verbose, "phase", format!("phase lock: arrivals {est:.1} ms before the render tick (target {margin:.1}), sliding the grid {step:+.2} ms"));
     }
     if let Some(o) = ORIGIN.get() {
         crate::event(*o, "phase_lock", serde_json::json!({ "p10_ms": p10, "est_ms": est, "cluster_start_ms": m0, "spread_ms": rel[n - 1], "period_ms": period_ms, "acted": acted, "total_slide_ms": s.total_ms, "corrections": s.corrections }));

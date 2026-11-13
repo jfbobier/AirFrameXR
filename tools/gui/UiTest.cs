@@ -344,6 +344,7 @@ namespace AirFrameXR
         [STAThread]
         static int Main(string[] args)
         {
+            global::AirFrameXR.Log.Component = "uitest";   // the UI log (logs\\ui\\<time>-uitest.log) carries one line per case and per finding; harness/ui_matrix.py fetches it
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             string Arg(string k) { for (int i = 0; i + 1 < args.Length; i++) if (args[i] == k) return args[i + 1]; return null; }
@@ -427,7 +428,7 @@ namespace AirFrameXR
                 var lines = new List<string>();
                 foreach (var exe in (Arg("--exes") ?? "").Split(','))
                 {
-                    var r = global::AirFrameXR.LogTimeline.Last(tlLog, exe);
+                    var r = System.IO.Directory.Exists(tlLog) ? global::AirFrameXR.LogTimeline.ForGame(tlLog, exe) : global::AirFrameXR.LogTimeline.Last(tlLog, exe);   // a folder = the logs folder (run logs first), a file = a general log
                     lines.Add(r == null ? exe + "|none" : string.Format(CultureInfo.InvariantCulture, "{0}|start={1:yyyy-MM-dd HH:mm:ss}|end={2:yyyy-MM-dd HH:mm:ss}|ended={3}|perf={4}|gpu={5}|arr={8}|app_max={6:0.0}|gpu_max={7:0}", exe, r.Start, r.End, r.Ended, r.PerfT.Count, r.GpuT.Count, r.App.Count > 0 ? r.App.Max() : 0, r.GpuMb.Count > 0 ? r.GpuMb.Max() : 0, r.ArrT.Count));
                 }
                 Directory.CreateDirectory(outDir); File.WriteAllLines(Path.Combine(outDir, "log_timeline.txt"), lines);
@@ -713,6 +714,8 @@ namespace AirFrameXR
                     Ui.WorkAreaOverride = null;
                     n++;
                     fails += issues.Count(i => i.StartsWith("FAIL")); warns += issues.Count(i => i.StartsWith("WARN"));
+                    global::AirFrameXR.Log.Ui(issues.Any(i => i.StartsWith("FAIL")) ? "ERROR" : issues.Count > 0 ? "WARN" : "INFO", $"case {c.Name} {sw}x{sh}@{pct}: work area {work.Width}x{work.Height}, window {size}, {issues.Count} finding(s)");
+                    foreach (var i in issues) global::AirFrameXR.Log.Ui(i.StartsWith("FAIL") ? "ERROR" : "WARN", $"  {c.Name} {sw}x{sh}@{pct}: {i}");
                     Json.Add($"{{\"form\":{Q(c.Name)},\"screen\":\"{sw}x{sh}\",\"scale\":{pct},\"work\":\"{work.Width}x{work.Height}\",\"size\":{Q(size)},\"issues\":[{string.Join(",", issues.Select(Q))}]}}");
                     Application.DoEvents();
                 }

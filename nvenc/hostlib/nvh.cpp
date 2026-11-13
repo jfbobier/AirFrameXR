@@ -680,6 +680,23 @@ void nvh_ipc_set_color(void* i, float brightness, float contrast, float saturati
     h.colorBrightness = brightness; h.colorContrast = contrast; h.colorSaturation = saturation; h.colorSharpening = sharpening;
 }
 
+void nvh_ipc_set_log_level(void* i, uint32_t level) { ((Ipc*)i)->state->host.logLevel = level; }
+
+int nvh_ipc_log_pop(void* i, uint32_t* level, uint32_t* pid, char* stamp, char* comp, char* text) {
+    auto& r = ((Ipc*)i)->state->log;
+    const uint32_t d = r.deq.load(std::memory_order_relaxed), e = r.enq.load(std::memory_order_acquire);
+    if (d == e) return 0;
+    const auto& s = r.slot[d % airframexr_ipc::kLogSlots];
+    *level = s.level; *pid = s.pid;
+    memcpy(stamp, s.stamp, sizeof s.stamp); stamp[sizeof s.stamp - 1] = 0;
+    memcpy(comp, s.comp, sizeof s.comp); comp[sizeof s.comp - 1] = 0;
+    memcpy(text, s.text, sizeof s.text); text[sizeof s.text - 1] = 0;
+    r.deq.store(d + 1, std::memory_order_release);
+    return 1;
+}
+
+uint32_t nvh_ipc_log_dropped(void* i) { return ((Ipc*)i)->state->log.dropped.load(); }
+
 int nvh_ipc_app_exe(void* i, char* buf, int len) {
     wchar_t w[128];
     memcpy(w, ((Ipc*)i)->state->shim.appExe, sizeof w);

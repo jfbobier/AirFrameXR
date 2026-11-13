@@ -330,6 +330,16 @@ def launch_app(app, rid, rd, log):
               (f"build\\probe\\xr_modsim.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "xr_modsim" else
   f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n")) +
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
+    if app.get("exe") == "custom":   # any program (a game): `command` runs in `cwd`, bounded by the scenario's app timeout (the command itself ends it)
+        lines = cmd.split("\r\n")
+        k = next(i for i, l in enumerate(lines) if l.startswith(("build\\probe\\xr_probe.exe", "out\\mirrordesktop")))
+        lines[k] = f'cd /d "{app["cwd"]}" & {app["command"]} > {home}\\{ROOTNAME}\\{rd}\\app_stdout.txt 2>&1'
+        cmd = "\r\n".join(lines)
+    if app.get("kill_after_s"):   # H6: the game is killed (taskkill /f, no exit path runs) this many seconds after the launch script starts
+        lines = cmd.split("\r\n")
+        k = next(i for i, l in enumerate(lines) if l.startswith("build\\probe\\xr_probe.exe"))
+        lines.insert(k, f'start "" /b cmd /c "ping -n {int(app["kill_after_s"]) + 1} 127.0.0.1 >nul & taskkill /f /im xr_probe.exe >nul 2>&1"')
+        cmd = "\r\n".join(lines)
     local = CACHE / "app.cmd"
     CACHE.mkdir(parents=True, exist_ok=True)
     local.write_text(cmd)
@@ -437,6 +447,10 @@ def run_scenario(sc, outdir: Path, log=print):
             raise Blocked("portable package missing (build it first: python3 harness/run.py build gui package): " + out[-300:])
         if not sc.get("keep_package_config"):   # a user's fresh unzip has no personal settings: the lab starts from the defaults whatever the builder's folder holds
             b_run(f"echo {{}}> {inst}\\config\\airframexr.json")   # emptied, not deleted (the builder wrapper refuses deletes): {} = every default
+        if sc.get("airframexr_json"):   # the user's settings file as the host reads it at start (H6: log_level from airframexr.json)
+            CACHE.mkdir(parents=True, exist_ok=True)
+            (CACHE / "airframexr_scenario.json").write_text(json.dumps(sc["airframexr_json"]))
+            b_put(CACHE / "airframexr_scenario.json", f"{inst}/config/airframexr.json".replace("\\", "/"))
         if sc.get("fov_settings_from_gui"):
             # the settings file a user's choice in the launcher's FOV card leaves (the GUI's own code, UserFovStore.Apply, through uitest.exe), not a lab flag: the host reads it at its start
             fg = sc["fov_settings_from_gui"]
@@ -496,7 +510,7 @@ def run_scenario(sc, outdir: Path, log=print):
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "gui": "--gui", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
                                      "width": "--width", "height": "--height", "height_m": "--height-m", "noise": "--noise", "qp_map": "--qp-map",
                                      "idle_rgb": "--idle-rgb", "gpu_priority": "--gpu-priority", "encode_profile": "--encode-profile",
-                                     "install_dir": "--install-dir", "debug": "--debug", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
+                                     "install_dir": "--install-dir", "debug": "--debug", "log_level": "--log-level", "benchmark_network": "--benchmark-network", "bench_step_s": "--bench-step-s",
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
@@ -1465,6 +1479,26 @@ def analyse_pipeline(outdir):
     return out
 
 
+def analyse_ts(outdir):
+    """H5: repeated timestamps on the frames the host sent, summed over every encoder_stats window: same_ts_frames, frames, and how the shim stamped them (pose match vs fallback)."""
+    tot = {"frames": 0, "same_ts_frames": 0, "ts_matched": 0, "ts_fallback": 0, "windows": 0}
+    p = outdir / "host_stdout.txt"
+    for line in (open(p, errors="replace").read().splitlines() if p.exists() else []):
+        if '"encoder_stats"' in line:
+            try:
+                d = json.loads(line)["data"]
+            except (ValueError, KeyError):
+                continue
+            tot["windows"] += 1
+            tot["frames"] += int(d.get("frames") or 0)
+            tot["same_ts_frames"] += int(d.get("same_ts_frames") or 0)
+            sh = d.get("shim") or (d.get("pipeline") or {}).get("shim") or {}
+            tot["ts_matched"] += int(sh.get("ts_matched") or 0)
+            tot["ts_fallback"] += int(sh.get("ts_fallback") or 0)
+    tot["same_ts_pct"] = round(100.0 * tot["same_ts_frames"] / tot["frames"], 2) if tot["frames"] else None
+    return tot
+
+
 def analyse_app_timing(outdir, period_ms):
     """The game side (xr_probe XR_PROBE_TIMING_CSV): frame time = xrWaitFrame return to xrEndFrame return, and the release cadence."""
     _, rows = read_csv(outdir / "app_timing.csv")   # frame,display_time_ns,t_wait_return_ms,t_end_ms,load_factor
@@ -1627,6 +1661,9 @@ def analyse(sc, outdir: Path):
         ts_ = [int(r["ts_ns"]) for r in fr[first:]]
         a["client"]["timestamps_monotonic_tracked"] = all(y >= x for x, y in zip(ts_, ts_[1:]))
         a["client"]["frames_before_tracking"] = first
+        # duplicates likewise: the frames before the first tracking sample carry the host's own clock, so consecutive ones are identical whatever the pipeline does, and how many there are
+        # is the rig's start (about 5 frames, or 22 to 28 in the slow start the mock client shows on every build, bimodal for weeks): only the duplicates among the tracked frames count
+        a["client"]["duplicate_timestamps_tracked"] = sum(1 for x, y in zip(ts_, ts_[1:]) if x == y)
     hs = (outdir / "host_stdout.txt").read_text(errors="replace") if (outdir / "host_stdout.txt").exists() else ""
     a["host_event_names"] = sorted(set(re.findall(r'"event":"([a-z_]+)"', hs)))
     a["bench_steps"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"bench_step"' in l]
@@ -1636,7 +1673,11 @@ def analyse(sc, outdir: Path):
     if lg.exists():
         dbg = sorted((lg / "debug").glob("*")) if (lg / "debug").exists() else []
         a["install_logs"] = {"general": (lg / "AirFrameXR.log").read_text(errors="replace") if (lg / "AirFrameXR.log").exists() else "",
-                             "debug_files": sorted(p.name for p in dbg[-1].iterdir()) if dbg else []}
+                             "debug_files": sorted(p.name for p in dbg[-1].iterdir()) if dbg else [],
+                             # logs\games\<exe>\<yyyymmdd-hhmmss>.log: one file per run (the writer thread, tools/host/src/logsink.rs)
+                             "game_logs": {d.name: {f.name: f.read_text(errors="replace") for f in sorted(d.glob("*.log"))} for d in sorted((lg / "games").glob("*"))} if (lg / "games").exists() else {},
+                             "log_files": sorted(p.name for p in lg.glob("AirFrameXR*.log")),
+                             "alvr_log_at_root": (lg / "alvr.log").exists()}
     if sc.get("reconnect"):
         a["client2"] = jload(outdir / "client2_report.json")
     if sc.get("app"):
@@ -1756,6 +1797,7 @@ def analyse(sc, outdir: Path):
         a["display"] = analyse_display(sc, outdir, a.get("client"), period)
     if (outdir / "host_stdout.txt").exists():
         a["pipeline"] = analyse_pipeline(outdir)
+        a["ts"] = analyse_ts(outdir)
     if (outdir / "app_timing.csv").exists():
         a["app_timing"] = analyse_app_timing(outdir, period)
     if sc.get("checks", {}).get("frame_classes") and cl.exists() and cl.stat().st_size > 0:
@@ -1935,7 +1977,9 @@ def evaluate(sc, a):
     if ck.get("timestamps_monotonic", True):
         mono = c.get("timestamps_monotonic_tracked", c.get("timestamps_monotonic"))
         chk("timestamps_monotonic", mono, {"all": c.get("timestamps_monotonic"), "from_first_tracked_frame": mono, "frames_before_tracking": c.get("frames_before_tracking")}, "non-decreasing from the first frame that carries a pose the client sent (frames stamped before the first tracking sample use the host's clock)")
-    chk("duplicate_timestamps", c.get("duplicate_timestamps", 0) <= ck.get("max_duplicate_timestamps", 0), c.get("duplicate_timestamps"), f"<={ck.get('max_duplicate_timestamps', 0)}")
+    dups = c.get("duplicate_timestamps_tracked", c.get("duplicate_timestamps", 0))   # from the first frame that carries a client pose (see analyse)
+    chk("duplicate_timestamps", dups <= ck.get("max_duplicate_timestamps", 0), {"tracked": dups, "all": c.get("duplicate_timestamps"), "frames_before_tracking": c.get("frames_before_tracking")},
+        f"<={ck.get('max_duplicate_timestamps', 0)} among the frames from the first tracked one")
     if "min_delivery_ratio" in ck and h and h.get("frames_sent"):
         r = c["frames"] / h["frames_sent"]
         chk("delivery_ratio", r >= ck["min_delivery_ratio"], round(r, 3), f">={ck['min_delivery_ratio']} (client frames / host frames sent; UDP loss)")
@@ -2251,7 +2295,10 @@ def evaluate(sc, a):
         chk("host_refresh_hz", abs(h.get("refresh_hz", 0) - ck["refresh_hz"]) < 0.5, h.get("refresh_hz"), ck["refresh_hz"])
     if "app" in a:
         ap = a["app"]
-        chk("app_exit_ok", ap["rc"] == "0" and ap["passed"], {"rc": ap["rc"], "log_pass": ap["passed"]}, "rc 0 and PASS in app.log")
+        if ck.get("app_killed"):   # the harness killed the game: it must NOT have ended by itself
+            chk("app_was_killed", ap["rc"] != "0" and not ap["passed"], {"rc": ap["rc"], "log_pass": ap["passed"]}, "the game did not exit cleanly (it was killed)")
+        else:
+            chk("app_exit_ok", ap["rc"] == "0" and ap["passed"], {"rc": ap["rc"], "log_pass": ap["passed"]}, "rc 0 and PASS in app.log")
         if "app_min_frames" in ck:
             chk("app_frames", ap["frames_logged"] >= ck["app_min_frames"], ap["frames_logged"], f">={ck['app_min_frames']}")
         if "pose_roundtrip_max_rad" in ck:
@@ -2268,6 +2315,66 @@ def evaluate(sc, a):
         files, need = il.get("debug_files", []), ["host_events.jsonl", "alvr.log", "gpu.csv"]
         chk("debug_session_files", bool(files) and all(n in files for n in need) and any(n.startswith("shim_xr_probe_") for n in files), files,
             "logs\\debug\\<time>\\ has " + ", ".join(need) + ", shim_xr_probe_<pid>.log")
+    if ck.get("game_log"):
+        # the run's own log: logs\games\xr_probe.exe\<yyyymmdd-hhmmss>.log with the start line, the run's timeline lines and the end line; none of those lines in the main log
+        il = a.get("install_logs") or {}
+        runs = (il.get("game_logs") or {}).get("xr_probe.exe", {})
+        names_ok = bool(runs) and all(re.fullmatch(r"\d{8}-\d{6}\.log", n) for n in runs)
+        txt = next(iter(runs.values()), "")
+        chk("game_log_file", names_ok and "run log started" in txt and "game ended: xr_probe.exe" in txt, list(runs) or "none",
+            "logs\\games\\xr_probe.exe\\<yyyymmdd-hhmmss>.log with 'run log started' and 'game ended: xr_probe.exe'")
+        main = il.get("general", "")
+        chk("timeline_lines_only_in_game_log", "frame generation perf" not in main and "memory: host" not in main and "phase lock:" not in main,
+            [k for k in ("frame generation perf", "memory: host", "phase lock:") if k in main] or "none in the main log", "the run's periodic lines are in the game log, not in AirFrameXR.log")
+        if "game_log_min_lines" in ck:
+            n = len(txt.splitlines())
+            chk("game_log_lines", n >= ck["game_log_min_lines"], n, f">= {ck['game_log_min_lines']} lines in the run's log")
+    if "log_level_main" in ck:
+        il = a.get("install_logs") or {}
+        want, forbid = ck["log_level_main"].get("present", []), ck["log_level_main"].get("absent", [])
+        gen = il.get("general", "") + "\n".join(t for r in (il.get("game_logs") or {}).values() for t in r.values())
+        chk("log_level_lines", all(w in gen for w in want) and not any(w in gen for w in forbid), {"missing": [w for w in want if w not in gen], "unexpected": [w for w in forbid if w in gen]},
+            f"present {want}, absent {forbid}")
+    if ck.get("ts_report"):   # informational (H5): no threshold, the numbers go in the release notes
+        t = a.get("ts")
+        chk("ts_report", bool(t and t["frames"]), t, "informational: share of sent frames that repeat the previous timestamp, and how the shim stamped them")
+    if ck.get("log_noise") or ck.get("log_routing"):
+        import log_hygiene_check as lh
+        il = a.get("install_logs") or {}
+        if ck.get("log_noise"):
+            ok, d = lh.noise(il.get("general", ""))
+            chk("log_noise", ok, d, "no one message shape is more than 25 % of the main log's lines (once it has 100)")
+        if ck.get("log_routing"):
+            runs = (il.get("game_logs") or {}).get("xr_probe.exe", {})
+            ok, d = lh.routing(il.get("general", ""), next(iter(runs.values()), ""))
+            chk("log_routing", ok, d, "every WARN/ERROR, [shim: and client-frame-gaps line of the main log inside the run's window is in the run's log too")
+    if "log_level_live" in ck:   # H6: after a live `log_level` line on stdin, the run log has the periodic lines and none of them is older than the change
+        il = a.get("install_logs") or {}
+        tag, what = ck["log_level_live"]["announce"], ck["log_level_live"]["line"]
+        stamp = lambda l: l[:23]
+        ann = [stamp(l) for l in il.get("general", "").splitlines() if l.endswith(tag)]
+        runs = "\n".join(t for r in (il.get("game_logs") or {}).values() for t in r.values())
+        lines = [stamp(l) for l in runs.splitlines() if what in l]
+        chk("log_level_live", bool(ann) and bool(lines) and min(lines) >= ann[0], {"announced": ann[:1], "lines": len(lines), "first_line": min(lines) if lines else None},
+            f"'{tag}' in the main log, then '{what}' lines in the run log, none older than the announcement")
+    if ck.get("killed_game_logs"):   # H6: the game died with no exit path: the shim lines it had written are still in the run log (the host read them from the ring), and the host ended the run
+        il = a.get("install_logs") or {}
+        runs = "\n".join((il.get("game_logs") or {}).get("xr_probe.exe", {}).values())
+        shim = [l for l in runs.splitlines() if "[shim:xr_probe.exe]" in l]
+        chk("killed_game_logs", len(shim) >= 1 and "game exit" not in runs and "game ended: xr_probe.exe" in il.get("general", "") + runs,
+            {"shim_lines": len(shim), "shim_game_exit": "game exit" in runs, "game_ended": "game ended: xr_probe.exe" in il.get("general", "") + runs},
+            "the run log holds the shim's lines from before the kill, no 'game exit' (it never ran), and the host's 'game ended' line")
+    if ck.get("alvr_in_unified_log"):
+        # 1.3.10: ALVR's own lines are in AirFrameXR.log as [alvr]; the raw stream (alvr.log) exists only in the debug session folder
+        il = a.get("install_logs") or {}
+        chk("alvr_lines_in_unified_log", "[alvr] INFO" in il.get("general", "") and not il.get("alvr_log_at_root"),
+            {"alvr_lines": "[alvr] INFO" in il.get("general", ""), "alvr.log at the logs root": il.get("alvr_log_at_root")}, "'[alvr] INFO' lines in AirFrameXR.log and no logs\\alvr.log (it is in logs\\debug\\<time>\\ at the debug level only)")
+    if ck.get("log_line_format"):
+        gen = (a.get("install_logs") or {}).get("general", "")
+        bad = [l for l in gen.splitlines() if l.strip() and not re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[[^\]]+\] (ERROR|WARN |INFO |VERB |DEBUG) ", l)]
+        lost = [k for k in ("log lines dropped", "lines lost in the ring buffer") if k in gen]
+        chk("no_log_lines_lost", not lost, lost or "none", "no 'log lines dropped' (the writer's queue) and no shim ring buffer losses in a normal run")
+        chk("log_line_format", not bad and gen.strip() != "", bad[:3] or "all lines match", "every line: 'yyyy-mm-dd hh:mm:ss.mmm [component] LEVEL message'")
     if ck.get("bench_tracks_target"):
         st = a.get("bench_steps") or []
         ok = bool(st) and all(abs(x["actual_mbps"] - x["target_mbps"]) <= 0.2 * x["target_mbps"] and x.get("client_fps", 0) >= 80 for x in st)

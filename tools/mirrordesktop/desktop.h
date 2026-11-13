@@ -25,6 +25,8 @@ public:
     // The controls hint for the next Render: ndc = the hint's four corners per eye (as for the screen, NaN x = not seen), mode 0 none, 1 the badge, 2 the panel
     // (the commands). Drawn under the screen with the same shader; the text is drawn once with GDI.
     void SetHint(const float ndc[16], int mode);
+    // A line about the capture when no picture arrived within 3 s (copied to `out`, true once), else false.
+    bool TakeCaptureStatus(char* out, int n);
 private:
     struct Impl;
     std::unique_ptr<Impl> I;

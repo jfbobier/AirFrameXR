@@ -10,11 +10,12 @@
 // their HANDLE values are published in IpcState::slotHandle.
 #pragma once
 #include <stdint.h>
+#include <atomic>
 
 namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 36;
+constexpr uint32_t kVersion = 37;
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -123,6 +124,8 @@ struct HostToShim {
     // headset's full box) when the stream is fitted to a smaller declared window, so the slider can still raise the game's render up to it. 0 = the stream's
     // eye size (the way it was). Read with the recommended size, so an app that started later takes a new value.
     int32_t renderCeilingW, renderCeilingH;
+    // The host's log verbosity (logsink.rs Level: 0 error, 1 warn, 2 info, 3 verbose, 4 debug): the shim filters its own lines with it, before it formats them.
+    uint32_t logLevel;
 };
 
 struct Haptic {
@@ -160,11 +163,33 @@ struct ShimToHost {
     int32_t recommendedW, recommendedH;   // the per-eye render size the shim told the app (GetRecommendedResolution), for the host's run record
 };
 
+// The shim's log lines travel to the host (its writer thread owns every log file: no disk write on the game's threads, no concurrent appends,
+// the lines survive a game crash because they are already in shared memory). Many producers (the shim's threads, and the shims of several games), one
+// consumer (the host). A producer takes the small spin lock (an owner stale for 5 ms is taken over: it died holding it), copies its line in and
+// publishes it by moving `enq`; a full ring or a lock that stays busy drops the line and counts it. The host reads from `deq` up to `enq`.
+constexpr uint32_t kLogSlots = 256;
+struct LogSlot {
+    uint32_t pid;
+    uint32_t level;        // 0 error, 1 warn, 2 info, 3 verbose, 4 debug
+    char stamp[24];        // "yyyy-mm-dd hh:mm:ss.mmm" (local time, taken by the producer)
+    char comp[32];         // component, e.g. "shim:Game.exe"
+    char text[192];        // the message, cut when longer
+};
+struct LogRing {
+    std::atomic<uint32_t> lock;      // 0 free, else the owner's tick count (GetTickCount | 1)
+    std::atomic<uint32_t> enq;       // lines published (slot index = enq % kLogSlots)
+    std::atomic<uint32_t> deq;       // lines the host has taken
+    std::atomic<uint32_t> dropped;   // lines lost (ring full, lock busy)
+    LogSlot slot[kLogSlots];
+};
+static_assert(std::atomic<uint32_t>::is_always_lock_free, "the log ring is shared between processes");
+
 struct IpcState {
     uint32_t magic;
     uint32_t version;
     HostToShim host;
     ShimToHost shim;
+    LogRing log;
 };
 
 } // namespace airframexr_ipc
