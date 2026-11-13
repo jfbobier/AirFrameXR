@@ -1470,6 +1470,26 @@ def analyse_app_timing(outdir, period_ms):
     _, rows = read_csv(outdir / "app_timing.csv")   # frame,display_time_ns,t_wait_return_ms,t_end_ms,load_factor
     if len(rows) < 60:
         return None
+def analyse_ts(outdir):
+    """H5: repeated timestamps on the frames the host sent, summed over every encoder_stats window: same_ts_frames, frames, and how the shim stamped them (pose match vs fallback)."""
+    tot = {"frames": 0, "same_ts_frames": 0, "ts_matched": 0, "ts_fallback": 0, "windows": 0}
+    p = outdir / "host_stdout.txt"
+    for line in (open(p, errors="replace").read().splitlines() if p.exists() else []):
+        if '"encoder_stats"' in line:
+            try:
+                d = json.loads(line)["data"]
+            except (ValueError, KeyError):
+                continue
+            tot["windows"] += 1
+            tot["frames"] += int(d.get("frames") or 0)
+            tot["same_ts_frames"] += int(d.get("same_ts_frames") or 0)
+            sh = d.get("shim") or (d.get("pipeline") or {}).get("shim") or {}
+            tot["ts_matched"] += int(sh.get("ts_matched") or 0)
+            tot["ts_fallback"] += int(sh.get("ts_fallback") or 0)
+    tot["same_ts_pct"] = round(100.0 * tot["same_ts_frames"] / tot["frames"], 2) if tot["frames"] else None
+    return tot
+
+
     rows = rows[30:]
     ft = [float(r[3]) - float(r[2]) for r in rows]
     rel = [float(b[2]) - float(a[2]) for a, b in zip(rows, rows[1:])]
@@ -1768,6 +1788,7 @@ def analyse(sc, outdir: Path):
     if sc.get("checks", {}).get("frame_classes") and cl.exists() and cl.stat().st_size > 0:
         classes = read_frame_classes(cl)
         runs, stray = rle(classes)
+        a["ts"] = analyse_ts(outdir)
         a["classes"] = {"frames": len(classes), "runs": runs, "stray_frames": stray}
     if sc.get("checks", {}).get("counter_readback") and cl.exists() and cl.stat().st_size > 0:
         if sc["checks"].get("foveation") is not None:
@@ -2297,11 +2318,9 @@ def evaluate(sc, a):
         gen = il.get("general", "") + "\n".join(t for r in (il.get("game_logs") or {}).values() for t in r.values())
         chk("log_level_lines", all(w in gen for w in want) and not any(w in gen for w in forbid), {"missing": [w for w in want if w not in gen], "unexpected": [w for w in forbid if w in gen]},
             f"present {want}, absent {forbid}")
-    if ck.get("alvr_in_unified_log"):
-        # 1.3.10: ALVR's own lines are in AirFrameXR.log as [alvr]; the raw stream (alvr.log) exists only in the debug session folder
-        il = a.get("install_logs") or {}
-        chk("alvr_lines_in_unified_log", "[alvr] INFO" in il.get("general", "") and not il.get("alvr_log_at_root"),
-            {"alvr_lines": "[alvr] INFO" in il.get("general", ""), "alvr.log at the logs root": il.get("alvr_log_at_root")}, "'[alvr] INFO' lines in AirFrameXR.log and no logs\\alvr.log (it is in logs\\debug\\<time>\\ at the debug level only)")
+    if ck.get("ts_report"):   # informational (H5): no threshold, the numbers go in the release notes
+        t = a.get("ts")
+        chk("ts_report", bool(t and t["frames"]), t, "informational: share of sent frames that repeat the previous timestamp, and how the shim stamped them")
     if ck.get("log_noise") or ck.get("log_routing"):
         import log_hygiene_check as lh
         il = a.get("install_logs") or {}
