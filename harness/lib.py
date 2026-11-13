@@ -2302,6 +2302,16 @@ def evaluate(sc, a):
         il = a.get("install_logs") or {}
         chk("alvr_lines_in_unified_log", "[alvr] INFO" in il.get("general", "") and not il.get("alvr_log_at_root"),
             {"alvr_lines": "[alvr] INFO" in il.get("general", ""), "alvr.log at the logs root": il.get("alvr_log_at_root")}, "'[alvr] INFO' lines in AirFrameXR.log and no logs\\alvr.log (it is in logs\\debug\\<time>\\ at the debug level only)")
+    if ck.get("log_noise") or ck.get("log_routing"):
+        import log_hygiene_check as lh
+        il = a.get("install_logs") or {}
+        if ck.get("log_noise"):
+            ok, d = lh.noise(il.get("general", ""))
+            chk("log_noise", ok, d, "no one message shape is more than 25 % of the main log's lines (once it has 100)")
+        if ck.get("log_routing"):
+            runs = (il.get("game_logs") or {}).get("xr_probe.exe", {})
+            ok, d = lh.routing(il.get("general", ""), next(iter(runs.values()), ""))
+            chk("log_routing", ok, d, "every WARN/ERROR, [shim: and client-frame-gaps line of the main log inside the run's window is in the run's log too")
     if ck.get("log_line_format"):
         gen = (a.get("install_logs") or {}).get("general", "")
         bad = [l for l in gen.splitlines() if l.strip() and not re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[[^\]]+\] (ERROR|WARN |INFO |VERB |DEBUG) ", l)]

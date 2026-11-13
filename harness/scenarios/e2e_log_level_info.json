@@ -106,6 +106,8 @@
     "game_log": true,
     "game_log_min_lines": 2,
     "log_line_format": true,
+    "log_noise": true,
+    "log_routing": true,
     "log_level_main": {
       "present": [],
       "absent": [
