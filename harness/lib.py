@@ -442,6 +442,10 @@ def run_scenario(sc, outdir: Path, log=print):
             fg = sc["fov_settings_from_gui"]
             rc, out = b_run(f"if exist _tmp\\uitest\\run\\uitest.exe (_tmp\\uitest\\run\\uitest.exe --fov-apply-to {inst}\\config\\airframexr.json --tan {','.join(map(str, fg['tan']))} --client {','.join(map(str, fg['client']))} && echo APPLIED) else echo NOUITEST")
             if "APPLIED" not in out:
+        if sc.get("airframexr_json"):   # the user's settings file as the host reads it at start (H6: log_level from airframexr.json)
+            CACHE.mkdir(parents=True, exist_ok=True)
+            (CACHE / "airframexr_scenario.json").write_text(json.dumps(sc["airframexr_json"]))
+            b_put(CACHE / "airframexr_scenario.json", f"{inst}/config/airframexr.json".replace("\\", "/"))
                 raise Blocked("uitest.exe missing or failed (python3 harness/ui_matrix.py builds it): " + out[-300:])
         host_exe = f"{inst}\\bin\\alvr_host.exe"
         h = sc["host"] = {**sc["host"], "install_dir": f"%USERPROFILE%\\{ROOTNAME}\\{inst}"}
@@ -2336,6 +2340,20 @@ def evaluate(sc, a):
         bad = [l for l in gen.splitlines() if l.strip() and not re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[[^\]]+\] (ERROR|WARN |INFO |VERB |DEBUG) ", l)]
         lost = [k for k in ("log lines dropped", "lines lost in the ring buffer") if k in gen]
         chk("no_log_lines_lost", not lost, lost or "none", "no 'log lines dropped' (the writer's queue) and no shim ring buffer losses in a normal run")
+    if "log_level_live" in ck:   # H6: after a live `log_level` line on stdin, the run log has the periodic lines and none of them is older than the change
+        il = a.get("install_logs") or {}
+        tag, what = ck["log_level_live"]["announce"], ck["log_level_live"]["line"]
+        stamp = lambda l: l[:23]
+        ann = [stamp(l) for l in il.get("general", "").splitlines() if l.endswith(tag)]
+        runs = "\n".join(t for r in (il.get("game_logs") or {}).values() for t in r.values())
+        lines = [stamp(l) for l in runs.splitlines() if what in l]
+        chk("log_level_live", bool(ann) and bool(lines) and min(lines) >= ann[0], {"announced": ann[:1], "lines": len(lines), "first_line": min(lines) if lines else None},
+            f"'{tag}' in the main log, then '{what}' lines in the run log, none older than the announcement")
+    if ck.get("alvr_in_unified_log"):
+        # 1.3.10: ALVR's own lines are in AirFrameXR.log as [alvr]; the raw stream (alvr.log) exists only in the debug session folder
+        il = a.get("install_logs") or {}
+        chk("alvr_lines_in_unified_log", "[alvr] INFO" in il.get("general", "") and not il.get("alvr_log_at_root"),
+            {"alvr_lines": "[alvr] INFO" in il.get("general", ""), "alvr.log at the logs root": il.get("alvr_log_at_root")}, "'[alvr] INFO' lines in AirFrameXR.log and no logs\\alvr.log (it is in logs\\debug\\<time>\\ at the debug level only)")
         chk("log_line_format", not bad and gen.strip() != "", bad[:3] or "all lines match", "every line: 'yyyy-mm-dd hh:mm:ss.mmm [component] LEVEL message'")
     if ck.get("bench_tracks_target"):
         st = a.get("bench_steps") or []
