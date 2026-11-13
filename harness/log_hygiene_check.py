@@ -57,5 +57,23 @@ def _self():
     print("log_hygiene_check selftest: PASS")
 
 
+def _dir(d):
+    """python3 harness/log_hygiene_check.py <results dir>: the noise and routing checks on the logs/ folder an installed run fetched."""
+    from pathlib import Path
+    logs = Path(d) / "logs"
+    main = (logs / "AirFrameXR.log").read_text(errors="replace")
+    runs = [r.read_text(errors="replace") for r in sorted((logs / "games").glob("*/*.log"))]
+    ok1, d1 = noise(main)
+    print("noise  ", "PASS" if ok1 else "FAIL", d1)
+    ok = ok1
+    warns = sum(1 for l in main.splitlines() if " WARN " in l or " ERROR " in l)
+    for i, r in enumerate(runs):
+        ok2, d2 = routing(main, r)
+        print(f"routing run {i}", "PASS" if ok2 else "FAIL", d2, f"({warns} WARN/ERROR lines in the main log)")
+        ok = ok and ok2
+    return 0 if ok and warns else 1
+
+
 if __name__ == "__main__":
-    _self()
+    import sys
+    sys.exit(_dir(sys.argv[1]) if len(sys.argv) > 1 else (_self() or 0))
