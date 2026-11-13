@@ -307,13 +307,15 @@ struct Writer {
     main_day: String,
     main_bytes: u64,
     game: Option<BufWriter<fs::File>>,
+    /// shim lines that arrived while no game log was open (the shim's `game start` is popped from the ring a moment before the host sees the game): copied into the run log when it opens
+    pending_shim: Vec<(std::time::Instant, String)>,
     last_flush: std::time::Instant,
     reported_drops: u64,
 }
 
 impl Writer {
     fn new(cfg: Config) -> Writer {
-        Writer { cfg, main: None, main_day: String::new(), main_bytes: 0, game: None, last_flush: std::time::Instant::now(), reported_drops: 0 }
+        Writer { cfg, main: None, main_day: String::new(), main_bytes: 0, game: None, pending_shim: Vec::new(), last_flush: std::time::Instant::now(), reported_drops: 0 }
     }
 
     fn run(mut self, rx: Receiver<Msg>, dropped: Arc<AtomicU64>) {
@@ -354,6 +356,13 @@ impl Writer {
                         g.write_all(line.as_bytes()).ok();
                     }
                     self.write_main(at, level, &comp, &text);
+                } else if dest == Dest::Both && self.game.is_none() {
+                    if comp.starts_with("shim:") {
+                        let now = std::time::Instant::now();
+                        self.pending_shim.retain(|(t, _)| now.duration_since(*t) < Duration::from_secs(5));
+                        self.pending_shim.push((now, format!("{} [{}] {:<5} {}\n", at.full(), comp, level.name(), text)));
+                    }
+                    self.write_main(at, level, &comp, &text);
                 } else if dest == Dest::RunOnly && self.game.is_none() {
                     // no game: nothing to attach the line to
                 } else if dest != Dest::Main && dest != Dest::Both && self.game.is_some() {
@@ -377,7 +386,14 @@ impl Writer {
                 }
                 if let Some(g) = self.game.as_mut() {
                     writeln!(g, "{} [log] {:<5} {exe}: run log started", at.full(), Level::Info.name()).ok();
+                    let now = std::time::Instant::now();
+                    for (t, l) in self.pending_shim.drain(..) {
+                        if now.duration_since(t) < Duration::from_secs(5) {
+                            g.write_all(l.as_bytes()).ok();
+                        }
+                    }
                 }
+                self.pending_shim.clear();
             }
             Msg::GameEnd { at, summary } => self.end_game(at, &summary),
             Msg::Flush(ack) => {
@@ -603,6 +619,21 @@ mod tests {
         assert!(run.contains("stall detected") && run.contains("shim line") && run.contains("an error"));
         assert!(!run.contains("main only") && !run.contains("warn no game") && !run.contains("filtered"));
         assert!(!main.contains("filtered"));
+    }
+
+    #[test]
+    fn a_shim_line_just_before_the_run_log_opens_is_copied_into_it() {
+        let d = tmp("pending");
+        let s = Sink::start(Config::new(&d), Level::Info);
+        s.log(Level::Info, "shim:g.exe", "game start", Dest::Both);   // popped from the ring before the host sees the game
+        s.log(Level::Info, "host", "not a shim line", Dest::Both);
+        let p = s.game_start("G.exe");
+        s.log(Level::Info, "shim:g.exe", "later", Dest::Both);
+        s.game_end("done");
+        s.flush();
+        let run = read(&d.join(&p));
+        assert!(run.contains("game start") && run.contains("later") && !run.contains("not a shim line"), "{run}");
+        assert!(read(&d.join("AirFrameXR.log")).contains("game start"));
     }
 
     #[test]

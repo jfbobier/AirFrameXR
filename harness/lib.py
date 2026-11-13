@@ -330,6 +330,16 @@ def launch_app(app, rid, rd, log):
               (f"build\\probe\\xr_modsim.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} > {rd}\\app_stdout.txt 2>&1\r\n" if app.get("exe") == "xr_modsim" else
   f"build\\probe\\xr_probe.exe {rd}\\app.log {app.get('frames', 300)} {app.get('timeout_s', 60)} {rd}\\app_pose.csv {(rd + chr(92) + 'app_input.csv') if app.get('input') else '-'}{(' ' + str(int(app['layer_test'])) if app.get('layer_test') else '')} > {rd}\\app_stdout.txt 2>&1\r\n")) +
            f"echo %ERRORLEVEL% > {rd}\\app.rc\r\n")
+    if app.get("exe") == "custom":   # any program (a game): `command` runs in `cwd`, bounded by the scenario's app timeout (the command itself ends it)
+        lines = cmd.split("\r\n")
+        k = next(i for i, l in enumerate(lines) if l.startswith(("build\\probe\\xr_probe.exe", "out\\mirrordesktop")))
+        lines[k] = f'cd /d "{app["cwd"]}" & {app["command"]} > {home}\\{ROOTNAME}\\{rd}\\app_stdout.txt 2>&1'
+        cmd = "\r\n".join(lines)
+    if app.get("kill_after_s"):   # H6: the game is killed (taskkill /f, no exit path runs) this many seconds after the launch script starts
+        lines = cmd.split("\r\n")
+        k = next(i for i, l in enumerate(lines) if l.startswith("build\\probe\\xr_probe.exe"))
+        lines.insert(k, f'start "" /b cmd /c "ping -n {int(app["kill_after_s"]) + 1} 127.0.0.1 >nul & taskkill /f /im xr_probe.exe >nul 2>&1"')
+        cmd = "\r\n".join(lines)
     local = CACHE / "app.cmd"
     CACHE.mkdir(parents=True, exist_ok=True)
     local.write_text(cmd)
@@ -2285,7 +2295,10 @@ def evaluate(sc, a):
         chk("host_refresh_hz", abs(h.get("refresh_hz", 0) - ck["refresh_hz"]) < 0.5, h.get("refresh_hz"), ck["refresh_hz"])
     if "app" in a:
         ap = a["app"]
-        chk("app_exit_ok", ap["rc"] == "0" and ap["passed"], {"rc": ap["rc"], "log_pass": ap["passed"]}, "rc 0 and PASS in app.log")
+        if ck.get("app_killed"):   # the harness killed the game: it must NOT have ended by itself
+            chk("app_was_killed", ap["rc"] != "0" and not ap["passed"], {"rc": ap["rc"], "log_pass": ap["passed"]}, "the game did not exit cleanly (it was killed)")
+        else:
+            chk("app_exit_ok", ap["rc"] == "0" and ap["passed"], {"rc": ap["rc"], "log_pass": ap["passed"]}, "rc 0 and PASS in app.log")
         if "app_min_frames" in ck:
             chk("app_frames", ap["frames_logged"] >= ck["app_min_frames"], ap["frames_logged"], f">={ck['app_min_frames']}")
         if "pose_roundtrip_max_rad" in ck:
@@ -2344,6 +2357,13 @@ def evaluate(sc, a):
         il = a.get("install_logs") or {}
         tag, what = ck["log_level_live"]["announce"], ck["log_level_live"]["line"]
         stamp = lambda l: l[:23]
+    if ck.get("killed_game_logs"):   # H6: the game died with no exit path: the shim lines it had written are still in the run log (the host read them from the ring), and the host ended the run
+        il = a.get("install_logs") or {}
+        runs = "\n".join((il.get("game_logs") or {}).get("xr_probe.exe", {}).values())
+        shim = [l for l in runs.splitlines() if "[shim:xr_probe.exe]" in l]
+        chk("killed_game_logs", len(shim) >= 1 and "game exit" not in runs and "game ended: xr_probe.exe" in il.get("general", "") + runs,
+            {"shim_lines": len(shim), "shim_game_exit": "game exit" in runs, "game_ended": "game ended: xr_probe.exe" in il.get("general", "") + runs},
+            "the run log holds the shim's lines from before the kill, no 'game exit' (it never ran), and the host's 'game ended' line")
         ann = [stamp(l) for l in il.get("general", "").splitlines() if l.endswith(tag)]
         runs = "\n".join(t for r in (il.get("game_logs") or {}).values() for t in r.values())
         lines = [stamp(l) for l in runs.splitlines() if what in l]
