@@ -21,7 +21,14 @@ pub fn main_beat(origin: Instant) {
 const TICK: Duration = Duration::from_millis(250);
 /// how long a counter may stand still while a headset is connected before it is called a stall
 const STALL: Duration = Duration::from_millis(1500);
-const MEMORY_EVERY: Duration = Duration::from_secs(30);
+const MEMORY_EVERY: Duration = Duration::from_secs(30);/// A "no frame sent" episode is INFO when it starts: a healthy run has one at nearly every game start (the game loading, 2-3 s in) and exit (5 of 5 runs of
+/// 2026-11-13), and the host cannot know in advance which one it is. It becomes a WARN only if it is still going after this long (a game that hung).
+const FRAMES_WARN_AFTER: Duration = Duration::from_secs(5);
+
+/// Whether the open "no frame sent" episode has lasted long enough for its one WARN (not warned yet, still open, `age_s` since the last frame).
+fn frames_escalates(warned: bool, open: bool, age_s: f64) -> bool {
+    !warned && open && age_s >= FRAMES_WARN_AFTER.as_secs_f64()
+}
 
 /// One thing that can stall: starts an episode when it stood still for `STALL`, ends it when it moves again.
 struct Watch {
@@ -65,6 +72,7 @@ fn run(origin: Instant, shared: Arc<Shared>) {
     let (mut tracking, mut frames, mut main) = (Watch::new("tracking", t0), Watch::new("frames", t0), Watch::new("main loop", t0));
     let mut last_tick = t0;
     let mut last_memory = t0;
+    let mut frames_warned = false;
     loop {
         std::thread::sleep(TICK);
         let now = Instant::now();
@@ -92,16 +100,25 @@ fn run(origin: Instant, shared: Arc<Shared>) {
         for (i, t) in ticks.iter().enumerate() {
             match t {
                 Some(true) => {
-                    logs::general("WARN", &format!("stall detected: {} has not moved for {:.1} s (tracking {:.1} s, frames sent {:.1} s, main loop {:.1} s since last change)",
+                    let level = if names[i] == "frames" { "INFO" } else { "WARN" }; // frames: WARN only if it lasts (FRAMES_WARN_AFTER, below)
+                    logs::general(level, &format!("stall detected: {} has not moved for {:.1} s (tracking {:.1} s, frames sent {:.1} s, main loop {:.1} s since last change)",
                         names[i], STALL.as_secs_f64(), tracking.age(now), frames.age(now), main.age(now)));
                     event(origin, "stall_detected", json!({ "kind": names[i], "tracking_s": tracking.age(now), "frames_s": frames.age(now), "main_s": main.age(now) }));
                 }
                 Some(false) => {
+                    if names[i] == "frames" {
+                        frames_warned = false;
+                    }
                     logs::general("INFO", &format!("stall ended: {} moves again", names[i]));
                     event(origin, "stall_ended", json!({ "kind": names[i] }));
                 }
                 None => {}
             }
+        }
+        if frames_escalates(frames_warned, frames.open.is_some(), frames.age(now)) {
+            frames_warned = true;
+            logs::general("WARN", &format!("stall continues: frames has not moved for {:.1} s (tracking {:.1} s, main loop {:.1} s since last change)", frames.age(now), tracking.age(now), main.age(now)));
+            event(origin, "stall_continues", json!({ "kind": "frames", "frames_s": frames.age(now), "tracking_s": tracking.age(now), "main_s": main.age(now) }));
         }
         if connected && now.duration_since(last_memory) >= MEMORY_EVERY {
             last_memory = now;
@@ -117,5 +134,33 @@ fn run(origin: Instant, shared: Arc<Shared>) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_frames_stall_warns_once_and_only_when_it_lasts() {
+        // a healthy game start / exit: 1.5 s to a few seconds, no WARN
+        assert!(!frames_escalates(false, true, 1.5));
+        assert!(!frames_escalates(false, true, 4.9));
+        // a hung game: one WARN at 5 s, not again while the same episode goes on
+        assert!(frames_escalates(false, true, 5.0));
+        assert!(!frames_escalates(true, true, 9.0));
+        // no open episode: nothing, whatever the age
+        assert!(!frames_escalates(false, false, 30.0));
+    }
+
+    #[test]
+    fn an_episode_opens_after_the_stall_time_and_closes_when_it_moves() {
+        let t0 = Instant::now();
+        let mut w = Watch::new("frames", t0);
+        assert_eq!(w.update(1, true, t0), None);
+        assert_eq!(w.update(1, true, t0 + Duration::from_millis(1000)), None);
+        assert_eq!(w.update(1, true, t0 + Duration::from_millis(1600)), Some(true));
+        assert_eq!(w.update(1, true, t0 + Duration::from_millis(3000)), None);
+        assert_eq!(w.update(2, true, t0 + Duration::from_millis(3100)), Some(false));
     }
 }

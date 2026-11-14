@@ -393,6 +393,7 @@ impl log::Log for AlvrLogger {
         }
         // server_core's own text lines: the unified log (the raw stream stays in the debug folder's alvr.log)
         let (level, lvl) = match record.level() {
+            log::Level::Error if expected_alvr_error(&msg) => ("INFO", Level::Info),
             log::Level::Error => ("ERROR", Level::Error),
             log::Level::Warn => ("WARN", Level::Warn),
             log::Level::Info => ("INFO", Level::Info),
@@ -403,6 +404,13 @@ impl log::Log for AlvrLogger {
     }
 
     fn flush(&self) {}
+}
+
+/// The two stock ALVR lines logged at ERROR at the first connection attempt of every streamer start (3 of 3 sessions of 2026-11-13, no SteamVR running,
+/// the headset connects about a second later): ALVR tries to restart SteamVR, which this host does not use, and drops its first handshake socket
+/// (os error 10053, the system's own text is localised). Expected, so INFO. Only these two lines, not a filter on ALVR's errors.
+fn expected_alvr_error(msg: &str) -> bool {
+    msg.starts_with("Cannot restart SteamVR. No dashboard process found") || (msg.starts_with("Handshake error") && msg.contains("(os error 10053)"))
 }
 
 fn write_alvr(kind: &str, msg: &str) {
@@ -726,6 +734,17 @@ pub mod client_stats {
         }
 
         use super::*;
+
+        #[test]
+        fn expected_alvr_errors_are_only_the_two_connection_start_lines() {
+            assert!(expected_alvr_error("Cannot restart SteamVR. No dashboard process found on local device."));
+            assert!(expected_alvr_error("Handshake error for : Une connexion établie a été abandonnée par un logiciel de votre ordinateur hôte. (os error 10053)"));
+            assert!(expected_alvr_error("Handshake error for 192.168.1.14: An established connection was aborted by the software in your host machine. (os error 10053)"));
+            // other handshake failures, other errors stay errors
+            assert!(!expected_alvr_error("Handshake error for : timed out (os error 10060)"));
+            assert!(!expected_alvr_error("Handshake error for : something else"));
+            assert!(!expected_alvr_error("Failed to start the encoder"));
+        }
 
         #[test]
         fn gap_bins_sit_between_whole_periods() {
