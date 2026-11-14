@@ -700,6 +700,11 @@ namespace {
                 m_swapchains.insert(swapchain);
             }
 
+#ifdef AIRFRAMEXR_TELEMETRY
+            ShimLog("swapchain created %p: ovr format %d -> %s (read as %s), %ux%u, array %d, mips %d, samples %d, type %d, static %d, bind 0x%x, misc 0x%x", (void*)swapchain, (int)ovrDesc.Format, DxgiName(format),
+                    SamplesLinear(format) ? "linear light" : "plain UNORM values", ovrDesc.Width, ovrDesc.Height, ovrDesc.ArraySize, ovrDesc.MipLevels, ovrDesc.SampleCount, (int)ovrDesc.Type,
+                    (int)!!ovrDesc.StaticImage, (unsigned)ovrDesc.BindFlags, (unsigned)ovrDesc.MiscFlags);
+#endif
             TraceLoggingWriteStop(local, "HostDriver_CreateSwapchain", TLPArg(swapchain, "Swapchain"));
 
             return swapchain;
@@ -1559,6 +1564,9 @@ namespace {
                     ok &= ComposeLayers(layers, m_sbsRTV[slot].Get(), m_sbsWidth, m_sbsHeight, TargetMode::DirectEncode);
                 }
 
+#ifdef AIRFRAMEXR_TELEMETRY
+                ProbeFrame(layers, slot, composed);
+#endif
                 // the display time the app rendered this frame for (its content time: what its animation and camera were computed for), shim clock
                 double displayS = 0.0;
                 for (const ovrLayerHeader* lh : layers) {
@@ -1704,6 +1712,271 @@ namespace {
 
             return ok;
         }
+
+#ifdef AIRFRAMEXR_TELEMETRY
+        // ---- Picture probe (telemetry flavour, debug on) -------------------------------------------------------------------------------
+        // What the game really submits and what the shim writes, for questions like "the game's HDR did not look right" (2026-11-14):
+        // per sampled frame, for every layer's swapchain (and the encoded slot after the composition) the format, the value statistics
+        // (min / max / mean, percentiles, share above 1.0 / 2 / 4, negatives, NaN, a coarse histogram) over a grid of pixels, and a few
+        // raw dumps (PFM, float RGB, point-sampled) into the debug session folder. Cost is a full readback: debug sessions only.
+        struct ProbePx { float r, g, b, a; };
+
+        static const char* DxgiName(DXGI_FORMAT f) {
+            switch (f) {
+            case DXGI_FORMAT_R16G16B16A16_FLOAT: return "R16G16B16A16_FLOAT";
+            case DXGI_FORMAT_R16G16B16A16_TYPELESS: return "R16G16B16A16_TYPELESS";
+            case DXGI_FORMAT_R32G32B32A32_FLOAT: return "R32G32B32A32_FLOAT";
+            case DXGI_FORMAT_R11G11B10_FLOAT: return "R11G11B10_FLOAT";
+            case DXGI_FORMAT_R10G10B10A2_UNORM: return "R10G10B10A2_UNORM";
+            case DXGI_FORMAT_R8G8B8A8_UNORM: return "R8G8B8A8_UNORM";
+            case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return "R8G8B8A8_UNORM_SRGB";
+            case DXGI_FORMAT_R8G8B8A8_TYPELESS: return "R8G8B8A8_TYPELESS";
+            case DXGI_FORMAT_B8G8R8A8_UNORM: return "B8G8R8A8_UNORM";
+            case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return "B8G8R8A8_UNORM_SRGB";
+            case DXGI_FORMAT_B8G8R8A8_TYPELESS: return "B8G8R8A8_TYPELESS";
+            case DXGI_FORMAT_B8G8R8X8_UNORM: return "B8G8R8X8_UNORM";
+            case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB: return "B8G8R8X8_UNORM_SRGB";
+            default: return "other";
+            }
+        }
+
+        static float ProbeHalf(uint16_t h) {
+            const uint32_t s = (h >> 15) & 1, e = (h >> 10) & 31, m = h & 1023;
+            float v;
+            if (e == 0) v = std::ldexp((float)m, -24);
+            else if (e == 31) v = m ? NAN : INFINITY;
+            else v = std::ldexp((float)(1024 + m), (int)e - 25);
+            return s ? -v : v;
+        }
+
+        // unsigned 11 / 10 bit float of R11G11B10
+        static float ProbeSmallFloat(uint32_t bits, int mantBits) {
+            const uint32_t m = bits & ((1u << mantBits) - 1), e = bits >> mantBits;
+            if (e == 0) return std::ldexp((float)m, -14 - mantBits);
+            if (e == 31) return m ? NAN : INFINITY;
+            return std::ldexp((float)((1u << mantBits) + m), (int)e - 15 - mantBits);
+        }
+
+        // bytes per pixel of the formats the probe can decode, 0 = not supported
+        static int ProbeBpp(DXGI_FORMAT f) {
+            switch (f) {
+            case DXGI_FORMAT_R16G16B16A16_FLOAT: case DXGI_FORMAT_R16G16B16A16_TYPELESS: return 8;
+            case DXGI_FORMAT_R32G32B32A32_FLOAT: return 16;
+            case DXGI_FORMAT_R11G11B10_FLOAT: case DXGI_FORMAT_R10G10B10A2_UNORM:
+            case DXGI_FORMAT_R8G8B8A8_UNORM: case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+            case DXGI_FORMAT_B8G8R8A8_UNORM: case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+            case DXGI_FORMAT_B8G8R8X8_UNORM: case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB: return 4;
+            default: return 0;
+            }
+        }
+
+        // stored values as numbers (UNORM codes / 255 or 1023, floats as they are: sRGB-encoded views stay encoded)
+        static ProbePx ProbeDecode(DXGI_FORMAT f, const uint8_t* p) {
+            switch (f) {
+            case DXGI_FORMAT_R16G16B16A16_FLOAT: case DXGI_FORMAT_R16G16B16A16_TYPELESS: {
+                const uint16_t* h = (const uint16_t*)p;
+                return {ProbeHalf(h[0]), ProbeHalf(h[1]), ProbeHalf(h[2]), ProbeHalf(h[3])};
+            }
+            case DXGI_FORMAT_R32G32B32A32_FLOAT: {
+                const float* v = (const float*)p;
+                return {v[0], v[1], v[2], v[3]};
+            }
+            case DXGI_FORMAT_R11G11B10_FLOAT: {
+                const uint32_t v = *(const uint32_t*)p;
+                return {ProbeSmallFloat(v & 0x7FF, 6), ProbeSmallFloat((v >> 11) & 0x7FF, 6), ProbeSmallFloat((v >> 22) & 0x3FF, 5), 1.f};
+            }
+            case DXGI_FORMAT_R10G10B10A2_UNORM: {
+                const uint32_t v = *(const uint32_t*)p;
+                return {(v & 1023) / 1023.f, ((v >> 10) & 1023) / 1023.f, ((v >> 20) & 1023) / 1023.f, (v >> 30) / 3.f};
+            }
+            case DXGI_FORMAT_B8G8R8A8_UNORM: case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+            case DXGI_FORMAT_B8G8R8X8_UNORM: case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+                return {p[2] / 255.f, p[1] / 255.f, p[0] / 255.f, p[3] / 255.f};
+            default:
+                return {p[0] / 255.f, p[1] / 255.f, p[2] / 255.f, p[3] / 255.f};
+            }
+        }
+
+        // Reads a region of subresource 0 back through a staging copy and samples it on a grid (at most maxAxis samples per axis).
+        bool ProbeRead(ID3D11Texture2D* tex, DXGI_FORMAT typed, int x0, int y0, int w, int h, int maxAxis, std::vector<ProbePx>& out, int& sw, int& sh,
+                       std::string& why) {
+            out.clear();
+            sw = sh = 0;
+            D3D11_TEXTURE2D_DESC td{};
+            tex->GetDesc(&td);
+            if (td.SampleDesc.Count > 1) { why = "multisampled"; return false; }
+            const DXGI_FORMAT fmt = ProbeBpp(typed) ? typed : td.Format;
+            const int bpp = ProbeBpp(fmt);
+            if (!bpp) { why = "format not decodable"; return false; }
+            x0 = std::max(0, std::min(x0, (int)td.Width - 1));
+            y0 = std::max(0, std::min(y0, (int)td.Height - 1));
+            w = std::max(1, std::min(w, (int)td.Width - x0));
+            h = std::max(1, std::min(h, (int)td.Height - y0));
+            D3D11_TEXTURE2D_DESC sd{};
+            sd.Width = w; sd.Height = h; sd.MipLevels = 1; sd.ArraySize = 1; sd.Format = td.Format; sd.SampleDesc.Count = 1;
+            sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            ComPtr<ID3D11Texture2D> st;
+            if (FAILED(m_submissionDevice->CreateTexture2D(&sd, nullptr, st.GetAddressOf()))) { why = "staging texture failed"; return false; }
+            const D3D11_BOX box{(UINT)x0, (UINT)y0, 0, (UINT)(x0 + w), (UINT)(y0 + h), 1};
+            m_submissionContext->CopySubresourceRegion(st.Get(), 0, 0, 0, 0, tex, 0, &box);
+            D3D11_MAPPED_SUBRESOURCE ms{};
+            if (FAILED(m_submissionContext->Map(st.Get(), 0, D3D11_MAP_READ, 0, &ms))) { why = "map failed"; return false; }
+            const int stepX = std::max(1, std::max(w, h) / maxAxis), stepY = stepX; // one step on both axes: the dump keeps the picture's proportions
+            for (int y = 0; y < h; y += stepY) {
+                const uint8_t* row = (const uint8_t*)ms.pData + (size_t)y * ms.RowPitch;
+                int cols = 0;
+                for (int x = 0; x < w; x += stepX, cols++) {
+                    out.push_back(ProbeDecode(fmt, row + (size_t)x * bpp));
+                }
+                sw = cols;
+                sh++;
+            }
+            m_submissionContext->Unmap(st.Get(), 0);
+            return true;
+        }
+
+        static std::string ProbeStats(const std::vector<ProbePx>& px) {
+            if (px.empty()) return "no samples";
+            std::vector<float> luma;
+            luma.reserve(px.size());
+            double sr = 0, sg = 0, sb = 0, sa = 0;
+            float mn = INFINITY, mx = -INFINITY, amin = INFINITY, amax = -INFINITY;
+            size_t gt1 = 0, gt2 = 0, gt4 = 0, neg = 0, nan = 0, zero = 0, clip = 0;
+            size_t hist[10] = {};
+            for (const auto& p : px) {
+                if (!std::isfinite(p.r) || !std::isfinite(p.g) || !std::isfinite(p.b)) { nan++; continue; }
+                const float l = 0.2126f * p.r + 0.7152f * p.g + 0.0722f * p.b;
+                luma.push_back(l);
+                sr += p.r; sg += p.g; sb += p.b; sa += p.a;
+                const float lo = std::min(p.r, std::min(p.g, p.b)), hi = std::max(p.r, std::max(p.g, p.b));
+                mn = std::min(mn, lo); mx = std::max(mx, hi);
+                if (std::isfinite(p.a)) { amin = std::min(amin, p.a); amax = std::max(amax, p.a); }
+                gt1 += hi > 1.f; gt2 += hi > 2.f; gt4 += hi > 4.f; neg += lo < 0.f; zero += hi <= 0.f; clip += hi >= 0.9995f && hi <= 1.0005f;
+                const int b = l <= 0.f ? 0 : l <= 0.01f ? 1 : l <= 0.1f ? 2 : l <= 0.5f ? 3 : l <= 1.f ? 4 : l <= 2.f ? 5 : l <= 4.f ? 6 : l <= 8.f ? 7 : l <= 16.f ? 8 : 9;
+                hist[b]++;
+            }
+            if (luma.empty()) return "all samples NaN/Inf";
+            std::sort(luma.begin(), luma.end());
+            auto pc = [&](double q) { return luma[std::min(luma.size() - 1, (size_t)(q * (luma.size() - 1) + 0.5))]; };
+            const double n = (double)luma.size(), inv = 100.0 / n;
+            char b[900];
+            snprintf(b, sizeof(b),
+                     "n=%zu min=%.4f max=%.4f | mean rgb %.4f %.4f %.4f a %.3f (a range %.3f..%.3f) | luma p1 %.4f p50 %.4f p90 %.4f p99 %.4f p99.9 %.4f max %.4f | "
+                     ">1.0 %.2f%% >2 %.2f%% >4 %.2f%% | at 1.0 (clipped) %.2f%% | negative %.2f%% | zero %.2f%% | NaN/Inf %zu | luma hist [0 | <=.01 | <=.1 | <=.5 | <=1 | <=2 | <=4 | <=8 | <=16 | >16] = "
+                     "%zu %zu %zu %zu %zu %zu %zu %zu %zu %zu",
+                     luma.size(), mn, mx, sr / n, sg / n, sb / n, sa / n, amin, amax, pc(0.01), pc(0.5), pc(0.9), pc(0.99), pc(0.999), luma.back(), gt1 * inv, gt2 * inv,
+                     gt4 * inv, clip * inv, neg * inv, zero * inv, nan, hist[0], hist[1], hist[2], hist[3], hist[4], hist[5], hist[6], hist[7], hist[8], hist[9]);
+            return b;
+        }
+
+        void ProbeDump(const char* tag, uint64_t frame, const std::vector<ProbePx>& px, int sw, int sh) {
+            if (px.empty() || sw <= 0 || sh <= 0) return;
+            std::wstring dir;
+            {
+                std::lock_guard lk(shimlog::g_mutex);
+                dir = shimlog::g_debugDir;
+            }
+            if (dir.empty()) return;
+            wchar_t name[320];
+            swprintf(name, 320, L"%ls\\probe_%ls_%lu_f%llu_%hs.pfm", dir.c_str(), shimlog::ExeName().c_str(), GetCurrentProcessId(), (unsigned long long)frame, tag);
+            FILE* f = nullptr;
+            _wfopen_s(&f, name, L"wb");
+            if (!f) return;
+            fprintf(f, "PF\n%d %d\n-1.0\n", sw, sh);
+            for (int y = sh - 1; y >= 0; y--) {
+                for (int x = 0; x < sw; x++) {
+                    const ProbePx& p = px[(size_t)y * sw + x];
+                    const float v[3] = {p.r, p.g, p.b};
+                    fwrite(v, sizeof(float), 3, f);
+                }
+            }
+            fclose(f);
+            ShimLog("[probe] f=%llu dump %s: %dx%d float RGB -> %s", (unsigned long long)frame, tag, sw, sh, shimlog::Utf8(name).c_str());
+        }
+
+        // one layer image: log its description and statistics, optionally dump it
+        void ProbeImage(uint64_t n, bool dump, const char* label, void* swapchainPtr, int x0, int y0, int w, int h, TargetMode mode, uint32_t layerFlags) {
+            if (!swapchainPtr || !m_swapchains.count(swapchainPtr)) {
+                ShimLog("[probe] f=%llu %s: swapchain unknown", (unsigned long long)n, label);
+                return;
+            }
+            Swapchain* sc = (Swapchain*)swapchainPtr;
+            const DXGI_FORMAT typed = ToDxgiTextureFormat(sc->desc.Format);
+            int enc = 0, dec = 0;
+            SrgbFlags(mode, SamplesLinear(typed), enc, dec);
+            ID3D11Texture2D* tex = sc->textures[sc->ComposeIndex()].Get();
+            std::vector<ProbePx> px;
+            int sw = 0, sh = 0;
+            std::string why;
+            const bool ok = ProbeRead(tex, typed, x0, y0, w, h, 128, px, sw, sh, why);
+            ShimLog("[probe] f=%llu %s: ovr fmt %d = %s, swapchain %ux%u arr %d ms %d, rect (%d,%d %dx%d), layer flags 0x%x, shim reads it as %s -> encodeSrgb %d decodeSrgb %d | %s",
+                    (unsigned long long)n, label, (int)sc->desc.Format, DxgiName(typed), sc->desc.Width, sc->desc.Height, sc->desc.ArraySize, sc->desc.SampleCount, x0, y0, w, h,
+                    layerFlags, SamplesLinear(typed) ? "linear light" : "plain UNORM values", enc, dec, ok ? ProbeStats(px).c_str() : why.c_str());
+            if (ok && dump) {
+                std::vector<ProbePx> big;
+                int bw = 0, bh = 0;
+                if (ProbeRead(tex, typed, x0, y0, w, h, 480, big, bw, bh, why)) {
+                    std::string tag = label;
+                    for (char& c : tag) if (c == ' ' || c == ':') c = '_';
+                    ProbeDump(tag.c_str(), n, big, bw, bh);
+                }
+            }
+        }
+
+        void ProbeFrame(const std::vector<const ovrLayerHeader*>& layers, uint32_t slot, int composed) {
+            if (!shimlog::DebugActive()) return;
+            const uint64_t n = ++m_probeN;
+            const bool stats = n <= 5 || n == 10 || n == 30 || n % 300 == 0;
+            const bool dump = n == 120 || n == 900 || n == 3000 || n == 6000 || n == 12000 || n == 20000;
+            if (!stats && !dump) return;
+            const TargetMode mode = (composed > 1 && m_linearRTV) ? TargetMode::Linear : TargetMode::DirectEncode;
+            ShimLog("[probe] f=%llu frame: %zu layers (%d composed) -> %s | output gamma %.4f (negotiated %.2f x user)", (unsigned long long)n, layers.size(), composed,
+                    mode == TargetMode::Linear ? "Linear compose (FP16) then encode" : "DirectEncode (single layer)", OutputGamma(TargetMode::DirectEncode), m_encodingGamma);
+            std::shared_lock lock(m_swapchainMutex);
+            int li = 0;
+            for (const ovrLayerHeader* h : layers) {
+                li++;
+                if (!h) continue;
+                const auto* l = (const ovrLayer_Union*)h;
+                char label[64];
+                if (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth) {
+                    for (int e = 0; e < 2; e++) {
+                        void* sc = (e == 0 || !l->EyeFov.ColorTexture[e]) ? l->EyeFov.ColorTexture[0] : l->EyeFov.ColorTexture[e];
+                        snprintf(label, sizeof(label), "src layer%d eyefov eye%d", li, e);
+                        ProbeImage(n, dump, label, sc, l->EyeFov.Viewport[e].Pos.x, l->EyeFov.Viewport[e].Pos.y, l->EyeFov.Viewport[e].Size.w, l->EyeFov.Viewport[e].Size.h,
+                                   mode, h->Flags);
+                    }
+                } else if (h->Type == ovrLayerType_Quad || h->Type == ovrLayerType_Cylinder) {
+                    snprintf(label, sizeof(label), "src layer%d %s", li, h->Type == ovrLayerType_Quad ? "quad" : "cylinder");
+                    ProbeImage(n, dump, label, l->Quad.ColorTexture, l->Quad.Viewport.Pos.x, l->Quad.Viewport.Pos.y, l->Quad.Viewport.Size.w, l->Quad.Viewport.Size.h, mode,
+                               h->Flags);
+                } else {
+                    ShimLog("[probe] f=%llu layer%d: type %d not sampled", (unsigned long long)n, li, (int)h->Type);
+                }
+            }
+            // what the shim wrote: the encoded slot (sRGB-encoded, then the encoding gamma), both eyes side by side
+            ID3D11Texture2D* out = m_sbsTex[slot].Get();
+            if (out) {
+                D3D11_TEXTURE2D_DESC od{};
+                out->GetDesc(&od);
+                std::vector<ProbePx> px;
+                int sw = 0, sh = 0;
+                std::string why;
+                const bool ok = ProbeRead(out, od.Format, 0, 0, (int)od.Width, (int)od.Height, 160, px, sw, sh, why);
+                ShimLog("[probe] f=%llu out slot %u: %s %ux%u (values as stored in the encoded frame) | %s", (unsigned long long)n, slot, DxgiName(od.Format), od.Width, od.Height,
+                        ok ? ProbeStats(px).c_str() : why.c_str());
+                if (ok && dump) {
+                    std::vector<ProbePx> big;
+                    int bw = 0, bh = 0;
+                    if (ProbeRead(out, od.Format, 0, 0, (int)od.Width, (int)od.Height, 960, big, bw, bh, why)) {
+                        ProbeDump("out_slot", n, big, bw, bh);
+                    }
+                }
+            }
+        }
+
+        uint64_t m_probeN{0};
+#endif
 
         // The shim's own spin wait (OVRSHIM_SYNC_SUBMIT=1, or if EnqueueSetEvent fails): until the GPU is done, at most 50 ms.
         void WaitGpuIdleSpin() {

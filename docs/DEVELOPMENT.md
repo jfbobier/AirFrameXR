@@ -50,6 +50,8 @@ since 1.3, ships as the Black Box suite in its own install (`blackbox\` of the b
 | shim (C++) | `AIRFRAMEXR_TELEMETRY` defined | `AIRFRAMEXR_RELEASE` defined (undefines it) |
 | harness | `python3 harness/run.py build host shim` | `python3 harness/run.py build host shim --release` (then `package`) |
 
+The shim's **picture probe** (telemetry flavour, host debug on; `ovrshim/driver.cpp` `ProbeFrame`) logs every swapchain at creation (ovr format, DXGI format, size, whether the shim reads it as linear light) and, on frames 1-5, 10, 30 and every 300th, for each layer image and for the encoded slot: min / max / mean, luma percentiles, share above 1.0 / 2 / 4, clipped, negative, NaN/Inf and a coarse histogram, as `[probe]` lines of the shim log; on six frames it also dumps float RGB (`probe_*.pfm`, point-sampled, in the debug session folder; `python3 harness/pfm2png.py in.pfm out.png --mode clip|srgb|aces`). It was added to find out what an HDR game really submits (scenario `e2e_picture_probe`). It costs a full readback per sampled frame: never on in normal play.
+
 What the flag covers today: the shim's per-frame trace `shim_frames.csv` (pose read, head-sample arrival, release, submit, publish) and
 the pose-match diagnostics behind the 900-frame log line; the host's frame fates and sent-frame CSVs (`host_pipeline*.csv`,
 `host_frames.csv`). New per-frame telemetry must sit behind it (`#ifdef AIRFRAMEXR_TELEMETRY` / `#[cfg(feature = "telemetry")]`);
