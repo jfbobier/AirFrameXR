@@ -1072,6 +1072,17 @@ namespace {
                    f == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
         }
 
+        // FP16 / FP32 swapchains (HDR-capable games and mods) hold linear values: the draw reads them as linear exactly like the sRGB views above.
+        // Without this they were treated as sRGB-encoded UNORM: decoded twice in the linear path and written raw (too dark) in the direct one.
+        // What exceeds 1.0 is clamped when the UNORM slot is written (what ALVR's own HDR mode does), nothing above SDR white is carried.
+        static bool IsLinearFloat(DXGI_FORMAT f) {
+            return f == DXGI_FORMAT_R16G16B16A16_FLOAT || f == DXGI_FORMAT_R32G32B32A32_FLOAT || f == DXGI_FORMAT_R11G11B10_FLOAT;
+        }
+
+        static bool SamplesLinear(DXGI_FORMAT f) {
+            return IsSrgb(f) || IsLinearFloat(f);
+        }
+
         enum class TargetMode {
             DirectEncode, // UNORM target: sRGB-sourced content is encoded to sRGB values as it is drawn (single-layer fast path)
             Linear,       // FP16 linear target: all sources converted to linear, encoded by a final pass
@@ -1286,7 +1297,7 @@ namespace {
                                 continue;
                             }
                             Swapchain* swapchainObject = (Swapchain*)swapchain;
-                            SrgbFlags(mode, IsSrgb(ToDxgiTextureFormat(swapchainObject->desc.Format)),
+                            SrgbFlags(mode, SamplesLinear(ToDxgiTextureFormat(swapchainObject->desc.Format)),
                                       constants.encodeSrgb, constants.decodeSrgb);
                             constants.outputGamma = OutputGamma(mode);
                             FillColor(mode == TargetMode::DirectEncode, constants.brightness, constants.contrast, constants.saturation,
@@ -1328,7 +1339,7 @@ namespace {
                         c.flipY = (flags & ovrLayerFlag_TextureOriginAtBottomLeft) ? 1 : 0;
                         c.premultiply = 0; // VDXR already hands OVR premultiplied textures (alpha pre-processing in its swapchain shader)
                         c.segments = 64;
-                        SrgbFlags(mode, IsSrgb(ToDxgiTextureFormat(sc->desc.Format)), c.encodeSrgb, c.decodeSrgb);
+                        SrgbFlags(mode, SamplesLinear(ToDxgiTextureFormat(sc->desc.Format)), c.encodeSrgb, c.decodeSrgb);
                         c.outputGamma = OutputGamma(mode);
                         FillColor(mode == TargetMode::DirectEncode, c.brightness, c.contrast, c.saturation, c.sharpening, c.finalPass);
                         c.uvOffset = {(float)q.Viewport.Pos.x / sc->desc.Width, (float)q.Viewport.Pos.y / sc->desc.Height};
@@ -1374,7 +1385,7 @@ namespace {
 
                         LayerConstants c{};
                         c.kind = LAYER_KIND_CUBE;
-                        SrgbFlags(mode, IsSrgb(ToDxgiTextureFormat(sc->desc.Format)), c.encodeSrgb, c.decodeSrgb);
+                        SrgbFlags(mode, SamplesLinear(ToDxgiTextureFormat(sc->desc.Format)), c.encodeSrgb, c.decodeSrgb);
                         c.outputGamma = OutputGamma(mode);
                         FillColor(mode == TargetMode::DirectEncode, c.brightness, c.contrast, c.saturation, c.sharpening, c.finalPass);
 

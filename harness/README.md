@@ -227,6 +227,7 @@ source stream decoded the same way; tolerance = `max_unknown_frame_ratio`, to al
 - `e2e_avp_late_views`: the user's session with the mock behaving like the stock visionOS client in its immersive space
   (`--views-after-first-frame`: ViewsConfig only after the first decoded frame). Also checks game-audio capture started, pose-matched
   frame timestamps and the async submit mode.
+- `e2e_hdr_fp16_input`: like `e2e_openxr_probe` with an FP16 (linear) swapchain (`XR_PROBE_FP16=1`: gray patch linear 0.5, counter blocks 4.0): the shim must read it as linear (gray 188 like the 8-bit sRGB app; 128 = the old double-decode / raw write) and clamp the over-range blocks to white. No pacing judged.
 - `e2e_installed_layout`: the portable folder `out\dist\AirFrameXR` copied as a user unzips it; host with `--install-dir --debug`, app against
   only its manifest; checks the general log's key lines and the debug session files.
 - `e2e_benchmark_network`: `--benchmark-network 100,200` to the mock client: steps must reach their target bitrate at >= 80 fps.

@@ -318,6 +318,9 @@ int main(int argc, char** argv) {
     CK(xrEnumerateSwapchainFormats(sess, n, &n, fmts.data()));
     int64_t fmt = fmts[0];
     for (int64_t f : fmts) if (f == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) fmt = f;
+    // XR_PROBE_FP16=1: an FP16 (linear) swapchain, like an HDR game or mod; the white counter blocks are 4.0 (above SDR white) and the gray patch stays linear 0.5.
+    const bool fp16 = getenv("XR_PROBE_FP16") && atoi(getenv("XR_PROBE_FP16")) != 0;
+    if (fp16) { bool have = false; for (int64_t f : fmts) if (f == DXGI_FORMAT_R16G16B16A16_FLOAT) have = true; if (have) fmt = DXGI_FORMAT_R16G16B16A16_FLOAT; else L("XR_PROBE_FP16 set but no FP16 swapchain format"); }
     L("swapchain formats: %u, using %lld", n, (long long)fmt);
 
     std::vector<XrSwapchain> sc(vcv.size());
@@ -722,7 +725,7 @@ int main(int argc, char** argv) {
                     ID3D11DeviceContext1* c1 = nullptr;
                     if (i == 0 && !tool.On() && SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
                         const uint32_t stamp = (uint32_t)(done + 1);
-                        const float white[4] = { 1, 1, 1, 1 }, black[4] = { 0, 0, 0, 1 }, gray[4] = { 0.5f, 0.5f, 0.5f, 1 };
+                        const float wv = fmt == DXGI_FORMAT_R16G16B16A16_FLOAT ? 4.f : 1.f; const float white[4] = { wv, wv, wv, 1 }, black[4] = { 0, 0, 0, 1 }, gray[4] = { 0.5f, 0.5f, 0.5f, 1 };
                         for (int bi = 0; bi < 16; bi++) {
                             D3D11_RECT r{ bi * 64, 0, (bi + 1) * 64, 64 };
                             c1->ClearView(rtv, ((stamp >> bi) & 1) ? white : black, &r, 1);
@@ -734,7 +737,7 @@ int main(int argc, char** argv) {
                         // checkerboard; with the game denser than the stream (the render quality slider) the compose pass must average it flat (ovrshim
                         // ReprojectPS.hlsl, 2026-10-29). Copied from a texture made once in the swapchain's own format (4 bytes per pixel formats only).
                         D3D11_TEXTURE2D_DESC sd{}; imgs[i][idx].texture->GetDesc(&sd);
-                        if (sd.Width >= 1216 && sd.Height >= 64) {
+                        if (sd.Width >= 1216 && sd.Height >= 64 && sd.Format != DXGI_FORMAT_R16G16B16A16_FLOAT) {
                             static ID3D11Texture2D* checker = nullptr; static DXGI_FORMAT checkerFmt = DXGI_FORMAT_UNKNOWN;
                             if (checker && checkerFmt != sd.Format) { checker->Release(); checker = nullptr; }
                             if (!checker) {
