@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The tray (tools/gui/Tray.cs, bin\\tray.exe) on the PC: it must watch while nothing streams and go fully idle while a streamer runs.
-    AIRFRAMEXR_PROFILE=5090 python3 harness/tray_check.py [--no-build]
+    AIRFRAMEXR_PROFILE=5090 python3 harness/tray_check.py [--no-build] [--by-ip]
 A throwaway folder (C:\\Users\\<user>\\tray_e2e) holds a copy of the install's bin\\ (real alvr_host.exe), the freshly built tray.exe and a stand-in
 streamer.exe that just sleeps; nothing in the real install is touched or stopped. tray_check.ps1 samples every 100 ms (stand-in streamers running,
 `alvr_host --discover` children running) while it plays the field: a headset announcing itself (UDP 9943 datagram like find_headset_e2e), another
@@ -49,7 +49,8 @@ Remove-Item '{wd}\\bin\\streamer.exe' -Force -ErrorAction SilentlyContinue
 
 proto = json.loads([l for l in live.ps(rf"& '{wd}\bin\alvr_host.exe' --system-check").splitlines() if l.startswith("{")][0])["data"]["alvr_protocol_id"]
 sess = json.loads((live.ROOT / "tools/install/session.default.json").read_text())
-sess["client_connections"] = {HOST: {"display_name": "Tray mock", "current_ip": "127.0.0.2", "manual_ips": ["127.0.0.2"], "trusted": True, "connection_state": "Disconnected"}}
+BY_IP = "--by-ip" in sys.argv   # paired the way the Settings window pairs the Vision Pro: empty hostname key, the address only (the field bug of 2026-11-15)
+sess["client_connections"] = {"" if BY_IP else HOST: {"display_name": "Tray mock", "current_ip": "127.0.0.2", "manual_ips": ["127.0.0.2"], "trusted": True, "connection_state": "Disconnected"}}
 live.SCRATCH.mkdir(parents=True, exist_ok=True)
 f = live.SCRATCH / "tray_session.json"
 f.write_text(json.dumps(sess, indent=2))

@@ -18,14 +18,14 @@ $marks = @()
 $results = @()
 function Verdict($name, $ok, $detail) { $script:results += [pscustomobject]@{ name = $name; ok = [bool]$ok; detail = $detail } }
 function Between($a, $b) { $samples | Where-Object { $_.t -ge $a -and $_.t -le $b } }
-function Announcer($name) {
-    Start-Job -ArgumentList $name, $proto -ScriptBlock {
-        param($h, $p)
+function Announcer($name, $from = '127.0.0.2') {
+    Start-Job -ArgumentList $name, $proto, $from -ScriptBlock {
+        param($h, $p, $f)
         $pk = New-Object byte[] 56
         [Text.Encoding]::ASCII.GetBytes('ALVR').CopyTo($pk, 0)
         [BitConverter]::GetBytes([uint64]$p).CopyTo($pk, 16)
         [Text.Encoding]::ASCII.GetBytes($h).CopyTo($pk, 24)
-        $u = New-Object System.Net.Sockets.UdpClient (New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Parse('127.0.0.2')), 0)
+        $u = New-Object System.Net.Sockets.UdpClient (New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Parse($f)), 0)
         while ($true) { $u.Send($pk, 56, '127.0.0.1', 9943) | Out-Null; Start-Sleep -Milliseconds 500 }
     }
 }
@@ -45,7 +45,7 @@ Verdict 'idle_watches' ($ok -and -not ($a | Where-Object { $_.discover -ne 1 -or
 
 # E: another headset announces: nothing starts
 Mark 'other_headset'
-$j = Announcer 'some-other-headset'
+$j = Announcer 'some-other-headset' '127.0.0.3'
 Watch 6
 Stop-Job $j; Remove-Job $j
 $e = Between ($marks[-1][1]) $t0.Elapsed.TotalSeconds

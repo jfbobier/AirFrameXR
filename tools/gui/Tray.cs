@@ -85,15 +85,17 @@ static class TrayProgram
             if (DateTime.Now < resumeAt) { StopWatching(); Say($"Streamer closed, watching again in {(int)(resumeAt - DateTime.Now).TotalSeconds + 1} s"); return; }
             var paired = Session.Headset(Session.Load());
             if (paired == null) { StopWatching(); Say("No headset paired: pair it in Settings"); return; }
-            if (discovery == null) StartWatching(paired.Item1);
+            if (discovery == null) StartWatching(paired.Item1, paired.Item3);
         }
 
-        void StartWatching(string pairedHostname)
+        void StartWatching(string pairedHostname, string pairedIp)
         {
             var d = new Discovery();
             d.OnFound += f =>
             {
-                if (!f.Compatible || !string.Equals(f.Hostname, pairedHostname, StringComparison.OrdinalIgnoreCase)) return;
+                // the pairing is by hostname (the key) or, when the key is empty (a headset paired by its address, as the Settings window does for the Vision Pro), by IP
+                var mine = (pairedHostname.Length > 0 && string.Equals(f.Hostname, pairedHostname, StringComparison.OrdinalIgnoreCase)) || (pairedIp.Length > 0 && f.Ip == pairedIp);
+                if (!f.Compatible || !mine) { Log.Write("INFO", $"tray: headset {f.Hostname} at {f.Ip} seen via {f.Via}, ignored (compatible={f.Compatible}, paired: '{pairedHostname}' / {pairedIp})"); return; }
                 Log.Write("INFO", $"tray: headset {f.Hostname} seen at {f.Ip} via {f.Via}: starting the streamer");
                 BeginInvoke(StartStreamer);
             };
