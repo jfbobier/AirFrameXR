@@ -13,10 +13,12 @@
 #  - per-frame facts to OVRShim through its ovrshim_Trace export (virtualdesktop-openxr/airframexr_trace.h).
 # Until 1.3.11 the first five were regex text patches applied here to an upstream checkout; the fork's first five commits
 # reproduce their text exactly.
-# -Unpatched builds stock upstream at upstream_hash instead (A/B against stock VDXR).
+# -Unpatched builds stock upstream at upstream_hash instead (A/B against stock VDXR). -Commit <full hash> builds another commit of
+# the fork (lab A/B: 50eda31 = what 1.3.10 shipped, airframexr-slices = the in-place slice experiment); harness/run.py passes
+# them from AIRFRAMEXR_VDXR_UNPATCHED=1 / AIRFRAMEXR_VDXR_COMMIT=<hash>. Rebuild without them to return to the pin.
 # The builder's src\VDXR checkout is moved to the requested commit (checkout -f: edits in that folder are overwritten; the
 # build-time patches of earlier versions were the only ones).
-param([switch]$Unpatched)
+param([switch]$Unpatched, [string]$Commit = '')
 $ErrorActionPreference = 'Continue'
 $start = Get-Date
 $root = if ($env:AIRFRAMEXR_ROOT) { $env:AIRFRAMEXR_ROOT } else { "$env:USERPROFILE\openxr" }
@@ -27,7 +29,7 @@ $lockFile = "$root\_tmp\deps.lock.json"
 if (-not (Test-Path $lockFile)) { Write-Host "RESULT: FAILED (no _tmp\deps.lock.json; harness/run.py build vdxr puts it there)"; exit 1 }
 if (-not (Test-Path "$v\.git")) { Write-Host "RESULT: FAILED (no VDXR checkout in $v; run harness/run.py setup)"; exit 1 }
 $pin = (Get-Content $lockFile -Raw | ConvertFrom-Json).builder_sources.VDXR
-$hash = if ($Unpatched) { $pin.upstream_hash } else { $pin.full_hash }
+$hash = if ($Unpatched) { $pin.upstream_hash } elseif ($Commit) { $Commit } else { $pin.full_hash }
 $remote = if ($Unpatched) { $pin.upstream_remote } else { $pin.remote }
 if (-not $hash -or -not $remote) { Write-Host "RESULT: FAILED (deps.lock.json has no VDXR remote/hash for this build)"; exit 1 }
 

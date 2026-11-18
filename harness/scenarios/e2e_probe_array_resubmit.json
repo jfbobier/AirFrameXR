@@ -1,0 +1,122 @@
+{
+  "description": "SINGLE-PASS STEREO + RESUBMITS (the VDXR dirty gate): as e2e_probe_array, and after every frame a second wait / begin / end cycle resubmits the same layers without releasing an image (XR_PROBE_RESUBMIT=1, a VR mod's duplicate cycle). Half the frames carry no new picture: slice 1 must be copied on the real frames only and skipped as unchanged on the resubmits; both eyes keep their own image.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 90,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 1800
+  },
+  "client": {
+    "seconds": 85,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 1800,
+    "timeout_s": 90,
+    "env": {
+      "XR_PROBE_ARRAY": "1",
+      "XR_PROBE_RESUBMIT": "1"
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 200,
+  "checks": {
+    "host_min_frames": 250,
+    "client_min_frames": 200,
+    "timestamps_monotonic": true,
+    "max_duplicate_timestamps": 100000,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 3520,
+      "height": 1600,
+      "color_range": "pc"
+    },
+    "decode": true,
+    "decode_frame_slack": 40,
+    "app_min_frames": 300,
+    "pose_roundtrip_max_rad": 0.06,
+    "min_yaw_range_rad": 0.3,
+    "refresh_hz": 90,
+    "max_pipeline_latency_ms": 150,
+    "eye_colors": {
+      "min_frames": 100,
+      "min_ok_frac": 0.95,
+      "min_blue_diff": 15,
+      "max_rg_diff": 12
+    },
+    "vdxr_trace": {
+      "min_frames": 900,
+      "resubmit_frac": [
+        0.45,
+        0.52
+      ],
+      "copied_per_frame": [
+        0.45,
+        0.55
+      ],
+      "unchanged_per_frame": [
+        0.45,
+        0.55
+      ],
+      "released_per_frame": [
+        0.9,
+        1.05
+      ]
+    }
+  }
+}

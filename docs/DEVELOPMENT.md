@@ -54,7 +54,9 @@ What the flag covers today: the shim's per-frame trace `shim_frames.csv` (pose r
 the pose-match diagnostics behind the 900-frame log line; the host's frame fates and sent-frame CSVs (`host_pipeline*.csv`,
 `host_frames.csv`). New per-frame telemetry must sit behind it (`#ifdef AIRFRAMEXR_TELEMETRY` / `#[cfg(feature = "telemetry")]`);
 counters that are a single add per frame and the periodic stats lines stay in both. `tools/wsl/check_cpp.sh` and `check_host.sh
---no-default-features` compile the release flavour (`EXTRA_DEFS="/D AIRFRAMEXR_RELEASE" bash tools/wsl/check_cpp.sh`). The follow-the-frames
+--no-default-features` compile the release flavour (`EXTRA_DEFS="/D AIRFRAMEXR_RELEASE" bash tools/wsl/check_cpp.sh`); `tools/wsl/check_hlsl.sh`
+compiles the shim's shaders with the Windows SDK's fxc through WSL interop and `tools/wsl/check_vdxr.sh [checkout]` checks the fork's VDXR
+sources (syntax only, NuGet packages stubbed). The follow-the-frames
 analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin\flavour.txt`, its zip name ends in `-debug` and the windows show "(debug build)" after the version. The debug package also carries the Black Box programs (`blackbox_recorder.exe`, `blackbox_analyzer.exe`, `perfcore.dll`, `perfreport.exe`); the release package never does, and the package test must keep checking that (the host and shim of a release package contain no telemetry file name).
 
 ## How the build fits together

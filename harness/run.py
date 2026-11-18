@@ -108,9 +108,13 @@ def build(what):
     for w in what or ["client", "host"]:
         if w == "vdxr":      # VDXR from the AirFrameXR fork at the commit pinned in deps.lock.json (tools/remote/stage15_vdxr.ps1)
             lib.b_put(lib.ROOT / "deps.lock.json", "_tmp/deps.lock.json")
-            r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage15_vdxr.ps1"], cwd=lib.ROOT, capture_output=True)
+            # lab A/B: AIRFRAMEXR_VDXR_COMMIT=<full hash> builds another fork commit, AIRFRAMEXR_VDXR_UNPATCHED=1 stock upstream
+            vargs = ["-Unpatched"] if os.environ.get("AIRFRAMEXR_VDXR_UNPATCHED") == "1" else \
+                    ["-Commit", os.environ["AIRFRAMEXR_VDXR_COMMIT"]] if os.environ.get("AIRFRAMEXR_VDXR_COMMIT") else []
+            r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage15_vdxr.ps1", *vargs], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")
-            print(f"build vdxr: {'ok' if 'RESULT: OK' in o else 'FAILED'}")
+            vline = next((l.strip() for l in o.splitlines() if l.startswith("vdxr: ")), "")
+            print(f"build vdxr: {'ok' if 'RESULT: OK' in o else 'FAILED'}{' (' + vline + ')' if vline else ''}")
             if "RESULT: OK" not in o:
                 print(o[-1200:])
                 return 2

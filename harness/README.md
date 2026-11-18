@@ -258,8 +258,15 @@ pass `host.gpu_keepalive: 90` (a background GPU load standing in for the composi
 
 ## OpenXR chain details (`e2e_openxr_probe`)
 - **Components:** `ovrshim/` (fork of VDXR OVRNull: `driver.cpp` = `HostDriver`, `ipc.h`/`ipc_win.h` = shared-memory contract,
-  modified `ReprojectPS.hlsl`/`constantsbuffer.h`), built by `build shim` into `out\vdxr-shim` together with the unmodified VDXR dll.
+  modified `ReprojectPS.hlsl`/`constantsbuffer.h`), built by `build shim` into `out\vdxr-shim` together with the VDXR dll of our fork.
   The host side is `alvr_host --shim` (`nvh_ipc_*` in `nvenc/hostlib`).
+- **Swapchain shapes (2026-11-18):** `xr_probe` env `XR_PROBE_ARRAY=1` (one texture-array swapchain, view i = slice i: single-pass stereo),
+  `XR_PROBE_MSAA=<n>` (n samples, VDXR resolves), `XR_PROBE_RESUBMIT=<k>` (k extra wait / begin / end cycles per frame with the same layers,
+  nothing released). Scenarios `e2e_probe_array`, `e2e_probe_array_resubmit`, `e2e_probe_msaa`, optional `e2e_probe_array_inplace`. Checks:
+  `eye_colors` (the right eye's background bluer than the left's at a point low in each eye: each eye shows its own image) and `vdxr_trace`
+  (the shim's `app frames (VDXR)` line: `[lo, hi]` per frame for `copied_per_frame`, `unchanged_per_frame`, `released_per_frame`,
+  `slices_per_frame`, `resubmit_frac`). A/B without editing scenarios: `AIRFRAMEXR_APP_RUNTIME=<folder under the root>` (another
+  VDXR + shim), `AIRFRAMEXR_VDXR_COMMIT=<hash>` / `AIRFRAMEXR_VDXR_UNPATCHED=1` for `build vdxr`. Run order: `docs/PLAN_VDXR_FORK_LAB.md`.
 - **Process model:** host, client and app are separate processes. The host and the app are both started as non-elevated scheduled
   tasks in the interactive session (`topology.host_launch: "interactive"`): the OpenXR loader ignores `XR_RUNTIME_JSON` for elevated
   processes, and D3D shared textures do not cross Windows sessions. The IPC objects use the `Global\` namespace (fallback: local).

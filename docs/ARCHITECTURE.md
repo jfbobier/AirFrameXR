@@ -30,7 +30,10 @@ calls from the app's `xrWaitFrame` / `xrBeginFrame` / `xrEndFrame` with what lib
 an image released since the previous frame (none = the app resubmitted its last picture) and how many went through VDXR's copy into a
 second OVR swapchain (texture arrays, MSAA). Stock VDXR and libOVR games never call it. Since 1.3.11 it is diagnostic only: the debug
 log's `app frames (VDXR)` line every 900 submits (resubmits, discarded frames, slices released/copied/skipped,
-`xrWaitFrame` return → `xrEndFrame` and `xrBeginFrame` → `xrEndFrame` p50/p95); no behaviour depends on it.
+`xrWaitFrame` return → `xrEndFrame` and `xrBeginFrame` → `xrEndFrame` p50/p95); no behaviour depends on it. The shim also exports
+`ovrshim_Capabilities` (bit 0: it reads texture-array slices in place when a layer's flags carry `0x400000`, eye e's slice at bits 24 + 4 e);
+only the experiment on fork branch `airframexr-slices` sets that flag (`docs/PLAN_VDXR_FORK_LAB.md`). Every 2D swapchain image is composed
+through an array view, so a single-pass stereo swapchain (OpenXR `arraySize` 2) is read slice by slice.
 
 ## Threads (v0.2)
 
