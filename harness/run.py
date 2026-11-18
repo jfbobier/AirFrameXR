@@ -106,7 +106,8 @@ def build(what):
         if not patched:
             return 2
     for w in what or ["client", "host"]:
-        if w == "vdxr":      # VDXR with the small OVRShim patches (tools/remote/stage15_vdxr.ps1)
+        if w == "vdxr":      # VDXR from the AirFrameXR fork at the commit pinned in deps.lock.json (tools/remote/stage15_vdxr.ps1)
+            lib.b_put(lib.ROOT / "deps.lock.json", "_tmp/deps.lock.json")
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage15_vdxr.ps1"], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")
             print(f"build vdxr: {'ok' if 'RESULT: OK' in o else 'FAILED'}")

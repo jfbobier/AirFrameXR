@@ -40,7 +40,7 @@ $dll = "$vdxr\bin-shim\x64\Release\LibOVRRT64_1.dll"
 if ((Test-Path $dll) -and ((Get-Item $dll).LastWriteTime -ge $start)) {
   $out = "$root\out\vdxr-shim"
   New-Item -ItemType Directory -Force $out | Out-Null
-  # the VDXR runtime DLL: the latest build (stage15 adds the cube-layer define), else the original build
+  # the VDXR runtime DLL: the latest build (stage15: the fork at the pinned commit), else the setup build
   $vd = "$vdxr\bin\x64\Release\virtualdesktop-openxr.dll"
   if (-not (Test-Path $vd)) { $vd = "$root\out\vdxr-null\virtualdesktop-openxr.dll" }
   Copy-Item $vd $out -Force
