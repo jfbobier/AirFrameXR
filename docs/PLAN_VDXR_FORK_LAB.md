@@ -18,15 +18,24 @@ VDXR `tools/wsl/check_vdxr.sh` (syntax with stubs). Nothing built, linked or run
 
 ## 0. Before the first run
 
-1. `harness/vdxr_fork_preflight.sh` (and `AIRFRAMEXR_PROFILE=5090 harness/vdxr_fork_preflight.sh`): reachable, free disk, what the root holds,
-   the fork branches on GitHub. `airframexr-slices` must be pushed before step 5 (the builder fetches commits from GitHub).
-2. Builder root. This worktree's `tools/builder.local` / `builder.5090.local` (gitignored) point at dedicated roots `VisionALVR_vdxrfork` /
-   `vision-alvr-vdxrfork`, so the lab never moves the VDXR checkout other sessions build from. A new root needs
-   `python3 harness/run.py setup` (clones ALVR and the fork, builds everything; budget about 25 GB; the 3080 Ti had 18.7 GB free on C: and no D:
-   on 2026-11-13). If the disk does not allow it, use the existing root (`AIRFRAMEXR_BUILDER_ROOT=VisionALVR`) and tell the other session:
+1. Builder root. This worktree's `tools/builder.local` / `builder.5090.local` (gitignored) point at dedicated roots `VisionALVR_vdxrfork` /
+   `vision-alvr-vdxrfork`, so the lab never moves the VDXR checkout other sessions build from. A new root needs about 25 GB
+   (`python3 harness/run.py setup` clones ALVR and the fork and builds everything). The 3080 Ti had 18.7 GB free on C: (2026-11-13), so its
+   root goes on the 1 TB USB drive D: (owner, 2026-11-18): run `harness/vdxr_fork_root_on_drive.sh` once, before anything else touches the
+   root. It creates `D:\VisionALVR_vdxrfork` and the junction `%USERPROFILE%\VisionALVR_vdxrfork` -> there, so builder.sh and the absolute
+   paths lib.py writes stay as they are. It refuses when the C: folder already exists (for an empty one it prints the `rd` to run), never
+   deletes, and checks that scp writes through the junction. Tested locally on Windows in temp folders (fresh, again, empty folder, folder
+   with files, junction elsewhere); not yet on the builder. The drive must stay plugged in under the same letter: without it the junction
+   dangles and every call fails loudly (nothing falls back to C:). Builds from USB are slower; build times are not lab measurements.
+   The 5090 keeps its root on C:.
+2. `harness/vdxr_fork_preflight.sh` (and `AIRFRAMEXR_PROFILE=5090 harness/vdxr_fork_preflight.sh`): reachable, free disk (D: with its file
+   system), where the root lives (junction or C:) and what it holds, the fork branches on GitHub. It creates nothing. `airframexr-slices`
+   is on GitHub (pushed 2026-11-18, `dffe237`).
+3. Fallback when no dedicated root fits: use the existing root (`AIRFRAMEXR_BUILDER_ROOT=VisionALVR`) and tell the other session:
    `build vdxr` moves that root's `src\VDXR` to the fork; the 1.3.11 tree's old `stage15_vdxr.ps1` still builds there (its five patches report
    "already patched", HAS_CUBE_LAYERS is defined twice: warning C4005, no /WX) but then ships the fork's VDXR. Back to 1.3.11's VDXR:
    `bash tools/builder.sh run "git -C src\VDXR checkout -f 1a83fec8b5c565b14b06ffa8e1eb7e4768057573"`, then `build vdxr` from the 1.3.11 tree.
+4. A fresh root: `python3 harness/run.py setup` (on the 3080 Ti after step 1, so it lands on D:), then the preflight again.
 
 ## 1. Builds
 
