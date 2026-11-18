@@ -13,6 +13,10 @@
 //    the field flip made the mod faster and raggeder;
 //  - the worker is one of MODSIM_POOL threads used in turn (default 9), and from MODSIM_SWITCH_S seconds on a single thread (0 = never): the
 //    mod's submit work collapsed to one thread about four minutes after the game started.
+// MODSIM_OFXR=1 mimics OFXR-Bridge (external/ofxr, an OpenXR API layer doing frame generation) instead: every engine frame is a VR frame on one thread
+// (no pool, no worker), and the layer's xrEndFrame submits TWO frames for it: the generated one (a different image, the game's render poses) in the slot
+// the app waited for, then, after an internal wait / begin, the real one (layer.cpp submit_current_cycle: poses unchanged for projection layers). So the
+// shim sees about twice the engine rate of submits, every second with the previous submit's exact render poses, the second wait taken by the layer.
 // The render thread starts its next xrWaitFrame only after the worker is done (the mod serialises them with a mutex).
 //
 // Usage: xr_modsim.exe <logfile> [real_frames=300] [timeout_s=60]
@@ -79,6 +83,8 @@ struct Worker {
 static std::atomic<int> g_taskDone{0};
 static std::atomic<int> g_dupN{1};
 static bool g_staticPose = false;
+static bool g_ofxr = false;
+static bool g_strobe = false;   // MODSIM_STROBE=1: real frames flat green, the generated ones flat magenta (a headset test: does the display show both?)
 static std::atomic<bool> g_failed{false};
 
 // draws the next image of both eyes (a flat colour from the frame id, the id stamped in the left eye) and releases them
@@ -94,7 +100,8 @@ static bool drawFrame(int id) {
             ID3D11RenderTargetView* rtv = nullptr;
             g_dev->CreateRenderTargetView(g_imgs[i][idx].texture, &rd, &rtv);
             if (rtv) {
-                const float c[4] = { 0.1f + 0.1f * (float)(id % 7), 0.2f, 0.3f + 0.05f * (float)(id % 5), 1.f };
+                float c[4] = { 0.1f + 0.1f * (float)(id % 7), 0.2f, 0.3f + 0.05f * (float)(id % 5), 1.f };
+                if (g_strobe) { const bool gen = id >= 100000; c[0] = gen ? 0.8f : 0.f; c[1] = gen ? 0.f : 0.8f; c[2] = gen ? 0.8f : 0.f; }
                 g_ctx->ClearRenderTargetView(rtv, c);
                 ID3D11DeviceContext1* c1 = nullptr;
                 if (i == 0 && SUCCEEDED(g_ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
@@ -162,6 +169,8 @@ int main(int argc, char** argv) {
     const int gpuCopies = getenv("MODSIM_GPU_COPIES") ? atoi(getenv("MODSIM_GPU_COPIES")) : 0;
     g_dupN = getenv("MODSIM_DUP") ? std::max(0, atoi(getenv("MODSIM_DUP"))) : 1;
     g_staticPose = getenv("MODSIM_STATIC_POSE") && atoi(getenv("MODSIM_STATIC_POSE")) != 0;
+    g_ofxr = getenv("MODSIM_OFXR") && atoi(getenv("MODSIM_OFXR")) != 0;
+    g_strobe = getenv("MODSIM_STROBE") && atoi(getenv("MODSIM_STROBE")) != 0;
     const double dupStopS = getenv("MODSIM_DUP_STOP_S") ? atof(getenv("MODSIM_DUP_STOP_S")) : 0.0;
     const double jitterMs = getenv("MODSIM_JITTER_MS") ? atof(getenv("MODSIM_JITTER_MS")) : 0.0;
     const double switchEngineMs = getenv("MODSIM_SWITCH_ENGINE_MS") ? atof(getenv("MODSIM_SWITCH_ENGINE_MS")) : -1.0;
@@ -250,7 +259,8 @@ int main(int argc, char** argv) {
             const double t = qpcMs(); while (qpcMs() - t < cost) YieldProcessor();
         }
         if (loadTex[0]) { std::lock_guard<std::mutex> g(g_gpuMx); for (int k = 0; k < gpuCopies; k++) g_ctx->CopyResource(loadTex[(k + 1) & 1], loadTex[k & 1]); g_ctx->Flush(); }
-        const bool vrFrame = (ef++ & 1) == 1;
+        const bool vrFrame = g_ofxr || (ef & 1) == 1;
+        ef++;
         if (!vrFrame) continue;
 
         while (g_taskDone.load() < posted && !g_failed && GetTickCount64() - t0 <= (ULONGLONG)timeoutS * 1000) Sleep(0);   // the worker finishes the last frame first
@@ -267,6 +277,18 @@ int main(int argc, char** argv) {
         static XrView firstViews[2]; static bool haveFirst = false;
         if (g_staticPose) { if (!haveFirst) { firstViews[0] = views[0]; firstViews[1] = views[1]; haveFirst = true; } views[0] = firstViews[0]; views[1] = firstViews[1]; }
         t.views[0] = views[0]; t.views[1] = views[1];
+        if (g_ofxr) {   // the layer's end: generated frame in the app's slot, then an internal cycle for the real frame (same poses, other image)
+            if (!drawFrame(t.id + 100000) || !endFrame(t, t.time, t.id)) { L("FAIL ofxr generated frame"); rc = 4; break; }
+            XrFrameState fs2{ XR_TYPE_FRAME_STATE };
+            ev("WAIT_IN", 0, t.id);
+            if (XR_FAILED(xrWaitFrame(g_sess, nullptr, &fs2))) { L("FAIL ofxr internal wait"); rc = 4; break; }
+            ev("WAIT_OUT", (long long)fs2.predictedDisplayTime, t.id);
+            if (XR_FAILED(xrBeginFrame(g_sess, nullptr))) { L("FAIL ofxr internal begin"); rc = 4; break; }
+            ev("BEGIN", (long long)fs2.predictedDisplayTime, t.id);
+            if (!drawFrame(t.id) || !endFrame(t, fs2.predictedDisplayTime, t.id)) { L("FAIL ofxr real frame"); rc = 4; break; }
+            posted++; g_taskDone++;
+            continue;
+        }
         const bool single = switchS > 0 && (qpcMs() - loopStart) / 1000.0 >= switchS;
         static bool announced = false; if (single && !announced) { announced = true; L("switch: from now on one worker thread (%.1f s)", (qpcMs() - loopStart) / 1000.0); }
         Worker* w = workers[single ? 0 : (size_t)(posted % pool)];
