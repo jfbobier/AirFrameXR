@@ -239,6 +239,13 @@ source stream decoded the same way; tolerance = `max_unknown_frame_ratio`, to al
   Knob off: nothing is dropped, the second wait is paced like any other (22.5 real fps on the laptop, the behavior of before); knob on (`drop_duplicate_frames`): every duplicate
   dropped, the second wait returns at once, real frames paced alone (45 real fps, spacing stdev 0.7 ms); knob on with a game that does not resubmit (`MODSIM_DUP=0`): the fix does not act.
   The app's own event CSV (`modsim.csv`) and the shim's pacing line (`duplicate frames seen N dropped M (pacing fix on|off, free waits K)`) are what the checks read.
+- Frame-identity matrix (`scenarios/identity/`, `python3 harness/run.py identity [names]`, not part of `all`; plan: `docs/PLAN_UNIVERSAL_OPENXR.md`): `xr_modsim` call
+  shapes (`MODSIM_ARRAY`, `MODSIM_MSAA`, `MODSIM_DUP_RELEASE`, `MODSIM_QUAD`, `MODSIM_PAUSE_S`, `MODSIM_OFXR`) with the app's truth per submit in `modsim.csv`
+  (`rel` images released since the previous submit, `new_pic`, `same_pose`). Check `identity` (lib.analyse_identity): `identity_signal_matches_app` (VDXR's
+  "resubmitted with no new picture" count equals the app's no-release submits over the same frames: the fork's signal is exact), `identity_shape.*` (the run
+  produced its shape), `identity_no_new_picture_dropped`, `identity_true_dups_dropped`, `identity_waits_paced` (no spin). Some rows fail on 1.3.11 by design
+  (pose-only duplicate test): that is the baseline the arms are compared with. The real OFXR layer rows (`e2e_ofxr_tokyo_*`, need the OFXR build in
+  `D:\_ofxr\lab`) have no app truth: VDXR's and the shim's counts only, `harness/ofxr_report.py` for the display side. Tested on synthetic runs only.
 - optional: `e2e_openxr_foveated_split` (needs a GPU with >= 2 NVENC engines, e.g. the 5090) and `e2e_wslhost_hevc10_30mbps` (host in WSL, client on the builder over the real network) and
   `net_capacity_250mbps` (records what that network can carry).
 

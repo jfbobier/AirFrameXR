@@ -1,5 +1,5 @@
 {
-  "description": "OFXR LAB (real layer, V551 build in D:\\_ofxr, see docs): xr_probe with the Littlest Tokyo scene and a CPU cost of 22 ms per frame (a game at about half the 90 Hz display, the case OFXR is made for) through the full chain to the mock Vision Pro display (90 Hz). No OFXR layer: the baseline of the same app.",
+  "description": "FRAME-IDENTITY MATRIX (docs/PLAN_UNIVERSAL_OPENXR.md, run with `run.py identity` for each arm; not part of `all`: some rows fail on 1.3.11 by design, that failure is the baseline). xr_modsim writes what each submit really was (images released, new picture or not, same poses or not); the checks compare it with VDXR's per-frame facts and with what the shim dropped. Row (control): a normal game, one submit per wait, new poses and a new picture every time. Want: no duplicate seen or dropped, the signal reports no resubmit.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -47,17 +47,17 @@
   "host": {
     "shim": true,
     "fps": 90,
-    "seconds": 100,
+    "seconds": 75,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
     "exit_after_frames": 100000,
     "running_start_ms": 2.0,
-    "frame_gen": "off",
-    "drop_duplicate_frames": false,
-    "debug": true
+    "frame_gen": "on",
+    "frame_gen_rate": "half",
+    "drop_duplicate_frames": true
   },
   "client": {
-    "seconds": 100,
+    "seconds": 80,
     "connect_timeout": 45,
     "yaw_amp": 0.5,
     "yaw_hz": 0.25,
@@ -70,19 +70,38 @@
     "RUST_LOG": "warn"
   },
   "app": {
-    "frames": 3000,
-    "timeout_s": 110,
+    "exe": "xr_modsim",
+    "frames": 2400,
+    "timeout_s": 70,
     "env": {
-      "XR_PROBE_SCENE": "bench\\littlest_tokyo.vab",
-      "XR_PROBE_CPU_MS": "22"
+      "MODSIM_ENGINE_MS": "9",
+      "MODSIM_GPU_COPIES": "0",
+      "MODSIM_DUP": "0",
+      "MODSIM_POOL": "1"
     }
   },
   "gpu_sample": true,
-  "timeout_s": 300,
+  "timeout_s": 240,
   "checks": {
     "host_min_frames": 600,
     "client_min_frames": 600,
-    "ts_report": true,
-    "max_duplicate_timestamps": 1000000
+    "max_duplicate_timestamps": 100000,
+    "vdxr_trace": {
+      "min_frames": 900
+    },
+    "identity": {
+      "min_submits": 900,
+      "shape": {
+        "true_dup": [
+          0.0,
+          0.01
+        ],
+        "same_pose_new_pic": [
+          0.0,
+          0.01
+        ]
+      },
+      "max_dropped_new_pictures_frac": 0.0
+    }
   }
 }
