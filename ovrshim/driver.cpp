@@ -348,6 +348,22 @@ struct FrameTraceRow {
 // VDXR's own extension flags (virtualdesktop-openxr/OVR_Ext.h): layer shown to one eye only.
 static constexpr int kLayerFlagDisableLeft = 0x100000;
 static constexpr int kLayerFlagDisableRight = 0x200000;
+// The AirFrameXR fork of VDXR (OVR_Ext.h there), only when ovrshim_Capabilities reports bit 0: the layer's swapchain is a texture
+// array read in place (no copy of slices above 0 into a second swapchain); eye e reads slice (Flags >> (24 + 4 e)) & 0xF, a quad
+// or cylinder the eye-0 field. Without the flag every slice is 0.
+static constexpr unsigned kLayerFlagArraySlices = 0x400000;
+// the shaders' cbuffer offsets of the slice field (fxc reflection of ReprojectPS.hlsl / LayerPS.hlsl, 2026-11-18)
+static_assert(offsetof(ConstantsBuffer, slice) == 116, "ConstantsBuffer layout must match ReprojectPS.hlsl");
+static_assert(offsetof(LayerConstants, slice) == 276, "LayerConstants layout must match LayerPS.hlsl");
+static UINT LayerSlice(unsigned flags, int eye, const ovrTextureSwapChainDesc& d) {
+    if (!(flags & kLayerFlagArraySlices)) {
+        return 0;
+    }
+    return std::min<UINT>((flags >> (24 + 4 * eye)) & 0xF, std::max(1, d.ArraySize) - 1);
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl ovrshim_Capabilities() {
+    return 1u; // bit 0: texture-array slices in place (kLayerFlagArraySlices)
+}
 
 // Per-frame facts from the OpenXR runtime that the libOVR API cannot carry: when the app's frame really started
 // (xrWaitFrame returned, xrBeginFrame) and whether a submit holds a newly released picture or resubmits the last one.
@@ -755,8 +771,14 @@ namespace {
                             desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
                             desc.TextureCube.MipLevels = -1;
                         } else {
-                            desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                            desc.Texture2D.MipLevels = -1;
+                            // An array view for every 2D image (one slice for a plain texture): D3D11 has no plain 2D view of a texture
+                            // array, and VDXR hands single-pass stereo swapchains (OpenXR arraySize 2) to us as arrays. The compose
+                            // shaders sample Texture2DArray at the layer's slice (ReprojectPS.hlsl, LayerPS.hlsl).
+                            desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+                            desc.Texture2DArray.MostDetailedMip = 0;
+                            desc.Texture2DArray.MipLevels = -1;
+                            desc.Texture2DArray.FirstArraySlice = 0;
+                            desc.Texture2DArray.ArraySize = std::max<UINT>(1, ovrDesc.ArraySize);
                         }
                         winrt::check_hresult(m_submissionDevice->CreateShaderResourceView(
                             swapchain->textures[i].Get(), &desc, swapchain->SRVs[i].ReleaseAndGetAddressOf()));
@@ -1360,6 +1382,7 @@ namespace {
                             FillColor(mode == TargetMode::DirectEncode, constants.brightness, constants.contrast, constants.saturation,
                                       constants.sharpening, constants.finalPass);
 
+                            constants.slice = (int)LayerSlice(flags, (int)eye, swapchainObject->desc);
                             constants.imageRectNormalized.offset = {
                                 (float)eyeFov->Viewport[eye].Pos.x / swapchainObject->desc.Width,
                                 (float)eyeFov->Viewport[eye].Pos.y / swapchainObject->desc.Height};
@@ -1399,6 +1422,7 @@ namespace {
                         SrgbFlags(mode, IsSrgb(ToDxgiTextureFormat(sc->desc.Format)), c.encodeSrgb, c.decodeSrgb);
                         c.outputGamma = OutputGamma(mode);
                         FillColor(mode == TargetMode::DirectEncode, c.brightness, c.contrast, c.saturation, c.sharpening, c.finalPass);
+                        c.slice = (int)LayerSlice(flags, 0, sc->desc);
                         c.uvOffset = {(float)q.Viewport.Pos.x / sc->desc.Width, (float)q.Viewport.Pos.y / sc->desc.Height};
                         c.uvExtent = {(float)q.Viewport.Size.w / sc->desc.Width, (float)q.Viewport.Size.h / sc->desc.Height};
                         if (isCylinder) {
@@ -2342,7 +2366,12 @@ namespace {
                 ld.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
                 winrt::check_hresult(m_submissionDevice->CreateTexture2D(&ld, nullptr, m_linearTex.ReleaseAndGetAddressOf()));
                 winrt::check_hresult(m_submissionDevice->CreateRenderTargetView(m_linearTex.Get(), nullptr, m_linearRTV.ReleaseAndGetAddressOf()));
-                winrt::check_hresult(m_submissionDevice->CreateShaderResourceView(m_linearTex.Get(), nullptr, m_linearSRV.ReleaseAndGetAddressOf()));
+                D3D11_SHADER_RESOURCE_VIEW_DESC lsd{};   // an array view: LayerPS samples Texture2DArray (slice 0 here)
+                lsd.Format = ld.Format;
+                lsd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+                lsd.Texture2DArray.MipLevels = 1;
+                lsd.Texture2DArray.ArraySize = 1;
+                winrt::check_hresult(m_submissionDevice->CreateShaderResourceView(m_linearTex.Get(), &lsd, m_linearSRV.ReleaseAndGetAddressOf()));
             }
             D3D11_QUERY_DESC qd{D3D11_QUERY_EVENT, 0};
             winrt::check_hresult(m_submissionDevice->CreateQuery(&qd, m_doneQuery.ReleaseAndGetAddressOf()));

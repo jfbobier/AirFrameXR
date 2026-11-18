@@ -9,7 +9,8 @@ cbuffer cb : register(b0)
 };
 
 SamplerState linearSampler : register(s0);
-Texture2D<float4> sourceColor : register(t0);
+// Every 2D swapchain image is bound as an array view (one slice for a plain texture), see ReprojectPS.hlsl; cb.slice picks the slice.
+Texture2DArray<float4> sourceColor : register(t0);
 
 float4 main(in float4 position : SV_Position, in float3 uvw : TEXCOORD0) : SV_Target
 {
@@ -18,14 +19,16 @@ float4 main(in float4 position : SV_Position, in float3 uvw : TEXCOORD0) : SV_Ta
     rect.extent = cb.uvExtent;
     float2 uv = ApplyImageRect(uvw.xy, rect, cb.flipY != 0);
 
-    float4 color = sourceColor.SampleLevel(linearSampler, uv, 0);
+    float4 color = sourceColor.SampleLevel(linearSampler, float3(uv, cb.slice), 0);
     if (cb.finalPass && cb.sharpening > 0.0)
     {
-        float w, h;
-        sourceColor.GetDimensions(w, h);
+        float w, h, slices;
+        sourceColor.GetDimensions(w, h, slices);
         const float2 dx = float2(1.0 / w, 0), dy = float2(0, 1.0 / h);
-        const float3 n = sourceColor.SampleLevel(linearSampler, uv + dx, 0).rgb + sourceColor.SampleLevel(linearSampler, uv - dx, 0).rgb +
-                         sourceColor.SampleLevel(linearSampler, uv + dy, 0).rgb + sourceColor.SampleLevel(linearSampler, uv - dy, 0).rgb;
+        const float3 n = sourceColor.SampleLevel(linearSampler, float3(uv + dx, cb.slice), 0).rgb +
+                         sourceColor.SampleLevel(linearSampler, float3(uv - dx, cb.slice), 0).rgb +
+                         sourceColor.SampleLevel(linearSampler, float3(uv + dy, cb.slice), 0).rgb +
+                         sourceColor.SampleLevel(linearSampler, float3(uv - dy, cb.slice), 0).rgb;
         color.rgb = max(color.rgb * (1.0 + cb.sharpening) - n * (cb.sharpening / 4.0), 0.0);
     }
 
