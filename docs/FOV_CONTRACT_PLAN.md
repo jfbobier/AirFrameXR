@@ -1,6 +1,6 @@
 # FoV contract: the streamer owns the field of view (plan)
 
-Status 2026-11-19: **phase 0 built** on branch `fov-contract` (GUI only: `video.stream_density` bitrate / faster / sharper, the foveation following Apple's map inside the window, the FOV card's density readout and slider advice, the streamer's warning when the headset's box differs from the compiled one); lab-checked, not yet on a headset (section 6). Phases 1-3: not built; the engine items need the owner's go-ahead, on the same branch.
+Status 2026-11-20: **1.4 built** on branch `1.4` (now main): phase 0 (the presets, the foveation fix, the readout) and from phase 1 E1-E3 (the host's box message over `ServerControlPacket::Reserved`), U1-U3 (the compile writes `video.client_box`, the simplified FOV card), V1-V4 (the visionOS app 1.4: no sliders, declares the box, CAS sharpening; TestFlight), plus the mask stored in the profiles (the line test's corner lines). Not built: E5 (the mask sent to games), E6 (per-eye boxes), Q1-Q3 (the Quest app). How it works: `docs/ARCHITECTURE.md`, "Field of view in 1.4".
 This replaces the design parts of `docs/FOV_PIPELINE_OPTIM.md` (S3 fit tick, S4 client ceiling, S6 declare channel, S9 render ceiling); its
 measurements still hold. Numbers marked *model* come from `harness/fov_contract_model.py` (a Python reference of the launcher's sizing; `--selftest`
 reproduces the 2026-11-14 SWGR compile line exactly), not from a headset. Primary target: Apple Vision Pro; the Quest uses the same design.
@@ -135,9 +135,9 @@ goes into density), Faster 6.2 over the quality window (about 45 % saved) and 4.
 
 ## 4. Work items
 
-Rule: **engine** = needs the owner's go-ahead and lives on the `fov-contract` branch. Everything else follows the usual rules.
+Rule: **engine** = needs the owner's go-ahead and lives on the `1.4` branch. Everything else follows the usual rules.
 
-### Engine (`fov-contract` branch)
+### Engine (`1.4` branch)
 
 | # | Item | Where | Gate |
 |---|---|---|---|
