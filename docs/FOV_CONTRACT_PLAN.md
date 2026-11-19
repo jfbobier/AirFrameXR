@@ -230,30 +230,32 @@ Open, with a recommendation:
 
 ## 9. Phase 0 on the headset (2026-11-19, the owner, 5090 + Vision Pro, SWGR, 275 Mbps, 100 Hz, release flavour)
 
-Logs: `private/logs/fov-contract-phase0-2026-11-19/`. Headset sliders about H 0.80 / V 0.75 (declared box 1.41 / 0.81 / 0.91 / 0.76), quality restriction
-1.22 / 0.81 / 0.90 / 0.76. The owner's verdict: **less blurry in both new modes; the old sizing was faster.** Only two runs of the night are long enough; the
-old sizing's runs tonight (20 s and 23 s, game trouble) are not, so its row is the 7-minute SWGR run of 2026-11-14 (sliders 0.8 / 0.9, same restriction).
+Logs: `private/logs/fov-contract-phase0-2026-11-19/` (`AirFrameXR-2026-11-19.log`: the new exes; `AirFrameXR-old.log`: the same sequence with the 1.3.10
+exes). Headset sliders about H 0.80 / V 0.75 (declared box 1.41 / 0.81 / 0.91 / 0.76), quality restriction 1.22 / 0.81 / 0.90 / 0.76. The owner's verdict:
+**less blurry in both new modes; the old sizing is faster.**
 
-| Sizing | Stream per eye | Centre px/deg | Encoded, Mpx (bits per pixel) | Game per eye (Mpx, both eyes) | Game fps, run | Headset repeated |
+| Sizing | Stream per eye | Centre px/deg over the declared box | Encoded, Mpx (bits per pixel) | Game per eye (Mpx, both eyes) | Game fps, run | Headset repeated |
 |---|---|---|---|---|---|---|
-| Old (bitrate), 2026-11-14 | 2176 x 1760 | 16.9 x 15.2 | 5.8 (0.47) | 1966 x 1452 (5.7) | 89.1 over 7 min, slowest tenth 76.3 | 3.0 % |
-| Old (bitrate), tonight | 1984 x 1504 | 15.5 x 15.7 | 5.8 (0.48) | 1808 x 1496 (5.4) | 56.7 / 65.4 over 20 s / 23 s: not usable | |
-| Faster | 2880 x 2368 | 22.5 x 24.7 | 7.3 (0.37) | 2626 x 2356 (12.4) | 75.9 over 2 min, slowest tenth 74.5 | 21.4 % |
-| Sharper | 3648 x 3200 | 28.5 x 33.4 | 12.6 (0.22) | 3324 x 3182 (21.2) | 52.1 over 2.4 min, slowest tenth 51.0 | 46.8 % |
+| Old (1.3.10 exes) | 2176 x 1760 | 17.1 x 18.4 (its log says 13.9 x 14.0: it sized for Apple's frustum, see below) | 5.8 (0.47) | 1984 x 1752 (7.0) | **92.9** over 2.5 min, slowest tenth 93.4 | 1.8 % |
+| Faster | 2880 x 2368 | 22.5 x 24.7 | 7.3 (0.37) | 2626 x 2356 (12.4) | **75.9** over 2 min, slowest tenth 74.5 | 21.4 % |
+| Sharper | 3648 x 3200 | 28.5 x 33.4 | 12.6 (0.22) | 3324 x 3182 (21.2) | **52.1** over 2.4 min, slowest tenth 51.0 | 46.8 % |
+
+(The new exes' "as before" runs, 20 s and 23 s, were cut short by the game and are not used.)
 
 What it says:
-- The density reaches the eye: 1.5 x (Faster) and about 2 x (Sharper) the old centre px/deg were seen as less blurry. Sharper's 0.22 bits per pixel drew no complaint (one session).
+- The density reaches the eye: 1.3 x (Faster) and 1.7-1.8 x (Sharper) the old centre px/deg were seen as less blurry. Sharper's 0.22 bits per pixel drew no
+  complaint (one session).
 - **The cost is the game, not the stream.** Every run streamed what the game rendered (rendered = streamed fps, no host drops). Phase 0 keeps the game at the
-  stream's density over the window, so a denser stream is a bigger game render: 5.4-5.7 Mpx (old), 12.4 (Faster), 21.2 (Sharper, about 90 % of an unrestricted
-  3648 x 3200 game). Sharper's 52 fps is the 100 Hz pacing's half-rate state (two thirds of the frames shown for two periods); its real capacity is somewhere
-  between 50 and about 65 fps.
+  stream's density over the window, so a denser stream is a bigger game render. Old and Faster fit a line: frame time about 7.7 ms + 0.45 ms per game
+  Mpx (both eyes). It predicts 17.1 ms (58 fps) for Sharper; the measured 52.1 is the 100 Hz pacing's half-rate state (two thirds of the frames shown for two
+  periods). By the same line, 90 fps in this game leaves about 7.7 Mpx, about 19 px/deg rendered uniformly over this window.
 - Phase 1 (the client declaring the window) does **not** buy game fps: the game already renders only the window. It trims the stream (the outer edge 1.41 -> 1.22)
   and removes the slider setup.
-- The levers for the game's cost: a density between Faster and Sharper (the Settings resolution scales both modes: Sharper at 3200 x 2800 is about
-  25 x 29 px/deg and a 16 Mpx game, *model*), frame generation at half rate with Sharper (its slowest tenth, 51 fps, is at the edge of 50), and game-side
-  foveated rendering (variable-rate shading following Apple's map: the game shades the window's periphery at full density where the compositor keeps 30 %
-  or less; candidate to reuse: OpenXR Toolkit's NVIDIA VRS foveation, an API layer like OFXR), not measured.
-- Bug found: every connection the headset's first declaration is 1.73 / 1.00 / 1.00 / 1.19 (vertical flipped, not circumscribed) for about 0.2 s before the
-  real box (the host's first "70 / 81 / 90 / 65 %" line, also on 2026-11-14). The streamer's box warning fired on it (22:09:29); it must compare the settled
-  declaration.
-
+- The levers for the game's cost: frame generation at half rate with Sharper (its slowest tenth, 51 fps, is at the edge of 50 at 100 Hz; 45 at 90 Hz), a
+  density between Faster and Sharper (the Settings resolution scales both modes: Sharper at 3200 x 2800 is about 25 x 29 px/deg and a 16 Mpx game, about 67 fps
+  by the line), and game-side foveated rendering (variable-rate shading following Apple's map: the game shades the window's periphery at full density where the
+  compositor keeps 30 % or less; candidate to reuse: OpenXR Toolkit's NVIDIA VRS foveation, an API layer like OFXR), not measured.
+- Found: (1) the old exes' compile again used Apple's frustum (1.73 / 1.00 / 1.19 / 1.00), as on 2026-11-14, while the new exes read the saved box every time
+  the same night; neither says why the saved box was not read (to log: missing file, parse error or a non-positive tangent, with the values). (2) Every
+  connection the headset's first declaration is 1.73 / 1.00 / 1.00 / 1.19 (vertical flipped, not circumscribed) for about 0.2 s before the real box (the host's
+  first "70 / 81 / 90 / 65 %" line, also on 2026-11-14); the streamer's box warning fired on it (22:09:29) and must compare the settled declaration.
