@@ -21,8 +21,10 @@ namespace AirFrameXR
         public IList<double[]> Window { get => window; set { window = value ?? new List<double[]>(); Invalidate(); } }
         /// the rectangle's colour: the accent, or red / amber when the numbers are invalid / strange
         public Color RectColor { get => rectColor; set { rectColor = value; Invalidate(); } }
+        /// 1.4: the mask's four corner fractions for this rectangle (FovMask), drawn as the octagon inside it; null = none
+        public double[] Mask { get => mask; set { mask = value; Invalidate(); } }
 
-        double[] rect, declared; IList<double[]> window = new List<double[]>(); Color rectColor = Ui.Accent;
+        double[] rect, declared, mask; IList<double[]> window = new List<double[]>(); Color rectColor = Ui.Accent;
 
         public FovMap() { DoubleBuffered = true; BackColor = Color.White; Size = new Size(520, 340); AccessibleName = "Field of view map"; }
 
@@ -67,6 +69,9 @@ namespace AirFrameXR
             {
                 var a = map(-(float)rect[1], (float)rect[2]); var b = map((float)rect[0], -(float)rect[3]);
                 using (var p = new Pen(rectColor, 2.5f)) g.DrawRectangle(p, a.X, a.Y, b.X - a.X, b.Y - a.Y);
+                if (mask != null && mask.Length >= 4)
+                    using (var mp = new Pen(Color.DeepSkyBlue, 2f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash })
+                        g.DrawPolygon(mp, FovMask.Polygon(rect, mask).Select(q => map((float)q[0], (float)q[1])).ToArray());
             }
             using (var f = new Font(Font.FontFamily, 8.5f))
             {
@@ -207,7 +212,7 @@ namespace AirFrameXR
         void ShowSelected()
         {
             var u = Selected;
-            map.Declared = declared; map.Window = u?.Window; map.Rectangle = u?.Tan; map.RectColor = Ui.Accent;
+            map.Declared = declared; map.Window = u?.Window; map.Rectangle = u?.Tan; map.Mask = u?.MaskLeft; map.RectColor = Ui.Accent;
             if (u == null) { details.Text = list.Items.Count == 0 ? "No profile yet: calibrate, or enter values below." : ""; message.Text = ""; Layout(null); return; }
             var c = FovValidator.Check(u.Tan, FovUnit.Tangent, declared);
             details.Text = Summary(c) + "\n" + (u.Calibrated ? "Calibrated" : "Entered by hand") + (u.Created.Length >= 10 ? " on " + u.Created.Substring(0, 10) : "") + (u.Headset.Length > 0 ? " for " + u.Headset : "") + ".";
@@ -240,7 +245,7 @@ namespace AirFrameXR
             bool filled = box.All(b => b.Text.Trim().Length > 0);
             add.Enabled = filled && c.Usable;
             map.Declared = declared; map.Window = null;
-            map.Rectangle = c.Tan.All(v => !double.IsNaN(v)) ? c.Tan : null;
+            map.Rectangle = c.Tan.All(v => !double.IsNaN(v)) ? c.Tan : null; map.Mask = null;
             map.RectColor = c.Level == FovLevel.Invalid ? Color.Firebrick : c.Level == FovLevel.Strange ? Color.DarkGoldenrod : Ui.Accent;
             details.Text = c.Usable ? Summary(c) : "";
             Layout(c);

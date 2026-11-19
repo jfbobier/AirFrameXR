@@ -25,9 +25,13 @@
 struct XrTool {
     enum Mode { None, Fit, Restrict } mode = None;
     enum Phase { Intro, Working, Saved } phase = Intro;
-    enum Key { KSpace, KLeft, KRight, KUp, KDown, KShift, KTab, KEnter, KEsc, KCount };
+    enum Key { KSpace, KLeft, KRight, KUp, KDown, KShift, KTab, KEnter, KEsc, KN7, KN9, KN3, KN1, KCount };   // KN7..KN1: numpad corners (upper-left, upper-right, lower-right, lower-left)
     float P[2][4] = {};     // the panel (what the runtime told) per eye: outer, inner, upper, lower tangents
     float box[2][4] = {};   // the box being shaped, same order
+    // 1.4 mask (docs/FOV_CONTRACT_PLAN.md): per eye and corner (upper-outer, upper-inner, lower-inner, lower-outer) a straight line across the corner, perpendicular
+    // to the direction from the view axis to the box's corner, at this fraction of the corner's distance (1 = through the corner: nothing cut). Pushed out until the lens
+    // cuts it: the visible window is convex, so nothing beyond the line is visible. XR_PROBE_START_CORNERS = 8 fractions (left eye, then right eye).
+    float corner[2][4] = { { 1, 1, 1, 1 }, { 1, 1, 1, 1 } };
     float pxTan[2] = {};    // stream pixels per tangent of the told view, per eye (set while drawing)
     int eye = 0;            // fit: the eye being fitted; restrict, one eye: the eye edited
     bool bothEyes = true;   // restrict
@@ -53,6 +57,7 @@ struct XrTool {
         if (!tool) return;
         mode = !strcmp(tool, "fit") ? Fit : !strcmp(tool, "restrict") ? Restrict : None;
         if (const char* s = getenv("XR_PROBE_FIT_STYLE")) lineStyle = strcmp(s, "box") != 0;
+        if (const char* s = getenv("XR_PROBE_START_CORNERS")) { float v[8]; if (sscanf(s, "%f,%f,%f,%f,%f,%f,%f,%f", v, v + 1, v + 2, v + 3, v + 4, v + 5, v + 6, v + 7) == 8) for (int i = 0; i < 8; i++) corner[i / 4][i % 4] = std::max(0.4f, std::min(1.f, v[i])); }
         if (const char* s = getenv("XR_PROBE_START_BOX")) { float v[4]; if (sscanf(s, "%f,%f,%f,%f", v, v + 1, v + 2, v + 3) == 4 && v[0] > 0 && v[1] > 0 && v[2] > 0 && v[3] > 0) memcpy(startBox, v, sizeof v); }
         useStartBox = getenv("XR_PROBE_START_BOX") != nullptr && !getenv("XR_PROBE_TOOL_START");   // without it the line style starts at startFrac of the panel (85 %): any headset   // the restriction starts on the author's rays and shows the same bars only when the tool app says so (the lab's scenarios keep the whole view)
         if (const char* s = getenv("XR_PROBE_PARENT_PID")) { const DWORD pid = (DWORD)atoi(s); if (pid) parentH = OpenProcess(SYNCHRONIZE, FALSE, pid); }
@@ -63,7 +68,7 @@ struct XrTool {
     }
 
     static bool NameKey(const std::string& n, Key& k) {
-        static const char* names[] = { "space", "left", "right", "up", "down", "shift", "tab", "enter", "esc" };
+        static const char* names[] = { "space", "left", "right", "up", "down", "shift", "tab", "enter", "esc", "n7", "n9", "n3", "n1" };
         for (int i = 0; i < KCount; i++) if (n == names[i]) { k = (Key)i; return true; }
         return false;
     }
@@ -108,11 +113,13 @@ struct XrTool {
         if (scripted) {
             while (nextEv < events.size() && events[nextEv].frame <= fr) { const Ev& v = events[nextEv++]; if (v.down && !down[v.key]) pressed[v.key] = true; down[v.key] = v.down; }
         } else {
-            static const int vk[KCount] = { VK_SPACE, VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_SHIFT, VK_TAB, VK_RETURN, VK_ESCAPE };
+            // the numpad: 8 / 2 / 4 / 6 are the arrows (with Num Lock off they send them anyway), 7 / 9 / 3 / 1 the corners (Num Lock off: Home / Page Up / Page Down / End)
+            static const int vk[KCount] = { VK_SPACE, VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_SHIFT, VK_TAB, VK_RETURN, VK_ESCAPE, VK_NUMPAD7, VK_NUMPAD9, VK_NUMPAD3, VK_NUMPAD1 };
+            static const int vk2[KCount] = { 0, VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD8, VK_NUMPAD2, 0, 0, 0, 0, VK_HOME, VK_PRIOR, VK_NEXT, VK_END };
             for (int k = 0; k < KCount; k++) {
-                const bool d = (GetAsyncKeyState(vk[k]) & 0x8000) != 0;
+                const bool d = (GetAsyncKeyState(vk[k]) & 0x8000) != 0 || (vk2[k] && (GetAsyncKeyState(vk2[k]) & 0x8000) != 0);
                 if (d && !down[k]) { pressed[k] = true; heldSince[k] = lastRepeat[k] = nowMs; }
-                else if (d && k >= KLeft && k <= KDown && nowMs - heldSince[k] > 400 && nowMs - lastRepeat[k] > 70) { pressed[k] = true; lastRepeat[k] = nowMs; }   // repeats while held
+                else if (d && ((k >= KLeft && k <= KDown) || k >= KN7) && nowMs - heldSince[k] > 400 && nowMs - lastRepeat[k] > 70) { pressed[k] = true; lastRepeat[k] = nowMs; }   // repeats while held
                 down[k] = d;
             }
         }
@@ -130,6 +137,7 @@ struct XrTool {
         }
         const bool shift = down[KShift];
         for (int a = KLeft; a <= KDown; a++) if (pressed[a]) { Arrow((Key)a, shift); changed = true; }
+        if (mode == Fit) for (int a = KN7; a <= KN1; a++) if (pressed[a]) { Corner((Key)a, shift); changed = true; }
         if (changed) Emit("box");
         if (pressed[KEnter]) {
             if (mode == Fit && eye == 0) { eye = 1; Emit("box"); }   // the first eye is finished: the other eye comes
@@ -153,6 +161,15 @@ struct XrTool {
         }
     }
 
+    // the corner a numpad key moves in the eye being fitted: screen corners, the left eye's outer side is its left one
+    void Corner(Key a, bool shift) {
+        const int e = eye;
+        const bool upper = a == KN7 || a == KN9, left = a == KN7 || a == KN1;
+        const bool outer = left == (e == 0);
+        const int c = upper ? (outer ? 0 : 1) : (outer ? 3 : 2);   // upper-outer, upper-inner, lower-inner, lower-outer
+        corner[e][c] = shift ? std::max(0.4f, corner[e][c] - 0.01f) : std::min(1.f, corner[e][c] + 0.01f);
+    }
+
     float Pct() const {   // the share of the panel's pixels the box keeps (both eyes)
         float g = 0, v = 0;
         for (int e = 0; e < 2; e++) { g += (box[e][0] + box[e][1]) * (box[e][2] + box[e][3]); v += (P[e][0] + P[e][1]) * (P[e][2] + P[e][3]); }
@@ -160,10 +177,11 @@ struct XrTool {
     }
 
     void Emit(const char* ev) const {
-        printf("{\"tool\":\"%s\",\"event\":\"%s\",\"frame\":%d,\"eye\":%d,\"both\":%d,\"box\":[[%.5f,%.5f,%.5f,%.5f],[%.5f,%.5f,%.5f,%.5f]],\"panel\":[[%.5f,%.5f,%.5f,%.5f],[%.5f,%.5f,%.5f,%.5f]],\"pct\":%.2f}\n",
+        printf("{\"tool\":\"%s\",\"event\":\"%s\",\"frame\":%d,\"eye\":%d,\"both\":%d,\"box\":[[%.5f,%.5f,%.5f,%.5f],[%.5f,%.5f,%.5f,%.5f]],\"panel\":[[%.5f,%.5f,%.5f,%.5f],[%.5f,%.5f,%.5f,%.5f]],\"pct\":%.2f,\"corners\":[[%.3f,%.3f,%.3f,%.3f],[%.3f,%.3f,%.3f,%.3f]]}\n",
                mode == Fit ? "fit" : "restrict", ev, frame, eye, bothEyes ? 1 : 0,
                box[0][0], box[0][1], box[0][2], box[0][3], box[1][0], box[1][1], box[1][2], box[1][3],
-               P[0][0], P[0][1], P[0][2], P[0][3], P[1][0], P[1][1], P[1][2], P[1][3], Pct());
+               P[0][0], P[0][1], P[0][2], P[0][3], P[1][0], P[1][1], P[1][2], P[1][3], Pct(),
+               corner[0][0], corner[0][1], corner[0][2], corner[0][3], corner[1][0], corner[1][1], corner[1][2], corner[1][3]);
         fflush(stdout);
     }
 
@@ -174,11 +192,11 @@ struct XrTool {
     std::wstring Text(int e, bool& show) const {
         show = true;
         if (mode == Fit) {
-            if (lineStyle && phase == Intro) return L"Fit the picture to your eyes.\nLook at each bright line. Arrows push a line outward until it just disappears; Shift + arrow brings it back until it is clearly visible again.\nEnter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
+            if (lineStyle && phase == Intro) return L"Fit the picture to your eyes.\nLook at each bright line. Arrows push a yellow edge line outward until it just disappears; Shift + arrow brings it back until it is clearly visible again.\nNumpad 7 9 1 3 push the blue corner lines outward until they just disappear (leave them there); Shift brings one back.\nEnter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
             if (phase == Intro) return L"Fit the picture to your eyes.\nArrows push an edge out until its black bar is gone. Shift + arrow pulls it back.\nHold SPACE: compare. Enter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
             if (phase == Saved) return L"Saved. You can take the headset off.";
             if (compare) { show = false; return L""; }
-            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\n" + (lineStyle ? L"push each line out until it disappears, bring it back until it is clearly visible, then ENTER" : L"push until the bar is gone, one step back, then ENTER");
+            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\n" + (lineStyle ? L"edges (arrows): push out until a line disappears, bring it back until it is clearly visible; corners (numpad 7 9 1 3): push out until a line just disappears; then ENTER" : L"push until the bar is gone, one step back, then ENTER");
         }
         if (useStartBox && phase == Intro) return L"Choose what the game renders.\nFour bright lines mark the edges of the picture the game renders; outside them it is black. Arrows move a line inward, Shift + arrow outward, until you just notice the black at that edge, then one step back. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
         if (phase == Intro) return L"Choose what the game renders.\nArrows pull an edge in, Shift + arrow pushes it back out. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
@@ -222,6 +240,23 @@ struct XrTool {
                 const float lt = std::max(6.f, ppt * 0.0087f), cxm = (x0 + x1) / 2, cym = (y0 + y1) / 2, hl = 0.22f * (y1 - y0), hw = 0.22f * (x1 - x0);
                 fill(x0 - lt / 2, cym - hl, x0 + lt / 2, cym + hl, yellow); fill(x1 - lt / 2, cym - hl, x1 + lt / 2, cym + hl, yellow);
                 fill(cxm - hw, y0 - lt / 2, cxm + hw, y0 + lt / 2, yellow); fill(cxm - hw, y1 - lt / 2, cxm + hw, y1 + lt / 2, yellow);
+                // the four corner lines (1.4 mask), dotted: square dots along the line across each corner, inside the box
+                static const float cyan[4] = { 0.25f, 0.85f, 1.f, 1 };
+                const float bo = b[0], bi = b[1], bu = b[2], bd = b[3];
+                for (int c = 0; c < 4; c++) {
+                    const bool outer = c == 0 || c == 3, upper = c < 2;
+                    const float cxT = (outer == (e == 0)) ? -(outer ? bo : bi) : (outer ? bo : bi), cyT = upper ? bu : -bd;   // the box's corner, screen tangents
+                    const float n = sqrtf(cxT * cxT + cyT * cyT), f = corner[e][c];
+                    if (n < 1e-4f) continue;
+                    const float mx = f * cxT, my = f * cyT, ux = -cyT / n, uy = cxT / n;   // the line's middle and its direction
+                    const float half = 0.18f * std::min(bo + bi, bu + bd);
+                    for (int i = -20; i <= 20; i++) {
+                        const float s = half * i / 20.f, tx = mx + s * ux, ty = my + s * uy;
+                        if (tx < -(e == 0 ? bo : bi) || tx > (e == 0 ? bi : bo) || ty > bu || ty < -bd) continue;
+                        const float qx = px(tx), qy = py(ty);
+                        fill(qx - lt / 2, qy - lt / 2, qx + lt / 2, qy + lt / 2, cyan);
+                    }
+                }
             }
             else if (eyeShown && !sceneDrawn) { fill(x0, y0, x1, y1, blue); fill(x0, y0, x1, y0 + lw, line); fill(x0, y1 - lw, x1, y1, line); fill(x0, y0, x0 + lw, y1, line); fill(x1 - lw, y0, x1, y1, line); }
         } else {

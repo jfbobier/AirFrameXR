@@ -117,7 +117,7 @@ namespace AirFrameXR
 
         Process probe;
         bool toolApplied, hostPrepared; bool? priorOverride;
-        double[][] liveBox, livePanel; double livePct; Label liveLabel, liveState;
+        double[][] liveBox, livePanel, liveCorners; double livePct; Label liveLabel, liveState;
         static string ProbeLog => Path.Combine(Paths.Config, "calibration", "probe_tool.log");
 
         /// While a tool runs the game must be told the whole panel (the fit measures P) and no headset view is sent: the settings the streamer forwards are set aside and put back at the end.
@@ -209,9 +209,16 @@ namespace AirFrameXR
                 Directory.CreateDirectory(Path.GetDirectoryName(ProbeLog));
                 var psi = new ProcessStartInfo(Probe, "\"" + ProbeLog + "\" 100000000 86400") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(Probe) };
                 psi.EnvironmentVariables["XR_PROBE_TOOL"] = restrictTool ? "restrict" : "fit";
-                var author = UserFovStore.Load().FirstOrDefault(u => u.Source == "author");   // a Vision Pro's lines start on the AVP optimized window; any other headset starts at 85 % of what it declares
+                // a Vision Pro's lines start on the profile in use (1.4: with its mask's corner lines), else the AVP optimized window; any other headset starts at 85 % of what it declares
+                var all = UserFovStore.Load(); var inUse = Json.Str(new AppSettings().Root, "video.fov_profile", "");
+                var author = all.FirstOrDefault(u => u.Id == inUse) ?? all.FirstOrDefault(u => u.Source == "author");
                 psi.EnvironmentVariables["XR_PROBE_PARENT_PID"] = Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);   // the scene ends with this window, whatever happens to it
-                if (author != null && (headset.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0 || headset.IndexOf("Vision", StringComparison.OrdinalIgnoreCase) >= 0)) psi.EnvironmentVariables["XR_PROBE_START_BOX"] = string.Join(",", author.Tan.Select(v => v.ToString("0.####", CultureInfo.InvariantCulture)));
+                if (author != null && (headset.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0 || headset.IndexOf("Vision", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    psi.EnvironmentVariables["XR_PROBE_START_BOX"] = string.Join(",", author.Tan.Select(v => v.ToString("0.####", CultureInfo.InvariantCulture)));
+                    if (author.HasMask) psi.EnvironmentVariables["XR_PROBE_START_CORNERS"] = string.Join(",", author.MaskLeft.Concat(author.MaskRight).Select(v => v.ToString("0.###", CultureInfo.InvariantCulture)));
+                    Log.Write("INFO", $"calibrate: the lines start on '{author.Name}'" + (author.HasMask ? " with its mask" : ""));
+                }
                 var vab = Path.Combine(Paths.Dir, "bench", "littlest_tokyo.vab");
                 if (restrictTool && File.Exists(vab)) psi.EnvironmentVariables["XR_PROBE_SCENE"] = vab;
                 probe = Process.Start(psi);
@@ -247,6 +254,7 @@ namespace AirFrameXR
             var ev = Json.Str(d, "event", "");
             var box = Boxes(Json.Get(d, "box")); var panel = Boxes(Json.Get(d, "panel"));
             if (box != null) { liveBox = box; livePanel = panel; livePct = Json.Num(d, "pct", 100); }
+            var corners = Boxes(Json.Get(d, "corners")); if (corners != null) liveCorners = corners;
             string Deg(double t) => (Math.Atan(t) * 180 / Math.PI).ToString("0.0", CultureInfo.InvariantCulture);
             if (liveLabel != null && liveBox != null)
                 liveLabel.Text = string.Join("\n", new[] { 0, 1 }.Select(e => (e == 0 ? "Left eye:  " : "Right eye: ") + $"outer {Deg(liveBox[e][0])}  inner {Deg(liveBox[e][1])}  up {Deg(liveBox[e][2])}  down {Deg(liveBox[e][3])} degrees")) + (restrictTool ? $"\nThe game renders {livePct:0} % of its pixels." : "");
@@ -278,7 +286,7 @@ namespace AirFrameXR
             try
             {
                 var seal = restrictTool ? "" : AskSeal();
-                var u = UserFovStore.Add(UserFovStore.FromTool(restrictTool ? "restriction" : "quickfit", liveBox, livePanel, headset, seal));
+                var u = UserFovStore.Add(UserFovStore.FromTool(restrictTool ? "restriction" : "quickfit", liveBox, livePanel, headset, seal, restrictTool ? null : liveCorners));
                 var st = new AppSettings();
                 UserFovStore.Apply(u, st, AppSettings.ReadClientFov(), headset);   // as what the game renders (G); as the headset view V too once the headset-view message exists (step C)
                 st.Save(); toolApplied = true;
@@ -286,7 +294,8 @@ namespace AirFrameXR
                 Reset(restrictTool ? "Saved" : "Your fit is saved");
                 Text_($"Kept as \"{u.Name}\" in your profiles and chosen: outer {u.Tan[0]:0.00}  inner {u.Tan[1]:0.00}  upper {u.Tan[2]:0.00}  lower {u.Tan[3]:0.00} (tangents, the larger of the two eyes).");
                 Text_("Needs a streamer restart for games that are already running; the next game gets it.", true);
-                var map = new FovMap { Rectangle = u.Tan, Declared = AppSettings.ReadClientFov(), Margin = new Padding(3, 6, 3, 2) }; page.Controls.Add(map);
+                if (u.HasMask) Text_($"Mask: the corner lines hide {100 * FovMask.HiddenShare(u.TanLeft ?? u.Tan, u.MaskLeft):0} % of the left eye's picture, {100 * FovMask.HiddenShare(u.TanRight ?? u.Tan, u.MaskRight):0} % of the right eye's (for games that use the runtime's mask).", true);
+                var map = new FovMap { Rectangle = u.TanLeft ?? u.Tan, Mask = u.MaskLeft, Declared = AppSettings.ReadClientFov(), Margin = new Padding(3, 6, 3, 2) }; page.Controls.Add(map);
                 Buttons(Btn("Close", Close));
             }
             catch (Exception e) { Reset("Could not save"); Text_(e.Message); Buttons(Btn("Retry", Retry), Btn("Close", Close)); Log.Write("WARN", "calibrate: could not save the tool's result: " + e.Message); }

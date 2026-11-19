@@ -30,6 +30,9 @@ namespace AirFrameXR
         public double Quality;
         /// the measured window of a calibration (tangent space, x outward from the nose, y up); empty for numbers typed by hand
         public List<double[]> Window = new List<double[]>();
+        /// 1.4 the mask (FovMask): per eye four corner fractions (upper-outer, upper-inner, lower-inner, lower-outer), 1 = nothing cut; null = no mask
+        public double[] MaskLeft, MaskRight;
+        public bool HasMask => MaskLeft != null && MaskRight != null;
         public bool Calibrated => Source == "calibrated";
 
         public Dictionary<string, object> ToJson()
@@ -47,6 +50,7 @@ namespace AirFrameXR
             if (LightSeal.Length > 0) d["light_seal"] = LightSeal;
             if (DeclaredAtMeasure != null) d["declared_at_measure"] = DeclaredAtMeasure.Select(v => (object)Math.Round(v, 4)).ToList();
             if (Window.Count > 0) d["window"] = Window.Select(p => (object)new List<object> { Math.Round(p[0], 4), Math.Round(p[1], 4) }).ToList();
+            if (HasMask) d["mask"] = new Dictionary<string, object> { ["kind"] = FovMask.Kind, ["left"] = MaskLeft.Select(v => (object)Math.Round(v, 3)).ToList(), ["right"] = MaskRight.Select(v => (object)Math.Round(v, 3)).ToList() };
             return d;
         }
 
@@ -70,6 +74,12 @@ namespace AirFrameXR
                     double[] Four(System.Collections.IList l) => Enumerable.Range(0, 4).Select(i => Convert.ToDouble(l[i], CultureInfo.InvariantCulture)).ToArray();
                     var left = Four(tl); var right = Four(tr);
                     if (left.Concat(right).All(v => !double.IsNaN(v) && v > 0)) { u.TanLeft = left; u.TanRight = right; }
+                }
+                if (Json.Get(d, "mask") is Dictionary<string, object> mk && Json.Get(mk, "left") is System.Collections.IList ml && ml.Count >= 4 && Json.Get(mk, "right") is System.Collections.IList mr && mr.Count >= 4)
+                {
+                    double[] F(System.Collections.IList l) => Enumerable.Range(0, 4).Select(i => Convert.ToDouble(l[i], CultureInfo.InvariantCulture)).ToArray();
+                    var ma = F(ml); var mb = F(mr);
+                    if (ma.Concat(mb).All(v => v >= FovMask.Min && v <= 1.0)) { u.MaskLeft = ma; u.MaskRight = mb; }
                 }
                 if (u.Id.Length == 0 || u.Tan.Any(v => double.IsNaN(v) || !(v > 0))) return null;
                 if (u.Name.Length == 0) u.Name = u.Id;
@@ -228,7 +238,7 @@ namespace AirFrameXR
 
         /// A box the probe's tool scenes produced (one per eye: outer, inner, upper, lower tangents) as a stored profile: method "quickfit" (the black-bar fit) or "restriction" (what the game renders).
         /// Tan is the per-edge union of the two eyes, which is what schema 1 readers and the streamer's mirrored fields take; TanLeft / TanRight carry the eyes apart.
-        public static UserFov FromTool(string method, double[][] box, double[][] panel, string headset, string seal)
+        public static UserFov FromTool(string method, double[][] box, double[][] panel, string headset, string seal, double[][] corners = null)
         {
             var u = new UserFov
             {
@@ -238,6 +248,8 @@ namespace AirFrameXR
             };
             u.Tan = Enumerable.Range(0, 4).Select(k => Math.Round(Math.Max(box[0][k], box[1][k]), 4)).ToArray();
             if (panel != null) u.DeclaredAtMeasure = panel[0].Concat(panel[1]).ToArray();
+            if (corners != null && corners.Length == 2 && corners.All(c => c != null && c.Length >= 4 && c.Take(4).All(v => v >= FovMask.Min && v <= 1.0)))
+            { u.MaskLeft = corners[0].Take(4).Select(v => Math.Round(v, 3)).ToArray(); u.MaskRight = corners[1].Take(4).Select(v => Math.Round(v, 3)).ToArray(); }
             return u;
         }
 
@@ -252,6 +264,46 @@ namespace AirFrameXR
             };
             foreach (var w in r.Window) u.Window.Add(new[] { w.X, w.Y });
             return u;
+        }
+    }
+
+    /// 1.4 the mask of a profile (docs/FOV_CONTRACT_PLAN.md): the parts of the rectangle the lens never shows, cut off at the four corners. A corner fraction f puts a
+    /// straight line across that corner, perpendicular to the direction from the view axis to the rectangle's corner, at f times the corner's distance (1 = through the corner,
+    /// nothing cut). The line test (tools/probe/xr_tool.h, numpad 7 9 1 3) pushes each line out until the lens cuts it; the visible window is convex, so nothing beyond a line
+    /// is visible. The rectangle and the four lines make an octagon per eye: what a game with the runtime's visibility mask shades. Order: upper-outer, upper-inner,
+    /// lower-inner, lower-outer; coordinates x outward from the nose, y up (the FovMap's).
+    public static class FovMask
+    {
+        public const string Kind = "corner_fraction_v1";
+        public const double Min = 0.4;
+
+        /// the octagon (fewer distinct points where a corner is not cut), counter-clockwise from the right edge's top end
+        public static List<double[]> Polygon(double[] tan, double[] mask)
+        {
+            double o = tan[0], i = tan[1], u = tan[2], l = tan[3];
+            var corners = new[] { new[] { o, u }, new[] { -i, u }, new[] { -i, -l }, new[] { o, -l } };   // UO, UI, LI, LO
+            var pts = new List<double[]>();
+            for (int k = 0; k < 4; k++)
+            {
+                double cx = corners[k][0], cy = corners[k][1], f = mask == null ? 1.0 : Math.Max(Min, Math.Min(1.0, mask[k])), n2 = cx * cx + cy * cy;
+                // the line p . c = f |c|^2 meets the horizontal edge (y = cy) at x and the vertical edge (x = cx) at y; both kept on their edge
+                double xh = Math.Max(-i, Math.Min(o, (f * n2 - cy * cy) / cx)), yv = Math.Max(-l, Math.Min(u, (f * n2 - cx * cx) / cy));
+                var onH = new[] { xh, cy }; var onV = new[] { cx, yv };
+                // counter-clockwise: right edge upwards, top edge outer -> inner, left edge downwards, bottom edge inner -> outer
+                if (k == 0 || k == 2) { pts.Add(onV); pts.Add(onH); } else { pts.Add(onH); pts.Add(onV); }
+            }
+            return pts;
+        }
+
+        /// the share of the rectangle the mask hides (0 = none)
+        public static double HiddenShare(double[] tan, double[] mask)
+        {
+            if (mask == null) return 0;
+            var p = Polygon(tan, mask);
+            double a = 0;
+            for (int k = 0; k < p.Count; k++) { var q = p[k]; var r = p[(k + 1) % p.Count]; a += q[0] * r[1] - r[0] * q[1]; }
+            double rect = (tan[0] + tan[1]) * (tan[2] + tan[3]);
+            return rect > 0 ? Math.Max(0, 1 - Math.Abs(a) / 2 / rect) : 0;
         }
     }
 
