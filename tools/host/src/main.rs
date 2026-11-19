@@ -86,6 +86,9 @@ struct Args {
     fov_quality: f32,   // 0..1, see vision::render_quality
     /// the streamer's override (settings, `fov_override` command, `--fov-override`): the tangents the game is told per edge (outer, inner, upper, lower); None = not overridden
     fov_override: Option<[f32; 4]>,
+    /// 1.4: the box and the sharpening sent to our client (settings video.client_box / client_sharpen)
+    client_box: Option<[f64; 4]>,
+    client_sharpen: bool,
     /// the render quality slider's ceiling per eye above the stream's eye size (lab `--fov-ceiling WxH`; else the settings' stream_reference_eye when stream_fit_window is on): None = the stream's eye size
     fov_ceiling: Option<(i32, i32)>,
     fov_quality_explicit: bool,
@@ -191,6 +194,8 @@ fn parse_args() -> Result<Args, String> {
         fov_scale_explicit: false,
         fov_quality: 0.0,
         fov_override: None,
+        client_box: None,
+        client_sharpen: true,
         fov_ceiling: None,
         fov_quality_explicit: false,
         stream_fit_window: false,
@@ -527,6 +532,8 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
         }
     }
     a.stream_fit_window = st.stream_fit_window.unwrap_or(false);
+    a.client_box = st.client_box;
+    a.client_sharpen = st.client_sharpen.unwrap_or(true);
     a.stream_reference_eye = st.stream_reference_eye.map(|r| (r[0] as i32, r[1] as i32)).filter(|r| r.0 > 0 && r.1 > 0);
     if let Some(v) = st.frame_gen_synthesis.as_deref().and_then(|v| parse_fg_synth(v).ok()) {
         a.fg_synth = v;
@@ -1759,6 +1766,8 @@ fn main() {
         apply_settings(&mut args, &vision::Settings::default());
     }
     fs::create_dir_all(&args.config_dir).expect("create config dir");
+    // 1.4: what our client is told (sent with the first real-time update of every connection, again when it changes)
+    alvr_server_core::set_headset_view_message(Some(vision::client_message(args.client_box, args.client_sharpen)));
     let layout = alvr_filesystem::Layout::new(&args.config_dir);
     let logs_dir = install.as_ref().map(|i| i.logs.clone()).or(args.logs_dir.clone());
     let alvr_log = match &install {
@@ -2822,6 +2831,7 @@ fn main() {
                 }
                 if connect {
                     logs::general("INFO", &vision::stream_summary(&layout.session(), enc_size));
+                    logs::general("INFO", &format!("sent to the headset app: {}", vision::client_message(args.client_box, args.client_sharpen)));
                     shared.stream_ready.store(true, Ordering::SeqCst);
                 }
             }
@@ -2831,6 +2841,12 @@ fn main() {
                 args.fov_quality = f32::from_bits(vision::FOV_QUALITY_REQ.load(Ordering::SeqCst));
                 args.fov_scale_explicit = true;   // the streamer's choice wins over the settings file from now on
                 views_published = false;
+            }
+            let cs = vision::CLIENT_SHARPEN_REQ.swap(-1, Ordering::SeqCst);
+            if cs >= 0 && (cs == 1) != args.client_sharpen {
+                args.client_sharpen = cs == 1;
+                alvr_server_core::set_headset_view_message(Some(vision::client_message(args.client_box, args.client_sharpen)));
+                logs::general("INFO", &format!("headset sharpening {} (sent to the client)", if args.client_sharpen { "on" } else { "off" }));
             }
             if let Some(v) = shared.pending_views.lock().take() {
                 last_views = Some(v);

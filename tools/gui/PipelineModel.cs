@@ -525,7 +525,18 @@ namespace AirFrameXR
         public static class StreamDensity
         {
             public const string Key = "video.stream_density";
-            public static string Mode(AppSettings st) { var m = Json.Str(st.Root, Key, "bitrate"); return m == "faster" || m == "sharper" ? m : "bitrate"; }
+            /// 1.4 (owner 2026-11-19, the three presets measured in SWGR that night): "performance" (3/4 of the default density), "balanced" (the default density, the
+            /// default: 1.3 x the old sharpness at 76 fps against 93 there), "sharp" (the default pixels over the box; 52 fps there, frame generation recommended);
+            /// "bitrate" = the 1.3 sizing, only when set by hand. The phase-0 names "faster" / "sharper" are read as balanced / sharp.
+            public static string Mode(AppSettings st)
+            {
+                var m = Json.Str(st.Root, Key, "balanced");
+                if (m == "faster") return "balanced";
+                if (m == "sharper") return "sharp";
+                return m == "performance" || m == "sharp" || m == "bitrate" ? m : "balanced";
+            }
+            /// Performance's share of the default density (per axis): the old 1.3 sizing's real centre density in SWGR, 17.1 x 18.4 px/deg against 22.5 x 24.7
+            public const double PerformanceShare = 0.75;
 
             /// The box the AirFrameXR client declares with its FoV sliders at 1 (outer, inner, upper, lower; the two eyes averaged): the host's pilot views (tools/host/src/main.rs
             /// AVP_DEFAULT_FOV), which the 2026-11-14 shim lines confirm (outer 1.215 at 85 % of the declared box = 1.43 = 1.79 x 0.8). Wider than Apple's per-view frustum in the rate map
@@ -537,10 +548,12 @@ namespace AirFrameXR
             /// the per-eye stream size of a mode from the golden resolution over `view` (the box the headset declares); null for "bitrate" (ChooseEye sizes it)
             public static int[] Eye(string mode, int[] golden, double[] view, RateMap rm)
             {
-                if (mode != "faster" && mode != "sharper" || golden == null || view == null || rm == null) return null;
+                if (mode == "faster") mode = "balanced"; else if (mode == "sharper") mode = "sharp";
+                if (mode != "performance" && mode != "balanced" && mode != "sharp" || golden == null || view == null || rm == null) return null;
                 double sx = view[0] + view[1], sy = view[2] + view[3];
-                double dx = mode == "faster" ? golden[0] / (AvpBoxAtFov1[0] + AvpBoxAtFov1[1]) : golden[0] / sx;
-                double dy = mode == "faster" ? golden[1] / (AvpBoxAtFov1[2] + AvpBoxAtFov1[3]) : golden[1] / sy;
+                double share = mode == "performance" ? PerformanceShare : 1.0;
+                double dx = mode == "sharp" ? golden[0] / sx : share * golden[0] / (AvpBoxAtFov1[0] + AvpBoxAtFov1[1]);
+                double dy = mode == "sharp" ? golden[1] / sy : share * golden[1] / (AvpBoxAtFov1[2] + AvpBoxAtFov1[3]);
                 dx = Math.Min(dx, rm.Density[0]); dy = Math.Min(dy, rm.Density[1]);
                 return new[] { Math.Max(256, Math.Min(MaxEyeWidth, Align32Floor(dx * sx + 1e-6))), Math.Max(256, Math.Min(MaxEyeHeight, Align32Floor(dy * sy + 1e-6))) };
             }
@@ -682,6 +695,16 @@ namespace AirFrameXR
                 if (st.FoveationManual) { if (!explicitChoice) return null; st.FoveationManual = false; }
                 var view = View(st, rm);
                 var window = RestrictionWindow(st, view);   // the restriction profile in force, capped at the frame: where the game draws; null = it draws everywhere
+                // 1.4 (docs/FOV_CONTRACT_PLAN.md): with a preset and a restriction, the headset app declares the restriction itself (video.client_box, sent by the host
+                // over the Reserved message): the stream covers exactly it, at the preset's density. Capped at the Vision Pro's own box, not at the box saved at the last
+                // connection (that is the last box sent, which would never let a wider profile through).
+                double[] clientBox = null;
+                if (StreamDensity.Mode(st) != "bitrate" && st.FovOverride)
+                {
+                    var w = new[] { st.FovOuter, st.FovInner, st.FovUpper, st.FovLower };
+                    if (w.All(x => x > 0.05)) { clientBox = Enumerable.Range(0, 4).Select(k => Math.Round(Math.Min(w[k], StreamDensity.AvpBoxAtFov1[k]), 4)).ToArray(); view = clientBox; window = clientBox; }
+                }
+                if (clientBox != null) Json.Set(st.Root, "video.client_box", clientBox); else Json.Remove(st.Root, "video.client_box");
                 // a restriction as wide as the frame draws everywhere too: nothing outside it to compress, so the foveation follows Apple's map alone (with the window it came out as a
                 // centre as large as the frame, no foveation at all, and the stream sized for the bitrate fell to 1984 x 1600 over a 0.6 box)
                 var fovea = window != null && Enumerable.Range(0, 4).All(k => window[k] >= view[k] - 1e-6) ? null : window;
@@ -690,10 +713,11 @@ namespace AirFrameXR
                 var c = CultureInfo.InvariantCulture;
                 string sized = "";
                 var mode = StreamDensity.Mode(st);
-                string boxSource = AppSettings.ReadClientFov() != null ? "the box the headset declared at its last connection" : "Apple's frustum (no saved headset box was read)";
+                string boxSource = clientBox != null ? "the restriction, sent to the headset app to declare (1.4 app)"
+                    : AppSettings.ReadClientFov() != null ? "the box the headset declared at its last connection" : "Apple's frustum (no saved headset box was read: " + (AppSettings.ClientFovProblem() ?? "?") + ")";
                 double sMbps = Json.Num(session, "session_settings.video.bitrate.mode.ConstantMbps", 0), sFps = Json.Num(session, "session_settings.video.preferred_fps", 0);
                 // Faster / Sharper (docs/FOV_CONTRACT_PLAN.md phase 0): the stream size follows the golden resolution and the box the headset declares, not the bitrate
-                if (mode != "bitrate" && !st.StreamFitWindow && !st.StreamSizeManual && eye != null)
+                if (mode != "bitrate" && eye != null)   // 1.4: the presets size the stream from the golden resolution (a size typed in Settings is that base); the fit tick and the typed-size flag are 1.3's
                 {
                     var chosen = StreamDensity.Eye(mode, eye, view, rm);
                     if (chosen != null)
@@ -728,7 +752,8 @@ namespace AirFrameXR
                 int[] game = null;
                 if (window != null)
                 {
-                    var plan = RenderPlan.Make(reference, view, window, eye, st.RenderSpendPct, st.RenderAboveStream);
+                    var plan = mode != "bitrate" ? RenderPlan.Make(reference, view, window, eye, 0, false)   // 1.4 presets: the game renders the stream's own density over the window
+                                                 : RenderPlan.Make(reference, view, window, eye, st.RenderSpendPct, st.RenderAboveStream);
                     if (plan != null)
                     {
                         Json.Set(st.Root, "video.fov_render_quality", plan.Quality);
@@ -862,7 +887,8 @@ namespace AirFrameXR
             log = null;
             if (chosen == null) return s;
             var eye = chosen;
-            if (scratch.StreamFitWindow && declared != null && scratch.StreamReferenceEye != null && scratch.StreamReferenceFov != null)
+            bool preset = scratch.Kind == HeadsetKind.VisionPro && PipelineModel.StreamDensity.Mode(scratch) != "bitrate";   // 1.4: the presets replace the fit
+            if (!preset && scratch.StreamFitWindow && declared != null && scratch.StreamReferenceEye != null && scratch.StreamReferenceFov != null)
             {
                 var fe = PipelineModel.FitEye(scratch.StreamReferenceEye, scratch.StreamReferenceFov, declared);
                 eye = new[] { Math.Min(fe[0], PipelineModel.MaxEyeWidth), Math.Min(fe[1], PipelineModel.MaxEyeHeight) };
@@ -893,8 +919,14 @@ namespace AirFrameXR
                 Json.Save(Paths.Session, s);
                 var real = new AppSettings();
                 var q = Json.Get(scratch.Root, "video.fov_render_quality");
+                bool changed = false;
                 if (q != null && Math.Abs(Json.Num(real.Root, "video.fov_render_quality", -1) - Json.Num(scratch.Root, "video.fov_render_quality", -1)) > 1e-9)
-                { Json.Set(real.Root, "video.fov_render_quality", q); real.Save(); }
+                { Json.Set(real.Root, "video.fov_render_quality", q); changed = true; }
+                // 1.4: the box the headset app declares (the host sends it), a derived value like the render quality
+                var cb = Json.Get(scratch.Root, "video.client_box"); var cbReal = Json.Get(real.Root, "video.client_box");
+                string S(object o) => o == null ? "" : Json.Serialize(o);
+                if (S(cb) != S(cbReal)) { if (cb != null) Json.Set(real.Root, "video.client_box", cb); else Json.Remove(real.Root, "video.client_box"); changed = true; }
+                if (changed) real.Save();
                 return log ?? "session compiled (no stream size known yet)";
             }
             catch (Exception e) { Log.Write("WARN", "session compile failed: " + e.Message); return null; }

@@ -27,8 +27,9 @@ namespace AirFrameXR
         CheckBox spendTick, aboveTick; NumericUpDown spendBox; Label spendInfo, spendRange;   // "Spend the savings on quality": a percentage, committed once (Enter, leaving the box, or 0.8 s after the last change)
         readonly Timer commitTimer = new Timer { Interval = 800 };
         CheckBox fitTick; Label fitNote, pipeLine, pipeBand; FlowLayoutPanel pipeWarn;
-        FlowLayoutPanel densityBox; RadioButton bitrateRb, fasterRb, sharperRb; Label densityLine, sliderLine;   // stream sharpness (docs/FOV_CONTRACT_PLAN.md phase 0, Vision Pro)
-        string testDensity = "bitrate";   // the UI harness: the mode shown (nothing is written)
+        FlowLayoutPanel densityBox; RadioButton performanceRb, balancedRb, sharpRb; Label densityLine, sliderLine; CheckBox sharpenTick;   // the picture presets (1.4, docs/FOV_CONTRACT_PLAN.md, Vision Pro)
+        readonly List<Control> legacyRows = new List<Control>();   // 1.3's render percentage, supersampling, stream fit and pipeline fold: hidden where the presets apply
+        string testDensity = "balanced";   // the UI harness: the mode shown (nothing is written)
         bool densityOn;   // the section applies (a Vision Pro, or the harness): Visible reads false while the window is not shown yet
         int[] streamEye;   // the stream's per-eye size (session.json, the user's resolution settings); null = not known yet
         double[] clientFov;   // the headset's tangents per edge (outer, inner, upper, lower), averaged over the two eyes; null = no headset seen yet
@@ -42,7 +43,7 @@ namespace AirFrameXR
         {
             testClient = clientFovForTest; testTick = tickForTest; testEye = streamEyeForTest; testFit = fitForTest; storePath = storePathForTest;
             FlowDirection = FlowDirection.TopDown; WrapContents = false; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; Margin = new Padding(0);
-            clientFov = testClient ?? AppSettings.ReadClientFov();
+            clientFov = testClient ?? HeadsetBox();
 
             // the choice: the vendor's own view (Apple, Meta: what the headset declares) or a restriction, a rectangle the game is told (the same for every headset)
             stockRb = new RadioButton { AutoSize = true, Text = "Stock vendor view (Apple, Meta): the game renders everything the headset declares", AccessibleName = "Stock vendor view", Margin = new Padding(3, 4, 3, 0) };
@@ -69,6 +70,7 @@ namespace AirFrameXR
             // what the restriction saves, and how much of it to spend on the game's render quality: no slider (it committed on every move), one percentage box
             spendInfo = Ui.Line(""); spendInfo.ForeColor = Color.SeaGreen; spendInfo.Margin = new Padding(22, 0, 3, 2); spendInfo.MaximumSize = new Size(WrapWidth, 0);
             var spendRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(22, 2, 0, 0) };
+            legacyRows.Add(spendRow);
             spendTick = new CheckBox { AutoSize = true, Text = "Spend the savings on quality:", AccessibleName = "Spend the savings on quality", Margin = new Padding(0, 4, 6, 0) };
             spendBox = new NumericUpDown { Minimum = 50, Maximum = 100, Increment = 5, Value = 100, Width = 62, AccessibleName = "Share of pixel for pixel, percent", Enabled = false };
             aboveTick = new CheckBox { AutoSize = true, Text = "allow above 100 % (supersampling)", AccessibleName = "Allow above 100 percent", Margin = new Padding(22 + 20, 0, 0, 0), Enabled = false };
@@ -79,15 +81,18 @@ namespace AirFrameXR
             // stream sharpness (docs/FOV_CONTRACT_PLAN.md phase 0, Vision Pro): how the stream is sized, and what reaches the eye at the centre. The three buttons share one container,
             // so Windows Forms makes them one group.
             densityBox = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
-            var dTitle = Ui.Line("Stream sharpness (Vision Pro)", Ui.Bold); dTitle.Margin = new Padding(3, 2, 3, 0);
-            bitrateRb = new RadioButton { AutoSize = true, Text = "As before: sized for the bitrate", AccessibleName = "Stream sized for the bitrate", Margin = new Padding(22, 2, 3, 0) };
-            fasterRb = new RadioButton { AutoSize = true, Text = "Faster: the default resolution's sharpness (a smaller headset box gives fewer pixels)", AccessibleName = "Faster", Margin = new Padding(22, 0, 3, 0) };
-            sharperRb = new RadioButton { AutoSize = true, Text = "Sharper: the default resolution's pixels over the headset's box", AccessibleName = "Sharper", Margin = new Padding(22, 0, 3, 0) };
+            var dTitle = Ui.Line("Picture (Vision Pro)", Ui.Bold); dTitle.Margin = new Padding(3, 2, 3, 0);
+            performanceRb = new RadioButton { AutoSize = true, Text = "Performance: 3/4 of the default sharpness, the lightest for the game", AccessibleName = "Performance", Margin = new Padding(22, 2, 3, 0) };
+            balancedRb = new RadioButton { AutoSize = true, Text = "Balanced: the default resolution's sharpness (recommended)", AccessibleName = "Balanced", Margin = new Padding(22, 0, 3, 0) };
+            sharpRb = new RadioButton { AutoSize = true, Text = "Sharp: the default resolution's pixels over your field of view", AccessibleName = "Sharp", Margin = new Padding(22, 0, 3, 0) };
             densityLine = Ui.Line(""); densityLine.ForeColor = Color.DimGray; densityLine.Margin = new Padding(40, 2, 3, 0); densityLine.MaximumSize = new Size(WrapWidth - 18, 0);
             sliderLine = Ui.Line(""); sliderLine.ForeColor = Color.SeaGreen; sliderLine.Margin = new Padding(40, 2, 3, 2); sliderLine.MaximumSize = new Size(WrapWidth - 18, 0);
-            densityBox.Controls.Add(dTitle); densityBox.Controls.Add(bitrateRb); densityBox.Controls.Add(fasterRb); densityBox.Controls.Add(sharperRb); densityBox.Controls.Add(densityLine); densityBox.Controls.Add(sliderLine);
+            sharpenTick = new CheckBox { AutoSize = true, Text = "Sharpen the picture in the headset (1.4 app, AMD FidelityFX CAS)", AccessibleName = "Sharpen in the headset", Margin = new Padding(22, 6, 3, 0) };
+            tips.SetToolTip(sharpenTick, "The headset magnifies the stream to its own sharpness (up to about 40 px/deg at the centre). On: the 1.4 headset app sharpens what it magnifies (AMD FidelityFX CAS, contrast adaptive: weaker where edges are already strong). It costs the headset's GPU only: nothing changes on the PC or the network. Applied at once, also while you play.");
+            sharpenTick.CheckedChanged += (s, e) => { if (!loading) SharpenChanged(); };
+            densityBox.Controls.Add(dTitle); densityBox.Controls.Add(performanceRb); densityBox.Controls.Add(balancedRb); densityBox.Controls.Add(sharpRb); densityBox.Controls.Add(densityLine); densityBox.Controls.Add(sliderLine); densityBox.Controls.Add(sharpenTick);
             Controls.Add(densityBox);
-            foreach (var rb in new[] { bitrateRb, fasterRb, sharperRb }) { tips.SetToolTip(rb, DensityTip); var r0 = rb; r0.CheckedChanged += (s, e) => { if (!loading && r0.Checked) DensityChanged(r0 == fasterRb ? "faster" : r0 == sharperRb ? "sharper" : "bitrate"); }; }
+            foreach (var rb in new[] { performanceRb, balancedRb, sharpRb }) { tips.SetToolTip(rb, DensityTip); var r0 = rb; r0.CheckedChanged += (s, e) => { if (!loading && r0.Checked) DensityChanged(r0 == performanceRb ? "performance" : r0 == sharpRb ? "sharp" : "balanced"); }; }
             tips.SetToolTip(spendTick, SpendTip); tips.SetToolTip(spendBox, SpendTip); tips.SetToolTip(aboveTick, "Above 100 % the game renders more pixels than the headset's declared resolution would give the same box: supersampling, filtered down to the stream. It costs GPU time and adds no detail the stream can carry (it carries about a thousand pixels per tangent at 275 Mbps), but cleaner edges. Up to the stream's own size.");
             spendTick.CheckedChanged += (s, e) => { spendBox.Enabled = aboveTick.Enabled = spendTick.Checked; if (!loading) ScheduleCommit(true); };
             spendBox.ValueChanged += (s, e) => { if (!loading && spendTick.Checked) ScheduleCommit(false); };
@@ -118,7 +123,8 @@ namespace AirFrameXR
             pipeBand = Ui.Line(""); pipeBand.ForeColor = Color.DimGray; pipeBand.Margin = new Padding(22, 0, 3, 0); pipeBand.MaximumSize = new Size(WrapWidth, 0);
             pipeWarn = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(22, 0, 3, 2) };
             more.Controls.Add(pipeLine); more.Controls.Add(pipeBand); more.Controls.Add(pipeWarn);
-            Controls.Add(Ui.Expander("Stream fit and what the pipeline does", more, testFit || testEye != null));
+            var fold = Ui.Expander("Stream fit and what the pipeline does", more, testFit || testEye != null);
+            Controls.Add(fold); legacyRows.Add(fold);
 
             fovTick.CheckedChanged += (s, e) => FovTickChanged();
             profileBox.SelectedIndexChanged += (s, e) => ProfileChanged();
@@ -129,6 +135,10 @@ namespace AirFrameXR
             Disposed += (s, e) => { warnTimer.Dispose(); commitTimer.Dispose(); tips.Dispose(); };
             Reload();
         }
+
+        /// the headset's own box: for a Vision Pro its whole frustum at sliders 1 (1.4: the box saved at the last connection is the one the streamer sent, a profile
+        /// wider than it must stay choosable), for another headset the box it declared at its last connection
+        static double[] HeadsetBox() => new AppSettings().Kind == HeadsetKind.VisionPro ? (double[])PipelineModel.StreamDensity.AvpBoxAtFov1.Clone() : AppSettings.ReadClientFov();
 
         void StartManager()
         {
@@ -162,7 +172,7 @@ namespace AirFrameXR
         {
             loading = true;
             var st = new AppSettings();
-            clientFov = testClient ?? AppSettings.ReadClientFov();
+            clientFov = testClient ?? HeadsetBox();
             if (storePath == null)
             {
                 UserFovStore.SeedFromShipped(st.HeadsetName);
@@ -191,9 +201,12 @@ namespace AirFrameXR
             fovTick.Checked = on && fovTick.Enabled;
             restrictRb.Enabled = fovTick.Enabled; stockRb.Enabled = true;
             var dm = testClient != null ? testDensity : PipelineModel.StreamDensity.Mode(st);
-            bitrateRb.Checked = dm == "bitrate"; fasterRb.Checked = dm == "faster"; sharperRb.Checked = dm == "sharper";
+            performanceRb.Checked = dm == "performance"; balancedRb.Checked = dm == "balanced"; sharpRb.Checked = dm == "sharp";   // "bitrate" (1.3, set by hand): none
+            sharpenTick.Checked = Json.Bool(st.Root, "video.client_sharpen", true);
             densityOn = testClient != null || st.Kind == HeadsetKind.VisionPro;
             densityBox.Visible = densityOn;
+            foreach (var c in legacyRows) c.Visible = !densityOn;
+            aboveTick.Visible = !densityOn;
             loading = false;
             FovLabels();
         }
@@ -209,7 +222,7 @@ namespace AirFrameXR
         {
             FovLabelsText();
             UpdateDensity();
-            if (!bitrateRb.Checked) clientHint.Text = "";   // Faster / Sharper: the slider advice below replaces the profile's single FoV Scale hint
+            if (densityOn) { clientHint.Text = ""; fovShare.Text = ""; }   // the presets: the readout and the slider advice below replace the share and the FoV Scale hint
             fovShare.Visible = fovShare.Text.Length > 0; clientHint.Visible = clientHint.Text.Length > 0;   // an empty line would leave a gap in the card
             densityLine.Visible = densityLine.Text.Length > 0; sliderLine.Visible = sliderLine.Text.Length > 0;
         }
@@ -218,19 +231,30 @@ namespace AirFrameXR
         public void DensityForTest(string mode)
         {
             testDensity = mode;
-            loading = true; bitrateRb.Checked = mode == "bitrate"; fasterRb.Checked = mode == "faster"; sharperRb.Checked = mode == "sharper"; loading = false;
+            loading = true; performanceRb.Checked = mode == "performance"; balancedRb.Checked = mode == "balanced"; sharpRb.Checked = mode == "sharp"; loading = false;
             FovLabels();
         }
         public string DensityText => densityLine.Text + " " + sliderLine.Text;
 
-        string DensityMode => fasterRb.Checked ? "faster" : sharperRb.Checked ? "sharper" : "bitrate";
+        string DensityMode => performanceRb.Checked ? "performance" : balancedRb.Checked ? "balanced" : sharpRb.Checked ? "sharp" : "bitrate";
+
+        /// live: the streamer window forwards it to the host (client_sharpen on|off), which tells the headset app; no restart
+        void SharpenChanged()
+        {
+            if (testClient != null) return;
+            var st = new AppSettings();
+            if (sharpenTick.Checked) Json.Remove(st.Root, "video.client_sharpen"); else Json.Set(st.Root, "video.client_sharpen", false);   // on is the default
+            try { st.Save(); } catch (Exception e) { status.Text = "Cannot write config\\airframexr.json: " + e.Message; status.ForeColor = Color.Firebrick; return; }
+            Log.Write("INFO", "fov: headset sharpening " + (sharpenTick.Checked ? "on" : "off") + " (live)");
+            status.Text = "Saved. " + (StreamerProc.Running ? "Applied to the headset now." : "Taken at the next streamer start."); status.ForeColor = Color.SeaGreen;
+        }
 
         void DensityChanged(string mode)
         {
             if (testClient != null) { testDensity = mode; FovLabels(); return; }
             var st = new AppSettings();
-            if (mode == "bitrate") Json.Remove(st.Root, PipelineModel.StreamDensity.Key); else Json.Set(st.Root, PipelineModel.StreamDensity.Key, mode);   // a switch at its default is removed
-            Save(st, "stream sharpness " + mode, Restart);
+            if (mode == "balanced") Json.Remove(st.Root, PipelineModel.StreamDensity.Key); else Json.Set(st.Root, PipelineModel.StreamDensity.Key, mode);   // a switch at its default is removed
+            Save(st, "picture " + mode, Restart);
             FovLabels();
         }
 
@@ -263,21 +287,22 @@ namespace AirFrameXR
             if (big) densityLine.Text += " More encoded pixels than this chain was ever measured at (22.7 Mpx).";
             if (oneEngine) densityLine.Text += " This GPU has one encoder engine: expect about " + (1.3 * d.Mpx + 2.1).ToString("0", c) + " ms per frame to encode.";
             densityLine.ForeColor = thin || big || oneEngine ? Color.DarkGoldenrod : Color.DimGray;
+            if (DensityMode == "sharp") densityLine.Text += " Sharp asks the game for the most pixels: in a GPU-heavy game turn on frame generation (Streamer window) to keep the motion smooth.";
             if (DensityMode == "bitrate" || !fovTick.Checked || d.Sliders == null) return;
             // the headset app's sliders that cover the restriction: the stream then covers less angle; what Sharper puts at the centre over that box
             var box = new[] { 0, 1, 2, 3 }.Select(k => PipelineModel.StreamDensity.AvpBoxAtFov1[k] * d.Sliders[k < 2 ? 0 : 1]).ToArray();
             var se = PipelineModel.StreamDensity.Eye("sharper", d.Golden ?? d.Eye, box, rm);
-            sliderLine.Text = "For this profile set the FoV sliders in the headset app to " + PipelineModel.StreamDensity.SliderText(d.Sliders) + " (the smallest that still cover it), connect once, then restart the streamer"
-                + (se != null ? ": Sharper then gives " + P(PipelineModel.StreamDensity.Ppd(se, box)) + " px/deg at the centre." : ".");
+            sliderLine.Text = "The 1.4 headset app takes this field of view from the streamer (no sliders). With an older app (1.3.x), set its FoV sliders to " + PipelineModel.StreamDensity.SliderText(d.Sliders)
+                + ", connect once, then restart the streamer.";
         }
 
         const string DensityTip =
-                "Stream sharpness (Vision Pro)\r\n" +
+                "Picture (Vision Pro)\r\n" +
                 "\r\n" +
-                "How the stream's size is chosen. The sharpness that reaches your eye is the stream's pixels per degree at the centre of the view; the Vision Pro itself shows up to about 40 there.\r\n" +
-                "As before: the size the bitrate buys at a fixed number of bits per pixel (what 1.3.x did; at 275 Mbps and 100 Hz about 17 px/deg).\r\n" +
-                "Faster: the default resolution's sharpness (3648 x 3200 over the Vision Pro's whole view, about 23 x 25 px/deg). A smaller headset box (the FoV sliders in the headset app) then needs fewer pixels: less to encode, send and decode.\r\n" +
-                "Sharper: the default resolution's pixels over the box the headset declares. With the sliders trimmed to your profile the same pixels cover less angle: sharper, at about the same cost as the default resolution.\r\n" +
+                "How sharp the picture is at the centre of the view, in pixels per degree; the Vision Pro itself shows up to about 40 there. The game renders at the same sharpness over your field of view, so a sharper picture asks more of the game's GPU.\r\n" +
+                "Performance: three quarters of the default sharpness (about 17 x 19 px/deg). Measured in one GPU-heavy game on an RTX 5090: about 93 fps.\r\n" +
+                "Balanced (recommended): the default resolution's sharpness (3648 x 3200 over the Vision Pro's whole view, about 23 x 25 px/deg). The same game: about 76 fps.\r\n" +
+                "Sharp: the default resolution's pixels over the field of view the headset declares; with the headset app's FoV sliders trimmed to your profile, about 28 x 33 px/deg. The same game: about 52 fps (turn on frame generation).\r\n" +
                 "\r\n" +
                 "The bitrate stays yours: the bits per pixel it leaves are shown; below about 0.15 compression may show. NEEDS STREAMER RESTART. The stream is sized for the box the headset declared at its last connection: after moving the sliders, connect once and restart the streamer (the streamer window says so).";
 
@@ -495,7 +520,7 @@ namespace AirFrameXR
         {
             bool restricted = fovTick.Checked;
             var plan = CurrentPlan();
-            spendInfo.Visible = spendRange.Visible = restricted;
+            spendInfo.Visible = spendRange.Visible = restricted && !densityOn;
             spendTick.Enabled = restricted && plan != null;
             if (!restricted) { spendInfo.Text = ""; spendRange.Text = ""; return; }
             if (plan == null)

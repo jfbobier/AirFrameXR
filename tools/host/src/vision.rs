@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "1.3.10";
+pub const VERSION: &str = "1.4.0";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
 /// `config/` (session.json, airframexr.json) and `logs/` inside it.
@@ -69,6 +69,11 @@ pub struct Settings {
     pub fov_lower: Option<f64>,
     /// 0..1: where the game's render size sits between the floor (the stream's pixel density over the restricted view) and the stream's eye size (0 = the floor)
     pub fov_render_quality: Option<f64>,
+    /// 1.4 (docs/FOV_CONTRACT_PLAN.md): the box our client declares (outer, inner, upper, lower tangents, mirrored for the right eye), written by the launcher's
+    /// session compile; absent = the client declares its own whole frustum. Sent over ServerControlPacket::Reserved (tools/patches/headset-view-message.patch).
+    pub client_box: Option<[f64; 4]>,
+    /// 1.4: our client's sharpening of the magnified picture (AMD FidelityFX CAS in its video pass); default on, `client_sharpen on|off` live
+    pub client_sharpen: Option<bool>,
     /// the launcher fits the stream to the box the headset declares at the density of `stream_reference_eye` (the size the user chose over the headset's full box,
     /// docs/FOV_PIPELINE_OPTIM.md S3); with it on and the reference above the stream's eye size, the reference is the render quality slider's ceiling (ipc renderCeiling)
     pub stream_fit_window: Option<bool>,
@@ -140,6 +145,9 @@ pub fn load_settings(path: &Path) -> Settings {
         fov_upper: video["fov_upper"].as_f64(),
         fov_lower: video["fov_lower"].as_f64(),
         fov_render_quality: video["fov_render_quality"].as_f64(),
+        client_box: video["client_box"].as_array().and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?, a.get(3)?.as_f64()?]))
+            .filter(|b| b.iter().all(|t| t.is_finite() && *t > 0.05 && *t < 10.0)),
+        client_sharpen: video["client_sharpen"].as_bool(),
         stream_fit_window: video["stream_fit_window"].as_bool(),
         stream_reference_eye: video["stream_reference_eye"].as_array().and_then(|a| Some([a.first()?.as_i64()?, a.get(1)?.as_i64()?])),
         debug: v["debug"].as_bool(),
@@ -241,6 +249,17 @@ pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 pub static FOV_ON: AtomicBool = AtomicBool::new(false);
 pub static FOV_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static FOV_PENDING: AtomicBool = AtomicBool::new(false);
+/// `client_sharpen on|off` from the streamer: -1 = nothing new
+pub static CLIENT_SHARPEN_REQ: AtomicI32 = AtomicI32::new(-1);
+
+/// The one JSON line our client takes over `ServerControlPacket::Reserved` (1.4, docs/FOV_CONTRACT_PLAN.md; the format of the 1.4 research line):
+/// `{"airframexr":1,"view":{"left":[o,i,u,d],"right":[o,i,u,d]},"sharpen":true}`; without a box no `view` (the client declares its whole frustum).
+pub fn client_message(b: Option<[f64; 4]>, sharpen: bool) -> String {
+    match b {
+        Some(v) => json!({ "airframexr": 1, "view": { "left": v, "right": v }, "sharpen": sharpen }).to_string(),
+        None => json!({ "airframexr": 1, "sharpen": sharpen }).to_string(),
+    }
+}
 /// the render quality sent with the override (f32 bits)
 pub static FOV_QUALITY_REQ: AtomicU32 = AtomicU32::new(0);
 /// 0..1 for a quality given in the settings, the lab flag or the command; anything else is the floor
@@ -268,7 +287,7 @@ pub fn fov_scale_from(t: &[f32; 4], fov8: &[f32; 8]) -> [f32; 4] {
 
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
 /// `frame_gen_cap <fps>` (0 = none), `fov_override off` | `fov_override on <outer> <inner> <upper> <lower> [<render quality 0..1>]` (the tangents the game is told and where its render size sits between the floor and the stream's eye size, taken by the next game), `recenter`,
-/// `color <brightness> <contrast> <saturation> <sharpening>`,
+/// `color <brightness> <contrast> <saturation> <sharpening>`, `client_sharpen on|off` (our client's sharpening, live),
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
 /// Virtual-key codes of a combination like "Ctrl+Alt+R" (modifiers, then one key: a letter or digit, F1-F24, Insert, Delete, Home, End, PageUp,
@@ -361,6 +380,7 @@ pub fn spawn_stdin_control() {
                         HEIGHT_REQ.store(if h <= 0.0 { f32::MIN_POSITIVE } else { h.clamp(0.5, 2.5) }.to_bits(), Ordering::SeqCst);
                     }
                 }
+                (Some("client_sharpen"), Some(v)) => CLIENT_SHARPEN_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("fov_override"), Some("off")) => {
                     FOV_ON.store(false, Ordering::SeqCst);
                     FOV_PENDING.store(true, Ordering::SeqCst);

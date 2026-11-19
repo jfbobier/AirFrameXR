@@ -20,9 +20,28 @@ using Microsoft.Win32;
 
 namespace AirFrameXR
 {
+    /// The tray at Windows sign-in: the per-user Run entry tray.exe's own menu writes (TrayProgram.RunKey / RunName), so the launcher's switch and the tray agree.
+    public static class TrayAutostart
+    {
+        const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "AirFrameXR tray";
+        public static string Exe => Path.Combine(Paths.Bin, "tray.exe");
+        public static bool On { get { try { using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKey)) return k?.GetValue(RunName) != null; } catch { return false; } } }
+        /// null when done, else the reason
+        public static string Set(bool on)
+        {
+            try
+            {
+                using (var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKey))
+                    if (on) k.SetValue(RunName, "\"" + Exe + "\""); else k.DeleteValue(RunName, false);
+                return null;
+            }
+            catch (Exception e) { return "The Windows sign-in entry could not be changed: " + e.Message; }
+        }
+    }
+
     public static class Version
     {
-        public const string Number = "1.3.10";
+        public const string Number = "1.4.0";
         /// "1.1.0", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
@@ -578,6 +597,24 @@ namespace AirFrameXR
         public double FovUpper => Json.Num(Root, "video.fov_upper", 0);
         public double FovLower => Json.Num(Root, "video.fov_lower", 0);
         /// The headset's tangents as the host saved them at its last connection (config\airframexr_views.json: left eye l r u d, right eye l r u d), per edge averaged over the eyes.
+        /// why ReadClientFov returns null (docs/FOV_CONTRACT_PLAN.md section 9: the saved box was sometimes not read, and nothing said why); null when it reads
+        public static string ClientFovProblem()
+        {
+            var p = Path.Combine(Paths.Config, "airframexr_views.json");
+            try
+            {
+                if (!File.Exists(p)) return "config\\airframexr_views.json is missing";
+                var d = Json.Load(p);
+                var a = Json.Get(d, "fov_tan") as System.Collections.IList;
+                if (a == null || a.Count < 8) return "config\\airframexr_views.json has no 8 fov_tan values (" + File.ReadAllText(p).Trim() + ")";
+                var vals = new double[8];
+                for (int i = 0; i < 8; i++) vals[i] = Convert.ToDouble(a[i], CultureInfo.InvariantCulture);
+                if (vals.Any(x => double.IsNaN(x) || !(x > 0))) return "config\\airframexr_views.json has a value not above 0: " + string.Join(" / ", vals.Select(x => x.ToString("0.000", CultureInfo.InvariantCulture)));
+                return null;
+            }
+            catch (Exception e) { return "config\\airframexr_views.json unreadable: " + e.Message; }
+        }
+
         public static double[] ReadClientFov()
         {
             try

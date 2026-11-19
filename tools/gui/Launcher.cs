@@ -162,6 +162,13 @@ namespace AirFrameXR
                 lines.Add(ToggleRow("\u2713", oc ? Color.SeaGreen : Color.White, oc ? "OpenVR: OpenComposite OpenXR translation" : "OpenVR: SteamVR", oc, true, on => OcSwitch(on),
                     "On: OpenVR games load OpenComposite, which translates them to OpenXR so they run on AirFrameXR without SteamVR. Off: they use SteamVR again. Takes effect at the next game start."));
             }
+            // the tray (bin\tray.exe) at Windows sign-in: the same per-user Run entry the tray's own menu sets; informational, never "Needs attention"
+            if (demoReady || File.Exists(TrayAutostart.Exe))
+            {
+                bool ta = demoReady || TrayAutostart.On;
+                lines.Add(ToggleRow("\u2713", ta ? Color.SeaGreen : Color.White, ta ? "Tray: starts at Windows sign-in" : "Tray: not started at Windows sign-in", ta, true, on => TraySwitch(on),
+                    "On: the AirFrameXR tray starts when you sign in to Windows and starts the streamer when your paired headset appears. Off: it starts only when you open it."));
+            }
             sys.Controls.Add(new Label { Text = allGood ? "Ready" : "Needs attention", AutoSize = true, Font = Ui.Big, ForeColor = allGood ? Color.SeaGreen : Color.Firebrick, Margin = new Padding(0, 0, 0, 4) });
             foreach (var l in lines) sys.Controls.Add(l);
             sys.ResumeLayout();
@@ -197,6 +204,14 @@ namespace AirFrameXR
         {
             var err = on ? OpenComposite.Enable() : OpenComposite.Disable();
             if (err != null) MessageBox.Show(this, err, "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            RefreshSystem();
+        }
+
+        void TraySwitch(bool on)
+        {
+            var err = TrayAutostart.Set(on);
+            if (err != null) MessageBox.Show(this, err, "AirFrameXR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            else Log.Write("INFO", "tray at Windows sign-in: " + (on ? "on" : "off"));
             RefreshSystem();
         }
 

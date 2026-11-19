@@ -401,7 +401,7 @@ namespace AirFrameXR
 
         void ConfigWatchStart()
         {
-            watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchFov = FovLine();
+            watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchFov = FovLine(); watchSharpen = Json.Bool(settings.Root, "video.client_sharpen", true);
             try { configSeen = File.GetLastWriteTimeUtc(Paths.Settings); } catch { }
             configWatch.Tick += (s, e) =>
             {
@@ -431,6 +431,10 @@ namespace AirFrameXR
             }
             if (FovLine() != watchFov) { watchFov = FovLine(); host.Send("fov_override " + watchFov); Log.Write("INFO", "field of view override: " + watchFov + " (the launcher's FOV restriction card; needs a streamer restart)"); }
             if (settings.FrameGenCapFps != watchCap) { watchCap = settings.FrameGenCapFps; host.Send("frame_gen_cap " + watchCap.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation cap " + watchCap + " fps (Advanced settings)"); }
+            // 1.4: the headset app's sharpening, live (the FOV card)
+            var sharpen = Json.Bool(settings.Root, "video.client_sharpen", true);
+            if (watchSharpen == null) watchSharpen = sharpen;
+            else if (sharpen != watchSharpen) { watchSharpen = sharpen; host.Send("client_sharpen " + (sharpen ? "on" : "off")); Log.Write("INFO", "headset sharpening " + (sharpen ? "on" : "off") + " (the FOV card, live)"); }
         }
 
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 400 };
@@ -686,7 +690,9 @@ namespace AirFrameXR
             Log.Write("INFO", "streamer started: alvr_host " + args);
         }
 
-        double[] compiledView; bool boxWarned;
+        double[] compiledView, pendingBox; bool boxWarned; bool? watchSharpen;
+        System.Windows.Forms.Timer boxTimerField;
+        System.Windows.Forms.Timer boxTimer { get { if (boxTimerField == null) { boxTimerField = new System.Windows.Forms.Timer { Interval = 2000 }; boxTimerField.Tick += (s, e) => { boxTimerField.Stop(); CheckCompiledBox(pendingBox); }; } return boxTimerField; } }
         /// docs/FOV_CONTRACT_PLAN.md phase 0: the stream was sized at this start for the box the headset declared at its last connection (config\airframexr_views.json). When the
         /// headset now declares another one (its FoV sliders moved, or no box was saved yet), the size and the foveation are for the wrong box until the next start: say so once.
         void CheckCompiledBox(double[] declared)
@@ -805,7 +811,7 @@ namespace AirFrameXR
                             var f = fa.Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
                             var avg = new[] { (f[0] + f[5]) / 2, (f[1] + f[4]) / 2, (f[2] + f[6]) / 2, (f[3] + f[7]) / 2 };
                             ApplyStreamFit(avg, true);
-                            CheckCompiledBox(avg);
+                            pendingBox = avg; boxTimer.Stop(); boxTimer.Start();   // compared once the declarations settle (the first one of a connection is a transient)
                         }
                         catch (Exception ex) { Log.Write("WARN", "stream fit: " + ex.Message); }
                     }
