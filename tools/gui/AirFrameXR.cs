@@ -697,10 +697,16 @@ namespace AirFrameXR
         /// headset now declares another one (its FoV sliders moved, or no box was saved yet), the size and the foveation are for the wrong box until the next start: say so once.
         void CheckCompiledBox(double[] declared)
         {
-            if (compiledView == null || declared == null || boxWarned) return;
-            if (Enumerable.Range(0, 4).All(k => Math.Abs(declared[k] - compiledView[k]) <= 0.01)) return;
-            boxWarned = true;
+            if (compiledView == null || declared == null) return;
             string T(double[] v) => string.Join(" / ", v.Select(x => x.ToString("0.00", CultureInfo.InvariantCulture)));
+            if (Enumerable.Range(0, 4).All(k => Math.Abs(declared[k] - compiledView[k]) <= 0.01))
+            {
+                // a later declaration matches (a reconnect starts with the headset's transient first one: 2026-11-19, 00:12:59 then 00:13:03): take the warning back
+                if (boxWarned) { boxWarned = false; Log.Write("INFO", $"field of view: the headset now declares {T(declared)}, the box the stream was sized for"); footer.Text = "The headset declares the field of view the stream was sized for."; footer.ForeColor = Color.SeaGreen; }
+                return;
+            }
+            if (boxWarned) return;
+            boxWarned = true;
             bool sent = PipelineModel.PictureEdgesFoveation.Last?.BoxSource?.StartsWith("the restriction, sent") == true;   // 1.4: the box was sent to the headset app
             Log.Write("WARN", $"field of view: the headset declares {T(declared)}, the stream was sized for {T(compiledView)}; " + (sent
                 ? "the headset app did not take the box the streamer sent (a 1.3 app declares its own FoV sliders' box: update the app to 1.4, or set its sliders as the FOV card says)"
