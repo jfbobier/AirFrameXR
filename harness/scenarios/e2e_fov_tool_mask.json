@@ -1,0 +1,114 @@
+{
+  "description": "1.4 mask: the line test's corner lines (tools/probe/xr_tool.h). The fit tool in its line style starts on corner fractions 0.8 / 0.8 / 0.7 / 0.8 (left eye) and 0.9 / 0.8 / 0.7 / 0.8 (right), the scripted numpad keys push the left eye's upper-outer line out three steps (n7) and bring its lower-inner back two (shift+n3), then the right eye's upper-outer (n9) and lower-inner (n1) out one step each; the tool reports the corners with each event, and the last one must be where the keys put them.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 1250,
+    "gui": true
+  },
+  "client": {
+    "seconds": 55,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "views_tan": "1.732,1.0,1.192,1.0"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 1400,
+    "timeout_s": 60,
+    "env": {
+      "XR_PROBE_TOOL": "fit",
+      "XR_PROBE_KEYS": "120:space,150:n7,154:n7,158:n7,180:shift+n3,184:shift+n3,330:enter,350:n9,360:n1,1000:enter",
+      "XR_PROBE_START_CORNERS": "0.8,0.8,0.7,0.8,0.9,0.8,0.7,0.8"
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 240,
+  "checks": {
+    "host_min_frames": 800,
+    "client_min_frames": 700,
+    "timestamps_monotonic": true,
+    "max_duplicate_timestamps": 400,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 3520,
+      "height": 1600,
+      "color_range": "pc"
+    },
+    "decode": true,
+    "refresh_hz": 90,
+    "max_pipeline_latency_ms": 150,
+    "decode_frame_slack": 60,
+    "tool": {
+      "corners": [
+        [
+          0.83,
+          0.8,
+          0.68,
+          0.8
+        ],
+        [
+          0.91,
+          0.8,
+          0.71,
+          0.8
+        ]
+      ],
+      "corners_tol": 0.006
+    }
+  }
+}

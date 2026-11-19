@@ -1606,7 +1606,7 @@ def analyse_tool(sc, outdir):
     def last_box(f):
         ks = [k for k in box_at if k <= f]
         return box_at[max(ks)] if ks else None
-    for smp in ck["samples"]:
+    for smp in ck.get("samples", []):
         f = smp["app_frame"]
         img = decode(first + f)
         res = {"app_frame": f, "what": smp.get("what", ""), "decoded": img is not None}
@@ -2145,6 +2145,10 @@ def evaluate(sc, a):
             chk("tool_seen", False, ta["error"], "the probe's tool lines, the headset's views and the tool's picture in the decoded stream")
         else:
             evs = ta["events"]
+            if "corners" in tk:   # 1.4 mask: the corner fractions the tool reports with its last event (numpad keys), per eye
+                last = next((e_["corners"] for e_ in reversed(evs) if "corners" in e_), None)
+                err = max(abs(g - w) for e in range(2) for g, w in zip(last[e], tk["corners"][e])) if last else 9
+                chk("tool_corners", err <= tk.get("corners_tol", 0.006), {"got": last, "want": tk["corners"]}, "the corner lines moved by the scripted numpad keys (n7 / n9 / n3 / n1, Shift = back) end where the keys put them, per eye")
             enter = [e for e in evs if e["event"] == "enter"]
             chk("tool_start_and_enter", any(e["event"] == "start" for e in evs) and bool(enter), [e["event"] for e in evs][:3] + ["..."], "Space started the tool and Enter kept the result (the probe's JSON lines)")
             if tk.get("expect") and enter:   # the keys that were scripted, applied to the start box of the panel the app was told
@@ -2154,7 +2158,7 @@ def evaluate(sc, a):
                 chk("tool_keys_move_edges", err <= 0.002, {"max_err": round(err, 5), "box": enter[-1]["box"], "expected": [[round(v, 4) for v in b] for b in exp]},
                     "each scripted arrow moved its edge by the step (0.5 degree out in the fit, 1 degree in in the restriction), Shift reversed it, Tab switched the eye / the edit")
             for smp in ta["samples"]:
-                want = next((w for w in tk["samples"] if w["app_frame"] == smp["app_frame"]), {})
+                want = next((w for w in tk.get("samples", []) if w["app_frame"] == smp["app_frame"]), {})
                 tag = f"{smp['what']}@{smp['app_frame']}"
                 if not smp["decoded"]:
                     chk(f"tool_{tag}_decoded", False, None, "the stream frame decodes"); continue
