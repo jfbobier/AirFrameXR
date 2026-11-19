@@ -1,5 +1,5 @@
 {
-  "description": "1.4 (docs/FOV_CONTRACT_PLAN.md): the box the streamer owns. airframexr.json carries video.client_box 1.2 / 0.8 / 0.9 / 0.8 (what the launcher's compile writes with a preset and a restriction); the host sends {\"airframexr\":1,\"view\":...,\"sharpen\":true} over ServerControlPacket::Reserved with the first real-time update (tools/patches/headset-view-message.patch); the mock headset (client-reserved-message.patch) has Apple's frustum as its panel and declares min(panel, box) per eye after its first frame, so the host's last views_config and the box the game is told are the box, unrestricted (scale 100 %: the restriction equals the declared box), and the stream has content to its edges. Adapted from the 1.4 research line's e2e_fov_headset_view (which used a stdin command).",
+  "description": "1.4 (docs/FOV_CONTRACT_PLAN.md): the box the streamer owns. the host is given the box 1.2 / 0.8 / 0.9 / 0.8 (lab flag --client-box; the launcher's compile writes it as video.client_box with a preset and a restriction); the host sends {\"airframexr\":1,\"view\":...,\"sharpen\":true} over ServerControlPacket::Reserved with the first real-time update (tools/patches/headset-view-message.patch); the mock headset (client-reserved-message.patch) has Apple's frustum as its panel and declares min(panel, box) per eye after its first frame, so the host's last views_config and the box the game is told are the box, unrestricted (scale 100 %: the restriction equals the declared box), and the stream has content to its edges. Adapted from the 1.4 research line's e2e_fov_headset_view (which used a stdin command).",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -50,7 +50,8 @@
     "seconds": 60,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
-    "exit_after_frames": 420
+    "exit_after_frames": 420,
+    "client_box": "1.2,0.8,0.9,0.8"
   },
   "client": {
     "seconds": 55,
@@ -105,17 +106,6 @@
         0.9,
         0.8
       ]
-    }
-  },
-  "airframexr_json": {
-    "video": {
-      "client_box": [
-        1.2,
-        0.8,
-        0.9,
-        0.8
-      ],
-      "client_sharpen": true
     }
   }
 }

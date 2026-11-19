@@ -48,6 +48,7 @@ Put "$repo\tools\patches\audio-process-loopback.patch" "$repo\_tmp\audio-process
 Put "$repo\tools\patches\client-audio-device.patch" "$repo\_tmp\client-audio-device.patch"
 Put "$repo\tools\patches\headset-view-message.patch" "$repo\_tmp\headset-view-message.patch"
 Put "$repo\tools\patches\client-reserved-message.patch" "$repo\_tmp\client-reserved-message.patch"
+Put "$repo\tools\patches\client-reserved-message-capi.patch" "$repo\_tmp\client-reserved-message-capi.patch"
 Put "$repo\tools\host\Cargo.toml" "$repo\_tmp\host\Cargo.toml"
 Put "$repo\tools\host\build.rs" "$repo\_tmp\host\build.rs"
 Get-ChildItem "$repo\tools\host\src\*.rs" | ForEach-Object { Put $_.FullName "$repo\_tmp\host\src\$($_.Name)" }

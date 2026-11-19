@@ -1,0 +1,13 @@
+diff --git a/alvr/client_core/src/c_api.rs b/alvr/client_core/src/c_api.rs
+index b69f7e92..4b57b6de 100644
+--- a/alvr/client_core/src/c_api.rs
++++ b/alvr/client_core/src/c_api.rs
+@@ -381,6 +381,8 @@ pub extern "C" fn alvr_poll_event(out_event: *mut AlvrEvent) -> bool {
+                     }
+                 }
+                 ClientCoreEvent::RealTimeConfig(_) => AlvrEvent::RealTimeConfig {},
++                // AirFrameXR (client-reserved-message.patch): the lab's client reads the text from client_core's event queue; the C API has no variant for it (the real clients carry their own)
++                ClientCoreEvent::ReservedMessage(_) => AlvrEvent::RealTimeConfig {},
+             };
+ 
+             unsafe { *out_event = event };

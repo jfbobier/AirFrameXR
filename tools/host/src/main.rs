@@ -364,6 +364,14 @@ fn parse_args() -> Result<Args, String> {
                 let (w, h) = t.split_once('x').ok_or("--fov-ceiling WxH")?;
                 a.fov_ceiling = Some((w.parse::<i32>().map_err(|e| format!("{e}"))?, h.parse::<i32>().map_err(|e| format!("{e}"))?));
             }
+            "--client-box" => {
+                // lab (1.4): the box sent to the headset app, "outer,inner,upper,lower" (the settings give it as video.client_box)
+                let p: Vec<f64> = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?;
+                if p.len() != 4 || !p.iter().all(|t| t.is_finite() && *t > 0.05) {
+                    return Err("--client-box outer,inner,upper,lower (tangents)".into());
+                }
+                a.client_box = Some([p[0], p[1], p[2], p[3]]);
+            }
             "--fov-override" => {
                 // lab: the tangents the game is told, "outer,inner,upper,lower"
                 let p: Vec<f32> = v()?.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?;
@@ -532,7 +540,9 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
         }
     }
     a.stream_fit_window = st.stream_fit_window.unwrap_or(false);
-    a.client_box = st.client_box;
+    if a.client_box.is_none() {
+        a.client_box = st.client_box;   // the lab flag --client-box wins
+    }
     a.client_sharpen = st.client_sharpen.unwrap_or(true);
     a.stream_reference_eye = st.stream_reference_eye.map(|r| (r[0] as i32, r[1] as i32)).filter(|r| r.0 > 0 && r.1 > 0);
     if let Some(v) = st.frame_gen_synthesis.as_deref().and_then(|v| parse_fg_synth(v).ok()) {
