@@ -1,5 +1,8 @@
 # FoV pipeline optimisation: the analysed plan (branch `fov-restriction-aware-engine`)
 
+**2026-11-19: the design of this plan (S3, S4, S6, S9) is replaced by `docs/FOV_CONTRACT_PLAN.md`** (the streamer owns the field of view). The
+measurements below still hold.
+
 Status 2026-10-29: **analysed and measured on the 3080 Ti, nothing on a headset yet.** This replaces the note of 2026-10-28 ("the idea of
 shrinking the stream to the calibrated rectangle"), which is kept in its last form in the git history (`9a9050b`). Follows
 `docs/FOV_CALIBRATION.md` (the calibrated rectangle R = 0.96 / 0.71 / 0.69 / 0.61, `docs/AVP_FOV.md`). Numbers below come from
