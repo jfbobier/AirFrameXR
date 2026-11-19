@@ -1035,13 +1035,19 @@ def analyse_fov_restrict(sc, outdir):
     cfgk = sc["checks"]["fov_restrict"]
     out = {}
     headset = None
+    last_decl = "declared" in cfgk   # 1.4 (the box sent to the headset app): the headset declares it after its first declaration; take the last one
     for line in open(outdir / "host_stdout.txt", errors="replace"):
         if '"views_config"' in line and '"views_config_ignored"' not in line:
             try:
                 headset = json.loads(line)["data"]["fov_tan"]
-                break
+                if not last_decl:
+                    break
             except Exception:
                 pass
+    if last_decl and headset:
+        d = cfgk["declared"]   # outer, inner, upper, lower; the right eye mirrored
+        want = [d[0], d[1], d[2], d[3], d[1], d[0], d[2], d[3]]
+        out["declared_err"] = round(max(abs(a - b) for a, b in zip(headset, want)), 4)
     if "override" in cfgk and headset:   # the streamer's override, tangents: per edge a fraction of the headset's (averaged over the two eyes), at most 1, at least a fifth
         cl = [(headset[0] + headset[5]) / 2, (headset[1] + headset[4]) / 2, (headset[2] + headset[6]) / 2, (headset[3] + headset[7]) / 2]
         s = [1.0 if v + 0.005 >= c else max(0.2, v / c) for v, c in zip(cfgk["override"], cl)]
@@ -2103,6 +2109,9 @@ def evaluate(sc, a):
             if ck.get("fov_restrict_event"):
                 chk("fov_restrict_published_once", fa.get("host_events") == 1, fa.get("host_events"), "the host logged one fov_restrict event: the command was taken once and published, not repeated")
             tol = ck["fov_restrict"].get("tol", 0.01)
+            if "declared" in ck["fov_restrict"]:
+                chk("fov_box_declared_by_headset", fa.get("declared_err", 9) <= tol, {"err": fa.get("declared_err"), "last_declared": fa.get("headset_fov"), "want": ck["fov_restrict"]["declared"]},
+                    "the headset (the mock with the client patch) declared the box the host sent over ServerControlPacket::Reserved (video.client_box), the right eye mirrored")
             chk("fov_restrict_app_fov", fa["fov_max_err"] <= tol, {"max_err": round(fa["fov_max_err"], 4), "got": fa["app_fov"], "expected": fa["expected_fov"]},
                 f"the four tangents per eye the app got from xrLocateViews are the headset's scaled per edge (outer, inner, upper, lower = {[round(x, 3) for x in fa['scale']]} of it), within {tol}")
             er, rr = fa["expected_recommended"], fa["recommended"]

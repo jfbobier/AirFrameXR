@@ -1,0 +1,27 @@
+diff --git a/alvr/client_core/src/connection.rs b/alvr/client_core/src/connection.rs
+index 357bd436..d494548b 100644
+--- a/alvr/client_core/src/connection.rs
++++ b/alvr/client_core/src/connection.rs
+@@ -526,6 +526,9 @@ fn connection_pipeline(
+                                 .push_back(ClientCoreEvent::RealTimeConfig(config));
+                         }
+                     }
++                    Ok(ServerControlPacket::Reserved(text)) => {
++                        event_queue.lock().push_back(ClientCoreEvent::ReservedMessage(text));
++                    }
+                     Ok(_) => (),
+                     Err(ConnectionError::TryAgain(_)) => {
+                         if Instant::now() > disconnection_deadline {
+diff --git a/alvr/client_core/src/lib.rs b/alvr/client_core/src/lib.rs
+index 7af1711e..5ac61edb 100644
+--- a/alvr/client_core/src/lib.rs
++++ b/alvr/client_core/src/lib.rs
+@@ -56,6 +56,8 @@ pub enum ClientCoreEvent {
+         config_nal: Vec<u8>,
+     },
+     RealTimeConfig(RealTimeConfig),
++    /// AirFrameXR (tools/patches/client-reserved-message.patch): the host's `ServerControlPacket::Reserved` text (the headset view message, docs/PICTURE_EDGES_DESIGN.md section 8)
++    ReservedMessage(String),
+ }
+ 
+ // Note: this struct may change without breaking network protocol changes
