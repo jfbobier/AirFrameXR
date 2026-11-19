@@ -14,6 +14,7 @@ using Microsoft.Win32;
 static class TrayProgram
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "AirFrameXR tray";
+    static readonly double DiscoverySeconds = double.TryParse(Environment.GetEnvironmentVariable("AIRFRAMEXR_TRAY_DISCOVERY_SECONDS"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ds) ? ds : 3600;   // the discovery process's own time limit; the harness shortens it
     static readonly int CooldownSeconds = int.TryParse(Environment.GetEnvironmentVariable("AIRFRAMEXR_TRAY_COOLDOWN"), out var c) ? c : 60;   // the harness shortens it
 
     [STAThread]
@@ -100,7 +101,9 @@ static class TrayProgram
                 BeginInvoke(StartStreamer);
             };
             d.OnError += m => Log.Write("WARN", "tray: discovery: " + m);
-            var err = d.Start();
+            // the discovery process has a time limit (1 h) and can fail: a dead one is dropped so the next tick starts a new one
+            d.OnExit += () => BeginInvoke(() => { if (discovery == d) { Log.Write("INFO", "tray: discovery process ended, restarting"); StopWatching(); } });
+            var err = d.Start(DiscoverySeconds);
             if (err != null) { Say("Cannot watch: " + err); d.Dispose(); return; }
             discovery = d;
             Say("Watching for the headset");

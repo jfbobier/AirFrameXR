@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The tray (tools/gui/Tray.cs, bin\\tray.exe) on the PC: it must watch while nothing streams and go fully idle while a streamer runs.
-    AIRFRAMEXR_PROFILE=5090 python3 harness/tray_check.py [--no-build] [--by-ip]
+    AIRFRAMEXR_PROFILE=5090 python3 harness/tray_check.py [--no-build] [--by-ip] [--expiry]
 A throwaway folder (C:\\Users\\<user>\\tray_e2e) holds a copy of the install's bin\\ (real alvr_host.exe), the freshly built tray.exe and a stand-in
 streamer.exe that just sleeps; nothing in the real install is touched or stopped. tray_check.ps1 samples every 100 ms (stand-in streamers running,
 `alvr_host --discover` children running) while it plays the field: a headset announcing itself (UDP 9943 datagram like find_headset_e2e), another
@@ -13,6 +13,8 @@ headset, a streamer started by someone else, the tray killed. Verdicts:
   cooldown_no_restart             after the streamer closes, announces start nothing and discovery stays off for the cooldown (5 s here, 60 s shipped)
   resumes_after_cooldown          then it watches again
   external_start_stops_discovery  a streamer started by the launcher: the child is gone in under 1.5 s (the host binds UDP 9943 seconds later)
+  with --expiry only (discovery process limit 6 s instead of 1 h; the field bug of 2026-11-15: a tray left running over an hour went blind):
+  discovery_expiry_renewed        every ended discovery process is replaced; still_detects_after_expiry: the paired headset still starts the streamer
   killed_tray_leaves_no_child     the tray killed hard leaves no discovery child holding UDP 9943"""
 import json, sys, time
 from pathlib import Path
@@ -49,6 +51,7 @@ Remove-Item '{wd}\\bin\\streamer.exe' -Force -ErrorAction SilentlyContinue
 
 proto = json.loads([l for l in live.ps(rf"& '{wd}\bin\alvr_host.exe' --system-check").splitlines() if l.startswith("{")][0])["data"]["alvr_protocol_id"]
 sess = json.loads((live.ROOT / "tools/install/session.default.json").read_text())
+EXPIRY = 6 if "--expiry" in sys.argv else 0
 BY_IP = "--by-ip" in sys.argv   # paired the way the Settings window pairs the Vision Pro: empty hostname key, the address only (the field bug of 2026-11-15)
 sess["client_connections"] = {"" if BY_IP else HOST: {"display_name": "Tray mock", "current_ip": "127.0.0.2", "manual_ips": ["127.0.0.2"], "trusted": True, "connection_state": "Disconnected"}}
 live.SCRATCH.mkdir(parents=True, exist_ok=True)
@@ -59,11 +62,11 @@ live.put(live.ROOT / "harness/tray_check.ps1", f"{wdf}/tray_check.ps1")
 
 # the tray needs a desktop (a notification icon): an interactive task, like the GUIs in find_headset_e2e
 cmd = live.SCRATCH / "va_tray.cmd"
-cmd.write_bytes(f'@echo off\r\nset AIRFRAMEXR_TRAY_COOLDOWN={COOLDOWN}\r\n"{wd}\\bin\\tray.exe"\r\n'.encode())
+cmd.write_bytes((f'@echo off\r\nset AIRFRAMEXR_TRAY_COOLDOWN={COOLDOWN}\r\n' + (f'set AIRFRAMEXR_TRAY_DISCOVERY_SECONDS={EXPIRY}\r\n' if EXPIRY else '') + f'"{wd}\\bin\\tray.exe"\r\n').encode())
 live.put(cmd, f"{wdf}/va_tray.cmd")
 live.ps(f"schtasks /create /tn va_tray /tr 'cmd /c {wd}\\va_tray.cmd' /sc once /st 00:00 /rl LIMITED /it /f | Out-Null; schtasks /run /tn va_tray | Out-Null")
 
-out = live.ps(f"& '{wd}\\tray_check.ps1' -wd '{wd}' -hostname '{HOST}' -proto {proto} -cooldown {COOLDOWN}", timeout=400)
+out = live.ps(f"& '{wd}\\tray_check.ps1' -wd '{wd}' -hostname '{HOST}' -proto {proto} -cooldown {COOLDOWN} -limit {EXPIRY}", timeout=400)
 print(out.strip()[-600:])
 
 res = live.ROOT / "harness" / "results" / f"tray_{time.strftime('%Y%m%dT%H%M%S')}"

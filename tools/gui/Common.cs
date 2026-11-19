@@ -1051,6 +1051,7 @@ namespace AirFrameXR
         public class Found { public string Hostname, Ip, Protocol, ServerProtocol, Via; public bool Compatible; public DateTime Seen; }
         public event Action<Found> OnFound;
         public event Action<string> OnError;
+        public event Action OnExit;   // the discovery process ended (its time ran out or it failed)
         HostProcess host;
 
         public string Start(double seconds = 3600)
@@ -1066,6 +1067,7 @@ namespace AirFrameXR
                     });
                 else if (name == "discovery_error" && d != null) OnError?.Invoke(Str(d, "message"));
             };
+            host.OnExit += code => OnExit?.Invoke();
             return host.Start($"--install-dir \"{Paths.Dir}\" --discover {seconds.ToString(CultureInfo.InvariantCulture)}");
         }
 

@@ -1,7 +1,7 @@
 # Runs ON the PC (called by tray_check.py). A test folder $wd holds a copy of bin\ (real alvr_host.exe, the new tray.exe) and a STAND-IN streamer.exe (sleeps).
 # A 100 ms sampler records, for that folder only: stand-in streamers running, `alvr_host --discover` children running. Phases then drive the tray
 # the way the field does (a headset announcing itself, a streamer started by someone else) and the verdicts are computed from the samples.
-param($wd, $hostname, $proto, $cooldown)
+param($wd, $hostname, $proto, $cooldown, $limit = 0)
 $ErrorActionPreference = 'Stop'
 $bin = "$wd\bin"
 $samples = New-Object System.Collections.Generic.List[object]
@@ -36,6 +36,22 @@ function WaitFor($cond, $sec) { $end = $t0.Elapsed.TotalSeconds + $sec; while ($
 $tray = $null
 for ($i = 0; $i -lt 50 -and -not $tray; $i++) { $tray = Get-Process tray -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$wd\*" }; Start-Sleep -Milliseconds 200 }
 if (-not $tray) { Write-Output (@{ error = 'tray.exe did not start' } | ConvertTo-Json -Compress); exit 2 }
+
+if ($limit -gt 0) {
+    # the discovery process dies by itself after its time limit (3600 s shipped, $limit s here): the tray must start a new one, any number of times, and still react
+    $ok = WaitFor { param($s) $s.discover -eq 1 } 8
+    $gaps = 0; $prev = 1; $end = $t0.Elapsed.TotalSeconds + $limit * 3.5
+    while ($t0.Elapsed.TotalSeconds -lt $end) { $x = Snap; $samples.Add($x); if ($prev -eq 1 -and $x.discover -eq 0) { $gaps++ }; $prev = $x.discover; Start-Sleep -Milliseconds 100 }
+    Verdict 'discovery_expiry_renewed' ($ok -and $gaps -ge 2 -and $prev -eq 1) "the discovery child ended and was replaced $gaps times in $([math]::Round($limit * 3.5)) s, one running at the end: $prev"
+    $j = Announcer $hostname
+    $started = WaitFor { param($s) $s.streamers -ge 1 } 12
+    Stop-Job $j; Remove-Job $j
+    Verdict 'still_detects_after_expiry' $started 'the paired headset starts the streamer after several expiries'
+    $samples | Export-Csv "$wd\samples.csv" -NoTypeInformation
+    @{ results = $results; marks = $marks } | ConvertTo-Json -Depth 4 -Compress | Out-File "$wd\verdicts.json" -Encoding ascii
+    Write-Output 'DONE'
+    exit 0
+}
 
 # A: idle, no streamer: exactly one discovery child
 $ok = WaitFor { param($s) $s.discover -eq 1 } 8
