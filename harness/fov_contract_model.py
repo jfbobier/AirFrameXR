@@ -122,7 +122,7 @@ def band_uv(view, axis, rm, contour):
 
 def _worst(size, cs, sh, er, loT, hiT, axis, rm, m, free):
     ow, _, cx, _, sx, _ = ffr_vars(size, size, cs, cs, sh, sh, er, er)
-    return axis_loss(cx, sx, er, loT, hiT, axis, rm, m, 401, free), ow
+    return axis_loss(cx, sx, er, loT, hiT, axis, rm, m, 801, free), ow   # PipelineModel: 801 samples
 
 
 def milder(view, eye, rm, window=None, margin=MARGIN, inside_follow_map=False):
@@ -154,7 +154,7 @@ def milder(view, eye, rm, window=None, margin=MARGIN, inside_follow_map=False):
             lo, hi = 1.0, ALVR_E[axis]
             if _worst(size, cs, sh, hi, loT, hiT, axis, rm, margin, free)[0] <= 1 + 1e-6: er = hi
             else:
-                for _ in range(18):
+                for _ in range(22):
                     mid = (lo + hi) / 2
                     if _worst(size, cs, sh, mid, loT, hiT, axis, rm, margin, free)[0] <= 1 + 1e-6: lo = mid
                     else: hi = mid
@@ -182,7 +182,7 @@ def choose_eye(view, rm, mbps, fps, window=None, bpp=None, **kw):
     if px(eye_at(hi)) <= budget: best = eye_at(hi)
     elif px(eye_at(lo)) >= budget: best = eye_at(lo)
     else:
-        for _ in range(14):
+        for _ in range(20):
             mid = (lo + hi) / 2
             if px(eye_at(mid)) <= budget: lo = mid
             else: hi = mid
@@ -200,7 +200,7 @@ def mode_eye(mode, window, rm, frustum=AVP_FRUSTUM, base=BASE_EYE):
     else:
         d = (base[0] / (window[0] + window[1]), base[1] / (window[2] + window[3]))
     d = (min(d[0], cap[0]), min(d[1], cap[1]))
-    return (min(MAX_W, align32(d[0] * (window[0] + window[1]))), min(MAX_H, align32(d[1] * (window[2] + window[3]))))
+    return (min(MAX_W, align32(d[0] * (window[0] + window[1]) + 1e-6)), min(MAX_H, align32(d[1] * (window[2] + window[3]) + 1e-6)))   # StreamDensity.Eye
 
 
 def row(name, eye, g, box, mbps=275, fps=100):

@@ -673,6 +673,7 @@ namespace AirFrameXR
             // session.json is transient: compiled from the golden master (session.base.json) and the settings at every start (the stream fit, the foveation, the render choice)
             var compiled = SessionCompiler.Compile(new AppSettings(), AppSettings.ReadClientFov());
             if (compiled != null) Log.Write("INFO", compiled);
+            compiledView = PipelineModel.PictureEdgesFoveation.Last?.View; boxWarned = false;   // the box this start sized the stream for (Vision Pro), compared with what the headset declares
             StartAudioRoute();
             var err = host.Start(args);
             if (err != null)
@@ -683,6 +684,19 @@ namespace AirFrameXR
             }
             footer.Text = "Streamer running. Open ALVR on the headset.";
             Log.Write("INFO", "streamer started: alvr_host " + args);
+        }
+
+        double[] compiledView; bool boxWarned;
+        /// docs/FOV_CONTRACT_PLAN.md phase 0: the stream was sized at this start for the box the headset declared at its last connection (config\airframexr_views.json). When the
+        /// headset now declares another one (its FoV sliders moved, or no box was saved yet), the size and the foveation are for the wrong box until the next start: say so once.
+        void CheckCompiledBox(double[] declared)
+        {
+            if (compiledView == null || declared == null || boxWarned) return;
+            if (Enumerable.Range(0, 4).All(k => Math.Abs(declared[k] - compiledView[k]) <= 0.01)) return;
+            boxWarned = true;
+            string T(double[] v) => string.Join(" / ", v.Select(x => x.ToString("0.00", CultureInfo.InvariantCulture)));
+            Log.Write("WARN", $"field of view: the headset declares {T(declared)}, the stream was sized for {T(compiledView)}; the box is saved now: restart the streamer to size the stream for it");
+            footer.Text = "The headset's field of view differs from the one the stream was sized for: restart the streamer to apply it."; footer.ForeColor = Color.DarkGoldenrod;
         }
 
         /// The stream fit (docs/FOV_PIPELINE_OPTIM.md, Advanced window): writes nothing. The golden master keeps the resolution the user chose; the fit size is compiled into
@@ -789,7 +803,9 @@ namespace AirFrameXR
                         try
                         {
                             var f = fa.Select(x => Convert.ToDouble(x, CultureInfo.InvariantCulture)).ToArray();
-                            ApplyStreamFit(new[] { (f[0] + f[5]) / 2, (f[1] + f[4]) / 2, (f[2] + f[6]) / 2, (f[3] + f[7]) / 2 }, true);
+                            var avg = new[] { (f[0] + f[5]) / 2, (f[1] + f[4]) / 2, (f[2] + f[6]) / 2, (f[3] + f[7]) / 2 };
+                            ApplyStreamFit(avg, true);
+                            CheckCompiledBox(avg);
                         }
                         catch (Exception ex) { Log.Write("WARN", "stream fit: " + ex.Message); }
                     }

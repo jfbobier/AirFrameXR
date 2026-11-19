@@ -1,6 +1,6 @@
 # FoV contract: the streamer owns the field of view (plan)
 
-Status 2026-11-19: **plan, nothing built.** The engine items need the owner's go-ahead, on their own branch (`fov-contract`, a worktree off main).
+Status 2026-11-19: **phase 0 built** on branch `fov-contract` (GUI only: `video.stream_density` bitrate / faster / sharper, the foveation following Apple's map inside the window, the FOV card's density readout and slider advice, the streamer's warning when the headset's box differs from the compiled one); lab-checked, not yet on a headset (section 6). Phases 1-3: not built; the engine items need the owner's go-ahead, on the same branch.
 This replaces the design parts of `docs/FOV_PIPELINE_OPTIM.md` (S3 fit tick, S4 client ceiling, S6 declare channel, S9 render ceiling); its
 measurements still hold. Numbers marked *model* come from `harness/fov_contract_model.py` (a Python reference of the launcher's sizing; `--selftest`
 reproduces the 2026-11-14 SWGR compile line exactly), not from a headset. Primary target: Apple Vision Pro; the Quest uses the same design.
@@ -197,7 +197,7 @@ hand-edit escape. `docs/EXPERIMENTAL_SWITCHES.md` and `docs/PERFORMANCE_KNOBS.md
 
 | Phase | Content | Gate | Measured on |
 |---|---|---|---|
-| 0 (no engine, possible now) | U1a, U3 on today's client, `e2e_fov_restrict_checker_floor`, `harness/fov_contract_model.py` | the `--phase0` rows in C#; UI matrix 0 FAIL | lab; then SWGR on the 5090 + Vision Pro: as run against Sharper, by eye, encode / decode ms from the existing logs |
+| 0 (no engine) | U1a, U3 on today's client, `e2e_fov_restrict_checker_floor`, `harness/fov_contract_model.py`. **Built 2026-11-19** (not the checker scenario): `harness/density_check.py` 6 of 6 (the real SessionCompiler through `uitest.exe` equals the model: stream size, foveation, density, for sliders 0.80 / 0.90 and 0.80 / 0.76 in the three modes), UI renders 0 failures (`advanced-switches`, the seven `fov-panel-*` cases, the new `fov-panel-sharper`) | the `--phase0` rows in C#; UI matrix 0 FAIL | lab; then SWGR on the 5090 + Vision Pro: as run against Sharper, by eye, encode / decode ms from the existing logs |
 | 1 (engine branch + clients) | E1-E3, U1-U3, V1-V4, Q1-Q2 | `e2e_fov_contract` and `_stock` PASS; the client's CI compile | the same SWGR A/B on the new client; Quest 3: one game, honoured line |
 | 2 | E5 mask, E6 per-eye boxes, U4, U5, V5 | GPU saving measured in two games for the mask; the chart on both headsets | headset |
 | 3 | E4 cleanup | the FoV regressions rewritten on the contract | lab |

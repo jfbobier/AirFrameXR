@@ -374,7 +374,9 @@ namespace AirFrameXR
             /// The foveation the stream gets: the zero-loss geometry at `Margin`, never stronger than ALVR's defaults (a centre at least that large, an edge ratio at most that high),
             /// and, when a restriction window is on (outer, inner, upper, lower tangents), centred on that window: outside it (plus two degrees) the game draws nothing, so the edge
             /// may be compressed as far as the cap allows. (cs x, cs y, shift x, shift y, er x, er y)
-            public static double[] Milder(double[] view, int[] eye, RateMap rm, double[] window = null)
+            /// `insideFollowsMap` (docs/FOV_CONTRACT_PLAN.md phase 0, the Faster / Sharper stream sizes): with a window, the full-density band is chosen among Apple's map contours
+            /// as without one, instead of the whole window at full density (which paid full density out to 50 degrees, where the map keeps 30 % or less); outside the window stays free.
+            public static double[] Milder(double[] view, int[] eye, RateMap rm, double[] window = null, bool insideFollowsMap = false)
             {
                 var o = new double[6];
                 for (int axis = 0; axis < 2; axis++)
@@ -387,7 +389,8 @@ namespace AirFrameXR
                         double gLo = axis == 0 ? window[0] : window[3], gHi = axis == 0 ? window[1] : window[2];
                         gLo = Math.Min(loT, Math.Tan(Math.Atan(gLo) + WindowMarginDeg * Math.PI / 180)); gHi = Math.Min(hiT, Math.Tan(Math.Atan(gHi) + WindowMarginDeg * Math.PI / 180));
                         free = new[] { -Deg(gLo), Deg(gHi) };
-                        bands.Add(axis == 0 ? new[] { (loT - gLo) / span, (loT + gHi) / span } : new[] { (hiT - gHi) / span, (hiT + gLo) / span });
+                        if (insideFollowsMap) for (int k = 30; k < 96; k += 5) { BandUv(view, axis, rm, k / 100.0, out var a0, out var a1, out _, out _); bands.Add(new[] { a0, a1 }); }
+                        else bands.Add(axis == 0 ? new[] { (loT - gLo) / span, (loT + gHi) / span } : new[] { (hiT - gHi) / span, (hiT + gLo) / span });
                     }
                     else for (int k = 30; k < 96; k += 5) { BandUv(view, axis, rm, k / 100.0, out var a0, out var a1, out _, out _); bands.Add(new[] { a0, a1 }); }
                     foreach (var b in bands)
@@ -512,6 +515,79 @@ namespace AirFrameXR
             }
         }
 
+        /// How the Vision Pro's stream is sized (docs/FOV_CONTRACT_PLAN.md, phase 0; `video.stream_density`). All densities are at the centre of the view:
+        /// px / (tan left + tan right) x pi / 180 per axis, never px / degrees (over the Vision Pro's frustum that reads about 1.5 x the centre value).
+        ///  * "bitrate" (the default, unchanged since 1.3.5): the pixels the bitrate buys at the profile's bits per pixel (ChooseEye), the restriction window at full density.
+        ///  * "faster": the golden resolution's density over the headset's whole box at FoV sliders 1, over the box it declares: a smaller box gives a smaller stream, the same sharpness.
+        ///  * "sharper": the golden resolution's pixel count over the box the headset declares: a smaller box (the headset app's sliders) gives a denser stream.
+        /// Both new modes are capped at Apple's full-rate density (the rate map: 2292 px per tangent unit, 40 px/deg) and NVENC's width, and their foveation follows Apple's map inside
+        /// the restriction window (Milder insideFollowsMap). The bitrate is a result: the bits per encoded pixel it leaves are shown, not used to size anything.
+        public static class StreamDensity
+        {
+            public const string Key = "video.stream_density";
+            public static string Mode(AppSettings st) { var m = Json.Str(st.Root, Key, "bitrate"); return m == "faster" || m == "sharper" ? m : "bitrate"; }
+
+            /// The box the AirFrameXR client declares with its FoV sliders at 1 (outer, inner, upper, lower; the two eyes averaged): the host's pilot views (tools/host/src/main.rs
+            /// AVP_DEFAULT_FOV), which the 2026-11-14 shim lines confirm (outer 1.215 at 85 % of the declared box = 1.43 = 1.79 x 0.8). Wider than Apple's per-view frustum in the rate map
+            /// (1.73 / 1.00 / 1.19 / 1.00): the client circumscribes the canted views. The reference of Faster's density and of the slider advice.
+            public static readonly double[] AvpBoxAtFov1 = { 1.7909, 1.02175, 1.2211, 1.02175 };
+            /// the 1.3.11 client's slider range (FovScale.swift fovScaleRange)
+            public const double SliderMin = 0.6, SliderMax = 1.4;
+
+            /// the per-eye stream size of a mode from the golden resolution over `view` (the box the headset declares); null for "bitrate" (ChooseEye sizes it)
+            public static int[] Eye(string mode, int[] golden, double[] view, RateMap rm)
+            {
+                if (mode != "faster" && mode != "sharper" || golden == null || view == null || rm == null) return null;
+                double sx = view[0] + view[1], sy = view[2] + view[3];
+                double dx = mode == "faster" ? golden[0] / (AvpBoxAtFov1[0] + AvpBoxAtFov1[1]) : golden[0] / sx;
+                double dy = mode == "faster" ? golden[1] / (AvpBoxAtFov1[2] + AvpBoxAtFov1[3]) : golden[1] / sy;
+                dx = Math.Min(dx, rm.Density[0]); dy = Math.Min(dy, rm.Density[1]);
+                return new[] { Math.Max(256, Math.Min(MaxEyeWidth, Align32Floor(dx * sx + 1e-6))), Math.Max(256, Math.Min(MaxEyeHeight, Align32Floor(dy * sy + 1e-6))) };
+            }
+
+            /// centre px/deg per axis of an eye size over a box (outer, inner, upper, lower tangents)
+            public static double[] Ppd(int[] eye, double[] box) => new[] { eye[0] / (box[0] + box[1]) * Math.PI / 180, eye[1] / (box[2] + box[3]) * Math.PI / 180 };
+
+            /// The headset app's FoV sliders (horizontal, vertical) that still cover the window: per axis the smallest factor on AvpBoxAtFov1 that keeps both edges, rounded up to
+            /// 0.01, within the slider's range. A slider scales both edges of its axis, so the outer edge stays wider than the window (the nose side decides).
+            public static double[] Sliders(double[] window)
+            {
+                if (window == null) return null;
+                double h = Math.Max(window[0] / AvpBoxAtFov1[0], window[1] / AvpBoxAtFov1[1]), v = Math.Max(window[2] / AvpBoxAtFov1[2], window[3] / AvpBoxAtFov1[3]);
+                double R(double x) => Math.Max(SliderMin, Math.Min(SliderMax, Math.Ceiling(x * 100 - 1e-6) / 100));
+                return new[] { R(h), R(v) };
+            }
+
+            /// What a compile chose and what reaches the eye: the window shows it, the log line carries it.
+            public class Result
+            {
+                public string Mode, BoxSource;
+                public double[] View, Window, StreamPpd, GamePpd, Sliders;
+                public int[] Golden, Eye, Encoded, Game;
+                public double Mpx, Bpp, Mbps, Fps, HeadsetPpd;
+            }
+
+            /// the numbers of a compile: the encoded frame of geometry `g`, its bits per pixel at the session's bitrate, the densities of the stream (over the box) and of the game
+            /// (over the window it is told, the render plan's size; without a window the game renders the stream's own size over the box)
+            public static Result Describe(string mode, string boxSource, int[] golden, int[] eye, double[] g, double[] view, double[] window, int[] game, RateMap rm, double mbps, double fps)
+            {
+                FfrVars(eye[0], eye[1], g[0], g[1], g[2], g[3], g[4], g[5], out var ow, out var oh, out _, out _, out _, out _);
+                var r = new Result { Mode = mode, BoxSource = boxSource, View = view, Window = window, Golden = golden, Eye = eye, Encoded = new[] { 2 * ow, oh }, Mbps = mbps, Fps = fps };
+                r.Mpx = 2.0 * ow * oh / 1e6;
+                r.Bpp = mbps > 0 && fps > 0 && r.Mpx > 0 ? mbps * 1e6 / (fps * r.Mpx * 1e6) : 0;
+                r.StreamPpd = Ppd(eye, view);
+                r.Game = game ?? eye;
+                r.GamePpd = Ppd(r.Game, window ?? view);
+                r.HeadsetPpd = rm.Density[0] * Math.PI / 180;
+                r.Sliders = Sliders(window);
+                return r;
+            }
+
+            static string F1(double v) => v.ToString("0.0", CultureInfo.InvariantCulture);
+            public static string PpdText(double[] p) => F1(p[0]) + " x " + F1(p[1]);
+            public static string SliderText(double[] s) => s == null ? "" : "H " + s[0].ToString("0.00", CultureInfo.InvariantCulture) + " / V " + s[1].ToString("0.00", CultureInfo.InvariantCulture);
+        }
+
         /// The step D wiring (docs/PICTURE_EDGES_DESIGN.md sections 5b and 9; owner 2026-11-06): the foveation of the stream is computed from the picture edges V (the Vision Pro
         /// card's profile, or the whole panel the headset declares = "Apple's default") and Apple's rasterization map, over the stream size already in session.json. It compresses
         /// nothing below what the map keeps at that angle (the zero-loss geometry), so it never costs picture, and it takes the place of the static numbers of the profile. Only the
@@ -583,8 +659,23 @@ namespace AirFrameXR
             /// Computes the foveation for the stream size in `session` and writes it there. Vision Pro only (the map is Apple's). `explicit`: the user just chose a picture-edges
             /// profile, finished a fit, or is setting up (clears the hand-edit flag); false: a passive recompute (the streamer starting) that leaves hand-edited numbers alone.
             /// Returns what it wrote, one line, or null when it wrote nothing. The caller saves the session (and the settings when the flag changed).
+            /// the numbers of the last Apply in this process (a compile or a preview): what the FOV card shows and what the streamer compares the headset's box with; null = nothing computed
+            public static StreamDensity.Result Last;
+
+            /// Apply's sizing and foveation for given inputs, nothing read or written (the UI harness: a pretend headset; no fit, no typed size, no render percentage)
+            public static StreamDensity.Result PreviewFor(string mode, int[] golden, double[] view, double[] window, RateMap rm, double mbps, double fps)
+            {
+                if (rm == null || golden == null || view == null) return null;
+                var fovea = window != null && Enumerable.Range(0, 4).All(k => window[k] >= view[k] - 1e-6) ? null : window;
+                var eye = (mode != "bitrate" ? StreamDensity.Eye(mode, golden, view, rm) : ChooseEye(view, rm, mbps, fps, out _, fovea)) ?? golden;
+                var g = RateMapFoveation.Milder(view, eye, rm, fovea, mode != "bitrate");
+                var plan = window != null ? RenderPlan.Make(rm.RecommendedEye ?? golden, view, window, eye, 0, false) : null;
+                return StreamDensity.Describe(mode, "a test box", golden, eye, g, view, window, plan?.Chosen, rm, mbps, fps);
+            }
+
             public static string Apply(AppSettings st, Dictionary<string, object> session, bool explicitChoice, RateMap rm = null)
             {
+                Last = null;
                 if (st.Kind != HeadsetKind.VisionPro) return null;
                 rm = rm ?? RateMapFoveation.Load(ProfilePath);
                 if (rm == null) return null;
@@ -595,11 +686,26 @@ namespace AirFrameXR
                 // centre as large as the frame, no foveation at all, and the stream sized for the bitrate fell to 1984 x 1600 over a 0.6 box)
                 var fovea = window != null && Enumerable.Range(0, 4).All(k => window[k] >= view[k] - 1e-6) ? null : window;
                 var eye = StreamEyeExpected(session);
+                var golden = eye;
                 var c = CultureInfo.InvariantCulture;
                 string sized = "";
+                var mode = StreamDensity.Mode(st);
+                string boxSource = AppSettings.ReadClientFov() != null ? "the box the headset declared at its last connection" : "Apple's frustum (no saved headset box was read)";
+                double sMbps = Json.Num(session, "session_settings.video.bitrate.mode.ConstantMbps", 0), sFps = Json.Num(session, "session_settings.video.preferred_fps", 0);
+                // Faster / Sharper (docs/FOV_CONTRACT_PLAN.md phase 0): the stream size follows the golden resolution and the box the headset declares, not the bitrate
+                if (mode != "bitrate" && !st.StreamFitWindow && !st.StreamSizeManual && eye != null)
+                {
+                    var chosen = StreamDensity.Eye(mode, eye, view, rm);
+                    if (chosen != null)
+                    {
+                        sized = $" (stream sharpness {mode}: {chosen[0]} x {chosen[1]} from the golden {eye[0]} x {eye[1]} over the box)";
+                        eye = chosen;
+                        WriteStreamEye(session, eye[0], eye[1]);
+                    }
+                }
                 // the stream size follows the bitrate (a constant bitrate, the user's: the profile only suggests 300 Mbps) unless the user fits the stream to the headset's window
                 // (the older tick) or set the size by hand (the flag above)
-                if (!st.StreamFitWindow && !st.StreamSizeManual && Json.Str(session, "session_settings.video.bitrate.mode.variant", "") == "ConstantMbps")   // a size typed in Settings is kept (the foveation is still computed for it)
+                else if (!st.StreamFitWindow && !st.StreamSizeManual && Json.Str(session, "session_settings.video.bitrate.mode.variant", "") == "ConstantMbps")   // a size typed in Settings is kept (the foveation is still computed for it)
                 {
                     double mbps = Json.Num(session, "session_settings.video.bitrate.mode.ConstantMbps", 0), fps = Json.Num(session, "session_settings.video.preferred_fps", 0);
                     // the keep-size switch (Advanced): size for the whole panel the headset asks for at FoV 1, so a smaller declared view gets denser pixels instead of a smaller stream
@@ -613,23 +719,31 @@ namespace AirFrameXR
                     }
                 }
                 if (eye == null || eye[0] < 256 || eye[1] < 256) return null;
-                var g = RateMapFoveation.Milder(view, eye, rm, fovea);
+                var g = RateMapFoveation.Milder(view, eye, rm, fovea, mode != "bitrate");
                 RateMapFoveation.ApplyGeometry(session, g);
                 FfrVars(eye[0], eye[1], g[0], g[1], g[2], g[3], g[4], g[5], out var encW, out var encH, out _, out _, out _, out _);   // what the encoder is given, for the log
                 // the render choice follows the stream size and the box: the percentage the user chose is turned into the engine's quality again at every start and every choice
                 string render = "";
                 var reference = st.RenderReferenceEye ?? rm.RecommendedEye;
+                int[] game = null;
                 if (window != null)
                 {
                     var plan = RenderPlan.Make(reference, view, window, eye, st.RenderSpendPct, st.RenderAboveStream);
                     if (plan != null)
                     {
                         Json.Set(st.Root, "video.fov_render_quality", plan.Quality);
+                        game = plan.Chosen;
                         render = $"; the game renders {plan.Chosen[0]} x {plan.Chosen[1]} ({plan.ChosenMpx.ToString("0.0", c)} Mpx, {plan.ChosenPct.ToString("0", c)} % of pixel for pixel, saves {plan.SavingPct.ToString("0", c)} % against {reference[0]} x {reference[1]})";
                     }
                 }
-                var logLine = $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye (encoded {encW} x {encH} per eye, {(2.0 * encW * encH / 1e6).ToString("0.0", c)} Mpx both): centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}" + (window != null ? $" (centred on the restriction {string.Join(" / ", window.Select(x => x.ToString("0.00", c)))})" : "") + " (never stronger than ALVR's 0.45 x 0.40, 4 / 5)";
-                return logLine + render;
+                var logLine = $"foveation from the picture edges {string.Join(" / ", view.Select(x => x.ToString("0.00", c)))} and Apple's map{sized}, over {eye[0]} x {eye[1]} per eye (encoded {encW} x {encH} per eye, {(2.0 * encW * encH / 1e6).ToString("0.0", c)} Mpx both): centre {g[0].ToString("0.000", c)} x {g[1].ToString("0.000", c)}, shift {g[2].ToString("0.000", c)} / {g[3].ToString("0.000", c)}, edge ratio {g[4].ToString("0.000", c)} / {g[5].ToString("0.000", c)}" + (window != null ? $" (centred on the restriction {string.Join(" / ", window.Select(x => x.ToString("0.00", c)))}" + (mode != "bitrate" ? ", full density where Apple's map keeps it" : "") + ")" : "") + " (never stronger than ALVR's 0.45 x 0.40, 4 / 5)";
+                // what reaches the eye (docs/FOV_CONTRACT_PLAN.md): one line a log reader can compare between sessions
+                var d = StreamDensity.Describe(mode, boxSource, golden, eye, g, view, window, game, rm, sMbps, sFps);
+                Last = d;
+                var density = $"; density at the centre: stream {StreamDensity.PpdText(d.StreamPpd)} px/deg, game {StreamDensity.PpdText(d.GamePpd)} px/deg, the headset samples up to {d.HeadsetPpd.ToString("0.0", c)}; "
+                    + $"{d.Bpp.ToString("0.00", c)} bits per encoded pixel at {sMbps.ToString("0", c)} Mbps / {sFps.ToString("0", c)} Hz; stream sharpness {mode}; the box is {boxSource}"
+                    + (d.Sliders != null ? $"; headset FoV sliders that cover the restriction: {StreamDensity.SliderText(d.Sliders)}" : "");
+                return logLine + render + density;
             }
 
             /// A window's choice (a profile picked, a fit finished, the wizard saving): the picture-edges foveation is computed again at the next streamer start (SessionCompiler), so the
