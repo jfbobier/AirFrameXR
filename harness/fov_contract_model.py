@@ -195,8 +195,10 @@ def mode_eye(mode, window, rm, frustum=AVP_FRUSTUM, base=BASE_EYE):
     """the plan's two anchors: Faster keeps the base density (base eye over the frustum), Sharper keeps the base pixel count over the window,
     each capped at the headset's centre density (Apple's full-rate density)"""
     cap = rm["density"]
-    if mode == "faster":
-        d = (base[0] / (frustum[0] + frustum[1]), base[1] / (frustum[2] + frustum[3]))
+    mode = {"balanced": "faster", "sharp": "sharper"}.get(mode, mode)   # 1.4 names
+    if mode in ("faster", "performance"):
+        share = 0.75 if mode == "performance" else 1.0   # StreamDensity.PerformanceShare
+        d = (share * base[0] / (frustum[0] + frustum[1]), share * base[1] / (frustum[2] + frustum[3]))
     else:
         d = (base[0] / (window[0] + window[1]), base[1] / (window[2] + window[3]))
     d = (min(d[0], cap[0]), min(d[1], cap[1]))

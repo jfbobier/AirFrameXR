@@ -49,8 +49,7 @@ def compile_case(work, mode, box, window, golden=(3648, 3200), mbps=275, fps=100
     setp(s, V + "preferred_fps", fps)
     (root / "config" / "session.base.json").write_text(json.dumps(s, indent=1))
     v = {"fov_override": True, "fov_outer": window[0], "fov_inner": window[1], "fov_upper": window[2], "fov_lower": window[3]}
-    if mode != "bitrate":
-        v["stream_density"] = mode
+    v["stream_density"] = mode
     (root / "config" / "airframexr.json").write_text(json.dumps({"headset": {"name": "Apple Headset"}, "video": v}, indent=1))
     (root / "config" / "airframexr_views.json").write_text(json.dumps({"fov_tan": [box[0], box[1], box[2], box[3], box[1], box[0], box[2], box[3]]}))
     exe = subprocess.run(["wslpath", "-w", str(root / "bin" / "uitest.exe")], capture_output=True, text=True).stdout.strip()
@@ -68,15 +67,17 @@ def main():
     fails = 0
     for sl in ((0.8, 0.9), (0.80, 0.76)):
         box = (F[0] * sl[0], F[1] * sl[0], F[2] * sl[1], F[3] * sl[1])
-        for mode in ("bitrate", "faster", "sharper"):
+        for mode in ("bitrate", "performance", "balanced", "sharp"):
             comp, line = compile_case(work, mode, box, W)
             eye = (int(getp(comp, "openvr_config.eye_resolution_width", 0)), int(getp(comp, "openvr_config.eye_resolution_height", 0)))
             g = [getp(comp, V + "foveated_encoding.content." + k, 0) for k in ("center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y")]
             if mode == "bitrate":
                 want_eye, want_g, _ = m.choose_eye(box, rm, 275, 100, W)
             else:
-                want_eye = m.mode_eye(mode, box, rm)
-                want_g = m.milder(box, want_eye, rm, W, inside_follow_map=True)
+                # 1.4: the headset app declares the restriction (video.client_box): the stream covers the restriction capped at the Vision Pro's box, no window
+                cb = tuple(round(min(W[k], m.AVP_FRUSTUM[k]), 4) for k in range(4))
+                want_eye = m.mode_eye(mode, cb, rm)
+                want_g = m.milder(cb, want_eye, rm, None)
             ok = tuple(eye) == tuple(want_eye) and all(abs(a - b) <= 0.0015 for a, b in zip(g[:2] + g[4:], [want_g[0], want_g[1], want_g[4], want_g[5]]))
             fails += 0 if ok else 1
             dens = line.split("density at the centre: ")[1].split(";")[0] if "density at the centre: " in line else "(no density in the log line)"

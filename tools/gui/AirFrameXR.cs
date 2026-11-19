@@ -701,8 +701,13 @@ namespace AirFrameXR
             if (Enumerable.Range(0, 4).All(k => Math.Abs(declared[k] - compiledView[k]) <= 0.01)) return;
             boxWarned = true;
             string T(double[] v) => string.Join(" / ", v.Select(x => x.ToString("0.00", CultureInfo.InvariantCulture)));
-            Log.Write("WARN", $"field of view: the headset declares {T(declared)}, the stream was sized for {T(compiledView)}; the box is saved now: restart the streamer to size the stream for it");
-            footer.Text = "The headset's field of view differs from the one the stream was sized for: restart the streamer to apply it."; footer.ForeColor = Color.DarkGoldenrod;
+            bool sent = PipelineModel.PictureEdgesFoveation.Last?.BoxSource?.StartsWith("the restriction, sent") == true;   // 1.4: the box was sent to the headset app
+            Log.Write("WARN", $"field of view: the headset declares {T(declared)}, the stream was sized for {T(compiledView)}; " + (sent
+                ? "the headset app did not take the box the streamer sent (a 1.3 app declares its own FoV sliders' box: update the app to 1.4, or set its sliders as the FOV card says)"
+                : "the box is saved now: restart the streamer to size the stream for it"));
+            footer.Text = sent ? "The headset app did not take the streamer's field of view: update it to 1.4 (or set its FoV sliders as the FOV card says)."
+                               : "The headset's field of view differs from the one the stream was sized for: restart the streamer to apply it.";
+            footer.ForeColor = Color.DarkGoldenrod;
         }
 
         /// The stream fit (docs/FOV_PIPELINE_OPTIM.md, Advanced window): writes nothing. The golden master keeps the resolution the user chose; the fit size is compiled into
