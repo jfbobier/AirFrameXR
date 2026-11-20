@@ -8,8 +8,9 @@ fork lab's dedicated ones (`tools/builder*.local` copied from `universal-openxr-
 branch only and only after the owner confirms at the start of each engine step (M1, Phase B); no push, release or merge without asking; every engine arm
 behind one lab switch, default = 1.4's behaviour; the product keeps its defaults.
 
-v3 (2026-11-20) changes two things: the base moves to 1.4, and **the next engine round is the game visibility mask (Part M)**, ahead of the identity
-work's Phase B. The identity sections (1-11) are v2's, with their base updated.
+v3 (2026-11-20) changes two things: the base moves to 1.4, and **the next engine round is the calibrated mask (Part M)**, ahead of the identity work's
+Phase B: first in the encoder (every game), in the game only if evidence shows titles the owner plays would use it. The identity sections (1-11) are v2's,
+with their base updated.
 
 What changed from v1, and why:
 
@@ -26,8 +27,9 @@ What changed from v1, and why:
 
 1. **G0, the foundation:** the VDXR fork lab R1-R6 (`docs/PLAN_VDXR_FORK_LAB.md`) on this branch's build (1.4 + the fork). The fork lab was written on
    1.3.11; its rows apply unchanged, and R5 gains 1.4's FoV scenarios (`e2e_fov_client_box`, `e2e_fov_tool_mask`, `e2e_fov_tool_fit`).
-2. **Phase A (identity signal) and M0 (which games ask for a mask):** no engine change, the same B1 build, one lab session.
-3. **The mask round, M1-M4** (Part M; engine, after the owner confirms at M1).
+2. **No engine change, one lab session:** the identity work's Phase A, the mask's E0 (offline encodes) and G0 (which of the owner's non-UEVR titles ask
+   for a mask).
+3. **The encoder mask, E1-E3** (Part M; engine, after the owner confirms at E1). The game mask only if G0 finds titles (M-G).
 4. **G1, the field check** (fork lab plan section 3, 5090, AC Black Flag with the mod, one session): does the mod's duplicate cycle release an image?
 5. **Phase B (engine, after the owner confirms):** arm U1, the matrix again, regressions, timing A/B. Decision B.
 6. **Headset A/B** (section 9) only if Phase B passes.
@@ -36,84 +38,78 @@ Base moved on 2026-11-20 (this branch). From 1.3.11 to 1.4 the engine changed on
 app, `client_sharpen`) and the ALVR patches (`headset-view-message.patch` and the lab's `client-reserved-message*.patch`); the shim, the IPC (version 37 on
 both) and VDXR did not, so nothing in Phase A's design changes. Run it on this branch.
 
-## M. Game visibility masks (the next engine round)
+## M. The calibrated mask (the next engine round): the encoder first, the game only with evidence
 
 **Goal.** 1.4's line test gives a profile a per-eye visible outline (`mask`, kind `corner_fraction_v1`: four corner fractions per eye; `FovMask.Polygon` in
-`tools/gui/UserFovProfiles.cs` makes it a convex octagon in tangent units). 1.4 only stores it: the game renders the whole rectangle. Handing the outline to
-the game as OpenXR's visibility mask (`XR_KHR_visibility_mask`) lets an engine that uses it skip the hidden pixels. The per-eye edges (`tan_left` /
-`tan_right`, stored but never told, because a per-eye box broke the parallax in End of Abyss) go into the same mask: each eye also hides the strip it does
-not see, while the box and projection the game is told stay the same for both eyes. Nothing in this round is Vision Pro only: the line test and the mask
-work the same on every headset.
+`tools/gui/UserFovProfiles.cs` makes it a convex octagon in tangent units; the per-eye edges `tan_left` / `tan_right` cut each eye's own strip). 1.4 only
+stores it. Two places can use it:
 
-### M1. Facts (code read 2026-11-20; fork `airframexr` 46deebb, shim and IPC on this branch)
+- **The encoder (M-E, first).** The hidden corners are in every frame we encode, whatever the game. Spending almost no bits there works for UEVR games
+  too and touches only our encoder: no game, VDXR, shim or IPC change.
+- **The game (M-G, only with evidence).** Handed over as OpenXR's visibility mask it saves GPU only in games that draw it. The evidence of 2026-11-20
+  (M-G) finds none among the owner's mods. The owner's rule: no engine change for the very few games that would use it.
 
-- VDXR advertises `XR_KHR_visibility_mask` (`instance.cpp:577`) and answers `xrGetVisibilityMaskKHR` (`visibility_mask.cpp:39`) for both stereo views with
-  `ovr_GetFovStencil` (`:108`, `:130`) on the eye's FovPort, the box the game is told (`:105`): hidden triangles, visible triangles, or the line loop (it
-  keeps every second index, `:99`). It reads the vertices as SteamVR hidden-area-mesh coordinates (0..1 across the FovPort, y down) and converts them to
-  OpenXR's view plane (`convertSteamVRToOpenXRHiddenMesh`, `:169`); indices are 16-bit. It logs `Application uses visibility mask` once per process
-  (`:78`) in its own `OpenXR.log` (`framework/entry.cpp:98`).
-- Our shim answers that call with OVRNull's stub (`OVRNull/api.cpp:142` in the fork): 0 vertices, 0 indices. Every game that asks gets an empty mask
-  today, as in every release so far.
-- OVRNull's API reaches the driver through `IDriver` (`api.cpp:78`, as `GetEyeFov`); `ovrshim/driver.cpp` is our `IDriver`. The change is one `IDriver`
-  method in the fork (`GetFovStencil`; OVRNull's own driver keeps returning the empty mesh) and its implementation in the shim.
-- VDXR already raises `XrEventDataVisibilityMaskChangedKHR` per eye when its `visibility_mask_scale` setting changes (`session.cpp:545-548`,
-  `instance.cpp:456-472`): a ready path for a live change later. Round 1 latches the mask at game start, like the box.
-- The IPC carries the box the game is told as per-edge fractions (`ovrshim/ipc.h:114-116`, version 37); the mask needs its own field and version 38.
-- **UEVR never applies a mask** (its source read 2026-11-20, `praydog/UEVR` `4ee5c6b` of 2026-08-29; about 60 % of the owner's games, SWGR and Mortal
-  Shell 2 among them). It cannot ask: it enables only the D3D11 / D3D12, depth-layer and cylinder-layer extensions (`src/mods/VR.cpp:279-302`), not
-  `XR_KHR_visibility_mask`, and VDXR refuses the call without it (`visibility_mask.cpp:57`). And Unreal never draws one: the HMD UEVR fakes for the engine
-  starts with every function a stub returning 0 (`src/mods/vr/IXRTrackingSystemHook.cpp:383-386`) and replaces about ten (`:486-626`: connection, resets,
-  tracking, the view extension); `HasHiddenAreaMesh` and `HasVisibleAreaMesh` stay at 0. UEVR games gain nothing from round 1. Reaching them means
-  changing UEVR (its fake HMD answering the hidden-area functions from the runtime's mask, for each Unreal version it supports), not our engine.
-- The other games are open: native OpenXR titles (Unreal's own OpenXR plugin, Unity's occlusion mesh) and SteamVR titles through OpenComposite (its
-  `GetHiddenAreaMesh`; source not read yet) may ask. M0 reads which of the owner's do.
+Nothing in this part is Vision Pro only.
 
-### M2. What it can buy (a bound, not a measurement)
+### M-E. The encoder mask (every game)
 
-- The author's fit (shipped profile *AVP optimized trade-off*, told box 0.9215 / 0.5775 / 0.90 / 0.77): the visible octagon is 61.4 % (left eye) and
-  57.8 % (right eye) of the told rectangle, so the mask hides **38.6 % and 42.2 %**: 35.2 % and 39.5 % inside each eye's own rectangle, plus its 5.2 % and
-  4.5 % edge strip.
-- A game skips only the pixel work inside the hidden area; geometry, shadow maps, compute and full-screen passes that ignore the mask still run. As a
-  scale only: on SWGR's line (2026-11-19, `docs/FOV_CONTRACT_PLAN.md` section 9: 7.7 ms + 0.45 ms per game Mpx, both eyes) the fit's 9.1 Mpx is 11.8 ms
-  (85 fps), and 10.2 ms (98 fps) if the whole per-Mpx part followed the mask. SWGR itself is a UEVR game and gains nothing (M1); the ceiling for a game
-  that asks is measured in M3.
-- A game at the cap shows nothing: Dead Space ran at 96.8 and 97.9 fps at 100 Hz with the quality rectangle and with the fit (2026-11-20,
-  `docs/progress.md`). M3 uses a title below the cap and the telemetry flavour's frame times.
-- The stream does not change in round 1: the encoder still gets the rectangle, with whatever the game leaves in the hidden pixels. Painting them black
-  before NVENC is a frame-path change; measure the bits it would save before proposing it.
+**Facts (code read 2026-11-20, this branch).**
+- The encoder already builds a per-CTB (32 x 32) QP delta map, on by default (`docs/PERFORMANCE_KNOBS.md`: -3 in the foveal region, +6 at the edges):
+  `nvh_build_qp_map` (`nvenc/hostlib/nvh.cpp:208-257`). For each CTB it inverts ALVR's foveation (`CalculateFoveationVars` copied verbatim, `foveF`)
+  back to the eye's unfoveated position, measured from the eye's outer edge in both eyes (`:244`, the right eye mirrored in the frame): the mask's own
+  outer / inner convention. The mask adds one point-in-polygon test per CTB, once per encoder creation; nothing per frame.
+- Deltas are clamped to +-51 (`:254`): a hidden CTB at +51 costs close to nothing.
+- The map is built from the session's foveation and the settings table (`nvh.cpp:139-162`); the mask can travel the same way (a settings key written by
+  the session compile). The full-frame split profile turns the QP map off (`tools/host/src/main.rs:593-595`): no mask there unless black fill is built.
+- Black fill (the hidden pixels made flat before NVENC) is the other half: flat blocks are nearly free and decode flat. It touches the compose pass (the
+  frame path); build it only if E0 shows that +51 alone leaves bits worth taking.
 
-### M3. Design (round 1)
-
-- **GUI (session compile):** with the switch on and a profile that has a mask, write `video.game_mask` = `{kind: "polygon_tan_v1", left: [[x, y], ...],
-  right: [...]}`: each eye's `FovMask.Polygon` on its own rectangle (so the per-eye edges are in it), in view-space tangents (x right, y up, OpenXR's
-  convention; the GUI turns outer / inner into left / right per eye, so the shim has no eye logic). No key otherwise.
-- **Host:** read `video.game_mask` at start and put it in the IPC (up to 16 vertices per eye, a count, a serial); latched per game start.
-- **Shim (`GetFovStencil`):** from the eye's polygon and the FovPort VDXR passes: visible area = the convex polygon as a triangle fan; hidden area = the
-  told rectangle minus the polygon (each rectangle corner joined to the polygon vertices it faces); border line = the polygon's edges as index pairs;
-  coordinates 0..1 across that FovPort, y down. No mask in the IPC: the empty mesh, exactly as 1.4.
-- **Switch:** a lab switch first (host stdin `lab_game_mask 0|1` and the settings key, not in any window), default off. It becomes a toggle in the FOV card
-  only after M3 shows a gain (project rule: no setting without a measurement behind it).
-- **Margin:** none in round 1. The calibration rule puts each line where it is just visible; the headset check (M4) decides whether other wearings need
-  one.
-
-### M4. Steps
+**What it can buy (pixel shares, not bits).** The author's fit hides 38.6 % / 42.2 % of each eye's stream pixels and, after the foveation has squeezed
+the edges, **25.9 % / 29.8 % of the encoded pixels** (the session of 2026-11-20 01:00: centre 0.603 x 0.548, shift 0.533 / -0.127, edge ratio 1.606 /
+2.058; a linear edge model that reproduces the encoded size 1632 x 1824). At the owner's constant 275 Mbps the freed bits go to the visible area: about
+1.35 x the bits per visible pixel if bits follow pixels, or the same picture at about 200 Mbps. The headset decodes the same frame size, so its decode
+work barely changes: the gain is picture quality or Wi-Fi headroom. A slightly wrong fit shows blocky corners at the far edge, not black ones.
 
 | Step | Engine | What | Pass |
 |---|---|---|---|
-| M0 | none | Which games ask. UEVR: answered from its source, no (M1). The rest: VDXR's `Application uses visibility mask` line per run for the owner's non-UEVR titles (native OpenXR, OpenComposite, the Dead Space and AC Black Flag mods), and OpenComposite's source for `GetHiddenAreaMesh`; `xr_probe` asks for the mask and logs the counts (lab tool) | a list of non-UEVR titles that ask; at least one below the cap, or the round stops here |
-| M1 | fork (`IDriver` method), shim, IPC 38, host, GUI compile | the code above, behind the switch | `check_cpp`, the fork's compile, `check_gui` |
-| M2 | lab | `e2e_game_mask`: `xr_probe` draws the hidden mesh in a key colour; the received stream has the key colour only outside each eye's octagon (both eyes, mirrored corners); the line loop matches the polygon; switch off = empty mesh (1.4). A Python model of the mesh (as `harness/fov_contract_model.py`) checked against the shim's output. Regressions: the fork lab's R5 plus `e2e_fov_client_box`, `e2e_fov_tool_mask`, `e2e_fov_override` | all pass |
-| M3 | timing | a non-UEVR title from M0, telemetry flavour, 3 interleaved pairs (switch off / on) at the same spot: game fps, GPU frame time, repeated ticks | Phase B's rule: a change exceeds 3 x the larger spread and is >= 2 fps in 3 of 3 pairs |
-| M4 | headset | the owner, the trade-off profile, the M3 title: anything visible at the corners during head motion (black, smearing, a temporal upscaler's edge) | nothing visible. **Decision M:** a toggle in the FOV card (every headset), default off until a second wearer has tried it |
+| E0 | none | The bits the corners cost: the bench scene's encoded frames (`run.py bench-quality`, the owner's foveation) decoded, the hidden area made flat per eye (the octagons mapped into encoded coordinates by the model above), re-encoded with ffmpeg's `hevc_nvenc` at constant QP with and without; then at 275 Mbps, the visible area's PSNR / SSIM with and without | go if >= 15 % fewer bits at constant QP, or a visible-area gain above the run-to-run spread at 275 Mbps |
+| E1 | nvenc, host, GUI compile | the mask in `nvh_build_qp_map` (+51 in fully hidden CTBs) from a settings key written by the session compile (the profile in use, if it has a mask); a lab switch first | `check_cpp`, `check_gui`; the QP map dump (`--dump-qpmap`) equals a Python model of the mask in encoded coordinates |
+| E2 | lab | `bench-quality` mask off / on (bits, visible quality, encode time), the regression set (`e2e_baseline`, `e2e_fov_*`) | E0's numbers reproduced inside the engine; encode time unchanged |
+| E3 | headset | the owner: the corners are not seen during head motion; mask off / on at 275 Mbps compared blind, or the same picture at a lower bitrate | **Decision E:** a switch in the FOV card (every headset), its default from E2 / E3 |
 
-### M5. Risks
+### M-G. The game mask (only with evidence)
 
-- What a game writes in hidden pixels is undefined (black, stale, the near plane in depth). Screen-space effects and temporal upscalers (TAA, DLSS) can
-  smear at the boundary; M4 looks for it.
-- A game that asks before the mask is set gets the empty mesh. The host puts the mask in the IPC at its start, before any game.
-- UEVR and OpenComposite may read the mesh with other conventions (winding, y direction): M2 gets an OpenComposite row if M0 finds a title.
-- The fan needs a convex polygon. The corner-fraction octagon is convex; a free-form mask later needs a real triangulation.
-- A wrong mask hides what the user sees: the switch is off by default, and nothing changes for a profile without a mask.
+**Evidence (2026-11-20).** A game can use the mask only if it enables `XR_KHR_visibility_mask` when it creates its instance: VDXR logs every requested
+extension (`instance.cpp:233`) and refuses the call without it (`visibility_mask.cpp:57`).
+
+| Path | Titles | Evidence | Uses a mask |
+|---|---|---|---|
+| UEVR | about 60 % of the owner's games (SWGR, Mortal Shell 2, ...) | source `praydog/UEVR` `4ee5c6b` (2026-08-29): never enables the extension (`src/mods/VR.cpp:279-302`); the Unreal HMD it fakes starts with every function a stub returning 0 and replaces about ten (`src/mods/vr/IXRTrackingSystemHook.cpp:383-386`, `:486-626`), so `HasHiddenAreaMesh` stays 0. VDXR log 2026-11-14 (SWGR): D3D12, depth, cylinder | **no** |
+| R.E.A.L. VR (Luke Ross) | Dead Space | VDXR log 2026-11-14 (`private/logs/stgr-hdr-2026-11-14/OpenXR.log`): D3D11, win32 time conversion, depth | **no** |
+| NoMoreFlat (`acbfvr` 1.0.4) | AC Black Flag | its `dxgi.dll` (`private/ghidra/mod`): no `XR_KHR_visibility_mask` string; `xrGetVisibilityMaskKHR` appears only in the statically linked loader's name table (next to Vulkan, MSFT and hand-tracking names); the extension names it holds: D3D11, D3D12, depth, cylinder, debug utils | **no** |
+| OpenComposite (SteamVR games) | the owner's OpenComposite titles | the source we ship (OpenOVR `a27e7e6`): enables the extension whenever the runtime offers it (`DrvOpenXR/DrvOpenXR.cpp:220`) and answers SteamVR's `GetHiddenAreaMesh` from it (`DrvOpenXR/XrHMD.cpp:164-210`) | **yes, if the game draws SteamVR's hidden-area mesh**: per title |
+| Native OpenXR games | per title | VDXR's requested-extension lines | per title |
+
+Other R.E.A.L. VR and NoMoreFlat mods probably share the lists above (same frameworks); not checked.
+
+**G0 (no engine change).** For each OpenComposite and native OpenXR title the owner plays: one start through AirFrameXR, then VDXR's log
+(`%LOCALAPPDATA%\VirtualDesktop-OpenXR\OpenXR.log`; it keeps only the last app, so read it after each start): `Requested extension:
+XR_KHR_visibility_mask`, and `Application uses visibility mask` (logged once when the game asks, `visibility_mask.cpp:78`). **If no title the owner
+plays asks, M-G is closed**: no shim, IPC or fork change for it. If some do: the design below behind a lab switch, measured on such a title (game fps and
+GPU frame time, Phase B's decision rule) before any toggle.
+
+**Design, only if G0 opens it.** The session compile writes the per-eye polygon (`video.game_mask`, `polygon_tan_v1`, view-space tangents) -> host ->
+IPC version 38 -> the shim's `GetFovStencil` (one `IDriver` method in the fork; OVRNull's stub returns an empty mesh today, `OVRNull/api.cpp:142`) ->
+VDXR's `xrGetVisibilityMaskKHR` (`visibility_mask.cpp:39`: SteamVR coordinates 0..1 across the FovPort, y down; 16-bit indices; line loop with every
+second index). Latched per game start, like the box. Lab: `e2e_game_mask` (`xr_probe` draws the hidden mesh in a key colour, the stream shows it only
+outside each eye's octagon). Risks: what a game leaves in hidden pixels is undefined (temporal upscalers can smear at the edge); OpenComposite's
+conversion conventions.
+
+### M-Risks
+
+- A mask that is too tight hides what the wearer sees: blocky corners on the encoder side, undefined pixels on the game side. The calibration rule (push
+  a line out until it disappears, Shift back until it is just visible) puts each line at the edge; another wearer or fit needs its own profile.
+- The mask follows the profile in use; a profile without a mask changes nothing.
 
 ## 1. The question and the hypotheses
 
