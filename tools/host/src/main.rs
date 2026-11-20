@@ -151,6 +151,7 @@ struct Args {
     fgj_gaps: Vec<f64>,
     fgj_speeds: Vec<f64>,
     fgj_pans: Vec<f64>,
+    fgj_pan_warm: i32,
     bench_scene: Option<PathBuf>,
     /// simrig (cargo feature): run the pipeline without a headset against the synthetic client, results in this directory
     #[cfg(feature = "simrig")]
@@ -241,6 +242,7 @@ fn parse_args() -> Result<Args, String> {
         fgj_gaps: vec![22.2, 33.3, 44.4],
         fgj_speeds: vec![1.0, 8.0, 24.0],
         fgj_pans: vec![],
+        fgj_pan_warm: 0,
         bq_preview: None,
         bq_ref_scale: 1,
         bench_scene: None,
@@ -312,6 +314,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--fgj-starts" => a.fgj_starts = v()?.parse().map_err(|e| format!("{e}"))?,
             "--fgj-speeds" => a.fgj_speeds = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
+            "--fgj-pan-warm" => a.fgj_pan_warm = v()?.parse().map_err(|e| format!("{e}"))?,
             "--fgj-pans" => a.fgj_pans = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
             "--fgj-gaps" => a.fgj_gaps = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
             #[cfg(feature = "simrig")]
@@ -1007,7 +1010,7 @@ mod nvh {
         pub fn nvh_ipc_poll_haptic(ipc: *mut c_void, side: i32, seq: *mut u32, freq: *mut f32, amp: *mut f32);
         pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64, render_q8: *mut f32, has_projection: *mut i32, display_s: *mut f64, release_s: *mut f64) -> i32;
         pub fn nvh_fg_enable(nvh: *mut c_void, on: i32, flow_scale: f64, perf_level: i32, grid: i32, synth: i32, err: *mut c_char, errlen: i32) -> i32;
-        pub fn nvh_fg_ingest(nvh: *mut c_void, ipc: *mut c_void, slot: u32, q_render8: *const f32, err: *mut c_char, errlen: i32) -> i32;
+        pub fn nvh_fg_ingest(nvh: *mut c_void, ipc: *mut c_void, slot: u32, q_render8: *const f32, frame_s: f64, err: *mut c_char, errlen: i32) -> i32;
         pub fn nvh_fg_reset(nvh: *mut c_void);
         pub fn nvh_fg_encode(nvh: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, age: i32, q_out4: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_fg_stats(nvh: *mut c_void, buf: *mut c_char, len: i32) -> i32;
@@ -1278,7 +1281,7 @@ fn run_fg_judge(origin: Instant, args: &Args, _layout: &alvr_filesystem::Layout,
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .map(|d| if d.file_name().map(|n| n.eq_ignore_ascii_case("bin")).unwrap_or(false) { d.parent().map(|p| p.to_path_buf()).unwrap_or(d) } else { d });
     let scene = args.bench_scene.clone().unwrap_or_else(|| install.map(|i| i.dir.clone()).or(exe_dir).unwrap_or_default().join("bench").join("littlest_tokyo.vab"));
-    let opt = fg_judge::Options { eye: args.fgj_eye, starts: args.fgj_starts, gaps_ms: args.fgj_gaps.clone(), speeds: args.fgj_speeds.clone(), pans: args.fgj_pans.clone(), out };
+    let opt = fg_judge::Options { eye: args.fgj_eye, starts: args.fgj_starts, gaps_ms: args.fgj_gaps.clone(), speeds: args.fgj_speeds.clone(), pans: args.fgj_pans.clone(), pan_warm: args.fgj_pan_warm, out };
     fg_judge::run(origin, &scene, fov, ipd, &opt, &|o, n, d| event(o, n, d))
 }
 
@@ -2803,6 +2806,17 @@ fn main() {
                         unsafe { std::ffi::CStr::from_ptr(gb.as_ptr()) }.to_string_lossy().to_string()
                     } else { String::new() };
                     let gen = p.fg_stats_json();
+                    // the camera turn (lab switch AIRFRAMEXR_FG_CAM_TURN): what the generator measured, so a field log shows whether it engaged
+                    if let Ok(g) = serde_json::from_str::<serde_json::Value>(&gen) {
+                        let ct = &g["cam_turn"];
+                        if ct["on"].as_i64() == Some(1) {
+                            logs::run_line(logs::Level::Info, "perf", format!("frame generation camera turn: last pair {:.2} deg (prediction {:.2}), {:.0} % of {} blocks agreed, {:.2} ms CPU; totals: {} measured, {} doubtful, {} not ready, {} late for the first output, {} corrected, {} waited (mean {:.2} ms, max {:.2})",
+                                ct["last_deg"].as_f64().unwrap_or(0.0), ct["pred_deg"].as_f64().unwrap_or(0.0), 100.0 * ct["agree"].as_f64().unwrap_or(0.0), ct["blocks"].as_i64().unwrap_or(0),
+                                ct["cpu_ms"].as_f64().unwrap_or(0.0), ct["measured"].as_u64().unwrap_or(0), ct["doubtful"].as_u64().unwrap_or(0), ct["not_ready"].as_u64().unwrap_or(0),
+                                ct["late"].as_u64().unwrap_or(0), ct["corrections"].as_u64().unwrap_or(0), ct["waits"].as_u64().unwrap_or(0),
+                                ct["wait_ms_avg"].as_f64().unwrap_or(0.0), ct["wait_ms_max"].as_f64().unwrap_or(0.0)));
+                        }
+                    }
                     // the shim's counters restart with every game: a smaller value is a new game's own count, not a negative delta (gears 2026-10-20: 1.8e19 "releases late")
                     let (d_rel, d_late) = if rel < perf_rel || late < perf_late { (rel, late) } else { (rel - perf_rel, late - perf_late) };
                     (perf_rel, perf_late) = (rel, late);

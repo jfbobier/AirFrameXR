@@ -149,7 +149,7 @@ float4 PSUnpack(VSOut i) : SV_Target {
     int eyeW = int(flowIn.x), eyeH = int(flowIn.y);
     int x0 = c.x >= blocks.x ? eyeW : 0;
     float2 d = float2(flow.Load(int3(c, 0))) * (1.0 / 32.0);   // backward, flow-input px: content at q in the current frame is at q + d in the previous
-    float sum = 0, zero = 0, n = 0;
+    float sum = 0, zero = 0, n = 0, l1 = 0, l2 = 0;
     for (int y = 0; y < grid; y++) {
         for (int x = 0; x < grid; x++) {
             int2 q = c * grid + int2(x, y);
@@ -158,6 +158,7 @@ float4 PSUnpack(VSOut i) : SV_Target {
             // texel, which zeroed the confidence of correct vectors (rig marker drawn at the real frame's position: judder, 2026-10-24)
             float2 sp = float2(q) + 0.5 + d;
             float lc = lumaOf(cur.Load(int3(q, 0)).rgb);
+            l1 += lc; l2 += lc * lc;
             bool outside = sp.x < x0 || sp.x > x0 + eyeW || sp.y < 0 || sp.y > eyeH;
             sum += outside ? 0.25 : abs(lc - lumaOf(prev.SampleLevel(smp, clamp(sp, float2(x0 + 0.5, 0.5), float2(x0 + eyeW - 0.5, eyeH - 0.5)) / float2(2 * eyeW, eyeH), 0).rgb));
             zero += abs(lc - lumaOf(prev.Load(int3(q, 0)).rgb));
@@ -168,11 +169,15 @@ float4 PSUnpack(VSOut i) : SV_Target {
     zero /= max(n, 1.0);
     // a vector must beat no motion: on flat content (sky, a black background) the engine returns noise vectors that match as well as
     // standing still, and they carry thin detail nearby to the wrong place (the rig's dots, 2026-10-24)
-    if (zero <= cst + 0.004) return float4(0, 0, zero, 1);
+    // w: 1 where the block has texture (its vector, or standing still, says something about the motion), 0 on flat content (the camera-turn
+    // measurement skips it)
+    float lm = l1 / max(n, 1.0), tex = sqrt(max(l2 / max(n, 1.0) - lm * lm, 0.0));
+    float info = tex > 0.015 ? 1.0 : 0.0;
+    if (zero <= cst + 0.004) return float4(0, 0, zero, info);
     float2 f = d / flowP.xy;
     float m = length(f);
     if (m > flowIn.z) f *= flowIn.z / m;
-    return float4(f, cst, 1);
+    return float4(f, cst, info);
 }
 // PSFilter: cost-weighted vector median over the 3x3 blocks around (within the eye): an isolated wrong vector loses to its neighbours without
 // the averaging that would blur a motion boundary. t7 = PSUnpack's output.
@@ -257,7 +262,13 @@ float3 edgeSynth(float2 pO, float t) {
 }
 float4 PSOut(VSOut i) : SV_Target {
     float2 uvB;
-    if (!projectTo(rot(oA, oB, oC, dirOf(i.uv)), uvB)) return float4(0, 0, 0, 1);
+    float3 dB = rot(oA, oB, oC, dirOf(i.uv));
+    if (!projectTo(dB, uvB)) {
+        // camera turn (mode.w): the edge the newer frame does not cover, from the older frame where it does (a turned view always uncovers one)
+        float2 uvA;
+        [branch] if (mode.w > 0.5 && mode.x > 0.5 && projectTo(rot(pA, pB, pC, dB), uvA)) return float4(fetchCR(prev, sbs(uvA)), 1);
+        return float4(0, 0, 0, 1);
+    }
     [branch] if (mode.x > 0.5 && synth.x > 0.5) return float4(edgeSynth(uvToPx(uvB), flowP.w), 1);
     float3 curHere = fetchCR(cur, sbs(uvB));
     if (mode.x < 0.5) return float4(curHere, 1);
@@ -314,6 +325,25 @@ void rows(const float m[9], float* a, float* b, float* c) {
     b[0] = m[3]; b[1] = m[4]; b[2] = m[5]; b[3] = 0;
     c[0] = m[6]; c[1] = m[7]; c[2] = m[8]; c[3] = 0;
 }
+// Hamilton product a * b (x y z w): the rotation b, then a
+void qmul(const float* a, const float* b, float* o) {
+    const float x = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+    const float y = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+    const float z = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+    const float w = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+    o[0] = x; o[1] = y; o[2] = z; o[3] = w;
+}
+// the orientation q (x y z w), then a turn of `yaw` radians about the tracking up axis: what a game's stick turn does to the view
+void withYaw(const float* q, double yaw, float* o) {
+    if (yaw == 0) { memcpy(o, q, 16); return; }
+    const float y[4] = { 0.f, (float)std::sin(yaw * 0.5), 0.f, (float)std::cos(yaw * 0.5) };
+    qmul(y, q, o);
+}
+float half2f(uint16_t h) {
+    const uint32_t sgn = (h >> 15) & 1, ex = (h >> 10) & 31, man = h & 1023;
+    float v = ex == 0 ? std::ldexp((float)man, -24) : ex == 31 ? (man ? NAN : INFINITY) : std::ldexp((float)(man | 1024), (int)ex - 25);
+    return sgn ? -v : v;
+}
 void seterr(char* err, int n, const char* s) { if (err && n > 0) { strncpy(err, s, n - 1); err[n - 1] = 0; } }
 template <class T> void rel(T*& p) { if (p) { p->Release(); p = nullptr; } }
 }
@@ -357,6 +387,22 @@ struct FrameGen::Impl {
     ID3D11Query* qDisjoint = nullptr; ID3D11Query* qDisjointR = nullptr; ID3D11Query* qT[4] = {};
     bool flowTimed = false, synthTimed = false;
     float fov8[8] = {};
+    // camera turn (cfg.camTurn): each history frame's yaw on top of its head orientation, the turn predicted for the next pair, and the
+    // measurement in flight (the pair's filtered flow copied to a staging texture, read one pair later without waiting)
+    double camYaw[H] = {}; double turnPred = 0;
+    double realT[H] = {};       // each history frame's content time (s, 0 = unknown)
+    double turnRate = 0;        // the last measured turn per second of content time (0 = none, or no times: turnPred per pair instead)
+    bool haveRate = false;
+    // the turn predicted for pair (a, b): the rate times its time step when both times are known, else the last pair's turn
+    double predictTurn(int a, int b) const {
+        const double dt = realT[b] - realT[a];
+        return haveRate && realT[a] > 0 && realT[b] > 0 && dt > 0 && dt < 0.25 ? turnRate * dt : turnPred;
+    }
+    ID3D11Texture2D* turnStage[H] = {};   // per pair (indexed by its newer frame): its unpacked vectors, read without waiting
+    bool turnPending[H] = {}; float turnQ[H][8] = {}; float turnFov[H][8] = {}; double turnUsed[H] = {};
+    bool turnRecompute = false;           // computeFlow is redoing a pair with a corrected turn: no new measurement
+    // the effective orientation of history frame k, eye e: its render orientation turned by its camera yaw
+    void effQ(int k, int e, float* o) const { withYaw(realQ[k] + e * 4, cfg.camTurn ? camYaw[k] : 0.0, o); }
 };
 
 FrameGen::FrameGen(ID3D11Device* dev, ID3D11DeviceContext* ctx) : m_i(new Impl()), m_dev(dev), m_ctx(ctx) {}
@@ -375,7 +421,7 @@ FrameGen::~FrameGen() {
     rel(I.unpackSrv); rel(I.unpackRtv); rel(I.unpackTex); rel(I.zeroFiltSrv); rel(I.zeroFilt); rel(I.psUnpack); rel(I.psFilter);
     for (int k = 0; k < Impl::H; k++) { rel(I.realSrv[k]); rel(I.real[k]); rel(I.pairFlowSrv[k]); rel(I.pairFlow[k]); rel(I.pairCostSrv[k]); rel(I.pairCost[k]); }
     rel(I.flowOutSrv); rel(I.flowOut); rel(I.costSrv); rel(I.costTex); rel(I.outRtv); rel(m_out);
-    rel(I.zeroFlowSrv); rel(I.zeroFlow); rel(I.maxCostSrv); rel(I.maxCost);
+    rel(I.zeroFlowSrv); rel(I.zeroFlow); rel(I.maxCostSrv); rel(I.maxCost); for (auto& t : I.turnStage) rel(t);
     rel(I.vs); rel(I.psPrep); rel(I.psOut); rel(I.cb); rel(I.smp); rel(I.qDisjoint); rel(I.qDisjointR); rel(I.vsPoly); rel(I.cbPoly);
     for (auto& q : I.qT) rel(q);
     delete m_i;
@@ -514,10 +560,17 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
         ok = ok && SUCCEEDED(m_dev->CreateTexture2D(&zd, &zi, &I.zeroFilt)) && SUCCEEDED(m_dev->CreateShaderResourceView(I.zeroFilt, nullptr, &I.zeroFiltSrv));
         if (!ok) { seterr(err, errlen, "filtered flow textures"); return false; }
     }
+    if (cfg.camTurn && !cfg.synth) I.cfg.camTurn = 0;   // the measurement reads the edge synthesis's unpacked flow
+    if (I.cfg.camTurn) {
+        D3D11_TEXTURE2D_DESC sd2{}; sd2.Width = I.blocksW; sd2.Height = I.blocksH; sd2.MipLevels = 1; sd2.ArraySize = 1; sd2.SampleDesc.Count = 1;
+        sd2.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; sd2.Usage = D3D11_USAGE_STAGING; sd2.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        for (auto& t : I.turnStage) if (FAILED(m_dev->CreateTexture2D(&sd2, nullptr, &t))) { seterr(err, errlen, "camera turn staging texture"); return false; }
+    }
     stats.flowW = I.flowW; stats.flowH = I.flowH; stats.blocksW = I.blocksW; stats.blocksH = I.blocksH;
     stats.nvofReady = true;
-    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s",
-             NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "classic" : cfg.photoScale > 0 ? "edge" : "edge-blend");
+    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s",
+             NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "classic" : cfg.photoScale > 0 ? "edge" : "edge-blend",
+             I.cfg.camTurn ? ", camera turn" : "");
     return true;
 }
 
@@ -545,13 +598,15 @@ bool FrameGen::ensureFrames(ID3D11Texture2D* like, char* err, int errlen) {
     return true;
 }
 
-int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen) {
+int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen, double frameS) {
     Impl& I = *m_i;
     if (!stats.nvofReady) { seterr(err, errlen, "frame generation not initialised"); return -1; }
     if (!ensureFrames(src, err, errlen)) return -1;
     const int next = m_have == 0 ? 0 : (I.cur + 1) % Impl::H;
     m_ctx->CopyResource(I.real[next], src);
     memcpy(I.realQ[next], qRender8, sizeof(float) * 8);
+    I.realT[next] = frameS;
+    I.camYaw[next] = m_have == 0 ? 0.0 : I.camYaw[I.cur] + I.predictTurn(I.cur, next);   // provisional: computeFlow sets it again with the newest prediction
     memcpy(I.fov8, fov8, sizeof(float) * 8);
     I.cur = next;
     m_have = std::min(Impl::H, m_have + 1);
@@ -559,6 +614,13 @@ int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* f
     if (m_have < 2) return 0;
     stats.pairs++;
     I.pairFlowValid[I.cur] = false;   // computed by the first render of this pair that needs it (computeFlow)
+    I.turnPending[I.cur] = false;
+    if (I.cfg.camTurn) {
+        // camera turn: the flow now, not at the first output, so that the pair's own turn measurement has finished on the GPU when the first
+        // output of the pair needs it (the outputs run a lag behind the newest frame)
+        char e2[160];
+        computeFlow(I.cur, e2, sizeof e2);
+    }
     return 1;
 }
 
@@ -567,6 +629,11 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     Impl& I = *m_i;
     const float* fov8 = I.fov8;
     const int prev = (n + Impl::H - 1) % Impl::H;
+    if (I.cfg.camTurn && !I.turnRecompute) {
+        // the previous pair's measurement if no output of it has read it yet (frames arrive a lag before their outputs): with its correction
+        if (I.turnPending[prev]) harvestTurn(prev, true, false);
+        I.camYaw[n] = I.camYaw[prev] + I.predictTurn(prev, n);   // this pair's turn: the prediction, removed before the flow like the head's rotation
+    }
     // prep: flowIn[0] = the previous frame seen from the current camera, flowIn[1] = the current frame (both downscaled)
     m_ctx->Begin(I.qDisjoint);
     m_ctx->End(I.qT[0]);
@@ -581,7 +648,9 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
         for (int e = 0; e < 2; e++) {
             Cb c{};
             float m[9];
-            relRot(I.realQ[prev] + e * 4, I.realQ[n] + e * 4, m);   // direction in the current view -> the previous view
+            float qa[4], qb[4];
+            I.effQ(prev, e, qa); I.effQ(n, e, qb);
+            relRot(qa, qb, m);   // direction in the current view -> the previous view (with the camera turn: the effective views)
             rows(m, c.pA, c.pB, c.pC);
             memcpy(c.tanF, fov8 + e * 4, sizeof(float) * 4);
             c.eyeRect[0] = e ? 0.5f : 0.f; c.eyeRect[1] = 0.5f; c.eyeRect[2] = (float)m_w; c.eyeRect[3] = (float)m_h;
@@ -611,11 +680,22 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
         D3D11_VIEWPORT vp{}; vp.Width = (float)I.blocksW; vp.Height = (float)I.blocksH; vp.MaxDepth = 1.f;
         m_ctx->RSSetViewports(1, &vp);
         ID3D11ShaderResourceView* in3[3] = { I.flowInSrv[1], I.flowInSrv[0], I.flowOutSrv };   // t0 cur = the current frame, t1 prev = the aligned previous
+        // no blending: PSUnpack's alpha is data (w = 0: no motion information), and a caller's alpha blend left bound (the benchmark scene's) would
+        // drop those texels (first camera-turn lab run, 2026-11-20: every edge result wrong)
+        m_ctx->OMSetBlendState(nullptr, nullptr, 0xffffffff);
         m_ctx->OMSetRenderTargets(1, &I.unpackRtv, nullptr);
         m_ctx->PSSetShader(I.psUnpack, nullptr, 0);
         m_ctx->PSSetShaderResources(0, 3, in3);
         m_ctx->Draw(3, 0);
         m_ctx->PSSetShaderResources(0, 3, nulls);
+        if (I.cfg.camTurn && !I.turnRecompute) {
+            // this pair's measurement: its unpacked vectors to its staging texture, read by its first output (Render) without waiting
+            m_ctx->CopyResource(I.turnStage[n], I.unpackTex);
+            I.turnPending[n] = true;
+            for (int e = 0; e < 2; e++) I.effQ(n, e, I.turnQ[n] + e * 4);
+            memcpy(I.turnFov[n], fov8, sizeof(float) * 8);
+            I.turnUsed[n] = I.camYaw[n] - I.camYaw[prev];
+        }
         m_ctx->OMSetRenderTargets(1, &I.pairFiltRtv[n], nullptr);
         m_ctx->PSSetShader(I.psFilter, nullptr, 0);
         m_ctx->PSSetShaderResources(4, 1, &I.unpackSrv);
@@ -659,11 +739,20 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
             return m_out;
         }
     }
+    // camera turn: the pair's own measurement (no wait); a prediction it contradicts (a turn starting, stopping, reversing) is corrected and the
+    // pair's flow redone with the corrected turn, once
+    if (I.cfg.camTurn && mode == 1 && havePair && I.pairFlowValid[n]) {
+        const bool turning = std::fabs(I.turnUsed[n]) > 0.1 * 3.14159265358979 / 180.0;
+        if (I.turnPending[n]) { if (!harvestTurn(n, true, turning)) stats.camTurnLate++; }
+    }
     // the pair's optical flow, once, by the first synthetic output that needs it
     if (mode == 1 && havePair && !I.pairFlowValid[n]) {
         char e2[160];
         computeFlow(n, e2, sizeof e2);   // a failure leaves the zero flow bound below: the classic synthesis's crossfade fallback
     }
+    // camera turn: the output view is the stamp's head orientation turned by the camera yaw at t (the newer frame's for a rendered output)
+    const double yawOut = !I.cfg.camTurn ? 0.0 : (mode == 1 && havePair) ? I.camYaw[prev] + (double)t * (I.camYaw[n] - I.camYaw[prev]) : I.camYaw[n];
+    float qOutE[4]; withYaw(qOut4, yawOut, qOutE);
     m_ctx->Begin(I.qDisjointR);
     m_ctx->End(I.qT[2]);
     m_ctx->OMSetRenderTargets(1, &I.outRtv, nullptr);
@@ -679,16 +768,18 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         c.synth[0] = I.cfg.synth ? 1.f : 0.f; c.synth[1] = std::max(1.f, I.cfg.motionLimit * m_w * 0.5f);
         c.synth[2] = I.cfg.costScale; c.synth[3] = I.cfg.photoScale;
         float m[9];
-        relRot(I.realQ[n] + e * 4, qOut4, m);               // direction in the output (stamp) view -> the pair's newer frame's view
+        float qn[4], qp[4];
+        I.effQ(n, e, qn); I.effQ(havePair ? prev : n, e, qp);
+        relRot(qn, qOutE, m);               // direction in the output (stamp) view -> the pair's newer frame's view
         rows(m, c.oA, c.oB, c.oC);
-        relRot(I.realQ[havePair ? prev : n] + e * 4, I.realQ[n] + e * 4, m);   // newer view -> its predecessor's view
+        relRot(qp, qn, m);   // newer view -> its predecessor's view
         rows(m, c.pA, c.pB, c.pC);
         memcpy(c.tanF, fov8 + e * 4, sizeof(float) * 4);
         c.eyeRect[0] = e ? 0.5f : 0.f; c.eyeRect[1] = 0.5f; c.eyeRect[2] = (float)m_w; c.eyeRect[3] = (float)m_h;
         c.flowP[0] = (float)I.flowW / (float)m_w; c.flowP[1] = (float)I.flowH / (float)m_h; c.flowP[2] = (float)I.grid; c.flowP[3] = t;
         const int x0 = (e * I.flowW / 2) / I.grid, x1 = std::min(I.blocksW - 1, ((e + 1) * I.flowW / 2 - 1) / I.grid);
         c.blocks[0] = x0; c.blocks[1] = 0; c.blocks[2] = std::max(x0, x1); c.blocks[3] = I.blocksH - 1;
-        c.mode[0] = mode == 1 ? 1.f : 0.f; c.mode[1] = I.cfg.maxFlowPx; c.mode[2] = I.cfg.confGain;
+        c.mode[0] = mode == 1 ? 1.f : 0.f; c.mode[1] = I.cfg.maxFlowPx; c.mode[2] = I.cfg.confGain; c.mode[3] = I.cfg.camTurn && havePair ? 1.f : 0.f;
         m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c, 0, 0);
         D3D11_VIEWPORT vp{}; vp.TopLeftX = e ? m_w * 0.5f : 0.f; vp.Width = m_w * 0.5f; vp.Height = (float)m_h; vp.MaxDepth = 1.f;
         m_ctx->RSSetViewports(1, &vp);
@@ -780,5 +871,120 @@ void FrameGen::CollectTimings() {
 }
 
 void FrameGen::ResetHistory() {
+    Impl& I = *m_i;
     m_have = 0;
+    I.turnPred = 0; I.turnRate = 0; I.haveRate = false;
+    for (auto& t : I.realT) t = 0;
+    for (auto& p : I.turnPending) p = false;
+    for (auto& y : I.camYaw) y = 0;
+}
+
+// Camera turn: the oldest measurement in flight, if the GPU has finished it. Per textured block (PSUnpack w = 1, a trusted cost), the backward
+// vector gives the block's direction in the newer frame and its match in the aligned older one, both in the newer frame's effective view; in
+// the tracking space, the azimuth about the up axis of the two differs by the part of the turn the prediction missed. The weighted mode of those
+// differences (a histogram, then the mean around its peak) rejects what does not turn with the camera: the HUD, moving things, parallax.
+// The pair's turn = the prediction used - the miss; it becomes the prediction for the next pair, or 0 when too few blocks agree (a cut, chaos).
+bool FrameGen::harvestTurn(int n, bool correct, bool wait) {
+    Impl& I = *m_i;
+    if (!I.turnPending[n] || !I.turnStage[n]) return false;
+    D3D11_MAPPED_SUBRESOURCE ms{};
+    HRESULT hr = m_ctx->Map(I.turnStage[n], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms);
+    if (hr == DXGI_ERROR_WAS_STILL_DRAWING && wait) {
+        // a turn in progress: this pair's first output waits for its own measurement (the rest of our flow work on the GPU), so that a turn
+        // stopping or reversing is corrected before it is shown
+        LARGE_INTEGER w0, w1, wq; QueryPerformanceCounter(&w0); QueryPerformanceFrequency(&wq);
+        hr = m_ctx->Map(I.turnStage[n], 0, D3D11_MAP_READ, 0, &ms);
+        QueryPerformanceCounter(&w1);
+        const float ms_ = (float)((w1.QuadPart - w0.QuadPart) * 1000.0 / wq.QuadPart);
+        stats.camTurnWaits++; stats.camTurnWaitMsSum += ms_; stats.camTurnWaitMsMax = std::max(stats.camTurnWaitMsMax, ms_);
+    }
+    if (hr == DXGI_ERROR_WAS_STILL_DRAWING) { stats.camTurnNotReady++; return false; }
+    I.turnPending[n] = false;
+    if (FAILED(hr)) return false;
+    const int sl = n;
+    LARGE_INTEGER f0, f1, fq; QueryPerformanceCounter(&f0); QueryPerformanceFrequency(&fq);
+    static constexpr double kRange = 20.0 * 3.14159265358979 / 180.0, kBin = 0.05 * 3.14159265358979 / 180.0;   // misses within +-20 deg, 0.05 deg bins
+    static constexpr int kBins = 801;
+    std::vector<float> hist(kBins, 0.f);
+    std::vector<float> eps, wts;
+    eps.reserve(32768); wts.reserve(32768);
+    double M[2][9];
+    for (int e = 0; e < 2; e++) qmatRow(I.turnQ[sl] + e * 4, M[e]);
+    const float fx = (float)I.flowW / (float)m_w, fy = (float)I.flowH / (float)m_h;
+    const int half = I.blocksW / 2, step = 2;
+    for (int by = 0; by < I.blocksH; by += step) {
+        const uint16_t* row = (const uint16_t*)((const uint8_t*)ms.pData + (size_t)by * ms.RowPitch);
+        for (int bx = 0; bx < I.blocksW; bx += step) {
+            const uint16_t* px = row + (size_t)bx * 4;
+            if (half2f(px[3]) < 0.5f) continue;                 // no motion information (flat, or standing still wins)
+            const float cost = half2f(px[2]);
+            if (!(cost < 0.08f)) continue;                      // a doubtful match
+            const float vx = half2f(px[0]), vy = half2f(px[1]);
+            if (!std::isfinite(vx) || !std::isfinite(vy)) continue;
+            const int e = bx >= half ? 1 : 0;
+            const float* tf = I.turnFov[sl] + e * 4;            // l r u d
+            const double sx = ((bx + 0.5) * I.grid) / fx, sy = ((by + 0.5) * I.grid) / fy;   // full-res SBS px of the block's centre
+            const double ub = (sx / m_w - (e ? 0.5 : 0.0)) / 0.5, vb = sy / m_h;
+            const double ua = ((sx + vx) / m_w - (e ? 0.5 : 0.0)) / 0.5, va = (sy + vy) / m_h;
+            if (ua < 0 || ua > 1 || va < 0 || va > 1) continue;
+            auto dirW = [&](double u, double v, double* w) {
+                const double d[3] = { -tf[0] + u * (tf[0] + tf[1]), tf[2] - v * (tf[2] + tf[3]), -1.0 };
+                for (int r = 0; r < 3; r++) w[r] = M[e][r * 3] * d[0] + M[e][r * 3 + 1] * d[1] + M[e][r * 3 + 2] * d[2];
+            };
+            double wb[3], wa[3];
+            dirW(ub, vb, wb); dirW(ua, va, wa);
+            const double hb = std::sqrt(wb[0] * wb[0] + wb[2] * wb[2]), nb = std::sqrt(hb * hb + wb[1] * wb[1]);
+            if (hb < 0.2 * nb) continue;                        // near the up axis an azimuth means nothing
+            double d = std::atan2(wb[0], wb[2]) - std::atan2(wa[0], wa[2]);
+            if (d > 3.14159265358979) d -= 2 * 3.14159265358979; else if (d < -3.14159265358979) d += 2 * 3.14159265358979;
+            if (d < -kRange || d > kRange) continue;
+            const float w = (float)(hb / nb);
+            hist[(int)std::lround((d + kRange) / kBin)] += w;
+            eps.push_back((float)d); wts.push_back(w);
+        }
+    }
+    m_ctx->Unmap(I.turnStage[sl], 0);
+    double total = 0; for (float h : hist) total += h;
+    int peak = -1; double best = 0;
+    for (int k = 2; k < kBins - 2; k++) { const double w5 = hist[k - 2] + hist[k - 1] + hist[k] + hist[k + 1] + hist[k + 2]; if (w5 > best) { best = w5; peak = k; } }
+    double miss = 0, agree = total > 0 ? best / total : 0;
+    if (peak >= 0) {
+        const double c = peak * kBin - kRange; double sw = 0, sd = 0;
+        for (size_t k = 0; k < eps.size(); k++) if (std::fabs(eps[k] - c) <= 4 * kBin) { sw += wts[k]; sd += wts[k] * eps[k]; }
+        miss = sw > 0 ? sd / sw : c;
+    }
+    const double used = I.turnUsed[sl];
+    const bool ok = eps.size() >= 200 && agree >= 0.30;
+    double turn = ok ? used - miss : 0.0;   // too few blocks agree (a cut, chaos): no turn
+    if (std::fabs(turn) < 0.03 * 3.14159265358979 / 180.0) turn = 0;   // still: no turn (sub-pixel noise)
+    I.turnPred = turn;
+    {
+        const int pv = (n + Impl::H - 1) % Impl::H;
+        const double dt = I.realT[n] - I.realT[pv];
+        I.haveRate = I.realT[n] > 0 && I.realT[pv] > 0 && dt > 0 && dt < 0.25;
+        I.turnRate = I.haveRate ? turn / dt : 0.0;
+    }
+    if (ok) stats.camTurnMeasured++; else stats.camTurnDoubtful++;
+    if (correct && std::fabs(turn - used) > 0.25 * 3.14159265358979 / 180.0) {
+        // the prediction missed: this pair and every newer frame turn by the difference (their own steps are kept), and the pair's flow is redone
+        const double d = turn - used;
+        for (int k = n, guard = 0; guard < Impl::H; guard++) {
+            I.camYaw[k] += d;
+            if (k == I.cur) break;
+            k = (k + 1) % Impl::H;
+        }
+        I.pairFlowValid[n] = false;
+        I.turnRecompute = true;
+        char e2[160];
+        computeFlow(n, e2, sizeof e2);
+        I.turnRecompute = false;
+        stats.camTurnCorrections++;
+    }
+    stats.camTurnDeg = (float)(turn * 180.0 / 3.14159265358979);
+    stats.camTurnPredDeg = (float)(I.turnPred * 180.0 / 3.14159265358979);
+    stats.camTurnAgree = (float)agree;
+    stats.camTurnBlocks = (int)eps.size();
+    QueryPerformanceCounter(&f1);
+    stats.camTurnCpuMs = (float)((f1.QuadPart - f0.QuadPart) * 1000.0 / fq.QuadPart);
+    return true;
 }

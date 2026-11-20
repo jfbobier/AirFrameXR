@@ -69,6 +69,24 @@ global rotation before the flow): the double images go away: edge excess at 24.4
 case, the edge excess and the pictures are the right ones. So the flow is not what fails on a stick turn: the generator needs the turn removed first, as it does
 for the head. The strip needs a fill (the other frame, or the edge clamped).
 
+### The camera turn (lab switch `AIRFRAMEXR_FG_CAM_TURN`, 2026-11-20, RTX 5090)
+
+`--pan-warm 3`: three frames before A, so each pan rate also runs as a sequence (`pan` sustained, `panstart` still then turning at A, `panstop` turning
+then still, `panrev` turning then the other way): the prediction's cases. Edge synthesis, whole-frame PSNR off -> on (double-image energy), 3 starts,
+the owner's eye and box (`20261120T223155Z_fg_judge` off, `20261120T223501Z_fg_judge` on):
+
+| 24.4 ms (41 fps) | 60 deg/s | 120 | 180 | 270 |
+|---|---|---|---|---|
+| sustained | 27.1 -> 35.8 (0.18 -> 0.11) | 22.8 -> 33.4 (0.32 -> 0.13) | 20.2 -> 31.5 (0.45 -> 0.14) | 17.7 -> 29.3 (0.62 -> 0.17) |
+| start | 27.3 -> 35.9 | 22.8 -> 33.5 | 20.2 -> 31.3 | 17.7 -> 29.1 |
+| reverse | 26.6 -> 35.0 | 22.1 -> 32.9 | 19.7 -> 31.0 | 17.2 -> 28.9 |
+| stop | ~97 -> ~100 (a still pair) | | | |
+
+At 33.3 ms (30 fps) the same shape (180 deg/s 18.3 -> 30.0, reverse 17.9 -> 29.5). Head turns 27.7 -> 36.0 and `both` 27.7 -> 35.8 (the edge fill);
+scene x1 / x8 unchanged (56.2 / 42.6). The measured turn of a pair equals the truth within 0.01 deg. Lessons on the way: the unpack pass's alpha is
+data, so the generator sets its own blend state (the benchmark scene left alpha blending bound and broke every edge result once); a prediction
+from the last pair's turn alone missed on most real pairs (2 / 3 display periods apart): the rate times the pair's own time step fixed it.
+
 ## What it does not tell
 
 One scene, one GPU, one frame size; PSNR rewards blending and SSIM is a proxy; nothing here sees judder over time or the feel of a double image in a headset.

@@ -725,7 +725,9 @@ impl Pipeline {
             st.due.clear();
         }
         let mut err = [0 as std::ffi::c_char; 256];
-        let r = unsafe { nvh::nvh_fg_ingest(handle, ipc, a.slot, a.render_q.as_ptr(), err.as_mut_ptr(), 256) };
+        // the frame's content time for the generator's camera turn: the display time it was rendered for, else its release
+        let frame_s = if a.display_s > 0.0 { a.display_s } else { a.release_s };
+        let r = unsafe { nvh::nvh_fg_ingest(handle, ipc, a.slot, a.render_q.as_ptr(), frame_s, err.as_mut_ptr(), 256) };
         unsafe { nvh::nvh_ipc_slot_busy(ipc, a.slot, 0) };
         fate(a.counter, "I", Instant::now(), r as u64, 0);
         if r < 0 {

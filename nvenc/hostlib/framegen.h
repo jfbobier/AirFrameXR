@@ -26,6 +26,12 @@ struct FrameGenConfig {
     float motionLimit = 0.10f;   // edge: content shift beyond this share of the eye width falls back to the still frame (soft over the last quarter)
     float costScale = 17.f;      // edge: confidence = 1 - (luma cost - 0.02) * this
     float photoScale = 13.5f;    // edge: where a vector is doubted, the previous frame is blended in by 1 - (max |dRGB| - 0.03) * this (0 = always: "edge-blend")
+    // camera turn (lab switch AIRFRAMEXR_FG_CAM_TURN, edge synthesis only; docs/FRAME_GENERATION_JUDGE.md "rotation oracle"): a game's stick turn is a
+    // turn of the play space about the tracking up axis that the head pose does not carry, so it reached the optical flow whole and came out as
+    // double images. With it on, each rendered frame carries a camera yaw on top of its head orientation, predicted from the previous pair's
+    // measured turn and removed before the flow like the head's rotation; the output is turned by the yaw interpolated at t; the edge the
+    // turned newer frame does not cover is filled from the older one.
+    int camTurn = 0;
 };
 
 struct FrameGenStats {
@@ -35,6 +41,12 @@ struct FrameGenStats {
     int flowW = 0, flowH = 0, blocksW = 0, blocksH = 0;
     int maskPts[2] = {};               // the mask polygon each eye's output pass draws (0: the whole eye)
     float maskVisible[2] = { 1, 1 };   // the share of the eye that polygon covers (what the output pass still computes)
+    // camera turn (cfg.camTurn): the last measured turn of a pair, the prediction in force, the share of textured blocks that agreed, blocks used,
+    // CPU time of the last measurement, measurements taken / skipped as not ready or not confident
+    float camTurnDeg = 0, camTurnPredDeg = 0, camTurnAgree = 0, camTurnCpuMs = 0;
+    int camTurnBlocks = 0;
+    uint64_t camTurnMeasured = 0, camTurnNotReady = 0, camTurnDoubtful = 0, camTurnLate = 0, camTurnCorrections = 0, camTurnWaits = 0;
+    double camTurnWaitMsSum = 0; float camTurnWaitMsMax = 0;   // the first outputs that waited for their pair's measurement (a turn in progress)
     bool nvofReady = false;
     char nvofInfo[160] = "";   // "api 5.0, grids ..." or the failure reason
 };
@@ -49,7 +61,9 @@ public:
     bool Init(int w, int h, const FrameGenConfig& cfg, char* err, int errlen);
     // Takes a rendered frame into the history (previous <- current <- src) and computes the flow between the two. qRender8: the per-eye
     // orientation (x y z w) the frame was rendered with; fov8: per eye {l, r, u, d} tangents (the host's eye FoV). 1 = two frames exist, 0 = one, -1 error.
-    int Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen);
+    // frameS: the frame's content time in seconds (the display time it was rendered for; 0 = unknown): the camera turn predicts a pair's turn as the
+    // measured rate times the pair's own time step (under our pacing a game's frames are 2 or 3 display periods apart, and so is its turn)
+    int Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen, double frameS = 0.0);
     bool computeFlow(int n, char* err, int errlen);
     // Renders the output for a boundary: mode 0 = the rendered frame `age` frames before the newest (0 = the newest) rotated to qOut4, 1 = the
     // frame at fraction t (0..1) between that frame's predecessor and it (midpoint = 0.5), rotated to qOut4. Returns the output texture (owned
@@ -75,6 +89,9 @@ public:
 private:
     struct Impl;
     Impl* m_i = nullptr;
+    // camera turn: reads pair n's measurement if the GPU has finished it (false = not ready / none), updates the prediction; `correct`: a turn
+    // that contradicts the prediction moves this pair's (and newer frames') yaw and redoes the pair's flow
+    bool harvestTurn(int n, bool correct, bool wait);
     ID3D11Device* m_dev = nullptr;
     ID3D11DeviceContext* m_ctx = nullptr;
     int m_w = 0, m_h = 0, m_have = 0;

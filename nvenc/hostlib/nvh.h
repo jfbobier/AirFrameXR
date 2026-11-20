@@ -85,7 +85,8 @@ int nvh_fg_enable(void* nvh, int on, double flow_scale, int perf_level, int grid
 // Takes the shim slot into the frame history (previous <- current <- slot) and computes the flow between the two; q_render8 = the per-eye
 // orientations the frame was rendered with (ipc frameRenderQuat). Returns 1 when two frames exist (interpolation possible), 0 after the
 // first frame, -1 on error. The slot may be released as soon as this returns.
-int nvh_fg_ingest(void* nvh, void* ipc, uint32_t slot, const float* q_render8, char* err, int errlen);
+// frame_s: the frame's content time (the display time it was rendered for, s; 0 = unknown)
+int nvh_fg_ingest(void* nvh, void* ipc, uint32_t slot, const float* q_render8, double frame_s, char* err, int errlen);
 // Encodes a generated frame through the foveation pass + NVENC: mode 0 = the newest rendered frame rotated to q_out4 (x y z w, the head
 // orientation of the tracking sample the frame is stamped with), mode 1 = the frame at fraction t between the two newest rendered frames
 // (0.5 = midpoint), rotated likewise. Returns the time in ms (render + encode), < 0 on error.
@@ -188,6 +189,11 @@ int nvh_bench_fgj_frame(void* bench, int eye_w, int eye_h, const double* times3,
 // the judge's `pan` scenario: the camera turns at deg_per_s about the world's up axis (times3[0] is then the pan clock, the scene frozen at t_ref, the
 // head the generator is told unchanged: a stick turn); 0 = off
 void nvh_bench_fgj_pan(double deg_per_s, double t_ref);
+// a pan sequence: warm_frames frames before A, gap_s apart, turning at warm_deg_per_s; the evaluated pair at deg_per_s
+void nvh_bench_fgj_pan_seq(double deg_per_s, double t_ref, double warm_deg_per_s, int warm_frames, double gap_s);
+// the judge generator's camera-turn state after its last case: measured turn deg, prediction deg, agreement, blocks, CPU ms, measurements,
+// corrections, late (not ready at the first output)
+int nvh_bench_fgj_turn(void* fgj, float* out8);
 void* nvh_bench_fgj_open(void* bench, int eye_w, int eye_h, int synth, char* err, int errlen);
 // renders frame A (times[0..2]) and B (times[3..5]), generates the midpoint for the head pose of times[6..8] and reads it back (RGBA8); info3 = flow ms, synth ms
 int nvh_bench_fgj_gen(void* bench, void* fgj, int eye_w, int eye_h, const double* times9, const float* fov8, float ipd, uint8_t* rgba, float* info2, char* err, int errlen);

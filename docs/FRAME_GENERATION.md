@@ -187,6 +187,32 @@ search still runs on the whole frame: the engine's ROIs were tried and are slowe
 draws the whole eye (`docs/EXPERIMENTAL_SWITCHES.md`). Measured (3080 Ti laptop, Balanced, half rate, the shipped trade-off profile's mask, 59 % of the
 eyes visible, 3 pairs): output pass 0.74 -> 0.54 ms, generator 172 -> 153 GPU ms per second, stream 77.2 -> 80.4 fps.
 
+## Stick turns: the camera turn (lab switch `AIRFRAMEXR_FG_CAM_TURN`, 1.4-foundation, 2026-11-20)
+
+Field 2026-11-20 (Hellraiser, 1.5x, ~41 fps): trailing on the right stick, none on head turns. A head turn never reaches the optical flow (A is turned
+into B's camera first); a stick turn is a turn of the play space the head pose does not carry, so it reached the flow whole, and the flow as configured
+does not follow a large uniform motion (no engine setting helps: `docs/FRAME_GENERATION_JUDGE.md`). With the switch on:
+
+1. Each rendered frame carries a **camera yaw** (about the tracking up axis) on top of its head orientation; every rotation the generator uses (the
+   alignment before the flow, the output view, A from B) takes the effective orientation. The output view is the stamp's head orientation turned by the
+   yaw interpolated at t, so a generated frame shows the turn at its own moment.
+2. The **pair's turn** is predicted as the measured turn rate times the pair's own content-time step (`nvh_fg_ingest` frame time: the display time the
+   frame was rendered for); under our pacing a game's frames are 2 or 3 display periods apart and its turn steps with them.
+3. The flow of a pair runs when its newer frame arrives (not at its first output), and its unpacked vectors are copied to a staging texture.
+   The **measurement** (`FrameGen::harvestTurn`, CPU, every second block): per textured block, the azimuth about the up axis of its direction in B
+   against its match in the aligned A, in tracking space; the weighted mode of the differences (0.05 deg histogram, then the mean around the peak) is
+   the part of the turn the prediction missed. The HUD, moving things and parallax do not turn with the camera and fall outside the peak. Under 200
+   blocks or under 30 % agreeing: no turn.
+4. A **missed prediction** (more than 0.25 deg: a turn starting, stopping, reversing) moves the pair's yaw (and the newer frames') and redoes the
+   pair's flow once. The pair's first output reads its measurement without waiting when it is ready; while a turn is in progress (a prediction
+   over 0.1 deg) it waits for it (the rest of our own GPU work: 0.7 ms on average, 3.9 ms at most in the lab).
+5. The edge the turned newer frame does not cover is taken from the older one (it showed it), else black as before.
+
+Cost (5090, the owner's stream 1920 x 2368): the flow as before (1 ms) plus one more at turn changes (5.6 % of the pairs on the lab's stick
+cycle), the measurement 0.35-0.9 ms CPU per pair on the encoder thread. Measured: `harness/fg_judge.py --pans ... --pan-warm 3` (sustained, start,
+stop, reverse) and `optional/e2e_fg_stick_turn_{off,on}` (the probe's `XR_PROBE_STICK_TURN`). Not yet: a headset, classic synthesis (stays off),
+pitch (yaw only: VR games turn on the stick in yaw), a game whose stick turn rolls the view.
+
 ## Borrowed from OFXR-Bridge (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge): the classic synthesis
 
 The synthesis: rotation-compensated flow (there analytically subtracted, here by aligning A into B's camera before the engine),

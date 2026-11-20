@@ -724,6 +724,7 @@ int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid,
     if (const char* v = getenv("AIRFRAMEXR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_COST_SCALE")) c.costScale = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_PHOTO_SCALE")) c.photoScale = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_CAM_TURN")) c.camTurn = atoi(v) != 0;   // lab switch, off by default (framegen.h camTurn)
     // the frame the shim composes: 2 x eye width by eye height (the encoder's own size may be the foveated one)
     const auto& S = Settings::Instance();
     if (!fg->Init((int)S.m_renderWidth, (int)S.m_renderHeight, c, err, errlen)) return 0;
@@ -731,12 +732,12 @@ int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid,
     return 1;
 }
 
-int nvh_fg_ingest(void* hh, void* i, uint32_t slot, const float* q_render8, char* err, int errlen) {
+int nvh_fg_ingest(void* hh, void* i, uint32_t slot, const float* q_render8, double frame_s, char* err, int errlen) {
     auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
     if (!n || !n->fg) { seterr(err, errlen, "frame generation off"); return -1; }
     ID3D11Texture2D* src = openSlot(n, ipc, slot, err, errlen);
     if (!src) return -1;
-    return n->fg->Ingest(src, q_render8, &ipc->state->host.eyeFovTan[0][0], err, errlen);
+    return n->fg->Ingest(src, q_render8, &ipc->state->host.eyeFovTan[0][0], err, errlen, frame_s);
 }
 
 double nvh_fg_encode(void* hh, void* i, int mode, double t, int age, const float* q_out4, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen) {
@@ -776,10 +777,14 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
     for (const char* c = s.nvofInfo; *c && k < 190; c++) { if (*c == '"' || *c == '\\') info[k++] = ' '; else info[k++] = *c; }
     info[k] = 0;
     return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"synths\":%llu,\"reals\":%llu,\"copies\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
-                    "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d],\"mask_pts\":[%d,%d],\"mask_visible\":[%.3f,%.3f]}",
+                    "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d],\"mask_pts\":[%d,%d],\"mask_visible\":[%.3f,%.3f],"
+                    "\"cam_turn\":{\"on\":%d,\"last_deg\":%.3f,\"pred_deg\":%.3f,\"agree\":%.2f,\"blocks\":%d,\"cpu_ms\":%.2f,\"measured\":%llu,\"doubtful\":%llu,\"not_ready\":%llu,\"late\":%llu,\"corrections\":%llu,\"waits\":%llu,\"wait_ms_avg\":%.2f,\"wait_ms_max\":%.2f}}",
                     s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.synths, (unsigned long long)s.reals, (unsigned long long)s.copies,
                     (unsigned long long)s.flowErrors, (unsigned long long)s.renderErrors, s.lastFlowMs, s.flowN ? s.flowMsSum / s.flowN : 0.0, s.lastSynthMs,
-                    s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH, s.maskPts[0], s.maskPts[1], s.maskVisible[0], s.maskVisible[1]);
+                    s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH, s.maskPts[0], s.maskPts[1], s.maskVisible[0], s.maskVisible[1],
+                    strstr(s.nvofInfo, "camera turn") ? 1 : 0, s.camTurnDeg, s.camTurnPredDeg, s.camTurnAgree, s.camTurnBlocks, s.camTurnCpuMs,
+                    (unsigned long long)s.camTurnMeasured, (unsigned long long)s.camTurnDoubtful, (unsigned long long)s.camTurnNotReady, (unsigned long long)s.camTurnLate,
+                    (unsigned long long)s.camTurnCorrections, (unsigned long long)s.camTurnWaits, s.camTurnWaits ? s.camTurnWaitMsSum / s.camTurnWaits : 0.0, s.camTurnWaitMsMax);
 }
 
 void nvh_ipc_set_app_min_period(void* i, uint32_t us) { ((Ipc*)i)->state->host.appMinPeriodUs = us; }

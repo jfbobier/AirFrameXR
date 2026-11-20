@@ -225,6 +225,22 @@ int main(int argc, char** argv) {
     // from the first valid head pose, 1.9 m ahead of where the head looks horizontally and 0.2 m below the eyes (the mock headset at 1.5 m facing -z gives this same default).
     XMMATRIX scenePlace = XMMatrixTranslation(0.f, 1.3f, -1.9f);
     bool sceneAtHead = false;
+    // XR_PROBE_STICK_TURN=<deg/s>:<turn s>:<still s>: a game's stick turn. The scene turns about the vertical axis through the head while the views the
+    // app submits stay the runtime's (the head pose does not carry the turn, as with a game's right stick), in display time, cycling: +rate for <turn s>,
+    // still for <still s>, -rate, then +rate at once (a reversal), still. The frame generator's camera-turn lab switch is judged on it (e2e_fg_stick_turn_*).
+    double stickRate = 0, stickOn = 1, stickOff = 0.5; long long stickT0 = 0;
+    if (const char* st = getenv("XR_PROBE_STICK_TURN")) {
+        stickRate = atof(st);
+        if (const char* c = strchr(st, ':')) { stickOn = std::max(0.05, atof(c + 1)); if (const char* c2 = strchr(c + 1, ':')) stickOff = std::max(0.0, atof(c2 + 1)); }
+        L("stick turn: %.0f deg/s, %.2f s turning, %.2f s still", stickRate, stickOn, stickOff);
+    }
+    auto stickYawDeg = [&](double t) {   // the integral of the cycle's rate up to t (seconds)
+        const double dur[5] = { stickOn, stickOff, stickOn, stickOn, stickOff }, rate[5] = { stickRate, 0, -stickRate, stickRate, 0 };
+        const double cyc = dur[0] + dur[1] + dur[2] + dur[3] + dur[4], perCycle = stickRate * stickOn;
+        double y = std::floor(t / cyc) * perCycle, r = std::fmod(t, cyc);
+        for (int k = 0; k < 5 && r > 0; k++) { const double d = std::min(r, dur[k]); y += rate[k] * d; r -= d; }
+        return y;
+    };
 
     XrGraphicsBindingD3D11KHR gb{ XR_TYPE_GRAPHICS_BINDING_D3D11_KHR }; gb.device = dev;
     XrSessionCreateInfo sci{ XR_TYPE_SESSION_CREATE_INFO }; sci.next = &gb; sci.systemId = sys;
@@ -530,7 +546,14 @@ int main(int argc, char** argv) {
             }
             if (tool.On() && views.size() >= 2) { XrFovf tf[2] = { views[0].fov, views[1].fov }; tool.Update(done, qpcMs(), tf); }
             SceneFrame sceneFrame;
-            if (sceneOn) BeginSceneFrame(scene, ctx, (qpcMs() - loopStartMs) / 1000.0, sceneFrame, scenePlace);
+            XMMATRIX placeNow = scenePlace;   // with a stick turn: the scene turned about the vertical axis through the head
+            if (stickRate != 0 && !views.empty()) {
+                if (stickT0 == 0) stickT0 = (long long)fs.predictedDisplayTime;
+                const double ts = (double)((long long)fs.predictedDisplayTime - stickT0) * 1e-9;
+                const XrVector3f& hp = views[0].pose.position;
+                placeNow = scenePlace * XMMatrixTranslation(-hp.x, 0, -hp.z) * XMMatrixRotationY((float)(stickYawDeg(ts) * 3.14159265358979 / 180.0)) * XMMatrixTranslation(hp.x, 0, hp.z);
+            }
+            if (sceneOn) BeginSceneFrame(scene, ctx, (qpcMs() - loopStartMs) / 1000.0, sceneFrame, placeNow);
             uint32_t idx = 0;
             for (size_t i = 0; i < vcv.size(); i++) {
                 if (!arrayMode || i == 0) {   // an array swapchain is acquired once for all its slices
@@ -573,7 +596,7 @@ int main(int argc, char** argv) {
                             const float tan4[4] = { -tanf(xf.angleLeft), tanf(xf.angleRight), tanf(xf.angleUp), -tanf(xf.angleDown) };
                             const XMMATRIX vp = XMMatrixInverse(nullptr, pose) * Projection(tan4, 0.05f, 100.f);
                             D3D11_VIEWPORT v{ 0, 0, (float)td.Width, (float)td.Height, 0, 1 };
-                            DrawSceneEye(scene, ctx, sceneFrame, v, vp, scenePlace);
+                            DrawSceneEye(scene, ctx, sceneFrame, v, vp, placeNow);
                             ID3D11RenderTargetView* none = nullptr;
                             ctx->OMSetRenderTargets(1, &none, nullptr);
                         }
