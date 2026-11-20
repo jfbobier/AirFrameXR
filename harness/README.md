@@ -239,6 +239,13 @@ source stream decoded the same way; tolerance = `max_unknown_frame_ratio`, to al
   Knob off: nothing is dropped, the second wait is paced like any other (22.5 real fps on the laptop, the behavior of before); knob on (`drop_duplicate_frames`): every duplicate
   dropped, the second wait returns at once, real frames paced alone (45 real fps, spacing stdev 0.7 ms); knob on with a game that does not resubmit (`MODSIM_DUP=0`): the fix does not act.
   The app's own event CSV (`modsim.csv`) and the shim's pacing line (`duplicate frames seen N dropped M (pacing fix on|off, free waits K)`) are what the checks read.
+- Frame-identity matrix (`scenarios/identity/`, `python3 harness/run.py identity [names]`, not part of `all`; plan: `docs/PLAN_UNIVERSAL_OPENXR.md`): `xr_modsim` call
+  shapes (`MODSIM_ARRAY`, `MODSIM_MSAA`, `MODSIM_DUP_RELEASE`, `MODSIM_QUAD`, `MODSIM_PAUSE_S`, `MODSIM_OFXR`) with the app's truth per submit in `modsim.csv`
+  (`rel` images released since the previous submit, `new_pic`, `same_pose`). Check `identity` (lib.analyse_identity): `identity_signal_matches_app` (VDXR's
+  "resubmitted with no new picture" count equals the app's no-release submits over the same frames: the fork's signal is exact), `identity_shape.*` (the run
+  produced its shape), `identity_no_new_picture_dropped`, `identity_true_dups_dropped`, `identity_waits_paced` (no spin). Some rows fail on 1.3.11 by design
+  (pose-only duplicate test): that is the baseline the arms are compared with. The real OFXR layer rows (`e2e_ofxr_tokyo_*`, need the OFXR build in
+  `D:\_ofxr\lab`) have no app truth: VDXR's and the shim's counts only, `harness/ofxr_report.py` for the display side. Tested on synthetic runs only.
 - optional: `e2e_openxr_foveated_split` (needs a GPU with >= 2 NVENC engines, e.g. the 5090) and `e2e_wslhost_hevc10_30mbps` (host in WSL, client on the builder over the real network) and
   `net_capacity_250mbps` (records what that network can carry).
 
@@ -258,8 +265,15 @@ pass `host.gpu_keepalive: 90` (a background GPU load standing in for the composi
 
 ## OpenXR chain details (`e2e_openxr_probe`)
 - **Components:** `ovrshim/` (fork of VDXR OVRNull: `driver.cpp` = `HostDriver`, `ipc.h`/`ipc_win.h` = shared-memory contract,
-  modified `ReprojectPS.hlsl`/`constantsbuffer.h`), built by `build shim` into `out\vdxr-shim` together with the unmodified VDXR dll.
+  modified `ReprojectPS.hlsl`/`constantsbuffer.h`), built by `build shim` into `out\vdxr-shim` together with the VDXR dll of our fork.
   The host side is `alvr_host --shim` (`nvh_ipc_*` in `nvenc/hostlib`).
+- **Swapchain shapes (2026-11-18):** `xr_probe` env `XR_PROBE_ARRAY=1` (one texture-array swapchain, view i = slice i: single-pass stereo),
+  `XR_PROBE_MSAA=<n>` (n samples, VDXR resolves), `XR_PROBE_RESUBMIT=<k>` (k extra wait / begin / end cycles per frame with the same layers,
+  nothing released). Scenarios `e2e_probe_array`, `e2e_probe_array_resubmit`, `e2e_probe_msaa`, optional `e2e_probe_array_inplace`. Checks:
+  `eye_colors` (the right eye's background bluer than the left's at a point low in each eye: each eye shows its own image) and `vdxr_trace`
+  (the shim's `app frames (VDXR)` line: `[lo, hi]` per frame for `copied_per_frame`, `unchanged_per_frame`, `released_per_frame`,
+  `slices_per_frame`, `resubmit_frac`). A/B without editing scenarios: `AIRFRAMEXR_APP_RUNTIME=<folder under the root>` (another
+  VDXR + shim), `AIRFRAMEXR_VDXR_COMMIT=<hash>` / `AIRFRAMEXR_VDXR_UNPATCHED=1` for `build vdxr`. Run order: `docs/PLAN_VDXR_FORK_LAB.md`.
 - **Process model:** host, client and app are separate processes. The host and the app are both started as non-elevated scheduled
   tasks in the interactive session (`topology.host_launch: "interactive"`): the OpenXR loader ignores `XR_RUNTIME_JSON` for elevated
   processes, and D3D shared textures do not cross Windows sessions. The IPC objects use the `Global\` namespace (fallback: local).

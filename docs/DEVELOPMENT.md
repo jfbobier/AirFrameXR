@@ -54,7 +54,9 @@ What the flag covers today: the shim's per-frame trace `shim_frames.csv` (pose r
 the pose-match diagnostics behind the 900-frame log line; the host's frame fates and sent-frame CSVs (`host_pipeline*.csv`,
 `host_frames.csv`). New per-frame telemetry must sit behind it (`#ifdef AIRFRAMEXR_TELEMETRY` / `#[cfg(feature = "telemetry")]`);
 counters that are a single add per frame and the periodic stats lines stay in both. `tools/wsl/check_cpp.sh` and `check_host.sh
---no-default-features` compile the release flavour (`EXTRA_DEFS="/D AIRFRAMEXR_RELEASE" bash tools/wsl/check_cpp.sh`). The follow-the-frames
+--no-default-features` compile the release flavour (`EXTRA_DEFS="/D AIRFRAMEXR_RELEASE" bash tools/wsl/check_cpp.sh`); `tools/wsl/check_hlsl.sh`
+compiles the shim's shaders with the Windows SDK's fxc through WSL interop and `tools/wsl/check_vdxr.sh [checkout]` checks the fork's VDXR
+sources (syntax only, NuGet packages stubbed). The follow-the-frames
 analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin\flavour.txt`, its zip name ends in `-debug` and the windows show "(debug build)" after the version. The debug package also carries the Black Box programs (`blackbox_recorder.exe`, `blackbox_analyzer.exe`, `perfcore.dll`, `perfreport.exe`); the release package never does, and the package test must keep checking that (the host and shim of a release package contain no telemetry file name).
 
 ## How the build fits together
@@ -65,7 +67,7 @@ analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin
   encode, QP map, reconstructed-frame output) and compiles them with `nvenc/hostlib/` into a static library.
 - The only patch to ALVR's sources is `tools/patches/loopback-client.patch` (test only: lets the mock client bind its own
   loopback address; inactive without its environment variable).
-- VDXR gets a few small text patches at build time (`tools/remote/stage15_vdxr.ps1`, listed in its header: layer visibility, cube faces, display name, running start off so that `xrWaitFrame` waits for the shim's release); OVRShim is built from VDXR's OVRNull project
+- VDXR is built from our fork at the commit pinned in `deps.lock.json` (`tools/remote/stage15_vdxr.ps1` checks it out in the builder's `src\VDXR` and builds it; `-Unpatched` builds stock upstream at `upstream_hash` for an A/B; what the fork changes: `docs/UPSTREAM.md`). A VDXR change is a commit on the fork's `airframexr` branch, pushed, then its hash in `deps.lock.json`; OVRShim is built from VDXR's OVRNull project
   with the files of `ovrshim/` (`stage11_ovrshim.ps1`).
 - GUIs: compiled with Visual Studio's Roslyn `csc` against the .NET Framework assemblies (`stage16_gui.ps1`), no .NET SDK.
 - Package: `stage13_package.ps1` assembles `out\dist\AirFrameXR` and the zip from an explicit list of files.
@@ -77,7 +79,7 @@ analysis (`harness/frames.py`) needs a debug build. A debug package carries `bin
 A release zip is built in the release flavour.
 
 0. **Since 1.3.5 every release ships the Black Box**: the release asset is the bundle (`python3 harness/bundle.py`: the release build and package, the personal package, the debug build and package, then the stock package with the Black Box nested in `blackbox\\`; the zips are fetched to `build/bundle/`). Publish `AirFrameXR-<version>-bundle.zip`, never the personal one. The steps below are what the bundle runs for its release part.
-1. `python3 harness/run.py build nvenc client host shim probe gui package --release` (`build` alone is client + host only), then
+1. `python3 harness/run.py build nvenc vdxr client host shim probe gui package --release` (`build` alone is client + host only), then
    `AIRFRAMEXR_PERSONAL=1 python3 harness/run.py build package --release` for the personal zip.
 2. Check the zip before publishing: `bin\flavour.txt` says release, no personal settings in the generic zip (no headset address in
    `config\airframexr.json`), the personal zip carrying its extra files and `config\user_fov_profiles.json` (from `private/personal_files/user_fov_profiles.json`; `harness/run.py package` fails a personal build when that file is missing or invalid, a generic zip ships none).

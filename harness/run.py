@@ -6,6 +6,7 @@
   python3 harness/run.py build [host|client|shim|probe|package|vdxr|nvenc ...]; test-install     # (re)build binaries on the builder
   python3 harness/run.py run  <scenario> [<scenario> ...]
   python3 harness/run.py all                               # every scenario, non-zero exit if any fail
+  python3 harness/run.py identity [<scenario> ...]         # the frame-identity matrix (scenarios/identity), one table (docs/PLAN_UNIVERSAL_OPENXR.md)
   python3 harness/run.py report [results_dir]              # re-evaluate saved artifacts (no builder needed)
   python3 harness/run.py bench-quality [quick|full] [--qp on|off] [--eye WxH] [--mbps N]   # benchmark phase 2 headless on the builder + sanity checks
   python3 harness/run.py test-zip                          # unzip the package into a fresh folder and run from it (logs, debug, config)
@@ -30,6 +31,8 @@ def load(name):
         p = SCEN / "pacing" / f"{name}.json"        # pacing lab (`run.py pacing`), not part of `all`
     if not p.exists():
         p = SCEN / "pacing" / "exp" / f"{name}.json"   # experiments (named explicitly)
+    if not p.exists():
+        p = SCEN / "identity" / f"{name}.json"      # frame-identity matrix (`run.py identity`), not part of `all`
     if not p.exists():
         raise SystemExit(f"unknown scenario {name}; available: {', '.join(x.stem for x in sorted(SCEN.glob('*.json')))}")
     sc = json.load(open(p))
@@ -106,10 +109,15 @@ def build(what):
         if not patched:
             return 2
     for w in what or ["client", "host"]:
-        if w == "vdxr":      # VDXR with the small OVRShim patches (tools/remote/stage15_vdxr.ps1)
-            r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage15_vdxr.ps1"], cwd=lib.ROOT, capture_output=True)
+        if w == "vdxr":      # VDXR from the AirFrameXR fork at the commit pinned in deps.lock.json (tools/remote/stage15_vdxr.ps1)
+            lib.b_put(lib.ROOT / "deps.lock.json", "_tmp/deps.lock.json")
+            # lab A/B: AIRFRAMEXR_VDXR_COMMIT=<full hash> builds another fork commit, AIRFRAMEXR_VDXR_UNPATCHED=1 stock upstream
+            vargs = ["-Unpatched"] if os.environ.get("AIRFRAMEXR_VDXR_UNPATCHED") == "1" else \
+                    ["-Commit", os.environ["AIRFRAMEXR_VDXR_COMMIT"]] if os.environ.get("AIRFRAMEXR_VDXR_COMMIT") else []
+            r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage15_vdxr.ps1", *vargs], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")
-            print(f"build vdxr: {'ok' if 'RESULT: OK' in o else 'FAILED'}")
+            vline = next((l.strip() for l in o.splitlines() if l.startswith("vdxr: ")), "")
+            print(f"build vdxr: {'ok' if 'RESULT: OK' in o else 'FAILED'}{' (' + vline + ')' if vline else ''}")
             if "RESULT: OK" not in o:
                 print(o[-1200:])
                 return 2
@@ -454,6 +462,32 @@ def main(argv):
         hdr = ["scenario", "status", "app_fps", "repeat%", "skip%", "dwell_p05", "dwell_p50", "dwell_p95", "empty", "superseded", "overruns", "send_late", "app_env_ms", "rel_late", "age_p50/p95/max", "same_ts"]
         w = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(hdr)]
         print("\n== pacing lab (reference SteamVR + ALVR on the headset: repeat 3.4 %, dwell 9-11 ms)")
+        print("  ".join(h.ljust(w[i]) for i, h in enumerate(hdr)))
+        for r in rows:
+            print("  ".join(c.ljust(w[i]) for i, c in enumerate(r)))
+        return 0 if all(r[1] == "PASS" for r in rows) else 1
+    if cmd == "identity":          # the frame-identity matrix (docs/PLAN_UNIVERSAL_OPENXR.md): every scenarios/identity/*.json (or the named ones), one table
+        names = argv[2:] or [p.stem for p in sorted((SCEN / "identity").glob("*.json"))]
+        rows = []
+        for n in names:
+            run_one(n)
+            d = lib.RESULTS / "latest"
+            a = json.load(open(d / "analysis.json")) if (d / "analysis.json").exists() else {}
+            r = json.load(open(d / "result.json"))
+            I = a.get("identity") or {}
+            W, V, S = I.get("window") or {}, I.get("vdxr") or {}, I.get("shim") or {}
+            if not I:   # a row without the app's truth (the real OFXR layer on xr_probe): VDXR's and the shim's counts alone
+                V = a.get("vdxr_trace") or {}
+                S = (a.get("modsim") or {}).get("shim") or {}
+            w = max(W.get("submits") or 0, 1)
+            pc = lambda k: f'{100.0 * (W.get(k) or 0) / w:.0f}' if W else "-"
+            rows.append([n, r["status"], str(W.get("submits", "-")), pc("true_dup"), pc("same_pose_new_pic"), pc("re_released"),
+                         f'{V.get("resubmits", "-")}/{W.get("no_release", "-")}', f'{S.get("dups_seen", "-")}/{S.get("dups_dropped", "-")}', str(S.get("free_waits", "-")),
+                         str(I.get("pause_wait_rate_hz", I.get("wait_rate_hz", "-"))),
+                         ",".join(c["name"] for c in r.get("checks", []) if not c["ok"]) or "-"])
+        hdr = ["scenario", "status", "submits", "true_dup%", "samepose_new%", "rereleased%", "vdxr/app_norel", "seen/dropped", "free_waits", "wait_hz", "failed checks"]
+        w = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(hdr)]
+        print("\n== frame-identity matrix (record the arm: AIRFRAMEXR_LAB_UNIVERSAL / build)")
         print("  ".join(h.ljust(w[i]) for i, h in enumerate(hdr)))
         for r in rows:
             print("  ".join(c.ljust(w[i]) for i, c in enumerate(r)))

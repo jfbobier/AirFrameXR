@@ -13,12 +13,29 @@
 //    the field flip made the mod faster and raggeder;
 //  - the worker is one of MODSIM_POOL threads used in turn (default 9), and from MODSIM_SWITCH_S seconds on a single thread (0 = never): the
 //    mod's submit work collapsed to one thread about four minutes after the game started.
+// MODSIM_OFXR=1 mimics OFXR-Bridge (external/ofxr, an OpenXR API layer doing frame generation) instead: every engine frame is a VR frame on one thread
+// (no pool, no worker), and the layer's xrEndFrame submits TWO frames for it: the generated one (a different image, the game's render poses) in the slot
+// the app waited for, then, after an internal wait / begin, the real one (layer.cpp submit_current_cycle: poses unchanged for projection layers). So the
+// shim sees about twice the engine rate of submits, every second with the previous submit's exact render poses, the second wait taken by the layer.
 // The render thread starts its next xrWaitFrame only after the worker is done (the mod serialises them with a mutex).
+//
+// Call shapes for the frame-identity matrix (docs/PLAN_UNIVERSAL_OPENXR.md), combinable with the above unless noted:
+//  - MODSIM_ARRAY=1: one swapchain with two array slices (single-pass stereo) instead of one swapchain per eye: VDXR's copy path for slice 1;
+//  - MODSIM_MSAA=N: N samples per pixel (VDXR resolves into a second swapchain: its other copy path); not with MODSIM_ARRAY; no id stamp;
+//  - MODSIM_DUP_RELEASE=1: the duplicate cycle acquires the next image of each swapchain, copies the last picture into it and releases it: the
+//    SAME picture, but an image release (whether the real mod does this is the open question of the plan's field check);
+//  - MODSIM_QUAD=1: a quad layer (own swapchain) redrawn and released before every submit, duplicates included: a submit whose projection
+//    repeats but whose picture changed (a menu or HUD over a frozen view);
+//  - MODSIM_PAUSE_S=a:b: the frames posted between a and b seconds after the loop starts draw nothing and resubmit the last picture with its
+//    poses (a game paused on its last frame; OpenXR allows it): no release, same poses, the app still paced by its waits.
+// The app's own truth for every submit is in the CSV's END rows (columns rel, new_pic, same_pose; harness lib.analyse_identity).
 //
 // Usage: xr_modsim.exe <logfile> [real_frames=300] [timeout_s=60]
 // Env: MODSIM_ENGINE_MS (default 8), MODSIM_GPU_COPIES (0), MODSIM_DUP (1), MODSIM_POOL (9), MODSIM_SWITCH_S (0), MODSIM_CSV = per-event CSV
-// (t_ms, tid, event, a, b): EF / WAIT_IN / WAIT_OUT / BEGIN / END with the display time in a and, for END, the real-frame id in b (the duplicate
-// carries the id of the frame it repeats), the lab's equivalent of the probe's log.
+// (t_ms, tid, event, a, b, rel, new_pic, same_pose): EF / WAIT_IN / WAIT_OUT / BEGIN / END with the display time in a and, for END, the real-frame
+// id in b (the duplicate carries the id of the frame it repeats), the lab's equivalent of the probe's log. END rows also carry rel = swapchain
+// images released since the previous END (what VDXR counts as "newly released"), new_pic = 1 when the picture differs from every earlier submit's
+// (0: a resubmit, a DUP_RELEASE copy, a paused frame), same_pose = 1 when the projection poses equal the previous END's exactly; -1 on other rows.
 // Each real frame stamps its id as 16 white/black 64x64 blocks in the top-left of the left eye image, like xr_probe.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -57,10 +74,10 @@ static void L(const char* fmt, ...) {
     vfprintf(g_log, fmt, a); fputc('\n', g_log); fflush(g_log);
     va_end(a);
 }
-static void ev(const char* name, long long a = 0, long long b = 0) {
+static void ev(const char* name, long long a = 0, long long b = 0, int rel = -1, int newPic = -1, int samePose = -1) {
     if (!g_csv) return;
     std::lock_guard<std::mutex> lk(g_logMx);
-    fprintf(g_csv, "%.3f,%lu,%s,%lld,%lld\n", qpcMs(), GetCurrentThreadId(), name, a, b);
+    fprintf(g_csv, "%.3f,%lu,%s,%lld,%lld,%d,%d,%d\n", qpcMs(), GetCurrentThreadId(), name, a, b, rel, newPic, samePose);
 }
 static int fail(const char* what, XrResult r) { L("FAIL %s -> %d", what, (int)r); return 1; }
 #define CK(x) do { XrResult r_ = (x); if (XR_FAILED(r_)) return fail(#x, r_); L("ok   %s", #x); } while (0)
@@ -72,58 +89,132 @@ static std::vector<std::vector<XrSwapchainImageD3D11KHR>> g_imgs(2);
 static uint32_t g_w[2], g_h[2];
 static int64_t g_fmt;
 
-struct Task { int id; XrTime time; XrView views[2]; };
+struct Task { int id; XrTime time; XrView views[2]; bool paused = false; };
 struct Worker {
     std::thread th; std::mutex m; std::condition_variable cv; std::deque<Task> q; bool stop = false;
 };
 static std::atomic<int> g_taskDone{0};
 static std::atomic<int> g_dupN{1};
 static bool g_staticPose = false;
+static bool g_ofxr = false;
+static bool g_strobe = false;   // MODSIM_STROBE=1: real frames flat green, the generated ones flat magenta (a headset test: does the display show both?)
 static std::atomic<bool> g_failed{false};
+// call shapes (header comment)
+static bool g_array = false;          // MODSIM_ARRAY=1: g_sc[1] == g_sc[0], the eye is the array slice
+static int g_samples = 1;             // MODSIM_MSAA
+static bool g_dupRelease = false;     // MODSIM_DUP_RELEASE=1
+static bool g_quad = false;           // MODSIM_QUAD=1
+static XrSwapchain g_quadSc = XR_NULL_HANDLE;
+static std::vector<XrSwapchainImageD3D11KHR> g_quadImgs;
+static const int kQuadPx = 512;
+static uint32_t g_lastIdx[2] = {};    // the image each swapchain released last (MODSIM_DUP_RELEASE copies it)
+// The app's truth per submit (CSV END rows). The submits of one frame never overlap (the render thread waits for the worker; OFXR mode is one
+// thread), so plain variables are enough for the pose; the counters are atomics because the worker changes from frame to frame.
+static std::atomic<int> g_relSinceEnd{0};
+static std::atomic<bool> g_newPicSinceEnd{false};
+static XrPosef g_lastEndPose[2];
+static bool g_haveLastEnd = false;
+static std::atomic<int> g_truthEnds{0}, g_truthNoRelease{0}, g_truthRepeatPic{0}, g_truthSamePose{0};
 
 // draws the next image of both eyes (a flat colour from the frame id, the id stamped in the left eye) and releases them
 static bool drawFrame(int id) {
-    for (int i = 0; i < 2; i++) {
+    const int nsc = g_array ? 1 : 2;   // MODSIM_ARRAY: one image holds both eyes
+    for (int s = 0; s < nsc; s++) {
         XrSwapchainImageAcquireInfo ai{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO }; uint32_t idx;
-        if (XR_FAILED(xrAcquireSwapchainImage(g_sc[i], &ai, &idx))) return false;
+        if (XR_FAILED(xrAcquireSwapchainImage(g_sc[s], &ai, &idx))) return false;
         XrSwapchainImageWaitInfo wi{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO }; wi.timeout = XR_INFINITE_DURATION;
-        if (XR_FAILED(xrWaitSwapchainImage(g_sc[i], &wi))) return false;
+        if (XR_FAILED(xrWaitSwapchainImage(g_sc[s], &wi))) return false;
         {
             std::lock_guard<std::mutex> g(g_gpuMx);
-            D3D11_RENDER_TARGET_VIEW_DESC rd{}; rd.Format = (DXGI_FORMAT)g_fmt; rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-            ID3D11RenderTargetView* rtv = nullptr;
-            g_dev->CreateRenderTargetView(g_imgs[i][idx].texture, &rd, &rtv);
-            if (rtv) {
-                const float c[4] = { 0.1f + 0.1f * (float)(id % 7), 0.2f, 0.3f + 0.05f * (float)(id % 5), 1.f };
-                g_ctx->ClearRenderTargetView(rtv, c);
-                ID3D11DeviceContext1* c1 = nullptr;
-                if (i == 0 && SUCCEEDED(g_ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
-                    const float white[4] = { 1, 1, 1, 1 }, black[4] = { 0, 0, 0, 1 };
-                    for (int bi = 0; bi < 16; bi++) { D3D11_RECT r{ bi * 64, 0, (bi + 1) * 64, 64 }; c1->ClearView(rtv, ((id >> bi) & 1) ? white : black, &r, 1); }
-                    c1->Release();
+            for (int i = g_array ? 0 : s; i < (g_array ? 2 : s + 1); i++) {
+                D3D11_RENDER_TARGET_VIEW_DESC rd{}; rd.Format = (DXGI_FORMAT)g_fmt;
+                if (g_array) { rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY; rd.Texture2DArray.FirstArraySlice = (UINT)i; rd.Texture2DArray.ArraySize = 1; }
+                else rd.ViewDimension = g_samples > 1 ? D3D11_RTV_DIMENSION_TEXTURE2DMS : D3D11_RTV_DIMENSION_TEXTURE2D;
+                ID3D11RenderTargetView* rtv = nullptr;
+                g_dev->CreateRenderTargetView(g_imgs[s][idx].texture, &rd, &rtv);
+                if (rtv) {
+                    float c[4] = { 0.1f + 0.1f * (float)(id % 7), 0.2f, 0.3f + 0.05f * (float)(id % 5), 1.f };
+                    if (g_strobe) { const bool gen = id >= 100000; c[0] = gen ? 0.8f : 0.f; c[1] = gen ? 0.f : 0.8f; c[2] = gen ? 0.8f : 0.f; }
+                    g_ctx->ClearRenderTargetView(rtv, c);
+                    ID3D11DeviceContext1* c1 = nullptr;
+                    if (i == 0 && g_samples == 1 && SUCCEEDED(g_ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1))) {
+                        const float white[4] = { 1, 1, 1, 1 }, black[4] = { 0, 0, 0, 1 };
+                        for (int bi = 0; bi < 16; bi++) { D3D11_RECT r{ bi * 64, 0, (bi + 1) * 64, 64 }; c1->ClearView(rtv, ((id >> bi) & 1) ? white : black, &r, 1); }
+                        c1->Release();
+                    }
+                    rtv->Release();
                 }
-                rtv->Release();
             }
             g_ctx->Flush();
         }
         XrSwapchainImageReleaseInfo rl{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-        if (XR_FAILED(xrReleaseSwapchainImage(g_sc[i], &rl))) return false;
+        if (XR_FAILED(xrReleaseSwapchainImage(g_sc[s], &rl))) return false;
+        g_lastIdx[s] = idx; g_relSinceEnd++;
+    }
+    g_newPicSinceEnd = true;
+    return true;
+}
+
+// MODSIM_DUP_RELEASE: the next image of each swapchain receives a copy of the last picture and is released (the same picture, but a release)
+static bool rereleaseLast() {
+    const int nsc = g_array ? 1 : 2;
+    for (int s = 0; s < nsc; s++) {
+        XrSwapchainImageAcquireInfo ai{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO }; uint32_t idx;
+        if (XR_FAILED(xrAcquireSwapchainImage(g_sc[s], &ai, &idx))) return false;
+        XrSwapchainImageWaitInfo wi{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO }; wi.timeout = XR_INFINITE_DURATION;
+        if (XR_FAILED(xrWaitSwapchainImage(g_sc[s], &wi))) return false;
+        if (idx != g_lastIdx[s]) { std::lock_guard<std::mutex> g(g_gpuMx); g_ctx->CopyResource(g_imgs[s][idx].texture, g_imgs[s][g_lastIdx[s]].texture); g_ctx->Flush(); }
+        XrSwapchainImageReleaseInfo rl{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+        if (XR_FAILED(xrReleaseSwapchainImage(g_sc[s], &rl))) return false;
+        g_lastIdx[s] = idx; g_relSinceEnd++;
     }
     return true;
 }
 
+// MODSIM_QUAD: the quad layer's next picture (a flat colour that changes at every submit)
+static bool drawQuad() {
+    static int n = 0; n++;
+    XrSwapchainImageAcquireInfo ai{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO }; uint32_t idx;
+    if (XR_FAILED(xrAcquireSwapchainImage(g_quadSc, &ai, &idx))) return false;
+    XrSwapchainImageWaitInfo wi{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO }; wi.timeout = XR_INFINITE_DURATION;
+    if (XR_FAILED(xrWaitSwapchainImage(g_quadSc, &wi))) return false;
+    {
+        std::lock_guard<std::mutex> g(g_gpuMx);
+        D3D11_RENDER_TARGET_VIEW_DESC rd{}; rd.Format = (DXGI_FORMAT)g_fmt; rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        ID3D11RenderTargetView* rtv = nullptr;
+        g_dev->CreateRenderTargetView(g_quadImgs[idx].texture, &rd, &rtv);
+        if (rtv) { const float c[4] = { 0.9f, 0.1f + 0.08f * (float)(n % 10), 0.1f, 1.f }; g_ctx->ClearRenderTargetView(rtv, c); rtv->Release(); }
+        g_ctx->Flush();
+    }
+    XrSwapchainImageReleaseInfo rl{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+    if (XR_FAILED(xrReleaseSwapchainImage(g_quadSc, &rl))) return false;
+    g_relSinceEnd++; g_newPicSinceEnd = true;
+    return true;
+}
+
 static bool endFrame(const Task& t, XrTime displayTime, int id) {
+    if (g_quad && !drawQuad()) return false;
     XrCompositionLayerProjectionView pv[2] = { { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW }, { XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW } };
     for (int i = 0; i < 2; i++) {
         pv[i].pose = t.views[i].pose; pv[i].fov = t.views[i].fov;
         pv[i].subImage.swapchain = g_sc[i]; pv[i].subImage.imageRect = { { 0, 0 }, { (int)g_w[i], (int)g_h[i] } };
+        pv[i].subImage.imageArrayIndex = g_array ? (uint32_t)i : 0;
     }
     XrCompositionLayerProjection layer{ XR_TYPE_COMPOSITION_LAYER_PROJECTION };
     layer.space = g_space; layer.viewCount = 2; layer.views = pv;
-    const XrCompositionLayerBaseHeader* lay[1] = { (XrCompositionLayerBaseHeader*)&layer };
+    XrCompositionLayerQuad quad{ XR_TYPE_COMPOSITION_LAYER_QUAD };   // MODSIM_QUAD: 0.6 m square 1.5 m ahead, in front of the projection
+    quad.space = g_space; quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH; quad.subImage.swapchain = g_quadSc;
+    quad.subImage.imageRect = { { 0, 0 }, { kQuadPx, kQuadPx } }; quad.pose.orientation.w = 1.f; quad.pose.position.z = -1.5f; quad.size = { 0.6f, 0.6f };
+    const XrCompositionLayerBaseHeader* lay[2] = { (XrCompositionLayerBaseHeader*)&layer, (XrCompositionLayerBaseHeader*)&quad };
     XrFrameEndInfo fe{ XR_TYPE_FRAME_END_INFO };
-    fe.displayTime = displayTime; fe.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE; fe.layerCount = 1; fe.layers = lay;
-    ev("END", (long long)displayTime, id);
+    fe.displayTime = displayTime; fe.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE; fe.layerCount = g_quad ? 2 : 1; fe.layers = lay;
+    // the truth for this submit: images released since the previous submit, a picture never submitted before, the previous submit's poses
+    const int rel = g_relSinceEnd.exchange(0);
+    const bool newPic = g_newPicSinceEnd.exchange(false);
+    const bool samePose = g_haveLastEnd && memcmp(&g_lastEndPose[0], &t.views[0].pose, sizeof(XrPosef)) == 0 && memcmp(&g_lastEndPose[1], &t.views[1].pose, sizeof(XrPosef)) == 0;
+    g_lastEndPose[0] = t.views[0].pose; g_lastEndPose[1] = t.views[1].pose; g_haveLastEnd = true;
+    g_truthEnds++; if (rel == 0) g_truthNoRelease++; if (!newPic) g_truthRepeatPic++; if (samePose) g_truthSamePose++;
+    ev("END", (long long)displayTime, id, rel, newPic ? 1 : 0, samePose ? 1 : 0);
     return XR_SUCCEEDED(xrEndFrame(g_sess, &fe));
 }
 
@@ -136,7 +227,7 @@ static void workerLoop(Worker* w) {
             if (w->q.empty()) return;
             t = w->q.front(); w->q.pop_front();
         }
-        if (!drawFrame(t.id) || !endFrame(t, t.time, t.id)) { g_failed = true; g_taskDone++; continue; }
+        if ((!t.paused && !drawFrame(t.id)) || !endFrame(t, t.time, t.id)) { g_failed = true; g_taskDone++; continue; }   // paused: the last picture again
         for (int k = 0, n = g_dupN.load(); k < n; k++) {
             // the extra cycle: a new frame (wait, begin) that only resubmits the same layers
             XrFrameState fs{ XR_TYPE_FRAME_STATE };
@@ -145,6 +236,7 @@ static void workerLoop(Worker* w) {
             ev("WAIT_OUT", (long long)fs.predictedDisplayTime, t.id);
             if (XR_FAILED(xrBeginFrame(g_sess, nullptr))) { g_failed = true; g_taskDone++; continue; }
             ev("BEGIN", (long long)fs.predictedDisplayTime, t.id);
+            if (g_dupRelease && !rereleaseLast()) { g_failed = true; }
             if (!endFrame(t, fs.predictedDisplayTime, t.id)) { g_failed = true; }
         }
         g_taskDone++;
@@ -157,11 +249,19 @@ int main(int argc, char** argv) {
     const int realFrames = argc > 2 ? atoi(argv[2]) : 300;
     const int timeoutS = argc > 3 ? atoi(argv[3]) : 60;
     g_log = fopen(logPath, "w"); if (!g_log) return 2;
-    if (const char* c = getenv("MODSIM_CSV")) { g_csv = fopen(c, "w"); if (g_csv) fprintf(g_csv, "t_ms,tid,ev,a,b\n"); }
+    if (const char* c = getenv("MODSIM_CSV")) { g_csv = fopen(c, "w"); if (g_csv) fprintf(g_csv, "t_ms,tid,ev,a,b,rel,new_pic,same_pose\n"); }
     const double engineMs = getenv("MODSIM_ENGINE_MS") ? atof(getenv("MODSIM_ENGINE_MS")) : 8.0;
     const int gpuCopies = getenv("MODSIM_GPU_COPIES") ? atoi(getenv("MODSIM_GPU_COPIES")) : 0;
     g_dupN = getenv("MODSIM_DUP") ? std::max(0, atoi(getenv("MODSIM_DUP"))) : 1;
     g_staticPose = getenv("MODSIM_STATIC_POSE") && atoi(getenv("MODSIM_STATIC_POSE")) != 0;
+    g_ofxr = getenv("MODSIM_OFXR") && atoi(getenv("MODSIM_OFXR")) != 0;
+    g_strobe = getenv("MODSIM_STROBE") && atoi(getenv("MODSIM_STROBE")) != 0;
+    g_array = getenv("MODSIM_ARRAY") && atoi(getenv("MODSIM_ARRAY")) != 0;
+    g_samples = std::max(1, getenv("MODSIM_MSAA") ? atoi(getenv("MODSIM_MSAA")) : 1);
+    g_dupRelease = getenv("MODSIM_DUP_RELEASE") && atoi(getenv("MODSIM_DUP_RELEASE")) != 0;
+    g_quad = getenv("MODSIM_QUAD") && atoi(getenv("MODSIM_QUAD")) != 0;
+    double pauseFrom = 0.0, pauseTo = 0.0;   // MODSIM_PAUSE_S=a:b
+    if (const char* ps = getenv("MODSIM_PAUSE_S")) { if (sscanf(ps, "%lf:%lf", &pauseFrom, &pauseTo) != 2 || pauseTo <= pauseFrom) { pauseFrom = pauseTo = 0.0; } }
     const double dupStopS = getenv("MODSIM_DUP_STOP_S") ? atof(getenv("MODSIM_DUP_STOP_S")) : 0.0;
     const double jitterMs = getenv("MODSIM_JITTER_MS") ? atof(getenv("MODSIM_JITTER_MS")) : 0.0;
     const double switchEngineMs = getenv("MODSIM_SWITCH_ENGINE_MS") ? atof(getenv("MODSIM_SWITCH_ENGINE_MS")) : -1.0;
@@ -171,6 +271,8 @@ int main(int argc, char** argv) {
     const int pool = std::max(1, getenv("MODSIM_POOL") ? atoi(getenv("MODSIM_POOL")) : 9);
     const double switchS = getenv("MODSIM_SWITCH_S") ? atof(getenv("MODSIM_SWITCH_S")) : 0.0;
     L("start real_frames=%d timeout=%ds engine_ms=%.1f gpu_copies=%d dup=%d pool=%d switch_s=%.1f dup_stop_s=%.1f static_pose=%d jitter_ms=%.1f switch_engine_ms=%.1f switch_jitter_ms=%.1f", realFrames, timeoutS, engineMs, gpuCopies, g_dupN.load(), pool, switchS, dupStopS, (int)g_staticPose, jitterMs, switchEngineMs, switchJitterMs);
+    L("shapes: array=%d msaa=%d dup_release=%d quad=%d pause_s=%.1f:%.1f ofxr=%d", (int)g_array, g_samples, (int)g_dupRelease, (int)g_quad, pauseFrom, pauseTo, (int)g_ofxr);
+    if (g_array && g_samples > 1) { L("FAIL MODSIM_MSAA with MODSIM_ARRAY is not supported"); return 2; }
 
     XrInstanceCreateInfo ici{ XR_TYPE_INSTANCE_CREATE_INFO };
     const char* ext[] = { XR_KHR_D3D11_ENABLE_EXTENSION_NAME };
@@ -201,14 +303,26 @@ int main(int argc, char** argv) {
     std::vector<int64_t> fmts(n); CK(xrEnumerateSwapchainFormats(g_sess, n, &n, fmts.data()));
     g_fmt = fmts[0]; for (int64_t f : fmts) if (f == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) g_fmt = f;
     for (int i = 0; i < 2; i++) {
+        g_w[i] = vcv[i].recommendedImageRectWidth; g_h[i] = vcv[i].recommendedImageRectHeight;
+        if (g_array) { g_w[i] = std::max(vcv[0].recommendedImageRectWidth, vcv[1].recommendedImageRectWidth); g_h[i] = std::max(vcv[0].recommendedImageRectHeight, vcv[1].recommendedImageRectHeight); }
+        if (g_array && i == 1) { g_sc[1] = g_sc[0]; g_imgs[1] = g_imgs[0]; continue; }   // one swapchain, slice = eye
         XrSwapchainCreateInfo si{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
         si.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
-        si.format = g_fmt; si.sampleCount = 1; si.faceCount = 1; si.arraySize = 1; si.mipCount = 1;
-        g_w[i] = vcv[i].recommendedImageRectWidth; g_h[i] = vcv[i].recommendedImageRectHeight; si.width = g_w[i]; si.height = g_h[i];
+        si.format = g_fmt; si.sampleCount = (uint32_t)g_samples; si.faceCount = 1; si.arraySize = g_array ? 2 : 1; si.mipCount = 1;
+        si.width = g_w[i]; si.height = g_h[i];
         CK(xrCreateSwapchain(g_sess, &si, &g_sc[i]));
         uint32_t c; CK(xrEnumerateSwapchainImages(g_sc[i], 0, &c, nullptr));
         g_imgs[i].assign(c, { XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR });
         CK(xrEnumerateSwapchainImages(g_sc[i], c, &c, (XrSwapchainImageBaseHeader*)g_imgs[i].data()));
+    }
+    if (g_quad) {
+        XrSwapchainCreateInfo si{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
+        si.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+        si.format = g_fmt; si.sampleCount = 1; si.faceCount = 1; si.arraySize = 1; si.mipCount = 1; si.width = kQuadPx; si.height = kQuadPx;
+        CK(xrCreateSwapchain(g_sess, &si, &g_quadSc));
+        uint32_t c; CK(xrEnumerateSwapchainImages(g_quadSc, 0, &c, nullptr));
+        g_quadImgs.assign(c, { XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR });
+        CK(xrEnumerateSwapchainImages(g_quadSc, c, &c, (XrSwapchainImageBaseHeader*)g_quadImgs.data()));
     }
     // GPU load: copies of a big texture on the render thread's engine frames
     ID3D11Texture2D* loadTex[2] = {};
@@ -250,7 +364,8 @@ int main(int argc, char** argv) {
             const double t = qpcMs(); while (qpcMs() - t < cost) YieldProcessor();
         }
         if (loadTex[0]) { std::lock_guard<std::mutex> g(g_gpuMx); for (int k = 0; k < gpuCopies; k++) g_ctx->CopyResource(loadTex[(k + 1) & 1], loadTex[k & 1]); g_ctx->Flush(); }
-        const bool vrFrame = (ef++ & 1) == 1;
+        const bool vrFrame = g_ofxr || (ef & 1) == 1;
+        ef++;
         if (!vrFrame) continue;
 
         while (g_taskDone.load() < posted && !g_failed && GetTickCount64() - t0 <= (ULONGLONG)timeoutS * 1000) Sleep(0);   // the worker finishes the last frame first
@@ -267,6 +382,27 @@ int main(int argc, char** argv) {
         static XrView firstViews[2]; static bool haveFirst = false;
         if (g_staticPose) { if (!haveFirst) { firstViews[0] = views[0]; firstViews[1] = views[1]; haveFirst = true; } views[0] = firstViews[0]; views[1] = firstViews[1]; }
         t.views[0] = views[0]; t.views[1] = views[1];
+        {   // MODSIM_PAUSE_S: inside the window the frame resubmits the last drawn picture with its poses and id (no draw, no release)
+            static Task lastDrawn{}; static bool haveDrawn = false; static int pauseState = 0;
+            const double ls = (qpcMs() - loopStart) / 1000.0;
+            const bool paused = pauseTo > pauseFrom && ls >= pauseFrom && ls < pauseTo && haveDrawn;
+            if (paused) { t.views[0] = lastDrawn.views[0]; t.views[1] = lastDrawn.views[1]; t.id = lastDrawn.id; t.paused = true; }
+            else { lastDrawn = t; haveDrawn = true; }
+            if (paused && pauseState == 0) { pauseState = 1; L("pause: from now on the last picture again (%.1f s)", ls); }
+            if (!paused && pauseState == 1) { pauseState = 2; L("pause ends (%.1f s)", ls); }
+        }
+        if (g_ofxr) {   // the layer's end: generated frame in the app's slot, then an internal cycle for the real frame (same poses, other image)
+            if (!drawFrame(t.id + 100000) || !endFrame(t, t.time, t.id)) { L("FAIL ofxr generated frame"); rc = 4; break; }
+            XrFrameState fs2{ XR_TYPE_FRAME_STATE };
+            ev("WAIT_IN", 0, t.id);
+            if (XR_FAILED(xrWaitFrame(g_sess, nullptr, &fs2))) { L("FAIL ofxr internal wait"); rc = 4; break; }
+            ev("WAIT_OUT", (long long)fs2.predictedDisplayTime, t.id);
+            if (XR_FAILED(xrBeginFrame(g_sess, nullptr))) { L("FAIL ofxr internal begin"); rc = 4; break; }
+            ev("BEGIN", (long long)fs2.predictedDisplayTime, t.id);
+            if (!drawFrame(t.id) || !endFrame(t, fs2.predictedDisplayTime, t.id)) { L("FAIL ofxr real frame"); rc = 4; break; }
+            posted++; g_taskDone++;
+            continue;
+        }
         const bool single = switchS > 0 && (qpcMs() - loopStart) / 1000.0 >= switchS;
         static bool announced = false; if (single && !announced) { announced = true; L("switch: from now on one worker thread (%.1f s)", (qpcMs() - loopStart) / 1000.0); }
         Worker* w = workers[single ? 0 : (size_t)(posted % pool)];
@@ -277,6 +413,8 @@ int main(int argc, char** argv) {
     while (g_taskDone.load() < posted && GetTickCount64() - t0 < (ULONGLONG)(timeoutS + 5) * 1000) Sleep(1);
     const double secs = (qpcMs() - loopStart) / 1000.0;
     L("done: %d real frames in %.1f s (%.1f real fps), %d engine frames, rc=%d", posted, secs, secs > 0 ? posted / secs : 0.0, ef, rc);
+    L("identity truth: %d submits, %d with no image released, %d repeating an earlier picture, %d with the previous submit's poses",
+      g_truthEnds.load(), g_truthNoRelease.load(), g_truthRepeatPic.load(), g_truthSamePose.load());
     if (running) {   // leave the session the way a game does
         xrRequestExitSession(g_sess);
         for (int i = 0; i < 200 && running; i++) {

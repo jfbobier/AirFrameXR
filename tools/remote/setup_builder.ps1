@@ -1,8 +1,10 @@
 # One-time setup of a builder (the Windows PC that builds and runs AirFrameXR; see docs/DEVELOPMENT.md). Idempotent:
 #  1. checks the toolchain (git, rustup/cargo, cmake, clang, nuget, Visual Studio 2022 with C++),
-#  2. clones ALVR v20.14.1 and VirtualDesktop-OpenXR at the commits pinned in deps.lock.json (<root>\_tmp\deps.lock.json)
-#     into <Src> (default <root>\src; root = $env:AIRFRAMEXR_ROOT or %USERPROFILE%\openxr) and verifies them (existing clones are verified, never changed),
-#  3. builds what the later stages expect: VDXR (unpatched, + out\vdxr-null), the OpenXR loader (build\oxr-sdk), ALVR's
+#  2. clones ALVR v20.14.1 and VDXR (the AirFrameXR fork of VirtualDesktop-OpenXR) at the commits pinned in deps.lock.json
+#     (<root>\_tmp\deps.lock.json) into <Src> (default <root>\src; root = $env:AIRFRAMEXR_ROOT or %USERPROFILE%\openxr) and verifies
+#     them (existing clones are verified, never changed; an existing VDXR clone at another commit is only reported: build vdxr,
+#     tools/remote/stage15_vdxr.ps1, moves it to the pin),
+#  3. builds what the later stages expect: VDXR (+ out\vdxr-null), the OpenXR loader (build\oxr-sdk), ALVR's
 #     server_core once (fetches the crates).
 # -CloneOnly stops after step 2 (used to test the clone step into another folder).
 param([string]$Src = '', [switch]$CloneOnly)
@@ -37,13 +39,16 @@ git -C $a submodule update --init --depth 1 openvr 2>&1 | Select-Object -Last 2
 $ov = (git -C "$a\openvr" rev-parse HEAD 2>$null)
 Step 'alvr_openvr_submodule' ($ov -eq $alvr.submodules.openvr) "$ov"
 $v = "$Src\VDXR"
-if (-not (Test-Path "$v\.git")) {
+$vdxrFresh = -not (Test-Path "$v\.git")
+if ($vdxrFresh) {
   git init -q $v
-  git -C $v remote add origin https://github.com/mbucchia/VirtualDesktop-OpenXR.git
+  git -C $v remote add origin $vdxr.remote
   git -C $v fetch -q --depth 1 origin $vdxr.full_hash 2>&1 | Select-Object -Last 2
   git -C $v checkout -q FETCH_HEAD 2>&1 | Select-Object -Last 2
 }
-Step 'vdxr_commit' ((Head $v) -eq $vdxr.full_hash) "$(Head $v) (pinned $($vdxr.full_hash))"
+# builders set up before 1.3.11 hold upstream 1a83fec8 here: reported, and moved by build vdxr (the next step of run.py setup)
+$vh = Head $v
+Step 'vdxr_commit' ($vh -eq $vdxr.full_hash -or ($vh -and -not $vdxrFresh)) "$vh (pinned $($vdxr.full_hash)$(if ($vh -ne $vdxr.full_hash) { '; build vdxr moves it there' }))"
 git -C $v submodule update --init --recursive --depth 1 2>&1 | Select-Object -Last 3
 foreach ($p in $vdxr.submodules.PSObject.Properties) {
   $h = (git -C "$v\$($p.Name)" rev-parse HEAD 2>$null)

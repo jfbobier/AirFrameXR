@@ -15,16 +15,17 @@ Versions, sources and checksums: `third_party/README.md`, `deps.lock.json`.
 
 ## Fetched at build time (not in this repository)
 - **ALVR v20.14.1** (MIT, github.com/alvr-org/ALVR): `server_core` and its crates are linked into `alvr_host.exe`.
-- **VirtualDesktop-OpenXR** (MIT, github.com/mbucchia/VirtualDesktop-OpenXR) at the commit in `deps.lock.json`, with its
-  submodules (OpenXR SDK: Apache-2.0; LibOVR; FidelityFX; fmt; cJSON; ...): the OpenXR runtime DLL is built from it with three
-  small patches (`tools/remote/stage15_vdxr.ps1`).
+- **VirtualDesktop-OpenXR** (MIT, Copyright (c) Matthieu Bucchianeri, github.com/mbucchia/VirtualDesktop-OpenXR), through our fork
+  github.com/jfbobier/VirtualDesktop-OpenXR (branch `airframexr`: upstream plus our commits, `docs/UPSTREAM.md`) at the commit in
+  `deps.lock.json`, with its submodules (OpenXR SDK: Apache-2.0; LibOVR; FidelityFX; fmt; cJSON; ...): the OpenXR runtime DLL is
+  built from it (`tools/remote/stage15_vdxr.ps1`).
 - **Draco 1.5.7** (Apache-2.0) and the *Littlest Tokyo* GLB: only for the offline scene converter (`tools/bench_scene/build.sh`).
 
 ## In the release zip
 - `alvr_host.exe`: AirFrameXR + ALVR (MIT) + 263 Rust crates, listed with their licenses in
   `third_party/licenses/alvr_host-crates.txt`. All are permissive (MIT / Apache-2.0 / BSD / ISC / Zlib / Unicode-3.0 / BSL-1.0)
   except six under **MPL-2.0** (`symphonia*`, `webpki-roots`, `option-ext`), used unmodified; their source is at crates.io.
-- `virtualdesktop-openxr.dll` / `.json`: VirtualDesktop-OpenXR (MIT), patched as above.
+- `virtualdesktop-openxr.dll` / `.json`: VirtualDesktop-OpenXR (MIT), our fork as above.
 - `LibOVRRT64_1.dll`: OVRShim (MIT).
 - `opencomposite\bin\vrclient.dll`, `vrclient_x64.dll`: **OpenComposite** (OpenVR -> OpenXR, https://gitlab.com/znixian/OpenOVR), **GPL-3.0-or-later**, the
   project's own prebuilt DLLs, unmodified, revision `a27e7e6a64bdcd1eff6b7fba1ea2ea34bcf1273d` (1.0.1539). They are separate programs that games load; AirFrameXR does not link to

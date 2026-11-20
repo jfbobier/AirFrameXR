@@ -320,12 +320,27 @@ int main(int argc, char** argv) {
     for (int64_t f : fmts) if (f == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) fmt = f;
     L("swapchain formats: %u, using %lld", n, (long long)fmt);
 
+    // Swapchain shapes that take VDXR's copy into a second OVR swapchain (harness scenarios e2e_probe_array*, e2e_probe_msaa):
+    // XR_PROBE_ARRAY=1: one swapchain with an array slice per view (single-pass stereo, as Unity's single-pass instanced submits);
+    // XR_PROBE_MSAA=<n>: n samples per pixel (VDXR resolves them; not with XR_PROBE_SCENE, whose depth buffer has one sample);
+    // XR_PROBE_RESUBMIT=<k>: after each frame, k more wait / begin / end cycles resubmit the same layers without releasing an image
+    // (a VR mod's duplicate cycle).
+    const bool arrayMode = getenv("XR_PROBE_ARRAY") && atoi(getenv("XR_PROBE_ARRAY")) != 0;
+    const uint32_t msaa = getenv("XR_PROBE_MSAA") ? (uint32_t)std::max(1, atoi(getenv("XR_PROBE_MSAA"))) : 1;
+    const int resubmit = getenv("XR_PROBE_RESUBMIT") ? std::max(0, atoi(getenv("XR_PROBE_RESUBMIT"))) : 0;
+    if (msaa > 1 && sceneOn) return fail("XR_PROBE_MSAA with XR_PROBE_SCENE", XR_ERROR_VALIDATION_FAILURE);
+    if (arrayMode || msaa > 1 || resubmit) L("swapchain shape: %s, %u samples, %d resubmits per frame", arrayMode ? "one array (slice per view)" : "one per view", msaa, resubmit);
     std::vector<XrSwapchain> sc(vcv.size());
     std::vector<std::vector<XrSwapchainImageD3D11KHR>> imgs(vcv.size());
     for (size_t i = 0; i < vcv.size(); i++) {
+        if (arrayMode && i > 0) {   // every view uses the first swapchain, slice i
+            sc[i] = sc[0];
+            imgs[i] = imgs[0];
+            continue;
+        }
         XrSwapchainCreateInfo si{ XR_TYPE_SWAPCHAIN_CREATE_INFO };
         si.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
-        si.format = fmt; si.sampleCount = 1; si.faceCount = 1; si.arraySize = 1; si.mipCount = 1;
+        si.format = fmt; si.sampleCount = msaa; si.faceCount = 1; si.arraySize = arrayMode ? (uint32_t)vcv.size() : 1; si.mipCount = 1;
         si.width = vcv[i].recommendedImageRectWidth; si.height = vcv[i].recommendedImageRectHeight;
         CK(xrCreateSwapchain(sess, &si, &sc[i]));
         uint32_t c; CK(xrEnumerateSwapchainImages(sc[i], 0, &c, nullptr));
@@ -333,6 +348,7 @@ int main(int argc, char** argv) {
         CK(xrEnumerateSwapchainImages(sc[i], c, &c, (XrSwapchainImageBaseHeader*)imgs[i].data()));
         L("swapchain %zu: %u images", i, c);
     }
+    int resubmitted = 0;
 
     // ---- composition-layer test resources: phases of 90 frames
     //  0 head-locked quad   1 world-locked rotated quad   2 cylinder   3 cube (behind a transparent projection layer)
@@ -514,14 +530,24 @@ int main(int argc, char** argv) {
             if (tool.On() && views.size() >= 2) { XrFovf tf[2] = { views[0].fov, views[1].fov }; tool.Update(done, qpcMs(), tf); }
             SceneFrame sceneFrame;
             if (sceneOn) BeginSceneFrame(scene, ctx, (qpcMs() - loopStartMs) / 1000.0, sceneFrame, scenePlace);
+            uint32_t idx = 0;
             for (size_t i = 0; i < vcv.size(); i++) {
-                XrSwapchainImageAcquireInfo ai{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO }; uint32_t idx;
-                r = xrAcquireSwapchainImage(sc[i], &ai, &idx); if (XR_FAILED(r)) return fail("xrAcquireSwapchainImage", r);
-                XrSwapchainImageWaitInfo wi{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO }; wi.timeout = XR_INFINITE_DURATION;
-                r = xrWaitSwapchainImage(sc[i], &wi); if (XR_FAILED(r)) return fail("xrWaitSwapchainImage", r);
+                if (!arrayMode || i == 0) {   // an array swapchain is acquired once for all its slices
+                    XrSwapchainImageAcquireInfo ai{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO };
+                    r = xrAcquireSwapchainImage(sc[i], &ai, &idx); if (XR_FAILED(r)) return fail("xrAcquireSwapchainImage", r);
+                    XrSwapchainImageWaitInfo wi{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO }; wi.timeout = XR_INFINITE_DURATION;
+                    r = xrWaitSwapchainImage(sc[i], &wi); if (XR_FAILED(r)) return fail("xrWaitSwapchainImage", r);
+                }
                 // stamp: dark background, 16 counter blocks and a gray patch in the left eye image
                 ID3D11RenderTargetView* rtv = nullptr;
-                D3D11_RENDER_TARGET_VIEW_DESC rd{}; rd.Format = (DXGI_FORMAT)fmt; rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+                D3D11_RENDER_TARGET_VIEW_DESC rd{}; rd.Format = (DXGI_FORMAT)fmt;
+                if (arrayMode && msaa > 1) {
+                    rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DMSARRAY; rd.Texture2DMSArray.FirstArraySlice = (UINT)i; rd.Texture2DMSArray.ArraySize = 1;
+                } else if (arrayMode) {
+                    rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY; rd.Texture2DArray.FirstArraySlice = (UINT)i; rd.Texture2DArray.ArraySize = 1;
+                } else {
+                    rd.ViewDimension = msaa > 1 ? D3D11_RTV_DIMENSION_TEXTURE2DMS : D3D11_RTV_DIMENSION_TEXTURE2D;
+                }
                 if (SUCCEEDED(dev->CreateRenderTargetView(imgs[i][idx].texture, &rd, &rtv))) {
                     float bg[4] = { 0.02f, 0.02f, 0.02f + (i ? 0.1f : 0.f), 1 };
                     if (cubeTest && (done / 90) % 6 == 3) { bg[0] = bg[1] = bg[2] = bg[3] = 0.f; }   // cube phase: transparent, cube is drawn behind
@@ -748,16 +774,20 @@ int main(int argc, char** argv) {
                                 static bool said = false;
                                 if (!said) { said = true; L("checker: %s at 1152,0 64x64 (format %d)", checker ? "drawn" : "not available", (int)sd.Format); }
                             }
-                            if (checker) ctx->CopySubresourceRegion(imgs[i][idx].texture, 0, 1152, 0, 0, checker, 0, nullptr);
+                            if (checker && msaa == 1)   // into this view's slice (an MSAA target takes no copy from a one-sample texture)
+                                ctx->CopySubresourceRegion(imgs[i][idx].texture, arrayMode ? D3D11CalcSubresource(0, (UINT)i, 1) : 0, 1152, 0, 0, checker, 0, nullptr);
                         }
                     }
                     rtv->Release();
                 }
                 ctx->Flush();
-                XrSwapchainImageReleaseInfo rl{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
-                r = xrReleaseSwapchainImage(sc[i], &rl); if (XR_FAILED(r)) return fail("xrReleaseSwapchainImage", r);
+                if (!arrayMode || i + 1 == vcv.size()) {   // released once every slice is drawn
+                    XrSwapchainImageReleaseInfo rl{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
+                    r = xrReleaseSwapchainImage(sc[i], &rl); if (XR_FAILED(r)) return fail("xrReleaseSwapchainImage", r);
+                }
                 pv[i].pose = views[i].pose; pv[i].fov = views[i].fov;
                 pv[i].subImage.swapchain = sc[i]; pv[i].subImage.imageRect = { {0,0}, {(int)vcv[i].recommendedImageRectWidth, (int)vcv[i].recommendedImageRectHeight} };
+                pv[i].subImage.imageArrayIndex = arrayMode ? (uint32_t)i : 0;
             }
             layer.space = space; layer.viewCount = (uint32_t)pv.size(); layer.views = pv.data();
             const XrCompositionLayerBaseHeader* proj = (XrCompositionLayerBaseHeader*)&layer;
@@ -822,8 +852,17 @@ int main(int argc, char** argv) {
         r = xrEndFrame(sess, &fe);
         if (XR_FAILED(r)) return fail("xrEndFrame", r);
         if (timingF) { fprintf(timingF, "%d,%lld,%.3f,%.3f,%.3f\n", done + 1, (long long)fs.predictedDisplayTime, tWaitRet, qpcMs(), lf); if (done % 30 == 0) fflush(timingF); }
+        for (int k = 0; k < resubmit && nl > 0; k++) {   // XR_PROBE_RESUBMIT: the same layers again, nothing acquired or released
+            XrFrameState fs2{ XR_TYPE_FRAME_STATE };
+            r = xrWaitFrame(sess, nullptr, &fs2); if (XR_FAILED(r)) return fail("xrWaitFrame(resubmit)", r);
+            r = xrBeginFrame(sess, nullptr); if (XR_FAILED(r)) return fail("xrBeginFrame(resubmit)", r);
+            XrFrameEndInfo fe2 = fe; fe2.displayTime = fs2.predictedDisplayTime;
+            r = xrEndFrame(sess, &fe2); if (XR_FAILED(r)) return fail("xrEndFrame(resubmit)", r);
+            resubmitted++;
+        }
         done++;
     }
+    if (resubmit) L("resubmitted frames: %d", resubmitted);
     if (soundOn) mciSendStringA("close xrbgm", nullptr, 0, nullptr);
     L("loop done: frames=%d ready=%d synchronized=%d", done, sawReady, sawSync);
     if (done > 1) L("app fps %.2f over %d frames", (done - 1) * 1000.0 / (qpcMs() - loopStartMs), done - 1);

@@ -1,0 +1,98 @@
+{
+  "description": "OFXR-BRIDGE MIMIC, maximum OpenXR compatibility mode (drop_duplicate_frames) ON: xr_modsim MODSIM_OFXR=1 reproduces what the OFXR layer (frame generation, external/ofxr) does to the runtime: one thread, every engine frame (20 ms, about 45 a second) is submitted twice, a generated image in the slot the app waited for and then, after an internal wait / begin, the real image, both with the game's render poses (field log WEIRD HITCH, Borderlands 4: 50 % of the submits had the previous render poses, the headset showed 44 of 90 streamed fps). Full chain, frame generation off.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 75,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 100000,
+    "running_start_ms": 2.0,
+    "frame_gen": "off",
+    "frame_gen_rate": "half",
+    "drop_duplicate_frames": true
+  },
+  "client": {
+    "seconds": 80,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "display_sim": true,
+    "poll_ms": 5,
+    "queue_max": 2,
+    "motion": "yaw"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "exe": "xr_modsim",
+    "frames": 1500,
+    "timeout_s": 70,
+    "env": {
+      "MODSIM_OFXR": "1",
+      "MODSIM_ENGINE_MS": "20",
+      "MODSIM_GPU_COPIES": "0"
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 240,
+  "checks": {
+    "host_min_frames": 600,
+    "client_min_frames": 600,
+    "modsim": {
+      "fix": "on",
+      "min_real_frames": 600,
+      "min_free_wait_ratio": 0.8,
+      "max_second_wait_ms": 1.0,
+      "min_second_wait_ms": 1.0,
+      "min_real_fps": 40,
+      "max_spacing_stdev_ms": 3
+    },
+    "max_duplicate_timestamps": 100
+  }
+}

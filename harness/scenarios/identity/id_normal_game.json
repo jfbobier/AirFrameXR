@@ -1,0 +1,107 @@
+{
+  "description": "FRAME-IDENTITY MATRIX (docs/PLAN_UNIVERSAL_OPENXR.md, run with `run.py identity` for each arm; not part of `all`: some rows fail on 1.3.11 by design, that failure is the baseline). xr_modsim writes what each submit really was (images released, new picture or not, same poses or not); the checks compare it with VDXR's per-frame facts and with what the shim dropped. Row (control): a normal game, one submit per wait, new poses and a new picture every time. Want: no duplicate seen or dropped, the signal reports no resubmit.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 75,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 100000,
+    "running_start_ms": 2.0,
+    "frame_gen": "on",
+    "frame_gen_rate": "half",
+    "drop_duplicate_frames": true
+  },
+  "client": {
+    "seconds": 80,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "display_sim": true,
+    "poll_ms": 5,
+    "queue_max": 2,
+    "motion": "yaw"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "exe": "xr_modsim",
+    "frames": 2400,
+    "timeout_s": 70,
+    "env": {
+      "MODSIM_ENGINE_MS": "9",
+      "MODSIM_GPU_COPIES": "0",
+      "MODSIM_DUP": "0",
+      "MODSIM_POOL": "1"
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 240,
+  "checks": {
+    "host_min_frames": 600,
+    "client_min_frames": 600,
+    "max_duplicate_timestamps": 100000,
+    "vdxr_trace": {
+      "min_frames": 900
+    },
+    "identity": {
+      "min_submits": 900,
+      "shape": {
+        "true_dup": [
+          0.0,
+          0.01
+        ],
+        "same_pose_new_pic": [
+          0.0,
+          0.01
+        ]
+      },
+      "max_dropped_new_pictures_frac": 0.0
+    }
+  }
+}

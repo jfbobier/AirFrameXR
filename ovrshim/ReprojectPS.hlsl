@@ -30,7 +30,9 @@ cbuffer cb : register(b0)
 
 SamplerState linearSampler : register(s0);
 
-Texture2D<float4> sourceColor : register(t0);
+// Every 2D swapchain image is bound as an array view (one slice for a plain texture): D3D11 has no plain 2D view of a texture
+// array (single-pass stereo swapchains). cb.slice picks the slice.
+Texture2DArray<float4> sourceColor : register(t0);
 
 float4 main(in float4 position : SV_Position, in float3 reprojectedCoord : TEXCOORD0) : SV_Target
 {
@@ -47,14 +49,14 @@ float4 main(in float4 position : SV_Position, in float3 reprojectedCoord : TEXCO
     // render, docs/EXPERIMENTAL_SWITCHES.md) is averaged over this output pixel's footprint instead of being read with one bilinear tap,
     // which skipped most of the extra pixels (2026-10-29: "no clarity gain"). The footprint in source texels comes from the screen-space
     // derivatives of the source coordinate (homography included); up to 3 x 3 taps spread over it, one tap at 1:1 as before.
-    float srcW, srcH;
-    sourceColor.GetDimensions(srcW, srcH);
+    float srcW, srcH, srcSlices;
+    sourceColor.GetDimensions(srcW, srcH, srcSlices);
     const float2 footprint = max(abs(ddx(realTexCoord)), abs(ddy(realTexCoord))) * float2(srcW, srcH);
     const int nx = clamp((int)ceil(footprint.x - 0.05), 1, 3), ny = clamp((int)ceil(footprint.y - 0.05), 1, 3);
     float4 color = 0;
     if (nx == 1 && ny == 1)
     {
-        color = sourceColor.SampleLevel(linearSampler, realTexCoord, 0);
+        color = sourceColor.SampleLevel(linearSampler, float3(realTexCoord, cb.slice), 0);
     }
     else
     {
@@ -68,7 +70,7 @@ float4 main(in float4 position : SV_Position, in float3 reprojectedCoord : TEXCO
             {
                 if (i < nx && j < ny)
                 {
-                    color += sourceColor.SampleLevel(linearSampler, start + step * float2(i, j), 0);
+                    color += sourceColor.SampleLevel(linearSampler, float3(start + step * float2(i, j), cb.slice), 0);
                 }
             }
         }
@@ -77,11 +79,11 @@ float4 main(in float4 position : SV_Position, in float3 reprojectedCoord : TEXCO
     if (cb.finalPass && cb.sharpening > 0.0)
     {
         // unsharp mask on the 4 neighbours (ALVR uses 8 at weight sharpening / 8)
-        float w, h;
-        sourceColor.GetDimensions(w, h);
-        const float2 dx = float2(1.0 / w, 0), dy = float2(0, 1.0 / h);
-        const float3 n = sourceColor.SampleLevel(linearSampler, realTexCoord + dx, 0).rgb + sourceColor.SampleLevel(linearSampler, realTexCoord - dx, 0).rgb +
-                         sourceColor.SampleLevel(linearSampler, realTexCoord + dy, 0).rgb + sourceColor.SampleLevel(linearSampler, realTexCoord - dy, 0).rgb;
+        const float2 dx = float2(1.0 / srcW, 0), dy = float2(0, 1.0 / srcH);
+        const float3 n = sourceColor.SampleLevel(linearSampler, float3(realTexCoord + dx, cb.slice), 0).rgb +
+                         sourceColor.SampleLevel(linearSampler, float3(realTexCoord - dx, cb.slice), 0).rgb +
+                         sourceColor.SampleLevel(linearSampler, float3(realTexCoord + dy, cb.slice), 0).rgb +
+                         sourceColor.SampleLevel(linearSampler, float3(realTexCoord - dy, cb.slice), 0).rgb;
         color.rgb = max(color.rgb * (1.0 + cb.sharpening) - n * (cb.sharpening / 4.0), 0.0);
     }
 

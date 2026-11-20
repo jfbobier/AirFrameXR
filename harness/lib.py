@@ -321,7 +321,10 @@ def launch_app(app, rid, rd, log):
         raw = CACHE / "desktop.rgba"
         sh([FFMPEG, "-hide_banner", "-v", "error", "-y", "-i", str(ROOT / app["image"]), "-vf", "scale=1920:1080", "-f", "rawvideo", "-pix_fmt", "bgra", str(raw)])
         b_put(raw, f"runs/{rid}/desktop.rgba")
-    rt = app.get("runtime", r"out\vdxr-shim")
+    # AIRFRAMEXR_APP_RUNTIME=<folder under the root>: another runtime (VDXR + shim) for an A/B without editing scenarios (docs/PLAN_VDXR_FORK_LAB.md)
+    rt = app.get("runtime", os.environ.get("AIRFRAMEXR_APP_RUNTIME") or r"out\vdxr-shim")
+    if os.environ.get("AIRFRAMEXR_APP_RUNTIME"):
+        log(f"  app runtime: {rt} (AIRFRAMEXR_APP_RUNTIME)")
     cmd = ("@echo off\r\n"
            f"set XR_RUNTIME_JSON={home}\\{ROOTNAME}\\{rt}\\virtualdesktop-openxr.json\r\n"
            + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\{ROOTNAME}\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\{ROOTNAME}\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_timing.csv", "MODSIM_CSV": f"{home}\\{ROOTNAME}\\{rd}\\modsim.csv", **app.get("env", {})}.items()) +
@@ -1216,6 +1219,52 @@ def analyse_handover_chain(sc, outdir):
     return res
 
 
+def analyse_eye_colors(sc, outdir):
+    """checks.eye_colors (single-pass stereo / MSAA probes, XR_PROBE_ARRAY / XR_PROBE_MSAA): xr_probe clears the left eye to linear 0.02 grey and the
+    right eye with 0.1 more blue, and draws its counter only in the left eye's top rows. A background point low in each eye tells a right eye
+    that shows its own slice (bluer than the left) from a black, swapped or duplicated eye."""
+    cfg = negotiated_cfg(outdir)
+    ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
+    pts = [(ew // 2, (eh * 3) // 4), (ew + ew // 2, (eh * 3) // 4)]
+    frames = read_rgb_at(outdir / "client.hevc", pts)[20:]
+    ck = sc["checks"]["eye_colors"]
+    need_db, max_drg = ck.get("min_blue_diff", 15), ck.get("max_rg_diff", 12)
+
+    def ok(fr):
+        (lr, lg, lb), (rr, rg, rb) = fr
+        return rb - lb >= need_db and abs(rr - lr) <= max_drg and abs(rg - lg) <= max_drg
+
+    def med(k, c):
+        return sorted(fr[k][c] for fr in frames)[len(frames) // 2] if frames else None
+
+    return {"frames": len(frames), "ok": sum(1 for fr in frames if ok(fr)), "left_median_rgb": [med(0, c) for c in range(3)],
+            "right_median_rgb": [med(1, c) for c in range(3)], "points": [list(p) for p in pts]}
+
+
+def analyse_vdxr_trace(outdir):
+    """The shim's `app frames (VDXR)` line (ovrshim_Trace from the AirFrameXR fork of VDXR, docs/ARCHITECTURE.md): the last one carries the
+    cumulative counters. None when the line is absent (a VDXR build without the channel, or no debug log)."""
+    sl = Path(outdir) / "ovrshim.log"
+    if not sl.exists():
+        return None
+    last = None
+    for line in sl.read_text(errors="replace").splitlines():
+        m = re.search(r"app frames \(VDXR\): (\d+), resubmitted with no new picture (\d+), discarded (\d+); swapchain slices (\d+) "
+                      r"\(newly released (\d+), copied into a second swapchain (\d+), copy skipped as unchanged (\d+)\); "
+                      r"xrWaitFrame return -> xrEndFrame ms p50 ([0-9.]+) p95 ([0-9.]+), xrBeginFrame -> xrEndFrame ms p50 ([0-9.]+) p95 ([0-9.]+)", line)
+        if m:
+            last = m
+    if not last:
+        return None
+    g = [last.group(i) for i in range(1, 12)]
+    r = dict(zip(("frames", "resubmits", "discarded", "slices", "released", "copied", "unchanged"), map(int, g[:7])))
+    r.update(dict(zip(("wait_to_end_p50", "wait_to_end_p95", "begin_to_end_p50", "begin_to_end_p95"), map(float, g[7:]))))
+    f = max(r["frames"], 1)
+    r.update({"copied_per_frame": round(r["copied"] / f, 3), "unchanged_per_frame": round(r["unchanged"] / f, 3),
+              "released_per_frame": round(r["released"] / f, 3), "slices_per_frame": round(r["slices"] / f, 3), "resubmit_frac": round(r["resubmits"] / f, 3)})
+    return r
+
+
 def analyse_mirror_clicks(outdir):
     """The mock client's scripted controller (controllers.csv: trigger, grip, A, B per sample with the wall-clock time it was sent) against what the app decided
     (mirror_events.csv: left/right button edges, double clicks, with the wall-clock time of the decision). Per kind: the expected edges (the same hysteresis the app
@@ -1784,6 +1833,10 @@ def analyse(sc, outdir: Path):
         a["layers"] = analyse_layers(sc, outdir)
     if sc.get("checks", {}).get("mirror") and cl.exists() and cl.stat().st_size > 0:
         a["mirror"] = analyse_mirror(sc, outdir)
+    if sc.get("checks", {}).get("eye_colors") and cl.exists() and cl.stat().st_size > 0:
+        a["eye_colors"] = analyse_eye_colors(sc, outdir)
+    if sc.get("checks", {}).get("vdxr_trace"):
+        a["vdxr_trace"] = analyse_vdxr_trace(outdir)
     if sc.get("checks", {}).get("handover"):
         a["handover"] = analyse_handover(sc, outdir)
     if sc.get("checks", {}).get("handover_chain"):
@@ -1796,6 +1849,8 @@ def analyse(sc, outdir: Path):
         a["qpmap"] = analyse_qpmap(sc, outdir, a.get("host") or {})
     if sc.get("checks", {}).get("modsim") and sc.get("app"):
         a["modsim"] = analyse_modsim(sc, outdir)
+    if sc.get("checks", {}).get("identity") and sc.get("app"):
+        a["identity"] = analyse_identity(sc, outdir)
     if sc.get("checks", {}).get("pacing") and sc.get("app"):
         a["pacing"] = analyse_pacing(sc, outdir, 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0))
     period = 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0)
@@ -1944,6 +1999,74 @@ def analyse_modsim(sc, outdir):
                            "fix": last.group(5), "dup_per_real": int(last.group(6)), "free_waits": int(last.group(7))}
     return res
 
+def analyse_identity(sc, outdir):
+    """The frame-identity matrix (docs/PLAN_UNIVERSAL_OPENXR.md): what each submit really was, from the app (xr_modsim's CSV END rows: rel = images
+    released since the previous submit, new_pic = a picture never submitted before, same_pose = the previous submit's exact poses), against what
+    VDXR reports (the shim's `app frames (VDXR)` line: frames whose swapchains released nothing) and what the shim dropped (pacing line).
+    Classes: a true duplicate = same poses and a repeated picture (safe to drop); OFXR-like = same poses, new picture (must be kept);
+    re-released = an image released whose picture repeats (a release-based identity calls it new). The comparisons use the app's first N submits,
+    N = the frames of the VDXR line (both lines come from the same 900-frame block), or the whole run without that line.
+    None when the CSV has no truth columns (an xr_modsim older than the identity matrix)."""
+    f = Path(outdir) / "modsim.csv"
+    if not f.exists():
+        return None
+    ends, waits = [], []
+    for line in f.read_text(errors="replace").splitlines()[1:]:
+        q = line.split(",")
+        if len(q) >= 8 and q[2] == "END":
+            try:
+                ends.append((float(q[0]) / 1000.0, int(q[5]), int(q[6]), int(q[7])))
+            except ValueError:
+                pass
+        elif len(q) >= 3 and q[2] == "WAIT_OUT":
+            try:
+                waits.append(float(q[0]) / 1000.0)
+            except ValueError:
+                pass
+    if not ends or ends[0][1] < 0:
+        return None
+
+    def classes(rows):
+        c = {"submits": len(rows), "no_release": 0, "repeat_pic": 0, "same_pose": 0, "true_dup": 0, "same_pose_new_pic": 0, "re_released": 0}
+        for _, rel, newp, same in rows:
+            c["no_release"] += rel == 0
+            c["repeat_pic"] += newp == 0
+            c["same_pose"] += same == 1
+            c["true_dup"] += same == 1 and newp == 0
+            c["same_pose_new_pic"] += same == 1 and newp == 1
+            c["re_released"] += rel > 0 and newp == 0
+        return c
+    res = {"all": classes(ends)}
+    V = analyse_vdxr_trace(outdir)
+    n = V["frames"] if V else len(ends)
+    res["window"] = classes(ends[:n])
+    res["window_from"] = "vdxr line" if V else "whole run (no VDXR line)"
+    if V:
+        res["vdxr"] = {"frames": V["frames"], "resubmits": V["resubmits"]}
+    sl = Path(outdir) / "ovrshim.log"
+    if sl.exists():
+        last = None
+        for line in sl.read_text(errors="replace").splitlines():
+            m = re.search(r"duplicate frames seen (\d+) dropped (\d+) \(pacing fix (on|off), (\d+) duplicates per real frame, free waits (\d+)\)", line)
+            if m:
+                last = m
+        if last:
+            res["shim"] = {"dups_seen": int(last.group(1)), "dups_dropped": int(last.group(2)), "fix": last.group(3), "free_waits": int(last.group(5))}
+    # the app's wait rate: steady part, and inside MODSIM_PAUSE_S when set (a paused app must stay paced, not spin)
+    t0 = ends[0][0]
+    def rate(a, b):
+        k = [w for w in waits if a <= w < b]
+        return round(len(k) / (b - a), 1) if b > a else None
+    res["wait_rate_hz"] = rate(t0 + 3.0, ends[-1][0] - 1.0)
+    ps = str(sc.get("app", {}).get("env", {}).get("MODSIM_PAUSE_S", ""))
+    if ":" in ps:
+        lo, hi = (float(x) for x in ps.split(":", 1))
+        # the app's pause clock starts at its loop start (about the first submit); keep 1 s off both edges
+        res["pause_wait_rate_hz"] = rate(t0 + lo + 1.0, t0 + hi - 1.0)
+        res["pause"] = classes([e for e in ends if t0 + lo + 1.0 <= e[0] < t0 + hi - 1.0])
+    return res
+
+
 def evaluate(sc, a):
     """Returns list of checks: {name, ok, value, expected}."""
     out = []
@@ -2046,6 +2169,22 @@ def evaluate(sc, a):
                 frac = r["ok"] / r["n"] if r["n"] else 0.0
                 chk(f"layer.p{r['phase']}.{name}", r["n"] >= need and frac >= ck["layers"].get("min_ok_frac", 0.9),
                     {"frames": r["n"], "ok_frac": round(frac, 2), "samples": r["samples"][:2]}, f"expected {r['expected']} at the projected point in >= {ck['layers'].get('min_ok_frac', 0.9)} of {need}+ frames")
+    if "eye_colors" in a:
+        E_ = a["eye_colors"]; ek = ck["eye_colors"]
+        frac = E_["ok"] / E_["frames"] if E_["frames"] else 0.0
+        chk("eye_colors_each_eye_its_own", E_["frames"] >= ek.get("min_frames", 100) and frac >= ek.get("min_ok_frac", 0.95),
+            {"frames": E_["frames"], "ok_frac": round(frac, 3), "left": E_["left_median_rgb"], "right": E_["right_median_rgb"]},
+            f"the right eye's background bluer than the left's by >= {ek.get('min_blue_diff', 15)} (same red and green) in >= {ek.get('min_ok_frac', 0.95)} "
+            "of the frames: each eye shows its own image (not black, not swapped, not the other eye's)")
+    if "vdxr_trace" in a:
+        V_ = a["vdxr_trace"]; vk = ck["vdxr_trace"]
+        chk("vdxr_trace_present", V_ is not None and V_["frames"] >= vk.get("min_frames", 100), V_ and {"frames": V_["frames"]},
+            "the shim logged the fork's per-frame facts (app frames (VDXR) line) for enough frames")
+        if V_ is not None:
+            for key in ("copied_per_frame", "unchanged_per_frame", "released_per_frame", "slices_per_frame", "resubmit_frac"):
+                if key in vk:   # [lo, hi]
+                    lo, hi = vk[key]
+                    chk(f"vdxr_trace.{key}", lo <= V_[key] <= hi, V_[key], f"{lo} <= {key} <= {hi}")
     if "mirror" in a:
         M_ = a["mirror"]; mk = ck["mirror"]
         frac = M_["ok"] / M_["frames"] if M_["frames"] else 0.0
@@ -2456,6 +2595,38 @@ def evaluate(sc, a):
                 part = M.get(nm)
                 if part:
                     chk("modsim_spacing_" + nm, part["stdev"] <= mk["max_spacing_stdev_ms"], part["stdev"], f"real-frame spacing stdev <= {mk['max_spacing_stdev_ms']} ms")
+    if ck.get("identity") and "identity" in a:
+        I = a["identity"]; ik = ck["identity"]
+        chk("identity_truth_present", I is not None and I["all"]["submits"] >= ik.get("min_submits", 300), I and I["all"]["submits"],
+            f">= {ik.get('min_submits', 300)} submits with the app's truth columns (xr_modsim with the identity matrix)")
+        if I is not None:
+            W = I["window"]; w = max(W["submits"], 1)
+            for key, (lo, hi) in ik.get("shape", {}).items():   # the run produced the shape it is named after: fraction of submits per class
+                v = round(W.get(key, 0) / w, 3)
+                chk(f"identity_shape.{key}", lo <= v <= hi, v, f"{lo} <= {key} / submits <= {hi}")
+            if ik.get("signal", True):   # H1a: VDXR's "released nothing" equals the app's truth, frame for frame in count
+                Vx = I.get("vdxr")
+                tol = max(ik.get("signal_tol", 3), 0.005 * w)
+                chk("identity_signal_matches_app", Vx is not None and abs(Vx["resubmits"] - W["no_release"]) <= tol,
+                    Vx and {"vdxr_resubmits": Vx["resubmits"], "app_no_release": W["no_release"], "frames": Vx["frames"]},
+                    f"VDXR's frames with no image released == the app's submits with no release (+- {tol:.0f}) over the same {w} frames")
+            S = I.get("shim")
+            if "max_dropped_new_pictures_frac" in ik:   # never drop a new picture: dropped share of same-pose submits <= their true-duplicate share
+                allowed = (W["true_dup"] / max(W["same_pose"], 1)) + ik["max_dropped_new_pictures_frac"]
+                v = round(S["dups_dropped"] / max(S["dups_seen"], 1), 3) if S is not None else None
+                chk("identity_no_new_picture_dropped", S is not None and (S["dups_dropped"] == 0 or v <= allowed), S and {"seen": S["dups_seen"], "dropped": S["dups_dropped"], "true_dup_share": round(W["true_dup"] / max(W["same_pose"], 1), 3)},
+                    f"dropped / seen <= true duplicates / same-pose submits + {ik['max_dropped_new_pictures_frac']} (a same-pose submit with a new picture is kept)")
+            if "min_true_dups_dropped_frac" in ik:   # the mod fix still works: true duplicates dropped
+                share = W["true_dup"] / max(W["same_pose"], 1)
+                ok = S is not None and S["dups_seen"] > 0 and S["dups_dropped"] >= ik["min_true_dups_dropped_frac"] * share * S["dups_seen"]
+                chk("identity_true_dups_dropped", ok, S and {"seen": S["dups_seen"], "dropped": S["dups_dropped"], "true_dup_share": round(share, 3)},
+                    f"dropped >= {ik['min_true_dups_dropped_frac']} x the true duplicates among the same-pose submits")
+            if "max_wait_rate_hz" in ik:   # no spin: the app's xrWaitFrame returns stay at the display rate (inside the pause when there is one)
+                v = I.get("pause_wait_rate_hz", I.get("wait_rate_hz"))
+                chk("identity_waits_paced", v is not None and v <= ik["max_wait_rate_hz"], v, f"<= {ik['max_wait_rate_hz']} xrWaitFrame returns per second"
+                    + (" inside the pause" if "pause_wait_rate_hz" in I else ""))
+            if "max_free_waits" in ik:
+                chk("identity_free_waits", S is not None and S["free_waits"] <= ik["max_free_waits"], S and S["free_waits"], f"<= {ik['max_free_waits']} free waits")
     if "shim_submit_mode" in ck and h and h.get("shim"):
         chk("shim_submit_mode", h["shim"].get("submit_mode") == ck["shim_submit_mode"], h["shim"].get("submit_mode"), ck["shim_submit_mode"])
     if "gray_patch" in ck:
