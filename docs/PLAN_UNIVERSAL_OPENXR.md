@@ -56,7 +56,7 @@ Nothing in this part is Vision Pro only.
 **Facts (code read 2026-11-20, this branch).**
 - The encoder already builds a per-CTB (32 x 32) QP delta map, on by default (`docs/PERFORMANCE_KNOBS.md`: -3 in the foveal region, +6 at the edges):
   `nvh_build_qp_map` (`nvenc/hostlib/nvh.cpp:208-257`). For each CTB it inverts ALVR's foveation (`CalculateFoveationVars` copied verbatim, `foveF`)
-  back to the eye's unfoveated position, measured from the eye's outer edge in both eyes (`:244`, the right eye mirrored in the frame): the mask's own
+  back to the eye's unfoveated position, measured from the eye's outer edge in both eyes (`:247`, the right eye mirrored in the frame): the mask's own
   outer / inner convention. The mask adds one point-in-polygon test per CTB, once per encoder creation; nothing per frame.
 - Deltas are clamped to +-51 (`:254`): a hidden CTB at +51 costs close to nothing.
 - The map is built from the session's foveation and the settings table (`nvh.cpp:139-162`); the mask can travel the same way (a settings key written by
