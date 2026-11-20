@@ -1,6 +1,6 @@
 // What the frame pipeline will do with the current settings, before a game runs: the stream's per-eye size (the "fit" keeps the pixel density the
 // user chose over whatever box the headset declares), the game's render size (floor = the stream's density over the rectangle the game is told,
-// ceiling = the reference size when the fit is on), the encoded frame (ALVR's foveated layout, the exact maths of FFR.cpp), where the
+// ceiling = the stream's own eye size: 1.4-foundation E4 removed the reference ceiling above it), the encoded frame (ALVR's foveated layout, the exact maths of FFR.cpp), where the
 // foveation's full-density band sits in degrees, the NVENC strips to expect (the split rules of the Video Codec SDK guide, section 8.14) and the
 // warnings to show. A port of harness/fov_stream_geometry.py `model()`; harness/pipeline_model_check.py compares the two over a grid.
 // Pure maths: the only file access is in FromSettings. docs/FOV_PIPELINE_OPTIM.md section 2b.
@@ -158,7 +158,7 @@ namespace AirFrameXR
             }
             double wr = rspan[0] / dspan[0], hr = rspan[1] / dspan[1];
             double[] floor = { fitEye[0] * wr, fitEye[1] * hr };
-            double[] ceiling = useFit ? new double[] { Math.Max(i.ReferenceEye[0], fitEye[0]), Math.Max(i.ReferenceEye[1], fitEye[1]) } : new double[] { fitEye[0], fitEye[1] };
+            double[] ceiling = { fitEye[0], fitEye[1] };   // the engine's ceiling is the stream's eye size (1.4-foundation E4: IPC renderCeiling is gone)
             r.FitEye = fitEye;
             r.Floor = new[] { EvenAtLeast64(floor[0]), EvenAtLeast64(floor[1]) };
             r.Ceiling = new[] { (int)ceiling[0], (int)ceiling[1] };
@@ -200,7 +200,7 @@ namespace AirFrameXR
                     r.Warnings.Add($"Split encoding: {r.Strips} strip(s) expected ({why}). A forced mode splits at any size.");
             }
             if (i.Quality > 0 && r.Game[0] == r.Floor[0] && r.Game[1] == r.Floor[1] && ceiling[0] <= floor[0] + 1e-9 && ceiling[1] <= floor[1] + 1e-9)
-                r.Warnings.Add("The render quality slider has no room: the game's size and its ceiling are the same (tick the stream fit or set a larger resolution).");
+                r.Warnings.Add("The render quality slider has no room: the game's size and its ceiling are the same (set a larger resolution).");
             return r;
         }
 

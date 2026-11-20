@@ -393,15 +393,13 @@ namespace AirFrameXR
             if (AlvrConnecting()) { if (link != Link.Orange || !headset.Text.Contains("connecting")) SetLink(Link.Orange, $"Headset: detected - {name}, connecting..."); }
             else if (link == Link.Orange && (DateTime.UtcNow - lastSeen).TotalSeconds > 30) SetLink(Link.Red, $"Headset: not found - searching for {name} ...");
         }
-        DateTime configSeen; string watchRate; double watchCap; string watchFov;
+        DateTime configSeen; string watchRate; double watchCap;
         /// the field-of-view override as the host command takes it: "off", or "on outer inner upper lower render_quality" (tangents, then 0..1)
-        string FovLine() => settings.FovOverride && settings.FovFits(AppSettings.ReadClientFov()) && settings.FovOuter > 0 && settings.FovInner > 0 && settings.FovUpper > 0 && settings.FovLower > 0
-            ? "on " + string.Join(" ", new[] { settings.FovOuter, settings.FovInner, settings.FovUpper, settings.FovLower }.Select(v => v.ToString("0.00", CultureInfo.InvariantCulture))) + " " + settings.FovRenderQuality.ToString("0.00", CultureInfo.InvariantCulture)
-            : "off";
+        // 1.4-foundation E4: the field of view is no longer forwarded live (it is compiled per streamer start: the box, the stream size, the foveation, the mask)
 
         void ConfigWatchStart()
         {
-            watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchFov = FovLine(); watchSharpen = Json.Bool(settings.Root, "video.client_sharpen", true);
+            watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchSharpen = Json.Bool(settings.Root, "video.client_sharpen", true);
             try { configSeen = File.GetLastWriteTimeUtc(Paths.Settings); } catch { }
             configWatch.Tick += (s, e) =>
             {
@@ -429,7 +427,6 @@ namespace AirFrameXR
                 fgRateFromHost = false;
                 Log.Write("INFO", "frame generation rate " + watchRate + " (Advanced settings)");
             }
-            if (FovLine() != watchFov) { watchFov = FovLine(); host.Send("fov_override " + watchFov); Log.Write("INFO", "field of view override: " + watchFov + " (the launcher's FOV restriction card; needs a streamer restart)"); }
             if (settings.FrameGenCapFps != watchCap) { watchCap = settings.FrameGenCapFps; host.Send("frame_gen_cap " + watchCap.ToString("0.#", CultureInfo.InvariantCulture)); Log.Write("INFO", "frame generation cap " + watchCap + " fps (Advanced settings)"); }
             // 1.4: the headset app's sharpening, live (the FOV card)
             var sharpen = Json.Bool(settings.Root, "video.client_sharpen", true);
@@ -967,7 +964,7 @@ namespace AirFrameXR
                         ForwardConfigChanges();
                         break;
                     }
-                case "settings_baseline": watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; watchFov = FovLine(); break;   // the replay harness: what the streamer sent at its start
+                case "settings_baseline": watchRate = settings.FrameGenRate; watchCap = settings.FrameGenCapFps; break;   // the replay harness: what the streamer sent at its start
                 case "settings_touch": ForwardConfigChanges(); break;   // the replay harness: the file changed but not a forwarded value
                 case "advanced":
                     {

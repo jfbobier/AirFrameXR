@@ -79,10 +79,6 @@ pub struct Settings {
     pub encode_mask: Option<EncodeMask>,
     /// F2 lab switch: the hidden blocks are also cleared to black before NVENC (default off; `mask_fill on|off` live)
     pub mask_fill: Option<bool>,
-    /// the launcher fits the stream to the box the headset declares at the density of `stream_reference_eye` (the size the user chose over the headset's full box,
-    /// docs/FOV_PIPELINE_OPTIM.md S3); with it on and the reference above the stream's eye size, the reference is the render quality slider's ceiling (ipc renderCeiling)
-    pub stream_fit_window: Option<bool>,
-    pub stream_reference_eye: Option<[i64; 2]>,
     pub debug: Option<bool>,
     /// verbosity of AirFrameXR.log: error | warn | info (default) | verbose | debug (docs/EXPERIMENTAL_SWITCHES.md)
     pub log_level: Option<String>,
@@ -155,8 +151,6 @@ pub fn load_settings(path: &Path) -> Settings {
         client_sharpen: video["client_sharpen"].as_bool(),
         encode_mask: parse_encode_mask(&video["encode_mask"]),
         mask_fill: video["mask_fill"].as_bool(),
-        stream_fit_window: video["stream_fit_window"].as_bool(),
-        stream_reference_eye: video["stream_reference_eye"].as_array().and_then(|a| Some([a.first()?.as_i64()?, a.get(1)?.as_i64()?])),
         debug: v["debug"].as_bool(),
         log_level: v["log_level"].as_str().map(str::to_string),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
@@ -253,9 +247,8 @@ pub static RECENTER_REQ: AtomicBool = AtomicBool::new(false);
 pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 /// the field-of-view override sent by the streamer when the user touches the tick or a field: on/off, the four tangents (outer, inner, upper, lower; f32 bits), pending flag
-pub static FOV_ON: AtomicBool = AtomicBool::new(false);
-pub static FOV_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
-pub static FOV_PENDING: AtomicBool = AtomicBool::new(false);
+/// 1.4-foundation E4: a `fov_override` line (what the 1.4 streamer sent live) is ignored: the field of view is compiled per streamer start. Set when one arrived.
+pub static FOV_OVERRIDE_IGNORED: AtomicBool = AtomicBool::new(false);
 /// `client_sharpen on|off` from the streamer: -1 = nothing new
 pub static CLIENT_SHARPEN_REQ: AtomicI32 = AtomicI32::new(-1);
 /// `mask_fill on|off` (F2 lab switch, live): -1 = nothing new
@@ -314,15 +307,9 @@ pub fn box_views(b: [f64; 4], known: Option<&([f32; 8], [f32; 6])>) -> ([f32; 8]
     };
     ([o, i, u, l, i, o, u, l], off6)
 }
-/// the render quality sent with the override (f32 bits)
-pub static FOV_QUALITY_REQ: AtomicU32 = AtomicU32::new(0);
 /// 0..1 for a quality given in the settings, the lab flag or the command; anything else is the floor
 pub fn render_quality(v: f64) -> f32 {
     if v.is_finite() { v.clamp(0.0, 1.0) as f32 } else { 0.0 }
-}
-/// percent -> fraction (the lab flag `--fov-scale`), within what a restriction accepts (a view cannot be emptied)
-pub fn fov_fraction(pct: f64) -> f32 {
-    (pct / 100.0).clamp(0.2, 1.0) as f32
 }
 /// The per-edge fractions of the headset's field of view for an override given as tangents (outer, inner, upper, lower): the headset's tangents (fov8 = left eye l r u d,
 /// right eye l r u d) are averaged over the two eyes per edge (outer = the left eye's left and the right eye's right), a value above the headset's is the headset's
@@ -340,7 +327,7 @@ pub fn fov_scale_from(t: &[f32; 4], fov8: &[f32; 8]) -> [f32; 4] {
 }
 
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
-/// `frame_gen_cap <fps>` (0 = none), `fov_override off` | `fov_override on <outer> <inner> <upper> <lower> [<render quality 0..1>]` (the tangents the game is told and where its render size sits between the floor and the stream's eye size, taken by the next game), `recenter`,
+/// `frame_gen_cap <fps>` (0 = none), `recenter` (`fov_override ...` is ignored since 1.4-foundation: the field of view is compiled per streamer start),
 /// `color <brightness> <contrast> <saturation> <sharpening>`, `client_sharpen on|off` (our client's sharpening, live), `mask_fill on|off` (the mask's flat fill, live),
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
@@ -436,21 +423,7 @@ pub fn spawn_stdin_control() {
                 }
                 (Some("client_sharpen"), Some(v)) => CLIENT_SHARPEN_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("mask_fill"), Some(v)) => MASK_FILL_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
-                (Some("fov_override"), Some("off")) => {
-                    FOV_ON.store(false, Ordering::SeqCst);
-                    FOV_PENDING.store(true, Ordering::SeqCst);
-                }
-                (Some("fov_override"), Some("on")) => {
-                    let vals: Vec<f32> = w.filter_map(|x| x.parse().ok()).collect();
-                    if (vals.len() == 4 || vals.len() == 5) && vals[..4].iter().all(|v| v.is_finite() && *v > 0.0) {
-                        for (k, t) in vals[..4].iter().enumerate() {
-                            FOV_REQ[k].store(t.to_bits(), Ordering::SeqCst);
-                        }
-                        FOV_QUALITY_REQ.store(vals.get(4).map_or(0.0, |q| render_quality(*q as f64)).to_bits(), Ordering::SeqCst);
-                        FOV_ON.store(true, Ordering::SeqCst);
-                        FOV_PENDING.store(true, Ordering::SeqCst);
-                    }
-                }
+                (Some("fov_override"), _) => FOV_OVERRIDE_IGNORED.store(true, Ordering::SeqCst),
                 (Some("color"), Some(first)) => {
                     let vals: Vec<f32> = std::iter::once(first).chain(w).filter_map(|x| x.parse().ok()).collect();
                     if vals.len() == 4 {
