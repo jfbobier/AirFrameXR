@@ -13,3 +13,25 @@ a conflict is the loud failure. Upstream is maintained but slow (two small commi
 
 Everything else is new code: the host (`tools/host`, Rust), the encoder library and benchmark
 (`nvenc/hostlib`, C++), the GUIs, the installer scripts, the mock client, the OpenXR probe and the harness.
+
+## Taking upstream changes into the VDXR fork
+
+Before each release, and whenever upstream moves:
+
+1. **Look**: `tools/vdxr_upstream_check.sh` lists the commits on upstream `main` since the last merge (`upstream_hash` in `deps.lock.json`) and
+   upstream's open pull requests.
+2. **Take them in a checkout of the fork** (`jfbobier/VirtualDesktop-OpenXR`, branch `airframexr`): upstream `main` by `git merge upstream/main`, never
+   a rebase (our commits keep their hashes, the pins of older releases stay valid); a conflict is resolved in the merge commit. A pull request upstream has
+   not merged (third-party, MIT like the rest): `git cherry-pick -x` of its commits, the message naming the PR number and its author; its tests stay out
+   if they need upstream's test harness. Each taken change is one commit or merge on a lab branch first, not on `airframexr`.
+3. **Measure before pinning**: `AIRFRAMEXR_VDXR_COMMIT=<the new head> python3 harness/run.py build vdxr` (it deploys to `out\vdxr-shim`), then the
+   VDXR scenarios interleaved against the pin (`run.py build vdxr` without the variable for the other arm): `e2e_openxr_probe`, `e2e_baseline`,
+   `e2e_layers` (composition layers: alpha, cube, cylinder), `e2e_probe_array`, `e2e_probe_msaa`, `e2e_probe_array_resubmit`, each run with
+   `AIRFRAMEXR_LAB_IDLE_GPU=10`, compared with `harness/ab_report.py` (no metric worse beyond noise, no check newly failing).
+4. **Pin**: push the lab branch's commits onto `airframexr` (the owner's go: it is public), then in this repository `deps.lock.json`: `full_hash` = the
+   new head, `upstream_hash` = the upstream commit merged (unchanged for a cherry-picked PR), and the note; one commit with the scenarios' result.
+   `tools/remote/stage15_vdxr.ps1`'s header lists our commits: add the new one.
+
+State (2026-11-20): upstream `main` has nothing after `6da20fe` (2026-08-16), merged on 2026-11-18 (`21b2ca0`). Open upstream: PR #53 (jfleezy23, 2026-10-11,
+"Reuse alpha preprocessing shader and constant buffer"): VDXR recreates a compute shader and a constant buffer on every alpha correction of a
+secondary layer (games with HUD quads: every frame); the PR creates them once. Our fork has the same code; a candidate for step 2.
