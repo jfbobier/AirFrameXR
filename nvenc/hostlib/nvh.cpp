@@ -724,7 +724,7 @@ int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid,
     if (const char* v = getenv("AIRFRAMEXR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_COST_SCALE")) c.costScale = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_PHOTO_SCALE")) c.photoScale = (float)atof(v);
-    if (const char* v = getenv("AIRFRAMEXR_FG_CAM_TURN")) c.camTurn = atoi(v) != 0;   // lab switch, off by default (framegen.h camTurn)
+    if (const char* v = getenv("AIRFRAMEXR_FG_CAM_TURN")) c.camTurn = atoi(v) != 0;   // on by default (framegen.h camTurn); 0 = the generation of 1.4.0 and earlier
     // the frame the shim composes: 2 x eye width by eye height (the encoder's own size may be the foveated one)
     const auto& S = Settings::Instance();
     if (!fg->Init((int)S.m_renderWidth, (int)S.m_renderHeight, c, err, errlen)) return 0;

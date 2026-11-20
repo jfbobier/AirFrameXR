@@ -26,12 +26,12 @@ struct FrameGenConfig {
     float motionLimit = 0.10f;   // edge: content shift beyond this share of the eye width falls back to the still frame (soft over the last quarter)
     float costScale = 17.f;      // edge: confidence = 1 - (luma cost - 0.02) * this
     float photoScale = 13.5f;    // edge: where a vector is doubted, the previous frame is blended in by 1 - (max |dRGB| - 0.03) * this (0 = always: "edge-blend")
-    // camera turn (lab switch AIRFRAMEXR_FG_CAM_TURN, edge synthesis only; docs/FRAME_GENERATION_JUDGE.md "rotation oracle"): a game's stick turn is a
+    // camera turn (on by default since 1.4.1; AIRFRAMEXR_FG_CAM_TURN=0 turns it off; edge synthesis only; docs/FRAME_GENERATION.md "Stick turns"): a game's stick turn is a
     // turn of the play space about the tracking up axis that the head pose does not carry, so it reached the optical flow whole and came out as
     // double images. With it on, each rendered frame carries a camera yaw on top of its head orientation, predicted from the previous pair's
     // measured turn and removed before the flow like the head's rotation; the output is turned by the yaw interpolated at t; the edge the
     // turned newer frame does not cover is filled from the older one.
-    int camTurn = 0;
+    int camTurn = 1;
 };
 
 struct FrameGenStats {

@@ -187,7 +187,7 @@ search still runs on the whole frame: the engine's ROIs were tried and are slowe
 draws the whole eye (`docs/EXPERIMENTAL_SWITCHES.md`). Measured (3080 Ti laptop, Balanced, half rate, the shipped trade-off profile's mask, 59 % of the
 eyes visible, 3 pairs): output pass 0.74 -> 0.54 ms, generator 172 -> 153 GPU ms per second, stream 77.2 -> 80.4 fps.
 
-## Stick turns: the camera turn (lab switch `AIRFRAMEXR_FG_CAM_TURN`, 1.4-foundation, 2026-11-20)
+## Stick turns: the camera turn (on by default since 1.4.1; `AIRFRAMEXR_FG_CAM_TURN=0` turns it off)
 
 Field 2026-11-20 (Hellraiser, 1.5x, ~41 fps): trailing on the right stick, none on head turns. A head turn never reaches the optical flow (A is turned
 into B's camera first); a stick turn is a turn of the play space the head pose does not carry, so it reached the flow whole, and the flow as configured
