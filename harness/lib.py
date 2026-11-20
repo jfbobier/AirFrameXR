@@ -413,7 +413,7 @@ def topology(sc):
     return t
 
 
-def gpu_idle_gate(steps):
+def gpu_idle_gate(steps, log=print):
     """AIRFRAMEXR_LAB_IDLE_GPU=<percent>: before a run, wait (at most AIRFRAMEXR_LAB_IDLE_WAIT_S, 1800 s by default) until the builder's GPU is at most that busy in
     three samples 5 s apart. Another program's load on the builder (2026-11-20: 80-98 % and 88 W for an hour, the fork lab's R6 / D1 pairs) slows both arms of
     an A/B and fails the pacing checks; the wait and the load found are in result.json (steps.gpu_idle_gate). Off without the variable."""
@@ -431,7 +431,7 @@ def gpu_idle_gate(steps):
         calm = calm + 1 if 0 <= u <= lim else 0
         if calm >= 3 or time.time() > deadline or u < 0:
             break
-        if len(seen) == 1 or len(seen) % 12 == 0:
+        if u > lim and (sum(1 for x in seen if x > lim) == 1 or len(seen) % 12 == 0):
             log(f"  GPU busy on the builder ({u:.0f} %): waiting for <= {lim:.0f} % before the run")
         time.sleep(5)
     steps["gpu_idle_gate"] = {"limit_pct": lim, "waited_s": round(time.time() - t0, 1), "samples_pct": seen[-12:], "idle": calm >= 3}
@@ -468,7 +468,7 @@ def run_scenario(sc, outdir: Path, log=print):
     derive_session(sc, outdir / "session.json", pin)
     b_put(outdir / "session.json", f"runs/{rid}/session.json")
 
-    gpu_idle_gate(steps)
+    gpu_idle_gate(steps, log)
     gpu_p = None
     if sc.get("gpu_sample"):
         # sample the NVIDIA GPU on the builder during the run (state, clocks, engine utilization, power, throttle reasons)
