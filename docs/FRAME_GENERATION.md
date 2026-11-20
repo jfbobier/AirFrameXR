@@ -178,6 +178,15 @@ Two syntheses draw a generated frame from the same optical flow (`video.frame_ge
 
 The game's DLSS motion vectors were an alternative motion source from 0.4 to 0.6; they were removed in 0.6.1 (archived: docs/PERMANENT_RECORD.md).
 
+## With a mask profile: only what the lens shows is generated (1.4-foundation, 2026-11-20)
+
+With a mask in force (the profile's `video.encode_mask`, the polygons the encoder's QP map already uses), each eye's output pass draws the eye's
+visible polygon (a triangle fan, scaled about its centroid for a margin of at least 2 px) instead of the full-screen triangle: the pixels the lens hides
+are never computed. Outside it the output keeps black (cleared once) or the last copied frame; the encoder gives those blocks QP +51 anyway. The motion
+search still runs on the whole frame: the engine's ROIs were tried and are slower (`docs/PERFORMANCE_FINDINGS.md`). Lab switch `AIRFRAMEXR_FG_MASK=0`
+draws the whole eye (`docs/EXPERIMENTAL_SWITCHES.md`). Measured (3080 Ti laptop, Balanced, half rate, the shipped trade-off profile's mask, 59 % of the
+eyes visible, 3 pairs): output pass 0.74 -> 0.54 ms, generator 172 -> 153 GPU ms per second, stream 77.2 -> 80.4 fps.
+
 ## Borrowed from OFXR-Bridge (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge): the classic synthesis
 
 The synthesis: rotation-compensated flow (there analytically subtracted, here by aligning A into B's camera before the engine),

@@ -50,6 +50,11 @@ compiled foveation, idle GPU; `harness/fg_size_report.py`):
   which half rate needs at half the display rate or more; a GPU with three encoders (the 5090, split encode); the headset.
 - Performance is about 1.3's pixel count with a smaller encoded frame than 1.3's (its foveation is stronger): generation behaves as in 1.3 there.
 
+Then (same day) **with a mask profile the generator draws only the visible polygon** (`docs/FRAME_GENERATION.md`): `optional/e2e_fg_mask_on` against
+`_off`, Balanced, the shipped trade-off profile's mask (61.3 % / 57.4 % of the eyes visible), 3 interleaved pairs, idle GPU: output pass 0.74 -> **0.54 ms**
+(beyond noise), generator 172 -> 153 GPU ms per second, stream 77.2 -> 80.4 fps, encode p95 17.8 -> 17.2 ms (each the same way in all three pairs, below
+the 3 x spread rule). The pass saves less than the hidden share (27 % against 41 %): a part of its cost does not follow the pixels. On by default with a mask.
+
 ## Tried and removed or left off
 
 | What | What happened | Lesson |
@@ -60,6 +65,7 @@ compiled foveation, idle GPU; `harness/fg_size_report.py`):
 | **Predicting a missing head sample** (`video.predict_missing_head`, lab `OVRSHIM_INORDER_POSE`) | the predicted timestamp matched one of the client's own only 16% of the time (client timestamps jitter by tens of ns); the client looks the pose up by timestamp, so the picture came out misplaced (tilted, offset, even the head-locked title). | Never invent timestamps; the client's lookup is exact. Opt-in, off. |
 | **`video.head_in_order`** (consume head samples in order, wait up to 8 ms) | lab: duplicates 244 -> 11 and 3.7 ms less pose-to-display. Headset: Cyberpunk 13% -> 7% duplicates, Dead Space unchanged at 20%, and a one-frame flash of the Cyberpunk warning page, shifted out of place. | Tracking packets arrive unevenly (gaps over 12 ms on 13-19% of samples) so the wait often times out; the lab does not capture that. Removed in IPC v18. |
 | **Send pacing variants** (`vsync`, slot, `asap`) | no visible gain over `asap`; `asap` stayed. | |
+| **Optical-flow ROIs over the mask** (masked generation step 2, 2026-11-20, branch `1.4-foundation-fgroi`) | the engine takes a few rectangles on a coarse grid (x in 128 px steps at grid 4): over the trade-off profile's octagons they cover 93 % of the flow input with the margin a head turn needs (82 % with none). Measured against the whole frame (3 pairs, Balanced): the search got slower, 3.79 -> 3.95 ms, generator 159 -> 165 GPU ms per second, the same way in all pairs. | The engine's ROI mode costs more than the 7 % it skips. Not merged. |
 | **Zero-copy encoder input** | about 0.2 ms. | Below the 1 ms bar; it stays on by default (`AIRFRAMEXR_ZEROCOPY=0` disables) because it costs nothing. |
 | **Lower render scale (0.75)** | did not help the moving-head feel. | The GPU budget is not what differs from SteamVR. |
 | **HEVC QP-delta map** (foveal emphasis) | built and proven against a Python oracle, never judged on the headset. | Milder foveation plus a QP map is encode-bound on a one-engine GPU. **On by default** (center -3, edge +6; corrected 2026-10-26, this said opt-in). |
