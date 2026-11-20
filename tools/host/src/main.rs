@@ -80,20 +80,16 @@ struct Args {
     fg_cap_fps: Option<f64>,
     drop_dup_frames: bool,
     drop_dup_frames_flag: bool,
-    /// field-of-view restriction (outer, inner, upper, lower as fractions of the headset's tangents; 1 = none): what the game is told, taken by the next game
-    fov_scale: [f32; 4],
-    fov_scale_explicit: bool,
     fov_quality: f32,   // 0..1, see vision::render_quality
-    /// the streamer's override (settings, `fov_override` command, `--fov-override`): the tangents the game is told per edge (outer, inner, upper, lower); None = not overridden
+    /// the restriction (settings video.fov_override + fov_outer .. fov_lower, read at start: one contract per streamer start, 1.4-foundation E4): the tangents
+    /// the game is told per edge (outer, inner, upper, lower); None = not restricted
     fov_override: Option<[f32; 4]>,
+    /// lab: an airframexr.json read as an installed host reads config\airframexr.json (`--settings <file>`, without --install-dir)
+    settings_file: Option<PathBuf>,
     /// 1.4: the box and the sharpening sent to our client (settings video.client_box / client_sharpen)
     client_box: Option<[f64; 4]>,
     client_sharpen: bool,
-    /// the render quality slider's ceiling per eye above the stream's eye size (lab `--fov-ceiling WxH`; else the settings' stream_reference_eye when stream_fit_window is on): None = the stream's eye size
-    fov_ceiling: Option<(i32, i32)>,
     fov_quality_explicit: bool,
-    stream_fit_window: bool,
-    stream_reference_eye: Option<(i32, i32)>,
     fg_grid: i32,
     /// 1 = edge-aware synthesis (default), 2 = edge-aware without the photometric gate, 0 = classic, the crossfade recipe (the predictable
     /// fallback) (`video.frame_gen_synthesis`, `--frame-gen-synthesis`, env AIRFRAMEXR_FG_SYNTH)
@@ -195,16 +191,12 @@ fn parse_args() -> Result<Args, String> {
         fg_cap_fps: None,
         drop_dup_frames: false,
         drop_dup_frames_flag: false,
-        fov_scale: [1.0; 4],
-        fov_scale_explicit: false,
         fov_quality: 0.0,
         fov_override: None,
         client_box: None,
         client_sharpen: true,
-        fov_ceiling: None,
+        settings_file: None,
         fov_quality_explicit: false,
-        stream_fit_window: false,
-        stream_reference_eye: None,
         fg_grid: 4,
         fg_synth: 1,
         auto_input: vec![],
@@ -363,26 +355,13 @@ fn parse_args() -> Result<Args, String> {
             "--drop-duplicate-frames" => a.drop_dup_frames_flag = true,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
-            "--fov-scale" => {
-                // lab: the field of view the game is told, percent per edge "outer,inner,upper,lower" (the streamer's Advanced window writes the same four values to the settings)
-                let p: Vec<f64> = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?;
-                if p.len() != 4 {
-                    return Err("--fov-scale outer,inner,upper,lower (percent)".into());
-                }
-                for k in 0..4 {
-                    a.fov_scale[k] = vision::fov_fraction(p[k]);
-                }
-                a.fov_scale_explicit = true;
+            "--settings" => a.settings_file = Some(v()?.into()),   // lab: the settings file of an installed host, without --install-dir (1.4-foundation E4)
+            "--fov-scale" | "--fov-override" | "--fov-ceiling" => {
+                return Err(format!("{k} was removed in 1.4-foundation (E4): the restriction comes from the settings (video.fov_override, fov_outer .. fov_lower; lab: --settings <file>)"));
             }
             "--fov-quality" => {   // lab: where the game's render size sits between the floor and the ceiling, 0..1
                 a.fov_quality = vision::render_quality(v()?.parse::<f64>().map_err(|e| format!("{e}"))?);
                 a.fov_quality_explicit = true;
-            }
-            "--fov-ceiling" => {
-                // lab: the render quality slider's ceiling per eye, "WxH" (the panel reference when the stream is fitted to the headset's window; the settings give it as stream_reference_eye)
-                let t = v()?;
-                let (w, h) = t.split_once('x').ok_or("--fov-ceiling WxH")?;
-                a.fov_ceiling = Some((w.parse::<i32>().map_err(|e| format!("{e}"))?, h.parse::<i32>().map_err(|e| format!("{e}"))?));
             }
             "--client-box" => {
                 // lab (1.4): the box sent to the headset app, "outer,inner,upper,lower" (the settings give it as video.client_box)
@@ -391,15 +370,6 @@ fn parse_args() -> Result<Args, String> {
                     return Err("--client-box outer,inner,upper,lower (tangents)".into());
                 }
                 a.client_box = Some([p[0], p[1], p[2], p[3]]);
-            }
-            "--fov-override" => {
-                // lab: the tangents the game is told, "outer,inner,upper,lower"
-                let p: Vec<f32> = v()?.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?;
-                if p.len() != 4 {
-                    return Err("--fov-override outer,inner,upper,lower (tangents)".into());
-                }
-                a.fov_override = Some([p[0], p[1], p[2], p[3]]);
-                a.fov_scale_explicit = true;
             }
             "--frame-gen-cap" => a.fg_cap_fps = Some(v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.0, 240.0)),
             "--frame-gen-grid" => a.fg_grid = v()?.parse::<i32>().map_err(|e| format!("{e}"))?,
@@ -576,7 +546,7 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if a.fg_cap_fps.is_none() {
         a.fg_cap_fps = st.frame_gen_cap_fps.map(|v| v.clamp(0.0, 240.0));
     }
-    if let (Some(true), Some(o), Some(i), Some(u), Some(l), false) = (st.fov_override, st.fov_outer, st.fov_inner, st.fov_upper, st.fov_lower, a.fov_scale_explicit) {
+    if let (Some(true), Some(o), Some(i), Some(u), Some(l)) = (st.fov_override, st.fov_outer, st.fov_inner, st.fov_upper, st.fov_lower) {
         a.fov_override = Some([o as f32, i as f32, u as f32, l as f32]);
     }
     if !a.fov_quality_explicit {
@@ -585,12 +555,10 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
             a.fov_quality = vision::render_quality(q);
         }
     }
-    a.stream_fit_window = st.stream_fit_window.unwrap_or(false);
     if a.client_box.is_none() {
         a.client_box = st.client_box;   // the lab flag --client-box wins
     }
     a.client_sharpen = st.client_sharpen.unwrap_or(true);
-    a.stream_reference_eye = st.stream_reference_eye.map(|r| (r[0] as i32, r[1] as i32)).filter(|r| r.0 > 0 && r.1 > 0);
     if let Some(v) = st.frame_gen_synthesis.as_deref().and_then(|v| parse_fg_synth(v).ok()) {
         a.fg_synth = v;
     }
@@ -1025,7 +993,7 @@ mod nvh {
         pub fn nvh_ipc_last_compose_ms(ipc: *mut c_void) -> f32;
         pub fn nvh_last_ffr_gpu_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_open() -> *mut c_void;
-        pub fn nvh_ipc_config(ipc: *mut c_void, nvh: *mut c_void, rate_hz: f64, eye_w: i32, eye_h: i32, fov8: *const f32, off6: *const f32, bits: i32, encoding_gamma: f32, fov_scale4: *const f32, render_quality: f32, ceil_w: i32, ceil_h: i32);
+        pub fn nvh_ipc_config(ipc: *mut c_void, nvh: *mut c_void, rate_hz: f64, eye_w: i32, eye_h: i32, fov8: *const f32, off6: *const f32, bits: i32, encoding_gamma: f32, fov_scale4: *const f32, render_quality: f32);
         pub fn nvh_ipc_shim_recommended(ipc: *mut c_void, w: *mut i32, h: *mut i32);
         pub fn nvh_last_ffr_wait_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_set_connected(ipc: *mut c_void, connected: i32);
@@ -1594,31 +1562,18 @@ fn apply_fg_pacing(ipc: *mut std::ffi::c_void, p: Option<&pipeline::Pipeline>, a
 }
 
 /// The field of view the game is told (percent of the headset's, per edge), logged at the start and whenever it changes.
-/// The per-edge fractions the game's field of view is scaled by: the streamer's override (tangents, converted against the headset's views), else the lab percent flag, else 1.
+/// The per-edge fractions the game's field of view is scaled by: the restriction (tangents, converted against the headset's views), else 1.
 fn effective_fov_scale(a: &Args, fov8: &[f32; 8]) -> [f32; 4] {
     match &a.fov_override {
         Some(t) => vision::fov_scale_from(t, fov8),
-        None => a.fov_scale,
+        None => [1.0; 4],
     }
 }
 
-fn log_fov_restriction(origin: Instant, s: &[f32; 4], quality: f32, ceiling: (i32, i32), why: &str) {
+fn log_fov_restriction(origin: Instant, s: &[f32; 4], quality: f32, why: &str) {
     let p = s.map(|v| (v * 100.0).round());
-    let c = if ceiling.0 > 0 { format!(", render ceiling {} x {}", ceiling.0, ceiling.1) } else { String::new() };
-    logs::general("INFO", &format!("field of view the game is told ({why}): outer {} %, inner {} %, upper {} %, lower {} % of the headset's, render quality {:.2}{c}; a game takes it when it starts", p[0], p[1], p[2], p[3], quality));
-    event(origin, "fov_restrict", json!({ "why": why, "outer": s[0], "inner": s[1], "upper": s[2], "lower": s[3], "render_quality": quality, "ceiling": [ceiling.0, ceiling.1] }));
-}
-
-/// The render quality slider's ceiling per eye (ipc renderCeiling): the lab flag, else the user's reference size when the stream is fitted to the headset's window
-/// and the reference is above the stream's eye size; (0, 0) = the stream's eye size, the way it was.
-fn render_ceiling(a: &Args, eye: (i32, i32)) -> (i32, i32) {
-    if let Some(c) = a.fov_ceiling {
-        return if c.0 > 0 && c.1 > 0 { c } else { (0, 0) };
-    }
-    match (a.stream_fit_window, a.stream_reference_eye) {
-        (true, Some(r)) if r.0 > eye.0 || r.1 > eye.1 => r,
-        _ => (0, 0),
-    }
+    logs::general("INFO", &format!("field of view the game is told ({why}): outer {} %, inner {} %, upper {} %, lower {} % of the headset's, render quality {:.2}; a game takes it when it starts", p[0], p[1], p[2], p[3], quality));
+    event(origin, "fov_restrict", json!({ "why": why, "outer": s[0], "inner": s[1], "upper": s[2], "lower": s[3], "render_quality": quality }));
 }
 
 /// The GPU facts the launcher's pipeline model needs before a run (config/airframexr_gpu.json): name, driver, NVENC engines, the split conditions.
@@ -1634,7 +1589,6 @@ fn pipeline_facts(views: Option<&([f32; 8], [f32; 6])>, args: &Args, ipc: *mut s
                   fg_stats: Option<String>, nvenc_cfg: &serde_json::Value, enc_windows: &[serde_json::Value], compose_ms: &[f64]) -> serde_json::Value {
     let fov8 = views.map(|v| v.0).unwrap_or([0.0; 8]);
     let scale = views.map(|v| effective_fov_scale(args, &v.0)).unwrap_or([1.0; 4]);
-    let ceiling = render_ceiling(args, eye);
     let (mut rw, mut rh) = (0i32, 0i32);
     if !ipc.is_null() {
         unsafe { nvh::nvh_ipc_shim_recommended(ipc, &mut rw, &mut rh) };
@@ -1654,7 +1608,7 @@ fn pipeline_facts(views: Option<&([f32; 8], [f32; 6])>, args: &Args, ipc: *mut s
     let preset = nvidia_profile::NVH_KEYS.iter().find(|(k, _)| *k == "nvenc_quality_preset").map(|(_, v)| *v).unwrap_or(3);
     let round2 = |x: f64| (x * 100.0).round() / 100.0;
     json!({
-        "declared_fov": fov8, "fov_scale": scale, "render_quality": args.fov_quality, "ceiling": [ceiling.0, ceiling.1],
+        "declared_fov": fov8, "fov_scale": scale, "render_quality": args.fov_quality,
         "game_render": [rw, rh], "stream_eye": [eye.0, eye.1], "encoded": [enc.0, enc.1], "foveated": cfg.foveated,
         "foveation": { "center_size": [cfg.geom[0], cfg.geom[1]], "center_shift": [cfg.geom[2], cfg.geom[3]], "edge_ratio": [cfg.geom[4], cfg.geom[5]] },
         "frame_gen": { "on": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "flow_size": gen["flow_size"], "flow_ms": gen["flow_ms_avg"], "synth_ms": gen["synth_ms_avg"] },
@@ -1842,6 +1796,10 @@ fn main() {
             vision::COLOR_REQ[k].store(v.to_bits(), Ordering::SeqCst);
         }
         vision::COLOR_PENDING.store(true, Ordering::SeqCst);
+        apply_settings(&mut args, &st);
+    } else if let Some(p) = args.settings_file.clone() {
+        // lab (1.4-foundation E4): a settings file read as an installed host reads its own, the command line still wins
+        let st = vision::load_settings(&p);
         apply_settings(&mut args, &st);
     } else {
         apply_settings(&mut args, &vision::Settings::default());
@@ -2566,7 +2524,7 @@ fn main() {
     let mut last_views = load_views(&views_path);
     let mut real_views_seen = false;   // this connection's real views arrived (not the app's stand-in)
     let mut placeholders_ignored = 0usize;
-    let mut logged_fov = ([1.0f32; 4], 0.0f32, (0i32, 0i32));   // the field-of-view restriction last logged (a change, or the first publish with one, is logged once)
+    let mut logged_fov = ([1.0f32; 4], 0.0f32);   // the field-of-view restriction last logged (a change, or the first publish with one, is logged once)
     let mut views_published = false;
     let mut deferred_reconfig = false;
     let (mut encode_errors, consecutive_errors) = (0usize, 0usize);
@@ -2942,12 +2900,11 @@ fn main() {
                     shared.stream_ready.store(true, Ordering::SeqCst);
                 }
             }
-            if vision::FOV_PENDING.swap(false, Ordering::SeqCst) {
-                // the user touched the field of view override: publish it once; a game that starts later takes it (a running one keeps what it started with)
-                args.fov_override = if vision::FOV_ON.load(Ordering::SeqCst) { Some([0, 1, 2, 3].map(|k| f32::from_bits(vision::FOV_REQ[k].load(Ordering::SeqCst)))) } else { None };
-                args.fov_quality = f32::from_bits(vision::FOV_QUALITY_REQ.load(Ordering::SeqCst));
-                args.fov_scale_explicit = true;   // the streamer's choice wins over the settings file from now on
-                views_published = false;
+            if vision::FOV_OVERRIDE_IGNORED.swap(false, Ordering::SeqCst) {
+                // 1.4-foundation E4: the field of view is one contract per streamer start (the box, the stream size, the foveation and the mask are compiled then);
+                // a live change made the next game disagree with them
+                logs::general("INFO", "fov_override ignored: the field of view is set at the streamer start (restart the streamer to change it)");
+                event(origin, "command_ignored", json!({ "command": "fov_override", "why": "compiled per streamer start" }));
             }
             let mf = vision::MASK_FILL_REQ.swap(-1, Ordering::SeqCst);
             if mf >= 0 {
@@ -2991,14 +2948,13 @@ fn main() {
                 };
                 if let Some((fov8, off6)) = views {
                     let fov_scale = effective_fov_scale(&args, &fov8);
-                    let ceiling = render_ceiling(&args, eye_size);
-                    let fov_quality = if fov_scale.iter().any(|v| *v < 1.0) || ceiling.0 > 0 { args.fov_quality } else { 0.0 };   // nothing to choose without a restriction or a ceiling
-                    if (fov_scale, fov_quality, ceiling) != logged_fov {
-                        log_fov_restriction(origin, &fov_scale, fov_quality, ceiling, if args.fov_override.is_some() { "override" } else { "none" });
-                        logged_fov = (fov_scale, fov_quality, ceiling);
+                    let fov_quality = if fov_scale.iter().any(|v| *v < 1.0) { args.fov_quality } else { 0.0 };   // nothing to choose without a restriction
+                    if (fov_scale, fov_quality) != logged_fov {
+                        log_fov_restriction(origin, &fov_scale, fov_quality, if args.fov_override.is_some() { "override" } else { "none" });
+                        logged_fov = (fov_scale, fov_quality);
                     }
                     unsafe {
-                        nvh::nvh_ipc_config(ipc, pipeline.as_ref().map(|p| p.enc.lock().handle).unwrap_or(enc_handle), args.fps, eye_size.0, eye_size.1, fov8.as_ptr(), off6.as_ptr(), 10, read_encoding_gamma(&layout.session()), fov_scale.as_ptr(), fov_quality, ceiling.0, ceiling.1);
+                        nvh::nvh_ipc_config(ipc, pipeline.as_ref().map(|p| p.enc.lock().handle).unwrap_or(enc_handle), args.fps, eye_size.0, eye_size.1, fov8.as_ptr(), off6.as_ptr(), 10, read_encoding_gamma(&layout.session()), fov_scale.as_ptr(), fov_quality);
                         nvh::nvh_ipc_set_connected(ipc, 1); // after the config: the shim waits for this flag
                     }
                     views_published = true;

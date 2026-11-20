@@ -2300,18 +2300,15 @@ namespace {
                 }
             }
             const bool restricted = sc[0] < 1.f || sc[1] < 1.f || sc[2] < 1.f || sc[3] < 1.f;
-            // the render quality slider's ceiling: the stream's eye size, or the panel reference the host gives when the stream is fitted to the
-            // headset's visible window (ipc.h renderCeiling); with a ceiling above the stream the slider has room even without a restriction
-            const int ceilW = (h.renderCeilingW > 0 && h.renderCeilingH > 0) ? h.renderCeilingW : 0, ceilH = ceilW ? h.renderCeilingH : 0;
-            const bool lifted = ceilW > h.eyeWidth || ceilH > h.eyeHeight;
-            // not restricted and no ceiling: exactly what it always was (the recommended size is the stream's eye size, whatever its parity)
-            if (initial && (restricted || lifted) && measured && h.eyeWidth > 0 && h.eyeHeight > 0) {
-                const RenderSize rs = GameRenderSize(h.eyeWidth, h.eyeHeight, widthRatio / measured, heightRatio / measured, h.renderQuality, ceilW, ceilH);
+            // not restricted: exactly what it always was (the recommended size is the stream's eye size, whatever its parity); the slider's ceiling is the
+            // stream's eye size (1.4-foundation E4: the panel-reference ceiling above it is gone)
+            if (initial && restricted && measured && h.eyeWidth > 0 && h.eyeHeight > 0) {
+                const RenderSize rs = GameRenderSize(h.eyeWidth, h.eyeHeight, widthRatio / measured, heightRatio / measured, h.renderQuality);
                 m_recommendedResolution = {rs.w, rs.h};
                 {
-                    shimlog::General("INFO", "field of view told to the game: outer %.0f%% inner %.0f%% upper %.0f%% lower %.0f%% of the headset's -> left eye L/R/U/D tan %.3f/%.3f/%.3f/%.3f, recommended %d x %d (stream %d x %d, render quality %.2f, ceiling %d x %d)",
+                    shimlog::General("INFO", "field of view told to the game: outer %.0f%% inner %.0f%% upper %.0f%% lower %.0f%% of the headset's -> left eye L/R/U/D tan %.3f/%.3f/%.3f/%.3f, recommended %d x %d (stream %d x %d, render quality %.2f)",
                                      sc[0] * 100, sc[1] * 100, sc[2] * 100, sc[3] * 100, m_gameFov[0].LeftTan, m_gameFov[0].RightTan, m_gameFov[0].UpTan,
-                                     m_gameFov[0].DownTan, m_recommendedResolution.w, m_recommendedResolution.h, h.eyeWidth, h.eyeHeight, h.renderQuality, ceilW ? ceilW : h.eyeWidth, ceilH ? ceilH : h.eyeHeight);
+                                     m_gameFov[0].DownTan, m_recommendedResolution.w, m_recommendedResolution.h, h.eyeWidth, h.eyeHeight, h.renderQuality);
                 }
             }
             if (initial && h.eyeWidth > 0 && h.eyeHeight > 0) {
