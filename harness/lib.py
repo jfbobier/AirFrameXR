@@ -1445,6 +1445,7 @@ def analyse_fg(hs, host_fps=None):
     med = lambda k: (sorted(ev[i][1].get(k, 0) for i in idx)[len(idx) // 2])
     out.update({
         "ready": g1.get("ready") == 1, "info": g1.get("info"), "rate": ev[idx[-1]][1].get("rate"),
+        "mask_pts": g1.get("mask_pts"), "mask_visible": g1.get("mask_visible"),   # the mask polygon the output pass draws per eye (none: [0, 0], visible [1, 1])
         "frame": frame, "frame_mpx": round(frame[0] * frame[1] / 1e6, 3) if frame else None,
         "flow_size": flow, "flow_mpx": round(flow[0] * flow[1] / 1e6, 3) if flow else None,
         "flow_ms_avg": fm, "synth_ms_avg": sm, "flow_errors": g1.get("flow_errors", 0), "render_errors": g1.get("render_errors", 0),
@@ -2491,6 +2492,10 @@ def evaluate(sc, a):
                 {k: f.get(k) for k in ("ready", "flow_errors", "render_errors")}, "flow engine ready, no flow or render error")
             if "frame" in want:
                 chk("fg_frame", f.get("frame") == want["frame"], f.get("frame"), f"{want['frame']} (the side-by-side frame the generator works on: 2 x the stream eye)")
+            if "mask_visible" in want:   # masked generation: the output pass draws each eye's visible polygon (the share of the eye it covers), or the whole eye
+                mv = f.get("mask_visible") or [1.0, 1.0]
+                chk("fg_mask", all(want["mask_visible"][e][0] - 1e-6 <= mv[e] <= want["mask_visible"][e][1] + 1e-6 for e in range(2)), {"mask_pts": f.get("mask_pts"), "mask_visible": mv},
+                    f"the output pass covers {want['mask_visible']} of each eye (1 = the whole eye)")
             if "synth_share" in want:
                 lo, hi = want["synth_share"]
                 chk("fg_synth_share", lo <= f.get("synth_share", -1) <= hi, f.get("synth_share"), f"[{lo}, {hi}] of the outputs generated (the rest the newest real frame)")

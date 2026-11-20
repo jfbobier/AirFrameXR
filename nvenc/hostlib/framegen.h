@@ -33,6 +33,8 @@ struct FrameGenStats {
     float lastFlowMs = 0, lastSynthMs = 0, lastIngestMs = 0;   // GPU time of the last flow pass (prep + engine), the last output pass, the last ingest copy
     double flowMsSum = 0, synthMsSum = 0; uint64_t flowN = 0, synthN = 0;
     int flowW = 0, flowH = 0, blocksW = 0, blocksH = 0;
+    int maskPts[2] = {};               // the mask polygon each eye's output pass draws (0: the whole eye)
+    float maskVisible[2] = { 1, 1 };   // the share of the eye that polygon covers (what the output pass still computes)
     bool nvofReady = false;
     char nvofInfo[160] = "";   // "api 5.0, grids ..." or the failure reason
 };
@@ -53,6 +55,9 @@ public:
     // frame at fraction t (0..1) between that frame's predecessor and it (midpoint = 0.5), rotated to qOut4. Returns the output texture (owned
     // by this object), nullptr on error.
     ID3D11Texture2D* Render(int mode, float t, int age, const float* qOut4, const float* fov8, char* err, int errlen);
+    // The mask of the profile in force (docs/PLAN_1_4_FOUNDATION.md F1, polygon_uv_v1: n points x, y in the eye's uv, u = 0 at the outer edge, v = 0 at the
+    // top, convex): the output pass then computes only the pixels inside it (plus 2 px), the rest of the eye is never generated. nullptr / n < 3: the whole eye.
+    void SetMask(int eye, const float* uv, int n);
     // Reads back the GPU timings of the last passes when they are available (call after the encode of the frame).
     void CollectTimings();
     void ResetHistory();            // the app is gone (or changed): forget the frames

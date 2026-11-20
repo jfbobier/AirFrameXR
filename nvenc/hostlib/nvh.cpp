@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 #include <atomic>
+#include <mutex>
 #include <thread>
 
 static double nowMs() { using namespace std::chrono; return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count(); }
@@ -95,6 +96,7 @@ struct Nvh {
     std::unique_ptr<FrameGen> fg;
     std::unique_ptr<FFR> fgFfr;
     ID3D11Texture2D* fgFfrTex = nullptr;
+    int fgMaskSerial = -1;   // the g_maskSerial the generator's mask was taken at
     bool fgLast = false;
     // the mask's flat fill (nvh_set_mask, "mask_fill"): render-target views of the encoder inputs it clears, by texture
     ID3D11DeviceContext1* ctx1 = nullptr;
@@ -110,6 +112,8 @@ static int g_noiseAmp = 48;             // noise == 2: per-pixel noise on top, i
 // the mask (docs/PLAN_1_4_FOUNDATION.md F1/F2): per eye the visible outline, a convex polygon in the eye's own unfoveated uv (u = 0 at the
 // eye's outer edge, 1 at its inner edge; v = 0 at the top), set by the host before the encoder is created; empty = no mask
 static std::vector<float> g_maskUv[2];
+static std::mutex g_maskMu;                 // nvh_set_mask against the generator's copy (nvh_fg_encode, the encoder thread)
+static std::atomic<int> g_maskSerial{0};    // bumped by every nvh_set_mask: the generator takes the mask again
 static std::atomic<bool> g_maskFill{false};   // F2 lab switch: hidden blocks cleared to black before NVENC (live: host stdin mask_fill)
 
 int nvh_set(const char* key, int64_t v) {
@@ -217,6 +221,8 @@ static QpAxis qpAxis(float cs, float sh, float er, float ratio) {
 
 int nvh_set_mask(int eye, const float* uv, int n) {
     if (eye < 0 || eye > 1) return 0;
+    std::lock_guard<std::mutex> lk(g_maskMu);
+    g_maskSerial++;
     g_maskUv[eye].clear();
     if (!uv || n < 3) return 1;   // fewer than 3 points: no mask for this eye
     if (n > 64) return 0;
@@ -708,7 +714,7 @@ double nvh_encode_shared(void* hh, void* i, uint32_t slot, uint32_t frame_no, ui
 // ---- frame generation (framegen.cpp) -------------------------------------------------------------------------------------------
 int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid, int synth, char* err, int errlen) {
     auto* n = (Nvh*)hh; if (!n) return 0;
-    n->fgFfr.reset(); n->fgFfrTex = nullptr; n->fg.reset(); n->fgLast = false;
+    n->fgFfr.reset(); n->fgFfrTex = nullptr; n->fg.reset(); n->fgLast = false; n->fgMaskSerial = -1;
     if (!on) return 1;
     auto fg = std::make_unique<FrameGen>(n->render->GetDevice(), n->render->GetContext());
     FrameGenConfig c;
@@ -737,6 +743,14 @@ double nvh_fg_encode(void* hh, void* i, int mode, double t, int age, const float
     auto* n = (Nvh*)hh; auto* ipc = (Ipc*)i;
     if (!n || !n->fg) { seterr(err, errlen, "frame generation off"); return -1; }
     const double a = nowMs();
+    if (n->fgMaskSerial != g_maskSerial.load()) {
+        // the mask of the profile in force: the output pass generates only what the lens shows. AIRFRAMEXR_FG_MASK=0: the whole eye (lab A/B)
+        std::lock_guard<std::mutex> lk(g_maskMu);
+        n->fgMaskSerial = g_maskSerial.load();
+        const char* sw = getenv("AIRFRAMEXR_FG_MASK");
+        const bool off = sw && atoi(sw) == 0;
+        for (int e = 0; e < 2; e++) n->fg->SetMask(e, off ? nullptr : g_maskUv[e].data(), off ? 0 : (int)g_maskUv[e].size() / 2);
+    }
     ID3D11Texture2D* tex = n->fg->Render(mode, (float)t, age, q_out4, &ipc->state->host.eyeFovTan[0][0], err, errlen);
     if (!tex) { n->fg->stats.renderErrors++; return -1; }
     if (!n->fgFfr || n->fgFfrTex != tex) {
@@ -762,10 +776,10 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
     for (const char* c = s.nvofInfo; *c && k < 190; c++) { if (*c == '"' || *c == '\\') info[k++] = ' '; else info[k++] = *c; }
     info[k] = 0;
     return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"synths\":%llu,\"reals\":%llu,\"copies\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
-                    "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d]}",
+                    "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d],\"mask_pts\":[%d,%d],\"mask_visible\":[%.3f,%.3f]}",
                     s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.synths, (unsigned long long)s.reals, (unsigned long long)s.copies,
                     (unsigned long long)s.flowErrors, (unsigned long long)s.renderErrors, s.lastFlowMs, s.flowN ? s.flowMsSum / s.flowN : 0.0, s.lastSynthMs,
-                    s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH);
+                    s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH, s.maskPts[0], s.maskPts[1], s.maskVisible[0], s.maskVisible[1]);
 }
 
 void nvh_ipc_set_app_min_period(void* i, uint32_t us) { ((Ipc*)i)->state->host.appMinPeriodUs = us; }

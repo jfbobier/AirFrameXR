@@ -20,6 +20,10 @@ METRICS = [   # (name, path in analysis.json, unit)
     ("late_pct", ("pacing", "late_frac"), "%"),
     ("latency_p50", ("client", "arrival_minus_timestamp_ms", "p50"), "ms"),
     ("client_fps", ("client", "fps_measured"), "fps"),
+    ("fg_flow", ("fg", "flow_ms_avg"), "ms"),          # frame generation (analyse_fg): the motion search per game frame
+    ("fg_synth", ("fg", "synth_ms_avg"), "ms"),        # one output pass
+    ("fg_gpu_ms_s", ("fg", "gpu_ms_per_s"), "ms"),     # the generator's GPU time per second
+    ("fg_stream_fps", ("fg", "stream_fps_p50"), "fps"),
 ]
 SHOWN_ONLY = ["gpu_busy0"]   # columns without a verdict (gpu.csv's first utilization sample, %)
 

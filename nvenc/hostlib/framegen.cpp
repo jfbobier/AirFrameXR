@@ -48,6 +48,18 @@ VSOut VS(uint id : SV_VertexID) {
     o.uv = p;
     return o;
 }
+// the output pass with a mask: the eye's visible polygon (screen uv of this eye, convex, clockwise, 2 px margin; FrameGen::SetMask) as a triangle fan
+cbuffer Poly : register(b1) { float4 polyPts[32]; };   // two points per float4
+VSOut VSPoly(uint id : SV_VertexID) {
+    uint t = id / 3, k = id - t * 3;
+    uint idx = k == 0 ? 0 : t + k;
+    float4 q = polyPts[idx >> 1];
+    float2 p = (idx & 1) ? q.zw : q.xy;
+    VSOut o;
+    o.pos = float4(p.x * 2 - 1, 1 - p.y * 2, 0, 1);
+    o.uv = p;
+    return o;
+}
 float3 dirOf(float2 uv) { return float3(lerp(-tanF.x, tanF.y, uv.x), lerp(tanF.z, -tanF.w, uv.y), -1); }
 bool projectTo(float3 d, out float2 uv) {
     uv = float2(0, 0);
@@ -310,6 +322,9 @@ struct FrameGen::Impl {
     FrameGenConfig cfg;
     // D3D pipeline
     ID3D11VertexShader* vs = nullptr; ID3D11PixelShader* psPrep = nullptr; ID3D11PixelShader* psOut = nullptr;
+    // the mask (SetMask): per eye the polygon the output pass draws, in this eye's screen uv (two points per float4), and its point count
+    ID3D11VertexShader* vsPoly = nullptr; ID3D11Buffer* cbPoly = nullptr;
+    float poly[2][128] = {}; int polyN[2] = {};
     ID3D11Buffer* cb = nullptr; ID3D11SamplerState* smp = nullptr;
     // frame history: a ring of kHist rendered frames and their per-eye render orientations; pair k = (k-1, k) has its flow in pairFlow[k]
     static constexpr int H = FrameGen::kHist;
@@ -361,7 +376,7 @@ FrameGen::~FrameGen() {
     for (int k = 0; k < Impl::H; k++) { rel(I.realSrv[k]); rel(I.real[k]); rel(I.pairFlowSrv[k]); rel(I.pairFlow[k]); rel(I.pairCostSrv[k]); rel(I.pairCost[k]); }
     rel(I.flowOutSrv); rel(I.flowOut); rel(I.costSrv); rel(I.costTex); rel(I.outRtv); rel(m_out);
     rel(I.zeroFlowSrv); rel(I.zeroFlow); rel(I.maxCostSrv); rel(I.maxCost);
-    rel(I.vs); rel(I.psPrep); rel(I.psOut); rel(I.cb); rel(I.smp); rel(I.qDisjoint); rel(I.qDisjointR);
+    rel(I.vs); rel(I.psPrep); rel(I.psOut); rel(I.cb); rel(I.smp); rel(I.qDisjoint); rel(I.qDisjointR); rel(I.vsPoly); rel(I.cbPoly);
     for (auto& q : I.qT) rel(q);
     delete m_i;
 }
@@ -371,8 +386,9 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     I.cfg = cfg;
     m_w = w; m_h = h;
     // shaders
-    ID3DBlob *vb = nullptr, *p1 = nullptr, *p2 = nullptr, *p5 = nullptr, *p6 = nullptr, *e = nullptr;
+    ID3DBlob *vb = nullptr, *vp = nullptr, *p1 = nullptr, *p2 = nullptr, *p5 = nullptr, *p6 = nullptr, *e = nullptr;
     if (FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vb, &e)) ||
+        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "VSPoly", "vs_5_0", 0, 0, &vp, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSPrep", "ps_5_0", 0, 0, &p1, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSOut", "ps_5_0", 0, 0, &p2, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSUnpack", "ps_5_0", 0, 0, &p5, &e)) ||
@@ -382,16 +398,19 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
         return false;
     }
     m_dev->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &I.vs);
+    m_dev->CreateVertexShader(vp->GetBufferPointer(), vp->GetBufferSize(), nullptr, &I.vsPoly);
     m_dev->CreatePixelShader(p1->GetBufferPointer(), p1->GetBufferSize(), nullptr, &I.psPrep);
     m_dev->CreatePixelShader(p2->GetBufferPointer(), p2->GetBufferSize(), nullptr, &I.psOut);
     m_dev->CreatePixelShader(p5->GetBufferPointer(), p5->GetBufferSize(), nullptr, &I.psUnpack);
     m_dev->CreatePixelShader(p6->GetBufferPointer(), p6->GetBufferSize(), nullptr, &I.psFilter);
-    vb->Release(); p1->Release(); p2->Release(); p5->Release(); p6->Release();
+    vb->Release(); vp->Release(); p1->Release(); p2->Release(); p5->Release(); p6->Release();
     D3D11_BUFFER_DESC bd{}; bd.ByteWidth = sizeof(Cb); bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     m_dev->CreateBuffer(&bd, nullptr, &I.cb);
+    bd.ByteWidth = sizeof(I.poly[0]);
+    m_dev->CreateBuffer(&bd, nullptr, &I.cbPoly);
     D3D11_SAMPLER_DESC sd{}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sd.MaxLOD = D3D11_FLOAT32_MAX;
     m_dev->CreateSamplerState(&sd, &I.smp);
-    if (!I.vs || !I.psPrep || !I.psOut || !I.psUnpack || !I.psFilter || !I.cb || !I.smp) { seterr(err, errlen, "frame generation pipeline objects"); return false; }
+    if (!I.vs || !I.vsPoly || !I.psPrep || !I.psOut || !I.psUnpack || !I.psFilter || !I.cb || !I.cbPoly || !I.smp) { seterr(err, errlen, "frame generation pipeline objects"); return false; }
     D3D11_QUERY_DESC qd{ D3D11_QUERY_TIMESTAMP_DISJOINT, 0 }, qt{ D3D11_QUERY_TIMESTAMP, 0 };
     m_dev->CreateQuery(&qd, &I.qDisjoint);
     m_dev->CreateQuery(&qd, &I.qDisjointR);
@@ -520,6 +539,8 @@ bool FrameGen::ensureFrames(ID3D11Texture2D* like, char* err, int errlen) {
     }
     td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
     if (FAILED(m_dev->CreateTexture2D(&td, nullptr, &m_out)) || FAILED(m_dev->CreateRenderTargetView(m_out, nullptr, &I.outRtv))) { seterr(err, errlen, "frame generation output texture"); return false; }
+    const float black[4] = { 0, 0, 0, 1 };
+    m_ctx->ClearRenderTargetView(I.outRtv, black);   // with a mask the output pass never writes outside it: black until a copied frame fills it
     I.fmt = ld.Format;
     return true;
 }
@@ -671,7 +692,15 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c, 0, 0);
         D3D11_VIEWPORT vp{}; vp.TopLeftX = e ? m_w * 0.5f : 0.f; vp.Width = m_w * 0.5f; vp.Height = (float)m_h; vp.MaxDepth = 1.f;
         m_ctx->RSSetViewports(1, &vp);
-        m_ctx->Draw(3, 0);
+        if (I.polyN[e] >= 3) {   // the mask: only the eye's visible polygon is generated
+            m_ctx->VSSetShader(I.vsPoly, nullptr, 0);
+            m_ctx->UpdateSubresource(I.cbPoly, 0, nullptr, I.poly[e], 0, 0);
+            m_ctx->VSSetConstantBuffers(1, 1, &I.cbPoly);
+            m_ctx->Draw(3 * (I.polyN[e] - 2), 0);
+            m_ctx->VSSetShader(I.vs, nullptr, 0);
+        } else {
+            m_ctx->Draw(3, 0);
+        }
     }
     ID3D11ShaderResourceView* nulls[5] = {}; m_ctx->PSSetShaderResources(0, 5, nulls);
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
@@ -680,6 +709,39 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     I.synthTimed = true;
     if (mode == 1) stats.synths++; else stats.reals++;
     return m_out;
+}
+
+void FrameGen::SetMask(int eye, const float* uv, int n) {
+    Impl& I = *m_i;
+    if (eye < 0 || eye > 1) return;
+    I.polyN[eye] = 0; stats.maskPts[eye] = 0; stats.maskVisible[eye] = 1.f;
+    if (!uv || n < 3 || n > 64 || m_w <= 0 || m_h <= 0) return;
+    // into this eye's screen uv (the right eye's outer edge is its right side: u -> 1 - u), in pixels for the margin
+    const double ew = m_w * 0.5, eh = m_h;
+    std::vector<double> x(n), y(n);
+    for (int k = 0; k < n; k++) { x[k] = (eye ? 1.0 - uv[2 * k] : uv[2 * k]) * ew; y[k] = uv[2 * k + 1] * eh; }
+    double a2 = 0, cx = 0, cy = 0;
+    for (int k = 0; k < n; k++) { const int j = (k + 1) % n; a2 += x[k] * y[j] - x[j] * y[k]; cx += x[k]; cy += y[k]; }
+    cx /= n; cy /= n;
+    if (std::fabs(a2) < 1.0) return;   // degenerate: the whole eye
+    // 2 px margin: scaled about the vertex centroid (inside a convex polygon) so the nearest edge moves out by 2 px and every other edge by more
+    double dmin = 1e30;
+    for (int k = 0; k < n; k++) {
+        const int j = (k + 1) % n; const double ex = x[j] - x[k], ey = y[j] - y[k], len = std::sqrt(ex * ex + ey * ey);
+        if (len > 1e-9) dmin = std::min(dmin, std::fabs((cx - x[k]) * ey - (cy - y[k]) * ex) / len);
+    }
+    if (!(dmin > 0.5)) return;
+    const double sc = 1.0 + 2.0 / dmin;
+    // clockwise on the screen (y down: a positive shoelace sum), the orientation the full-screen triangle has, so the rasterizer's culling keeps it
+    const bool reverse = a2 < 0;
+    for (int k = 0; k < n; k++) {
+        const int s = reverse ? n - 1 - k : k;
+        I.poly[eye][2 * k] = (float)((cx + (x[s] - cx) * sc) / ew);
+        I.poly[eye][2 * k + 1] = (float)((cy + (y[s] - cy) * sc) / eh);
+    }
+    I.polyN[eye] = n;
+    stats.maskPts[eye] = n;
+    stats.maskVisible[eye] = (float)std::min(1.0, std::fabs(a2) * 0.5 / (ew * eh));
 }
 
 void FrameGen::CollectTimings() {
