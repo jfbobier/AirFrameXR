@@ -7,6 +7,7 @@
 #include "ipc_win.h"
 #include "FFR.h"
 #include "framegen.h"
+#include <d3d11_1.h>
 #include <dxgi.h>
 #include <dxgi1_4.h>
 #define PSAPI_VERSION 2   // GetProcessMemoryInfo from kernel32 (K32...), no extra import library
@@ -95,6 +96,10 @@ struct Nvh {
     std::unique_ptr<FFR> fgFfr;
     ID3D11Texture2D* fgFfrTex = nullptr;
     bool fgLast = false;
+    // the mask's flat fill (nvh_set_mask, "mask_fill"): render-target views of the encoder inputs it clears, by texture
+    ID3D11DeviceContext1* ctx1 = nullptr;
+    std::map<ID3D11Texture2D*, ID3D11RenderTargetView*> fillRtv;
+    bool fillBroken = false;
 };
 
 // host options that are not ALVR settings
@@ -102,6 +107,10 @@ static uint32_t g_idleRgb = 0x107C10;   // solid frame sent while no OpenXR app 
 static int g_gpuThreadPriority = 0;     // -7..7, 0 = leave the default
 static int g_noiseBlock = 16;           // noise == 2: side of the random blocks (the floor: what is left at the coarsest quantizer)
 static int g_noiseAmp = 48;             // noise == 2: per-pixel noise on top, in 10-bit levels (the ceiling: kept at fine quantizers)
+// the mask (docs/PLAN_1_4_FOUNDATION.md F1/F2): per eye the visible outline, a convex polygon in the eye's own unfoveated uv (u = 0 at the
+// eye's outer edge, 1 at its inner edge; v = 0 at the top), set by the host before the encoder is created; empty = no mask
+static std::vector<float> g_maskUv[2];
+static std::atomic<bool> g_maskFill{false};   // F2 lab switch: hidden blocks cleared to black before NVENC (live: host stdin mask_fill)
 
 int nvh_set(const char* key, int64_t v) {
     auto& S = Settings::Instance();
@@ -143,6 +152,7 @@ int nvh_set(const char* key, int64_t v) {
         {"gpu_thread_priority", [&](int64_t x) { g_gpuThreadPriority = (int)std::max<int64_t>(-7, std::min<int64_t>(7, x)); }},
         {"noise_block", [&](int64_t x) { g_noiseBlock = (int)std::max<int64_t>(1, std::min<int64_t>(64, x)); }},
         {"noise_amp", [&](int64_t x) { g_noiseAmp = (int)std::max<int64_t>(0, std::min<int64_t>(512, x)); }},
+        {"mask_fill", [&](int64_t x) { g_maskFill = x != 0; }},
     };
     auto it = m.find(key);
     if (it == m.end()) return 0;
@@ -205,10 +215,58 @@ static QpAxis qpAxis(float cs, float sh, float er, float ratio) {
     return a;
 }
 
+int nvh_set_mask(int eye, const float* uv, int n) {
+    if (eye < 0 || eye > 1) return 0;
+    g_maskUv[eye].clear();
+    if (!uv || n < 3) return 1;   // fewer than 3 points: no mask for this eye
+    if (n > 64) return 0;
+    for (int k = 0; k < 2 * n; k++) if (!std::isfinite(uv[k])) { g_maskUv[eye].clear(); return 0; }
+    g_maskUv[eye].assign(uv, uv + 2 * n);
+    return 1;
+}
+
+// A block's footprint [u0, u1] x [v0, v1] (eye uv, through the foveation) lies entirely outside the convex polygon P (x, y pairs): the
+// separating-axis test with the footprint's own axes and the polygon's edge normals. A block that touches the outline is visible.
+static bool footprintHidden(const std::vector<float>& P, float u0, float u1, float v0, float v1) {
+    const int n = (int)P.size() / 2;
+    if (n < 3) return false;
+    float minx = P[0], maxx = P[0], miny = P[1], maxy = P[1];
+    double area = 0;
+    for (int k = 0; k < n; k++) {
+        const float ax = P[2 * k], ay = P[2 * k + 1], bx = P[2 * ((k + 1) % n)], by = P[2 * ((k + 1) % n) + 1];
+        minx = std::min(minx, ax); maxx = std::max(maxx, ax); miny = std::min(miny, ay); maxy = std::max(maxy, ay);
+        area += (double)ax * by - (double)bx * ay;
+    }
+    if (u1 < minx || u0 > maxx || v1 < miny || v0 > maxy) return true;
+    if (std::fabs(area) < 1e-12) return false;
+    const float sgn = area > 0 ? 1.f : -1.f;
+    const float qx[4] = { u0, u1, u1, u0 }, qy[4] = { v0, v0, v1, v1 };
+    for (int k = 0; k < n; k++) {
+        const float ax = P[2 * k], ay = P[2 * k + 1], ex = P[2 * ((k + 1) % n)] - ax, ey = P[2 * ((k + 1) % n) + 1] - ay;
+        if (ex * ex + ey * ey < 1e-12f) continue;   // a corner the mask does not cut gives two equal points
+        const float nx = sgn * ey, ny = -sgn * ex;   // outward normal
+        float m = 1e30f;
+        for (int c = 0; c < 4; c++) m = std::min(m, nx * (qx[c] - ax) + ny * (qy[c] - ay));
+        if (m > 1e-6f) return true;
+    }
+    return false;
+}
+
+static std::vector<D3D11_RECT> g_maskRects;   // the hidden blocks in the encoded frame, merged into runs per block row (the F2 fill)
+static int g_maskHidden = 0, g_maskBlocks = 0;
+int nvh_mask_stats(int* hidden, int* blocks, int* rects) {
+    if (hidden) *hidden = g_maskHidden;
+    if (blocks) *blocks = g_maskBlocks;
+    if (rects) *rects = (int)g_maskRects.size();
+    return (g_maskUv[0].size() >= 6 || g_maskUv[1].size() >= 6) ? 1 : 0;
+}
+
 void nvh_build_qp_map(int W, int H) {
     auto& S = Settings::Instance();
     g_qpMap.clear(); g_nvh_qp_map = nullptr; g_nvh_qp_map_size = 0;
-    if (!S.m_qpMapEnabled || W <= 0 || H <= 0) return;
+    g_maskRects.clear(); g_maskHidden = 0; g_maskBlocks = 0;
+    const bool masked = g_maskUv[0].size() >= 6 || g_maskUv[1].size() >= 6;
+    if ((!S.m_qpMapEnabled && !masked) || W <= 0 || H <= 0) return;
     g_qpW = W; g_qpH = H; g_qpCols = (W + 31) / 32; g_qpRows = (H + 31) / 32;
     g_qpFoveated = S.m_enableFoveatedEncoding;
     float cx = S.m_foveationCenterSizeX, cy = S.m_foveationCenterSizeY, sx = S.m_foveationCenterShiftX, sy = S.m_foveationCenterShiftY;
@@ -242,24 +300,69 @@ void nvh_build_qp_map(int W, int H) {
     const float eyeW = W / 2.f;
     const int C = S.m_qpMapCenterDelta, E = S.m_qpMapEdgeDelta; const float T = std::max(1e-3f, S.m_qpMapTransition);
     g_qpMap.assign((size_t)g_qpCols * g_qpRows, 0);
-    for (int j = 0; j < g_qpRows; j++) for (int i = 0; i < g_qpCols; i++) {
-        float px = std::min((i + 0.5f) * 32.f, (float)W - 0.5f), py = std::min((j + 0.5f) * 32.f, (float)H - 0.5f);
-        float pe = px < eyeW ? px / eyeW : (W - px) / eyeW;     // eye-local x (the right eye is mirrored in the frame)
-        float ex = pe / ratioX, ey = (py / H) / ratioY;
-        float sxs = foveF(ex, ax.cs, ax.sh, ax.er), sys = foveF(ey, ay.cs, ay.sh, ay.er);
-        float dx = (sxs - ax.scMid) / ax.scHalf, dy = (sys - ay.scMid) / ay.scHalf;
-        float d = sqrtf(dx * dx + dy * dy);
-        float t = std::min(1.f, std::max(0.f, (d - 1.f) / T)); t = t * t * (3.f - 2.f * t);
-        int v = (int)lroundf((float)C + (float)(E - C) * t);
-        g_qpMap[(size_t)j * g_qpCols + i] = (int8_t)std::max(-51, std::min(51, v));
+    // the source position of an output coordinate on one axis (eye-local, 0 = the outer edge / the top); a non-finite answer stays visible
+    auto srcX = [&](float pe) { float s = foveF(pe / ratioX, ax.cs, ax.sh, ax.er); return std::isfinite(s) ? s : 0.5f; };
+    auto srcY = [&](float py) { float s = foveF((py / H) / ratioY, ay.cs, ay.sh, ay.er); return std::isfinite(s) ? s : 0.5f; };
+    for (int j = 0; j < g_qpRows; j++) {
+        int runStart = -1;
+        for (int i = 0; i <= g_qpCols; i++) {
+            bool hidden = false;
+            if (i < g_qpCols) {
+                float px = std::min((i + 0.5f) * 32.f, (float)W - 0.5f), py = std::min((j + 0.5f) * 32.f, (float)H - 0.5f);
+                const bool left = px < eyeW;
+                float pe = left ? px / eyeW : (W - px) / eyeW;     // eye-local x (the right eye is mirrored in the frame)
+                float ex = pe / ratioX, ey = (py / H) / ratioY;
+                float sxs = foveF(ex, ax.cs, ax.sh, ax.er), sys = foveF(ey, ay.cs, ay.sh, ay.er);
+                float dx = (sxs - ax.scMid) / ax.scHalf, dy = (sys - ay.scMid) / ay.scHalf;
+                float d = sqrtf(dx * dx + dy * dy);
+                float t = std::min(1.f, std::max(0.f, (d - 1.f) / T)); t = t * t * (3.f - 2.f * t);
+                int v = S.m_qpMapEnabled ? (int)lroundf((float)C + (float)(E - C) * t) : 0;
+                const auto& poly = g_maskUv[left ? 0 : 1];
+                if (poly.size() >= 6) {
+                    // the whole block's footprint: its four edges through the inverted foveation (monotonic per axis)
+                    float x0 = i * 32.f, x1 = std::min((i + 1) * 32.f, (float)W), y0 = j * 32.f, y1 = std::min((j + 1) * 32.f, (float)H);
+                    float pa = left ? x0 / eyeW : (W - x1) / eyeW, pb = left ? x1 / eyeW : (W - x0) / eyeW;
+                    float u0 = srcX(pa), u1 = srcX(pb), v0 = srcY(y0), v1 = srcY(y1);
+                    if (u0 > u1) std::swap(u0, u1);
+                    if (v0 > v1) std::swap(v0, v1);
+                    hidden = footprintHidden(poly, u0, u1, v0, v1);
+                    g_maskBlocks++;
+                }
+                if (hidden) { v = 51; g_maskHidden++; }
+                g_qpMap[(size_t)j * g_qpCols + i] = (int8_t)std::max(-51, std::min(51, v));
+            }
+            if (hidden && runStart < 0) runStart = i;
+            if (!hidden && runStart >= 0) {
+                g_maskRects.push_back(D3D11_RECT{ runStart * 32, j * 32, std::min(i * 32, W), std::min((j + 1) * 32, H) });
+                runStart = -1;
+            }
+        }
     }
-    g_nvh_qp_map = g_qpMap.data(); g_nvh_qp_map_size = (uint32_t)g_qpMap.size();
+    // the map goes to NVENC only with the delta mode on (the host turns it on with a mask, the ramp at 0 when the user's QP map is off)
+    if (S.m_qpMapEnabled) { g_nvh_qp_map = g_qpMap.data(); g_nvh_qp_map_size = (uint32_t)g_qpMap.size(); }
+}
+
+// F2: the hidden blocks cleared to black in the encoder's input, after the foveation pass, in order on the encoder's context
+static void maskFill(Nvh* n, ID3D11Texture2D* target) {
+    if (!g_maskFill || g_maskRects.empty() || !target || n->fillBroken) return;
+    if (!n->ctx1 && FAILED(n->render->GetContext()->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&n->ctx1))) { n->fillBroken = true; return; }
+    auto it = n->fillRtv.find(target);
+    ID3D11RenderTargetView* rtv = it != n->fillRtv.end() ? it->second : nullptr;
+    if (!rtv) {
+        D3D11_TEXTURE2D_DESC td{}; target->GetDesc(&td);
+        if (!(td.BindFlags & D3D11_BIND_RENDER_TARGET) || FAILED(n->render->GetDevice()->CreateRenderTargetView(target, nullptr, &rtv)) || !rtv) { n->fillBroken = true; return; }
+        if (n->fillRtv.size() >= 16) { for (auto& kv : n->fillRtv) kv.second->Release(); n->fillRtv.clear(); }
+        n->fillRtv[target] = rtv;
+    }
+    static const float black[4] = { 0.f, 0.f, 0.f, 1.f };
+    n->ctx1->ClearView(rtv, black, g_maskRects.data(), (UINT)g_maskRects.size());
 }
 
 int nvh_qpmap_dump(const char* path) {
     if (g_qpMap.empty()) return 0;
     FILE* f = nullptr; if (fopen_s(&f, path, "wb") || !f) return 0;
-    fprintf(f, "{\"w\":%d,\"h\":%d,\"cols\":%d,\"rows\":%d,\"foveated\":%d,\"data\":[", g_qpW, g_qpH, g_qpCols, g_qpRows, g_qpFoveated ? 1 : 0);
+    fprintf(f, "{\"w\":%d,\"h\":%d,\"cols\":%d,\"rows\":%d,\"foveated\":%d,\"qp_map\":%d,\"mask_hidden\":%d,\"mask_blocks\":%d,\"mask_rects\":%d,\"data\":[",
+            g_qpW, g_qpH, g_qpCols, g_qpRows, g_qpFoveated ? 1 : 0, Settings::Instance().m_qpMapEnabled ? 1 : 0, g_maskHidden, g_maskBlocks, (int)g_maskRects.size());
     for (size_t k = 0; k < g_qpMap.size(); k++) fprintf(f, "%s%d", k ? "," : "", (int)g_qpMap[k]);
     fprintf(f, "]}\n"); fclose(f); return 1;
 }
@@ -566,12 +669,14 @@ static double encodeWithFfr(Nvh* n, FFR* ffr, uint32_t frame_no, uint64_t ts_ns,
             // zero copy: the foveation pass renders straight into the encoder's next input frame; Transmit skips its copy
             const NvEncInputFrame* in = n->enc->GetNvEncoder()->GetNextInputFrame();
             ffr->RenderTo(reinterpret_cast<ID3D11Texture2D*>(in->inputPtr));
+            maskFill(n, reinterpret_cast<ID3D11Texture2D*>(in->inputPtr));
             ctx->End(n->qT1); ctx->End(n->qDisjoint);
             g_nvh_prepared_input = (void*)in;
             struct Reset { ~Reset() { g_nvh_prepared_input = nullptr; } } reset;
             n->enc->Transmit(nullptr, frame_no, ts_ns, force_idr != 0);
         } else {
             ffr->Render();
+            maskFill(n, ffr->GetOutputTexture());
             ctx->End(n->qT1); ctx->End(n->qDisjoint);
             // (No CPU wait here to measure queueing: waiting for this pass before Transmit makes its input copy queue behind other
             // GPU work a second time; measured +5.7 ms per frame under the harness's GPU keep-alive load.)
@@ -798,6 +903,9 @@ void nvh_destroy(void* hh) {
     auto* n = (Nvh*)hh;
     if (!n) return;
     n->fgFfr.reset(); n->fg.reset();
+    for (auto& kv : n->fillRtv) kv.second->Release();
+    n->fillRtv.clear();
+    if (n->ctx1) { n->ctx1->Release(); n->ctx1 = nullptr; }
     for (auto& f : n->ffr) f.reset();
     for (auto& t : n->shared) if (t) { t->Release(); t = nullptr; }
     if (n->green) n->green->Release();

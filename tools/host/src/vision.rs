@@ -74,6 +74,11 @@ pub struct Settings {
     pub client_box: Option<[f64; 4]>,
     /// 1.4: our client's sharpening of the magnified picture (AMD FidelityFX CAS in its video pass); default on, `client_sharpen on|off` live
     pub client_sharpen: Option<bool>,
+    /// 1.4-foundation (docs/PLAN_1_4_FOUNDATION.md F1): the visible outline of the profile in use, per eye, in the stream eye's uv, written by the launcher's
+    /// session compile when the encoding is foveated and the profile has a mask; absent = no mask. The encoder gives the blocks outside it the highest QP.
+    pub encode_mask: Option<EncodeMask>,
+    /// F2 lab switch: the hidden blocks are also cleared to black before NVENC (default off; `mask_fill on|off` live)
+    pub mask_fill: Option<bool>,
     /// the launcher fits the stream to the box the headset declares at the density of `stream_reference_eye` (the size the user chose over the headset's full box,
     /// docs/FOV_PIPELINE_OPTIM.md S3); with it on and the reference above the stream's eye size, the reference is the render quality slider's ceiling (ipc renderCeiling)
     pub stream_fit_window: Option<bool>,
@@ -148,6 +153,8 @@ pub fn load_settings(path: &Path) -> Settings {
         client_box: video["client_box"].as_array().and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?, a.get(3)?.as_f64()?]))
             .filter(|b| b.iter().all(|t| t.is_finite() && *t > 0.05 && *t < 10.0)),
         client_sharpen: video["client_sharpen"].as_bool(),
+        encode_mask: parse_encode_mask(&video["encode_mask"]),
+        mask_fill: video["mask_fill"].as_bool(),
         stream_fit_window: video["stream_fit_window"].as_bool(),
         stream_reference_eye: video["stream_reference_eye"].as_array().and_then(|a| Some([a.first()?.as_i64()?, a.get(1)?.as_i64()?])),
         debug: v["debug"].as_bool(),
@@ -251,6 +258,37 @@ pub static FOV_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), Atom
 pub static FOV_PENDING: AtomicBool = AtomicBool::new(false);
 /// `client_sharpen on|off` from the streamer: -1 = nothing new
 pub static CLIENT_SHARPEN_REQ: AtomicI32 = AtomicI32::new(-1);
+/// `mask_fill on|off` (F2 lab switch, live): -1 = nothing new
+pub static MASK_FILL_REQ: AtomicI32 = AtomicI32::new(-1);
+
+/// The mask the encoder takes (docs/PLAN_1_4_FOUNDATION.md F1): per eye a convex polygon in the stream eye's unfoveated uv (x = 0 at the eye's outer edge,
+/// 1 at its inner edge; y = 0 at the top), and the profile it came from (for the log).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EncodeMask {
+    pub profile: String,
+    pub left: Vec<[f32; 2]>,
+    pub right: Vec<[f32; 2]>,
+}
+
+/// `{"kind":"polygon_uv_v1","profile":"...","left":[[x,y],...],"right":[[x,y],...]}`; None for anything else (another kind, fewer than 3 or more than 64
+/// points, a value that is not a number or lies well outside the eye)
+pub fn parse_encode_mask(v: &Value) -> Option<EncodeMask> {
+    if v["kind"].as_str() != Some("polygon_uv_v1") {
+        return None;
+    }
+    let eye = |k: &str| -> Option<Vec<[f32; 2]>> {
+        let pts: Vec<[f32; 2]> = v[k].as_array()?.iter().map(|p| {
+            let a = p.as_array()?;
+            if a.len() != 2 {
+                return None;
+            }
+            let (x, y) = (a[0].as_f64()? as f32, a[1].as_f64()? as f32);
+            (x.is_finite() && y.is_finite() && (-0.05..=1.05).contains(&x) && (-0.05..=1.05).contains(&y)).then_some([x, y])
+        }).collect::<Option<Vec<_>>>()?;
+        (3..=64).contains(&pts.len()).then_some(pts)
+    };
+    Some(EncodeMask { profile: v["profile"].as_str().unwrap_or("").to_string(), left: eye("left")?, right: eye("right")? })
+}
 
 /// The one JSON line our client takes over `ServerControlPacket::Reserved` (1.4, docs/FOV_CONTRACT_PLAN.md; the format of the 1.4 research line):
 /// `{"airframexr":1,"view":{"left":[o,i,u,d],"right":[o,i,u,d]},"sharpen":true}`; without a box no `view` (the client declares its whole frustum).
@@ -303,7 +341,7 @@ pub fn fov_scale_from(t: &[f32; 4], fov8: &[f32; 8]) -> [f32; 4] {
 
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
 /// `frame_gen_cap <fps>` (0 = none), `fov_override off` | `fov_override on <outer> <inner> <upper> <lower> [<render quality 0..1>]` (the tangents the game is told and where its render size sits between the floor and the stream's eye size, taken by the next game), `recenter`,
-/// `color <brightness> <contrast> <saturation> <sharpening>`, `client_sharpen on|off` (our client's sharpening, live),
+/// `color <brightness> <contrast> <saturation> <sharpening>`, `client_sharpen on|off` (our client's sharpening, live), `mask_fill on|off` (the mask's flat fill, live),
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
 /// Virtual-key codes of a combination like "Ctrl+Alt+R" (modifiers, then one key: a letter or digit, F1-F24, Insert, Delete, Home, End, PageUp,
@@ -397,6 +435,7 @@ pub fn spawn_stdin_control() {
                     }
                 }
                 (Some("client_sharpen"), Some(v)) => CLIENT_SHARPEN_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
+                (Some("mask_fill"), Some(v)) => MASK_FILL_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("fov_override"), Some("off")) => {
                     FOV_ON.store(false, Ordering::SeqCst);
                     FOV_PENDING.store(true, Ordering::SeqCst);
@@ -667,5 +706,33 @@ mod fov_tests {
         assert!((s[2] - 0.9 / 1.2211).abs() < 1e-6);
         assert_eq!(s[3], 0.2, "a view cannot be emptied");
         assert_eq!(fov_scale_from(&[0.0, -1.0, f32::NAN, 0.0], &AVP), [1.0; 4], "garbage means not restricted");
+    }
+}
+
+#[cfg(test)]
+mod encode_mask_tests {
+    use super::*;
+
+    #[test]
+    fn parses_the_compiles_mask() {
+        let v = json!({"kind": "polygon_uv_v1", "profile": "AVP optimized trade-off",
+            "left": [[0.0, 0.2], [0.1, 0.0], [0.9, 0.0], [1.0, 0.2], [1.0, 1.0], [0.0, 1.0]],
+            "right": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]});
+        let m = parse_encode_mask(&v).expect("a mask");
+        assert_eq!(m.profile, "AVP optimized trade-off");
+        assert_eq!(m.left.len(), 6);
+        assert_eq!(m.right[2], [1.0, 1.0]);
+    }
+
+    #[test]
+    fn refuses_what_is_not_a_mask() {
+        assert!(parse_encode_mask(&json!(null)).is_none());
+        assert!(parse_encode_mask(&json!({"kind": "corner_fraction_v1", "left": [[0, 0], [1, 0], [1, 1]], "right": [[0, 0], [1, 0], [1, 1]]})).is_none());
+        let two = json!({"kind": "polygon_uv_v1", "left": [[0, 0], [1, 0]], "right": [[0, 0], [1, 0], [1, 1]]});
+        assert!(parse_encode_mask(&two).is_none(), "fewer than 3 points");
+        let far = json!({"kind": "polygon_uv_v1", "left": [[0, 0], [3, 0], [1, 1]], "right": [[0, 0], [1, 0], [1, 1]]});
+        assert!(parse_encode_mask(&far).is_none(), "a point far outside the eye");
+        let one_eye = json!({"kind": "polygon_uv_v1", "left": [[0, 0], [1, 0], [1, 1]]});
+        assert!(parse_encode_mask(&one_eye).is_none(), "both eyes or none");
     }
 }

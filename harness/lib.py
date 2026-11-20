@@ -503,6 +503,12 @@ def run_scenario(sc, outdir: Path, log=print):
         else:      # host on the builder (loopback topology: the client binds topology.client_bind_ip)
             src_arg = "" if (h.get("live") or h.get("shim")) else f'--file {sc["source"].replace("/", chr(92))} '
             dump_arg = f"--dump-qpmap {rd}\\qpmap.json " if h.get("dump_qpmap") else ""
+            if h.get("encode_mask"):   # docs/PLAN_1_4_FOUNDATION.md F1: the mask object (polygon_uv_v1) as the session compile writes it, handed over as a file
+                mf = CACHE / "encode_mask.json"
+                CACHE.mkdir(parents=True, exist_ok=True)
+                mf.write_text(json.dumps(h["encode_mask"]))
+                b_put(mf, f"runs/{rid}/encode_mask.json")
+                dump_arg += f"--encode-mask {rd}\\encode_mask.json "
             envpre = "".join(f"set {k}={v}&& " for k, v in {"AIRFRAMEXR_PIPELINE_CSV": f"{rd}\\host_pipeline.csv", "AIRFRAMEXR_HEAD_CSV": f"{rd}\\host_head.csv", **(h.get("env") or {})}.items())
             feedpre = ""
             if sc.get("stdin_feed"):
@@ -529,7 +535,8 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
-                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override", "client_box": "--client-box", "fov_quality": "--fov-quality", "fov_ceiling": "--fov-ceiling"})
+                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override", "client_box": "--client-box", "fov_quality": "--fov-quality", "fov_ceiling": "--fov-ceiling",
+                                     "mask_fill": "--mask-fill"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -933,8 +940,32 @@ def read_rgb_at(path, pts, win=4):
     return [[tuple(d[o + 3 * i: o + 3 * i + 3]) for i in range(n)] for o in range(0, len(d) - stride + 1, stride)]
 
 
-def qp_map_expected(cfg, w, h, foveated, c, e, t):
-    """Independent Python port of nvh.cpp build_qp_map (per 32x32 CTB QP deltas). cfg = negotiated openvr_config."""
+def mask_footprint_hidden(poly, u0, u1, v0, v1):
+    """Port of nvh.cpp footprintHidden: the block's footprint [u0, u1] x [v0, v1] lies wholly outside the convex polygon (separating axes)."""
+    n = len(poly)
+    if n < 3:
+        return False
+    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+    if u1 < min(xs) or u0 > max(xs) or v1 < min(ys) or v0 > max(ys):
+        return True
+    area = sum(poly[k][0] * poly[(k + 1) % n][1] - poly[(k + 1) % n][0] * poly[k][1] for k in range(n))
+    if abs(area) < 1e-12:
+        return False
+    sgn = 1.0 if area > 0 else -1.0
+    for k in range(n):
+        ax, ay = poly[k]
+        ex, ey = poly[(k + 1) % n][0] - ax, poly[(k + 1) % n][1] - ay
+        if ex * ex + ey * ey < 1e-12:
+            continue
+        nx, ny = sgn * ey, -sgn * ex
+        if min(nx * (qx - ax) + ny * (qy - ay) for qx, qy in ((u0, v0), (u1, v0), (u1, v1), (u0, v1))) > 1e-6:
+            return True
+    return False
+
+
+def qp_map_expected(cfg, w, h, foveated, c, e, t, mask=None, ramp=True):
+    """Independent Python port of nvh.cpp build_qp_map (per 32x32 CTB QP deltas). cfg = negotiated openvr_config. mask = {"left": [[u, v], ...],
+    "right": [...]} (docs/PLAN_1_4_FOUNDATION.md F1): a block whose whole footprint lies outside its eye's polygon gets +51; ramp False = the foveal ramp at 0."""
     import math
     cx, cy = cfg["foveation_center_size_x"], cfg["foveation_center_size_y"]
     sx, sy = cfg["foveation_center_shift_x"], cfg["foveation_center_shift_y"]
@@ -957,16 +988,32 @@ def qp_map_expected(cfg, w, h, foveated, c, e, t):
     cols, rows = (w + 31) // 32, (h + 31) // 32
     eye_w = w / 2
     out = []
+
+    def src(v, a, r):
+        try:
+            s_ = _fov_f(v / r, *a[0])
+        except ZeroDivisionError:
+            return 0.5
+        return s_ if math.isfinite(s_) else 0.5
     for j in range(rows):
         for i in range(cols):
             px, py = min((i + .5) * 32, w - .5), min((j + .5) * 32, h - .5)
-            pe = px / eye_w if px < eye_w else (w - px) / eye_w
+            left = px < eye_w
+            pe = px / eye_w if left else (w - px) / eye_w
             exx, eyy = pe / ratio[0], (py / h) / ratio[1]
             sxs, sys_ = _fov_f(exx, *ax[0]), _fov_f(eyy, *ay[0])
             d = math.hypot((sxs - ax[1]) / ax[2], (sys_ - ay[1]) / ay[2])
             tt = min(1.0, max(0.0, (d - 1) / max(1e-3, t)))
             tt = tt * tt * (3 - 2 * tt)
-            val = int(math.floor(c + (e - c) * tt + 0.5))
+            val = int(math.floor(c + (e - c) * tt + 0.5)) if ramp else 0
+            poly = (mask or {}).get("left" if left else "right")
+            if poly and len(poly) >= 3:
+                x0, x1, y0, y1 = i * 32, min((i + 1) * 32, w), j * 32, min((j + 1) * 32, h)
+                pa, pb = (x0 / eye_w, x1 / eye_w) if left else ((w - x1) / eye_w, (w - x0) / eye_w)
+                u0, u1 = sorted((src(pa, ax, ratio[0]), src(pb, ax, ratio[0])))
+                v0, v1 = sorted((src(y0 / h, ay, ratio[1]), src(y1 / h, ay, ratio[1])))
+                if mask_footprint_hidden(poly, u0, u1, v0, v1):
+                    val = 51
             out.append(max(-51, min(51, val)))
     return cols, rows, out
 
@@ -1598,7 +1645,8 @@ def analyse_qpmap(sc, outdir, host):
         return out
     w, h, fov = fr[0], fr[1], bool(cfgh.get("foveated"))
     cfg = negotiated_cfg(outdir)
-    cols, rows, exp = qp_map_expected(cfg, w, h, fov, qk["center"], qk["edge"], qk["transition"])
+    mask = (sc.get("host") or {}).get("encode_mask")
+    cols, rows, exp = qp_map_expected(cfg, w, h, fov, qk["center"], qk["edge"], qk["transition"], mask=mask, ramp=qk.get("ramp", True))
     out["expected_hist"] = {str(v): exp.count(v) for v in sorted(set(exp))}
     if dump:
         got = dump["data"]
@@ -1606,6 +1654,33 @@ def analyse_qpmap(sc, outdir, host):
         out["mismatch"] = sum(1 for x, y in zip(exp, got) if x != y)
         out["ctbs"] = len(got)
         out["hist"] = {str(v): got.count(v) for v in sorted(set(got))}
+        out["mask_hidden"], out["mask_blocks"], out["mask_rects"] = dump.get("mask_hidden"), dump.get("mask_blocks"), dump.get("mask_rects")
+    if mask:
+        out["expected_hidden"] = exp.count(51)
+        for line in open(outdir / "host_stdout.txt", errors="replace") if (outdir / "host_stdout.txt").exists() else []:
+            if '"encode_mask"' in line and line.lstrip().startswith("{"):
+                try:
+                    out["mask_event"] = json.loads(line).get("data")
+                except ValueError:
+                    pass
+    if qk.get("mask_luma") and (outdir / "client.hevc").exists():
+        # the decoded picture in the hidden blocks (fill on: black) and in the visible ones (the scene's lines), frame `frame`
+        n = qk["mask_luma"].get("frame", 120)
+        p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", str(outdir / "client.hevc"), "-vf", f"select=eq(n\\,{n})", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-"], capture_output=True, timeout=600)
+        if len(p.stdout) == w * h:
+            import numpy as np
+            img = np.frombuffer(p.stdout, dtype=np.uint8).reshape(h, w)
+            hid, vis = [], []
+            for j in range(rows):
+                for i in range(cols):
+                    blk = img[j * 32:min((j + 1) * 32, h), i * 32:min((i + 1) * 32, w)]
+                    (hid if exp[j * cols + i] == 51 else vis).append(blk)
+            if hid and vis:
+                hv = np.concatenate([b.ravel() for b in hid]); vv = np.concatenate([b.ravel() for b in vis])
+                out["mask_luma"] = {"hidden_mean": round(float(hv.mean()), 2), "hidden_p99": int(np.percentile(hv, 99)), "hidden_max": int(hv.max()),
+                                    "visible_mean": round(float(vv.mean()), 2), "visible_max": int(vv.max()), "hidden_blocks": len(hid)}
+        else:
+            out["mask_luma_error"] = f"decoded {len(p.stdout)} bytes, expected {w * h}"
     if qk.get("effect") and (outdir / "client.hevc").exists():
         n = qk["effect"].get("frame", 60)
         p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", str(outdir / "client.hevc"), "-vf", f"select=eq(n\\,{n})", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-"], capture_output=True, timeout=600)
@@ -2227,6 +2302,19 @@ def evaluate(sc, a):
             chk("qpmap_center_keeps_more_detail", (qa.get("detail_ratio") or 0) >= qk["min_detail_ratio"], qa.get("detail") or qa.get("detail_error"), f"decoded detail center/edge >= {qk['min_detail_ratio']} (ratio {qa.get('detail_ratio')})")
         if "max_detail_ratio" in qk:
             chk("qpmap_off_is_flat", (qa.get("detail_ratio") or 99) <= qk["max_detail_ratio"], qa.get("detail"), f"decoded detail center/edge <= {qk['max_detail_ratio']} with the map off (ratio {qa.get('detail_ratio')})")
+        if "mask_min_hidden_share" in qk:   # docs/PLAN_1_4_FOUNDATION.md F1
+            eh, ctbs = qa.get("expected_hidden") or 0, qa.get("ctbs") or 0
+            chk("mask_hidden_blocks", qa.get("mask_hidden") is not None and abs((qa.get("mask_hidden") or 0) - eh) <= max(1, int(0.005 * ctbs)) and ctbs and eh / ctbs >= qk["mask_min_hidden_share"],
+                {"engine": qa.get("mask_hidden"), "oracle": eh, "ctbs": ctbs, "event": qa.get("mask_event")},
+                f"the engine's hidden block count equals the oracle's and is at least {qk['mask_min_hidden_share']:.0%} of the frame")
+        if "mask_luma" in qk:
+            ml, want = qa.get("mask_luma") or {}, qk["mask_luma"]
+            if want.get("fill"):
+                chk("mask_fill_black", ml.get("hidden_blocks") and ml.get("hidden_p99", 255) <= want.get("max_hidden_p99", 4) and ml.get("visible_max", 0) >= 100,
+                    ml or qa.get("mask_luma_error"), f"fill on: the hidden blocks decode black (p99 <= {want.get('max_hidden_p99', 4)}), the visible ones keep the scene (max >= 100)")
+            else:
+                chk("mask_hidden_keep_picture", ml.get("hidden_blocks") and ml.get("hidden_max", 0) >= want.get("min_hidden_max", 40),
+                    ml or qa.get("mask_luma_error"), f"fill off: the hidden blocks still carry the picture at the highest QP (max >= {want.get('min_hidden_max', 40)}): the fill is off by default")
     if "tool" in ck:   # the headset tools (xr_probe XR_PROBE_TOOL, scripted keys): analyse_tool
         import math
         tk, ta = ck["tool"], a.get("tool") or {}

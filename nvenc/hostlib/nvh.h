@@ -23,8 +23,16 @@ double nvh_encode(void* h, uint32_t frame_index, uint64_t ts_ns, int force_idr, 
 void nvh_destroy(void* h);
 // JSON description of what NVENC was actually configured with + the GPU's capabilities + the split-encode conditions (for logs).
 int nvh_describe(void* h, char* buf, int buflen);
-// Writes the current QP delta map ({"w","h","cols","rows","foveated","data":[...]}) to a file. Returns 1 if a map exists.
+// Writes the current QP delta map ({"w","h","cols","rows","foveated","qp_map","mask_hidden","mask_blocks","mask_rects","data":[...]}) to a
+// file. Returns 1 if a map exists.
 int nvh_qpmap_dump(const char* path);
+// The mask (docs/PLAN_1_4_FOUNDATION.md F1): eye 0 = left, 1 = right; `uv` = n (x, y) pairs of a convex polygon in the eye's unfoveated uv
+// (x = 0 at the eye's outer edge, 1 at its inner edge; y = 0 at the top); n < 3 clears that eye. Call before nvh_create: the QP map gives
+// every 32 x 32 block whose whole footprint lies outside the polygon +51, and "mask_fill" (nvh_set, live) clears those blocks to black after
+// the foveation pass. Returns 0 for a bad eye, more than 64 points or a non-finite value.
+int nvh_set_mask(int eye, const float* uv, int n);
+// After nvh_create: blocks judged hidden, blocks judged (inside an eye with a mask), fill rectangles. Returns 1 when a mask is set.
+int nvh_mask_stats(int* hidden, int* blocks, int* rects);
 // Number of NVENC engines of the GPU (split-frame encoding needs >= 2).
 int nvh_encoder_engines(void* h);
 // Starts/stops a background GPU load on a second D3D11 device (about `duty_pct` busy) so the driver keeps the GPU in a

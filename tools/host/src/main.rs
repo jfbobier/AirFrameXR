@@ -102,6 +102,11 @@ struct Args {
     auto_input: Vec<(f64, usize, u32, f32)>,
     qp_map: Option<bool>,
     dump_qpmap: Option<PathBuf>,
+    /// the mask (docs/PLAN_1_4_FOUNDATION.md F1): settings `video.encode_mask` (the session compile), or `--encode-mask <file|off>` (the lab; wins)
+    encode_mask: Option<vision::EncodeMask>,
+    encode_mask_explicit: bool,
+    /// F2: the hidden blocks cleared to black before NVENC (`--mask-fill`, settings `video.mask_fill`, stdin `mask_fill`); default off
+    mask_fill: Option<bool>,
     idle_rgb: Option<u32>,
     gpu_priority: Option<i64>,
     encode_profile: nvidia_profile::EncodeProfile,
@@ -204,6 +209,9 @@ fn parse_args() -> Result<Args, String> {
         fg_synth: 1,
         auto_input: vec![],
         qp_map: None,
+        encode_mask: None,
+        encode_mask_explicit: false,
+        mask_fill: None,
         dump_qpmap: None,
         idle_rgb: None,
         gpu_priority: None,
@@ -335,6 +343,18 @@ fn parse_args() -> Result<Args, String> {
                 })
             }
             "--dump-qpmap" => a.dump_qpmap = Some(v()?.into()),
+            "--encode-mask" => {
+                let f = v()?;
+                a.encode_mask_explicit = true;
+                a.encode_mask = if f == "off" {
+                    None
+                } else {
+                    let t = fs::read_to_string(&f).map_err(|e| format!("--encode-mask {f}: {e}"))?;
+                    let j: serde_json::Value = serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|e| format!("--encode-mask {f}: {e}"))?;
+                    Some(vision::parse_encode_mask(&j).ok_or_else(|| format!("--encode-mask {f}: not a polygon_uv_v1 mask (kind, left, right: 3-64 [x, y] points in 0..1)"))?)
+                };
+            }
+            "--mask-fill" => a.mask_fill = Some(parse_on_off("--mask-fill", &v()?)?),
             "--idle-rgb" => a.idle_rgb = Some(parse_rgb(&v()?)?),
             "--gpu-priority" => a.gpu_priority = Some(v()?.parse().map_err(|e| format!("{e}"))?),
             "--running-start-ms" => a.running_start_ms = v()?.parse().map_err(|e| format!("{e}"))?,
@@ -461,9 +481,35 @@ fn parse_args() -> Result<Args, String> {
 
 /// The negotiated ALVR encoding gamma (persisted in `openvr_config` at connect). The client decodes with pow(v, gamma); the shim
 /// sends pow(v, 1/gamma) (ALVR's SteamVR compositor does the same in FrameRender.fx). 1.0 if absent.
+/// The session's encoding gamma (what the shim encodes with). A read that hit the moment a window replaced session.json used to fall back to 1.0 without a
+/// word (field 2026-11-07: a session ran 1.00 instead of 1.5): the read is tried again, then the last good value is kept, and either case is said in the log.
+/// A session without the key is ALVR's 1.0.
 fn read_encoding_gamma(session_path: &std::path::Path) -> f32 {
-    fs::read_to_string(session_path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|s| s["openvr_config"]["encoding_gamma"].as_f64()).filter(|g| *g > 0.1 && *g < 10.0).unwrap_or(1.0) as f32
+    static LAST_GOOD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let read = || -> Result<Option<f64>, String> {
+        let t = fs::read_to_string(session_path).map_err(|e| e.to_string())?;
+        let s: serde_json::Value = serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
+        Ok(s["openvr_config"]["encoding_gamma"].as_f64())
+    };
+    let mut last_err = String::new();
+    for attempt in 0..3 {
+        match read() {
+            Ok(g) => {
+                let v = g.filter(|g| *g > 0.1 && *g < 10.0).unwrap_or(1.0) as f32;
+                if attempt > 0 {
+                    logs::general("INFO", &format!("encoding gamma {v:.2} read at the attempt {} (session.json was being replaced)", attempt + 1));
+                }
+                LAST_GOOD.store(v.to_bits(), Ordering::Relaxed);
+                return v;
+            }
+            Err(e) => last_err = e,
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let last = f32::from_bits(LAST_GOOD.load(Ordering::Relaxed));
+    let v = if last > 0.0 { last } else { 1.0 };
+    logs::general("WARN", &format!("encoding gamma: session.json could not be read ({last_err}); using {v:.2} ({})", if last > 0.0 { "the last value read" } else { "ALVR's default" }));
+    v
 }
 
 fn parse_on_off(flag: &str, v: &str) -> Result<bool, String> {
@@ -557,6 +603,12 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if a.qp_map.is_none() {
         a.qp_map = st.qp_map;
     }
+    if !a.encode_mask_explicit {
+        a.encode_mask = st.encode_mask.clone();
+    }
+    if a.mask_fill.is_none() {
+        a.mask_fill = st.mask_fill;
+    }
     if !a.split_explicit {
         if let Some(m) = st.split_encode.as_deref().and_then(|m| parse_split(m).ok()) {
             a.split_encode = m;
@@ -597,6 +649,10 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
         if !a.split_explicit {
             a.split_encode = 3;
         }
+        // no foveation means no mask either (the owner's two choices: foveated from the mask, or none); the lab flag still wins
+        if !a.encode_mask_explicit {
+            a.encode_mask = None;
+        }
     }
 }
 
@@ -624,6 +680,12 @@ fn describe_encoder(origin: Instant, enc: *mut std::ffi::c_void, dump: &Option<P
         v = serde_json::from_str(&s).unwrap_or_else(|e| json!({ "raw": s, "parse_error": e.to_string() }));
     }
     event(origin, "nvenc_config", v.clone());
+    let (mut hidden, mut blocks, mut rects) = (0i32, 0i32, 0i32);
+    if unsafe { nvh::nvh_mask_stats(&mut hidden, &mut blocks, &mut rects) } == 1 {
+        let share = if blocks > 0 { hidden as f64 / blocks as f64 } else { 0.0 };
+        event(origin, "encode_mask", json!({ "hidden_blocks": hidden, "blocks": blocks, "fill_rects": rects, "hidden_share": share }));
+        logs::general("INFO", &format!("encode mask: {hidden} of {blocks} blocks of 32 x 32 hidden ({:.1} %), {rects} fill rectangles", 100.0 * share));
+    }
     if let Some(p) = dump {
         if let Ok(c) = std::ffi::CString::new(p.to_string_lossy().as_bytes()) {
             let ok = unsafe { nvh::nvh_qpmap_dump(c.as_ptr()) };
@@ -958,6 +1020,8 @@ mod nvh {
         pub fn nvh_encoder_engines(h: *mut c_void) -> i32;
         pub fn nvh_describe(h: *mut c_void, buf: *mut std::ffi::c_char, len: i32) -> i32;
         pub fn nvh_qpmap_dump(path: *const std::ffi::c_char) -> i32;
+        pub fn nvh_set_mask(eye: i32, uv: *const f32, n: i32) -> i32;
+        pub fn nvh_mask_stats(hidden: *mut i32, blocks: *mut i32, rects: *mut i32) -> i32;
         pub fn nvh_ipc_last_compose_ms(ipc: *mut c_void) -> f32;
         pub fn nvh_last_ffr_gpu_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_open() -> *mut c_void;
@@ -1148,15 +1212,22 @@ fn fov_geometry(c: &serde_json::Value, fset: &serde_json::Value, k: &str, sk: &s
 
 /// Pushes the encoder configuration to the NVENC code: the encoder parameters are the hardcoded NVIDIA profile, the stream
 /// parameters (refresh rate, eye resolution, foveation) come from the session's `openvr_config` as before.
-fn configure_encoder(session_path: &std::path::Path, split_mode: i64, qp_map: bool, host_keys: &[(&std::ffi::CStr, i64)]) -> (i32, i32, f64) {
+fn configure_encoder(session_path: &std::path::Path, split_mode: i64, qp_map: bool, mask: Option<&vision::EncodeMask>, mask_fill: bool, host_keys: &[(&std::ffi::CStr, i64)]) -> (i32, i32, f64) {
     let s: serde_json::Value = serde_json::from_str(&fs::read_to_string(session_path).expect("read session")).expect("parse session");
     let c = &s["openvr_config"];
+    // the mask's +51 travels in the QP map: with a mask the map is on, its foveal ramp at 0 when the user turned the map off
+    let ramp = qp_map || mask.is_none();
     unsafe {
         nvh::nvh_set(c"nvenc_split_encode_mode".as_ptr(), split_mode);
-        nvh::nvh_set(c"nvenc_qp_map".as_ptr(), qp_map as i64);
-        nvh::nvh_set(c"qp_map_center_delta".as_ptr(), nvidia_profile::QP_MAP_CENTER_DELTA);
-        nvh::nvh_set(c"qp_map_edge_delta".as_ptr(), nvidia_profile::QP_MAP_EDGE_DELTA);
+        nvh::nvh_set(c"nvenc_qp_map".as_ptr(), (qp_map || mask.is_some()) as i64);
+        nvh::nvh_set(c"qp_map_center_delta".as_ptr(), if ramp { nvidia_profile::QP_MAP_CENTER_DELTA } else { 0 });
+        nvh::nvh_set(c"qp_map_edge_delta".as_ptr(), if ramp { nvidia_profile::QP_MAP_EDGE_DELTA } else { 0 });
         nvh::nvh_set_f(c"qp_map_transition".as_ptr(), nvidia_profile::QP_MAP_TRANSITION);
+        nvh::nvh_set(c"mask_fill".as_ptr(), (mask_fill && mask.is_some()) as i64);
+        for (eye, pts) in [(0, mask.map(|m| &m.left)), (1, mask.map(|m| &m.right))] {
+            let flat: Vec<f32> = pts.map(|p| p.iter().flat_map(|q| [q[0], q[1]]).collect()).unwrap_or_default();
+            nvh::nvh_set_mask(eye, if flat.is_empty() { std::ptr::null() } else { flat.as_ptr() }, (flat.len() / 2) as i32);
+        }
         for (k, v) in host_keys {
             nvh::nvh_set(k.as_ptr(), *v);
         }
@@ -1246,7 +1317,7 @@ fn run_quality_bench(origin: Instant, args: &Args, layout: &alvr_filesystem::Lay
     let session = layout.session();
     let host_keys = [(c"idle_rgb", 0x00FF00i64), (c"gpu_thread_priority", 0)];
     let qp_on = args.qp_map.unwrap_or(nvidia_profile::QP_MAP_ENABLED);
-    configure_encoder(&session, args.split_encode, qp_on, &host_keys);
+    configure_encoder(&session, args.split_encode, qp_on, args.encode_mask.as_ref(), args.mask_fill.unwrap_or(false), &host_keys);
     let s: serde_json::Value = fs::read_to_string(&session).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
     let c = &s["openvr_config"];
     let fset = &s["session_settings"]["video"]["foveated_encoding"];
@@ -1862,10 +1933,28 @@ fn main() {
         // benchmarks try profiles without changing the user's session (they set the encoder's foveation directly)
         let profile_to_session = if args.bench.is_some() || args.bench_network.is_some() { nvidia_profile::EncodeProfile::Session } else { args.encode_profile };
         match nvidia_profile::apply_encode_profile(&args.config_dir.join("session.json"), profile_to_session) {
-            Ok(changed) => event(origin, "encode_profile", json!({
-                "profile": format!("{:?}", args.encode_profile), "session_changes": changed,
-                "qp_map": args.qp_map, "split_encode_mode": args.split_encode,
-            })),
+            Ok(changed) => {
+                // F5 (docs/PLAN_1_4_FOUNDATION.md): the effective foveation and where it came from, once per start; a session that disagreed with the
+                // encode profile used to be overruled without a word (field 2026-10-12, 2026-10-17)
+                let session_on = fs::read_to_string(args.config_dir.join("session.json")).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(t.trim_start_matches('\u{feff}')).ok())
+                    .and_then(|v| v["session_settings"]["video"]["foveated_encoding"]["enabled"].as_bool());
+                let source = match profile_to_session {
+                    nvidia_profile::EncodeProfile::Session => "the session".to_string(),
+                    p => format!("the encode profile {}", if p == nvidia_profile::EncodeProfile::Foveated { "foveated" } else { "full-split" }),
+                };
+                let mask = match (&args.encode_mask, session_on) {
+                    (Some(m), Some(true)) => format!(", from the mask of the profile '{}'", m.profile),
+                    _ => String::new(),
+                };
+                logs::general("INFO", &format!("foveation {} ({source}{mask})", match session_on { Some(true) => "on", Some(false) => "off (full frame)", None => "unknown" }));
+                if !changed.is_empty() {
+                    logs::general("WARN", &format!("the session disagreed with {source}, which wins: {}", changed.join("; ")));
+                }
+                event(origin, "encode_profile", json!({
+                    "profile": format!("{:?}", args.encode_profile), "session_changes": changed,
+                    "qp_map": args.qp_map, "split_encode_mode": args.split_encode, "foveated": session_on, "mask": args.encode_mask.as_ref().map(|m| m.profile.clone()),
+                }))
+            }
             Err(e) => {
                 eprintln!("cannot apply the encode profile to session.json: {e}");
                 exit_now(3);
@@ -1932,10 +2021,14 @@ fn main() {
     // The default output, the virtual cable and its volume are set up by the streamer (tools/gui/AudioRoute.cs); the capture below is ALVR's.
     let mut reconfigs = 0usize;
     if args.live {
-        let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, &host_keys);
+        let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, args.encode_mask.as_ref(), args.mask_fill.unwrap_or(false), &host_keys);
         eye_size = (w / 2, h);
         if !args.fps_explicit {
             args.fps = session_fps; // the session's refresh rate (what the client is asked for), not a hard-coded 90
+        }
+        if let Some(m) = &args.encode_mask {
+            logs::general("INFO", &format!("encode mask from the profile '{}' ({} / {} outline points, left / right): the blocks outside it get the highest QP{}",
+                m.profile, m.left.len(), m.right.len(), if args.mask_fill.unwrap_or(false) { " and are cleared to black (mask fill on)" } else { "" }));
         }
         let benchmarking = args.bench.is_some() || args.bench_network.is_some();
         if benchmarking && args.encode_profile != nvidia_profile::EncodeProfile::Session {
@@ -2804,7 +2897,7 @@ fn main() {
                 } else {
                     let mut g = pipeline.as_ref().expect("pipeline").enc.lock();
                     unsafe { nvh::nvh_destroy(g.handle) };
-                    let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, &host_keys);
+                    let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, args.encode_mask.as_ref(), args.mask_fill.unwrap_or(false), &host_keys);
                     eye_size = (w / 2, h);
                     if !args.fps_explicit {
                         args.fps = session_fps;
@@ -2855,6 +2948,14 @@ fn main() {
                 args.fov_quality = f32::from_bits(vision::FOV_QUALITY_REQ.load(Ordering::SeqCst));
                 args.fov_scale_explicit = true;   // the streamer's choice wins over the settings file from now on
                 views_published = false;
+            }
+            let mf = vision::MASK_FILL_REQ.swap(-1, Ordering::SeqCst);
+            if mf >= 0 {
+                args.mask_fill = Some(mf == 1);
+                let on = mf == 1 && args.encode_mask.is_some();
+                unsafe { nvh::nvh_set(c"mask_fill".as_ptr(), on as i64) };
+                logs::general("INFO", &format!("mask fill {}{}", if on { "on" } else { "off" }, if mf == 1 && !on { " (no mask in force)" } else { "" }));
+                event(origin, "mask_fill", json!({ "on": on }));
             }
             let cs = vision::CLIENT_SHARPEN_REQ.swap(-1, Ordering::SeqCst);
             if cs >= 0 && (cs == 1) != args.client_sharpen {

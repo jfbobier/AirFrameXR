@@ -145,7 +145,7 @@ def build(what):
             for src in sorted((lib.ROOT / "tools/bench").glob("*.cs")):
                 lib.b_put(src, f"_tmp/bench/{src.name}")
             lib.b_run("if not exist _tmp\\bench\\gui\\res mkdir _tmp\\bench\\gui\\res")
-            for g in ("Common.cs", "PipelineModel.cs", "AirFrameXR.cs", "FindHeadset.cs", "AudioRoute.cs", "BenchRecorder.cs", "PerfAnalyze.cs", "BlackBoxBrand.cs", "BlackBoxChart.cs", "Stub.cs", "app.stub.manifest", "app.manifest", "app.exe.config"):
+            for g in ("Common.cs", "PipelineModel.cs", "FovFit.cs", "UserFovProfiles.cs", "AirFrameXR.cs", "FindHeadset.cs", "AudioRoute.cs", "BenchRecorder.cs", "PerfAnalyze.cs", "BlackBoxBrand.cs", "BlackBoxChart.cs", "Stub.cs", "app.stub.manifest", "app.manifest", "app.exe.config"):
                 lib.b_put(lib.ROOT / "tools/gui" / g, f"_tmp/bench/gui/{g}")
             for g in ("airframexr.ico", "blackbox-windows.ico", "blackbox_128.png", "logo_640.png", "chroma_passthrough.png"):
                 lib.b_put(lib.ROOT / "tools/gui/res" / g, f"_tmp/bench/gui/res/{g}")
@@ -317,6 +317,10 @@ def build(what):
             # stb_image (bench.cpp decodes the benchmark scene's textures) and the scene itself (tools/bench_scene/build.sh)
             lib.b_run("if not exist third_party\\stb mkdir third_party\\stb")
             lib.b_put(lib.ROOT / "third_party/stb/stb_image.h", "third_party/stb/stb_image.h")
+            # the Optical Flow SDK headers framegen.cpp includes (a root set up from scratch had none: the host failed to build there, 2026-11-20)
+            lib.b_run("if not exist third_party\\nvof mkdir third_party\\nvof")
+            for hdr in sorted((lib.ROOT / "third_party/nvof").glob("*.h")):
+                lib.b_put(hdr, f"third_party/nvof/{hdr.name}")
             vab = lib.ROOT / "build/bench/littlest_tokyo.vab"
             if vab.exists():
                 lib.b_run("if not exist bench mkdir bench")

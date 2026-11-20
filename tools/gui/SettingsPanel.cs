@@ -168,6 +168,7 @@ namespace AirFrameXR
             Fps.SelectedItem = f;
             Bitrate.Value = Clamp(Bitrate, Json.Num(s, V + "bitrate.mode.ConstantMbps", 250));
             (settings.EncodeProfile == "full-split" ? ProfFull : ProfFov).Checked = true;
+            ShowMaskChoice();
             Split.Checked = settings.SplitEncode;
             FrameGen.Checked = settings.FrameGen;
             Fcx.Value = Clamp(Fcx, Json.Num(s, V + "foveated_encoding.content.center_size_x", 0.45));
@@ -193,6 +194,21 @@ namespace AirFrameXR
             foreach (var p in plans) PowerPlanBox.Items.Add(p.Name);
             var cur = plans.FindIndex(p => string.Equals(p.Guid, settings.PowerPlan, StringComparison.OrdinalIgnoreCase));
             PowerPlanBox.SelectedIndex = cur >= 0 ? cur + 1 : 0;
+        }
+
+        /// 1.4-foundation (docs/PLAN_1_4_FOUNDATION.md F4): with a mask profile in force (the FOV card's profile, its rectangle the restriction) the two choices are the
+        /// mask's foveation (the default) or none; on the Vision Pro the six numbers are computed at every start (shown, not edited)
+        void ShowMaskChoice()
+        {
+            UserFov u = null;
+            try { u = PipelineModel.MaskEncoding.ProfileInForce(settings); } catch (Exception e) { Log.Write("WARN", "settings: the FoV profiles could not be read: " + e.Message); }
+            bool mask = u != null && u.HasMask;
+            ProfFov.Text = mask ? $"Foveated from the mask of '{u.Name}' (recommended)" : "Foveated (ALVR foveated encoding; recommended)";
+            ProfFull.Text = mask ? "No foveation (full frame + split encode)" : "Full frame + split encode (needs a strong link)";
+            bool computed = mask && settings.Kind == HeadsetKind.VisionPro;
+            foreach (var n in new[] { Fcx, Fcy, Fsx, Fsy, Frx, Fry }) n.Enabled = !computed;
+            SetReason(ProfFov, mask ? "The mask's hidden corners get the encoder's highest quantizer (nearly no bits); the visible picture gets them." : "");
+            SetReason(Fcx, computed ? "Computed at every start from the headset's box and Apple's map (the mask does not change these: they are one curve across and one down)." : "");
         }
 
         /// Puts a proposal into the controls (nothing is written to disk until Save).
