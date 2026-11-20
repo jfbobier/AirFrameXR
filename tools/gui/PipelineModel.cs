@@ -856,7 +856,8 @@ namespace AirFrameXR
                 hiddenLeft = hiddenRight = 0;
                 var l = ToUv(FovMask.Polygon(u.TanLeft ?? u.Tan, u.MaskLeft), view);
                 var r = ToUv(FovMask.Polygon(u.TanRight ?? u.Tan, u.MaskRight), view);
-                if (l.Count < 3 || r.Count < 3) return null;
+                // the encoder's test needs a convex outline: anything else is refused (no mask) rather than sent (a self-crossing one hid the whole picture, field 2026-11-20)
+                if (!FovMask.IsConvex(l) || !FovMask.IsConvex(r)) return null;
                 hiddenLeft = HiddenShare(l); hiddenRight = HiddenShare(r);
                 object Pts(List<double[]> p) => p.Select(q => (object)new List<object> { Math.Round(q[0], 4), Math.Round(q[1], 4) }).ToList();
                 return new Dictionary<string, object> { ["kind"] = Kind, ["profile"] = u.Name ?? u.Id, ["left"] = Pts(l), ["right"] = Pts(r) };
@@ -878,7 +879,7 @@ namespace AirFrameXR
                 if (u != null && view != null && view.All(x => x > 0.05)) m = Build(u, view, out hl, out hr);
                 if (m != null) Json.Set(scratch.Root, Key, m); else Json.Remove(scratch.Root, Key);
                 if (scratch.EncodeProfile == "full-split") return "encoding: no foveation (full frame)";
-                if (m == null) return "encoding: foveated, no mask (" + (why ?? (view == null ? "the stream's box is not known" : "the outline leaves nothing")) + ")";
+                if (m == null) return "encoding: foveated, no mask (" + (why ?? (view == null ? "the stream's box is not known" : "the outline leaves nothing or is not convex")) + ")";
                 return $"encoding: foveated from the mask of '{u.Name}' (it hides {(100 * hl).ToString("0.0", c)} % / {(100 * hr).ToString("0.0", c)} % of the left / right stream eye; the blocks outside it get the highest QP)";
             }
         }

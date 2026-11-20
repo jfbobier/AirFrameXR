@@ -284,22 +284,53 @@ namespace AirFrameXR
         public const string Kind = "corner_fraction_v1";
         public const double Min = 0.4;
 
-        /// the octagon (fewer distinct points where a corner is not cut), counter-clockwise from the right edge's top end
+        /// the visible window: the rectangle cut by the four corner lines (the half-planes p . c <= f |c|^2), counter-clockwise, at most 8 points (fewer where a corner
+        /// is not cut or two lines meet before the edge between them). Always convex and simple: the encoder (nvh.cpp footprintHidden) and the frame generator rely on it.
+        /// Not the octagon's points in a fixed order: deep cuts on a lopsided rectangle (field 2026-11-20: corners 0.5 / 0.57 on outer 0.92 / inner 0.59) cross on the
+        /// edge between them, and the fixed order then made a self-crossing outline that the encoder read as 100 % hidden (the whole picture at the highest QP).
         public static List<double[]> Polygon(double[] tan, double[] mask)
         {
             double o = tan[0], i = tan[1], u = tan[2], l = tan[3];
             var corners = new[] { new[] { o, u }, new[] { -i, u }, new[] { -i, -l }, new[] { o, -l } };   // UO, UI, LI, LO
-            var pts = new List<double[]>();
-            for (int k = 0; k < 4; k++)
+            // counter-clockwise from the lower-outer corner: right edge upwards, top edge outer -> inner, left edge downwards, bottom edge inner -> outer
+            var p = new List<double[]> { corners[3], corners[0], corners[1], corners[2] }.Select(q => new[] { q[0], q[1] }).ToList();
+            for (int k = 0; k < 4 && mask != null; k++)
             {
-                double cx = corners[k][0], cy = corners[k][1], f = mask == null ? 1.0 : Math.Max(Min, Math.Min(1.0, mask[k])), n2 = cx * cx + cy * cy;
-                // the line p . c = f |c|^2 meets the horizontal edge (y = cy) at x and the vertical edge (x = cx) at y; both kept on their edge
-                double xh = Math.Max(-i, Math.Min(o, (f * n2 - cy * cy) / cx)), yv = Math.Max(-l, Math.Min(u, (f * n2 - cx * cx) / cy));
-                var onH = new[] { xh, cy }; var onV = new[] { cx, yv };
-                // counter-clockwise: right edge upwards, top edge outer -> inner, left edge downwards, bottom edge inner -> outer
-                if (k == 0 || k == 2) { pts.Add(onV); pts.Add(onH); } else { pts.Add(onH); pts.Add(onV); }
+                double cx = corners[k][0], cy = corners[k][1], f = Math.Max(Min, Math.Min(1.0, mask[k])), lim = f * (cx * cx + cy * cy);
+                if (f >= 1.0) continue;
+                Func<double[], double> inside = q => lim - (q[0] * cx + q[1] * cy);   // >= 0 on the view axis's side of the line
+                var outp = new List<double[]>();
+                for (int n = 0; n < p.Count; n++)
+                {
+                    var a = p[n]; var b = p[(n + 1) % p.Count];
+                    double fa = inside(a), fb = inside(b);
+                    if (fa >= 0) outp.Add(a);
+                    if ((fa >= 0) != (fb >= 0)) { var t = fa / (fa - fb); outp.Add(new[] { a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]) }); }
+                }
+                p = outp;
             }
-            return pts;
+            // a line through a vertex gives that point twice: dropped
+            var d = new List<double[]>();
+            foreach (var q in p) if (d.Count == 0 || Math.Abs(q[0] - d[d.Count - 1][0]) > 1e-9 || Math.Abs(q[1] - d[d.Count - 1][1]) > 1e-9) d.Add(q);
+            if (d.Count > 1 && Math.Abs(d[0][0] - d[d.Count - 1][0]) < 1e-9 && Math.Abs(d[0][1] - d[d.Count - 1][1]) < 1e-9) d.RemoveAt(d.Count - 1);
+            return d;
+        }
+
+        /// true when the outline is a convex polygon in one turning direction (every corner turns the same way, no edge crosses back): what the encoder's test needs
+        public static bool IsConvex(IList<double[]> p)
+        {
+            if (p == null || p.Count < 3) return false;
+            int sign = 0; double turn = 0;
+            for (int k = 0; k < p.Count; k++)
+            {
+                var a = p[k]; var b = p[(k + 1) % p.Count]; var c = p[(k + 2) % p.Count];
+                double cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+                if (Math.Abs(cr) < 1e-12) continue;
+                int s = cr > 0 ? 1 : -1;
+                if (sign == 0) sign = s; else if (s != sign) return false;
+                turn += Math.Atan2(cr, (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]));
+            }
+            return sign != 0 && Math.Abs(Math.Abs(turn) - 2 * Math.PI) < 1e-6;   // one full turn: a star-shaped outline turns 4 pi
         }
 
         /// the share of the rectangle the mask hides (0 = none)

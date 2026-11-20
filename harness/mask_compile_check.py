@@ -21,17 +21,68 @@ FIT = _SHIPPED.get("fov", _SHIPPED)   # the shipped file keeps the numbers under
 
 
 def polygon(tan, mask):
-    """tools/gui/UserFovProfiles.cs FovMask.Polygon: the octagon in tangents (x outward from the nose, y up), counter-clockwise from the right edge's top end"""
+    """tools/gui/UserFovProfiles.cs FovMask.Polygon: the rectangle (tangents, x outward from the nose, y up) cut by the four corner lines, counter-clockwise
+    from the lower-outer corner"""
     o, i, u, l = tan
-    pts = []
-    for k, (cx, cy) in enumerate(((o, u), (-i, u), (-i, -l), (o, -l))):
-        f = 1.0 if mask is None else max(0.4, min(1.0, mask[k]))
-        n2 = cx * cx + cy * cy
-        xh = max(-i, min(o, (f * n2 - cy * cy) / cx))
-        yv = max(-l, min(u, (f * n2 - cx * cx) / cy))
-        on_h, on_v = (xh, cy), (cx, yv)
-        pts += [on_v, on_h] if k in (0, 2) else [on_h, on_v]
-    return pts
+    corners = ((o, u), (-i, u), (-i, -l), (o, -l))
+    p = [corners[3], corners[0], corners[1], corners[2]]
+    for k, (cx, cy) in enumerate(corners):
+        if mask is None:
+            break
+        f = max(0.4, min(1.0, mask[k]))
+        if f >= 1.0:
+            continue
+        lim = f * (cx * cx + cy * cy)
+        ins = lambda q: lim - (q[0] * cx + q[1] * cy)
+        out = []
+        for n in range(len(p)):
+            a, b = p[n], p[(n + 1) % len(p)]
+            fa, fb = ins(a), ins(b)
+            if fa >= 0:
+                out.append(a)
+            if (fa >= 0) != (fb >= 0):
+                t = fa / (fa - fb)
+                out.append((a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])))
+        p = out
+    d = []
+    for q in p:
+        if not d or abs(q[0] - d[-1][0]) > 1e-9 or abs(q[1] - d[-1][1]) > 1e-9:
+            d.append(q)
+    if len(d) > 1 and abs(d[0][0] - d[-1][0]) < 1e-9 and abs(d[0][1] - d[-1][1]) < 1e-9:
+        d.pop()
+    return d
+
+
+def convex(p):
+    """one turning direction and one full turn (a self-crossing outline fails): what nvh.cpp footprintHidden needs"""
+    import math
+    if not p or len(p) < 3:
+        return False
+    sign, turn = 0, 0.0
+    for k in range(len(p)):
+        a, b, c = p[k], p[(k + 1) % len(p)], p[(k + 2) % len(p)]
+        cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+        if abs(cr) < 1e-12:
+            continue
+        s = 1 if cr > 0 else -1
+        if sign == 0:
+            sign = s
+        elif s != sign:
+            return False
+        turn += math.atan2(cr, (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]))
+    return sign != 0 and abs(abs(turn) - 2 * math.pi) < 1e-6
+
+
+def area_hidden(p):
+    a = sum(p[k][0] * p[(k + 1) % len(p)][1] - p[(k + 1) % len(p)][0] * p[k][1] for k in range(len(p)))
+    return max(0.0, 1 - abs(a) / 2)
+
+
+def encoder_hidden(p, n=64):
+    """the share of an n x n block grid over the eye that the encoder's own test (lib.mask_footprint_hidden = nvh.cpp footprintHidden) hides: independent of
+    this file's port of the compile (field 2026-11-20: a self-crossing outline passed the port and hid 100 % in the encoder)"""
+    from lib import mask_footprint_hidden
+    return sum(mask_footprint_hidden(p, i / n, (i + 1) / n, j / n, (j + 1) / n) for j in range(n) for i in range(n)) / (n * n)
 
 
 def to_uv(tan_pts, view):
@@ -130,6 +181,11 @@ def main():
             checks["kind"] = got is not None and got.get("kind") == "polygon_uv_v1" and got.get("profile") == FIT["name"]
             checks["left"] = same_poly((got or {}).get("left"), want["left"])
             checks["right"] = same_poly((got or {}).get("right"), want["right"])
+            # independent of the port: convex, and the encoder's block test hides about the outline's area (blocks on the line stay visible: a little less)
+            for e in ("left", "right"):
+                pe = (got or {}).get(e) or []
+                checks[f"{e}_convex"] = convex(pe)
+                checks[f"{e}_encoder_share"] = bool(pe) and 0.0 <= area_hidden(pe) - encoder_hidden(pe) <= 0.08
             checks["log"] = "foveated from the mask" in line
         # F4: the radios name the mask when the profile in force has one; on the Vision Pro the six numbers are the compiled ones, read-only
         masked = prof.get("mask") is not None and name != "avp_restriction_changed"
