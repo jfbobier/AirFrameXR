@@ -93,13 +93,22 @@ def preflight(sc):
     return notes
 
 
+def foreign_host():
+    """The path of an alvr_host.exe running on the builder from outside the harness's root (an installed AirFrameXR), or None."""
+    rc, out = b_run('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name = \'alvr_host.exe\'\\" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath -notlike (\'*\\' + ROOTNAME + '\\*\') } | ForEach-Object { $_.ExecutablePath }"')
+    paths = [l.strip() for l in (out or "").splitlines() if l.strip().lower().endswith("alvr_host.exe")]
+    return paths[0] if paths else None
+
+
 def kill_stale():
     # the scheduled tasks first: `schtasks /run` does nothing while a task is still running (a feeder or a frozen host left by an aborted run kept the next run's
     # host from starting), and /end takes the task's whole process tree (cmd, feeder, host)
     for task in ("openxr_host_tmp", "openxr_app_tmp", "openxr_ballast_tmp", "openxr_dbg"):
         b_run(f"schtasks /end /tn {task} >nul 2>&1")
-    for exe in ("alvr_host.exe", "alvr_client_headless.exe", "xr_probe.exe", "vram_ballast.exe", "findstr.exe"):
-        b_run(f"taskkill /f /im {exe} >nul 2>&1")
+    # only processes started from the harness's own root: an AirFrameXR the user installed and started (its host, its line test's xr_probe) is never stopped
+    # (until 2026-11-20 this was taskkill /im by name: the lab killed the owner's streamer host five times on the 5090, field log 2026-11-20 00:37-02:00)
+    names = "|".join(n.replace(".", "\\.") for n in ("alvr_host.exe", "alvr_client_headless.exe", "xr_probe.exe", "vram_ballast.exe", "findstr.exe"))
+    b_run('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -match \'^(' + names + ')$\' -and $_.ExecutablePath -like (\'*\\' + ROOTNAME + '\\*\') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1')
     # the audio / UI harnesses start the packaged streamer (and its host) through their own scheduled tasks (va_*): end those tasks too, and any streamer, launcher or desktop mirror
     # running from the harness's own folders (runs\, out\, build\; never an install the user started elsewhere). A streamer left by an aborted run kept its host's ports, and the next
     # start's host died on them.
@@ -415,6 +424,9 @@ def run_scenario(sc, outdir: Path, log=print):
         (outdir / "rig.txt").write_text(next((l.strip() for l in _g.splitlines() if "NVIDIA" in l or "GeForce" in l or "RTX" in l), ""))
     except Exception:
         pass
+    foreign = foreign_host()
+    if foreign:
+        raise Blocked(f"an AirFrameXR streamer outside the harness is running on the builder ({foreign}): it holds the ALVR ports and the lab never stops it; close it, then run again")
     kill_stale()
     kill_local_stale()
     b_run(f"mkdir {rd}")
