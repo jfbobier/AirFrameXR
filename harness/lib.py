@@ -503,6 +503,13 @@ def run_scenario(sc, outdir: Path, log=print):
         else:      # host on the builder (loopback topology: the client binds topology.client_bind_ip)
             src_arg = "" if (h.get("live") or h.get("shim")) else f'--file {sc["source"].replace("/", chr(92))} '
             dump_arg = f"--dump-qpmap {rd}\\qpmap.json " if h.get("dump_qpmap") else ""
+            if h.get("host_settings"):   # docs/PLAN_1_4_FOUNDATION.md E4: the host reads this airframexr.json as an installed host reads config\\airframexr.json (the restriction,
+                # the render quality, ...); the lab flags --fov-override / --fov-scale / --fov-ceiling are gone
+                sf = CACHE / "host_settings.json"
+                CACHE.mkdir(parents=True, exist_ok=True)
+                sf.write_text(json.dumps(h["host_settings"]))
+                b_put(sf, f"runs/{rid}/host_settings.json")
+                dump_arg += f"--settings {rd}\\host_settings.json "
             if h.get("encode_mask"):   # docs/PLAN_1_4_FOUNDATION.md F1: the mask object (polygon_uv_v1) as the session compile writes it, handed over as a file
                 mf = CACHE / "encode_mask.json"
                 CACHE.mkdir(parents=True, exist_ok=True)
@@ -535,8 +542,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
-                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override", "client_box": "--client-box", "fov_quality": "--fov-quality", "fov_ceiling": "--fov-ceiling",
-                                     "mask_fill": "--mask-fill"})
+                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "client_box": "--client-box", "fov_quality": "--fov-quality", "mask_fill": "--mask-fill"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -2262,6 +2268,11 @@ def evaluate(sc, a):
         chk("handover_mirror_leaves", H_["leave_s"] is not None and H_["leave_s"] <= hk.get("max_leave_s", 2.0) and not H_["forced_out"] and H_["mirror_rc"] == "0", {"leave_s": H_["leave_s"], "forced_out": H_["forced_out"], "rc": H_["mirror_rc"]}, f"the mirror ends by itself within {hk.get('max_leave_s', 2.0)} s of the signal, without the 1.5 s fallback")
         chk("handover_engine_switches", H_["mirror_run_ended_before_game_started"], H_["events"], "the engine ends the mirror's run, then starts the game's (the game is not recorded as the mirror)")
         chk("handover_game_ran", H_["game_ran"], H_["game_rc"], "the game ran to its end after the mirror left")
+    if "host_events" in ck:   # {"event name": minimum count}: the host printed that event (a JSON line on its stdout) at least that often
+        hs = (outdir / "host_stdout.txt").read_text(errors="replace").replace(" ", "") if (outdir / "host_stdout.txt").exists() else ""
+        for name, n in ck["host_events"].items():
+            got = hs.count(f'"event":"{name}"')
+            chk(f"host_event_{name}", got >= n, got, f"the host printed the {name} event at least {n} time(s)")
     if "fov_restrict" in ck:
         fa = a.get("fov_restrict") or {}
         if fa.get("error"):
