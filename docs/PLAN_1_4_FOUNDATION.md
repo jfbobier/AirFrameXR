@@ -1,6 +1,7 @@
 # Plan: 1.4-foundation, the engine before the universal OpenXR attempt
 
-Status: proposal, 2026-11-20. Branch `1.4-foundation` (worktree `/home/jeff/openxr-foundation`), cut from `1.4` = `main` = v1.4.0-pre.1
+Status: in progress, 2026-11-20. Owner's choices the same day: the mask through the QP map (ALVR's numbers stay 1.4's), and all four optional items
+in (F2, D1, S2, E4). Progress per item: section 4. Branch `1.4-foundation` (worktree `/home/jeff/openxr-foundation`), cut from `1.4` = `main` = v1.4.0-pre.1
 (`aa38ed3`), with `vdxr-fork` merged (`63e7880`, clean; `tools/wsl/check_cpp.sh` OK). Builder: the 3080 Ti, root `VisionALVR_vdxrfork` on its
 D: drive (exFAT) behind the junction `%USERPROFILE%\VisionALVR_vdxrfork` (scp through it checked). Engine edits are allowed on this branch (owner,
 2026-11-20). No push, release or merge without asking.
@@ -24,7 +25,8 @@ D: drive (exFAT) behind the junction `%USERPROFILE%\VisionALVR_vdxrfork` (scp th
 | **F4** | The UI: with a mask profile, the Encoding radios read "Foveated from the mask of <profile> (recommended)" / "No foveation (full frame + split encode)", the six numbers shown computed and read-only; the FOV card says the mask drives the encoding | `tools/gui` | to build | `ui_matrix.py`, uitest renders |
 | **F5** | One writer for foveation on/off: `video.encode_profile` silently overrode the session's foveation (field 2026-10-12, 2026-10-17); the host logs the effective state and where it came from | host `vision.rs`, compile | to build | host unit test, `e2e_session_compiled*` |
 | **G1** | Encoding gamma: a failed read of `session.json` silently fell back to 1.0 (field 2026-11-07: a session ran 1.00 instead of 1.5); read again, then keep the last good value, WARN in the general log | host `main.rs` `read_encoding_gamma` | to build | host unit test |
-| **D1** | The debug build costs about 5 ms per frame (`docs/PERFORMANCE_FINDINGS.md`; NVML sampler or event writer suspected). Every lab number of the universal attempt is taken on a debug build, so find it first | host | to investigate | `e2e_baseline` debug vs release, then the cause; fix only with a measured cause |
+| **D1** | Debug logging on (the Debug tick, `--debug`: the host's and the shim's debug sessions) cost about 5 ms of encode p95 in the field (2026-10-17: 9.0 against 4.3 ms; `docs/PERFORMANCE_FINDINGS.md`). The universal attempt's lab and field reads need debug on, so find it first. Not the debug build flavour | host, shim | to measure | `e2e_baseline` against `optional/e2e_baseline_debug`, 3 interleaved pairs; then the writers one by one; fix only with a measured cause |
+| **E4** | The field of view as one contract per streamer start: IPC 38 without `renderCeiling` (the slider's top is the stream's own size, as with the presets), the live `fov_override` command ignored and said, the lab flags `--fov-override` / `--fov-scale` / `--fov-ceiling` replaced by `--settings <file>` (an installed host's settings file) | IPC, shim, host, GUI, harness | built into the branch (`79f47fe`) | the nine FoV scenarios on `host_settings`, `e2e_fov_override_live` = the command is ignored, `streamer_events.py`, `pipeline_model_check.py` |
 
 ### F. Why the mask enters through the QP map, not through ALVR's foveation numbers
 
@@ -54,7 +56,6 @@ No foveation = full frame + split encode, no mask (the QP map is off in that pro
 |---|---|
 | The identity lab, Phase A/B, U1, G1 field check, OFXR scenarios | the universal attempt itself (`universal-1.4`) |
 | The game visibility mask (shim `GetFovStencil`, IPC 38) | evidence 2026-11-20: UEVR, R.E.A.L. VR and NoMoreFlat never enable `XR_KHR_visibility_mask`; owner's rule: no engine change for the very few games that would. G0 (VDXR's `OpenXR.log` per OpenComposite / native title) can reopen it |
-| E4 cleanup (`renderCeiling`, the `fov_override` stdin command, `--fov-override` / `--fov-scale`) | nine FoV regressions, `lib.py`, `density_check.py` and `streamer_events.py` use them: rewriting them now removes the baseline this branch is judged against. Next round |
 | E6 per-eye boxes | v20 has one eye size and a mirrored foveation; needs an IPC change for a model-only 13 %; phase 2 of the FoV plan |
 | HDR FP16 (`hdr-experimental`), JIT hold A2, frame generation items, decoder queue, duplicate timestamps (U3) | no measurement on the input they would fix, or headset-only evidence |
 | The lab host stopping on `OpenSharedResource 0x80070057` after a 3-frame app | only the lab's non-daemon host stops; the installed host already reopens the slots and goes on |
@@ -73,3 +74,17 @@ No foveation = full frame + split encode, no mask (the QP map is off in that pro
    setup. `e2e_fov_client_box_early` runs for the first time.
 6. Results in `docs/progress.md` (legend), numbers in `docs/PERFORMANCE_FINDINGS.md`. The headset checks (corners not seen in head motion, mask
    off / on blind at 275 Mbps) are the owner's, after the lab.
+
+## 4. Progress (legend: `docs/progress.md`)
+
+| Item | State | How it was checked |
+|---|---|---|
+| Builder | 3080 Ti, root on D: (exFAT): `safe.directory D:/VisionALVR_vdxrfork/*` in the builder's global git config (exFAT records no owner, git refused every repo there); the host build now uploads `third_party/nvof` (a fresh root failed `framegen.cpp`) | setup RESULT OK, every build ok |
+| V1-V3, S1 | built (B1 = `612995a`: VDXR at the pin, shim, probe, host, mirror, GUI, package); B0 kept in `out\vdxr-shim-base` (VDXR `50eda31` + the shim of `aa38ed3`) | fork lab: section 3 step 2 |
+| F1 | source-verified, built in B1 | the C++ map against the Python oracle offline (g++ on the extracted code, 60 random foveations and masks, 693,036 blocks, 0 differ); lab `e2e_qpmap_mask` |
+| F2 | built in B1, off by default | lab `e2e_qpmap_mask_fill` |
+| F3 / F5 | built in B1 | `harness/mask_compile_check.py` 5/5 with the real SessionCompiler (the author's fit: 38.7 % / 42.6 % of the stream eyes hidden, the foveation of 2026-11-20 reproduced: centre 0.603 x 0.548, shift 0.533 / -0.127, edge 1.606 / 2.058, encoded 1632 x 1824) |
+| F4 | built in B1 | not yet rendered (uitest renders in the suite) |
+| G1 | built in B1 | compile only (the host's unit tests run on the builder) |
+| E4 | merged (`79f47fe`), not built yet | check_cpp, check_gui, cargo check; `fov_stream_geometry.py --selftest` PASS |
+| D1, S2 | open | lab after the fork lab |
