@@ -330,7 +330,10 @@ def launch_app(app, rid, rd, log):
         raw = CACHE / "desktop.rgba"
         sh([FFMPEG, "-hide_banner", "-v", "error", "-y", "-i", str(ROOT / app["image"]), "-vf", "scale=1920:1080", "-f", "rawvideo", "-pix_fmt", "bgra", str(raw)])
         b_put(raw, f"runs/{rid}/desktop.rgba")
-    rt = app.get("runtime", r"out\vdxr-shim")
+    # AIRFRAMEXR_APP_RUNTIME=<folder under the root>: another runtime (VDXR + shim) for an A/B without editing scenarios (docs/PLAN_VDXR_FORK_LAB.md)
+    rt = app.get("runtime", os.environ.get("AIRFRAMEXR_APP_RUNTIME") or r"out\vdxr-shim")
+    if os.environ.get("AIRFRAMEXR_APP_RUNTIME"):
+        log(f"  app runtime: {rt} (AIRFRAMEXR_APP_RUNTIME)")
     cmd = ("@echo off\r\n"
            f"set XR_RUNTIME_JSON={home}\\{ROOTNAME}\\{rt}\\virtualdesktop-openxr.json\r\n"
            + "".join(f"set {k}={v}\r\n" for k, v in {"OVRSHIM_LOG": f"{home}\\{ROOTNAME}\\{rd}\\ovrshim.log", "OVRSHIM_FRAME_CSV": f"{home}\\{ROOTNAME}\\{rd}\\shim_frames.csv", "XR_PROBE_MARKERS_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_markers.csv", "XR_PROBE_TIMING_CSV": f"{home}\\{ROOTNAME}\\{rd}\\app_timing.csv", "MODSIM_CSV": f"{home}\\{ROOTNAME}\\{rd}\\modsim.csv", **app.get("env", {})}.items()) +
@@ -1233,6 +1236,52 @@ def analyse_handover_chain(sc, outdir):
     return res
 
 
+def analyse_eye_colors(sc, outdir):
+    """checks.eye_colors (single-pass stereo / MSAA probes, XR_PROBE_ARRAY / XR_PROBE_MSAA): xr_probe clears the left eye to linear 0.02 grey and the
+    right eye with 0.1 more blue, and draws its counter only in the left eye's top rows. A background point low in each eye tells a right eye
+    that shows its own slice (bluer than the left) from a black, swapped or duplicated eye."""
+    cfg = negotiated_cfg(outdir)
+    ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
+    pts = [(ew // 2, (eh * 3) // 4), (ew + ew // 2, (eh * 3) // 4)]
+    frames = read_rgb_at(outdir / "client.hevc", pts)[20:]
+    ck = sc["checks"]["eye_colors"]
+    need_db, max_drg = ck.get("min_blue_diff", 15), ck.get("max_rg_diff", 12)
+
+    def ok(fr):
+        (lr, lg, lb), (rr, rg, rb) = fr
+        return rb - lb >= need_db and abs(rr - lr) <= max_drg and abs(rg - lg) <= max_drg
+
+    def med(k, c):
+        return sorted(fr[k][c] for fr in frames)[len(frames) // 2] if frames else None
+
+    return {"frames": len(frames), "ok": sum(1 for fr in frames if ok(fr)), "left_median_rgb": [med(0, c) for c in range(3)],
+            "right_median_rgb": [med(1, c) for c in range(3)], "points": [list(p) for p in pts]}
+
+
+def analyse_vdxr_trace(outdir):
+    """The shim's `app frames (VDXR)` line (ovrshim_Trace from the AirFrameXR fork of VDXR, docs/ARCHITECTURE.md): the last one carries the
+    cumulative counters. None when the line is absent (a VDXR build without the channel, or no debug log)."""
+    sl = Path(outdir) / "ovrshim.log"
+    if not sl.exists():
+        return None
+    last = None
+    for line in sl.read_text(errors="replace").splitlines():
+        m = re.search(r"app frames \(VDXR\): (\d+), resubmitted with no new picture (\d+), discarded (\d+); swapchain slices (\d+) "
+                      r"\(newly released (\d+), copied into a second swapchain (\d+), copy skipped as unchanged (\d+)\); "
+                      r"xrWaitFrame return -> xrEndFrame ms p50 ([0-9.]+) p95 ([0-9.]+), xrBeginFrame -> xrEndFrame ms p50 ([0-9.]+) p95 ([0-9.]+)", line)
+        if m:
+            last = m
+    if not last:
+        return None
+    g = [last.group(i) for i in range(1, 12)]
+    r = dict(zip(("frames", "resubmits", "discarded", "slices", "released", "copied", "unchanged"), map(int, g[:7])))
+    r.update(dict(zip(("wait_to_end_p50", "wait_to_end_p95", "begin_to_end_p50", "begin_to_end_p95"), map(float, g[7:]))))
+    f = max(r["frames"], 1)
+    r.update({"copied_per_frame": round(r["copied"] / f, 3), "unchanged_per_frame": round(r["unchanged"] / f, 3),
+              "released_per_frame": round(r["released"] / f, 3), "slices_per_frame": round(r["slices"] / f, 3), "resubmit_frac": round(r["resubmits"] / f, 3)})
+    return r
+
+
 def analyse_mirror_clicks(outdir):
     """The mock client's scripted controller (controllers.csv: trigger, grip, A, B per sample with the wall-clock time it was sent) against what the app decided
     (mirror_events.csv: left/right button edges, double clicks, with the wall-clock time of the decision). Per kind: the expected edges (the same hysteresis the app
@@ -1801,6 +1850,10 @@ def analyse(sc, outdir: Path):
         a["layers"] = analyse_layers(sc, outdir)
     if sc.get("checks", {}).get("mirror") and cl.exists() and cl.stat().st_size > 0:
         a["mirror"] = analyse_mirror(sc, outdir)
+    if sc.get("checks", {}).get("eye_colors") and cl.exists() and cl.stat().st_size > 0:
+        a["eye_colors"] = analyse_eye_colors(sc, outdir)
+    if sc.get("checks", {}).get("vdxr_trace"):
+        a["vdxr_trace"] = analyse_vdxr_trace(outdir)
     if sc.get("checks", {}).get("handover"):
         a["handover"] = analyse_handover(sc, outdir)
     if sc.get("checks", {}).get("handover_chain"):
@@ -2063,6 +2116,22 @@ def evaluate(sc, a):
                 frac = r["ok"] / r["n"] if r["n"] else 0.0
                 chk(f"layer.p{r['phase']}.{name}", r["n"] >= need and frac >= ck["layers"].get("min_ok_frac", 0.9),
                     {"frames": r["n"], "ok_frac": round(frac, 2), "samples": r["samples"][:2]}, f"expected {r['expected']} at the projected point in >= {ck['layers'].get('min_ok_frac', 0.9)} of {need}+ frames")
+    if "eye_colors" in a:
+        E_ = a["eye_colors"]; ek = ck["eye_colors"]
+        frac = E_["ok"] / E_["frames"] if E_["frames"] else 0.0
+        chk("eye_colors_each_eye_its_own", E_["frames"] >= ek.get("min_frames", 100) and frac >= ek.get("min_ok_frac", 0.95),
+            {"frames": E_["frames"], "ok_frac": round(frac, 3), "left": E_["left_median_rgb"], "right": E_["right_median_rgb"]},
+            f"the right eye's background bluer than the left's by >= {ek.get('min_blue_diff', 15)} (same red and green) in >= {ek.get('min_ok_frac', 0.95)} "
+            "of the frames: each eye shows its own image (not black, not swapped, not the other eye's)")
+    if "vdxr_trace" in a:
+        V_ = a["vdxr_trace"]; vk = ck["vdxr_trace"]
+        chk("vdxr_trace_present", V_ is not None and V_["frames"] >= vk.get("min_frames", 100), V_ and {"frames": V_["frames"]},
+            "the shim logged the fork's per-frame facts (app frames (VDXR) line) for enough frames")
+        if V_ is not None:
+            for key in ("copied_per_frame", "unchanged_per_frame", "released_per_frame", "slices_per_frame", "resubmit_frac"):
+                if key in vk:   # [lo, hi]
+                    lo, hi = vk[key]
+                    chk(f"vdxr_trace.{key}", lo <= V_[key] <= hi, V_[key], f"{lo} <= {key} <= {hi}")
     if "mirror" in a:
         M_ = a["mirror"]; mk = ck["mirror"]
         frac = M_["ok"] / M_["frames"] if M_["frames"] else 0.0

@@ -5,7 +5,7 @@ Builds AirFrameXR on Windows from this checkout (see docs/DEVELOPMENT.md for the
     powershell -ExecutionPolicy Bypass -File build.ps1 host gui        # only some parts (setup runs first if needed)
 
 Add `debug` to keep the debug traces (default flavour: release). Targets, in build order: vdxr host shim mirrordesktop gui package (default: all five), plus client probe (test tools for the harness).
-The first run clones ALVR v20.14.1 and VirtualDesktop-OpenXR at the commits in deps.lock.json into src\ and builds their
+The first run clones ALVR v20.14.1 and VDXR (our fork of VirtualDesktop-OpenXR) at the commits in deps.lock.json into src\ and builds their
 prerequisites (tools\remote\setup_builder.ps1, idempotent). Output: out\dist\AirFrameXR\ and out\dist\AirFrameXR-<version>.zip.
 Logs: logs\build_<step>.txt. Nothing outside this folder is changed (no registry, no OpenXR runtime registration).
 #>

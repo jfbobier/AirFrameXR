@@ -348,6 +348,90 @@ struct FrameTraceRow {
 // VDXR's own extension flags (virtualdesktop-openxr/OVR_Ext.h): layer shown to one eye only.
 static constexpr int kLayerFlagDisableLeft = 0x100000;
 static constexpr int kLayerFlagDisableRight = 0x200000;
+// The AirFrameXR fork of VDXR (OVR_Ext.h there), only when ovrshim_Capabilities reports bit 0: the layer's swapchain is a texture
+// array read in place (no copy of slices above 0 into a second swapchain); eye e reads slice (Flags >> (24 + 4 e)) & 0xF, a quad
+// or cylinder the eye-0 field. Without the flag every slice is 0.
+static constexpr unsigned kLayerFlagArraySlices = 0x400000;
+// the shaders' cbuffer offsets of the slice field (fxc reflection of ReprojectPS.hlsl / LayerPS.hlsl, 2026-11-18)
+static_assert(offsetof(ConstantsBuffer, slice) == 116, "ConstantsBuffer layout must match ReprojectPS.hlsl");
+static_assert(offsetof(LayerConstants, slice) == 276, "LayerConstants layout must match LayerPS.hlsl");
+static UINT LayerSlice(unsigned flags, int eye, const ovrTextureSwapChainDesc& d) {
+    if (!(flags & kLayerFlagArraySlices)) {
+        return 0;
+    }
+    return std::min<UINT>((flags >> (24 + 4 * eye)) & 0xF, std::max(1, d.ArraySize) - 1);
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl ovrshim_Capabilities() {
+    return 1u; // bit 0: texture-array slices in place (kLayerFlagArraySlices)
+}
+
+// Per-frame facts from the OpenXR runtime that the libOVR API cannot carry: when the app's frame really started
+// (xrWaitFrame returned, xrBeginFrame) and whether a submit holds a newly released picture or resubmits the last one.
+// The AirFrameXR fork of VDXR (virtualdesktop-openxr/airframexr_trace.h, deps.lock.json) resolves ovrshim_Trace from this
+// DLL and calls it from the app's xrWaitFrame / xrBeginFrame / xrEndFrame; stock VDXR and libOVR games never call it.
+// Diagnostic only for now: counted and printed with the pacing lines, no behaviour depends on it. Times are OVR seconds.
+namespace vdxrinfo {
+    enum Kind : int { WaitFrameReturn = 1, BeginFrame = 2, EndFrame = 4, FrameContent = 8, FrameCopies = 9 };
+    struct Stats {
+        uint64_t calls{0}, frames{0}, resubmits{0}, slices{0}, released{0}, copied{0}, unchanged{0}, discarded{0};
+        std::vector<float> waitToEndMs, beginToEndMs; // since the last pacing line
+    };
+    struct Frame {
+        long long id{-1};
+        double waitRet{0.0}, begin{0.0};
+    };
+    static std::mutex g_mutex;
+    static Stats g_stats;
+    static Frame g_frames[8]; // frames in flight by id (an app may wait for frame N+1 before it ends N)
+
+    static Frame& Slot(long long id) {
+        Frame& f = g_frames[(unsigned long long)id % 8];
+        if (f.id != id) {
+            f = Frame{};
+            f.id = id;
+        }
+        return f;
+    }
+} // namespace vdxrinfo
+
+extern "C" __declspec(dllexport) void __cdecl ovrshim_Trace(int kind, long long frameId, double now, double a, double b) {
+    using namespace vdxrinfo;
+    std::lock_guard lock(g_mutex);
+    g_stats.calls++;
+    switch (kind) {
+    case WaitFrameReturn:
+        Slot(frameId).waitRet = now;
+        break;
+    case BeginFrame:
+        Slot(frameId).begin = now;
+        g_stats.discarded += a != 0.0 ? 1 : 0;
+        break;
+    case EndFrame: {
+        const Frame& f = Slot(frameId);
+        if (g_stats.waitToEndMs.size() < 4096) {
+            if (f.waitRet > 0.0) {
+                g_stats.waitToEndMs.push_back((float)((now - f.waitRet) * 1000.0));
+            }
+            if (f.begin > 0.0) {
+                g_stats.beginToEndMs.push_back((float)((now - f.begin) * 1000.0));
+            }
+        }
+        break;
+    }
+    case FrameContent: // a = swapchain slices with an image released since the previous frame, b = slices in the frame
+        g_stats.frames++;
+        g_stats.resubmits += (a == 0.0 && b > 0.0) ? 1 : 0;
+        g_stats.released += (uint64_t)a;
+        g_stats.slices += (uint64_t)b;
+        break;
+    case FrameCopies: // a = slices copied into a second OVR swapchain (array slice > 0, MSAA), b = copies skipped (unchanged)
+        g_stats.copied += (uint64_t)a;
+        g_stats.unchanged += (uint64_t)b;
+        break;
+    default: // a newer runtime may send kinds this shim does not know
+        break;
+    }
+}
 
 using namespace ovrnull::driver;
 using namespace ovrnull::log;
@@ -687,8 +771,14 @@ namespace {
                             desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
                             desc.TextureCube.MipLevels = -1;
                         } else {
-                            desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                            desc.Texture2D.MipLevels = -1;
+                            // An array view for every 2D image (one slice for a plain texture): D3D11 has no plain 2D view of a texture
+                            // array, and VDXR hands single-pass stereo swapchains (OpenXR arraySize 2) to us as arrays. The compose
+                            // shaders sample Texture2DArray at the layer's slice (ReprojectPS.hlsl, LayerPS.hlsl).
+                            desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+                            desc.Texture2DArray.MostDetailedMip = 0;
+                            desc.Texture2DArray.MipLevels = -1;
+                            desc.Texture2DArray.FirstArraySlice = 0;
+                            desc.Texture2DArray.ArraySize = std::max<UINT>(1, ovrDesc.ArraySize);
                         }
                         winrt::check_hresult(m_submissionDevice->CreateShaderResourceView(
                             swapchain->textures[i].Get(), &desc, swapchain->SRVs[i].ReleaseAndGetAddressOf()));
@@ -1292,6 +1382,7 @@ namespace {
                             FillColor(mode == TargetMode::DirectEncode, constants.brightness, constants.contrast, constants.saturation,
                                       constants.sharpening, constants.finalPass);
 
+                            constants.slice = (int)LayerSlice(flags, (int)eye, swapchainObject->desc);
                             constants.imageRectNormalized.offset = {
                                 (float)eyeFov->Viewport[eye].Pos.x / swapchainObject->desc.Width,
                                 (float)eyeFov->Viewport[eye].Pos.y / swapchainObject->desc.Height};
@@ -1331,6 +1422,7 @@ namespace {
                         SrgbFlags(mode, IsSrgb(ToDxgiTextureFormat(sc->desc.Format)), c.encodeSrgb, c.decodeSrgb);
                         c.outputGamma = OutputGamma(mode);
                         FillColor(mode == TargetMode::DirectEncode, c.brightness, c.contrast, c.saturation, c.sharpening, c.finalPass);
+                        c.slice = (int)LayerSlice(flags, 0, sc->desc);
                         c.uvOffset = {(float)q.Viewport.Pos.x / sc->desc.Width, (float)q.Viewport.Pos.y / sc->desc.Height};
                         c.uvExtent = {(float)q.Viewport.Size.w / sc->desc.Width, (float)q.Viewport.Size.h / sc->desc.Height};
                         if (isCylinder) {
@@ -1643,6 +1735,25 @@ namespace {
                     memset(m_diagTies, 0, sizeof(m_diagTies));
                     m_diagNoDisplayTime = 0;
                     m_diagSameTs = 0;
+                    vdxrinfo::Stats vs;
+                    {
+                        std::lock_guard vl(vdxrinfo::g_mutex);
+                        vs = vdxrinfo::g_stats;
+                        vdxrinfo::g_stats.waitToEndMs.clear();
+                        vdxrinfo::g_stats.beginToEndMs.clear();
+                    }
+                    if (vs.calls) {
+                        ShimLog("app frames (VDXR): %llu, resubmitted with no new picture %llu, discarded %llu; swapchain slices %llu "
+                                "(newly released %llu, copied into a second swapchain %llu, copy skipped as unchanged %llu); "
+                                "xrWaitFrame return -> xrEndFrame ms p50 %.2f p95 %.2f, xrBeginFrame -> xrEndFrame ms p50 %.2f p95 %.2f",
+                                (unsigned long long)vs.frames, (unsigned long long)vs.resubmits, (unsigned long long)vs.discarded,
+                                (unsigned long long)vs.slices, (unsigned long long)vs.released, (unsigned long long)vs.copied,
+                                (unsigned long long)vs.unchanged, pct(vs.waitToEndMs, 0.5), pct(vs.waitToEndMs, 0.95),
+                                pct(vs.beginToEndMs, 0.5), pct(vs.beginToEndMs, 0.95));
+                    } else if (!m_vdxrInfoNoneLogged) {
+                        m_vdxrInfoNoneLogged = true;
+                        ShimLog("app frames (VDXR): no per-frame facts from the runtime (a libOVR game, or a VDXR build without ovrshim_Trace)");
+                    }
                 }
                 if (m_publishThread.joinable()) {
                     // The host may only read the slot once the GPU is done with it, and that includes the app's own rendering of
@@ -2255,7 +2366,12 @@ namespace {
                 ld.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
                 winrt::check_hresult(m_submissionDevice->CreateTexture2D(&ld, nullptr, m_linearTex.ReleaseAndGetAddressOf()));
                 winrt::check_hresult(m_submissionDevice->CreateRenderTargetView(m_linearTex.Get(), nullptr, m_linearRTV.ReleaseAndGetAddressOf()));
-                winrt::check_hresult(m_submissionDevice->CreateShaderResourceView(m_linearTex.Get(), nullptr, m_linearSRV.ReleaseAndGetAddressOf()));
+                D3D11_SHADER_RESOURCE_VIEW_DESC lsd{};   // an array view: LayerPS samples Texture2DArray (slice 0 here)
+                lsd.Format = ld.Format;
+                lsd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+                lsd.Texture2DArray.MipLevels = 1;
+                lsd.Texture2DArray.ArraySize = 1;
+                winrt::check_hresult(m_submissionDevice->CreateShaderResourceView(m_linearTex.Get(), &lsd, m_linearSRV.ReleaseAndGetAddressOf()));
             }
             D3D11_QUERY_DESC qd{D3D11_QUERY_EVENT, 0};
             winrt::check_hresult(m_submissionDevice->CreateQuery(&qd, m_doneQuery.ReleaseAndGetAddressOf()));
@@ -2766,6 +2882,7 @@ namespace {
         std::atomic<int> m_dupPerReal{0};          // confirmed duplicate pattern: extra submits per real frame (1 or 2), 0 = none (the fix idles)
         std::atomic<int> m_freeBudget{0};          // waits after the last real submit that return at once (WaitForVsync)
         uint64_t m_freeWaits{0};                   // waits of a duplicate cycle returned at once (pacing fix)
+        bool m_vdxrInfoNoneLogged{false};          // the "no per-frame facts from the runtime" line was printed once (vdxrinfo)
         uint64_t m_dupSeen{0}, m_dupDropped{0};    // frames with the previous frame's exact render poses / of those, the ones not published
         std::atomic<double> m_appTimeS{0.004};     // envelope of release -> frame GPU-complete (published), seconds
         long long m_lastTargetBoundary{0};         // boundary (tick index) the last release aimed at: one release per boundary

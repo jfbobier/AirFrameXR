@@ -42,7 +42,8 @@ def need(p, what):
 
 TAG = sys.argv[sys.argv.index("--tag") + 1] if "--tag" in sys.argv else ""   # appended to the zip names (a candidate must not share its name with a published asset)
 stamp = time.strftime("%Y%m%d-%H%M%S")
-p = run(["build", "host", "shim", "gui", "bench", "package", "--release"]); need(p, "release build")
+# vdxr first: the shipped runtime DLL is built from the commit pinned in deps.lock.json, not whatever the builder last built
+p = run(["build", "vdxr", "host", "shim", "gui", "bench", "package", "--release"]); need(p, "release build")
 stash(f"public_{stamp}")
 p = run(["build", "package", "--release"], {"AIRFRAMEXR_PERSONAL": "1"}); need(p, "personal package")
 stash(f"personal_{stamp}")

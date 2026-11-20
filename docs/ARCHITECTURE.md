@@ -15,7 +15,7 @@ VR stack does (SteamVR's running start, Meta's Phase Sync, the OpenXR `xrWaitFra
 
 | Process | Role |
 |---|---|
-| the game | OpenXR app → VDXR (upstream, Oculus-emulation mode) → `LibOVRRT64_1.dll` = **OVRShim** (`ovrshim/driver.cpp`), which composes the layers into a side-by-side texture and hands it to the host |
+| the game | OpenXR app → VDXR (our fork of upstream, `docs/UPSTREAM.md`; Oculus-emulation mode) → `LibOVRRT64_1.dll` = **OVRShim** (`ovrshim/driver.cpp`), which composes the layers into a side-by-side texture and hands it to the host |
 | `alvr_host.exe` | the streamer (`tools/host`): compositor boundary clock, encoder (ALVR's foveation pass + NVENC), ALVR's `server_core` for the connection, tracking, audio and the network |
 | `AirFrameXR.exe` / `configure.exe` | GUIs (C#): launch, status, pairing; discovery is done by the host (`--discover`) |
 | `mirrordesktop.exe` | the desktop mirror: an OpenXR app the streamer starts between games. **Not part of the engine**: it talks to it through OpenXR like any game (the handover when a game starts is the shim's signal), so it is changed without touching the frame path. Its beam and mouse follow a controller only once that controller is confirmed in use (an input, or an aim pose that moves away from the head) |
@@ -24,6 +24,17 @@ VR stack does (SteamVR's running start, Meta's Phase Sync, the OpenXR `xrWaitFra
 
 Shim and host share one memory block (`ovrshim/ipc.h`, IPC v36): host → shim config (eye size, FoV, the game's restricted FoV and render quality with its ceiling), poses, display ticks, compositor
 pacing, the ring-slot ownership mask; shim → host frame announcements (seqlock), heartbeat, haptics, diagnostics, the render size it told the app.
+
+VDXR and the shim also talk past the libOVR API, inside the game process: the shim exports `ovrshim_Trace`, which VDXR's fork resolves and
+calls from the app's `xrWaitFrame` / `xrBeginFrame` / `xrEndFrame` with what libOVR cannot carry (kinds and arguments:
+`virtualdesktop-openxr/airframexr_trace.h` in the fork): when the app's frame really started, and per frame how many swapchain slices had
+an image released since the previous frame (none = the app resubmitted its last picture) and how many went through VDXR's copy into a
+second OVR swapchain (texture arrays, MSAA). Stock VDXR and libOVR games never call it. Since 1.3.11 it is diagnostic only: the debug
+log's `app frames (VDXR)` line every 900 submits (resubmits, discarded frames, slices released/copied/skipped,
+`xrWaitFrame` return → `xrEndFrame` and `xrBeginFrame` → `xrEndFrame` p50/p95); no behaviour depends on it. The shim also exports
+`ovrshim_Capabilities` (bit 0: it reads texture-array slices in place when a layer's flags carry `0x400000`, eye e's slice at bits 24 + 4 e);
+only the experiment on fork branch `airframexr-slices` sets that flag (`docs/PLAN_VDXR_FORK_LAB.md`). Every 2D swapchain image is composed
+through an array view, so a single-pass stereo swapchain (OpenXR `arraySize` 2) is read slice by slice.
 
 ## Threads (v0.2)
 

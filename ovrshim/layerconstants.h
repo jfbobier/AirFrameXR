@@ -35,6 +35,7 @@ ALIGNED(16) struct LayerConstants {
     float outputGamma;      // exponent applied to the final encoded value (1 / ALVR encoding gamma); 1 (or <= 0) = none
     float brightness, contrast, saturation, sharpening; // user colour correction (0 = neutral), only where finalPass is set
     int finalPass;          // 1: this draw writes the value that is encoded
+    int slice;              // texture-array slice to read (0 for a plain texture: the source is always bound as a Texture2DArray)
 };
 
 #endif
