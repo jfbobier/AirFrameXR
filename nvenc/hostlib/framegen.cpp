@@ -903,6 +903,22 @@ bool FrameGen::harvestTurn(int n, bool correct, bool wait) {
     if (FAILED(hr)) return false;
     const int sl = n;
     LARGE_INTEGER f0, f1, fq; QueryPerformanceCounter(&f0); QueryPerformanceFrequency(&fq);
+    // diagnostics (AIRFRAMEXR_FG_CAM_TURN_DUMP=<dir>): every 8th measurement up to 120, the raw unpacked vectors with what the estimator needs
+    // (harness/cam_turn_dump.py re-runs the estimator offline on them), and one CSV line per measurement
+    static const std::string dumpDir = [] { const char* v = getenv("AIRFRAMEXR_FG_CAM_TURN_DUMP"); return std::string(v ? v : ""); }();
+    static uint64_t dumpSeq = 0, dumped = 0;
+    const uint64_t seq = dumpSeq++;
+    if (!dumpDir.empty() && seq % 8 == 0 && dumped < 120) {
+        char path[600]; snprintf(path, sizeof path, "%s\\turn_%06llu.bin", dumpDir.c_str(), (unsigned long long)seq);
+        if (FILE* f = fopen(path, "wb")) {
+            const int pvd = (n + Impl::H - 1) % Impl::H;
+            int32_t hdr[8] = { 0x4E525554 /* TURN */, I.blocksW, I.blocksH, I.grid, I.flowW, I.flowH, m_w, m_h };
+            double meta[2] = { I.turnUsed[sl], I.realT[n] - I.realT[pvd] };
+            fwrite(hdr, sizeof hdr, 1, f); fwrite(I.turnQ[sl], sizeof(float), 8, f); fwrite(I.turnFov[sl], sizeof(float), 8, f); fwrite(meta, sizeof meta, 1, f);
+            for (int by = 0; by < I.blocksH; by++) fwrite((const uint8_t*)ms.pData + (size_t)by * ms.RowPitch, 8, I.blocksW, f);
+            fclose(f); dumped++;
+        }
+    }
     static constexpr double kRange = 20.0 * 3.14159265358979 / 180.0, kBin = 0.05 * 3.14159265358979 / 180.0;   // misses within +-20 deg, 0.05 deg bins
     static constexpr int kBins = 801;
     std::vector<float> hist(kBins, 0.f);
@@ -986,5 +1002,15 @@ bool FrameGen::harvestTurn(int n, bool correct, bool wait) {
     stats.camTurnBlocks = (int)eps.size();
     QueryPerformanceCounter(&f1);
     stats.camTurnCpuMs = (float)((f1.QuadPart - f0.QuadPart) * 1000.0 / fq.QuadPart);
+    if (!dumpDir.empty()) {
+        static FILE* csv = nullptr;
+        if (!csv) { char path[600]; snprintf(path, sizeof path, "%s\\turn_log.csv", dumpDir.c_str()); csv = fopen(path, "w"); if (csv) fprintf(csv, "seq,used_deg,miss_deg,turn_deg,agree,blocks,ok,corrected,dt_ms\n"); }
+        if (csv) {
+            const int pvd = (n + Impl::H - 1) % Impl::H;
+            fprintf(csv, "%llu,%.4f,%.4f,%.4f,%.3f,%zu,%d,%d,%.2f\n", (unsigned long long)seq, used * 57.29578, miss * 57.29578, turn * 57.29578, agree, eps.size(), ok ? 1 : 0,
+                    (correct && std::fabs(turn - used) > 0.25 * 3.14159265358979 / 180.0) ? 1 : 0, (I.realT[n] - I.realT[pvd]) * 1000.0);
+            if (seq % 50 == 0) fflush(csv);
+        }
+    }
     return true;
 }
