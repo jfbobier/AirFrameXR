@@ -28,6 +28,28 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 | **Eye-height workflow (IPC v16)** | the head is published at y = 0 and the user's eye height is reported to games (`OVR_KEY_EYE_HEIGHT`). Fixes worlds sitting too low. Confirmed on the headset. |
 | **Hand offset derived from VDXR's calibration** | fixes the reversed hand posture. Confirmed on the headset. |
 
+## 2026-11-20: frame generation by picture preset (lab, 3080 Ti laptop)
+
+Users saw generation slow down with 1.4. The generator and its host code are the same as 1.3.10's (no change in `framegen.cpp`, `pipeline.rs` or the
+host's generation lines); what changed is the size: the generator renders every output at the full side-by-side stream frame, before the foveation, and 1.4's
+presets size the stream (and the game) for a density. `optional/e2e_fg_size_*` (half rate, host 90 Hz, the app held to 45 fps on the CPU, each preset's
+compiled foveation, idle GPU; `harness/fg_size_report.py`):
+
+| Preset | Eye | Encoded (Mpx) | Stream fps | Encode p50 / p95 (ms) | Motion search / output pass (ms) | Generator GPU ms per s |
+|---|---|---|---|---|---|---|
+| 1.3's sizing | 1888 x 1696 | 5.72 | 89.9 | 9.1 / 14.6 | 2.45 / 0.27 | 113 |
+| Performance | 1952 x 1760 | 3.70 | 89.6 | 6.6 / 12.1 | 2.52 / 0.29 | 115 |
+| Balanced (default) | 2624 x 2368 | 6.77 | **79.6** | 10.6 / 17.5 | 3.75 / 0.74 | 171 |
+| Sharp | 3648 x 3200 | 12.61 | **48.3** | 17.2 / 26.9 | 5.08 / 1.38 | 150 |
+
+- With generation on the encoder encodes every display slot (90 here, 100 on the Vision Pro): 11.1 ms a frame at 90 Hz. On this laptop's single encoder,
+  Balanced's encode (p50 10.6 ms) is at that budget and Sharp's beyond it: the encoder is the first limit, before the generator.
+- The generator's own GPU time grows with the pixels: the output pass costs a steady 0.043-0.06 ms per Mpx, the motion search has a large fixed part
+  (2.45 ms at 1.6 Mpx of flow input, 5.08 at 5.8). Balanced takes 1.5 x 1.3's GPU time (171 against 113 ms per second, 17 % of the GPU).
+- Not in the lab: the game's own cost (it renders the same bigger size: SWGR 92.9 -> 73.7 -> 52.1 fps for 1.3 / Balanced / Sharp on the 5090, 2026-11-19),
+  which half rate needs at half the display rate or more; a GPU with three encoders (the 5090, split encode); the headset.
+- Performance is about 1.3's pixel count with a smaller encoded frame than 1.3's (its foveation is stronger): generation behaves as in 1.3 there.
+
 ## Tried and removed or left off
 
 | What | What happened | Lesson |
