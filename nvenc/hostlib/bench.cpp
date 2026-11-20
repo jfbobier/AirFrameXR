@@ -347,6 +347,9 @@ int nvh_bench_preview(void* h, int eye_w, int eye_h, double t, const float* fov8
 // ---- frame generation judge ---------------------------------------------------------------------------------------------------
 namespace {
 struct Fgj { std::unique_ptr<FrameGen> fg; int eyeW = 0, eyeH = 0; };
+// the `pan` scenario (nvh_bench_fgj_pan): the camera turns at this rate (deg/s) about the world's up axis while the scene's animation stays at
+// the reference time and the head the generator is told stays where it is: a stick turn. 0 = off.
+double g_fgjPanDegS = 0, g_fgjPanRef = 0;
 
 // the frame's texture (R10G10B10A2 or RGBA8) into 8-bit RGBA
 bool ReadRgba8(Bench* b, ID3D11Texture2D* tex, uint8_t* rgba) {
@@ -379,7 +382,12 @@ Target* FgjRender(Bench* b, int eye_w, int eye_h, const double* tt, const float*
     Target* tg = b->target(eye_w * 2, eye_h, err);
     if (!tg) return nullptr;
     auto ctx = b->render->GetContext();
-    RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, tt[0], tt[1], tt[2], fov8, ipd);
+    if (g_fgjPanDegS != 0) {   // tt[0] is the pan clock: the scene frozen at the reference, the camera turned by rate x (tt[0] - reference)
+        const float yaw = (float)(g_fgjPanDegS * (tt[0] - g_fgjPanRef) * XM_PI / 180.0);
+        RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, g_fgjPanRef, tt[1], tt[2], fov8, ipd, yaw);
+    } else {
+        RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, tt[0], tt[1], tt[2], fov8, ipd);
+    }
     ctx->ResolveSubresource(tg->resolved.Get(), 0, tg->msaa.Get(), 0, FrameFormat());
     return tg;
 }
@@ -394,6 +402,8 @@ int nvh_bench_fgj_frame(void* h, int eye_w, int eye_h, const double* times3, con
     return ReadRgba8(b, tg->resolved.Get(), rgba) ? tg->w * tg->h * 4 : 0;
 }
 
+void nvh_bench_fgj_pan(double deg_per_s, double t_ref) { g_fgjPanDegS = deg_per_s; g_fgjPanRef = t_ref; }
+
 void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, int errlen) {
     auto* b = (Bench*)h;
     Settings::Instance().m_use10bitEncoder = true;
@@ -402,6 +412,10 @@ void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, in
     FrameGenConfig c;   // the streamer's defaults: flow at half scale, the fast preset, grid 4
     c.synth = synth == 0 ? 0 : 1;
     if (synth == 2) c.photoScale = 0.f;   // edge-blend: the edge synthesis without the photometric gate
+    // the streamer's env tuning knobs (nvh_fg_enable reads the same), so the judge measures what a changed knob does
+    if (const char* v = getenv("AIRFRAMEXR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_COST_SCALE")) c.costScale = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_PHOTO_SCALE")) if (synth != 2) c.photoScale = (float)atof(v);
     if (!j->fg->Init(eye_w * 2, eye_h, c, err, errlen)) return nullptr;
     j->eyeW = eye_w; j->eyeH = eye_h;
     return j.release();

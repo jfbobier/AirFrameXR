@@ -38,6 +38,20 @@ results and 4x difference images) are written as PNG montages.
 * **Head moving:** the three are within 0.1 dB of each other (the rotation reprojection dominates; parallax and disocclusions are what limits all of them).
 * **Large motion** (scene x24): holding B beats every synthesis at some rates. By design: a content shift beyond `motionLimit` (0.10 of the eye width) falls back to the still frame.
 
+## Stick turns: the `pan` scenario (2026-11-20, RTX 5090)
+
+`--pans 60,120,...` (deg/s; `fg_judge.py --pans`): the camera turns about the world's up axis while the scene stays frozen and the head the generator is told
+does not move: what a game's stick turn is to the generator (field 2026-11-20, Hellraiser at 1.5x: trailing on the stick, none on head turns). `--views` renders
+with an install's box, `--env AIRFRAMEXR_FG_MOTION_LIMIT=...` (and the other two knobs) changes the generator's tuning for the run.
+
+Run on the owner's stream (1920 x 2368 per eye, box 0.92 / 0.58 / 0.90 / 0.77, 3 start times; `harness/results/20261120T210125Z_fg_judge`), whole-frame PSNR of
+edge at a 24.4 ms pair gap (a 41 fps game): head turn 27.7 dB; stick 60 deg/s 27.3, 120 22.7, 180 20.2, 270 17.8, 360 16.1. The double-image energy on the
+boundary band (edge excess) goes 0.12 (head) -> 0.18 / 0.32 / 0.45 / 0.62 / 0.77; blur rises with it. The score follows the step between the two frames
+(about 3 deg per gap already costs 5 dB: 120 deg/s at 24 ms equals 180 deg/s at 16.7 ms); classic, edge and edge-blend all fail the same way (edge-blend
++0.3 dB). **Not the motion limit**: `AIRFRAMEXR_FG_MOTION_LIMIT=0.25` gives the same numbers (only 270 / 360 deg/s at 33 ms move, by 0.1 / 1 dB). The pictures
+(`pan_x180_g24_pictures.png`) show torn, doubled vertical edges and ghosted texture; the head turn's are clean. A head turn never reaches the optical flow
+(A is turned into B's camera first); a stick turn reaches it whole, and the flow as configured (half scale, fast preset, grid 4, no hints) does not follow it.
+
 ## What it does not tell
 
 One scene, one GPU, one frame size; PSNR rewards blending and SSIM is a proxy; nothing here sees judder over time or the feel of a double image in a headset.

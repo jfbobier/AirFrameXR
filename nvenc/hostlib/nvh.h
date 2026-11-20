@@ -185,6 +185,9 @@ void nvh_bench_close(void* bench);
 // orientation time (frame = times[3*k .. 3*k+2]); RGBA8, 2*eye_w x eye_h. The head's orientation (x y z w) goes to q4 when given.
 int nvh_bench_fgj_frame(void* bench, int eye_w, int eye_h, const double* times3, const float* fov8, float ipd, uint8_t* rgba, float* q4);
 // a frame generator (synth 0 classic, 1 edge, 2 edge-blend) for the judge; NULL + err when there is no optical-flow engine
+// the judge's `pan` scenario: the camera turns at deg_per_s about the world's up axis (times3[0] is then the pan clock, the scene frozen at t_ref, the
+// head the generator is told unchanged: a stick turn); 0 = off
+void nvh_bench_fgj_pan(double deg_per_s, double t_ref);
 void* nvh_bench_fgj_open(void* bench, int eye_w, int eye_h, int synth, char* err, int errlen);
 // renders frame A (times[0..2]) and B (times[3..5]), generates the midpoint for the head pose of times[6..8] and reads it back (RGBA8); info3 = flow ms, synth ms
 int nvh_bench_fgj_gen(void* bench, void* fgj, int eye_w, int eye_h, const double* times9, const float* fov8, float ipd, uint8_t* rgba, float* info2, char* err, int errlen);

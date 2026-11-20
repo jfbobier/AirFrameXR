@@ -383,8 +383,10 @@ void DrawSceneEye(Scene& s, ID3D11DeviceContext* ctx, const SceneFrame& f, const
 // The benchmark's stereo render: both eyes side by side into one target, the scripted HeadPose camera.
 // The scene's animation runs at time `t`; the scripted head's position at `tPos` and its orientation at `tRot` (the frame generation judge freezes one
 // of them to test the other alone; RenderScene uses `t` for all three).
+// `extraYaw` (radians): a camera turn about the world's up axis on top of the head, what a game's stick turn does (the head pose the
+// generator is told does not see it: the frame generation judge's `pan` scenario).
 void RenderSceneAt(Scene& s, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, int W, int H, double t, double tPos, double tRot,
-                   const float* fov8, float ipd) {
+                   const float* fov8, float ipd, float extraYaw = 0.f) {
     const float clear[4] = { 0.62f, 0.72f, 0.82f, 1 }; // sky-ish, not black: nothing the encoder gets for free
     ctx->ClearRenderTargetView(rtv, clear);
     ctx->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH, 1, 0);
@@ -394,6 +396,7 @@ void RenderSceneAt(Scene& s, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* r
     XMVECTOR hp, hr, unused;
     HeadPose(tPos, hp, unused);
     HeadPose(tRot, unused, hr);
+    if (extraYaw != 0.f) hr = XMQuaternionMultiply(hr, XMQuaternionRotationRollPitchYaw(0, extraYaw, 0));   // the head's rotation, then the world turn
     for (int eye = 0; eye < 2; eye++) {
         const XMVECTOR ep = XMVectorAdd(hp, XMVector3Rotate(XMVectorSet(eye ? ipd / 2 : -ipd / 2, 0, 0, 0), hr));
         const XMMATRIX view = XMMatrixLookToRH(ep, XMVector3Rotate(XMVectorSet(0, 0, -1, 0), hr), XMVector3Rotate(XMVectorSet(0, 1, 0, 0), hr));

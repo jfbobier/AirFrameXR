@@ -23,6 +23,7 @@ extern "C" {
     fn nvh_bench_fgj_open(b: *mut c_void, eye_w: i32, eye_h: i32, synth: i32, err: *mut c_char, errlen: i32) -> *mut c_void;
     fn nvh_bench_fgj_gen(b: *mut c_void, j: *mut c_void, eye_w: i32, eye_h: i32, times9: *const f64, fov8: *const f32, ipd: f32, rgba: *mut u8, info2: *mut f32, err: *mut c_char, errlen: i32) -> i32;
     fn nvh_bench_fgj_close(j: *mut c_void);
+    fn nvh_bench_fgj_pan(deg_per_s: f64, t_ref: f64);
 }
 
 pub struct Options {
@@ -31,6 +32,9 @@ pub struct Options {
     pub gaps_ms: Vec<f64>,
     /// multipliers of the scene's own animation time in the `scene` and `both` scenarios (the animation is slow: 1 moves about 0.3 % of the frame at a 33 ms pair gap)
     pub speeds: Vec<f64>,
+    /// camera turn rates (deg/s) of the `pan` scenario: the camera turns about the world's up axis, the scene and the head the generator is told stay
+    /// still (a game's stick turn; field 2026-11-20: trailing in Hellraiser on the stick, none on head turns). Empty = no pan cases
+    pub pans: Vec<f64>,
     pub out: PathBuf,
 }
 
@@ -233,7 +237,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
         }
     }
     let _ = fs::create_dir_all(&opt.out);
-    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "scene": scene }));
+    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "fov": fov, "scene": scene }));
     let bytes = w * h * 4;
     let (mut fa, mut fb, mut fg) = (vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]);
     let mut outs = [vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]];
@@ -248,10 +252,16 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                 scenarios.push(("scene", sp));
                 scenarios.push(("both", sp));
             }
+            for &pr in &opt.pans {
+                scenarios.push(("pan", pr));
+            }
             for (scenario, speed) in scenarios {
+                // pan: the first time is the pan clock (bench.cpp FgjRender), the scene frozen at t0, the head still
+                unsafe { nvh_bench_fgj_pan(if scenario == "pan" { speed } else { 0.0 }, t0) };
                 // (scene time, head position time, head orientation time) of A, B and the truth G (the midpoint)
                 let tm = |dt: f64| match scenario {
                     "scene" => [t0 + dt * speed, t0, t0],
+                    "pan" => [t0 + dt, t0, t0],
                     "head" => [t0, t0 + dt, t0 + dt],
                     _ => [t0 + dt * speed, t0 + dt, t0 + dt],
                 };
@@ -327,11 +337,12 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
             }
         }
     }
+    unsafe { nvh_bench_fgj_pan(0.0, 0.0) };
     for g in gens {
         unsafe { nvh_bench_fgj_close(g) };
     }
     unsafe { nvh_bench_close(b) };
-    let doc = json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "starts": opt.starts, "cases": cases, "failures": failures });
+    let doc = json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "starts": opt.starts, "cases": cases, "failures": failures });
     let _ = fs::write(opt.out.join("fgj.json"), serde_json::to_string(&doc).unwrap_or_default());
     event(origin, "fgj_done", json!({ "cases": cases.len(), "failures": failures }));
     if failures > 0 { 7 } else { 0 }
