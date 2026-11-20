@@ -51,6 +51,10 @@ Set-Location $v
 $dll = "$v\bin\x64\Release\virtualdesktop-openxr.dll"
 if ((Test-Path $dll) -and ((Get-Item $dll).LastWriteTime -ge $start)) {
   Get-Item $dll | Select-Object FullName, Length, LastWriteTime
+  # the app runtime folder (stage11 assembles it with the shim): refreshed here too, else a VDXR-only build (a lab A/B with
+  # -Commit) leaves the apps on the previous VDXR (2026-11-20: R8 ran both arms on the pin)
+  $rt = "$root\out\vdxr-shim"
+  if (Test-Path "$rt\LibOVRRT64_1.dll") { Copy-Item $dll $rt -Force; Write-Host "deployed: $rt" }
   Write-Host "RESULT: OK"
 } else {
   Get-Content "$root\logs\vdxr_patched_build.log" | Select-String -Pattern 'error' | Select-Object -First 8

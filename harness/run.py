@@ -114,7 +114,8 @@ def build(what):
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage15_vdxr.ps1", *vargs], cwd=lib.ROOT, capture_output=True)
             o = r.stdout.decode(errors="replace").replace("\x00", "")
             vline = next((l.strip() for l in o.splitlines() if l.startswith("vdxr: ")), "")
-            print(f"build vdxr: {'ok' if 'RESULT: OK' in o else 'FAILED'}{' (' + vline + ')' if vline else ''}")
+            dep = " deployed to out\\vdxr-shim" if "deployed: " in o else " NOT deployed (no out\\vdxr-shim yet: build shim)"
+            print(f"build vdxr: {'ok' if 'RESULT: OK' in o else 'FAILED'}{' (' + vline + ')' if vline else ''}{dep if 'RESULT: OK' in o else ''}")
             if "RESULT: OK" not in o:
                 print(o[-1200:])
                 return 2

@@ -413,6 +413,32 @@ def topology(sc):
     return t
 
 
+def gpu_idle_gate(steps):
+    """AIRFRAMEXR_LAB_IDLE_GPU=<percent>: before a run, wait (at most AIRFRAMEXR_LAB_IDLE_WAIT_S, 1800 s by default) until the builder's GPU is at most that busy in
+    three samples 5 s apart. Another program's load on the builder (2026-11-20: 80-98 % and 88 W for an hour, the fork lab's R6 / D1 pairs) slows both arms of
+    an A/B and fails the pacing checks; the wait and the load found are in result.json (steps.gpu_idle_gate). Off without the variable."""
+    lim = os.environ.get("AIRFRAMEXR_LAB_IDLE_GPU")
+    if not lim:
+        return
+    lim, deadline, t0, seen, calm = float(lim), time.time() + float(os.environ.get("AIRFRAMEXR_LAB_IDLE_WAIT_S", "1800")), time.time(), [], 0
+    while True:
+        rc, o = b_run("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", timeout=60)
+        try:
+            u = float(o.strip().splitlines()[-1])
+        except Exception:
+            u = -1.0
+        seen.append(u)
+        calm = calm + 1 if 0 <= u <= lim else 0
+        if calm >= 3 or time.time() > deadline or u < 0:
+            break
+        if len(seen) == 1 or len(seen) % 12 == 0:
+            log(f"  GPU busy on the builder ({u:.0f} %): waiting for <= {lim:.0f} % before the run")
+        time.sleep(5)
+    steps["gpu_idle_gate"] = {"limit_pct": lim, "waited_s": round(time.time() - t0, 1), "samples_pct": seen[-12:], "idle": calm >= 3}
+    if calm < 3:
+        log(f"  GPU still busy after {time.time() - t0:.0f} s ({seen[-1]:.0f} %): running anyway (steps.gpu_idle_gate in result.json)")
+
+
 def run_scenario(sc, outdir: Path, log=print):
     outdir.mkdir(parents=True, exist_ok=True)
     rid = outdir.name
@@ -442,6 +468,7 @@ def run_scenario(sc, outdir: Path, log=print):
     derive_session(sc, outdir / "session.json", pin)
     b_put(outdir / "session.json", f"runs/{rid}/session.json")
 
+    gpu_idle_gate(steps)
     gpu_p = None
     if sc.get("gpu_sample"):
         # sample the NVIDIA GPU on the builder during the run (state, clocks, engine utilization, power, throttle reasons)
@@ -1102,16 +1129,8 @@ def analyse_fov_restrict(sc, outdir):
     and the restriction, and the decoded stream: the margin the game does not render is black, the stream still covers the headset's whole view."""
     cfgk = sc["checks"]["fov_restrict"]
     out = {}
-    headset = None
     last_decl = "declared" in cfgk   # 1.4 (the box sent to the headset app): the headset declares it after its first declaration; take the last one
-    for line in open(outdir / "host_stdout.txt", errors="replace"):
-        if '"views_config"' in line and '"views_config_ignored"' not in line:
-            try:
-                headset = json.loads(line)["data"]["fov_tan"]
-                if not last_decl:
-                    break
-            except Exception:
-                pass
+    headset = host_views_fov(outdir, last=last_decl)
     if last_decl and headset:
         d = cfgk["declared"]   # outer, inner, upper, lower; the right eye mirrored
         want = [d[0], d[1], d[2], d[3], d[1], d[0], d[2], d[3]]
@@ -1135,7 +1154,7 @@ def analyse_fov_restrict(sc, outdir):
     out["host_events"] = sum(1 for line in open(outdir / "host_stdout.txt", errors="replace") if '"event":"fov_restrict"' in line.replace(' ', ''))
     out["headset_fov"], out["app_fov"], out["recommended"] = headset, got, (int(rec.group(1)), int(rec.group(2))) if rec else None
     if not headset or len(got) < 2 or not rec:
-        out["error"] = "no views_config event / no view fov line / no recommended size in the app log"
+        out["error"] = "no views_config / views_placeholder event / no view fov line / no recommended size in the app log"
         return out
     exp = []
     for e in range(2):
@@ -1373,19 +1392,28 @@ def analyse_mirror_clicks(outdir):
     return out
 
 
+def host_views_fov(outdir, last=False):
+    """The views the host published to the shim (host_stdout.txt): its views_config events (the headset's real views); without any, its views_placeholder ones
+    (1.4.0-pre.2: views with both eyes at one point, as the mock client's default +-45 degrees; the host uses them as is when no box was sent to the headset app
+    and no real views came before). The first event's fov_tan, or the last one with `last`; None without either."""
+    real, stand_in = [], []
+    for line in open(outdir / "host_stdout.txt", errors="replace"):
+        for key, acc in (('"views_config"', real), ('"views_placeholder"', stand_in)):
+            if key in line:
+                try:
+                    acc.append(json.loads(line)["data"]["fov_tan"])
+                except Exception:
+                    pass
+    got = real or stand_in
+    return (got[-1] if last else got[0]) if got else None
+
+
 def analyse_layers(sc, outdir):
     cfg = negotiated_cfg(outdir)
     ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
-    fov = None
-    for line in open(outdir / "host_stdout.txt", errors="replace"):
-        if '"views_config"' in line:
-            try:
-                fov = json.loads(line)["data"]["fov_tan"]
-                break
-            except Exception:
-                pass
+    fov = host_views_fov(outdir)
     if not fov:
-        return {"error": "no views_config event with the field of view in host_stdout.txt"}
+        return {"error": "no views_config / views_placeholder event with the field of view in host_stdout.txt"}
     tl, tr, tu, td = fov[0], fov[1], fov[2], fov[3]
     exps = layer_expectations(ew, eh, tl, tr, tu, td, cube=int(sc.get("app", {}).get("layer_test", 0)) == 2)
     stamp_pts = [(64 * i + 32, 32) for i in range(16)]
@@ -1715,19 +1743,12 @@ def analyse_tool(sc, outdir):
                 out["events"].append(json.loads(line))
             except ValueError:
                 pass
-    headset = None
-    for line in open(outdir / "host_stdout.txt", errors="replace"):
-        if '"views_config"' in line and '"views_config_ignored"' not in line:
-            try:
-                headset = json.loads(line)["data"]["fov_tan"]
-                break
-            except Exception:
-                pass
+    headset = host_views_fov(outdir)
     cfg = negotiated_cfg(outdir)
     ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
     out["headset_fov"], out["stream_eye"] = headset, (ew, eh)
     if not headset or not out["events"] or not (outdir / "client.hevc").exists():
-        out["error"] = "no views_config event / no tool event in app_stdout.txt / no client.hevc"
+        out["error"] = "no views_config / views_placeholder event / no tool event in app_stdout.txt / no client.hevc"
         return out
     hevc = str(outdir / "client.hevc")
 
