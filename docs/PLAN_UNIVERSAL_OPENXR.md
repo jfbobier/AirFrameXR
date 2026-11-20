@@ -1,9 +1,15 @@
-# Plan: a universal OpenXR frame identity (v2, 2026-11-19)
+# Plan: universal OpenXR (v3, 2026-11-20): game visibility masks, then a frame identity
 
-Status: plan, nothing run. Branch `universal-openxr-2` (worktree `/home/jeff/openxr-universal2`), cut from `vdxr-fork` (the VDXR fork and its per-frame
-facts, `docs/PLAN_VDXR_FORK_LAB.md`). Supersedes the 2026-11-13 draft (worktree `/home/jeff/openxr-universal`, uncommitted there, left as it was) after the
-review of 2026-11-18. Rules: engine edits on this branch only and only after the owner confirms at the start of Phase B; no push, release or merge without
-asking; every engine arm behind one lab switch, default = today's behaviour; the product keeps its defaults.
+Status: plan, nothing run. **Base: 1.4** (`main`, pre-release v1.4.0-pre.1). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
+from `1.4` at `6c73d0b` with `universal-openxr-2` merged in (`469ea14`: the VDXR fork pipeline and the shim's texture-array views from `vdxr-fork`, the
+fork lab, the identity lab). The merge was clean (`build.ps1`, `harness/lib.py`, `harness/run.py` and two docs auto-merged; `tools/wsl/check_cpp.sh` OK);
+nothing is built on a builder yet. `vdxr-fork` and `universal-openxr-2` stay as they were (from 1.3.11); new work goes on `universal-1.4`. Builder roots: the
+fork lab's dedicated ones (`tools/builder*.local` copied from `universal-openxr-2`), so the regular roots keep 1.4's VDXR. Rules: engine edits on this
+branch only and only after the owner confirms at the start of each engine step (M1, Phase B); no push, release or merge without asking; every engine arm
+behind one lab switch, default = 1.4's behaviour; the product keeps its defaults.
+
+v3 (2026-11-20) changes two things: the base moves to 1.4, and **the next engine round is the game visibility mask (Part M)**, ahead of the identity
+work's Phase B. The identity sections (1-11) are v2's, with their base updated.
 
 What changed from v1, and why:
 
@@ -18,14 +24,89 @@ What changed from v1, and why:
 
 ## 0. Gates and order
 
-1. **G0, the foundation:** the VDXR fork lab R1-R6 passes (`docs/PLAN_VDXR_FORK_LAB.md`). Phase A needs only its B1 build.
-2. **Phase A (no engine change):** the identity matrix on the B1 build. Decision A: is VDXR's signal exact on every shape?
-3. **G1, the field check** (fork lab plan section 3, 5090, AC Black Flag with the mod, one session): does the mod's duplicate cycle release an image?
-4. **Phase B (engine, after the owner confirms):** arm U1 on this branch, the matrix again, regressions, timing A/B. Decision B.
-5. **Headset A/B** (section 9) only if Phase B passes.
+1. **G0, the foundation:** the VDXR fork lab R1-R6 (`docs/PLAN_VDXR_FORK_LAB.md`) on this branch's build (1.4 + the fork). The fork lab was written on
+   1.3.11; its rows apply unchanged, and R5 gains 1.4's FoV scenarios (`e2e_fov_client_box`, `e2e_fov_tool_mask`, `e2e_fov_tool_fit`).
+2. **Phase A (identity signal) and M0 (which games ask for a mask):** no engine change, the same B1 build, one lab session.
+3. **The mask round, M1-M4** (Part M; engine, after the owner confirms at M1).
+4. **G1, the field check** (fork lab plan section 3, 5090, AC Black Flag with the mod, one session): does the mod's duplicate cycle release an image?
+5. **Phase B (engine, after the owner confirms):** arm U1, the matrix again, regressions, timing A/B. Decision B.
+6. **Headset A/B** (section 9) only if Phase B passes.
 
-Before Phase B: `vdxr-fork` merged into `1.3.11`, then `1.3.11` merged here (from 1.3.10 to 1.3.11 the engine changed only in `tools/host/src/logs.rs` and
-`watchdog.rs`, nothing on the frame path, so Phase A results carry over).
+Base moved on 2026-11-20 (this branch). From 1.3.11 to 1.4 the engine changed only in `tools/host` (`vision.rs`, `main.rs`: the box message to the headset
+app, `client_sharpen`) and the ALVR patches (`headset-view-message.patch` and the lab's `client-reserved-message*.patch`); the shim, the IPC (version 37 on
+both) and VDXR did not, so nothing in Phase A's design changes. Run it on this branch.
+
+## M. Game visibility masks (the next engine round)
+
+**Goal.** 1.4's line test gives a profile a per-eye visible outline (`mask`, kind `corner_fraction_v1`: four corner fractions per eye; `FovMask.Polygon` in
+`tools/gui/UserFovProfiles.cs` makes it a convex octagon in tangent units). 1.4 only stores it: the game renders the whole rectangle. Handing the outline to
+the game as OpenXR's visibility mask (`XR_KHR_visibility_mask`) lets an engine that uses it skip the hidden pixels. The per-eye edges (`tan_left` /
+`tan_right`, stored but never told, because a per-eye box broke the parallax in End of Abyss) go into the same mask: each eye also hides the strip it does
+not see, while the box and projection the game is told stay the same for both eyes. Nothing in this round is Vision Pro only: the line test and the mask
+work the same on every headset.
+
+### M1. Facts (code read 2026-11-20; fork `airframexr` 46deebb, shim and IPC on this branch)
+
+- VDXR advertises `XR_KHR_visibility_mask` (`instance.cpp:577`) and answers `xrGetVisibilityMaskKHR` (`visibility_mask.cpp:39`) for both stereo views with
+  `ovr_GetFovStencil` (`:108`, `:130`) on the eye's FovPort, the box the game is told (`:105`): hidden triangles, visible triangles, or the line loop (it
+  keeps every second index, `:99`). It reads the vertices as SteamVR hidden-area-mesh coordinates (0..1 across the FovPort, y down) and converts them to
+  OpenXR's view plane (`convertSteamVRToOpenXRHiddenMesh`, `:169`); indices are 16-bit. It logs `Application uses visibility mask` once per process
+  (`:78`) in its own `OpenXR.log` (`framework/entry.cpp:98`).
+- Our shim answers that call with OVRNull's stub (`OVRNull/api.cpp:142` in the fork): 0 vertices, 0 indices. Every game that asks gets an empty mask
+  today, as in every release so far.
+- OVRNull's API reaches the driver through `IDriver` (`api.cpp:78`, as `GetEyeFov`); `ovrshim/driver.cpp` is our `IDriver`. The change is one `IDriver`
+  method in the fork (`GetFovStencil`; OVRNull's own driver keeps returning the empty mesh) and its implementation in the shim.
+- VDXR already raises `XrEventDataVisibilityMaskChangedKHR` per eye when its `visibility_mask_scale` setting changes (`session.cpp:545-548`,
+  `instance.cpp:456-472`): a ready path for a live change later. Round 1 latches the mask at game start, like the box.
+- The IPC carries the box the game is told as per-edge fractions (`ovrshim/ipc.h:114-116`, version 37); the mask needs its own field and version 38.
+- Which games ask is unknown. Engines with a hidden-area path include Unreal's OpenXR plugin and Unity's occlusion mesh, and OpenComposite serves SteamVR's
+  `GetHiddenAreaMesh` from this extension. UEVR and the owner's titles (SWGR, Dead Space, AC Black Flag with its mod) are read in M0, not assumed.
+
+### M2. What it can buy (a bound, not a measurement)
+
+- The author's fit (shipped profile *AVP optimized trade-off*, told box 0.9215 / 0.5775 / 0.90 / 0.77): the visible octagon is 61.4 % (left eye) and
+  57.8 % (right eye) of the told rectangle, so the mask hides **38.6 % and 42.2 %**: 35.2 % and 39.5 % inside each eye's own rectangle, plus its 5.2 % and
+  4.5 % edge strip.
+- A game skips only the pixel work inside the hidden area; geometry, shadow maps, compute and full-screen passes that ignore the mask still run. On SWGR's
+  line (2026-11-19, `docs/FOV_CONTRACT_PLAN.md` section 9: 7.7 ms + 0.45 ms per game Mpx, both eyes), the fit's 9.1 Mpx predicts 11.8 ms (85 fps); if the
+  whole per-Mpx part followed the mask, 10.2 ms (98 fps). That is the ceiling; M3 measures the real share.
+- A game at the cap shows nothing: Dead Space ran at 96.8 and 97.9 fps at 100 Hz with the quality rectangle and with the fit (2026-11-20,
+  `docs/progress.md`). M3 uses a title below the cap and the telemetry flavour's frame times.
+- The stream does not change in round 1: the encoder still gets the rectangle, with whatever the game leaves in the hidden pixels. Painting them black
+  before NVENC is a frame-path change; measure the bits it would save before proposing it.
+
+### M3. Design (round 1)
+
+- **GUI (session compile):** with the switch on and a profile that has a mask, write `video.game_mask` = `{kind: "polygon_tan_v1", left: [[x, y], ...],
+  right: [...]}`: each eye's `FovMask.Polygon` on its own rectangle (so the per-eye edges are in it), in view-space tangents (x right, y up, OpenXR's
+  convention; the GUI turns outer / inner into left / right per eye, so the shim has no eye logic). No key otherwise.
+- **Host:** read `video.game_mask` at start and put it in the IPC (up to 16 vertices per eye, a count, a serial); latched per game start.
+- **Shim (`GetFovStencil`):** from the eye's polygon and the FovPort VDXR passes: visible area = the convex polygon as a triangle fan; hidden area = the
+  told rectangle minus the polygon (each rectangle corner joined to the polygon vertices it faces); border line = the polygon's edges as index pairs;
+  coordinates 0..1 across that FovPort, y down. No mask in the IPC: the empty mesh, exactly as 1.4.
+- **Switch:** a lab switch first (host stdin `lab_game_mask 0|1` and the settings key, not in any window), default off. It becomes a toggle in the FOV card
+  only after M3 shows a gain (project rule: no setting without a measurement behind it).
+- **Margin:** none in round 1. The calibration rule puts each line where it is just visible; the headset check (M4) decides whether other wearings need
+  one.
+
+### M4. Steps
+
+| Step | Engine | What | Pass |
+|---|---|---|---|
+| M0 | none | Which games ask: VDXR's `Application uses visibility mask` line per run for the owner's titles and one OpenComposite title; `xr_probe` asks for the mask and logs the counts (lab tool) | a list; at least one title below the cap that asks, or the round stops here |
+| M1 | fork (`IDriver` method), shim, IPC 38, host, GUI compile | the code above, behind the switch | `check_cpp`, the fork's compile, `check_gui` |
+| M2 | lab | `e2e_game_mask`: `xr_probe` draws the hidden mesh in a key colour; the received stream has the key colour only outside each eye's octagon (both eyes, mirrored corners); the line loop matches the polygon; switch off = empty mesh (1.4). A Python model of the mesh (as `harness/fov_contract_model.py`) checked against the shim's output. Regressions: the fork lab's R5 plus `e2e_fov_client_box`, `e2e_fov_tool_mask`, `e2e_fov_override` | all pass |
+| M3 | timing | the title from M0, telemetry flavour, 3 interleaved pairs (switch off / on) at the same spot: game fps, GPU frame time, repeated ticks | Phase B's rule: a change exceeds 3 x the larger spread and is >= 2 fps in 3 of 3 pairs |
+| M4 | headset | the owner, the trade-off profile, the M3 title: anything visible at the corners during head motion (black, smearing, a temporal upscaler's edge) | nothing visible. **Decision M:** a toggle in the FOV card (every headset), default off until a second wearer has tried it |
+
+### M5. Risks
+
+- What a game writes in hidden pixels is undefined (black, stale, the near plane in depth). Screen-space effects and temporal upscalers (TAA, DLSS) can
+  smear at the boundary; M4 looks for it.
+- A game that asks before the mask is set gets the empty mesh. The host puts the mask in the IPC at its start, before any game.
+- UEVR and OpenComposite may read the mesh with other conventions (winding, y direction): M2 gets an OpenComposite row if M0 finds a title.
+- The fan needs a convex polygon. The corner-fraction octagon is convex; a free-form mask later needs a real triangulation.
+- A wrong mask hides what the user sees: the switch is off by default, and nothing changes for a profile without a mask.
 
 ## 1. The question and the hypotheses
 
@@ -75,7 +156,7 @@ The engine and ALVR identify a frame by its tracking timestamp. OpenXR gives no 
 
 ## 4. Phase A: is the signal exact? (no engine change)
 
-Build: the fork lab's B1 (VDXR at the pin, shim from `vdxr-fork`), then `python3 harness/run.py build probe` from this worktree (adds the `xr_modsim`
+Build: the fork lab's B1 on this branch (VDXR at the pin, the shim of 1.4 with `vdxr-fork`'s array views), then `python3 harness/run.py build probe` from this worktree (adds the `xr_modsim`
 shapes; `xr_probe` is unchanged, the CSV only gains columns, so the fork lab's runs are not affected). Builder root: the fork lab's
 (`VisionALVR_vdxrfork`, on the 3080 Ti's D: behind the junction), one lab after the other.
 
@@ -123,7 +204,7 @@ Change (shim only, VDXR unchanged; about 30 lines next to `driver.cpp:1570-1610`
 - No facts at all (stock VDXR, a libOVR game, the first frames): today's pose-only test, exactly.
 - Stats line: `identity: arm N, same poses P (with an image released R, kept), submits without facts F, id mismatches M`.
 - Lab switch: an IPC field next to `dropDuplicateFrames`, set by a host stdin command (`lab_identity 0|1`), default 0, not in any GUI or config file.
-  Arm 0 must behave exactly like 1.3.11: run the matrix on 1.3.11's shim and on arm 0, same decisions on every row.
+  Arm 0 must behave exactly like 1.4: run the matrix on 1.4's shim and on arm 0, same decisions on every row.
 
 Runs: `run.py identity` on arm 1. Expected: every row PASS except `id_mod_dup_rerelease` (the known blind spot; it matters only if G1 found
 re-releases). Then the fork lab's R5 regression set and the nine `e2e_modsim_*`. Then timing: 3 interleaved pairs (arm 0 / arm 1) on `id_mod_dup` and
@@ -151,7 +232,7 @@ own switch on top of U0 (Decision A must not stop it), arrival jitter added to t
 
 ## 9. Headset A/B (only if Decision B passes)
 
-Client 1.3.11 on the Vision Pro, the user on the 5090: OFXR on a real title, then AC Black Flag with the mod. Arm switched live with the stdin command
+Client 1.4.0 on the Vision Pro, the user on the 5090: OFXR on a real title, then AC Black Flag with the mod. Arm switched live with the stdin command
 every 3 windows of 10 s, balanced order, start windows dropped. Read: ticks fresh %, `same_ts`, latency, the `identity:` line, and the user's blind call
 on two or three head motions. One night.
 
