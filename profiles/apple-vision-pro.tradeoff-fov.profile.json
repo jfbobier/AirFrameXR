@@ -1,0 +1,58 @@
+{
+ "schema": 1,
+ "id": "apple-vision-pro-tradeoff",
+ "display_name": "Apple Vision Pro (ALVR visionOS client), optimized trade-off",
+ "author": "AirFrameXR project (the author's fit of 2026-11-20 with the 1.4 line test, created on the 5090)",
+ "match": {
+  "name_contains": [
+   "Apple Headset",
+   "Apple Vision Pro"
+  ]
+ },
+ "fov": {
+  "name": "AVP optimized trade-off",
+  "visible_deg": {
+   "outer": 42.7,
+   "inner": 30.0,
+   "upper": 42.0,
+   "lower": 37.6
+  },
+  "margin_deg": 0,
+  "render_quality": 0,
+  "source": "author",
+  "tan": [
+   0.9215,
+   0.5775,
+   0.9,
+   0.77
+  ],
+  "tan_left": [
+   0.8438,
+   0.5775,
+   0.9,
+   0.77
+  ],
+  "tan_right": [
+   0.9215,
+   0.5097,
+   0.9,
+   0.77
+  ],
+  "mask": {
+   "kind": "corner_fraction_v1",
+   "left": [
+    0.61,
+    0.56,
+    0.53,
+    0.66
+   ],
+   "right": [
+    0.63,
+    0.54,
+    0.47,
+    0.63
+   ]
+  },
+  "note": "Optimized trade-off: the author's fit of 2026-11-20 (1.4 line test, GeekVR light seal, each edge and corner line brought back until just visible). The games are told 0.92 / 0.58 / 0.90 / 0.77 (outer / inner / upper / lower tangents, the larger of the two eyes per edge): narrower than AVP optimized quality and taller than AVP optimized performance, 2.50 tangent units of area against 2.22 and 3.39. Its mask (four corner lines per eye) hides about 35 % of the left eye's picture and 40 % of the right's; it is stored with the profile and not yet sent to games. One wearer's fit: if an edge shows black, calibrate your own (the line test starts on this profile). A field of view only; the stream settings come from the headset profile."
+ }
+}

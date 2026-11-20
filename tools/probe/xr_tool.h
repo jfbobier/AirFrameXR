@@ -1,8 +1,8 @@
 // The headset tools of docs/PICTURE_EDGES_DESIGN.md sections 6 and 6b, as scenes of the probe (an ordinary OpenXR app on the PC, streamed like a game):
-//   XR_PROBE_TOOL=fit       "Fit the picture to your eyes": a mid-blue box on black (the scene inside the box when XR_PROBE_SCENE is set), one eye at a time, arrows push an edge out until its black bar is gone.
+//   XR_PROBE_TOOL=fit       "Fit the picture to your eyes": a mid-blue box on black (the scene inside the box when XR_PROBE_SCENE is set), one eye at a time, numpad 8 / 2 / 4 / 6 push an edge out until its black bar is gone.
 //                           Enter = this eye is finished (the other eye comes; on the second eye it saves), Tab goes to the other eye and back.
 //   XR_PROBE_TOOL=restrict  "Choose what the game renders": the scene (XR_PROBE_SCENE=<file.vab>, flat grey without it) inside the box, black outside, both eyes,
-//                           arrows pull an edge in; Space (held) shows the whole view.
+//                           numpad 8 / 2 / 4 / 6 pull an edge in; Space (held) shows the whole view. (The arrow keys are the same keys: the numpad sends them with Num Lock off.)
 // Keys: the PC keyboard through GetAsyncKeyState (whatever window has the focus: with the headset on nobody can click a window back into focus), or scripted for the
 // lab: XR_PROBE_KEYS="<frame>:<key>[,...]" with key = space left right up down tab enter esc, "shift+left" etc.; "+space" / "-space" press and release only (a
 // plain key is a tap: down on that frame, up on the next). Frames count from the first rendered frame; scripted mode ignores the real keyboard.
@@ -192,14 +192,14 @@ struct XrTool {
     std::wstring Text(int e, bool& show) const {
         show = true;
         if (mode == Fit) {
-            if (lineStyle && phase == Intro) return L"Fit the picture to your eyes.\nLook at each bright line. Arrows push a yellow edge line outward until it just disappears; Shift + arrow brings it back until it is clearly visible again.\nNumpad 7 9 1 3 push the blue corner lines outward until they just disappear (leave them there); Shift brings one back.\nEnter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
-            if (phase == Intro) return L"Fit the picture to your eyes.\nArrows push an edge out until its black bar is gone. Shift + arrow pulls it back.\nHold SPACE: compare. Enter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
+            if (lineStyle && phase == Intro) return L"Fit the picture to your eyes.\nMove each line with the numpad: 8 2 4 6 the yellow edges (up, down, left, right), 7 9 1 3 the blue corners. Push a line out until it disappears, then bring it back with Shift + the same key until you just see it.\nEnter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
+            if (phase == Intro) return L"Fit the picture to your eyes.\nNumpad 8 2 4 6 push an edge out until its black bar is gone. Shift + the same key pulls it back.\nHold SPACE: compare. Enter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
             if (phase == Saved) return L"Saved. You can take the headset off.";
             if (compare) { show = false; return L""; }
-            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\n" + (lineStyle ? L"edges (arrows): push out until a line disappears, bring it back until it is clearly visible; corners (numpad 7 9 1 3): push out until a line just disappears; then ENTER" : L"push until the bar is gone, one step back, then ENTER");
+            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\n" + (lineStyle ? L"numpad 8 2 4 6 edges, 7 9 1 3 corners: push a line out until it disappears, Shift + the key back until you just see it; then ENTER" : L"push until the bar is gone, one step back, then ENTER");
         }
-        if (useStartBox && phase == Intro) return L"Choose what the game renders.\nFour bright lines mark the edges of the picture the game renders; outside them it is black. Arrows move a line inward, Shift + arrow outward, until you just notice the black at that edge, then one step back. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
-        if (phase == Intro) return L"Choose what the game renders.\nArrows pull an edge in, Shift + arrow pushes it back out. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
+        if (useStartBox && phase == Intro) return L"Choose what the game renders.\nFour bright lines mark the edges of the picture the game renders; outside them it is black. Numpad 8 2 4 6 move a line inward, Shift + the same key outward, until you just notice the black at that edge, then one step back. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
+        if (phase == Intro) return L"Choose what the game renders.\nNumpad 8 2 4 6 pull an edge in, Shift + the same key pushes it back out. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
         if (phase == Saved) return L"Saved.";
         if (compare) { show = false; return L""; }
         wchar_t b[160]; const float pct = Pct();

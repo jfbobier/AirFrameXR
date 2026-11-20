@@ -146,13 +146,20 @@ namespace AirFrameXR
                     var margin = Math.Max(0, Math.Min(15, Json.Num(fov, "margin_deg", 3)));
                     var scale = Json.Num(fov, "client_fov_scale", 0);
                     var tan = new[] { "outer", "inner", "upper", "lower" }.Select(k => Math.Round(Math.Tan((Json.Num(vis, k, 0) + margin) * Math.PI / 180), 2)).ToArray();
+                    // 1.4 (optional, older readers ignore them): the exact tangents, each eye's own, and the mask of a fit (the line test's corner lines)
+                    double[] Four(object o) { var l = o as System.Collections.IList; return l != null && l.Count >= 4 ? Enumerable.Range(0, 4).Select(k => Convert.ToDouble(l[k], CultureInfo.InvariantCulture)).ToArray() : null; }
+                    var exact = Four(Json.Get(fov, "tan")); if (exact != null && exact.All(v => v > 0)) tan = exact;
                     if (tan.Any(v => !(v > 0))) continue;
+                    var tanL = Four(Json.Get(fov, "tan_left")); var tanR = Four(Json.Get(fov, "tan_right"));
+                    var maskL = Four(Json.Get(fov, "mask.left")); var maskR = Four(Json.Get(fov, "mask.right"));
                     var standard = Json.Str(fov, "source", "standard");
                     all.RemoveAll(x => x.Id == "std-" + id);
                     all.Add(new UserFov
                     {
                         Id = "std-" + id, Name = Json.Str(fov, "name", "") is string given && given.Length > 0 ? given : standard == "author" ? "AVP optimized" : Json.Str(d, "display_name", id).Split('(')[0].Trim() + (standard == "starting-point" ? " (starting point, not measured)" : " (standard calibration)"), Headset = names[0], Source = standard,
                         Created = "2026-01-01T00:00:00", Tan = tan, Quality = Math.Max(0, Math.Min(1, Json.Num(fov, "render_quality", 0))), ClientScale = scale >= 0.2 && scale <= 1.6 && Math.Abs(scale - 1) > 0.001 ? scale : 0, Note = Json.Str(fov, "note", ""),
+                        TanLeft = tanL != null && tanR != null && tanL.Concat(tanR).All(v => v > 0) ? tanL : null, TanRight = tanL != null && tanR != null && tanL.Concat(tanR).All(v => v > 0) ? tanR : null,
+                        MaskLeft = maskL != null && maskR != null && maskL.Concat(maskR).All(v => v >= FovMask.Min && v <= 1.0) ? maskL : null, MaskRight = maskL != null && maskR != null && maskL.Concat(maskR).All(v => v >= FovMask.Min && v <= 1.0) ? maskR : null,
                     });
                     seeded.Add(id); added++;
                 }

@@ -102,7 +102,7 @@ namespace AirFrameXR
         {
             Reset("Choose what the game renders");
             Text_("Two minutes, the headset on, both eyes open. The tool shows a scene inside a box and black outside it: exactly what a game that honours the restriction shows. Pull an edge in until you notice the black during normal looking around, then one step back. Start with the inner edges and the lower one. The result is kept as one of your profiles and used by the games.");
-            Text_("Press SPACE on the PC keyboard to start. Arrows pull an edge in, Shift + arrow pushes it back out, Tab switches between both eyes and one eye, hold SPACE to see the whole view, Enter saves, Esc leaves. Keep this window in front: it receives the keys.", true);
+            Text_("Press SPACE on the PC keyboard to start. Numpad 8 2 4 6 pull an edge in, Shift + the same key pushes it back out, Tab switches between both eyes and one eye, hold SPACE to see the whole view, Enter saves, Esc leaves. Keep this window in front: it receives the keys.", true);
             var problems = new List<string>();
             if (headset.Length == 0) problems.Add("No headset is known yet: connect it once with the streamer.");
             if (demoDir == null && Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime)) { StartStreamer(); return; }
@@ -190,8 +190,8 @@ namespace AirFrameXR
             liveState = Text_("Starting the OpenXR scene...", true);
             liveLabel = Text_("", true);
             Text_(restrictTool
-                ? "Four bright lines mark the edges of the picture the game renders: arrows pull a line in 1 degree, Shift + arrow pushes it back out, Tab: both eyes / one eye, hold SPACE: the whole view, Enter: save, Esc: leave. Keep this window in front: it receives the keys."
-                : "Arrows push an edge out until its black bar is gone, Shift + arrow pulls it back, hold SPACE: compare, Enter: this eye is finished (the second eye saves), Esc: leave. One eye at a time: close the other. Keep this window in front: it receives the keys.", true);
+                ? "Four bright lines mark the edges of the picture the game renders: numpad 8 2 4 6 pull a line in 1 degree, Shift + the same key pushes it back out, Tab: both eyes / one eye, hold SPACE: the whole view, Enter: save, Esc: leave. Keep this window in front: it receives the keys."
+                : "Numpad 8 2 4 6 move the yellow edge lines (up, down, left, right), 7 9 1 3 the blue corner lines: push a line out until it disappears, then Shift + the same key until you just see it. Enter: this eye is finished (the second eye saves), Esc: leave. One eye at a time: close the other. Keep this window in front: it receives the keys.", true);
             Buttons(Btn("Stop", () => { EndTool(); ShowIntro(); }));
             // the streamer takes the settings change within a moment; the scene is started after it so the game is told the whole panel
             var t = new Timer { Interval = 6000 };
