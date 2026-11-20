@@ -1896,6 +1896,9 @@ def analyse(sc, outdir: Path):
         a["client"]["duplicate_timestamps_tracked"] = sum(1 for x, y in zip(ts_, ts_[1:]) if x == y)
     hs = (outdir / "host_stdout.txt").read_text(errors="replace") if (outdir / "host_stdout.txt").exists() else ""
     a["host_event_names"] = sorted(set(re.findall(r'"event":"([a-z_]+)"', hs)))
+    a["host_event_counts"] = {}
+    for name_ in re.findall(r'"event":\s*"([a-z_]+)"', hs):
+        a["host_event_counts"][name_] = a["host_event_counts"].get(name_, 0) + 1
     # the shim could not reach this host (its IPC version differs: a host built without its shim after an IPC change, 2026-11-20) and the app ran standalone; the
     # host still streams its idle frames, so nothing else fails clearly
     sl = (outdir / "ovrshim.log").read_text(errors="replace") if (outdir / "ovrshim.log").exists() else ""
@@ -2353,10 +2356,10 @@ def evaluate(sc, a):
         chk("handover_mirror_leaves", H_["leave_s"] is not None and H_["leave_s"] <= hk.get("max_leave_s", 2.0) and not H_["forced_out"] and H_["mirror_rc"] == "0", {"leave_s": H_["leave_s"], "forced_out": H_["forced_out"], "rc": H_["mirror_rc"]}, f"the mirror ends by itself within {hk.get('max_leave_s', 2.0)} s of the signal, without the 1.5 s fallback")
         chk("handover_engine_switches", H_["mirror_run_ended_before_game_started"], H_["events"], "the engine ends the mirror's run, then starts the game's (the game is not recorded as the mirror)")
         chk("handover_game_ran", H_["game_ran"], H_["game_rc"], "the game ran to its end after the mirror left")
-    if "host_events" in ck:   # {"event name": minimum count}: the host printed that event (a JSON line on its stdout) at least that often
-        hs = (outdir / "host_stdout.txt").read_text(errors="replace").replace(" ", "") if (outdir / "host_stdout.txt").exists() else ""
+    if isinstance(ck.get("host_events"), dict):   # {"event name": minimum count}: the host printed that event at least that often (a list: host_events_present below)
+        counts = a.get("host_event_counts") or {}   # (counted by analyse: evaluate has the analysis only, not the folder)
         for name, n in ck["host_events"].items():
-            got = hs.count(f'"event":"{name}"')
+            got = counts.get(name, 0)
             chk(f"host_event_{name}", got >= n, got, f"the host printed the {name} event at least {n} time(s)")
     if "fov_restrict" in ck:
         fa = a.get("fov_restrict") or {}
