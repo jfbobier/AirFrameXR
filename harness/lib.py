@@ -1408,6 +1408,61 @@ def host_views_fov(outdir, last=False):
     return (got[-1] if last else got[0]) if got else None
 
 
+def analyse_fg(hs, host_fps=None):
+    """Frame generation: what it cost and what it delivered, from the host's fg_perf events (one per window of about 10 s; `gen` is nvh_fg_stats: counters
+    and the generator's GPU times as averages over the run: flow = the motion search per rendered frame (prep + optical-flow engine, at the flow size),
+    synth = one output pass per displayed frame at the full side-by-side frame). The steady windows are those where the app ran and outputs went out,
+    after the first one (the start). gpu_ms_per_s = flow_ms x pairs/s + synth_ms x outputs/s: the GPU time the generator takes from the game each second
+    (the passes run on the shaders; only the flow engine itself is separate hardware). Per-Mpx costs compare sizes: a preset's cost should follow its
+    pixels (1.4's Balanced is about 2x 1.3's sizing, Sharp about 3.6x)."""
+    ev = []
+    for l in hs.splitlines():
+        if '"event":"fg_perf"' in l:
+            try:
+                e = json.loads(l)
+                ev.append((float(e.get("t_ms", 0)), e["data"]))
+            except Exception:
+                pass
+    if not ev:
+        return None
+    idx = [k for k, (_, d) in enumerate(ev) if k > 0 and d.get("app_fps", 0) > 1 and d.get("outputs", 0) > 0]
+    if not idx:
+        idx = [k for k, (_, d) in enumerate(ev) if d.get("outputs", 0) > 0]
+    out = {"windows": len(ev), "steady_windows": len(idx)}
+    if not idx:
+        out["error"] = "no fg_perf window with outputs"
+        return out
+    g1 = ev[idx[-1]][1].get("gen") or {}
+    g0 = (ev[idx[0] - 1][1].get("gen") or {}) if idx[0] > 0 else {}
+    dt = (ev[idx[-1]][0] - (ev[idx[0] - 1][0] if idx[0] > 0 else 0.0)) / 1000.0
+    m = re.search(r"frame (\d+)x(\d+)", g1.get("info", ""))
+    frame = [int(m.group(1)), int(m.group(2))] if m else None
+    flow = g1.get("flow_size") or None
+    d = lambda k: (g1.get(k, 0) or 0) - (g0.get(k, 0) or 0)
+    pairs_s = d("pairs") / dt if dt > 0 else 0.0
+    outs_s = (d("synths") + d("reals")) / dt if dt > 0 else 0.0
+    fm, sm = float(g1.get("flow_ms_avg", 0) or 0), float(g1.get("synth_ms_avg", 0) or 0)
+    med = lambda k: (sorted(ev[i][1].get(k, 0) for i in idx)[len(idx) // 2])
+    out.update({
+        "ready": g1.get("ready") == 1, "info": g1.get("info"), "rate": ev[idx[-1]][1].get("rate"),
+        "frame": frame, "frame_mpx": round(frame[0] * frame[1] / 1e6, 3) if frame else None,
+        "flow_size": flow, "flow_mpx": round(flow[0] * flow[1] / 1e6, 3) if flow else None,
+        "flow_ms_avg": fm, "synth_ms_avg": sm, "flow_errors": g1.get("flow_errors", 0), "render_errors": g1.get("render_errors", 0),
+        "pairs_per_s": round(pairs_s, 2), "outputs_per_s": round(outs_s, 2),
+        "synth_share": round(d("synths") / max(1, d("synths") + d("reals")), 3),
+        "gpu_ms_per_s": round(fm * pairs_s + sm * outs_s, 2),
+        "app_fps_p50": round(med("app_fps"), 2), "stream_fps_p50": round(med("stream_fps"), 2), "stream_fps_min": round(min(ev[i][1].get("stream_fps", 0) for i in idx), 2),
+    })
+    out["gpu_share"] = round(out["gpu_ms_per_s"] / 1000.0, 4)
+    if frame:
+        out["synth_ms_per_mpx"] = round(sm / out["frame_mpx"], 4)
+    if flow:
+        out["flow_ms_per_mpx"] = round(fm / out["flow_mpx"], 4)
+    if host_fps:
+        out["stream_fps_frac"] = round(out["stream_fps_p50"] / host_fps, 4)
+    return out
+
+
 def analyse_layers(sc, outdir):
     cfg = negotiated_cfg(outdir)
     ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
@@ -1843,6 +1898,8 @@ def analyse(sc, outdir: Path):
     a["bench_steps"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"bench_step"' in l]
     a["height_calibrated"] = next((json.loads(l)["data"] for l in hs.splitlines() if '"event":"height_calibrated"' in l), None)
     a["game_runs"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"game_run"' in l]   # the run summary the streamer shows (net block: latency medians, outliers)
+    if '"event":"fg_perf"' in hs:
+        a["fg"] = analyse_fg(hs, (sc.get("host") or {}).get("fps"))
     lg = outdir / "logs"
     if lg.exists():
         dbg = sorted((lg / "debug").glob("*")) if (lg / "debug").exists() else []
@@ -2424,6 +2481,29 @@ def evaluate(sc, a):
         if hc:
             chk("height_calibrated_eye_height", abs(hc.get("eye_height_m", -9) - want["eye_height_m"]) <= want.get("tol", 0.02), hc.get("eye_height_m"), f"{want['eye_height_m']} +- {want.get('tol', 0.02)}")
             chk("height_calibrated_headset_y", abs(hc.get("headset_y", -9) - want["headset_y"]) <= want.get("tol", 0.02), hc.get("headset_y"), f"{want['headset_y']} +- {want.get('tol', 0.02)}")
+    if "fg" in ck:   # frame generation: the generator ran clean, generated its share, held the display rate, and what it cost (analyse_fg)
+        want, f = ck["fg"], a.get("fg") or {}
+        chk("fg_reported", bool(f) and not f.get("error"), f.get("error") or f.get("steady_windows"), "fg_perf windows with outputs (the host's frame generation statistics)")
+        if f and not f.get("error"):
+            chk("fg_cost", True, {k: f.get(k) for k in ("frame", "flow_size", "flow_ms_avg", "synth_ms_avg", "gpu_ms_per_s", "synth_ms_per_mpx", "flow_ms_per_mpx", "app_fps_p50", "stream_fps_p50")},
+                "information: the generator's GPU time per motion search and per output pass, per second, and per Mpx")
+            chk("fg_clean", f.get("ready") and f.get("flow_errors", 1) == 0 and f.get("render_errors", 1) == 0,
+                {k: f.get(k) for k in ("ready", "flow_errors", "render_errors")}, "flow engine ready, no flow or render error")
+            if "frame" in want:
+                chk("fg_frame", f.get("frame") == want["frame"], f.get("frame"), f"{want['frame']} (the side-by-side frame the generator works on: 2 x the stream eye)")
+            if "synth_share" in want:
+                lo, hi = want["synth_share"]
+                chk("fg_synth_share", lo <= f.get("synth_share", -1) <= hi, f.get("synth_share"), f"[{lo}, {hi}] of the outputs generated (the rest the newest real frame)")
+            if "min_stream_fps_frac" in want:
+                chk("fg_holds_display_rate", f.get("stream_fps_frac", 0) >= want["min_stream_fps_frac"], f.get("stream_fps_p50"),
+                    f">= {want['min_stream_fps_frac']} x the display rate (median of the steady windows; min {f.get('stream_fps_min')})")
+            for k, label in (("max_flow_ms", "flow_ms_avg"), ("max_synth_ms", "synth_ms_avg"), ("max_gpu_ms_per_s", "gpu_ms_per_s")):
+                if k in want:
+                    chk(f"fg_{label}", 0 < f.get(label, 0) <= want[k], f.get(label), f"(0, {want[k]}]")
+            for k in ("synth_ms_per_mpx", "flow_ms_per_mpx"):
+                if k in want:   # the cost of one Mpx, whatever the preset: a regression in the passes shows here, a bigger preset does not
+                    lo, hi = want[k]
+                    chk(f"fg_{k}", lo <= f.get(k, -1) <= hi, f.get(k), f"[{lo}, {hi}] ms per Mpx")
     if "game_run" in ck:   # U7: the run's latency is believable on a clean run (no garbage samples, medians of the windows)
         g = ck["game_run"]
         runs = a.get("game_runs") or []

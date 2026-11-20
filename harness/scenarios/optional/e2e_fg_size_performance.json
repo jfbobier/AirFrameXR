@@ -1,0 +1,120 @@
+{
+ "description": "FRAME GENERATION COST BY PICTURE PRESET: 1.4 Performance, 1952x1760 per eye with its foveation, as the launcher compiles it for the Vision Pro (harness/density_check.py's case: sliders 0.80 / 0.90, the quality window; centre 0.495 x 0.522, shift 0.38 / -0.123, edge 2.415 / 2.026). Generation at half rate, host 90 Hz, the app free between 50 and 70 fps (held to 45), the mock headset's display emulation. The four e2e_fg_size_* runs compare what generation costs and whether it holds the display rate as the preset grows (1.4: users saw generation slow down): the generator renders every output at the full side-by-side frame before the foveation, and with generation on the encoder encodes every display slot. harness/fg_size_report.py puts the four side by side (game, encoder, generator).",
+ "topology": {
+  "host": "builder",
+  "client": "builder",
+  "client_bind_ip": "127.0.0.2",
+  "host_launch": "interactive"
+ },
+ "session_overrides": {
+  "openvr_config.eye_resolution_width": 1952,
+  "openvr_config.eye_resolution_height": 1760,
+  "openvr_config.target_eye_resolution_width": 1952,
+  "openvr_config.target_eye_resolution_height": 1760,
+  "session_settings.connection.client_recv_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  },
+  "session_settings.connection.server_send_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  },
+  "session_settings.video.transcoding_view_resolution": {
+   "Scale": 1.0,
+   "Absolute": {
+    "width": 1952,
+    "height": {
+     "set": true,
+     "content": 1760
+    }
+   },
+   "variant": "Absolute"
+  },
+  "session_settings.video.emulated_headset_view_resolution": {
+   "Scale": 1.0,
+   "Absolute": {
+    "width": 1952,
+    "height": {
+     "set": true,
+     "content": 1760
+    }
+   },
+   "variant": "Absolute"
+  },
+  "session_settings.video.foveated_encoding.enabled": true,
+  "openvr_config.enable_foveated_encoding": true,
+  "session_settings.video.foveated_encoding.content.center_size_x": 0.495,
+  "openvr_config.foveation_center_size_x": 0.495,
+  "session_settings.video.foveated_encoding.content.center_size_y": 0.522,
+  "openvr_config.foveation_center_size_y": 0.522,
+  "session_settings.video.foveated_encoding.content.center_shift_x": 0.38,
+  "openvr_config.foveation_center_shift_x": 0.38,
+  "session_settings.video.foveated_encoding.content.center_shift_y": -0.123,
+  "openvr_config.foveation_center_shift_y": -0.123,
+  "session_settings.video.foveated_encoding.content.edge_ratio_x": 2.415,
+  "openvr_config.foveation_edge_ratio_x": 2.415,
+  "session_settings.video.foveated_encoding.content.edge_ratio_y": 2.026,
+  "openvr_config.foveation_edge_ratio_y": 2.026
+ },
+ "host": {
+  "shim": true,
+  "fps": 90,
+  "seconds": 70,
+  "connect_timeout": 45,
+  "gpu_keepalive": 90,
+  "exit_after_frames": 100000,
+  "running_start_ms": 2.0,
+  "frame_gen": "on"
+ },
+ "client": {
+  "seconds": 75,
+  "connect_timeout": 45,
+  "yaw_amp": 0.5,
+  "yaw_hz": 0.25,
+  "display_sim": true,
+  "poll_ms": 5,
+  "queue_max": 2,
+  "motion": "yaw"
+ },
+ "client_env": {
+  "RUST_LOG": "warn"
+ },
+ "app": {
+  "frames": 1800,
+  "timeout_s": 60,
+  "env": {
+   "XR_PROBE_CPU_MS": "1",
+   "XR_PROBE_GPU_COPIES": "0",
+   "XR_PROBE_LOAD": "fps:50:70"
+  }
+ },
+ "gpu_sample": true,
+ "timeout_s": 220,
+ "checks": {
+  "host_min_frames": 600,
+  "client_min_frames": 600,
+  "max_duplicate_timestamps": 10,
+  "negotiated": {
+   "view_resolution": [
+    1952,
+    1760
+   ],
+   "enable_foveated_encoding": true
+  },
+  "fg": {
+   "frame": [
+    3904,
+    1760
+   ],
+   "synth_share": [
+    0.4,
+    0.6
+   ],
+   "min_stream_fps_frac": 0.95,
+   "synth_ms_per_mpx": [
+    0.02,
+    0.1
+   ]
+  }
+ }
+}

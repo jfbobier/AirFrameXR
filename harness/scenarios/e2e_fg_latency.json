@@ -85,6 +85,21 @@
       "max_latency_ms": 200,
       "max_latency_outliers": 0
     },
-    "max_duplicate_timestamps": 10
+    "max_duplicate_timestamps": 10,
+    "fg": {
+      "frame": [
+        3520,
+        1600
+      ],
+      "synth_share": [
+        0.4,
+        0.6
+      ],
+      "min_stream_fps_frac": 0.95,
+      "synth_ms_per_mpx": [
+        0.02,
+        0.1
+      ]
+    }
   }
 }

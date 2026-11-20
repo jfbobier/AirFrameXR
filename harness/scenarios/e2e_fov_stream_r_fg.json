@@ -1,5 +1,5 @@
 {
-  "description": "Frame generation at half rate with the stream fitted to the calibrated window (3168x2496 per eye, no foveation like e2e_fg_latency): the generator's flow size follows the frame, the run's latency is believable and the game_run record carries the pipeline block (game render, stream, encoded sizes, strips, encode times) that the Game statistics app draws.",
+  "description": "Frame generation at half rate with the stream fitted to the calibrated window (3168x2496 per eye, no foveation like e2e_fg_latency): the generator's flow size follows the frame, the run's latency is believable and the game_run record carries the pipeline block (game render, stream, encoded sizes, strips, encode times) that the Game statistics app draws. No display-rate check here: without foveation the 3080 Ti laptop's single encoder takes about 21 ms per 6336 x 2496 frame, so the stream stays near the game's 45 fps (2026-11-09: 44 of 90); the e2e_fg_size_* runs check the rate with each preset's foveation.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -107,6 +107,16 @@
         2496
       ],
       "enable_foveated_encoding": false
+    },
+    "fg": {
+      "frame": [
+        6336,
+        2496
+      ],
+      "synth_ms_per_mpx": [
+        0.02,
+        0.1
+      ]
     }
   }
 }
