@@ -6,6 +6,10 @@
 // Keys: the PC keyboard through GetAsyncKeyState (whatever window has the focus: with the headset on nobody can click a window back into focus), or scripted for the
 // lab: XR_PROBE_KEYS="<frame>:<key>[,...]" with key = space left right up down tab enter esc, "shift+left" etc.; "+space" / "-space" press and release only (a
 // plain key is a tap: down on that frame, up on the next). Frames count from the first rendered frame; scripted mode ignores the real keyboard.
+// An Xbox controller (XInput, also read whatever window has the focus; for laptops without a numpad): the right stick expands the area in the stick's direction,
+// the left stick reduces it (up / down / left / right = the edges, in the fit's line style the diagonals = the corners, like numpad 7 9 3 1; held, it repeats like
+// a held key); A = Space on the first screen (start), then Enter (this eye is finished / save). Scripted: "rs_up", "ls_downleft", ... (a tap: deflected on that
+// frame, centred on the next; "+rs_up" holds, "-rs" centres) and "a" / "+a" / "-a".
 // Output: one JSON line per change on stdout (the tool app reads them): {"tool","event":"box|start|enter|esc","frame","eye","box":[[outer,inner,upper,lower] per eye],
 // "panel":[...same...],"pct":..}; tangents, outer = away from the nose. XR_PROBE_TOOL_START = the fit's start box as a fraction of the panel (box style; the line style starts on the author's rays 0.97 / 0.71 / 0.69 / 0.63 capped at the panel, XR_PROBE_START_BOX replaces them),
 // XR_PROBE_TOOL_SAVED_S = how long the "Saved" screen stays (default 3).
@@ -14,6 +18,7 @@
 #pragma once
 #include <windows.h>
 #include <d3d11_1.h>
+#include <xinput.h>   // the structs only: XInputGetState is loaded from the system DLL (ReadPad)
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -82,6 +87,7 @@ struct XrTool {
             bool shift = false;
             if (what.compare(0, 6, "shift+") == 0) { shift = true; what = what.substr(6); }
             char mode_ = 0; if (!what.empty() && (what[0] == '+' || what[0] == '-')) { mode_ = what[0]; what = what.substr(1); }
+            if (ParsePad(fr, mode_, what)) continue;
             Key k; if (!NameKey(what, k)) continue;
             if (shift) events.push_back({ fr, KShift, true });
             if (mode_ == '-') events.push_back({ fr, k, false });
@@ -89,6 +95,78 @@ struct XrTool {
             if (shift) events.push_back({ fr + 1, KShift, false });
         }
         std::stable_sort(events.begin(), events.end(), [](const Ev& a, const Ev& b) { return a.frame < b.frame; });
+        std::stable_sort(padEvents.begin(), padEvents.end(), [](const PadEv& a, const PadEv& b) { return a.frame < b.frame; });
+    }
+
+    // ---- the Xbox controller --------------------------------------------------------------------------------------------------------------------------------------
+    struct Pad { float lx = 0, ly = 0, rx = 0, ry = 0; bool a = false; };
+    struct PadEv { int frame; int what; float x, y; };   // what: 0 left stick, 1 right stick (x, y), 2 A (x = 1 down, 0 up)
+    std::vector<PadEv> padEvents; size_t nextPadEv = 0;
+    Pad scriptedPad;
+    bool padA = false, padShift = false, padPrev[KCount] = {};
+    typedef DWORD(WINAPI* XInputGetStateFn)(DWORD, XINPUT_STATE*);
+    XInputGetStateFn xget = nullptr; bool xtried = false; int xslot = -1; double xscanMs = -1e9;
+
+    bool ParsePad(int fr, char hold, const std::string& w) {
+        if (w == "a") { if (hold != '-') padEvents.push_back({ fr, 2, 1, 0 }); if (hold != '+') padEvents.push_back({ hold == '-' ? fr : fr + 1, 2, 0, 0 }); return true; }
+        if (w.size() < 2 || (w[0] != 'l' && w[0] != 'r') || w[1] != 's') return false;
+        const int st = w[0] == 'l' ? 0 : 1;
+        if (w.size() == 2) { if (hold == '-') padEvents.push_back({ fr, st, 0, 0 }); return hold == '-'; }
+        if (w[2] != '_') return false;
+        static const char* dn[8] = { "right", "upright", "up", "upleft", "left", "downleft", "down", "downright" };
+        for (int i = 0; i < 8; i++)
+            if (w.compare(3, std::string::npos, dn[i]) == 0) {
+                const float a = i * 45.f * 0.0174532925f;
+                padEvents.push_back({ fr, st, cosf(a), sinf(a) });
+                if (!hold) padEvents.push_back({ fr + 1, st, 0, 0 });
+                return true;
+            }
+        return false;
+    }
+
+    // XInput from the system DLL (no link dependency): the first connected controller; an empty slot is slow to poll, so they are looked for once a second
+    bool ReadPad(double nowMs, Pad& p) {
+        if (!xtried) {
+            xtried = true;
+            HMODULE m = LoadLibraryW(L"xinput1_4.dll");
+            if (!m) m = LoadLibraryW(L"xinput9_1_0.dll");
+            if (m) xget = (XInputGetStateFn)GetProcAddress(m, "XInputGetState");
+        }
+        if (!xget) return false;
+        auto read = [&](int i) {
+            XINPUT_STATE st{};
+            if (xget((DWORD)i, &st) != ERROR_SUCCESS) return false;
+            const XINPUT_GAMEPAD& g = st.Gamepad;
+            auto ax = [](SHORT v) { return std::max(-1.f, std::min(1.f, v / 32767.f)); };
+            p.lx = ax(g.sThumbLX); p.ly = ax(g.sThumbLY); p.rx = ax(g.sThumbRX); p.ry = ax(g.sThumbRY);
+            p.a = (g.wButtons & XINPUT_GAMEPAD_A) != 0;
+            return true;
+        };
+        if (xslot >= 0 && read(xslot)) return true;
+        xslot = -1;
+        if (nowMs - xscanMs < 1000.0) return false;
+        xscanMs = nowMs;
+        for (int i = 0; i < 4; i++) if (read(i)) { xslot = i; return true; }
+        return false;
+    }
+
+    // The key a pad state stands for: the stick pushed further wins; past half its travel its direction picks an edge (4 sectors) or, in the fit's line style, an edge or
+    // a corner (8 sectors). The right stick expands, the left reduces: in the fit a plain key pushes out, in the restriction Shift does, so `shift` follows the mode.
+    void PadKeys(const Pad& p, bool k[KCount], bool& shift) const {
+        const float lm = hypotf(p.lx, p.ly), rm = hypotf(p.rx, p.ry);
+        const bool right = rm >= lm;
+        shift = false;
+        if (std::max(lm, rm) < 0.5f) return;
+        const float x = right ? p.rx : p.lx, y = right ? p.ry : p.ly;
+        const float ang = atan2f(y, x) * 57.2957795f + 360.f;   // 0 = right, 90 = up
+        if (mode == Fit && lineStyle) {
+            static const Key ks[8] = { KRight, KN9, KUp, KN7, KLeft, KN1, KDown, KN3 };
+            k[ks[(int)((ang + 22.5f) / 45.f) % 8]] = true;
+        } else {
+            static const Key ks[4] = { KRight, KUp, KLeft, KDown };
+            k[ks[(int)((ang + 45.f) / 90.f) % 4]] = true;
+        }
+        shift = (mode == Fit) ? !right : right;
     }
 
     static float Deg(float t, float d) { return tanf(atanf(t) + d * 0.0174532925f); }
@@ -110,18 +188,34 @@ struct XrTool {
         }
         if (!havePanel) { havePanel = true; startMs = nowMs; lastKeyMs = nowMs; Emit("box"); }
         bool pressed[KCount] = {};
+        Pad pad; bool havePad = false;
         if (scripted) {
             while (nextEv < events.size() && events[nextEv].frame <= fr) { const Ev& v = events[nextEv++]; if (v.down && !down[v.key]) pressed[v.key] = true; down[v.key] = v.down; }
+            while (nextPadEv < padEvents.size() && padEvents[nextPadEv].frame <= fr) {
+                const PadEv& v = padEvents[nextPadEv++];
+                if (v.what == 0) { scriptedPad.lx = v.x; scriptedPad.ly = v.y; } else if (v.what == 1) { scriptedPad.rx = v.x; scriptedPad.ry = v.y; } else scriptedPad.a = v.x > 0.5f;
+            }
+            pad = scriptedPad; havePad = !padEvents.empty();
+            // a scripted stick steps once per deflection (the lab's frames, not the clock, decide)
+            bool pk[KCount] = {}; if (havePad) PadKeys(pad, pk, padShift);
+            for (int k = 0; k < KCount; k++) { if (pk[k] && !padPrev[k]) pressed[k] = true; padPrev[k] = pk[k]; }
         } else {
             // the numpad: 8 / 2 / 4 / 6 are the arrows (with Num Lock off they send them anyway), 7 / 9 / 3 / 1 the corners (Num Lock off: Home / Page Up / Page Down / End)
             static const int vk[KCount] = { VK_SPACE, VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_SHIFT, VK_TAB, VK_RETURN, VK_ESCAPE, VK_NUMPAD7, VK_NUMPAD9, VK_NUMPAD3, VK_NUMPAD1 };
             static const int vk2[KCount] = { 0, VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD8, VK_NUMPAD2, 0, 0, 0, 0, VK_HOME, VK_PRIOR, VK_NEXT, VK_END };
+            havePad = ReadPad(nowMs, pad);
+            bool pk[KCount] = {}; padShift = false; if (havePad) PadKeys(pad, pk, padShift);
             for (int k = 0; k < KCount; k++) {
-                const bool d = (GetAsyncKeyState(vk[k]) & 0x8000) != 0 || (vk2[k] && (GetAsyncKeyState(vk2[k]) & 0x8000) != 0);
+                const bool d = (GetAsyncKeyState(vk[k]) & 0x8000) != 0 || (vk2[k] && (GetAsyncKeyState(vk2[k]) & 0x8000) != 0) || pk[k];
                 if (d && !down[k]) { pressed[k] = true; heldSince[k] = lastRepeat[k] = nowMs; }
                 else if (d && ((k >= KLeft && k <= KDown) || k >= KN7) && nowMs - heldSince[k] > 400 && nowMs - lastRepeat[k] > 70) { pressed[k] = true; lastRepeat[k] = nowMs; }   // repeats while held
                 down[k] = d;
             }
+        }
+        // A: Space on the first screen (start), then Enter (this eye is finished / save); never the held Space (compare)
+        if (havePad) {
+            if (pad.a && !padA && phase != Saved) pressed[phase == Intro ? KSpace : KEnter] = true;
+            padA = pad.a;
         }
         bool any = false;
         for (int k = 0; k < KCount; k++) if (pressed[k]) any = true;
@@ -135,7 +229,7 @@ struct XrTool {
             if (mode == Fit) eye ^= 1; else bothEyes = !bothEyes;
             changed = true;
         }
-        const bool shift = down[KShift];
+        const bool shift = down[KShift] || padShift;
         for (int a = KLeft; a <= KDown; a++) if (pressed[a]) { Arrow((Key)a, shift); changed = true; }
         if (mode == Fit) for (int a = KN7; a <= KN1; a++) if (pressed[a]) { Corner((Key)a, shift); changed = true; }
         if (changed) Emit("box");
@@ -192,14 +286,14 @@ struct XrTool {
     std::wstring Text(int e, bool& show) const {
         show = true;
         if (mode == Fit) {
-            if (lineStyle && phase == Intro) return L"Fit the picture to your eyes.\nMove each line with the numpad: 8 2 4 6 the yellow edges (up, down, left, right), 7 9 1 3 the blue corners. Push a line out until it disappears, then bring it back with Shift + the same key until you just see it.\nEnter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
-            if (phase == Intro) return L"Fit the picture to your eyes.\nNumpad 8 2 4 6 push an edge out until its black bar is gone. Shift + the same key pulls it back.\nHold SPACE: compare. Enter: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE to start.";
+            if (lineStyle && phase == Intro) return L"Fit the picture to your eyes.\nMove each line with the numpad: 8 2 4 6 the yellow edges (up, down, left, right), 7 9 1 3 the blue corners. Push a line out until it disappears, then bring it back with Shift + the same key until you just see it.\nXbox controller: right stick pushes the line in its direction out, left stick brings it back; diagonals for the corners.\nEnter or A: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE or A to start.";
+            if (phase == Intro) return L"Fit the picture to your eyes.\nNumpad 8 2 4 6 push an edge out until its black bar is gone. Shift + the same key pulls it back. Xbox controller: right stick out, left stick back.\nHold SPACE: compare. Enter or A: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE or A to start.";
             if (phase == Saved) return L"Saved. You can take the headset off.";
             if (compare) { show = false; return L""; }
-            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\n" + (lineStyle ? L"numpad 8 2 4 6 edges, 7 9 1 3 corners: push a line out until it disappears, Shift + the key back until you just see it; then ENTER" : L"push until the bar is gone, one step back, then ENTER");
+            return std::wstring(e == 0 ? L"LEFT EYE: close your right eye" : L"RIGHT EYE: close your left eye") + L"\n" + (lineStyle ? L"numpad 8 2 4 6 edges, 7 9 1 3 corners (or right stick out, left stick back): push a line out until it disappears, back until you just see it; then ENTER or A" : L"push until the bar is gone, one step back, then ENTER or A");
         }
-        if (useStartBox && phase == Intro) return L"Choose what the game renders.\nFour bright lines mark the edges of the picture the game renders; outside them it is black. Numpad 8 2 4 6 move a line inward, Shift + the same key outward, until you just notice the black at that edge, then one step back. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
-        if (phase == Intro) return L"Choose what the game renders.\nNumpad 8 2 4 6 pull an edge in, Shift + the same key pushes it back out. Tab: both eyes / one eye. Space: compare with the whole view. Enter: save. Esc: quit.\nPress SPACE to start.";
+        if (useStartBox && phase == Intro) return L"Choose what the game renders.\nFour bright lines mark the edges of the picture the game renders; outside them it is black. Numpad 8 2 4 6 move a line inward, Shift + the same key outward (Xbox controller: left stick in, right stick out), until you just notice the black at that edge, then one step back. Tab: both eyes / one eye. Space: compare with the whole view. Enter or A: save. Esc: quit.\nPress SPACE or A to start.";
+        if (phase == Intro) return L"Choose what the game renders.\nNumpad 8 2 4 6 pull an edge in, Shift + the same key pushes it back out (Xbox controller: left stick in, right stick out). Tab: both eyes / one eye. Space: compare with the whole view. Enter or A: save. Esc: quit.\nPress SPACE or A to start.";
         if (phase == Saved) return L"Saved.";
         if (compare) { show = false; return L""; }
         wchar_t b[160]; const float pct = Pct();
