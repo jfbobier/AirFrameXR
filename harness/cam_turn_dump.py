@@ -145,3 +145,47 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def estimate_v3(sm, min_moving=0.15, min_share=0.30, min_spread=0.35, bw=None):
+    """v3 (2026-11-21, from the Hellraiser dumps): blocks where standing still won (vector 0) never vote: in a dark, grainy scene they are noise
+    and voted 'no turn' (hiding every turn start). Few moving blocks = the prediction was right (miss 0); else the mode of the moving blocks, kept
+    only if it holds min_share of them and spreads over min_spread of the eye width (a moving object is not a camera turn).
+    Returns (miss rad, ok, why, moving share, peak share, spread)."""
+    still = [s for s in sm if s[5] == 0]
+    moving = [s for s in sm if s[5] > 0]
+    tot = sum(s[1] for s in sm) or 1
+    mshare = sum(s[1] for s in moving) / tot
+    if len(sm) < 200:
+        return 0.0, False, "few blocks", mshare, 0, 0
+    if mshare < min_moving:
+        return 0.0, True, "still", mshare, 0, 0
+    miss, agree, n, hist = estimate(moving)
+    cl = [s for s in moving if abs(s[0] - miss) <= 4 * K_BIN]
+    if not cl:
+        return 0.0, False, "no peak", mshare, agree, 0
+    us = sorted(((s[2] - (bw // 2 if s[4] else 0)) / (bw / 2)) for s in cl)
+    spread = us[int(0.9 * (len(us) - 1))] - us[int(0.1 * (len(us) - 1))]
+    ok = agree >= min_share and spread >= min_spread
+    return (miss if ok else 0.0), ok, ("turn" if ok else ("weak peak" if agree < min_share else "narrow")), mshare, agree, spread
+
+
+def estimate_v4(sm, still_cost=0.008, min_share=0.30, min_spread=0.35, bw=None):
+    """v4 (2026-11-21): v2's mode over all blocks, but a block where standing still won votes only if that match is good (cost < still_cost):
+    in a dark, grainy scene most such blocks are noise, which matches equally badly everywhere and voted 'the prediction was right' (Hellraiser:
+    median still cost 0.020 against the lab's 0.002). A non-zero miss must also spread over min_spread of the eye width (not one moving object).
+    Returns (miss rad, ok, why, agree, spread, n)."""
+    vote = [s for s in sm if s[5] > 0 or s[6] < still_cost]
+    if len(vote) < 200:
+        return 0.0, False, "few blocks", 0, 0, len(vote)
+    miss, agree, n, hist = estimate(vote)
+    if agree < min_share:
+        return 0.0, False, "weak peak", agree, 0, n
+    if abs(miss) < 0.15 / DEG:
+        return miss, True, "small", agree, 0, n
+    cl = [s for s in vote if abs(s[0] - miss) <= 4 * K_BIN]
+    us = sorted(((s[2] - (bw // 2 if s[4] else 0)) / (bw / 2)) for s in cl)
+    spread = us[int(0.9 * (len(us) - 1))] - us[int(0.1 * (len(us) - 1))]
+    if spread < min_spread:
+        return 0.0, False, "narrow", agree, spread, n
+    return miss, True, "turn", agree, spread, n

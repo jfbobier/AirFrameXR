@@ -922,8 +922,8 @@ bool FrameGen::harvestTurn(int n, bool correct, bool wait) {
     static constexpr double kRange = 20.0 * 3.14159265358979 / 180.0, kBin = 0.05 * 3.14159265358979 / 180.0;   // misses within +-20 deg, 0.05 deg bins
     static constexpr int kBins = 801;
     std::vector<float> hist(kBins, 0.f);
-    std::vector<float> eps, wts;
-    eps.reserve(32768); wts.reserve(32768);
+    std::vector<float> eps, wts, ucol;
+    eps.reserve(32768); wts.reserve(32768); ucol.reserve(32768);
     double M[2][9];
     for (int e = 0; e < 2; e++) qmatRow(I.turnQ[sl] + e * 4, M[e]);
     const float fx = (float)I.flowW / (float)m_w, fy = (float)I.flowH / (float)m_h;
@@ -937,6 +937,10 @@ bool FrameGen::harvestTurn(int n, bool correct, bool wait) {
             if (!(cost < 0.08f)) continue;                      // a doubtful match
             const float vx = half2f(px[0]), vy = half2f(px[1]);
             if (!std::isfinite(vx) || !std::isfinite(vy)) continue;
+            // standing still won here: a vote only if that match is good. Noise (a dark, grainy scene) matches equally badly everywhere, so standing
+            // still "wins" on it and voted "the prediction was right" (Hellraiser 2026-11-21: median cost of such blocks 0.020 against the lab's 0.002;
+            // it hid every turn start)
+            if (vx == 0.f && vy == 0.f && !(cost < 0.008f)) continue;
             const int e = bx >= half ? 1 : 0;
             const float* tf = I.turnFov[sl] + e * 4;            // l r u d
             const double sx = ((bx + 0.5) * I.grid) / fx, sy = ((by + 0.5) * I.grid) / fy;   // full-res SBS px of the block's centre
@@ -956,22 +960,37 @@ bool FrameGen::harvestTurn(int n, bool correct, bool wait) {
             if (d < -kRange || d > kRange) continue;
             const float w = (float)(hb / nb);
             hist[(int)std::lround((d + kRange) / kBin)] += w;
-            eps.push_back((float)d); wts.push_back(w);
+            eps.push_back((float)d); wts.push_back(w); ucol.push_back((float)ub);
         }
     }
     m_ctx->Unmap(I.turnStage[sl], 0);
     double total = 0; for (float h : hist) total += h;
-    int peak = -1; double best = 0;
-    for (int k = 2; k < kBins - 2; k++) { const double w5 = hist[k - 2] + hist[k - 1] + hist[k] + hist[k + 1] + hist[k + 2]; if (w5 > best) { best = w5; peak = k; } }
-    double miss = 0, agree = total > 0 ? best / total : 0;
+    // the peak: the heaviest +-0.2 deg window (a real game's turn is a broad peak: walking adds depth-dependent motion; the lab's is sharp), then
+    // the weighted mean within +-0.3 deg of it
+    static constexpr int kHw = 4;
+    int peak = -1; double best = 0, win = 0;
+    for (int k = 0; k < 2 * kHw + 1 && k < kBins; k++) win += hist[k];
+    for (int k = kHw; k < kBins - kHw; k++) {
+        if (k > kHw) win += hist[k + kHw] - hist[k - kHw - 1];
+        if (win > best) { best = win; peak = k; }
+    }
+    double miss = 0, agree = total > 0 ? best / total : 0, spread = 0;
     if (peak >= 0) {
         const double c = peak * kBin - kRange; double sw = 0, sd = 0;
-        for (size_t k = 0; k < eps.size(); k++) if (std::fabs(eps[k] - c) <= 4 * kBin) { sw += wts[k]; sd += wts[k] * eps[k]; }
+        std::vector<float> us;
+        for (size_t k = 0; k < eps.size(); k++) if (std::fabs(eps[k] - c) <= (kHw + 2) * kBin) { sw += wts[k]; sd += wts[k] * eps[k]; us.push_back(ucol[k]); }
         miss = sw > 0 ? sd / sw : c;
+        if (us.size() >= 10) {   // how wide the peak's blocks are across the eye (p10 - p90 of u): a camera turn moves the whole view, a moving object does not
+            std::sort(us.begin(), us.end());
+            spread = us[(size_t)(0.9 * (us.size() - 1))] - us[(size_t)(0.1 * (us.size() - 1))];
+        }
     }
     const double used = I.turnUsed[sl];
-    const bool ok = eps.size() >= 200 && agree >= 0.30;
-    double turn = ok ? used - miss : 0.0;   // too few blocks agree (a cut, chaos): no turn
+    const bool smallMiss = std::fabs(miss) < 0.15 * 3.14159265358979 / 180.0;
+    const bool ok = eps.size() >= 200 && agree >= 0.30 && (smallMiss || spread >= 0.35);
+    // a doubtful measurement (too few blocks, a weak or narrow peak) is no evidence against the prediction: half of it is kept (a cut fades in a few
+    // pairs) and nothing is corrected
+    double turn = ok ? used - miss : 0.5 * used;
     if (std::fabs(turn) < 0.03 * 3.14159265358979 / 180.0) turn = 0;   // still: no turn (sub-pixel noise)
     I.turnPred = turn;
     {
@@ -981,7 +1000,7 @@ bool FrameGen::harvestTurn(int n, bool correct, bool wait) {
         I.turnRate = I.haveRate ? turn / dt : 0.0;
     }
     if (ok) stats.camTurnMeasured++; else stats.camTurnDoubtful++;
-    if (correct && std::fabs(turn - used) > 0.25 * 3.14159265358979 / 180.0) {
+    if (correct && ok && std::fabs(turn - used) > 0.25 * 3.14159265358979 / 180.0) {
         // the prediction missed: this pair and every newer frame turn by the difference (their own steps are kept), and the pair's flow is redone
         const double d = turn - used;
         for (int k = n, guard = 0; guard < Impl::H; guard++) {
@@ -1008,7 +1027,7 @@ bool FrameGen::harvestTurn(int n, bool correct, bool wait) {
         if (csv) {
             const int pvd = (n + Impl::H - 1) % Impl::H;
             fprintf(csv, "%llu,%.4f,%.4f,%.4f,%.3f,%zu,%d,%d,%.2f\n", (unsigned long long)seq, used * 57.29578, miss * 57.29578, turn * 57.29578, agree, eps.size(), ok ? 1 : 0,
-                    (correct && std::fabs(turn - used) > 0.25 * 3.14159265358979 / 180.0) ? 1 : 0, (I.realT[n] - I.realT[pvd]) * 1000.0);
+                    (correct && ok && std::fabs(turn - used) > 0.25 * 3.14159265358979 / 180.0) ? 1 : 0, (I.realT[n] - I.realT[pvd]) * 1000.0);
             if (seq % 50 == 0) fflush(csv);
         }
     }

@@ -202,7 +202,11 @@ does not follow a large uniform motion (no engine setting helps: `docs/FRAME_GEN
    The **measurement** (`FrameGen::harvestTurn`, CPU, every second block): per textured block, the azimuth about the up axis of its direction in B
    against its match in the aligned A, in tracking space; the weighted mode of the differences (0.05 deg histogram, then the mean around the peak) is
    the part of the turn the prediction missed. The HUD, moving things and parallax do not turn with the camera and fall outside the peak. Under 200
-   blocks or under 30 % agreeing: no turn.
+   blocks or under 30 % agreeing: no turn. **v4 (2026-11-21, from the Hellraiser dumps):** a block where standing still won votes only if that match
+   is good (cost < 0.008): in a dark, grainy game such blocks are noise and voted "the prediction was right", which hid every turn start (17 % of the
+   measurements doubtful, 12 % corrected in the field); the peak window is +-0.2 deg (a real game's turn is a broad peak), a non-zero miss must
+   spread over 35 % of the eye width (not one moving object), and a doubtful measurement keeps half of the prediction instead of dropping it. Offline on
+   the 120 dumps: 119 / 120 confident (v2: 104); the lab's cases unchanged within 0.2 dB.
 4. A **missed prediction** (more than 0.25 deg: a turn starting, stopping, reversing) moves the pair's yaw (and the newer frames') and redoes the
    pair's flow once. The pair's first output reads its measurement without waiting when it is ready; while a turn is in progress (a prediction
    over 0.1 deg) it waits for it (the rest of our own GPU work: 0.7 ms on average, 3.9 ms at most in the lab).
