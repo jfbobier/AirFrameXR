@@ -1896,6 +1896,10 @@ def analyse(sc, outdir: Path):
         a["client"]["duplicate_timestamps_tracked"] = sum(1 for x, y in zip(ts_, ts_[1:]) if x == y)
     hs = (outdir / "host_stdout.txt").read_text(errors="replace") if (outdir / "host_stdout.txt").exists() else ""
     a["host_event_names"] = sorted(set(re.findall(r'"event":"([a-z_]+)"', hs)))
+    # the shim could not reach this host (its IPC version differs: a host built without its shim after an IPC change, 2026-11-20) and the app ran standalone; the
+    # host still streams its idle frames, so nothing else fails clearly
+    sl = (outdir / "ovrshim.log").read_text(errors="replace") if (outdir / "ovrshim.log").exists() else ""
+    a["shim_standalone"] = "host IPC not available" in sl
     a["bench_steps"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"bench_step"' in l]
     a["height_calibrated"] = next((json.loads(l)["data"] for l in hs.splitlines() if '"event":"height_calibrated"' in l), None)
     a["game_runs"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"game_run"' in l]   # the run summary the streamer shows (net block: latency medians, outliers)
@@ -2199,6 +2203,8 @@ def evaluate(sc, a):
         chk("reconnect_first_session_streamed", c.get("frames", 0) >= need, c.get("frames"), f">= {need} frames before the disconnect")
     if sc.get("host") is not None and not (sc.get("host") or {}).get("daemon"):
         chk("host_report_present", h is not None, h is not None, True)
+        if (sc.get("host") or {}).get("shim") and a.get("shim_standalone"):
+            chk("shim_reached_host", False, "the shim ran standalone", "the app's shim connects to this host (a different IPC version: build the host and the shim together)")
         if h:
             chk("host_connected", h.get("connected"), h.get("connected"), True)
             if "host_min_frames" in ck:
