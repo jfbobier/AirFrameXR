@@ -260,6 +260,22 @@ pub fn client_message(b: Option<[f64; 4]>, sharpen: bool) -> String {
         None => json!({ "airframexr": 1, "sharpen": sharpen }).to_string(),
     }
 }
+/// The visionOS app's stand-in views: before its immersive space renders it declares Apple's raw view frustum with both eyes at one point (fake tracking,
+/// `WorldTracker.sendFakeTracking`). A game that started on them would keep, for its whole run, a render size and eye offsets that are not the headset's.
+pub fn is_placeholder_views(off6: &[f32; 6]) -> bool {
+    ((off6[3] - off6[0]).powi(2) + (off6[4] - off6[1]).powi(2) + (off6[5] - off6[2]).powi(2)).sqrt() < 0.001
+}
+/// 1.4: the views a headset app that takes the streamer's box declares (outer, inner, upper, lower; the right eye mirrored), as fov8 (left eye l r u d, right
+/// eye l r u d), with the eye offsets of the last real views, or a 63 mm IPD without any. They stand in for the app's views from the connection until its real
+/// ones arrive, so a game that starts in between gets the box's render size and real stereo.
+pub fn box_views(b: [f64; 4], known: Option<&([f32; 8], [f32; 6])>) -> ([f32; 8], [f32; 6]) {
+    let (o, i, u, l) = (b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32);
+    let off6 = match known {
+        Some(v) if !is_placeholder_views(&v.1) => v.1,
+        _ => [-0.0315, 0.0, 0.0, 0.0315, 0.0, 0.0],
+    };
+    ([o, i, u, l, i, o, u, l], off6)
+}
 /// the render quality sent with the override (f32 bits)
 pub static FOV_QUALITY_REQ: AtomicU32 = AtomicU32::new(0);
 /// 0..1 for a quality given in the settings, the lab flag or the command; anything else is the floor
@@ -620,6 +636,19 @@ mod foveation_guard_tests {
 #[cfg(test)]
 mod fov_tests {
     use super::fov_scale_from;
+    #[test]
+    fn box_views_stand_in() {
+        use super::{box_views, is_placeholder_views};
+        assert!(is_placeholder_views(&[0.0; 6]), "both eyes at one point: the app's stand-in");
+        assert!(!is_placeholder_views(&[-0.031, 0.0, 0.0, 0.031, 0.0, 0.0]));
+        let (f, o) = box_views([1.22, 0.81, 0.9, 0.77], None);
+        assert_eq!(f, [1.22, 0.81, 0.9, 0.77, 0.81, 1.22, 0.9, 0.77], "left eye left = outer, right eye right = outer");
+        assert_eq!(o, [-0.0315, 0.0, 0.0, 0.0315, 0.0, 0.0], "no real views known: a 63 mm IPD");
+        let known = ([1.7; 8], [-0.032, 0.001, 0.0, 0.032, 0.001, 0.0]);
+        assert_eq!(box_views([1.0; 4], Some(&known)).1, known.1, "the last real eye offsets");
+        assert_eq!(box_views([1.0; 4], Some(&([1.7; 8], [0.0; 6]))).1[3], 0.0315, "a known stand-in's offsets are not used");
+        assert!(fov_scale_from(&[1.22, 0.81, 0.9, 0.77], &f).iter().all(|s| *s == 1.0), "the box told against itself: unrestricted, full render size");
+    }
     // the Vision Pro's views as the host saved them: left eye l r u d, right eye l r u d
     const AVP: [f32; 8] = [1.7823, 1.0186, 1.2169, 1.0186, 1.0249, 1.7995, 1.2253, 1.0249];
 

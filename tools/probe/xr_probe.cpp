@@ -486,7 +486,8 @@ int main(int argc, char** argv) {
             if (!fovLogged && vc >= 2 && (vs.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT)) {   // the field of view the runtime tells the app (the harness compares it with the headset's)
                 fovLogged = true;
                 for (uint32_t k = 0; k < 2; k++)
-                    L("view fov tan eye %u: L %.4f R %.4f U %.4f D %.4f", k, -tanf(views[k].fov.angleLeft), tanf(views[k].fov.angleRight), tanf(views[k].fov.angleUp), -tanf(views[k].fov.angleDown));
+                    L("view fov tan eye %u: L %.4f R %.4f U %.4f D %.4f pos %.4f %.4f %.4f", k, -tanf(views[k].fov.angleLeft), tanf(views[k].fov.angleRight), tanf(views[k].fov.angleUp), -tanf(views[k].fov.angleDown),
+                      views[k].pose.position.x, views[k].pose.position.y, views[k].pose.position.z);
             }
             if (done % 20 == 0) L("frame %d: viewState 0x%llx pos(%.3f %.3f %.3f) period %lld ns", done, (unsigned long long)vs.viewStateFlags,
                 views[0].pose.position.x, views[0].pose.position.y, views[0].pose.position.z, (long long)fs.predictedDisplayPeriod);

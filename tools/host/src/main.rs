@@ -2337,7 +2337,8 @@ fn main() {
                         let off6 = [a[0], a[1], a[2], b[0], b[1], b[2]];
                         // the main loop applies it: it may have to rebuild the encoder for the negotiated stream parameters first
                         *shared.pending_views.lock() = Some((fov8, off6));
-                        event(origin, "views_config", json!({ "fov_tan": fov8, "eye_offsets": off6 }));
+                        // the app's stand-in (both eyes at one point) has its own event: the lab's analysis reads views_config as the headset's real views
+                        event(origin, if vision::is_placeholder_views(&off6) { "views_placeholder" } else { "views_config" }, json!({ "fov_tan": fov8, "eye_offsets": off6 }));
                     }
                     ServerCoreEvent::ViewsConfig(cfg) => event(origin, "views_config", json!({
                         "ipd_m": cfg.local_view_transforms[1].position.x - cfg.local_view_transforms[0].position.x,
@@ -2470,6 +2471,8 @@ fn main() {
     let mut sent_ts: Vec<u64> = vec![];
     let views_path = args.config_dir.join("airframexr_views.json");
     let mut last_views = load_views(&views_path);
+    let mut real_views_seen = false;   // this connection's real views arrived (not the app's stand-in)
+    let mut placeholders_ignored = 0usize;
     let mut logged_fov = ([1.0f32; 4], 0.0f32, (0i32, 0i32));   // the field-of-view restriction last logged (a change, or the first publish with one, is logged once)
     let mut views_published = false;
     let mut deferred_reconfig = false;
@@ -2783,6 +2786,7 @@ fn main() {
             let connect = shared.connect_pending.swap(false, Ordering::SeqCst);
             if connect {
                 views_published = false;
+                real_views_seen = false;
             }
             if connect || (deferred_reconfig && !app_alive()) {
                 // Rebuild the encoder if the negotiated stream (resolution, refresh rate, foveation) differs from what it was built
@@ -2859,14 +2863,32 @@ fn main() {
                 logs::general("INFO", &format!("headset sharpening {} (sent to the client)", if args.client_sharpen { "on" } else { "off" }));
             }
             if let Some(v) = shared.pending_views.lock().take() {
-                last_views = Some(v);
-                save_views(&views_path, &v);
-                views_published = false;
+                let stand_in = vision::is_placeholder_views(&v.1);
+                if stand_in && (args.client_box.is_some() || last_views.is_some_and(|k| !vision::is_placeholder_views(&k.1))) {
+                    // the app's stand-in views (Apple's raw frustum, both eyes at one point) never replace the box sent to the app or the headset's last
+                    // real views: a game starting now would keep their render size and no stereo for its whole run (field 2026-11-20, SWGR)
+                    if placeholders_ignored == 0 {
+                        logs::general("INFO", "the headset app's stand-in views are not used (they come before its real ones): a game that starts now gets the box sent to the app, or the headset's last real views");
+                    }
+                    placeholders_ignored += 1;
+                } else {
+                    real_views_seen |= !stand_in;
+                    last_views = Some(v);
+                    if !stand_in {
+                        save_views(&views_path, &v);   // only real views are kept for the next start
+                    }
+                    views_published = false;
+                }
             }
             if !views_published && shared.stream_ready.load(Ordering::SeqCst) {
                 // the shim presents the device to an OpenXR app only once it has the FoV: this connection's views, or the ones
-                // the same headset sent last time (they arrive again right after the first decoded frame)
-                if let Some((fov8, off6)) = last_views {
+                // the same headset sent last time (they arrive again right after the first decoded frame). 1.4: with a box sent to
+                // the headset app, that box until the app's real views arrive (a 1.4 app declares exactly the box)
+                let views = match (args.client_box, real_views_seen) {
+                    (Some(b), false) => Some(vision::box_views(b, last_views.as_ref())),
+                    _ => last_views,
+                };
+                if let Some((fov8, off6)) = views {
                     let fov_scale = effective_fov_scale(&args, &fov8);
                     let ceiling = render_ceiling(&args, eye_size);
                     let fov_quality = if fov_scale.iter().any(|v| *v < 1.0) || ceiling.0 > 0 { args.fov_quality } else { 0.0 };   // nothing to choose without a restriction or a ceiling

@@ -1056,8 +1056,13 @@ def analyse_fov_restrict(sc, outdir):
     out["scale"] = s
     log = (outdir / "app.log").read_text(errors="replace") if (outdir / "app.log").exists() else ""
     got = {}
-    for m in re.finditer(r"view fov tan eye (\d): L ([0-9.]+) R ([0-9.]+) U ([0-9.]+) D ([0-9.]+)", log):
+    pos = {}
+    for m in re.finditer(r"view fov tan eye (\d): L ([0-9.]+) R ([0-9.]+) U ([0-9.]+) D ([0-9.]+)(?: pos ([-0-9.]+) ([-0-9.]+) ([-0-9.]+))?", log):
         got[int(m.group(1))] = [float(m.group(k)) for k in range(2, 6)]
+        if m.group(6) is not None:
+            pos[int(m.group(1))] = [float(m.group(k)) for k in range(6, 9)]
+    if len(pos) == 2:   # the eye distance the app got (xr_probe logs the view positions with the first view fov line)
+        out["app_ipd_m"] = round(sum((a - b) ** 2 for a, b in zip(pos[0], pos[1])) ** 0.5, 4)
     rec = re.search(r"views: \d+, recommended (\d+)x(\d+)", log)
     out["host_events"] = sum(1 for line in open(outdir / "host_stdout.txt", errors="replace") if '"event":"fov_restrict"' in line.replace(' ', ''))
     out["headset_fov"], out["app_fov"], out["recommended"] = headset, got, (int(rec.group(1)), int(rec.group(2))) if rec else None
@@ -2114,6 +2119,9 @@ def evaluate(sc, a):
                     "the headset (the mock with the client patch) declared the box the host sent over ServerControlPacket::Reserved (video.client_box), the right eye mirrored")
             chk("fov_restrict_app_fov", fa["fov_max_err"] <= tol, {"max_err": round(fa["fov_max_err"], 4), "got": fa["app_fov"], "expected": fa["expected_fov"]},
                 f"the four tangents per eye the app got from xrLocateViews are the headset's scaled per edge (outer, inner, upper, lower = {[round(x, 3) for x in fa['scale']]} of it), within {tol}")
+            if "app_ipd_min_m" in ck["fov_restrict"]:
+                chk("fov_app_stereo", fa.get("app_ipd_m", 0) >= ck["fov_restrict"]["app_ipd_min_m"], {"app_ipd_m": fa.get("app_ipd_m")},
+                    f"the app's two eyes are at least {ck['fov_restrict']['app_ipd_min_m']} m apart (a game started on the headset app's stand-in views would get both eyes at one point)")
             er, rr = fa["expected_recommended"], fa["recommended"]
             chk("fov_restrict_recommended_size", abs(er[0] - rr[0]) <= 2 and abs(er[1] - rr[1]) <= 2, {"app": rr, "expected": er, "stream_eye": fa["stream_eye"], "ceiling": fa.get("ceiling")},
                 "the recommended image size follows the area of the restricted view and the render quality between the floor and the ceiling (the stream's eye size, or the panel reference when the stream is fitted to the headset's window)")

@@ -1,0 +1,113 @@
+{
+  "description": "1.4.0-pre.2 (field bug 2026-11-20, SWGR): a game that starts before the headset app's real views. The mock headset first sends the visionOS app's stand-in views (MOCK_PLACEHOLDER_VIEWS=1: Apple's raw frustum 1.73 / 1.00 / 1.00 / 1.19, both eyes at one point, as WorldTracker.sendFakeTracking does) and declares the box only after its first frame, so the app (started at once) reads the host's views before the real declaration. The host must not use the stand-in: with the box sent to the app (--client-box) the app is told the box unrestricted at the stream's full eye size, with a real eye distance. Before the fix the app got the box as 70 / 81 / 90 / 65 % of the stand-in, a render size about 0.74 x 0.76 of the stream's and both eyes at one point. Otherwise e2e_fov_client_box.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 420,
+    "client_box": "1.2,0.8,0.9,0.8"
+  },
+  "client": {
+    "seconds": 55,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "views_tan": "1.732,1.0,1.192,1.0",
+    "views_after_first_frame": true
+  },
+  "client_env": {
+    "RUST_LOG": "warn",
+    "MOCK_PLACEHOLDER_VIEWS": "1"
+  },
+  "app": {
+    "frames": 420,
+    "timeout_s": 60
+  },
+  "gpu_sample": true,
+  "timeout_s": 200,
+  "checks": {
+    "host_min_frames": 250,
+    "client_min_frames": 200,
+    "timestamps_monotonic": true,
+    "max_duplicate_timestamps": 400,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 3520,
+      "height": 1600,
+      "color_range": "pc"
+    },
+    "decode": true,
+    "decode_frame_slack": 40,
+    "app_min_frames": 300,
+    "pose_roundtrip_max_rad": 0.06,
+    "min_yaw_range_rad": 0.3,
+    "refresh_hz": 90,
+    "max_pipeline_latency_ms": 150,
+    "fov_restrict": {
+      "scale": [
+        100,
+        100,
+        100,
+        100
+      ],
+      "tol": 0.002,
+      "declared": [
+        1.2,
+        0.8,
+        0.9,
+        0.8
+      ],
+      "app_ipd_min_m": 0.05
+    }
+  }
+}
