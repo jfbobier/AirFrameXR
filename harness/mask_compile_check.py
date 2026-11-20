@@ -1,4 +1,4 @@
-"""docs/PLAN_1_4_FOUNDATION.md F3 / F5: the launcher's real SessionCompiler (uitest.exe --session-compile-selftest) writes the encoder's mask (video.encode_mask,
+"""docs/PLAN_1_4_FOUNDATION.md F3 / F4 / F5: the launcher's real SessionCompiler (uitest.exe --session-compile-selftest) writes the encoder's mask (video.encode_mask,
 polygon_uv_v1) and the session's foveation flag, on this PC (WSL interop, no builder): build the GUIs first with tools/wsl/check_gui.sh.
 
     python3 harness/mask_compile_check.py        one line per case, PASS when the written mask equals this file's port of FovMask.Polygon + MaskEncoding.ToUv
@@ -6,6 +6,8 @@ polygon_uv_v1) and the session's foveation flag, on this PC (WSL interop, no bui
 Cases (the shipped "AVP optimized trade-off" profile: the author's fit with per-eye edges and corner lines): the Vision Pro with the profile in force and the encoding
 foveated (the mask over the box the stream is sized for = the restriction sent to the app), the same with "no foveation" (no mask, foveation off), a profile without a
 mask, the restriction changed by hand after the profile was chosen (the mask belongs to another rectangle: none), and a Quest 3 (the mask over its declared box).
+In each case the settings panel (uitest.exe --mask-choice-selftest) must name the mask in its Encoding radios when the profile has one, and on the Vision Pro show the
+compiled foveation numbers read-only.
 """
 import json, shutil, subprocess, sys, tempfile
 from pathlib import Path
@@ -81,7 +83,14 @@ def compile_case(work, name, headset, box, prof, restriction, encode_profile="fo
     comp = json.loads((root / "config" / "session.json").read_text()) if (root / "config" / "session.json").exists() else {}
     st = json.loads((root / "config" / "airframexr.json").read_text())
     line = (root / "session_compile.txt").read_text(errors="replace").strip() if (root / "session_compile.txt").exists() else ""
-    return comp, st, line
+    # F4: the settings panel over the same folder (the compiled session.json is there now)
+    subprocess.run([str(root / "bin" / "uitest.exe"), "--mask-choice-selftest", "--out", out], cwd=str(root / "bin"), capture_output=True, timeout=300)
+    ui = {}
+    if (root / "mask_choice.txt").exists():
+        for l in (root / "mask_choice.txt").read_text(errors="replace").splitlines():
+            k, _, v = l.partition("=")
+            ui[k] = v
+    return comp, st, line, ui
 
 
 def fit_profile(with_mask=True, pid="fit"):
@@ -110,7 +119,7 @@ def main():
         ("quest3_mask", "Meta Quest 3", quest_box, fit_profile(), tan, "foveated", quest_box, True),
     ]
     for name, headset, box, prof, restr, enc, view, fov_on in cases:
-        comp, st, line = compile_case(work, name, headset, box, prof, restr, enc)
+        comp, st, line, ui = compile_case(work, name, headset, box, prof, restr, enc)
         got = getp(st, "video.encode_mask")
         checks = {"session_foveation": getp(comp, "session_settings.video.foveated_encoding.enabled") is fov_on and getp(comp, "openvr_config.enable_foveated_encoding") is fov_on}
         if view is None:
@@ -122,9 +131,20 @@ def main():
             checks["left"] = same_poly((got or {}).get("left"), want["left"])
             checks["right"] = same_poly((got or {}).get("right"), want["right"])
             checks["log"] = "foveated from the mask" in line
+        # F4: the radios name the mask when the profile in force has one; on the Vision Pro the six numbers are the compiled ones, read-only
+        masked = prof.get("mask") is not None and name != "avp_restriction_changed"
+        checks["ui_labels"] = (ui.get("fov_text", "").startswith(f"Foveated from the mask of '{FIT['name']}'") and ui.get("full_text") == "No foveation (full frame + split encode)") if masked \
+            else ui.get("fov_text", "").startswith("Foveated (ALVR")
+        checks["ui_choice"] = ui.get("fov_checked") == ("False" if enc == "full-split" else "True")
+        computed = masked and headset.startswith("Apple")
+        checks["ui_fields"] = ui.get("fields_enabled") == ",".join(["False" if computed else "True"] * 6)
+        if computed:
+            want6 = [getp(comp, "session_settings.video.foveated_encoding.content." + k) for k in ("center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y")]
+            got6 = [float(x) for x in ui.get("fields", "").split(",") if x]
+            checks["ui_compiled_numbers"] = len(got6) == 6 and all(w is not None and abs(g - w) <= 0.006 for g, w in zip(got6, want6))
         ok = all(checks.values())
         ok_all &= ok
-        print(f"{'PASS' if ok else 'FAIL'}  {name}: {checks}" + ("" if ok else f"\n      log: {line[-400:]}\n      mask: {json.dumps(got)[:600]}"))
+        print(f"{'PASS' if ok else 'FAIL'}  {name}: {checks}" + ("" if ok else f"\n      log: {line[-400:]}\n      mask: {json.dumps(got)[:600]}\n      ui: {ui}"))
     print(f"mask_compile_check: {'PASS' if ok_all else 'FAIL'} ({work})")
     return 0 if ok_all else 1
 

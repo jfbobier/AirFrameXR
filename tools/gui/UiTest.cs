@@ -504,6 +504,17 @@ namespace AirFrameXR
                 File.WriteAllLines(Path.Combine(outDir, "encoding.txt"), lines);
                 return 0;
             }
+            if (Arg("--mask-choice-selftest") != null)   // harness/mask_compile_check.py (1.4-foundation F4): the settings panel over the config\ next to this exe
+            {
+                var panel = new SettingsPanel(new AppSettings(), Session.Load());
+                panel.Load();
+                var ic = CultureInfo.InvariantCulture;
+                var six = new[] { panel.Fcx, panel.Fcy, panel.Fsx, panel.Fsy, panel.Frx, panel.Fry };
+                var lines = new List<string> { "fov_text=" + panel.ProfFov.Text, "full_text=" + panel.ProfFull.Text, "fov_checked=" + panel.ProfFov.Checked,
+                    "fields_enabled=" + string.Join(",", six.Select(n => n.Enabled)), "fields=" + string.Join(",", six.Select(n => ((double)n.Value).ToString("0.00", ic))) };
+                File.WriteAllLines(Path.Combine(outDir, "mask_choice.txt"), lines);
+                return 0;
+            }
             var pmCases = Arg("--pipeline-model-selftest");   // harness/pipeline_model_check.py: the C# pipeline model against the Python oracle, case by case
             if (pmCases != null)
             {
