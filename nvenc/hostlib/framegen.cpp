@@ -711,6 +711,27 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     return m_out;
 }
 
+void FrameGen::DescribeCaps(char* out, int outlen) {
+    Impl& I = *m_i;
+    if (!out || outlen <= 0) return;
+    out[0] = 0;
+    if (!I.of) return;
+    auto list = [&](NV_OF_CAPS c, std::string& txt) {
+        uint32_t v[16] = {}; uint32_t n = 16;
+        if (I.api.nvOFGetCaps(I.of, c, v, &n) != NV_OF_SUCCESS) { txt = "?"; return; }
+        txt.clear();
+        // the driver fills the whole array: the list ends at the first 0 (a 0 in the first place is the answer "no")
+        for (uint32_t k = 0; k < n && k < 16 && (k == 0 || v[k] != 0); k++) txt += (k ? " " : "") + std::to_string(v[k]);
+    };
+    std::string hintOf, hintGrids, outGrids, roi;
+    list(NV_OF_CAPS_SUPPORT_HINT_WITH_OF_MODE, hintOf);
+    list(NV_OF_CAPS_SUPPORTED_HINT_GRID_SIZES, hintGrids);
+    list(NV_OF_CAPS_SUPPORTED_OUTPUT_GRID_SIZES, outGrids);
+    list(NV_OF_CAPS_SUPPORT_ROI, roi);
+    snprintf(out, outlen, "hints in optical-flow mode: %s; hint grids: %s; output grids: %s; ROI: %s",
+             hintOf == "1" ? "yes" : hintOf == "0" ? "no" : hintOf.c_str(), hintGrids.c_str(), outGrids.c_str(), roi.c_str());
+}
+
 void FrameGen::SetMask(int eye, const float* uv, int n) {
     Impl& I = *m_i;
     if (eye < 0 || eye > 1) return;

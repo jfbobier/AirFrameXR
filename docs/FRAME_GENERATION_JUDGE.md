@@ -52,6 +52,23 @@ boundary band (edge excess) goes 0.12 (head) -> 0.18 / 0.32 / 0.45 / 0.62 / 0.77
 (`pan_x180_g24_pictures.png`) show torn, doubled vertical edges and ghosted texture; the head turn's are clean. A head turn never reaches the optical flow
 (A is turned into B's camera first); a stick turn reaches it whole, and the flow as configured (half scale, fast preset, grid 4, no hints) does not follow it.
 
+### Stick turns: the flow engine's settings, and the rotation oracle (2026-11-20, RTX 5090)
+
+The 5090's optical-flow engine supports external hints in optical-flow mode (hint grids 1 2 4 8, output grids 1 2 4, ROI; `fgj_start` prints it).
+The 3080 Ti was offline: not checked.
+
+**Settings sweep** (lab-only `AIRFRAMEXR_FG_JUDGE_PERF` / `_FLOW_SCALE` / `_GRID`; 11 settings, 3 starts, gaps 16.7 / 24.4 ms, pans 60-270 deg/s): no setting fixes
+stick turns. At 24.4 ms the shipped one (fast, half scale, grid 4: 1.05 ms) scores 22.7 / 20.2 / 17.8 dB at 120 / 180 / 270 deg/s; the best (slow or fast preset at
+full scale, grid 4) 23.2 / 20.5 / 17.9 for 2.9-7.6 ms; finer grids (2, 1) are worse and dearer (1.4-19 ms). Head and scene cases do not move. The shipped
+settings stay.
+
+**Rotation oracle** (`AIRFRAMEXR_FG_JUDGE_PAN_ORACLE=1`: the generator is told the camera's turn as if it were the head's, the upper bound of compensating a
+global rotation before the flow): the double images go away: edge excess at 24.4 ms 0.32 / 0.45 / 0.62 -> 0.14 / 0.15 / 0.17 (a head turn: 0.12), and the pictures
+(`20261120T212442Z_fg_judge/pan_x180_g24_pictures.png`) are clean but for a black strip at the eye's edge, the part of the view neither rotated frame covers
+(about half the turn per gap, ~50 px at 180 deg/s). Whole-frame PSNR falls (20.2 -> 19.1 at 180 deg/s) because of that strip alone: PSNR is the wrong score for this
+case, the edge excess and the pictures are the right ones. So the flow is not what fails on a stick turn: the generator needs the turn removed first, as it does
+for the head. The strip needs a fill (the other frame, or the edge clamped).
+
 ## What it does not tell
 
 One scene, one GPU, one frame size; PSNR rewards blending and SSIM is a proxy; nothing here sees judder over time or the feel of a double image in a headset.

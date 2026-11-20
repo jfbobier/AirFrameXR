@@ -350,6 +350,11 @@ struct Fgj { std::unique_ptr<FrameGen> fg; int eyeW = 0, eyeH = 0; };
 // the `pan` scenario (nvh_bench_fgj_pan): the camera turns at this rate (deg/s) about the world's up axis while the scene's animation stays at
 // the reference time and the head the generator is told stays where it is: a stick turn. 0 = off.
 double g_fgjPanDegS = 0, g_fgjPanRef = 0;
+// the camera turn the generator is told at pan clock t: 0 unless the pan oracle is on
+float panYaw(double t) {
+    static const bool oracle = [] { const char* v = getenv("AIRFRAMEXR_FG_JUDGE_PAN_ORACLE"); return v && atoi(v) != 0; }();
+    return oracle && g_fgjPanDegS != 0 ? (float)(g_fgjPanDegS * (t - g_fgjPanRef) * XM_PI / 180.0) : 0.f;
+}
 
 // the frame's texture (R10G10B10A2 or RGBA8) into 8-bit RGBA
 bool ReadRgba8(Bench* b, ID3D11Texture2D* tex, uint8_t* rgba) {
@@ -416,6 +421,10 @@ void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, in
     if (const char* v = getenv("AIRFRAMEXR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_COST_SCALE")) c.costScale = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_PHOTO_SCALE")) if (synth != 2) c.photoScale = (float)atof(v);
+    // the judge's own sweep of the flow engine (the streamer has these fixed: main.rs FG_FLOW_SCALE 0.5, FG_PERF 20, grid 4)
+    if (const char* v = getenv("AIRFRAMEXR_FG_JUDGE_PERF")) c.perfLevel = atoi(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_JUDGE_FLOW_SCALE")) c.flowScale = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_JUDGE_GRID")) c.grid = atoi(v);
     if (!j->fg->Init(eye_w * 2, eye_h, c, err, errlen)) return nullptr;
     j->eyeW = eye_w; j->eyeH = eye_h;
     return j.release();
@@ -431,11 +440,13 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
     for (int k = 0; k < 2; k++) {   // A, then B: the second ingest computes the flow between them
         Target* tg = FgjRender(b, eye_w, eye_h, tt + 3 * k, fov8, ipd, e);
         if (!tg) return fail(e);
-        HeadQuat(tt[3 * k + 2], q8); memcpy(q8 + 4, q8, 16);
+        // pan oracle (AIRFRAMEXR_FG_JUDGE_PAN_ORACLE=1): the generator is told the camera's turn as if it were the head's, the upper bound of a
+        // global-rotation compensation; otherwise it is told the head only (a stick turn as the streamer sees one)
+        HeadQuatYaw(tt[3 * k + 2], panYaw(tt[3 * k]), q8); memcpy(q8 + 4, q8, 16);
         const int r = j->fg->Ingest(tg->resolved.Get(), q8, fov8, err, errlen);
         if (r < 0 || (k == 1 && r != 1)) return fail(std::string("ingest: ") + (err ? err : ""));
     }
-    float q4[4]; HeadQuat(tt[8], q4);
+    float q4[4]; HeadQuatYaw(tt[8], panYaw(tt[6]), q4);
     ID3D11Texture2D* tex = j->fg->Render(1, 0.5f, 0, q4, fov8, err, errlen);
     if (!tex) return fail(std::string("render: ") + (err ? err : ""));
     b->finish();
@@ -446,6 +457,15 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
 }
 
 void nvh_bench_fgj_close(void* jh) { delete (Fgj*)jh; }
+
+int nvh_bench_fgj_caps(void* jh, char* out, int outlen) {
+    auto* j = (Fgj*)jh;
+    if (!j || !j->fg || !out || outlen <= 0) return 0;
+    j->fg->DescribeCaps(out, outlen);
+    const int n = (int)strlen(out);
+    if (n + 2 < outlen) snprintf(out + n, outlen - n, "; in use: %s", j->fg->stats.nvofInfo);
+    return 1;
+}
 
 // One configuration of the quality sweep: the scene at eye_w x eye_h through ALVR's foveation pass and NVENC (the Settings singleton
 // is set from the config; everything else stays as the host configured it), the reconstructed frame compared, in display space,

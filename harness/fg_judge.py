@@ -57,6 +57,8 @@ def load_cases(d):
                 e = json.loads(l)
             except ValueError:
                 continue
+            if e.get("event") == "fgj_start":
+                print("optical flow:", e["data"].get("nvof", "?"))
             if e.get("event") == "fgj_case":
                 cases.append(e["data"])
             elif e.get("event") == "fgj_error":

@@ -411,6 +411,13 @@ void RenderScene(Scene& s, ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv
                  const float* fov8, float ipd) {
     RenderSceneAt(s, ctx, rtv, dsv, W, H, t, t, t, fov8, ipd);
 }
+// the head's orientation at time t followed by a world turn of `extraYaw` radians (RenderSceneAt's composition): the judge's pan oracle
+inline void HeadQuatYaw(double t, float extraYaw, float q[4]) {
+    XMVECTOR p, r; HeadPose(t, p, r);
+    if (extraYaw != 0.f) r = XMQuaternionMultiply(r, XMQuaternionRotationRollPitchYaw(0, extraYaw, 0));
+    XMFLOAT4 f; XMStoreFloat4(&f, r);
+    q[0] = f.x; q[1] = f.y; q[2] = f.z; q[3] = f.w;
+}
 // the head's orientation (x y z w) the scripted camera has at time t
 inline void HeadQuat(double t, float q[4]) {
     XMVECTOR p, r; HeadPose(t, p, r);

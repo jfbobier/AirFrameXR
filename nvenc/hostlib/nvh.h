@@ -192,6 +192,8 @@ void* nvh_bench_fgj_open(void* bench, int eye_w, int eye_h, int synth, char* err
 // renders frame A (times[0..2]) and B (times[3..5]), generates the midpoint for the head pose of times[6..8] and reads it back (RGBA8); info3 = flow ms, synth ms
 int nvh_bench_fgj_gen(void* bench, void* fgj, int eye_w, int eye_h, const double* times9, const float* fov8, float ipd, uint8_t* rgba, float* info2, char* err, int errlen);
 void nvh_bench_fgj_close(void* fgj);
+// the judge generator's optical-flow engine: its hint / grid / ROI capabilities and the session in use, as text (lab)
+int nvh_bench_fgj_caps(void* fgj, char* out, int outlen);
 #ifdef __cplusplus
 }
 #endif

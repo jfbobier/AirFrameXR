@@ -58,6 +58,9 @@ public:
     // The mask of the profile in force (docs/PLAN_1_4_FOUNDATION.md F1, polygon_uv_v1: n points x, y in the eye's uv, u = 0 at the outer edge, v = 0 at the
     // top, convex): the output pass then computes only the pixels inside it (plus 2 px), the rest of the eye is never generated. nullptr / n < 3: the whole eye.
     void SetMask(int eye, const float* uv, int n);
+    // Lab (the frame generation judge): what this GPU's optical-flow engine offers for external hints, as text ("hints in optical-flow mode: yes/no,
+    // hint grids 1 2 4 8, output grids 1 2 4, perf levels ..."); empty before Init. Nothing in the streamer calls it.
+    void DescribeCaps(char* out, int outlen);
     // Reads back the GPU timings of the last passes when they are available (call after the encode of the frame).
     void CollectTimings();
     void ResetHistory();            // the app is gone (or changed): forget the frames

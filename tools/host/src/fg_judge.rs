@@ -24,6 +24,7 @@ extern "C" {
     fn nvh_bench_fgj_gen(b: *mut c_void, j: *mut c_void, eye_w: i32, eye_h: i32, times9: *const f64, fov8: *const f32, ipd: f32, rgba: *mut u8, info2: *mut f32, err: *mut c_char, errlen: i32) -> i32;
     fn nvh_bench_fgj_close(j: *mut c_void);
     fn nvh_bench_fgj_pan(deg_per_s: f64, t_ref: f64);
+    fn nvh_bench_fgj_caps(j: *mut c_void, out: *mut c_char, outlen: i32) -> i32;
 }
 
 pub struct Options {
@@ -237,7 +238,10 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
         }
     }
     let _ = fs::create_dir_all(&opt.out);
-    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "fov": fov, "scene": scene }));
+    let mut caps = [0 as c_char; 512];
+    unsafe { nvh_bench_fgj_caps(gens[1], caps.as_mut_ptr(), 512) };
+    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "fov": fov, "scene": scene,
+        "nvof": cstr(&caps) }));
     let bytes = w * h * 4;
     let (mut fa, mut fb, mut fg) = (vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]);
     let mut outs = [vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]];
