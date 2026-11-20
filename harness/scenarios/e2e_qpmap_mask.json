@@ -1,5 +1,5 @@
 {
- "description": "docs/PLAN_1_4_FOUNDATION.md F1: the encoder mask through the whole OpenXR chain (milder foveation, the probe's fovgrid scene: lines and a white border to the edges). The host takes a per-eye outline (polygon_uv_v1, as the session compile writes it: the left eye keeps its upper-outer corner, the right eye loses all four), the QP map gives every block wholly outside it +51 and equals the Python port, the engine's hidden count equals the oracle's; with the fill off (the default) the hidden blocks still carry the picture",
+ "description": "docs/PLAN_1_4_FOUNDATION.md F1: the encoder mask through the whole OpenXR chain (milder foveation, the probe's fovgrid scene: lines and a white border to the edges). The host takes a per-eye outline (polygon_uv_v1, as the session compile writes it: corners cut at 0.4 of each edge like a real fit's depth: the left eye keeps its upper-outer corner (the probe's stamp), the right eye loses all four, 24 % / 32 % of the eyes; about 9.7 % of the encoded blocks after this foveation, computed offline with the oracle), the QP map gives every block wholly outside it +51 and equals the Python port, the engine's hidden count equals the oracle's; with the fill off (the default) the hidden blocks still carry the picture",
  "topology": {
   "host": "builder",
   "client": "builder",
@@ -30,62 +30,62 @@
      0
     ],
     [
-     0.78,
+     0.6,
      0
     ],
     [
      1,
-     0.22
+     0.4
     ],
     [
      1,
-     0.8
+     0.6
     ],
     [
-     0.8,
+     0.6,
      1
     ],
     [
-     0.22,
+     0.4,
      1
     ],
     [
      0,
-     0.8
+     0.6
     ]
    ],
    "right": [
     [
-     0.18,
+     0.4,
      0
     ],
     [
-     0.82,
+     0.6,
      0
     ],
     [
      1,
-     0.2
+     0.4
     ],
     [
      1,
-     0.78
+     0.6
     ],
     [
-     0.8,
+     0.6,
      1
     ],
     [
-     0.2,
+     0.4,
      1
     ],
     [
      0,
-     0.82
+     0.6
     ],
     [
      0,
-     0.2
+     0.4
     ]
    ]
   }
@@ -141,7 +141,7 @@
    "center": -3,
    "edge": 6,
    "transition": 1.0,
-   "mask_min_hidden_share": 0.03,
+   "mask_min_hidden_share": 0.05,
    "mask_luma": {
     "fill": false,
     "frame": 150,
