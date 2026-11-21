@@ -788,7 +788,8 @@ namespace AirFrameXR
         /// 1.4-foundation (docs/PLAN_1_4_FOUNDATION.md F3 / F5): the encoding's foveation, one writer. Two choices (owner 2026-11-20): "foveated", which takes the mask
         /// of the profile in use when it has one, or "no foveation" (video.encode_profile full-split). ALVR's foveation is separable (one curve across, one down) and
         /// cannot follow the mask's cut corners, so its six numbers stay what PictureEdgesFoveation computes; the mask goes to the encoder as a per-eye outline in the
-        /// stream eye's uv (video.encode_mask, polygon_uv_v1), where every 32 x 32 block wholly outside it gets the highest QP (nvenc/hostlib/nvh.cpp).
+        /// stream eye's uv (video.encode_mask, polygon_uv_v1), where every 32 x 32 block wholly outside it gets a QP that climbs to the highest across a band past
+        /// the outline (nvenc/hostlib/nvh.cpp, tools/host/src/nvidia_profile.rs MASK_QP_BAND).
         public static class MaskEncoding
         {
             public const string Key = "video.encode_mask", Kind = "polygon_uv_v1";
@@ -880,7 +881,7 @@ namespace AirFrameXR
                 if (m != null) Json.Set(scratch.Root, Key, m); else Json.Remove(scratch.Root, Key);
                 if (scratch.EncodeProfile == "full-split") return "encoding: no foveation (full frame)";
                 if (m == null) return "encoding: foveated, no mask (" + (why ?? (view == null ? "the stream's box is not known" : "the outline leaves nothing or is not convex")) + ")";
-                return $"encoding: foveated from the mask of '{u.Name}' (it hides {(100 * hl).ToString("0.0", c)} % / {(100 * hr).ToString("0.0", c)} % of the left / right stream eye; the blocks outside it get the highest QP)";
+                return $"encoding: foveated from the mask of '{u.Name}' (it hides {(100 * hl).ToString("0.0", c)} % / {(100 * hr).ToString("0.0", c)} % of the left / right stream eye; outside it the QP climbs to the highest across a band past the outline)";
             }
         }
 

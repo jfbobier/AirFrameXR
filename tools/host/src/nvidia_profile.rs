@@ -86,6 +86,35 @@ pub const QP_MAP_EDGE_DELTA: i64 = 6;
 /// width of the center->edge ramp, in units of the center region's half size (0.3 = hard edge, 1.0 = gentle)
 pub const QP_MAP_TRANSITION: f64 = 1.0;
 
+/// The band past the encode mask's outline, as a fraction of the eye's source width, over which a hidden block's QP climbs from its own ramp
+/// value to +51 (nvh.cpp nvh_build_qp_map); frame generation draws the same band (framegen.cpp SetMask). 0 = 1.4.1's cliff (+51 right past the
+/// outline, and frame generation stopped 2 px past it: the corners kept an old frame). Owner 2026-11-21 after Gears of War E-Day: "too aggressive,
+/// a little bit more gradual"; 0.10 = about 190 source px on the Vision Pro's 1920 px stream eye. Lab A/B: env AIRFRAMEXR_MASK_BAND=<fraction>.
+pub const MASK_QP_BAND: f64 = 0.10;
+
+/// The cap of the rate fill loop (main.rs RateFill; owner 2026-11-21: "the encoder fills the setting", the loop chosen over a fixed factor).
+/// NVENC's low-latency CBR with ALVR's VBV of 1.1 frames (VideoEncoderNVENC.cpp) keeps every frame under 1.1 x the per-frame budget and produced
+/// about 77 % of its target in games: the medians of the 10 s windows at 275 Mbps / 100 Hz on the 5090 were 0.78 (Gears of War E-Day, 2026-11-21),
+/// 0.77 (SWGR, 11-14), 0.76 (AC Black Flag, 10-30), windows 0.53-0.99; the bench scene fills 0.96-1.00 (1920 x 2368 per eye, 100-357 Mbps). With a
+/// constant bitrate the loop gives NVENC the setting x k, k in [1, RATE_FILL], so the stream averages the setting; content that already fills it
+/// gets k = 1 (no overshoot). Not applied to ALVR's adaptive bitrate (its own loop measures the link) nor to the benchmarks (their bitrate is the
+/// measurement). Lab A/B: env AIRFRAMEXR_RATE_FILL=<cap> (1 = off).
+pub const RATE_FILL: f64 = 1.30;
+
+fn env_f64(name: &str) -> Option<f64> {
+    std::env::var(name).ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite())
+}
+
+/// The mask band in force: AIRFRAMEXR_MASK_BAND (0..1) or MASK_QP_BAND.
+pub fn mask_band() -> f64 {
+    env_f64("AIRFRAMEXR_MASK_BAND").map(|v| v.clamp(0.0, 1.0)).unwrap_or(MASK_QP_BAND)
+}
+
+/// The rate fill loop's cap for a constant bitrate: AIRFRAMEXR_RATE_FILL (1..2; 1 = no loop) or RATE_FILL.
+pub fn rate_fill() -> f64 {
+    env_f64("AIRFRAMEXR_RATE_FILL").map(|v| v.clamp(1.0, 2.0)).unwrap_or(RATE_FILL)
+}
+
 /// Encode profiles (`--encode-profile`): which frame NVENC gets.
 ///  * `session`    (default): whatever the session says (today: ALVR foveated encoding + the QP map).
 ///  * `foveated`:  forces ALVR foveated encoding on (written to the session, it stays on afterwards).

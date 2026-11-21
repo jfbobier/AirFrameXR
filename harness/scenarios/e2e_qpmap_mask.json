@@ -1,5 +1,5 @@
 {
- "description": "docs/PLAN_1_4_FOUNDATION.md F1: the encoder mask through the whole OpenXR chain (milder foveation, the probe's fovgrid scene: lines and a white border to the edges). The host takes a per-eye outline (polygon_uv_v1, as the session compile writes it: corners cut at 0.4 of each edge like a real fit's depth: the left eye keeps its upper-outer corner (the probe's stamp), the right eye loses all four, 24 % / 32 % of the eyes; about 9.7 % of the encoded blocks after this foveation, computed offline with the oracle), the QP map gives every block wholly outside it +51 and equals the Python port, the engine's hidden count equals the oracle's; with the fill off (the default) the hidden blocks still carry the picture",
+ "description": "docs/PLAN_1_4_FOUNDATION.md F1: the encoder mask through the whole OpenXR chain (milder foveation, the probe's fovgrid scene: lines and a white border to the edges). The host takes a per-eye outline (polygon_uv_v1, as the session compile writes it: corners cut at 0.4 of each edge like a real fit's depth: the left eye keeps its upper-outer corner (the probe's stamp), the right eye loses all four, 24 % / 32 % of the eyes; about 9.7 % of the encoded blocks after this foveation, computed offline with the oracle), the QP map gives every block wholly outside it a QP that climbs to +51 across the host's band (nvidia_profile::MASK_QP_BAND, 0.10 of the eye: 672 of the 890 hidden blocks below +51, 218 at +51 with the oracle) and equals the Python port, the engine's hidden count equals the oracle's; with the fill off (the default) the blocks at +51 still carry the picture",
  "topology": {
   "host": "builder",
   "client": "builder",
@@ -146,7 +146,8 @@
     "fill": false,
     "frame": 150,
     "min_hidden_max": 20
-   }
+   },
+   "mask_min_band_share": 0.5
   }
  }
 }

@@ -181,8 +181,11 @@ The game's DLSS motion vectors were an alternative motion source from 0.4 to 0.6
 ## With a mask profile: only what the lens shows is generated (1.4-foundation, 2026-11-20)
 
 With a mask in force (the profile's `video.encode_mask`, the polygons the encoder's QP map already uses), each eye's output pass draws the eye's
-visible polygon (a triangle fan, scaled about its centroid for a margin of at least 2 px) instead of the full-screen triangle: the pixels the lens hides
-are never computed. Outside it the output keeps black (cleared once) or the last copied frame; the encoder gives those blocks QP +51 anyway. The motion
+visible polygon (a triangle fan, scaled about its centroid for a margin of at least 2 px + the band of 10 % of the eye width) instead of the full-screen
+triangle: the pixels the lens hides are never computed. Outside it the output keeps black (cleared once) or the last copied frame; the encoder gives
+those blocks QP +51 anyway. The band: until 2026-11-21 the margin was 2 px, so with frame generation on everything past the outline showed an old frame
+(7 whole-frame copies in 25 minutes of Gears of War E-Day) while the encoder's QP jumped to +51 there; the encoder's QP now climbs across the same band
+(`docs/EXPERIMENTAL_SWITCHES.md`, `encode_mask`) and the generator draws it live. The motion
 search still runs on the whole frame: the engine's ROIs were tried and are slower (`docs/PERFORMANCE_FINDINGS.md`). Lab switch `AIRFRAMEXR_FG_MASK=0`
 draws the whole eye (`docs/EXPERIMENTAL_SWITCHES.md`). Measured (3080 Ti laptop, Balanced, half rate, the shipped trade-off profile's mask, 59 % of the
 eyes visible, 3 pairs): output pass 0.74 -> 0.54 ms, generator 172 -> 153 GPU ms per second, stream 77.2 -> 80.4 fps.

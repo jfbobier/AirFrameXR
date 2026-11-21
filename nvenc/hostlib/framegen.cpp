@@ -48,7 +48,7 @@ VSOut VS(uint id : SV_VertexID) {
     o.uv = p;
     return o;
 }
-// the output pass with a mask: the eye's visible polygon (screen uv of this eye, convex, clockwise, 2 px margin; FrameGen::SetMask) as a triangle fan
+// the output pass with a mask: the eye's visible polygon (screen uv of this eye, convex, clockwise, grown by the margin of FrameGen::SetMask) as a triangle fan
 cbuffer Poly : register(b1) { float4 polyPts[32]; };   // two points per float4
 VSOut VSPoly(uint id : SV_VertexID) {
     uint t = id / 3, k = id - t * 3;
@@ -823,7 +823,7 @@ void FrameGen::DescribeCaps(char* out, int outlen) {
              hintOf == "1" ? "yes" : hintOf == "0" ? "no" : hintOf.c_str(), hintGrids.c_str(), outGrids.c_str(), roi.c_str());
 }
 
-void FrameGen::SetMask(int eye, const float* uv, int n) {
+void FrameGen::SetMask(int eye, const float* uv, int n, float band) {
     Impl& I = *m_i;
     if (eye < 0 || eye > 1) return;
     I.polyN[eye] = 0; stats.maskPts[eye] = 0; stats.maskVisible[eye] = 1.f;
@@ -836,14 +836,16 @@ void FrameGen::SetMask(int eye, const float* uv, int n) {
     for (int k = 0; k < n; k++) { const int j = (k + 1) % n; a2 += x[k] * y[j] - x[j] * y[k]; cx += x[k]; cy += y[k]; }
     cx /= n; cy /= n;
     if (std::fabs(a2) < 1.0) return;   // degenerate: the whole eye
-    // 2 px margin: scaled about the vertex centroid (inside a convex polygon) so the nearest edge moves out by 2 px and every other edge by more
+    // the margin (2 px + the band): scaled about the vertex centroid (inside a convex polygon) so the nearest edge moves out by the margin and every
+    // other edge by more (the eye's viewport clips what passes its edges)
     double dmin = 1e30;
     for (int k = 0; k < n; k++) {
         const int j = (k + 1) % n; const double ex = x[j] - x[k], ey = y[j] - y[k], len = std::sqrt(ex * ex + ey * ey);
         if (len > 1e-9) dmin = std::min(dmin, std::fabs((cx - x[k]) * ey - (cy - y[k]) * ex) / len);
     }
     if (!(dmin > 0.5)) return;
-    const double sc = 1.0 + 2.0 / dmin;
+    const double margin = 2.0 + (std::isfinite(band) ? std::max(0.0, std::min(1.0, (double)band)) : 0.0) * ew;
+    const double sc = 1.0 + margin / dmin;
     // clockwise on the screen (y down: a positive shoelace sum), the orientation the full-screen triangle has, so the rasterizer's culling keeps it
     const bool reverse = a2 < 0;
     for (int k = 0; k < n; k++) {

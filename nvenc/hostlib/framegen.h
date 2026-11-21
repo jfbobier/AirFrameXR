@@ -70,8 +70,9 @@ public:
     // by this object), nullptr on error.
     ID3D11Texture2D* Render(int mode, float t, int age, const float* qOut4, const float* fov8, char* err, int errlen);
     // The mask of the profile in force (docs/PLAN_1_4_FOUNDATION.md F1, polygon_uv_v1: n points x, y in the eye's uv, u = 0 at the outer edge, v = 0 at the
-    // top, convex): the output pass then computes only the pixels inside it (plus 2 px), the rest of the eye is never generated. nullptr / n < 3: the whole eye.
-    void SetMask(int eye, const float* uv, int n);
+    // top, convex): the output pass then computes only the pixels inside it plus a margin (2 px + `band` x the eye width: the band past the outline where the
+    // encoder's QP climbs to the highest, nvh_build_qp_map), the rest of the eye is never generated. nullptr / n < 3: the whole eye.
+    void SetMask(int eye, const float* uv, int n, float band = 0.f);
     // Lab (the frame generation judge): what this GPU's optical-flow engine offers for external hints, as text ("hints in optical-flow mode: yes/no,
     // hint grids 1 2 4 8, output grids 1 2 4, perf levels ..."); empty before Init. Nothing in the streamer calls it.
     void DescribeCaps(char* out, int outlen);

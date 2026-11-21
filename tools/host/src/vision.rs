@@ -75,7 +75,8 @@ pub struct Settings {
     /// 1.4: our client's sharpening of the magnified picture (AMD FidelityFX CAS in its video pass); default on, `client_sharpen on|off` live
     pub client_sharpen: Option<bool>,
     /// 1.4-foundation (docs/PLAN_1_4_FOUNDATION.md F1): the visible outline of the profile in use, per eye, in the stream eye's uv, written by the launcher's
-    /// session compile when the encoding is foveated and the profile has a mask; absent = no mask. The encoder gives the blocks outside it the highest QP.
+    /// session compile when the encoding is foveated and the profile has a mask; absent = no mask. Outside it the encoder's QP climbs to the highest
+    /// across a band (nvidia_profile::MASK_QP_BAND).
     pub encode_mask: Option<EncodeMask>,
     /// F2 lab switch: the hidden blocks are also cleared to black before NVENC (default off; `mask_fill on|off` live)
     pub mask_fill: Option<bool>,
@@ -211,7 +212,11 @@ pub fn stream_summary(session: &Path, encoded: (i32, i32)) -> String {
     let c = &s["openvr_config"];
     let bitrate = &s["session_settings"]["video"]["bitrate"]["mode"];
     let br = match bitrate["variant"].as_str() {
-        Some("ConstantMbps") => format!("{} Mbps constant", bitrate["ConstantMbps"]),
+        Some("ConstantMbps") => {
+            let fill = crate::nvidia_profile::rate_fill();
+            let mbps = bitrate["ConstantMbps"].as_f64().unwrap_or(0.0);
+            if fill > 1.0 { format!("{mbps} Mbps constant (rate fill: NVENC's target up to x{fill:.2} until the stream averages the setting)") } else { format!("{mbps} Mbps constant") }
+        }
         Some(v) => format!("bitrate {v}"),
         None => "bitrate ?".into(),
     };

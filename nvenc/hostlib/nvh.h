@@ -28,11 +28,14 @@ int nvh_describe(void* h, char* buf, int buflen);
 int nvh_qpmap_dump(const char* path);
 // The mask (docs/PLAN_1_4_FOUNDATION.md F1): eye 0 = left, 1 = right; `uv` = n (x, y) pairs of a convex polygon in the eye's unfoveated uv
 // (x = 0 at the eye's outer edge, 1 at its inner edge; y = 0 at the top); n < 3 clears that eye. Call before nvh_create: the QP map gives
-// every 32 x 32 block whose whole footprint lies outside the polygon +51, and "mask_fill" (nvh_set, live) clears those blocks to black after
-// the foveation pass. Returns 0 for a bad eye, more than 64 points or a non-finite value.
+// every 32 x 32 block whose whole footprint lies outside the polygon a QP that climbs from its own ramp value to +51 across the band
+// (nvh_set_f "mask_band", a fraction of the eye's source width; 0 = +51 at once) and +51 beyond it, and "mask_fill" (nvh_set, live) clears the
+// blocks at +51 to black after the foveation pass. Returns 0 for a bad eye, more than 64 points or a non-finite value.
 int nvh_set_mask(int eye, const float* uv, int n);
 // After nvh_create: blocks judged hidden, blocks judged (inside an eye with a mask), fill rectangles. Returns 1 when a mask is set.
 int nvh_mask_stats(int* hidden, int* blocks, int* rects);
+// After nvh_create: the hidden blocks at +51 (beyond the band) and the band in force. Returns 1 when a mask is set.
+int nvh_mask_band_stats(int* top, double* band);
 // Number of NVENC engines of the GPU (split-frame encoding needs >= 2).
 int nvh_encoder_engines(void* h);
 // Starts/stops a background GPU load on a second D3D11 device (about `duty_pct` busy) so the driver keeps the GPU in a

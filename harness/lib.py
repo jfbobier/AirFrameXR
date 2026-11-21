@@ -996,9 +996,36 @@ def mask_footprint_hidden(poly, u0, u1, v0, v1):
     return False
 
 
-def qp_map_expected(cfg, w, h, foveated, c, e, t, mask=None, ramp=True):
+def mask_footprint_separation(poly, u0, u1, v0, v1, sx, sy):
+    """Port of nvh.cpp footprintSeparation: how far (source px, the eye is sx x sy) a hidden footprint lies outside the convex polygon, the largest gap
+    along the box's axes and the polygon's edge normals."""
+    import math
+    n = len(poly)
+    if n < 3:
+        return 0.0
+    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+    best = max((min(xs) - u1) * sx, (u0 - max(xs)) * sx, (min(ys) - v1) * sy, (v0 - max(ys)) * sy, 0.0)
+    area = sum(poly[k][0] * poly[(k + 1) % n][1] - poly[(k + 1) % n][0] * poly[k][1] for k in range(n))
+    if abs(area) < 1e-12:
+        return best
+    sgn = 1.0 if area > 0 else -1.0
+    q = ((u0 * sx, v0 * sy), (u1 * sx, v0 * sy), (u1 * sx, v1 * sy), (u0 * sx, v1 * sy))
+    for k in range(n):
+        ax, ay = poly[k][0] * sx, poly[k][1] * sy
+        ex, ey = poly[(k + 1) % n][0] * sx - ax, poly[(k + 1) % n][1] * sy - ay
+        ln = math.hypot(ex, ey)
+        if ln < 1e-6:
+            continue
+        nx, ny = sgn * ey / ln, -sgn * ex / ln
+        best = max(best, min(nx * (x - ax) + ny * (y - ay) for x, y in q))
+    return best
+
+
+def qp_map_expected(cfg, w, h, foveated, c, e, t, mask=None, ramp=True, band=0.0, hidden_out=None):
     """Independent Python port of nvh.cpp build_qp_map (per 32x32 CTB QP deltas). cfg = negotiated openvr_config. mask = {"left": [[u, v], ...],
-    "right": [...]} (docs/PLAN_1_4_FOUNDATION.md F1): a block whose whole footprint lies outside its eye's polygon gets +51; ramp False = the foveal ramp at 0."""
+    "right": [...]} (docs/PLAN_1_4_FOUNDATION.md F1): a block whose whole footprint lies outside its eye's polygon is hidden; its QP climbs from its
+    own ramp value to +51 across `band` (a fraction of the eye's source width, the host's nvidia_profile::MASK_QP_BAND as nvenc_config reports it;
+    0 = +51 at once) and is +51 beyond. ramp False = the foveal ramp at 0. hidden_out (a list): filled with each block's hidden flag."""
     import math
     cx, cy = cfg["foveation_center_size_x"], cfg["foveation_center_size_y"]
     sx, sy = cfg["foveation_center_shift_x"], cfg["foveation_center_shift_y"]
@@ -1020,7 +1047,12 @@ def qp_map_expected(cfg, w, h, foveated, c, e, t, mask=None, ramp=True):
     ax, ay = axis(cx, sx, rx), axis(cy, sy, ry)
     cols, rows = (w + 31) // 32, (h + 31) // 32
     eye_w = w / 2
+    src_w, src_h = cfg["eye_resolution_width"], cfg["eye_resolution_height"]   # the eye before the foveation (nvh.cpp m_renderWidth / 2, m_renderHeight)
+    band_px = band * src_w
     out = []
+
+    def lround(x):   # C lroundf: half away from zero
+        return int(math.floor(x + 0.5)) if x >= 0 else -int(math.floor(-x + 0.5))
 
     def src(v, a, r):
         try:
@@ -1040,13 +1072,18 @@ def qp_map_expected(cfg, w, h, foveated, c, e, t, mask=None, ramp=True):
             tt = tt * tt * (3 - 2 * tt)
             val = int(math.floor(c + (e - c) * tt + 0.5)) if ramp else 0
             poly = (mask or {}).get("left" if left else "right")
+            hidden = False
             if poly and len(poly) >= 3:
                 x0, x1, y0, y1 = i * 32, min((i + 1) * 32, w), j * 32, min((j + 1) * 32, h)
                 pa, pb = (x0 / eye_w, x1 / eye_w) if left else ((w - x1) / eye_w, (w - x0) / eye_w)
                 u0, u1 = sorted((src(pa, ax, ratio[0]), src(pb, ax, ratio[0])))
                 v0, v1 = sorted((src(y0 / h, ay, ratio[1]), src(y1 / h, ay, ratio[1])))
                 if mask_footprint_hidden(poly, u0, u1, v0, v1):
-                    val = 51
+                    hidden = True
+                    sep = mask_footprint_separation(poly, u0, u1, v0, v1, src_w, src_h) if band_px > 0 else 0.0
+                    val = lround(val + (51 - val) * sep / band_px) if band_px > 0 and sep < band_px else 51
+            if hidden_out is not None:
+                hidden_out.append(hidden)
             out.append(max(-51, min(51, val)))
     return cols, rows, out
 
@@ -1736,7 +1773,10 @@ def analyse_qpmap(sc, outdir, host):
     w, h, fov = fr[0], fr[1], bool(cfgh.get("foveated"))
     cfg = negotiated_cfg(outdir)
     mask = (sc.get("host") or {}).get("encode_mask")
-    cols, rows, exp = qp_map_expected(cfg, w, h, fov, qk["center"], qk["edge"], qk["transition"], mask=mask, ramp=qk.get("ramp", True))
+    band = float((out["qp"] or {}).get("mask_band") or 0.0)   # the band the host used (absent before the band: 0, the cliff)
+    out["band"] = band
+    hid_flags = []
+    cols, rows, exp = qp_map_expected(cfg, w, h, fov, qk["center"], qk["edge"], qk["transition"], mask=mask, ramp=qk.get("ramp", True), band=band, hidden_out=hid_flags)
     out["expected_hist"] = {str(v): exp.count(v) for v in sorted(set(exp))}
     if dump:
         got = dump["data"]
@@ -1745,8 +1785,11 @@ def analyse_qpmap(sc, outdir, host):
         out["ctbs"] = len(got)
         out["hist"] = {str(v): got.count(v) for v in sorted(set(got))}
         out["mask_hidden"], out["mask_blocks"], out["mask_rects"] = dump.get("mask_hidden"), dump.get("mask_blocks"), dump.get("mask_rects")
+        out["mask_top"] = dump.get("mask_top")
     if mask:
-        out["expected_hidden"] = exp.count(51)
+        out["expected_hidden"] = sum(hid_flags)
+        out["expected_top"] = sum(1 for f, v in zip(hid_flags, exp) if f and v >= 51)
+        out["expected_band_blocks"] = sum(1 for f, v in zip(hid_flags, exp) if f and v < 51)   # hidden blocks below the highest QP (the band)
         for line in open(outdir / "host_stdout.txt", errors="replace") if (outdir / "host_stdout.txt").exists() else []:
             if '"encode_mask"' in line and line.lstrip().startswith("{"):
                 try:
@@ -1754,7 +1797,8 @@ def analyse_qpmap(sc, outdir, host):
                 except ValueError:
                     pass
     if qk.get("mask_luma") and (outdir / "client.hevc").exists():
-        # the decoded picture in the hidden blocks (fill on: black) and in the visible ones (the scene's lines), frame `frame`
+        # the decoded picture in the hidden blocks at the highest QP (fill on: black) and in the visible ones (the scene's lines), frame `frame`;
+        # the band's blocks (hidden, below the highest) are in neither: the fill leaves them, they carry the picture
         n = qk["mask_luma"].get("frame", 120)
         p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", str(outdir / "client.hevc"), "-vf", f"select=eq(n\\,{n})", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-"], capture_output=True, timeout=600)
         if len(p.stdout) == w * h:
@@ -1764,7 +1808,11 @@ def analyse_qpmap(sc, outdir, host):
             for j in range(rows):
                 for i in range(cols):
                     blk = img[j * 32:min((j + 1) * 32, h), i * 32:min((i + 1) * 32, w)]
-                    (hid if exp[j * cols + i] == 51 else vis).append(blk)
+                    k = j * cols + i
+                    if not hid_flags[k]:
+                        vis.append(blk)
+                    elif exp[k] >= 51:
+                        hid.append(blk)
             if hid and vis:
                 hv = np.concatenate([b.ravel() for b in hid]); vv = np.concatenate([b.ravel() for b in vis])
                 out["mask_luma"] = {"hidden_mean": round(float(hv.mean()), 2), "hidden_p99": int(np.percentile(hv, 99)), "hidden_max": int(hv.max()),
@@ -2406,6 +2454,12 @@ def evaluate(sc, a):
             chk("mask_hidden_blocks", qa.get("mask_hidden") is not None and abs((qa.get("mask_hidden") or 0) - eh) <= max(1, int(0.005 * ctbs)) and ctbs and eh / ctbs >= qk["mask_min_hidden_share"],
                 {"engine": qa.get("mask_hidden"), "oracle": eh, "ctbs": ctbs, "event": qa.get("mask_event")},
                 f"the engine's hidden block count equals the oracle's and is at least {qk['mask_min_hidden_share']:.0%} of the frame")
+            if "mask_min_band_share" in qk:   # 2026-11-21: past the outline the QP climbs across a band instead of +51 at once
+                et, eb = qa.get("expected_top") or 0, qa.get("expected_band_blocks") or 0
+                chk("mask_band_ramp", (qa.get("band") or 0) > 0 and qa.get("mask_top") is not None and abs((qa.get("mask_top") or 0) - et) <= max(1, int(0.005 * ctbs))
+                    and eh and eb / eh >= qk["mask_min_band_share"] and et > 0,
+                    {"band": qa.get("band"), "engine_top": qa.get("mask_top"), "oracle_top": et, "band_blocks": eb, "hidden": eh},
+                    f"the host reports a band, at least {qk['mask_min_band_share']:.0%} of the hidden blocks climb below the highest QP, and the engine's count at the highest equals the oracle's")
         if "mask_luma" in qk:
             ml, want = qa.get("mask_luma") or {}, qk["mask_luma"]
             if want.get("fill"):
@@ -2413,7 +2467,7 @@ def evaluate(sc, a):
                     ml or qa.get("mask_luma_error"), f"fill on: the hidden blocks decode black (p99 <= {want.get('max_hidden_p99', 4)}), the visible ones keep the scene (max >= 100)")
             else:
                 chk("mask_hidden_keep_picture", ml.get("hidden_blocks") and ml.get("hidden_max", 0) >= want.get("min_hidden_max", 40),
-                    ml or qa.get("mask_luma_error"), f"fill off: the hidden blocks still carry the picture at the highest QP (max >= {want.get('min_hidden_max', 40)}): the fill is off by default")
+                    ml or qa.get("mask_luma_error"), f"fill off: the hidden blocks at the highest QP still carry the picture (max >= {want.get('min_hidden_max', 40)}): the fill is off by default")
     if "tool" in ck:   # the headset tools (xr_probe XR_PROBE_TOOL, scripted keys): analyse_tool
         import math
         tk, ta = ck["tool"], a.get("tool") or {}

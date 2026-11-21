@@ -114,7 +114,10 @@ static int g_noiseAmp = 48;             // noise == 2: per-pixel noise on top, i
 static std::vector<float> g_maskUv[2];
 static std::mutex g_maskMu;                 // nvh_set_mask against the generator's copy (nvh_fg_encode, the encoder thread)
 static std::atomic<int> g_maskSerial{0};    // bumped by every nvh_set_mask: the generator takes the mask again
-static std::atomic<bool> g_maskFill{false};   // F2 lab switch: hidden blocks cleared to black before NVENC (live: host stdin mask_fill)
+static std::atomic<bool> g_maskFill{false};   // F2 lab switch: the blocks at the highest QP cleared to black before NVENC (live: host stdin mask_fill)
+// the band past the outline over which a hidden block's QP climbs from its own ramp value to the highest (fraction of the eye's source
+// width; 0 = every hidden block at the highest, 1.4.1's cliff). Frame generation draws the same band (FrameGen::SetMask margin). Set by the host.
+static float g_maskBand = 0.f;
 
 int nvh_set(const char* key, int64_t v) {
     auto& S = Settings::Instance();
@@ -174,6 +177,7 @@ int nvh_set_f(const char* key, double v) {
     else if (k == "foveation_edge_ratio_x") S.m_foveationEdgeRatioX = (float)v;
     else if (k == "foveation_edge_ratio_y") S.m_foveationEdgeRatioY = (float)v;
     else if (k == "qp_map_transition") S.m_qpMapTransition = (float)v;
+    else if (k == "mask_band") g_maskBand = std::isfinite(v) ? (float)std::max(0.0, std::min(1.0, v)) : 0.f;
     else return 0;
     return 1;
 }
@@ -258,19 +262,52 @@ static bool footprintHidden(const std::vector<float>& P, float u0, float u1, flo
     return false;
 }
 
-static std::vector<D3D11_RECT> g_maskRects;   // the hidden blocks in the encoded frame, merged into runs per block row (the F2 fill)
-static int g_maskHidden = 0, g_maskBlocks = 0;
+// How far (source pixels, sx x sy = the eye's source size) a footprint that footprintHidden judged hidden lies outside the polygon: the largest
+// gap along the box's axes and the polygon's edge normals. Exact when an edge is nearest, short of the distance near a vertex (a lower QP there).
+static float footprintSeparation(const std::vector<float>& P, float u0, float u1, float v0, float v1, float sx, float sy) {
+    const int n = (int)P.size() / 2;
+    if (n < 3) return 0.f;
+    float minx = P[0], maxx = P[0], miny = P[1], maxy = P[1];
+    double area = 0;
+    for (int k = 0; k < n; k++) {
+        const float ax = P[2 * k], ay = P[2 * k + 1], bx = P[2 * ((k + 1) % n)], by = P[2 * ((k + 1) % n) + 1];
+        minx = std::min(minx, ax); maxx = std::max(maxx, ax); miny = std::min(miny, ay); maxy = std::max(maxy, ay);
+        area += (double)ax * by - (double)bx * ay;
+    }
+    float best = std::max({ (minx - u1) * sx, (u0 - maxx) * sx, (miny - v1) * sy, (v0 - maxy) * sy, 0.f });
+    if (std::fabs(area) < 1e-12) return best;
+    const float sgn = area > 0 ? 1.f : -1.f;
+    const float qx[4] = { u0 * sx, u1 * sx, u1 * sx, u0 * sx }, qy[4] = { v0 * sy, v0 * sy, v1 * sy, v1 * sy };
+    for (int k = 0; k < n; k++) {
+        const float ax = P[2 * k] * sx, ay = P[2 * k + 1] * sy;
+        const float ex = P[2 * ((k + 1) % n)] * sx - ax, ey = P[2 * ((k + 1) % n) + 1] * sy - ay, len = sqrtf(ex * ex + ey * ey);
+        if (len < 1e-6f) continue;
+        const float nx = sgn * ey / len, ny = -sgn * ex / len;   // outward unit normal
+        float m = 1e30f;
+        for (int c = 0; c < 4; c++) m = std::min(m, nx * (qx[c] - ax) + ny * (qy[c] - ay));
+        best = std::max(best, m);
+    }
+    return best;
+}
+
+static std::vector<D3D11_RECT> g_maskRects;   // the blocks at the highest QP (hidden, beyond the band), merged into runs per block row (the F2 fill)
+static int g_maskHidden = 0, g_maskBlocks = 0, g_maskTop = 0;
 int nvh_mask_stats(int* hidden, int* blocks, int* rects) {
     if (hidden) *hidden = g_maskHidden;
     if (blocks) *blocks = g_maskBlocks;
     if (rects) *rects = (int)g_maskRects.size();
     return (g_maskUv[0].size() >= 6 || g_maskUv[1].size() >= 6) ? 1 : 0;
 }
+int nvh_mask_band_stats(int* top, double* band) {
+    if (top) *top = g_maskTop;
+    if (band) *band = g_maskBand;
+    return (g_maskUv[0].size() >= 6 || g_maskUv[1].size() >= 6) ? 1 : 0;
+}
 
 void nvh_build_qp_map(int W, int H) {
     auto& S = Settings::Instance();
     g_qpMap.clear(); g_nvh_qp_map = nullptr; g_nvh_qp_map_size = 0;
-    g_maskRects.clear(); g_maskHidden = 0; g_maskBlocks = 0;
+    g_maskRects.clear(); g_maskHidden = 0; g_maskBlocks = 0; g_maskTop = 0;
     const bool masked = g_maskUv[0].size() >= 6 || g_maskUv[1].size() >= 6;
     if ((!S.m_qpMapEnabled && !masked) || W <= 0 || H <= 0) return;
     g_qpW = W; g_qpH = H; g_qpCols = (W + 31) / 32; g_qpRows = (H + 31) / 32;
@@ -305,6 +342,8 @@ void nvh_build_qp_map(int W, int H) {
     QpAxis ax = qpAxis(cx, sx, rx, ratioX), ay = qpAxis(cy, sy, ry, ratioY);
     const float eyeW = W / 2.f;
     const int C = S.m_qpMapCenterDelta, E = S.m_qpMapEdgeDelta; const float T = std::max(1e-3f, S.m_qpMapTransition);
+    // the band past the outline in source pixels (the eye before the foveation: what the mask's uv covers)
+    const float srcEyeW = (float)S.m_renderWidth / 2, srcEyeH = (float)S.m_renderHeight, bandPx = g_maskBand * srcEyeW;
     g_qpMap.assign((size_t)g_qpCols * g_qpRows, 0);
     // the source position of an output coordinate on one axis (eye-local, 0 = the outer edge / the top); a non-finite answer stays visible
     auto srcX = [&](float pe) { float s = foveF(pe / ratioX, ax.cs, ax.sh, ax.er); return std::isfinite(s) ? s : 0.5f; };
@@ -312,7 +351,7 @@ void nvh_build_qp_map(int W, int H) {
     for (int j = 0; j < g_qpRows; j++) {
         int runStart = -1;
         for (int i = 0; i <= g_qpCols; i++) {
-            bool hidden = false;
+            bool hidden = false, top = false;
             if (i < g_qpCols) {
                 float px = std::min((i + 0.5f) * 32.f, (float)W - 0.5f), py = std::min((j + 0.5f) * 32.f, (float)H - 0.5f);
                 const bool left = px < eyeW;
@@ -333,12 +372,20 @@ void nvh_build_qp_map(int W, int H) {
                     if (v0 > v1) std::swap(v0, v1);
                     hidden = footprintHidden(poly, u0, u1, v0, v1);
                     g_maskBlocks++;
+                    if (hidden) {
+                        // past the outline the QP climbs from the block's own ramp value to the highest across the band (gradual), then stays there
+                        g_maskHidden++;
+                        const float sep = bandPx > 0 ? footprintSeparation(poly, u0, u1, v0, v1, srcEyeW, srcEyeH) : 0.f;
+                        if (bandPx > 0 && sep < bandPx) v = (int)lroundf((float)v + (51.f - (float)v) * sep / bandPx);
+                        else v = 51;
+                        top = v >= 51;
+                        if (top) g_maskTop++;
+                    }
                 }
-                if (hidden) { v = 51; g_maskHidden++; }
                 g_qpMap[(size_t)j * g_qpCols + i] = (int8_t)std::max(-51, std::min(51, v));
             }
-            if (hidden && runStart < 0) runStart = i;
-            if (!hidden && runStart >= 0) {
+            if (top && runStart < 0) runStart = i;
+            if (!top && runStart >= 0) {
                 g_maskRects.push_back(D3D11_RECT{ runStart * 32, j * 32, std::min(i * 32, W), std::min((j + 1) * 32, H) });
                 runStart = -1;
             }
@@ -367,8 +414,8 @@ static void maskFill(Nvh* n, ID3D11Texture2D* target) {
 int nvh_qpmap_dump(const char* path) {
     if (g_qpMap.empty()) return 0;
     FILE* f = nullptr; if (fopen_s(&f, path, "wb") || !f) return 0;
-    fprintf(f, "{\"w\":%d,\"h\":%d,\"cols\":%d,\"rows\":%d,\"foveated\":%d,\"qp_map\":%d,\"mask_hidden\":%d,\"mask_blocks\":%d,\"mask_rects\":%d,\"data\":[",
-            g_qpW, g_qpH, g_qpCols, g_qpRows, g_qpFoveated ? 1 : 0, Settings::Instance().m_qpMapEnabled ? 1 : 0, g_maskHidden, g_maskBlocks, (int)g_maskRects.size());
+    fprintf(f, "{\"w\":%d,\"h\":%d,\"cols\":%d,\"rows\":%d,\"foveated\":%d,\"qp_map\":%d,\"mask_hidden\":%d,\"mask_blocks\":%d,\"mask_rects\":%d,\"mask_band\":%.3f,\"mask_top\":%d,\"data\":[",
+            g_qpW, g_qpH, g_qpCols, g_qpRows, g_qpFoveated ? 1 : 0, Settings::Instance().m_qpMapEnabled ? 1 : 0, g_maskHidden, g_maskBlocks, (int)g_maskRects.size(), g_maskBand, g_maskTop);
     for (size_t k = 0; k < g_qpMap.size(); k++) fprintf(f, "%s%d", k ? "," : "", (int)g_qpMap[k]);
     fprintf(f, "]}\n"); fclose(f); return 1;
 }
@@ -750,7 +797,8 @@ double nvh_fg_encode(void* hh, void* i, int mode, double t, int age, const float
         n->fgMaskSerial = g_maskSerial.load();
         const char* sw = getenv("AIRFRAMEXR_FG_MASK");
         const bool off = sw && atoi(sw) == 0;
-        for (int e = 0; e < 2; e++) n->fg->SetMask(e, off ? nullptr : g_maskUv[e].data(), off ? 0 : (int)g_maskUv[e].size() / 2);
+        // the band past the outline is generated too: its blocks carry the picture at a QP below the highest (nvh_build_qp_map)
+        for (int e = 0; e < 2; e++) n->fg->SetMask(e, off ? nullptr : g_maskUv[e].data(), off ? 0 : (int)g_maskUv[e].size() / 2, g_maskBand);
     }
     ID3D11Texture2D* tex = n->fg->Render(mode, (float)t, age, q_out4, &ipc->state->host.eyeFovTan[0][0], err, errlen);
     if (!tex) { n->fg->stats.renderErrors++; return -1; }
@@ -910,8 +958,8 @@ int nvh_describe(void* hh, char* buf, int buflen) {
     if (!g_qpMap.empty()) { mn = 127; mx = -128; for (int8_t v : g_qpMap) { mn = std::min<int>(mn, v); mx = std::max<int>(mx, v); mean += v; } mean /= g_qpMap.size(); }
     std::string enc = n->enc ? n->enc->DescribeConfig() : "{}";
     char b[768];
-    snprintf(b, sizeof b, "{\"gpu\":\"%s\",\"gpu_thread_priority\":{\"requested\":%d,\"hr\":%ld},\"idle_rgb\":\"%06x\",\"frame\":[%d,%d],\"foveated\":%d,\"qp_map\":{\"enabled\":%d,\"center_delta\":%d,\"edge_delta\":%d,\"transition\":%.2f,\"ctbs\":%zu,\"min\":%d,\"max\":%d,\"mean\":%.2f},\"nvenc\":",
-             n->gpuName.c_str(), n->gpuPriority, n->gpuPriorityHr, (unsigned)g_idleRgb, n->w, n->h, S.m_enableFoveatedEncoding ? 1 : 0, S.m_qpMapEnabled ? 1 : 0, S.m_qpMapCenterDelta, S.m_qpMapEdgeDelta, S.m_qpMapTransition, g_qpMap.size(), mn, mx, mean);
+    snprintf(b, sizeof b, "{\"gpu\":\"%s\",\"gpu_thread_priority\":{\"requested\":%d,\"hr\":%ld},\"idle_rgb\":\"%06x\",\"frame\":[%d,%d],\"foveated\":%d,\"qp_map\":{\"enabled\":%d,\"center_delta\":%d,\"edge_delta\":%d,\"transition\":%.2f,\"ctbs\":%zu,\"min\":%d,\"max\":%d,\"mean\":%.2f,\"mask_band\":%.3f,\"mask_hidden\":%d,\"mask_top\":%d},\"nvenc\":",
+             n->gpuName.c_str(), n->gpuPriority, n->gpuPriorityHr, (unsigned)g_idleRgb, n->w, n->h, S.m_enableFoveatedEncoding ? 1 : 0, S.m_qpMapEnabled ? 1 : 0, S.m_qpMapCenterDelta, S.m_qpMapEdgeDelta, S.m_qpMapTransition, g_qpMap.size(), mn, mx, mean, g_maskBand, g_maskHidden, g_maskTop);
     std::string out = std::string(b) + enc + "}";
     if ((int)out.size() >= buflen) return 0;
     memcpy(buf, out.c_str(), out.size() + 1); return (int)out.size();

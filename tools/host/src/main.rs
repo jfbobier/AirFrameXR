@@ -34,7 +34,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -657,8 +657,11 @@ fn describe_encoder(origin: Instant, enc: *mut std::ffi::c_void, dump: &Option<P
     let (mut hidden, mut blocks, mut rects) = (0i32, 0i32, 0i32);
     if unsafe { nvh::nvh_mask_stats(&mut hidden, &mut blocks, &mut rects) } == 1 {
         let share = if blocks > 0 { hidden as f64 / blocks as f64 } else { 0.0 };
-        event(origin, "encode_mask", json!({ "hidden_blocks": hidden, "blocks": blocks, "fill_rects": rects, "hidden_share": share }));
-        logs::general("INFO", &format!("encode mask: {hidden} of {blocks} blocks of 32 x 32 hidden ({:.1} %), {rects} fill rectangles", 100.0 * share));
+        let (mut top, mut band) = (hidden, 0.0f64);
+        unsafe { nvh::nvh_mask_band_stats(&mut top, &mut band) };
+        event(origin, "encode_mask", json!({ "hidden_blocks": hidden, "blocks": blocks, "fill_rects": rects, "hidden_share": share, "band": band, "top_blocks": top }));
+        logs::general("INFO", &format!("encode mask: {hidden} of {blocks} blocks of 32 x 32 hidden ({:.1} %), {rects} fill rectangles; the QP climbs to the highest across a band of {:.0} % of the eye past the outline: {top} hidden blocks beyond it at the highest",
+            100.0 * share, 100.0 * band));
     }
     if let Some(p) = dump {
         if let Ok(c) = std::ffi::CString::new(p.to_string_lossy().as_bytes()) {
@@ -705,6 +708,13 @@ static ENC_WINDOWS: std::sync::Mutex<Vec<serde_json::Value>> = std::sync::Mutex:
 /// the client's tracking cadence was judged not to be a display rate (logged once per connection)
 static RATE_IGNORED: AtomicBool = AtomicBool::new(false);
 static TRACKING_GAP_LAST: Mutex<(f64, f64, u64, u64)> = Mutex::new((0.0, 0.0, 0, 0));
+/// the rate fill loop's factor x1000 (0 = off) and the setting it fills (kbps), for encoder_stats and the run log's encoder line
+static RATE_FILL_K_MILLI: AtomicU32 = AtomicU32::new(0);
+static RATE_FILL_SETTING_KBPS: AtomicU32 = AtomicU32::new(0);
+/// the loop's changes since the last encoder_stats window: (unix seconds, k before, k after, fill measured), for the lab's timing of NVENC's response
+static RATE_FILL_CHANGES: Mutex<Vec<(f64, f64, f64, f64)>> = Mutex::new(Vec::new());
+/// when the run log's encoder line was last written (ms since the host started; one line per 10 s at most)
+static ENC_RUN_LINE_MS: AtomicU64 = AtomicU64::new(0);
 static LAST_TRACKING_NS: AtomicU64 = AtomicU64::new(0);
 
 fn push_bounded(m: &std::sync::Mutex<Vec<f64>>, v: f64) {
@@ -810,6 +820,24 @@ impl StatsWindow {
         }
         if let Some(x) = extra {
             e["pipeline"] = x;
+        }
+        let fill_k = RATE_FILL_K_MILLI.load(Ordering::Relaxed);
+        let setting_mbps = RATE_FILL_SETTING_KBPS.load(Ordering::Relaxed) as f64 / 1000.0;
+        if fill_k > 0 {
+            e["rate_fill"] = json!({ "k": fill_k as f64 / 1000.0, "setting_mbps": setting_mbps });
+            let mut g = RATE_FILL_CHANGES.lock();
+            if !g.is_empty() {
+                e["rate_fill"]["changes"] = json!(g.drain(..).map(|(t, a, b, f)| json!([t, a, b, f])).collect::<Vec<_>>());
+            }
+        }
+        let now_ms = origin.elapsed().as_millis() as u64;
+        if !w.is_empty() && now_ms >= ENC_RUN_LINE_MS.load(Ordering::Relaxed) + 10_000 {
+            // the run log (release sessions too): what the encoder produced against the setting, so a field log shows the fill
+            ENC_RUN_LINE_MS.store(now_ms, Ordering::Relaxed);
+            let mbps = e["mbps"].as_f64().unwrap_or(0.0);
+            let fill = if fill_k > 0 { format!(" for the {setting_mbps:.0} Mbps setting (rate fill x{:.2})", fill_k as f64 / 1000.0) } else { String::new() };
+            logs::run_line(logs::Level::Info, "perf", format!("encoder: {mbps:.0} Mbps over {secs:.1} s{fill}, {:.1} fps, encode p50 {:.2} ms p95 {:.2} ms, {slices_per_packet:.1} slices per frame",
+                w.len() as f64 / secs, q(0.5), q(0.95)));
         }
         if !w.is_empty() {
             if let Ok(mut g) = ENC_WINDOWS.lock() {
@@ -996,6 +1024,7 @@ mod nvh {
         pub fn nvh_qpmap_dump(path: *const std::ffi::c_char) -> i32;
         pub fn nvh_set_mask(eye: i32, uv: *const f32, n: i32) -> i32;
         pub fn nvh_mask_stats(hidden: *mut i32, blocks: *mut i32, rects: *mut i32) -> i32;
+        pub fn nvh_mask_band_stats(top: *mut i32, band: *mut f64) -> i32;
         pub fn nvh_ipc_last_compose_ms(ipc: *mut c_void) -> f32;
         pub fn nvh_last_ffr_gpu_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_open() -> *mut c_void;
@@ -1106,6 +1135,10 @@ pub(crate) struct LiveCtx {
     cb_ns: u128,     // time spent inside on_packet (server_core hand-off)
     params_ns: u128, // time spent inside on_params
     bitrate_override: u64, // network benchmark: this bitrate instead of server_core's (0 = server_core decides)
+    /// the rate fill loop (constant bitrate only; None = server_core's bitrate as is: adaptive bitrate, off by env)
+    fill: Option<RateFill>,
+    base_bps: u64,  // server_core's last bitrate (the user's setting with a constant bitrate)
+    base_fps: f32,  // and its frame rate (the per-frame budget is base_bps / base_fps)
     bytes_total: u64,
     bitrate_sent: u64,
     fps: f32,
@@ -1140,6 +1173,9 @@ extern "C" fn on_packet(user: *mut std::ffi::c_void, data: *const u8, len: i32, 
         live.slice_samples += 1;
     }
     live.packet_bytes += frame.len();
+    if let Some(f) = live.fill.as_mut() {
+        f.frame(buf.len(), is_idr != 0);
+    }
     live.bytes_total += buf.len() as u64;
     live.packet_idr |= is_idr != 0;
     live.packets += 1;
@@ -1161,15 +1197,111 @@ extern "C" fn on_params(user: *mut std::ffi::c_void, bitrate: *mut u64, fps: *mu
         return 1;
     }
     let r = live.ctx.get_dynamic_encoder_params();
-    live.params_ns += t0.elapsed().as_nanos();
-    match r {
-        Some(p) => unsafe {
-            *bitrate = p.bitrate_bps as u64;
-            *fps = p.framerate;
-            1
-        },
-        None => 0,
+    let mut changed = false;
+    if let Some(p) = r {
+        if live.fill.is_some() && live.base_bps != p.bitrate_bps as u64 {
+            logs::general("INFO", &format!("rate fill on: NVENC's target follows the bits produced, x1.00 to x{:.2} of the {:.0} Mbps setting, once a second (AIRFRAMEXR_RATE_FILL=1 turns it off)",
+                live.fill.as_ref().map_or(1.0, |f| f.max), p.bitrate_bps as f64 / 1e6));
+        }
+        live.base_bps = p.bitrate_bps as u64;
+        live.base_fps = p.framerate;
+        changed = true;
     }
+    let k = match live.fill.as_mut() {
+        Some(f) if live.base_bps > 0 => {
+            if f.update(live.base_bps, live.base_fps, Instant::now()) {
+                changed = true;
+            }
+            RATE_FILL_K_MILLI.store((f.k * 1000.0).round() as u32, Ordering::Relaxed);
+            RATE_FILL_SETTING_KBPS.store((live.base_bps / 1000) as u32, Ordering::Relaxed);
+            f.k
+        }
+        _ => 1.0,
+    };
+    live.params_ns += t0.elapsed().as_nanos();
+    if !changed {
+        return 0;
+    }
+    unsafe {
+        *bitrate = (live.base_bps as f64 * k) as u64;
+        *fps = live.base_fps;
+    }
+    1
+}
+
+/// The rate fill loop (owner 2026-11-21, "the encoder fills the setting"; nvidia_profile::RATE_FILL). NVENC's low-latency CBR with ALVR's VBV of 1.1
+/// frames produces less than its target on most game content (medians 0.76-0.78 at 275 Mbps / 100 Hz in three games) and about all of it on harder
+/// content (the bench scene: 0.96-1.00): once a second the average non-IDR frame of the window is compared with the setting's per-frame budget and
+/// NVENC's target factor k moves halfway (in log) towards setting / produced, within [1, max], until produced is within 2 % of the setting. NVENC is
+/// reconfigured without an IDR, as ALVR's adaptive bitrate does every second.
+pub(crate) struct RateFill {
+    pub max: f64,
+    pub k: f64,
+    fixed: bool,     // lab (AIRFRAMEXR_RATE_FILL_FIXED): k is sent once and never adapted
+    bits: u64,
+    frames: u32,     // non-IDR frames of the window (their bits are measured)
+    all_frames: u32, // every frame of the window (its frame rate)
+    since: Option<Instant>,
+}
+
+impl RateFill {
+    pub fn new(max: f64) -> Self {
+        Self { max: max.max(1.0), k: 1.0, fixed: false, bits: 0, frames: 0, all_frames: 0, since: None }
+    }
+    pub fn fixed(k: f64) -> Self {
+        Self { max: k.max(1.0), k: k.max(1.0), fixed: true, bits: 0, frames: 0, all_frames: 0, since: None }
+    }
+    /// One encoded frame (bytes as sent). IDR frames are left out: they are the rate control's exception, not its average.
+    pub fn frame(&mut self, bytes: usize, idr: bool) {
+        self.all_frames += 1;
+        if !idr {
+            self.bits += bytes as u64 * 8;
+            self.frames += 1;
+        }
+    }
+    /// Once a second (at least 30 frames): true when k changed enough to reconfigure NVENC.
+    pub fn update(&mut self, base_bps: u64, fps: f32, now: Instant) -> bool {
+        let since = *self.since.get_or_insert(now);
+        let secs = now.duration_since(since).as_secs_f64();
+        if self.fixed || secs < 1.0 || self.frames < 30 || base_bps == 0 || !(fps > 0.0) {
+            return false;
+        }
+        // the per-frame budget at the nominal rate, or at the stream's own rate when it runs faster (the Vision Pro's 90 -> 100 Hz request: ALVR's
+        // nominal 90, frames at 100; lab 2026-11-21: sized at /90 the loop overshot 250 Mbps by 10 %). A slower stream (a game without generation)
+        // keeps the per-frame budget: its frames are not pushed to make up the missing ones.
+        let budget = base_bps as f64 / (fps as f64).max(self.all_frames as f64 / secs);
+        let fill = (self.bits as f64 / self.frames as f64 / budget).max(0.25);   // produced / setting
+        self.bits = 0;
+        self.frames = 0;
+        self.all_frames = 0;
+        self.since = Some(now);
+        if (fill - 1.0).abs() < 0.02 {
+            return false;   // within 2 % of the setting
+        }
+        let k = (self.k * fill.powf(-0.5)).clamp(1.0, self.max);
+        if (k - self.k).abs() < 1e-4 {
+            return false;   // held at 1 or at the cap
+        }
+        {
+            let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            let mut g = RATE_FILL_CHANGES.lock();
+            if g.len() < 256 { g.push((unix, self.k, k, fill)); }
+        }
+        self.k = k;
+        true
+    }
+}
+
+/// The rate fill loop for this session's bitrate: with a constant bitrate and nvidia_profile::rate_fill() above 1; none with ALVR's adaptive one
+/// (its own loop sizes the bitrate from the link).
+fn session_rate_fill(session: &std::path::Path) -> Option<RateFill> {
+    let s: serde_json::Value = fs::read_to_string(session).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let max = nvidia_profile::rate_fill();
+    let constant = s["session_settings"]["video"]["bitrate"]["mode"]["variant"].as_str() == Some("ConstantMbps");
+    if let Some(k) = std::env::var("AIRFRAMEXR_RATE_FILL_FIXED").ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 1.0) {
+        return constant.then(|| RateFill::fixed(k.min(2.0)));   // lab A/B: the factor without the loop
+    }
+    (constant && max > 1.0).then(|| RateFill::new(max))
 }
 
 /// One foveation geometry value from the session: `openvr_config[k]`, else the session's foveation settings `[sk]` (ALVR writes zeros to openvr_config
@@ -1189,7 +1321,8 @@ fn fov_geometry(c: &serde_json::Value, fset: &serde_json::Value, k: &str, sk: &s
 fn configure_encoder(session_path: &std::path::Path, split_mode: i64, qp_map: bool, mask: Option<&vision::EncodeMask>, mask_fill: bool, host_keys: &[(&std::ffi::CStr, i64)]) -> (i32, i32, f64) {
     let s: serde_json::Value = serde_json::from_str(&fs::read_to_string(session_path).expect("read session")).expect("parse session");
     let c = &s["openvr_config"];
-    // the mask's +51 travels in the QP map: with a mask the map is on, its foveal ramp at 0 when the user turned the map off
+    // the mask's QP (climbing to +51 across the band past the outline) travels in the QP map: with a mask the map is on, its foveal ramp at 0 when the
+    // user turned the map off
     let ramp = qp_map || mask.is_none();
     unsafe {
         nvh::nvh_set(c"nvenc_split_encode_mode".as_ptr(), split_mode);
@@ -1197,6 +1330,7 @@ fn configure_encoder(session_path: &std::path::Path, split_mode: i64, qp_map: bo
         nvh::nvh_set(c"qp_map_center_delta".as_ptr(), if ramp { nvidia_profile::QP_MAP_CENTER_DELTA } else { 0 });
         nvh::nvh_set(c"qp_map_edge_delta".as_ptr(), if ramp { nvidia_profile::QP_MAP_EDGE_DELTA } else { 0 });
         nvh::nvh_set_f(c"qp_map_transition".as_ptr(), nvidia_profile::QP_MAP_TRANSITION);
+        nvh::nvh_set_f(c"mask_band".as_ptr(), nvidia_profile::mask_band());
         nvh::nvh_set(c"mask_fill".as_ptr(), (mask_fill && mask.is_some()) as i64);
         for (eye, pts) in [(0, mask.map(|m| &m.left)), (1, mask.map(|m| &m.right))] {
             let flat: Vec<f32> = pts.map(|p| p.iter().flat_map(|q| [q[0], q[1]]).collect()).unwrap_or_default();
@@ -1991,8 +2125,8 @@ fn main() {
             args.fps = session_fps; // the session's refresh rate (what the client is asked for), not a hard-coded 90
         }
         if let Some(m) = &args.encode_mask {
-            logs::general("INFO", &format!("encode mask from the profile '{}' ({} / {} outline points, left / right): the blocks outside it get the highest QP{}",
-                m.profile, m.left.len(), m.right.len(), if args.mask_fill.unwrap_or(false) { " and are cleared to black (mask fill on)" } else { "" }));
+            logs::general("INFO", &format!("encode mask from the profile '{}' ({} / {} outline points, left / right): outside it the QP climbs to the highest across {:.0} % of the eye{}",
+                m.profile, m.left.len(), m.right.len(), 100.0 * nvidia_profile::mask_band(), if args.mask_fill.unwrap_or(false) { ", the blocks at the highest are cleared to black (mask fill on)" } else { "" }));
         }
         let benchmarking = args.bench.is_some() || args.bench_network.is_some();
         if benchmarking && args.encode_profile != nvidia_profile::EncodeProfile::Session {
@@ -2008,7 +2142,7 @@ fn main() {
             (args.width.unwrap_or(w), args.height.unwrap_or(h))
         };
         enc_size = (w, h);
-        let mut l = Box::new(LiveCtx { ctx: Arc::clone(&ctx), shared: Arc::clone(&shared), packet_bytes: 0, packet_idr: false, packets: 0, slices: 0, slice_samples: 0, report_in_callback: !args.shim, cb_ns: 0, params_ns: 0, bitrate_override: 0, bytes_total: 0, bitrate_sent: 0, fps: args.fps as f32, hold_now: false, pending: vec![] });
+        let mut l = Box::new(LiveCtx { ctx: Arc::clone(&ctx), shared: Arc::clone(&shared), packet_bytes: 0, packet_idr: false, packets: 0, slices: 0, slice_samples: 0, report_in_callback: !args.shim, cb_ns: 0, params_ns: 0, bitrate_override: 0, fill: session_rate_fill(&layout.session()), base_bps: 0, base_fps: 0.0, bytes_total: 0, bitrate_sent: 0, fps: args.fps as f32, hold_now: false, pending: vec![] });
         let mut err = [0 as std::ffi::c_char; 256];
         enc_handle = unsafe {
             nvh::nvh_create(w, h, args.noise, on_packet, on_params, &mut *l as *mut LiveCtx as *mut _, err.as_mut_ptr(), 256)
@@ -3306,6 +3440,89 @@ fn main() {
     logs::general("INFO", &format!("host stop ({} frames streamed{})", frames, if encode_errors > 0 { format!(", {encode_errors} encode errors") } else { String::new() }));
     logs::flush();   // the writer thread owns the files: wait until the last lines are on disk
     exit_now(if !connected { 2 } else if pass { 0 } else { 1 });
+}
+
+#[cfg(test)]
+mod rate_fill_tests {
+    use super::*;
+
+    /// NVENC as a fixed fill: produced bits per frame = fill x k x (target / NVENC's nominal rate); returns k after `secs` windows of `per_s` frames
+    fn run_at(fill: f64, max: f64, secs: u32, nominal: f32, per_s: u32) -> (f64, u32) {
+        let base = 275_000_000u64;
+        let mut f = RateFill::new(max);
+        let t0 = Instant::now();
+        let mut sends = 0;
+        f.update(base, nominal, t0);
+        for s in 1..=secs {
+            for _ in 0..per_s {
+                f.frame((fill * f.k * base as f64 / nominal as f64 / 8.0) as usize, false);
+            }
+            if f.update(base, nominal, t0 + Duration::from_secs(s as u64)) {
+                sends += 1;
+            }
+        }
+        (f.k, sends)
+    }
+
+    fn run(fill: f64, max: f64, secs: u32) -> (f64, u32) {
+        run_at(fill, max, secs, 100.0, 100)
+    }
+
+    #[test]
+    fn a_stream_faster_than_nominal_fills_the_setting_per_second() {
+        // ALVR's nominal 90, frames at 100 (the Vision Pro request hack), NVENC filling 0.805 of its own per-frame target (the lab's Tokyo run)
+        let (k, _) = run_at(0.805, 1.3, 15, 90.0, 100);
+        let mbps_share = 0.805 * k * 100.0 / 90.0;   // produced bits per second / setting
+        assert!((mbps_share - 1.0).abs() < 0.025, "k {k}, {mbps_share}");
+    }
+
+    #[test]
+    fn a_slow_stream_keeps_the_per_frame_budget() {
+        // a 48 fps game without generation on a 100 Hz stream: k sized per frame (1 / 0.77), not pushed to the cap for the missing frames
+        let (k, _) = run_at(0.77, 1.3, 15, 100.0, 48);
+        assert!((0.77 * k - 1.0).abs() < 0.025 && k < 1.3, "k {k}");
+    }
+
+    #[test]
+    fn fills_game_content() {
+        let (k, sends) = run(0.77, 1.3, 10);
+        assert!((0.77 * k - 1.0).abs() < 0.025 && k <= 1.3, "k {k}");   // the games' median fill: the setting within 2 %, under the cap
+        assert!(sends <= 5, "{sends} reconfigures");
+    }
+
+    #[test]
+    fn harder_content_gets_little() {
+        let (k, _) = run(0.96, 1.3, 10);
+        assert!((0.96 * k - 1.0).abs() < 0.025 && k < 1.06, "k {k}");
+    }
+
+    #[test]
+    fn overshooting_content_stays_at_one() {
+        let (k, sends) = run(1.24, 1.3, 10);
+        assert_eq!(k, 1.0);
+        assert_eq!(sends, 0, "no reconfigure while k stays at 1");
+    }
+
+    #[test]
+    fn easy_content_is_capped_and_settles() {
+        let (k, sends) = run(0.3, 1.3, 20);
+        assert_eq!(k, 1.3);
+        assert!(sends <= 3, "settles at the cap: {sends} reconfigures");
+    }
+
+    #[test]
+    fn idr_frames_and_short_windows_are_ignored() {
+        let mut f = RateFill::new(1.3);
+        let t0 = Instant::now();
+        f.update(275_000_000, 100.0, t0);
+        for _ in 0..100 { f.frame(10_000_000, true); }   // IDR only: nothing counted, the window stays open
+        assert!(!f.update(275_000_000, 100.0, t0 + Duration::from_secs(2)));
+        assert_eq!(f.k, 1.0);
+        for _ in 0..100 { f.frame(1000, false); }
+        assert!(f.update(275_000_000, 100.0, t0 + Duration::from_millis(2500)), "a window of 100 tiny frames closes and raises k");
+        for _ in 0..100 { f.frame(1000, false); }
+        assert!(!f.update(275_000_000, 100.0, t0 + Duration::from_millis(3000)), "under a second since that window");
+    }
 }
 
 #[cfg(test)]
