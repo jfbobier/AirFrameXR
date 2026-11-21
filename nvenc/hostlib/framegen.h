@@ -32,6 +32,14 @@ struct FrameGenConfig {
     // measured turn and removed before the flow like the head's rotation; the output is turned by the yaw interpolated at t; the edge the
     // turned newer frame does not cover is filled from the older one.
     int camTurn = 1;
+    // head-locked HUD (fg-testing branch; AIRFRAMEXR_FG_HUD=1; off by default): what stays where it is on the screen between the pair's two rendered frames
+    // (compared unaligned: no head rotation) and has texture is a head-locked overlay, and the output pass shows the newer frame's own pixel there instead of
+    // rotating it with the world (the rotation to the stamp moved a head-locked HUD by the head's turn). Smooth content is harmless to misjudge: it looks
+    // the same shifted. The mask is grown by the head's shift in pixels (+ hudDil quarter-resolution texels) so that a flat panel is covered too.
+    int hud = 0;
+    float hudThr = 0.02f;    // a pixel is still when max |A - B| (encoded colour) is below this
+    float hudTex = 0.04f;    // ... and textured when the newer frame's luma step to its right and lower neighbour sums above this
+    int hudDil = 2;          // extra growth of the mask, in texels of the quarter-resolution mask (4 px)
 };
 
 struct FrameGenStats {
@@ -93,6 +101,8 @@ private:
     // camera turn: reads pair n's measurement if the GPU has finished it (false = not ready / none), updates the prediction; `correct`: a turn
     // that contradicts the prediction moves this pair's (and newer frames') yaw and redoes the pair's flow
     bool harvestTurn(int n, bool correct, bool wait);
+    // head-locked HUD (cfg.hud): the pair's still-and-textured mask (once per pair), grown by `radius` texels into the mask the output pass reads
+    void hudPasses(int n, int prev, int radius);
     ID3D11Device* m_dev = nullptr;
     ID3D11DeviceContext* m_ctx = nullptr;
     int m_w = 0, m_h = 0, m_have = 0;

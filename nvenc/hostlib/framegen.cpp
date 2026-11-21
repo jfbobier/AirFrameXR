@@ -260,7 +260,7 @@ float3 edgeSynth(float2 pO, float t) {
     float photo = lerp(saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w), 1, conf);
     return lerp(cc, pc, s * photo);
 }
-float4 PSOut(VSOut i) : SV_Target {
+float4 PSOutBase(VSOut i) {
     float2 uvB;
     float3 dB = rot(oA, oB, oC, dirOf(i.uv));
     if (!projectTo(dB, uvB)) {
@@ -292,6 +292,49 @@ float4 PSOut(VSOut i) : SV_Target {
     float conf = saturate(1 - dis * mode.z) * saturate(1 - costAt(pB));
     return float4(lerp(stable, mid, conf), 1);
 }
+// head-locked HUD (FrameGenConfig::hud): hp0 x still threshold, y texture threshold, z growth radius (texels), w direction (0 x, 1 y); hp1 x, y mask size, z 1 = the
+// output pass applies the mask (t5)
+cbuffer HudCB : register(b2) { float4 hp0; float4 hp1; };
+Texture2D<float> hudIn : register(t5);
+// one texel = 4 x 4 pixels: 1 where one of them did not move on the screen between the older and the newer frame and has texture
+float PSHudMask(VSOut i) : SV_Target {
+    const int2 base = int2(i.pos.xy) * 4;
+    float hit = 0;
+    [loop] for (int y = 0; y < 4; y++) {
+        [loop] for (int x = 0; x < 4; x++) {
+            const int2 p = base + int2(x, y);
+            const float3 c = cur.Load(int3(p, 0)).rgb;
+            const float3 a = prev.Load(int3(p, 0)).rgb;
+            const float3 d = abs(c - a);
+            const float l = lumaOf(c);
+            const float g = abs(lumaOf(cur.Load(int3(p + int2(1, 0), 0)).rgb) - l) + abs(lumaOf(cur.Load(int3(p + int2(0, 1), 0)).rgb) - l);
+            if (max(d.r, max(d.g, d.b)) < hp0.x && g > hp0.y) hit = 1;
+        }
+    }
+    return hit;
+}
+float PSHudDil(VSOut i) : SV_Target {
+    const int r = (int)hp0.z;
+    const int2 p = int2(i.pos.xy);
+    const int2 dir = hp0.w > 0.5 ? int2(0, 1) : int2(1, 0);
+    float m = 0;
+    [loop] for (int k = -r; k <= r; k++) {
+        const int2 q = clamp(p + dir * k, int2(0, 0), int2(hp1.x - 1, hp1.y - 1));
+        m = max(m, hudIn.Load(int3(q, 0)));
+    }
+    return m;
+}
+float4 PSOut(VSOut i) : SV_Target {
+    [branch] if (hp1.z > 0.5) {
+        const float h = hudIn.SampleLevel(smp, i.pos.xy / eyeRect.zw, 0);
+        const float3 here = cur.Load(int3(int2(i.pos.xy), 0)).rgb;
+        [branch] if (h > 0.999) return float4(here, 1);
+        float4 o = PSOutBase(i);
+        [branch] if (h > 0.003) o.rgb = lerp(o.rgb, here, h);
+        return o;
+    }
+    return PSOutBase(i);
+}
 )";
 
 struct Cb {
@@ -305,6 +348,8 @@ struct Cb {
     float flowIn[4];
     float synth[4];
 };
+
+struct HudCb { float p0[4], p1[4]; };
 
 void qmatRow(const float* q, double m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w)
     double x = q[0], y = q[1], z = q[2], w = q[3];
@@ -371,6 +416,13 @@ struct FrameGen::Impl {
     bool pairFlowValid[H] = {};
     ID3D11Texture2D* zeroFlow = nullptr; ID3D11ShaderResourceView* zeroFlowSrv = nullptr;   // flow-less synthesis: zero flow, maximum cost
     ID3D11Texture2D* maxCost = nullptr; ID3D11ShaderResourceView* maxCostSrv = nullptr;
+    // head-locked HUD (cfg.hud): per history frame the pair's raw still-and-textured mask (quarter resolution, R8), then the grown mask the output pass reads
+    ID3D11PixelShader* psHudMask = nullptr; ID3D11PixelShader* psHudDil = nullptr;
+    ID3D11Buffer* cbHud = nullptr;
+    int hudW = 0, hudH = 0;
+    ID3D11Texture2D* hudRaw[H] = {}; ID3D11ShaderResourceView* hudRawSrv[H] = {}; ID3D11RenderTargetView* hudRawRtv[H] = {}; bool hudValid[H] = {};
+    ID3D11Texture2D* hudTmp = nullptr; ID3D11ShaderResourceView* hudTmpSrv = nullptr; ID3D11RenderTargetView* hudTmpRtv = nullptr;
+    ID3D11Texture2D* hudOut = nullptr; ID3D11ShaderResourceView* hudOutSrv = nullptr; ID3D11RenderTargetView* hudOutRtv = nullptr;
     int cur = 0;                      // ring index of the newest rendered frame in real[]
     DXGI_FORMAT fmt = DXGI_FORMAT_UNKNOWN;
     ID3D11RenderTargetView* outRtv = nullptr;
@@ -424,12 +476,19 @@ FrameGen::~FrameGen() {
     rel(I.zeroFlowSrv); rel(I.zeroFlow); rel(I.maxCostSrv); rel(I.maxCost); for (auto& t : I.turnStage) rel(t);
     rel(I.vs); rel(I.psPrep); rel(I.psOut); rel(I.cb); rel(I.smp); rel(I.qDisjoint); rel(I.qDisjointR); rel(I.vsPoly); rel(I.cbPoly);
     for (auto& q : I.qT) rel(q);
+    for (int k = 0; k < Impl::H; k++) { rel(I.hudRawSrv[k]); rel(I.hudRawRtv[k]); rel(I.hudRaw[k]); }
+    rel(I.hudTmpSrv); rel(I.hudTmpRtv); rel(I.hudTmp); rel(I.hudOutSrv); rel(I.hudOutRtv); rel(I.hudOut); rel(I.psHudMask); rel(I.psHudDil); rel(I.cbHud);
     delete m_i;
 }
 
 bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errlen) {
     Impl& I = *m_i;
     I.cfg = cfg;
+    if (const char* v = getenv("AIRFRAMEXR_FG_HUD")) I.cfg.hud = atoi(v) != 0;
+    if (const char* v = getenv("AIRFRAMEXR_FG_HUD_THR")) I.cfg.hudThr = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_HUD_TEX")) I.cfg.hudTex = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_HUD_DIL")) I.cfg.hudDil = atoi(v);
+    if (!cfg.synth) I.cfg.hud = 0;   // the mask is applied in the output pass of both syntheses, but the lab tests the edge one only
     m_w = w; m_h = h;
     // shaders
     ID3DBlob *vb = nullptr, *vp = nullptr, *p1 = nullptr, *p2 = nullptr, *p5 = nullptr, *p6 = nullptr, *e = nullptr;
@@ -457,6 +516,32 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     D3D11_SAMPLER_DESC sd{}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sd.MaxLOD = D3D11_FLOAT32_MAX;
     m_dev->CreateSamplerState(&sd, &I.smp);
     if (!I.vs || !I.vsPoly || !I.psPrep || !I.psOut || !I.psUnpack || !I.psFilter || !I.cb || !I.cbPoly || !I.smp) { seterr(err, errlen, "frame generation pipeline objects"); return false; }
+    {   // the HUD mask's constant buffer always exists and is bound with the output pass on (z = 0 off): an unbound slot is never read as stale data
+        D3D11_BUFFER_DESC hb{}; hb.ByteWidth = sizeof(HudCb); hb.Usage = D3D11_USAGE_DEFAULT; hb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        m_dev->CreateBuffer(&hb, nullptr, &I.cbHud);
+        if (!I.cbHud) { seterr(err, errlen, "HUD constant buffer"); return false; }
+    }
+    if (I.cfg.hud) {
+        ID3DBlob *h1 = nullptr, *h2 = nullptr, *he = nullptr;
+        if (FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSHudMask", "ps_5_0", 0, 0, &h1, &he)) ||
+            FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSHudDil", "ps_5_0", 0, 0, &h2, &he))) {
+            seterr(err, errlen, he ? (const char*)he->GetBufferPointer() : "HUD shader compile failed");
+            if (he) he->Release();
+            return false;
+        }
+        m_dev->CreatePixelShader(h1->GetBufferPointer(), h1->GetBufferSize(), nullptr, &I.psHudMask);
+        m_dev->CreatePixelShader(h2->GetBufferPointer(), h2->GetBufferSize(), nullptr, &I.psHudDil);
+        h1->Release(); h2->Release();
+        I.hudW = (w + 3) / 4; I.hudH = (h + 3) / 4;
+        D3D11_TEXTURE2D_DESC td{}; td.Width = I.hudW; td.Height = I.hudH; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R8_UNORM; td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        auto mk = [&](ID3D11Texture2D** t, ID3D11ShaderResourceView** sv, ID3D11RenderTargetView** rv) {
+            return SUCCEEDED(m_dev->CreateTexture2D(&td, nullptr, t)) && SUCCEEDED(m_dev->CreateShaderResourceView(*t, nullptr, sv)) && SUCCEEDED(m_dev->CreateRenderTargetView(*t, nullptr, rv));
+        };
+        bool ok = I.psHudMask && I.psHudDil && mk(&I.hudTmp, &I.hudTmpSrv, &I.hudTmpRtv) && mk(&I.hudOut, &I.hudOutSrv, &I.hudOutRtv);
+        for (int k = 0; k < Impl::H && ok; k++) ok = mk(&I.hudRaw[k], &I.hudRawSrv[k], &I.hudRawRtv[k]);
+        if (!ok) { seterr(err, errlen, "HUD mask textures"); return false; }
+    }
     D3D11_QUERY_DESC qd{ D3D11_QUERY_TIMESTAMP_DISJOINT, 0 }, qt{ D3D11_QUERY_TIMESTAMP, 0 };
     m_dev->CreateQuery(&qd, &I.qDisjoint);
     m_dev->CreateQuery(&qd, &I.qDisjointR);
@@ -568,9 +653,9 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     }
     stats.flowW = I.flowW; stats.flowH = I.flowH; stats.blocksW = I.blocksW; stats.blocksH = I.blocksH;
     stats.nvofReady = true;
-    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s",
+    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s%s",
              NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "classic" : cfg.photoScale > 0 ? "edge" : "edge-blend",
-             I.cfg.camTurn ? ", camera turn" : "");
+             I.cfg.camTurn ? ", camera turn" : "", I.cfg.hud ? ", HUD" : "");
     return true;
 }
 
@@ -609,10 +694,12 @@ int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* f
     I.camYaw[next] = m_have == 0 ? 0.0 : I.camYaw[I.cur] + I.predictTurn(I.cur, next);   // provisional: computeFlow sets it again with the newest prediction
     memcpy(I.fov8, fov8, sizeof(float) * 8);
     I.cur = next;
+    I.hudValid[next] = false;
     m_have = std::min(Impl::H, m_have + 1);
     stats.ingests++;
     if (m_have < 2) return 0;
     stats.pairs++;
+    I.hudValid[I.cur] = false;
     I.pairFlowValid[I.cur] = false;   // computed by the first render of this pair that needs it (computeFlow)
     I.turnPending[I.cur] = false;
     if (I.cfg.camTurn) {
@@ -716,6 +803,51 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     return true;
 }
 
+void FrameGen::hudPasses(int n, int prev, int radius) {
+    Impl& I = *m_i;
+    m_ctx->IASetInputLayout(nullptr); m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    m_ctx->VSSetShader(I.vs, nullptr, 0);
+    m_ctx->PSSetSamplers(0, 1, &I.smp);
+    m_ctx->PSSetConstantBuffers(2, 1, &I.cbHud);
+    m_ctx->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+    D3D11_VIEWPORT vp{}; vp.Width = (float)I.hudW; vp.Height = (float)I.hudH; vp.MaxDepth = 1.f;
+    m_ctx->RSSetViewports(1, &vp);
+    ID3D11ShaderResourceView* null6[6] = {};
+    auto upd = [&](float dir, float r) {   // the shared constants: thresholds, radius, direction
+        HudCb hc{};
+        hc.p0[0] = I.cfg.hudThr; hc.p0[1] = I.cfg.hudTex; hc.p0[2] = r; hc.p0[3] = dir;
+        hc.p1[0] = (float)I.hudW; hc.p1[1] = (float)I.hudH; hc.p1[2] = 1.f;
+        m_ctx->UpdateSubresource(I.cbHud, 0, nullptr, &hc, 0, 0);
+    };
+    if (!I.hudValid[n]) {
+        upd(0.f, 0.f);
+        ID3D11ShaderResourceView* s2[2] = { I.realSrv[n], I.realSrv[prev] };
+        m_ctx->PSSetShaderResources(0, 6, null6);
+        m_ctx->OMSetRenderTargets(1, &I.hudRawRtv[n], nullptr);
+        m_ctx->PSSetShaderResources(0, 2, s2);
+        m_ctx->PSSetShader(I.psHudMask, nullptr, 0);
+        m_ctx->Draw(3, 0);
+        I.hudValid[n] = true;
+    }
+    m_ctx->PSSetShaderResources(0, 6, null6);
+    m_ctx->OMSetRenderTargets(1, &I.hudTmpRtv, nullptr);
+    upd(0.f, (float)radius);
+    m_ctx->PSSetShaderResources(5, 1, &I.hudRawSrv[n]);
+    m_ctx->PSSetShader(I.psHudDil, nullptr, 0);
+    m_ctx->Draw(3, 0);
+    m_ctx->PSSetShaderResources(0, 6, null6);
+    m_ctx->OMSetRenderTargets(1, &I.hudOutRtv, nullptr);
+    upd(1.f, (float)radius);
+    m_ctx->PSSetShaderResources(5, 1, &I.hudTmpSrv);
+    m_ctx->Draw(3, 0);
+    m_ctx->PSSetShaderResources(0, 6, null6);
+    ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
+    // the output pass's constants again (z = 1: apply the mask)
+    HudCb hc{};
+    hc.p0[0] = I.cfg.hudThr; hc.p0[1] = I.cfg.hudTex; hc.p0[2] = (float)radius; hc.p1[0] = (float)I.hudW; hc.p1[1] = (float)I.hudH; hc.p1[2] = 1.f;
+    m_ctx->UpdateSubresource(I.cbHud, 0, nullptr, &hc, 0, 0);
+}
+
 ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4, const float* fov8, char* err, int errlen) {
     Impl& I = *m_i;
     if (m_have < 1 || !m_out) { seterr(err, errlen, "frame generation: no rendered frame yet"); return nullptr; }
@@ -753,6 +885,28 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     // camera turn: the output view is the stamp's head orientation turned by the camera yaw at t (the newer frame's for a rendered output)
     const double yawOut = !I.cfg.camTurn ? 0.0 : (mode == 1 && havePair) ? I.camYaw[prev] + (double)t * (I.camYaw[n] - I.camYaw[prev]) : I.camYaw[n];
     float qOutE[4]; withYaw(qOut4, yawOut, qOutE);
+    // head-locked HUD: the pair's mask grown by the head's shift between the frame's view and the output view (px per tangent at the eye's centre, 4 px a texel)
+    const bool hudOn = I.cfg.hud && havePair;
+    {
+        HudCb hc{};
+        hc.p0[0] = I.cfg.hudThr; hc.p0[1] = I.cfg.hudTex; hc.p1[0] = (float)I.hudW; hc.p1[1] = (float)I.hudH; hc.p1[2] = hudOn ? 1.f : 0.f;
+        if (hudOn) {
+            float worst = 0.f;
+            for (int e = 0; e < 2; e++) {
+                float qn[4]; I.effQ(n, e, qn);
+                const float dq = fabsf(qn[0] * qOutE[0] + qn[1] * qOutE[1] + qn[2] * qOutE[2] + qn[3] * qOutE[3]);
+                const float ang = 2.f * acosf(std::min(1.f, dq));
+                const float pxPerTan = (m_w * 0.5f) / std::max(0.1f, fov8[e * 4] + fov8[e * 4 + 1]);
+                worst = std::max(worst, tanf(std::min(ang, 1.2f)) * pxPerTan);
+            }
+            const int radius = std::max(2, std::min(16, (int)ceilf(worst / 4.f) + I.cfg.hudDil));
+            hc.p0[2] = (float)radius;
+            m_ctx->UpdateSubresource(I.cbHud, 0, nullptr, &hc, 0, 0);
+            hudPasses(n, prev, radius);
+        } else {
+            m_ctx->UpdateSubresource(I.cbHud, 0, nullptr, &hc, 0, 0);
+        }
+    }
     m_ctx->Begin(I.qDisjointR);
     m_ctx->End(I.qT[2]);
     m_ctx->OMSetRenderTargets(1, &I.outRtv, nullptr);
@@ -763,6 +917,11 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     ID3D11ShaderResourceView* srvs[4] = { I.realSrv[n], havePair ? I.realSrv[prev] : I.realSrv[n], flowOk ? I.pairFlowSrv[n] : I.zeroFlowSrv, flowOk ? I.pairCostSrv[n] : I.maxCostSrv };
     m_ctx->PSSetShaderResources(0, 4, srvs);
     m_ctx->PSSetShaderResources(4, 1, flowOk && I.cfg.synth ? &I.pairFiltSrv[n] : &I.zeroFiltSrv);
+    {
+        ID3D11ShaderResourceView* hs = hudOn ? I.hudOutSrv : nullptr;
+        m_ctx->PSSetShaderResources(5, 1, &hs);
+        m_ctx->PSSetConstantBuffers(2, 1, &I.cbHud);
+    }
     for (int e = 0; e < 2; e++) {
         Cb c{};
         c.synth[0] = I.cfg.synth ? 1.f : 0.f; c.synth[1] = std::max(1.f, I.cfg.motionLimit * m_w * 0.5f);
@@ -793,7 +952,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
             m_ctx->Draw(3, 0);
         }
     }
-    ID3D11ShaderResourceView* nulls[5] = {}; m_ctx->PSSetShaderResources(0, 5, nulls);
+    ID3D11ShaderResourceView* nulls[6] = {}; m_ctx->PSSetShaderResources(0, 6, nulls);
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     m_ctx->End(I.qT[3]);
     m_ctx->End(I.qDisjointR);
