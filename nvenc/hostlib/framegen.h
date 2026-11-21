@@ -39,6 +39,7 @@ struct FrameGenConfig {
     int hud = 0;
     float hudThr = 0.02f;    // a pixel is still when max |A - B| (encoded colour) is below this
     float hudTex = 0.04f;    // ... and textured when the newer frame's luma step to its right and lower neighbour sums above this; a 4 x 4 texel is HUD when 3 in 4 of its textured pixels are still
+    float hudVote = 0.75f;   // the share of a texel's textured pixels that must be still
     int hudDil = 0;          // extra growth of the mask, in texels of the quarter-resolution mask (4 px)
 };
 

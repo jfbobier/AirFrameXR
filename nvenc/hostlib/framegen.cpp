@@ -312,7 +312,7 @@ float2 PSHudMask(VSOut i) : SV_Target {
             if (g > hp0.y) { nt += 1; if (max(d.r, max(d.g, d.b)) < hp0.x) ns += 1; }
         }
     }
-    return float2((nt >= 3 && ns >= 0.75 * nt) ? 1.0 : 0.0, nt < 0.5 ? 1.0 : 0.0);
+    return float2((nt >= 3 && ns >= hp1.w * nt) ? 1.0 : 0.0, nt < 0.5 ? 1.0 : 0.0);
 }
 // growth: a flat texel (a panel's interior) takes the mask from a masked texel within the radius; a textured one only keeps its own (growing outward over
 // textured world swallowed it: the moving region lost 4 dB, 2026-11-21)
@@ -494,6 +494,7 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     if (const char* v = getenv("AIRFRAMEXR_FG_HUD_THR")) I.cfg.hudThr = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_HUD_TEX")) I.cfg.hudTex = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_HUD_DIL")) I.cfg.hudDil = atoi(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_HUD_VOTE")) I.cfg.hudVote = (float)atof(v);
     if (!cfg.synth) I.cfg.hud = 0;   // the mask is applied in the output pass of both syntheses, but the lab tests the edge one only
     m_w = w; m_h = h;
     // shaders
@@ -822,7 +823,7 @@ void FrameGen::hudPasses(int n, int prev, int radius) {
     auto upd = [&](float dir, float r) {   // the shared constants: thresholds, radius, direction
         HudCb hc{};
         hc.p0[0] = I.cfg.hudThr; hc.p0[1] = I.cfg.hudTex; hc.p0[2] = r; hc.p0[3] = dir;
-        hc.p1[0] = (float)I.hudW; hc.p1[1] = (float)I.hudH; hc.p1[2] = 1.f;
+        hc.p1[3] = I.cfg.hudVote; hc.p1[0] = (float)I.hudW; hc.p1[1] = (float)I.hudH; hc.p1[2] = 1.f;
         m_ctx->UpdateSubresource(I.cbHud, 0, nullptr, &hc, 0, 0);
     };
     if (!I.hudValid[n]) {
@@ -850,7 +851,7 @@ void FrameGen::hudPasses(int n, int prev, int radius) {
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     // the output pass's constants again (z = 1: apply the mask)
     HudCb hc{};
-    hc.p0[0] = I.cfg.hudThr; hc.p0[1] = I.cfg.hudTex; hc.p0[2] = (float)radius; hc.p1[0] = (float)I.hudW; hc.p1[1] = (float)I.hudH; hc.p1[2] = 1.f;
+    hc.p0[0] = I.cfg.hudThr; hc.p0[1] = I.cfg.hudTex; hc.p0[2] = (float)radius; hc.p1[3] = I.cfg.hudVote; hc.p1[0] = (float)I.hudW; hc.p1[1] = (float)I.hudH; hc.p1[2] = 1.f;
     m_ctx->UpdateSubresource(I.cbHud, 0, nullptr, &hc, 0, 0);
 }
 
@@ -895,7 +896,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     const bool hudOn = I.cfg.hud && havePair;
     {
         HudCb hc{};
-        hc.p0[0] = I.cfg.hudThr; hc.p0[1] = I.cfg.hudTex; hc.p1[0] = (float)I.hudW; hc.p1[1] = (float)I.hudH; hc.p1[2] = hudOn ? 1.f : 0.f;
+        hc.p0[0] = I.cfg.hudThr; hc.p0[1] = I.cfg.hudTex; hc.p1[3] = I.cfg.hudVote; hc.p1[0] = (float)I.hudW; hc.p1[1] = (float)I.hudH; hc.p1[2] = hudOn ? 1.f : 0.f;
         if (hudOn) {
             float worst = 0.f;
             for (int e = 0; e < 2; e++) {
