@@ -295,10 +295,10 @@ float4 PSOutBase(VSOut i) {
 // head-locked HUD (FrameGenConfig::hud): hp0 x still threshold, y texture threshold, z growth radius (texels), w direction (0 x, 1 y); hp1 x, y mask size, z 1 = the
 // output pass applies the mask (t5)
 cbuffer HudCB : register(b2) { float4 hp0; float4 hp1; };
-Texture2D<float> hudIn : register(t5);
+Texture2D<float2> hudIn : register(t5);   // x: the mask, y: 1 where the texel is flat (no texture) in the newer frame
 // one texel = 4 x 4 pixels: 1 where the textured pixels (at least 3 of the 16) are almost all (3 in 4) still on the screen between the older and the newer
 // frame. "Any one pixel" was far too permissive: a textured world pixel matches by chance somewhere in every block (2026-11-21: the moving region's PSNR fell 15 dB)
-float PSHudMask(VSOut i) : SV_Target {
+float2 PSHudMask(VSOut i) : SV_Target {
     const int2 base = int2(i.pos.xy) * 4;
     float nt = 0, ns = 0;
     [loop] for (int y = 0; y < 4; y++) {
@@ -312,22 +312,27 @@ float PSHudMask(VSOut i) : SV_Target {
             if (g > hp0.y) { nt += 1; if (max(d.r, max(d.g, d.b)) < hp0.x) ns += 1; }
         }
     }
-    return (nt >= 3 && ns >= 0.75 * nt) ? 1.0 : 0.0;
+    return float2((nt >= 3 && ns >= 0.75 * nt) ? 1.0 : 0.0, nt < 0.5 ? 1.0 : 0.0);
 }
-float PSHudDil(VSOut i) : SV_Target {
+// growth: a flat texel (a panel's interior) takes the mask from a masked texel within the radius; a textured one only keeps its own (growing outward over
+// textured world swallowed it: the moving region lost 4 dB, 2026-11-21)
+float2 PSHudDil(VSOut i) : SV_Target {
     const int r = (int)hp0.z;
     const int2 p = int2(i.pos.xy);
     const int2 dir = hp0.w > 0.5 ? int2(0, 1) : int2(1, 0);
+    const float2 own = hudIn.Load(int3(p, 0));
     float m = 0;
-    [loop] for (int k = -r; k <= r; k++) {
-        const int2 q = clamp(p + dir * k, int2(0, 0), int2(hp1.x - 1, hp1.y - 1));
-        m = max(m, hudIn.Load(int3(q, 0)));
+    [branch] if (own.y > 0.5) {
+        [loop] for (int k = -r; k <= r; k++) {
+            const int2 q = clamp(p + dir * k, int2(0, 0), int2(hp1.x - 1, hp1.y - 1));
+            m = max(m, hudIn.Load(int3(q, 0)).x);
+        }
     }
-    return m;
+    return float2(max(own.x, m), own.y);
 }
 float4 PSOut(VSOut i) : SV_Target {
     [branch] if (hp1.z > 0.5) {
-        const float h = hudIn.SampleLevel(smp, i.pos.xy / eyeRect.zw, 0);
+        const float h = hudIn.SampleLevel(smp, i.pos.xy / eyeRect.zw, 0).x;
         const float3 here = cur.Load(int3(int2(i.pos.xy), 0)).rgb;
         [branch] if (h > 0.999) return float4(here, 1);
         float4 o = PSOutBase(i);
@@ -417,7 +422,7 @@ struct FrameGen::Impl {
     bool pairFlowValid[H] = {};
     ID3D11Texture2D* zeroFlow = nullptr; ID3D11ShaderResourceView* zeroFlowSrv = nullptr;   // flow-less synthesis: zero flow, maximum cost
     ID3D11Texture2D* maxCost = nullptr; ID3D11ShaderResourceView* maxCostSrv = nullptr;
-    // head-locked HUD (cfg.hud): per history frame the pair's raw still-and-textured mask (quarter resolution, R8), then the grown mask the output pass reads
+    // head-locked HUD (cfg.hud): per history frame the pair's raw still-and-textured mask (quarter resolution, R8G8: mask, flat), then the grown mask the output pass reads
     ID3D11PixelShader* psHudMask = nullptr; ID3D11PixelShader* psHudDil = nullptr;
     ID3D11Buffer* cbHud = nullptr;
     int hudW = 0, hudH = 0;
@@ -534,7 +539,7 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
         m_dev->CreatePixelShader(h2->GetBufferPointer(), h2->GetBufferSize(), nullptr, &I.psHudDil);
         h1->Release(); h2->Release();
         I.hudW = (w + 3) / 4; I.hudH = (h + 3) / 4;
-        D3D11_TEXTURE2D_DESC td{}; td.Width = I.hudW; td.Height = I.hudH; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R8_UNORM; td.SampleDesc.Count = 1;
+        D3D11_TEXTURE2D_DESC td{}; td.Width = I.hudW; td.Height = I.hudH; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R8G8_UNORM; td.SampleDesc.Count = 1;
         td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
         auto mk = [&](ID3D11Texture2D** t, ID3D11ShaderResourceView** sv, ID3D11RenderTargetView** rv) {
             return SUCCEEDED(m_dev->CreateTexture2D(&td, nullptr, t)) && SUCCEEDED(m_dev->CreateShaderResourceView(*t, nullptr, sv)) && SUCCEEDED(m_dev->CreateRenderTargetView(*t, nullptr, rv));
