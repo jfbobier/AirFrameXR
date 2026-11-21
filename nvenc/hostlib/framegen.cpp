@@ -34,6 +34,7 @@ cbuffer CB : register(b0) {
     float4 flowIn;          // PSUnpack: x flow-input width of one eye, y flow-input height, z max flow (full-res px)
     float4 synth;           // output pass: x 1 = edge-aware synthesis (else the classic crossfade recipe), y motion limit (full-res px), z cost scale, w photometric scale
     float4 fbP;             // PSFilter: x 1 = forward/backward consistency on, y tolerance (full-res px), z confidence lost per px beyond it
+    float4 stP;             // PSFuse: x 1 = stereo fusion on, y margin (cost), z the largest disparity cost trusted
 };
 Texture2D cur : register(t0);
 Texture2D prev : register(t1);
@@ -77,6 +78,8 @@ float2 pxToUv(float2 px) { return float2((px.x / eyeRect.z - eyeRect.x) / eyeRec
 // prep: the flow input of one eye (small). mode 0: the current frame as is; 1: the previous frame seen from the current camera (t0 = that frame)
 float4 PSPrep(VSOut i) : SV_Target {
     float2 uv = i.uv;
+    // mode 2: the current frame with its eyes swapped (the stereo run: left against right)
+    if (mode.x > 1.5) return float4(cur.SampleLevel(smp, float2(0.5 - eyeRect.x + uv.x * eyeRect.y, uv.y), 0).rgb, 1);
     if (mode.x > 0.5) {
         if (!projectTo(rot(pA, pB, pC, dirOf(i.uv)), uv)) return float4(0, 0, 0, 1);
     }
@@ -145,12 +148,11 @@ R"(// ---- edge-aware synthesis (ideas from VectorXR, MPL-2.0, github.com/Diener
 // fixed scale; a luma cost lets one threshold hold. t0 = the current frame (flow input), t1 = the aligned previous one, t2 = the engine's flow.
 // blocks: x first block of eye 1, y blocksW, z blocksH, w grid; flowIn: x flow-input width of one eye, y flow-input height, z max flow (full-res px).
 float lumaOf(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
-float4 PSUnpack(VSOut i) : SV_Target {
-    int2 c = int2(i.pos.xy);
+float4 evalBlock(int2 c, float2 d) {   // the block's vector d (flow-input px, backward) with its luma cost: PSUnpack, and the stereo candidates of PSFuse
     int grid = blocks.w;
     int eyeW = int(flowIn.x), eyeH = int(flowIn.y);
     int x0 = c.x >= blocks.x ? eyeW : 0;
-    float2 d = float2(flow.Load(int3(c, 0))) * (1.0 / 32.0);   // backward, flow-input px: content at q in the current frame is at q + d in the previous
+    // d: backward, flow-input px: content at q in the current frame is at q + d in the previous
     float sum = 0, zero = 0, n = 0, l1 = 0, l2 = 0;
     for (int y = 0; y < grid; y++) {
         for (int x = 0; x < grid; x++) {
@@ -180,6 +182,27 @@ float4 PSUnpack(VSOut i) : SV_Target {
     float m = length(f);
     if (m > flowIn.z) f *= flowIn.z / m;
     return float4(f, cst, info);
+}
+float4 PSUnpack(VSOut i) : SV_Target {
+    int2 c = int2(i.pos.xy);
+    return evalBlock(c, float2(flow.Load(int3(c, 0))) * (1.0 / 32.0));
+}
+// PSFuse (cfg.stereo): t4 = PSUnpack's temporal vectors, t6 = the stereo vectors (where each block's content is in the other eye: x offset within the eye, full-res px, z cost).
+// The other eye's temporal vector at that place is a candidate for this block; its match cost in this eye decides (evalBlock), so a wrong vector is replaced only by a better one.
+float4 PSFuse(VSOut i) : SV_Target {
+    int2 c = int2(i.pos.xy);
+    const float4 own = filt.Load(int3(c, 0));
+    const float4 st = fwd.Load(int3(c, 0));
+    [branch] if (stP.x < 0.5 || st.z > stP.z) return own;
+    const bool right = c.x >= blocks.x;
+    const float2 bpx = (float2(c) + 0.5) * float(blocks.w) / flowP.xy;
+    const float eyePx = flowIn.x / flowP.x;                                    // one eye's width in full-res px
+    const int2 qo = int2(floor((bpx + st.xy + float2(right ? -eyePx : eyePx, 0)) * flowP.xy / float(blocks.w)));
+    const int olo = right ? 0 : blocks.x, ohi = right ? blocks.x - 1 : blocks.y - 1;
+    [branch] if (qo.x < olo || qo.x > ohi || qo.y < 0 || qo.y >= blocks.z) return own;
+    const float4 oth = filt.Load(int3(qo, 0));
+    const float4 cand = evalBlock(c, oth.xy * flowP.xy);
+    return (cand.z + stP.y < own.z) ? cand : own;
 }
 // PSFilter: cost-weighted vector median over the 3x3 blocks around (within the eye): an isolated wrong vector loses to its neighbours without
 // the averaging that would blur a motion boundary. t7 = PSUnpack's output.
@@ -367,6 +390,7 @@ struct Cb {
     float flowIn[4];
     float synth[4];
     float fbP[4];
+    float stP[4];
 };
 
 struct HudCb { float p0[4], p1[4]; };
@@ -430,6 +454,11 @@ struct FrameGen::Impl {
     // edge-aware synthesis (cfg.synth 1): the engine's vectors with our luma cost (unpack), then the 3x3 median (filter) per history pair
     ID3D11PixelShader* psUnpack = nullptr; ID3D11PixelShader* psFilter = nullptr;
     ID3D11Texture2D* unpackTex = nullptr; ID3D11ShaderResourceView* unpackSrv = nullptr; ID3D11RenderTargetView* unpackRtv = nullptr;
+    // cfg.stereo: the stereo vectors, the fused vectors the filter reads, the swapped-eyes flow input, its engine handle
+    ID3D11PixelShader* psFuse = nullptr;
+    ID3D11Texture2D* unpackStTex = nullptr; ID3D11ShaderResourceView* unpackStSrv = nullptr; ID3D11RenderTargetView* unpackStRtv = nullptr;
+    ID3D11Texture2D* fusedTex = nullptr; ID3D11ShaderResourceView* fusedSrv = nullptr; ID3D11RenderTargetView* fusedRtv = nullptr;
+    ID3D11Texture2D* flowInSw = nullptr; ID3D11RenderTargetView* flowInSwRtv = nullptr; ID3D11ShaderResourceView* flowInSwSrv = nullptr; NvOFGPUBufferHandle hInSw = nullptr;
     ID3D11Texture2D* unpackFwdTex = nullptr; ID3D11ShaderResourceView* unpackFwdSrv = nullptr; ID3D11RenderTargetView* unpackFwdRtv = nullptr;   // cfg.fb: the forward flow, unpacked
     ID3D11Texture2D* pairFilt[H] = {}; ID3D11ShaderResourceView* pairFiltSrv[H] = {}; ID3D11RenderTargetView* pairFiltRtv[H] = {};
     ID3D11Texture2D* zeroFilt = nullptr; ID3D11ShaderResourceView* zeroFiltSrv = nullptr;   // no flow: zero motion at the maximum cost
@@ -456,6 +485,7 @@ struct FrameGen::Impl {
     ID3D11Texture2D* flowOut = nullptr; ID3D11ShaderResourceView* flowOutSrv = nullptr;
     ID3D11Texture2D* costTex = nullptr; ID3D11ShaderResourceView* costSrv = nullptr;
     NvOFGPUBufferHandle hIn[2] = {}, hFlow = nullptr, hCost = nullptr;
+    bool fusedThisPair = false;   // computeFlow: the stereo fusion ran for the pair being computed (the filter then reads its output)
     // timings
     ID3D11Query* qDisjoint = nullptr; ID3D11Query* qDisjointR = nullptr; ID3D11Query* qT[4] = {};
     bool flowTimed = false, synthTimed = false;
@@ -484,6 +514,7 @@ FrameGen::~FrameGen() {
     Impl& I = *m_i;
     if (I.of) {
         for (auto& h : I.hIn) if (h) I.api.nvOFUnregisterResourceD3D11(h);
+        if (I.hInSw) I.api.nvOFUnregisterResourceD3D11(I.hInSw);
         if (I.hFlow) I.api.nvOFUnregisterResourceD3D11(I.hFlow);
         if (I.hCost) I.api.nvOFUnregisterResourceD3D11(I.hCost);
         I.api.nvOFDestroy(I.of);
@@ -492,6 +523,8 @@ FrameGen::~FrameGen() {
     for (int k = 0; k < 2; k++) { rel(I.flowInRtv[k]); rel(I.flowInSrv[k]); rel(I.flowIn[k]); }
     for (int k = 0; k < Impl::H; k++) { rel(I.pairFiltSrv[k]); rel(I.pairFiltRtv[k]); rel(I.pairFilt[k]); }
     rel(I.unpackFwdSrv); rel(I.unpackFwdRtv); rel(I.unpackFwdTex);
+    rel(I.unpackStSrv); rel(I.unpackStRtv); rel(I.unpackStTex); rel(I.fusedSrv); rel(I.fusedRtv); rel(I.fusedTex); rel(I.psFuse);
+    rel(I.flowInSwSrv); rel(I.flowInSwRtv); rel(I.flowInSw);
     rel(I.unpackSrv); rel(I.unpackRtv); rel(I.unpackTex); rel(I.zeroFiltSrv); rel(I.zeroFilt); rel(I.psUnpack); rel(I.psFilter);
     for (int k = 0; k < Impl::H; k++) { rel(I.realSrv[k]); rel(I.real[k]); rel(I.pairFlowSrv[k]); rel(I.pairFlow[k]); rel(I.pairCostSrv[k]); rel(I.pairCost[k]); }
     rel(I.flowOutSrv); rel(I.flowOut); rel(I.costSrv); rel(I.costTex); rel(I.outRtv); rel(m_out);
@@ -515,6 +548,11 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     if (const char* v = getenv("AIRFRAMEXR_FG_FB_TOL")) I.cfg.fbTol = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_FB_GAIN")) I.cfg.fbGain = (float)atof(v);
     if (!cfg.synth) I.cfg.fb = 0;
+    if (const char* v = getenv("AIRFRAMEXR_FG_NOHINTS")) I.cfg.noHints = atoi(v) != 0;
+    if (const char* v = getenv("AIRFRAMEXR_FG_STEREO")) I.cfg.stereo = atoi(v) != 0;
+    if (const char* v = getenv("AIRFRAMEXR_FG_STEREO_MARGIN")) I.cfg.stereoMargin = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_STEREO_MAXCOST")) I.cfg.stereoMaxCost = (float)atof(v);
+    if (!cfg.synth) I.cfg.stereo = 0;
     if (!cfg.synth) I.cfg.hud = 0;   // the mask is applied in the output pass of both syntheses, but the lab tests the edge one only
     m_w = w; m_h = h;
     // shaders
@@ -632,6 +670,12 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
             FAILED(m_dev->CreateShaderResourceView(I.flowIn[k], nullptr, &I.flowInSrv[k]))) { seterr(err, errlen, "flow input texture"); return false; }
         if (I.api.nvOFRegisterResourceD3D11(I.of, I.flowIn[k], &I.hIn[k]) != NV_OF_SUCCESS) { seterr(err, errlen, "nvOFRegisterResourceD3D11 (input)"); return false; }
     }
+    if (I.cfg.stereo) {
+        if (!tex(I.flowW, I.flowH, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, &I.flowInSw) ||
+            FAILED(m_dev->CreateRenderTargetView(I.flowInSw, nullptr, &I.flowInSwRtv)) ||
+            FAILED(m_dev->CreateShaderResourceView(I.flowInSw, nullptr, &I.flowInSwSrv))) { seterr(err, errlen, "stereo flow input texture"); return false; }
+        if (I.api.nvOFRegisterResourceD3D11(I.of, I.flowInSw, &I.hInSw) != NV_OF_SUCCESS) { seterr(err, errlen, "nvOFRegisterResourceD3D11 (stereo input)"); return false; }
+    }
     if (!tex(I.blocksW, I.blocksH, DXGI_FORMAT_R16G16_SINT, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET | D3D11_BIND_UNORDERED_ACCESS, &I.flowOut) ||
         FAILED(m_dev->CreateShaderResourceView(I.flowOut, nullptr, &I.flowOutSrv))) { seterr(err, errlen, "flow output texture"); return false; }
     if (I.api.nvOFRegisterResourceD3D11(I.of, I.flowOut, &I.hFlow) != NV_OF_SUCCESS) { seterr(err, errlen, "nvOFRegisterResourceD3D11 (flow)"); return false; }
@@ -663,6 +707,14 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
         };
         bool ok = filtTex(&I.unpackTex, &I.unpackSrv, &I.unpackRtv);
         if (ok && I.cfg.fb) ok = filtTex(&I.unpackFwdTex, &I.unpackFwdSrv, &I.unpackFwdRtv);
+        if (ok && I.cfg.stereo) {
+            ok = filtTex(&I.unpackStTex, &I.unpackStSrv, &I.unpackStRtv) && filtTex(&I.fusedTex, &I.fusedSrv, &I.fusedRtv);
+            ID3DBlob *fb = nullptr, *fe = nullptr;
+            if (ok && FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSFuse", "ps_5_0", 0, 0, &fb, &fe))) {
+                seterr(err, errlen, fe ? (const char*)fe->GetBufferPointer() : "stereo fuse shader compile failed"); if (fe) fe->Release(); return false;
+            }
+            if (ok) { m_dev->CreatePixelShader(fb->GetBufferPointer(), fb->GetBufferSize(), nullptr, &I.psFuse); fb->Release(); ok = I.psFuse != nullptr; }
+        }
         for (int k = 0; k < Impl::H && ok; k++) ok = filtTex(&I.pairFilt[k], &I.pairFiltSrv[k], &I.pairFiltRtv[k]);
         // half floats (0, 0, 1, 1): zero motion, cost 1
         std::vector<uint16_t> zf((size_t)I.blocksW * I.blocksH * 4, 0);
@@ -681,9 +733,9 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     }
     stats.flowW = I.flowW; stats.flowH = I.flowH; stats.blocksW = I.blocksW; stats.blocksH = I.blocksH;
     stats.nvofReady = true;
-    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s%s%s",
+    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s%s%s%s%s",
              NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "classic" : cfg.photoScale > 0 ? "edge" : "edge-blend",
-             I.cfg.camTurn ? ", camera turn" : "", I.cfg.hud ? ", HUD" : "", I.cfg.fb ? ", fwd/bwd flow" : "");
+             I.cfg.camTurn ? ", camera turn" : "", I.cfg.hud ? ", HUD" : "", I.cfg.fb ? ", fwd/bwd flow" : "", I.cfg.stereo ? ", stereo fusion" : "", I.cfg.noHints ? ", no temporal hints" : "");
     return true;
 }
 
@@ -756,9 +808,9 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     m_ctx->VSSetShader(I.vs, nullptr, 0); m_ctx->PSSetShader(I.psPrep, nullptr, 0);
     m_ctx->PSSetSamplers(0, 1, &I.smp); m_ctx->PSSetConstantBuffers(0, 1, &I.cb);
     ID3D11ShaderResourceView* nulls[4] = {};
-    for (int pass = 0; pass < 2; pass++) {   // 0: previous (rotated), 1: current
+    for (int pass = 0; pass < (I.cfg.stereo ? 3 : 2); pass++) {   // 0: previous (rotated), 1: current, 2 (stereo): current with its eyes swapped
         const int frame = pass == 0 ? prev : n;
-        m_ctx->OMSetRenderTargets(1, &I.flowInRtv[pass], nullptr);
+        m_ctx->OMSetRenderTargets(1, pass == 2 ? &I.flowInSwRtv : &I.flowInRtv[pass], nullptr);
         m_ctx->PSSetShaderResources(0, 1, &I.realSrv[frame]);
         for (int e = 0; e < 2; e++) {
             Cb c{};
@@ -769,7 +821,7 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
             rows(m, c.pA, c.pB, c.pC);
             memcpy(c.tanF, fov8 + e * 4, sizeof(float) * 4);
             c.eyeRect[0] = e ? 0.5f : 0.f; c.eyeRect[1] = 0.5f; c.eyeRect[2] = (float)m_w; c.eyeRect[3] = (float)m_h;
-            c.mode[0] = pass == 0 ? 1.f : 0.f;
+            c.mode[0] = pass == 0 ? 1.f : pass == 2 ? 2.f : 0.f;
             m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c, 0, 0);
             D3D11_VIEWPORT vp{}; vp.TopLeftX = e ? I.flowW * 0.5f : 0.f; vp.Width = I.flowW * 0.5f; vp.Height = (float)I.flowH; vp.MaxDepth = 1.f;
             m_ctx->RSSetViewports(1, &vp);
@@ -780,7 +832,7 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     // the engine: backward flow from the current frame to the aligned previous one
     NV_OF_EXECUTE_INPUT_PARAMS in{};
-    in.inputFrame = I.hIn[1]; in.referenceFrame = I.hIn[0]; in.externalHints = nullptr; in.disableTemporalHints = NV_OF_FALSE;
+    in.inputFrame = I.hIn[1]; in.referenceFrame = I.hIn[0]; in.externalHints = nullptr; in.disableTemporalHints = I.cfg.noHints ? NV_OF_TRUE : NV_OF_FALSE;
     NV_OF_EXECUTE_OUTPUT_PARAMS out{};
     out.outputBuffer = I.hFlow; out.outputCostBuffer = I.hCost;
     const NV_OF_STATUS st = I.api.nvOFExecute(I.of, &in, &out);
@@ -812,10 +864,48 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
             memcpy(I.turnFov[n], fov8, sizeof(float) * 8);
             I.turnUsed[n] = I.camYaw[n] - I.camYaw[prev];
         }
+        if (I.cfg.stereo) {
+            // the stereo run: the newer frame against its own eyes swapped; a block's vector = where its content is in the other eye (the same buffers again)
+            NV_OF_EXECUTE_INPUT_PARAMS inS{};
+            inS.inputFrame = I.hIn[1]; inS.referenceFrame = I.hInSw; inS.externalHints = nullptr; inS.disableTemporalHints = NV_OF_TRUE;
+            NV_OF_EXECUTE_OUTPUT_PARAMS outS{};
+            outS.outputBuffer = I.hFlow; outS.outputCostBuffer = I.hCost;
+            bool fused = false;
+            if (I.api.nvOFExecute(I.of, &inS, &outS) == NV_OF_SUCCESS) {
+                ID3D11ShaderResourceView* inSt[3] = { I.flowInSrv[1], I.flowInSwSrv, I.flowOutSrv };
+                m_ctx->OMSetRenderTargets(1, &I.unpackStRtv, nullptr);
+                m_ctx->PSSetShader(I.psUnpack, nullptr, 0);
+                m_ctx->PSSetShaderResources(0, 3, inSt);
+                m_ctx->Draw(3, 0);
+                m_ctx->PSSetShaderResources(0, 3, nulls);
+                // the fusion: t0 = the newer frame, t1 = the aligned older one (evalBlock's costs), t4 = the temporal vectors, t6 = the stereo vectors
+                Cb cf{};
+                cf.flowP[0] = (float)I.flowW / (float)m_w; cf.flowP[1] = (float)I.flowH / (float)m_h;
+                cf.blocks[0] = I.blocksW / 2; cf.blocks[1] = I.blocksW; cf.blocks[2] = I.blocksH; cf.blocks[3] = I.grid;
+                cf.flowIn[0] = (float)(I.flowW / 2); cf.flowIn[1] = (float)I.flowH; cf.flowIn[2] = I.cfg.maxFlowPx;
+                cf.stP[0] = 1.f; cf.stP[1] = I.cfg.stereoMargin; cf.stP[2] = I.cfg.stereoMaxCost;
+                cf.fbP[0] = I.cfg.fb ? 1.f : 0.f; cf.fbP[1] = I.cfg.fbTol; cf.fbP[2] = I.cfg.fbGain;
+                m_ctx->UpdateSubresource(I.cb, 0, nullptr, &cf, 0, 0);
+                ID3D11ShaderResourceView* inFu[2] = { I.flowInSrv[1], I.flowInSrv[0] };
+                m_ctx->OMSetRenderTargets(1, &I.fusedRtv, nullptr);
+                m_ctx->PSSetShader(I.psFuse, nullptr, 0);
+                m_ctx->PSSetShaderResources(0, 2, inFu);
+                m_ctx->PSSetShaderResources(4, 1, &I.unpackSrv);
+                m_ctx->PSSetShaderResources(6, 1, &I.unpackStSrv);
+                m_ctx->Draw(3, 0);
+                m_ctx->PSSetShaderResources(0, 2, nulls);
+                ID3D11ShaderResourceView* n6 = nullptr; m_ctx->PSSetShaderResources(6, 1, &n6);
+                m_ctx->PSSetShaderResources(4, 1, nulls);
+                fused = true;
+            } else {
+                stats.flowErrors++;
+            }
+            I.fusedThisPair = fused;
+        }
         if (I.cfg.fb) {
             // the other way: the aligned older frame -> the newer one (the same buffers: the pair's backward flow has been copied and unpacked above)
             NV_OF_EXECUTE_INPUT_PARAMS inF{};
-            inF.inputFrame = I.hIn[0]; inF.referenceFrame = I.hIn[1]; inF.externalHints = nullptr; inF.disableTemporalHints = NV_OF_FALSE;
+            inF.inputFrame = I.hIn[0]; inF.referenceFrame = I.hIn[1]; inF.externalHints = nullptr; inF.disableTemporalHints = I.cfg.noHints ? NV_OF_TRUE : NV_OF_FALSE;
             NV_OF_EXECUTE_OUTPUT_PARAMS outF{};
             outF.outputBuffer = I.hFlow; outF.outputCostBuffer = I.hCost;
             if (I.api.nvOFExecute(I.of, &inF, &outF) == NV_OF_SUCCESS) {
@@ -834,7 +924,7 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
         }
         m_ctx->OMSetRenderTargets(1, &I.pairFiltRtv[n], nullptr);
         m_ctx->PSSetShader(I.psFilter, nullptr, 0);
-        m_ctx->PSSetShaderResources(4, 1, &I.unpackSrv);
+        m_ctx->PSSetShaderResources(4, 1, I.cfg.stereo && I.fusedThisPair ? &I.fusedSrv : &I.unpackSrv);
         if (I.cfg.fb) m_ctx->PSSetShaderResources(6, 1, &I.unpackFwdSrv);
         m_ctx->Draw(3, 0);
         m_ctx->PSSetShaderResources(4, 1, nulls);

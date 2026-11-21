@@ -42,7 +42,15 @@ struct FrameGenConfig {
     float hudVote = 0.75f;   // the share of a texel's textured pixels that must be still
     int hudDil = 0;
     int fb = 0;              // forward/backward consistency (see FrameGenFb note above)
-    float fbTol = 2.f, fbGain = 0.25f;          // extra growth of the mask, in texels of the quarter-resolution mask (4 px)
+    float fbTol = 2.f, fbGain = 0.25f;
+    // stereo flow fusion (fg-testing branch; AIRFRAMEXR_FG_STEREO=1; off by default; edge synthesis only): the two eyes see the same motion, shifted by the disparity. The engine
+    // runs once more on the newer frame against its own eyes swapped (left against right, right against left) to find where each block's content is in the other eye; the other
+    // eye's temporal vector at that place is a candidate for this block, taken when its match cost in THIS eye beats the block's own by stereoMargin (a wrong or noisy vector
+    // replaced by what the other eye found). Costs a third flow run per pair.
+    int noHints = 0;         // lab (AIRFRAMEXR_FG_NOHINTS=1): the engine's temporal hints (the previous execute's flow as a starting point) off in every run. The extra runs of fb / stereo sit between
+                             // the pair's backward runs and would hint them with another direction's flow: compare those variants against a no-hints reference
+    int stereo = 0;
+    float stereoMargin = 0.004f, stereoMaxCost = 0.05f;          // extra growth of the mask, in texels of the quarter-resolution mask (4 px)
 };
 
 // forward/backward flow consistency (fg-testing branch; AIRFRAMEXR_FG_FB=1; off by default; edge synthesis only): the engine also runs the other way (aligned older
