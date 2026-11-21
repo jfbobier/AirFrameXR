@@ -250,6 +250,25 @@ the window that spans submit 12,000 left out):
 Whole runs (`game_run`, mode on / off): latency p50 65.9 / 57.3 ms, p95 67.1 / 67.1; encode p50 2.7 / 3.5 ms; GPU p50 41 / 31 %, 218 / 183 W;
 stream 98.0 / 96.6 fps; host repeats 32 % / 0.6 %.
 
+Two more sessions the same evening (same save, the game's limiter still 45; `run3-181252`, `run4-182103` in the same folder): run 3 with the mode
+off and frame generation at "half" (grid 50 Hz), run 4 with the mode on and frame generation off (from 14 s in). Before submit 12,000 the identity
+result holds in both, to the frame (run 3: 450 of 900 in 9 play windows; run 4: 900 of 1800 in 5), so **G1 holds in all four configurations**. Both
+make 22.6 new pictures/s: the mode costs pictures only where our grid is under twice the game's picture rate (mode off gives grid / 2: "third" at
+100 Hz = 16.7, "half" = 25, above the limiter's 22.6). Run 3 after 12,000 (8 windows): 21.9 new pictures/s, nothing released 52.3 % against same
+poses 51.2 %, one eye released 6.5 % of new pictures, a new pose with nothing released 0.9 %: the two late shapes mixed (free-running gave one-eye
+releases in run 1, paced waits gave pose-only submits in run 2). Run 4 ended before 12,000 (about 10,800 submits).
+
+| run | mode | frame generation | new pictures /s | generator inputs that are duplicates | host repeats | headset repeated | latency p50 / p95 ms | encode p50 ms | GPU p50 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | on | third | 22.6 | about 0 | 32 % | 0.5 % | 65.9 / 67.1 | 2.7 | 41 % |
+| 2 | off | third | 16.7 | >= 51 % | 0.6 % | 0.6 % | 57.3 / 67.1 | 3.5 | 31 % |
+| 3 | off | half | 22.6 | >= 39 % | 33 % | 0.9 % | 65.9 / 67.0 | 2.7 | 42 % |
+| 4 | on | off | 22.6 | - | 0 | 77 % | 79.1 / 88.8 | 7.8 | 34 % |
+
+Duplicates at the generator = its ingests minus the new pictures the shim saw (a lower bound). With the mode off every duplicate becomes a generator
+input, and the frames it generates between two identical pictures do not move; with the mode on none reaches it. For the U1 regression the mode
+must be on (U1 acts inside the compatibility tick): runs 1 and 4 are its references, run 4 the simpler one (no generator).
+
 What it changes:
 - **U1 gains nothing on this game, by construction:** its case rests on OFXR alone (row `id_ofxr_mimic`, the 2026-11-13 lab: 88 -> 72 new
   frames/s). Black Flag becomes a regression check: armed, the same dropped count per window as U0 (to within 1) and the same new pictures/s. In
