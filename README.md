@@ -72,7 +72,7 @@ built on ALVR's open-source server libraries (MIT). It is a separate project: it
 project, and the ALVR developers' own streamer remains the place for SteamVR-based streaming.
 - **Headset clients.** The streamer speaks the ALVR protocol (20.14.x), so there are two kinds of clients:
   - **AirFrameXR clients**, built for the two headsets this project targets, so that the optimizations run end to end (the field of view limit, the chroma-key passthrough, timing and latency logs):
-    - **Apple Vision Pro**: the [AirFrameXR visionOS client](https://github.com/jfbobier/airframexr-visionos) (source on GitHub), distributed through **TestFlight**. <!-- TODO: add the public TestFlight link from kteque -->
+    - **Apple Vision Pro**: the [AirFrameXR visionOS client](https://github.com/jfbobier/airframexr-visionos) (source on GitHub), distributed through **TestFlight**: [join the public beta](https://testflight.apple.com/join/QYxnfNWM) (limited to 100 testers).
     - **Meta Quest 3**: the [AirFrameXR Quest client](https://github.com/jfbobier/airframexr-metaquest), a full **Vulkan** rewrite of the ALVR client's renderer; **sideload** the APK from the fork's [releases](https://github.com/jfbobier/airframexr-metaquest/releases) (tested on a Quest 3 only).
   - **The stock ALVR clients** (the ALVR app on the Vision Pro, the Meta-store ALVR app on the Quest) work natively with the streamer, frame generation included, but with fewer end-to-end optimizations.
 
