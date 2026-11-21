@@ -1,6 +1,6 @@
 // What the frame pipeline will do with the current settings, before a game runs: the stream's per-eye size (the "fit" keeps the pixel density the
 // user chose over whatever box the headset declares), the game's render size (floor = the stream's density over the rectangle the game is told,
-// ceiling = the reference size when the fit is on), the encoded frame (ALVR's foveated layout, the exact maths of FFR.cpp), where the
+// ceiling = the stream's own eye size: 1.4-foundation E4 removed the reference ceiling above it), the encoded frame (ALVR's foveated layout, the exact maths of FFR.cpp), where the
 // foveation's full-density band sits in degrees, the NVENC strips to expect (the split rules of the Video Codec SDK guide, section 8.14) and the
 // warnings to show. A port of harness/fov_stream_geometry.py `model()`; harness/pipeline_model_check.py compares the two over a grid.
 // Pure maths: the only file access is in FromSettings. docs/FOV_PIPELINE_OPTIM.md section 2b.
@@ -158,7 +158,7 @@ namespace AirFrameXR
             }
             double wr = rspan[0] / dspan[0], hr = rspan[1] / dspan[1];
             double[] floor = { fitEye[0] * wr, fitEye[1] * hr };
-            double[] ceiling = useFit ? new double[] { Math.Max(i.ReferenceEye[0], fitEye[0]), Math.Max(i.ReferenceEye[1], fitEye[1]) } : new double[] { fitEye[0], fitEye[1] };
+            double[] ceiling = { fitEye[0], fitEye[1] };   // the engine's ceiling is the stream's eye size (1.4-foundation E4: IPC renderCeiling is gone)
             r.FitEye = fitEye;
             r.Floor = new[] { EvenAtLeast64(floor[0]), EvenAtLeast64(floor[1]) };
             r.Ceiling = new[] { (int)ceiling[0], (int)ceiling[1] };
@@ -200,7 +200,7 @@ namespace AirFrameXR
                     r.Warnings.Add($"Split encoding: {r.Strips} strip(s) expected ({why}). A forced mode splits at any size.");
             }
             if (i.Quality > 0 && r.Game[0] == r.Floor[0] && r.Game[1] == r.Floor[1] && ceiling[0] <= floor[0] + 1e-9 && ceiling[1] <= floor[1] + 1e-9)
-                r.Warnings.Add("The render quality slider has no room: the game's size and its ceiling are the same (tick the stream fit or set a larger resolution).");
+                r.Warnings.Add("The render quality slider has no room: the game's size and its ceiling are the same (set a larger resolution).");
             return r;
         }
 
@@ -692,7 +692,8 @@ namespace AirFrameXR
                 if (st.Kind != HeadsetKind.VisionPro) return null;
                 rm = rm ?? RateMapFoveation.Load(ProfilePath);
                 if (rm == null) return null;
-                if (st.FoveationManual) { if (!explicitChoice) return null; st.FoveationManual = false; }
+                // with a mask the six numbers are always computed (docs/PLAN_1_4_FOUNDATION.md F4: the Settings fields show them, read-only)
+                if (st.FoveationManual && MaskEncoding.Active(st, out _) == null) { if (!explicitChoice) return null; st.FoveationManual = false; }
                 var view = View(st, rm);
                 var window = RestrictionWindow(st, view);   // the restriction profile in force, capped at the frame: where the game draws; null = it draws everywhere
                 // 1.4 (docs/FOV_CONTRACT_PLAN.md): with a preset and a restriction, the headset app declares the restriction itself (video.client_box, sent by the host
@@ -781,6 +782,106 @@ namespace AirFrameXR
                     return null;
                 }
                 catch (Exception e) { Log.Write("WARN", "foveation flag not saved: " + e.Message); return null; }
+            }
+        }
+
+        /// 1.4-foundation (docs/PLAN_1_4_FOUNDATION.md F3 / F5): the encoding's foveation, one writer. Two choices (owner 2026-11-20): "foveated", which takes the mask
+        /// of the profile in use when it has one, or "no foveation" (video.encode_profile full-split). ALVR's foveation is separable (one curve across, one down) and
+        /// cannot follow the mask's cut corners, so its six numbers stay what PictureEdgesFoveation computes; the mask goes to the encoder as a per-eye outline in the
+        /// stream eye's uv (video.encode_mask, polygon_uv_v1), where every 32 x 32 block wholly outside it gets a QP that climbs to the highest across a band past
+        /// the outline (nvenc/hostlib/nvh.cpp, tools/host/src/nvidia_profile.rs MASK_QP_BAND).
+        public static class MaskEncoding
+        {
+            public const string Key = "video.encode_mask", Kind = "polygon_uv_v1";
+
+            /// the profile in use when its rectangle is the restriction in force (picked in the FOV card, numbers not changed since); null otherwise
+            public static UserFov ProfileInForce(AppSettings st, IList<UserFov> store = null)
+            {
+                var id = Json.Str(st.Root, "video.fov_profile", "");
+                if (id == "" || !st.FovOverride) return null;
+                var u = (store ?? UserFovStore.Load()).FirstOrDefault(x => x.Id == id);
+                if (u == null) return null;
+                var w = new[] { st.FovOuter, st.FovInner, st.FovUpper, st.FovLower };
+                return Enumerable.Range(0, 4).All(k => Math.Abs(w[k] - u.Tan[k]) < 0.005) ? u : null;
+            }
+
+            /// the mask the encoding takes: the profile in force when it has a mask and the encoding is foveated; null = none (and why)
+            public static UserFov Active(AppSettings st, out string why, IList<UserFov> store = null)
+            {
+                why = null;
+                if (st.EncodeProfile == "full-split") { why = "no foveation"; return null; }
+                var u = ProfileInForce(st, store);
+                if (u == null) { why = st.FovOverride ? "the restriction is not a profile's (or was changed since)" : "no restriction"; return null; }
+                if (!u.HasMask) { why = $"the profile '{u.Name}' has no mask"; return null; }
+                return u;
+            }
+
+            /// a convex polygon (tangents: x outward from the nose, y up) in the eye's uv over `view` (outer, inner, upper, lower: x = 0 at the outer edge, y = 0
+            /// at the top), clipped to the eye (Sutherland-Hodgman, so it stays convex)
+            public static List<double[]> ToUv(IList<double[]> tan, double[] view)
+            {
+                double sx = view[0] + view[1], sy = view[2] + view[3];
+                var p = tan.Select(q => new[] { (view[0] - q[0]) / sx, (view[2] - q[1]) / sy }).ToList();
+                Func<double[], double>[] inside = { q => q[0], q => 1 - q[0], q => q[1], q => 1 - q[1] };
+                foreach (var f in inside)
+                {
+                    var o = new List<double[]>();
+                    for (int k = 0; k < p.Count; k++)
+                    {
+                        var a = p[k]; var b = p[(k + 1) % p.Count];
+                        double fa = f(a), fb = f(b);
+                        if (fa >= 0) o.Add(a);
+                        if ((fa >= 0) != (fb >= 0)) { var t = fa / (fa - fb); o.Add(new[] { a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]) }); }
+                    }
+                    p = o;
+                    if (p.Count < 3) return p;
+                }
+                // equal neighbours (a corner the mask does not cut) say nothing: dropped
+                var d = new List<double[]>();
+                foreach (var q in p) if (d.Count == 0 || Math.Abs(q[0] - d[d.Count - 1][0]) > 1e-9 || Math.Abs(q[1] - d[d.Count - 1][1]) > 1e-9) d.Add(q);
+                if (d.Count > 1 && Math.Abs(d[0][0] - d[d.Count - 1][0]) < 1e-9 && Math.Abs(d[0][1] - d[d.Count - 1][1]) < 1e-9) d.RemoveAt(d.Count - 1);
+                return d;
+            }
+
+            /// the share of the eye a uv polygon leaves out (0 = none)
+            public static double HiddenShare(IList<double[]> uv)
+            {
+                double a = 0;
+                for (int k = 0; k < uv.Count; k++) { var q = uv[k]; var r = uv[(k + 1) % uv.Count]; a += q[0] * r[1] - r[0] * q[1]; }
+                return Math.Max(0, 1 - Math.Abs(a) / 2);
+            }
+
+            /// the settings object for the host, or null when an eye's outline leaves nothing
+            public static Dictionary<string, object> Build(UserFov u, double[] view, out double hiddenLeft, out double hiddenRight)
+            {
+                hiddenLeft = hiddenRight = 0;
+                var l = ToUv(FovMask.Polygon(u.TanLeft ?? u.Tan, u.MaskLeft), view);
+                var r = ToUv(FovMask.Polygon(u.TanRight ?? u.Tan, u.MaskRight), view);
+                // the encoder's test needs a convex outline: anything else is refused (no mask) rather than sent (a self-crossing one hid the whole picture, field 2026-11-20)
+                if (!FovMask.IsConvex(l) || !FovMask.IsConvex(r)) return null;
+                hiddenLeft = HiddenShare(l); hiddenRight = HiddenShare(r);
+                object Pts(List<double[]> p) => p.Select(q => (object)new List<object> { Math.Round(q[0], 4), Math.Round(q[1], 4) }).ToList();
+                return new Dictionary<string, object> { ["kind"] = Kind, ["profile"] = u.Name ?? u.Id, ["left"] = Pts(l), ["right"] = Pts(r) };
+            }
+
+            /// The compile's step: the session's foveation on / off from the encode profile (so the host never has to overrule the session), and the mask for
+            /// the box the stream was sized for (`view`, null = not known: no mask). Writes video.encode_mask into `scratch` (or removes it). Returns the log text.
+            public static string Apply(AppSettings scratch, Dictionary<string, object> session, double[] view, IList<UserFov> store = null)
+            {
+                var c = CultureInfo.InvariantCulture;
+                if (scratch.EncodeProfile != "session")
+                {
+                    bool on = scratch.EncodeProfile != "full-split";
+                    Json.Set(session, "session_settings.video.foveated_encoding.enabled", on);
+                    Json.Set(session, "openvr_config.enable_foveated_encoding", on);
+                }
+                var u = Active(scratch, out var why, store);
+                Dictionary<string, object> m = null; double hl = 0, hr = 0;
+                if (u != null && view != null && view.All(x => x > 0.05)) m = Build(u, view, out hl, out hr);
+                if (m != null) Json.Set(scratch.Root, Key, m); else Json.Remove(scratch.Root, Key);
+                if (scratch.EncodeProfile == "full-split") return "encoding: no foveation (full frame)";
+                if (m == null) return "encoding: foveated, no mask (" + (why ?? (view == null ? "the stream's box is not known" : "the outline leaves nothing or is not convex")) + ")";
+                return $"encoding: foveated from the mask of '{u.Name}' (it hides {(100 * hl).ToString("0.0", c)} % / {(100 * hr).ToString("0.0", c)} % of the left / right stream eye; outside it the QP climbs to the highest across a band past the outline)";
             }
         }
 
@@ -896,7 +997,10 @@ namespace AirFrameXR
             PipelineModel.WriteStreamEye(s, eye[0], eye[1]);
             var fov = PipelineModel.PictureEdgesFoveation.Apply(scratch, s, false);
             var now = PipelineModel.StreamEye(s) ?? eye;
-            log = $"session compiled: {now[0]} x {now[1]} per eye from the golden {chosen[0]} x {chosen[1]}" + (fov != null ? "; " + fov : "");
+            // the mask over the box the stream was sized for: the Vision Pro's compiled view, another headset's declared box
+            var maskView = scratch.Kind == HeadsetKind.VisionPro ? (PipelineModel.PictureEdgesFoveation.Last?.View ?? declared) : declared;
+            var enc = PipelineModel.MaskEncoding.Apply(scratch, s, maskView);
+            log = $"session compiled: {now[0]} x {now[1]} per eye from the golden {chosen[0]} x {chosen[1]}" + (fov != null ? "; " + fov : "") + "; " + enc;
             return s;
         }
 
@@ -926,6 +1030,9 @@ namespace AirFrameXR
                 var cb = Json.Get(scratch.Root, "video.client_box"); var cbReal = Json.Get(real.Root, "video.client_box");
                 string S(object o) => o == null ? "" : Json.Serialize(o);
                 if (S(cb) != S(cbReal)) { if (cb != null) Json.Set(real.Root, "video.client_box", cb); else Json.Remove(real.Root, "video.client_box"); changed = true; }
+                // 1.4-foundation: the mask the encoder takes (F3), derived like the box
+                var em = Json.Get(scratch.Root, PipelineModel.MaskEncoding.Key); var emReal = Json.Get(real.Root, PipelineModel.MaskEncoding.Key);
+                if (S(em) != S(emReal)) { if (em != null) Json.Set(real.Root, PipelineModel.MaskEncoding.Key, em); else Json.Remove(real.Root, PipelineModel.MaskEncoding.Key); changed = true; }
                 if (changed) real.Save();
                 return log ?? "session compiled (no stream size known yet)";
             }

@@ -333,8 +333,9 @@ namespace AirFrameXR
                 return;
             }
             fovNote.Text = "On: the game is told " + deg + " degrees (outer / inner / upper / lower), never more than the headset's. " + RestartSentence;
-            if (u != null && u.HasMask)   // 1.4: the profile's mask (the line test's corner lines); not sent to games yet
-                fovNote.Text += " Mask: " + (100 * FovMask.HiddenShare(u.TanLeft ?? u.Tan, u.MaskLeft)).ToString("0", CultureInfo.InvariantCulture) + " % (left eye) and " + (100 * FovMask.HiddenShare(u.TanRight ?? u.Tan, u.MaskRight)).ToString("0", CultureInfo.InvariantCulture) + " % (right eye) of the picture lie outside your lens window, in the corners (stored; not sent to games yet).";
+            if (u != null && u.HasMask)   // the profile's mask (the line test's corner lines): 1.4-foundation gives it to the encoder (docs/PLAN_1_4_FOUNDATION.md F1), not to games
+                fovNote.Text += " Mask: " + (100 * FovMask.HiddenShare(u.TanLeft ?? u.Tan, u.MaskLeft)).ToString("0", CultureInfo.InvariantCulture) + " % (left eye) and " + (100 * FovMask.HiddenShare(u.TanRight ?? u.Tan, u.MaskRight)).ToString("0", CultureInfo.InvariantCulture) + " % (right eye) of the picture lie outside your lens window, in the corners"
+                    + (new AppSettings().EncodeProfile == "full-split" ? " (not used: Settings, Encoding is No foveation)." : ": the encoder spends almost no bits there (Settings, Encoding: Foveated from the mask).");
             double w0 = clientFov[0] + clientFov[1], h0 = clientFov[2] + clientFov[3];
             double w = v[0] + v[1], h = v[2] + v[3];
             fovShare.Text = "The game renders " + (100 * w * h / (w0 * h0)).ToString("0", CultureInfo.InvariantCulture) + " % of the pixels the headset's whole view would.";

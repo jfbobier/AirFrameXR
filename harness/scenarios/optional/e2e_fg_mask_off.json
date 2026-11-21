@@ -1,0 +1,204 @@
+{
+ "description": "MASKED FRAME GENERATION, OFF: e2e_fg_size_balanced (1.4 Balanced, 2624x2368 per eye, half rate, 90 Hz) with the mask of the shipped 'AVP optimized trade-off' profile (its polygons over the Vision Pro's box as the session compile writes them, harness/mask_compile_check.py's port: 61.3 % / 57.4 % of the eyes visible). Lab switch AIRFRAMEXR_FG_MASK=0: the output pass draws the whole eye, as before (the A/B arm). Interleave with e2e_fg_mask_on and compare with harness/ab_report.py --min 0.1 (fg_synth, fg_gpu_ms_s, stream fps).",
+ "topology": {
+  "host": "builder",
+  "client": "builder",
+  "client_bind_ip": "127.0.0.2",
+  "host_launch": "interactive"
+ },
+ "session_overrides": {
+  "openvr_config.eye_resolution_width": 2624,
+  "openvr_config.eye_resolution_height": 2368,
+  "openvr_config.target_eye_resolution_width": 2624,
+  "openvr_config.target_eye_resolution_height": 2368,
+  "session_settings.connection.client_recv_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  },
+  "session_settings.connection.server_send_buffer_bytes": {
+   "variant": "Custom",
+   "Custom": 16777216
+  },
+  "session_settings.video.transcoding_view_resolution": {
+   "Scale": 1.0,
+   "Absolute": {
+    "width": 2624,
+    "height": {
+     "set": true,
+     "content": 2368
+    }
+   },
+   "variant": "Absolute"
+  },
+  "session_settings.video.emulated_headset_view_resolution": {
+   "Scale": 1.0,
+   "Absolute": {
+    "width": 2624,
+    "height": {
+     "set": true,
+     "content": 2368
+    }
+   },
+   "variant": "Absolute"
+  },
+  "session_settings.video.foveated_encoding.enabled": true,
+  "openvr_config.enable_foveated_encoding": true,
+  "session_settings.video.foveated_encoding.content.center_size_x": 0.499,
+  "openvr_config.foveation_center_size_x": 0.499,
+  "session_settings.video.foveated_encoding.content.center_size_y": 0.548,
+  "openvr_config.foveation_center_size_y": 0.548,
+  "session_settings.video.foveated_encoding.content.center_shift_x": 0.399,
+  "openvr_config.foveation_center_shift_x": 0.399,
+  "session_settings.video.foveated_encoding.content.center_shift_y": -0.127,
+  "openvr_config.foveation_center_shift_y": -0.127,
+  "session_settings.video.foveated_encoding.content.edge_ratio_x": 2.416,
+  "openvr_config.foveation_edge_ratio_x": 2.416,
+  "session_settings.video.foveated_encoding.content.edge_ratio_y": 2.058,
+  "openvr_config.foveation_edge_ratio_y": 2.058
+ },
+ "host": {
+  "shim": true,
+  "fps": 90,
+  "seconds": 70,
+  "connect_timeout": 45,
+  "gpu_keepalive": 90,
+  "exit_after_frames": 100000,
+  "running_start_ms": 2.0,
+  "frame_gen": "on",
+  "encode_mask": {
+   "kind": "polygon_uv_v1",
+   "profile": "AVP optimized trade-off",
+   "left": [
+    [
+     0.05183,
+     0.39493
+    ],
+    [
+     0.52112,
+     0.0
+    ],
+    [
+     0.41878,
+     0.0
+    ],
+    [
+     1.0,
+     0.33476
+    ],
+    [
+     1.0,
+     0.6614
+    ],
+    [
+     0.49703,
+     1.0
+    ],
+    [
+     0.4026,
+     1.0
+    ],
+    [
+     0.05183,
+     0.65498
+    ]
+   ],
+   "right": [
+    [
+     0.0,
+     0.40844
+    ],
+    [
+     0.44442,
+     0.0
+    ],
+    [
+     0.31069,
+     0.0
+    ],
+    [
+     0.95477,
+     0.32742
+    ],
+    [
+     0.95477,
+     0.64855
+    ],
+    [
+     0.36327,
+     1.0
+    ],
+    [
+     0.38627,
+     1.0
+    ],
+    [
+     0.0,
+     0.58507
+    ]
+   ]
+  },
+  "env": {
+   "AIRFRAMEXR_FG_MASK": "0"
+  }
+ },
+ "client": {
+  "seconds": 75,
+  "connect_timeout": 45,
+  "yaw_amp": 0.5,
+  "yaw_hz": 0.25,
+  "display_sim": true,
+  "poll_ms": 5,
+  "queue_max": 2,
+  "motion": "yaw"
+ },
+ "client_env": {
+  "RUST_LOG": "warn"
+ },
+ "app": {
+  "frames": 1800,
+  "timeout_s": 60,
+  "env": {
+   "XR_PROBE_CPU_MS": "1",
+   "XR_PROBE_GPU_COPIES": "0",
+   "XR_PROBE_LOAD": "fps:50:70"
+  }
+ },
+ "gpu_sample": true,
+ "timeout_s": 220,
+ "checks": {
+  "host_min_frames": 600,
+  "client_min_frames": 600,
+  "max_duplicate_timestamps": 10,
+  "negotiated": {
+   "view_resolution": [
+    2624,
+    2368
+   ],
+   "enable_foveated_encoding": true
+  },
+  "fg": {
+   "frame": [
+    5248,
+    2368
+   ],
+   "synth_share": [
+    0.4,
+    0.6
+   ],
+   "synth_ms_per_mpx": [
+    0.02,
+    0.1
+   ],
+   "mask_visible": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ]
+  }
+ }
+}

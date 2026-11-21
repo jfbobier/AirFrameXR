@@ -38,6 +38,55 @@ results and 4x difference images) are written as PNG montages.
 * **Head moving:** the three are within 0.1 dB of each other (the rotation reprojection dominates; parallax and disocclusions are what limits all of them).
 * **Large motion** (scene x24): holding B beats every synthesis at some rates. By design: a content shift beyond `motionLimit` (0.10 of the eye width) falls back to the still frame.
 
+## Stick turns: the `pan` scenario (2026-11-20, RTX 5090)
+
+`--pans 60,120,...` (deg/s; `fg_judge.py --pans`): the camera turns about the world's up axis while the scene stays frozen and the head the generator is told
+does not move: what a game's stick turn is to the generator (field 2026-11-20, Hellraiser at 1.5x: trailing on the stick, none on head turns). `--views` renders
+with an install's box, `--env AIRFRAMEXR_FG_MOTION_LIMIT=...` (and the other two knobs) changes the generator's tuning for the run.
+
+Run on the owner's stream (1920 x 2368 per eye, box 0.92 / 0.58 / 0.90 / 0.77, 3 start times; `harness/results/20261120T210125Z_fg_judge`), whole-frame PSNR of
+edge at a 24.4 ms pair gap (a 41 fps game): head turn 27.7 dB; stick 60 deg/s 27.3, 120 22.7, 180 20.2, 270 17.8, 360 16.1. The double-image energy on the
+boundary band (edge excess) goes 0.12 (head) -> 0.18 / 0.32 / 0.45 / 0.62 / 0.77; blur rises with it. The score follows the step between the two frames
+(about 3 deg per gap already costs 5 dB: 120 deg/s at 24 ms equals 180 deg/s at 16.7 ms); classic, edge and edge-blend all fail the same way (edge-blend
++0.3 dB). **Not the motion limit**: `AIRFRAMEXR_FG_MOTION_LIMIT=0.25` gives the same numbers (only 270 / 360 deg/s at 33 ms move, by 0.1 / 1 dB). The pictures
+(`pan_x180_g24_pictures.png`) show torn, doubled vertical edges and ghosted texture; the head turn's are clean. A head turn never reaches the optical flow
+(A is turned into B's camera first); a stick turn reaches it whole, and the flow as configured (half scale, fast preset, grid 4, no hints) does not follow it.
+
+### Stick turns: the flow engine's settings, and the rotation oracle (2026-11-20, RTX 5090)
+
+The 5090's optical-flow engine supports external hints in optical-flow mode (hint grids 1 2 4 8, output grids 1 2 4, ROI; `fgj_start` prints it).
+The 3080 Ti was offline: not checked.
+
+**Settings sweep** (lab-only `AIRFRAMEXR_FG_JUDGE_PERF` / `_FLOW_SCALE` / `_GRID`; 11 settings, 3 starts, gaps 16.7 / 24.4 ms, pans 60-270 deg/s): no setting fixes
+stick turns. At 24.4 ms the shipped one (fast, half scale, grid 4: 1.05 ms) scores 22.7 / 20.2 / 17.8 dB at 120 / 180 / 270 deg/s; the best (slow or fast preset at
+full scale, grid 4) 23.2 / 20.5 / 17.9 for 2.9-7.6 ms; finer grids (2, 1) are worse and dearer (1.4-19 ms). Head and scene cases do not move. The shipped
+settings stay.
+
+**Rotation oracle** (`AIRFRAMEXR_FG_JUDGE_PAN_ORACLE=1`: the generator is told the camera's turn as if it were the head's, the upper bound of compensating a
+global rotation before the flow): the double images go away: edge excess at 24.4 ms 0.32 / 0.45 / 0.62 -> 0.14 / 0.15 / 0.17 (a head turn: 0.12), and the pictures
+(`20261120T212442Z_fg_judge/pan_x180_g24_pictures.png`) are clean but for a black strip at the eye's edge, the part of the view neither rotated frame covers
+(about half the turn per gap, ~50 px at 180 deg/s). Whole-frame PSNR falls (20.2 -> 19.1 at 180 deg/s) because of that strip alone: PSNR is the wrong score for this
+case, the edge excess and the pictures are the right ones. So the flow is not what fails on a stick turn: the generator needs the turn removed first, as it does
+for the head. The strip needs a fill (the other frame, or the edge clamped).
+
+### The camera turn (lab switch `AIRFRAMEXR_FG_CAM_TURN`, 2026-11-20, RTX 5090)
+
+`--pan-warm 3`: three frames before A, so each pan rate also runs as a sequence (`pan` sustained, `panstart` still then turning at A, `panstop` turning
+then still, `panrev` turning then the other way): the prediction's cases. Edge synthesis, whole-frame PSNR off -> on (double-image energy), 3 starts,
+the owner's eye and box (`20261120T223155Z_fg_judge` off, `20261120T223501Z_fg_judge` on):
+
+| 24.4 ms (41 fps) | 60 deg/s | 120 | 180 | 270 |
+|---|---|---|---|---|
+| sustained | 27.1 -> 35.8 (0.18 -> 0.11) | 22.8 -> 33.4 (0.32 -> 0.13) | 20.2 -> 31.5 (0.45 -> 0.14) | 17.7 -> 29.3 (0.62 -> 0.17) |
+| start | 27.3 -> 35.9 | 22.8 -> 33.5 | 20.2 -> 31.3 | 17.7 -> 29.1 |
+| reverse | 26.6 -> 35.0 | 22.1 -> 32.9 | 19.7 -> 31.0 | 17.2 -> 28.9 |
+| stop | ~97 -> ~100 (a still pair) | | | |
+
+At 33.3 ms (30 fps) the same shape (180 deg/s 18.3 -> 30.0, reverse 17.9 -> 29.5). Head turns 27.7 -> 36.0 and `both` 27.7 -> 35.8 (the edge fill);
+scene x1 / x8 unchanged (56.2 / 42.6). The measured turn of a pair equals the truth within 0.01 deg. Lessons on the way: the unpack pass's alpha is
+data, so the generator sets its own blend state (the benchmark scene left alpha blending bound and broke every edge result once); a prediction
+from the last pair's turn alone missed on most real pairs (2 / 3 display periods apart): the rate times the pair's own time step fixed it.
+
 ## What it does not tell
 
 One scene, one GPU, one frame size; PSNR rewards blending and SSIM is a proxy; nothing here sees judder over time or the feel of a double image in a headset.

@@ -210,10 +210,11 @@ def model(declared, rect=None, eye=EYE, reference_eye=None, reference_fov=None, 
         fit_eye = (int(eye[0]), int(eye[1]))
         if fit_eye[0] > NVENC_MAX_EYE[0] or fit_eye[1] > NVENC_MAX_EYE[1]:
             warnings.append(f"The stream's {fit_eye[0]} x {fit_eye[1]} per eye exceeds what NVENC encodes ({2 * NVENC_MAX_EYE[0]} across side by side, {NVENC_MAX_EYE[1]} high).")
-    # the shim's floor and ceiling (ovrshim/render_size.h): floor = eye x the rectangle's share of the declared span, ceiling = the reference eye when the fit is on and larger
+    # the shim's floor and ceiling (ovrshim/render_size.h): floor = eye x the rectangle's share of the declared span, ceiling = the stream's own eye size (1.4-foundation E4:
+    # the panel-reference ceiling above the stream, IPC renderCeiling, is gone)
     wr, hr = rspan[0] / dspan[0], rspan[1] / dspan[1]
     floor = (fit_eye[0] * wr, fit_eye[1] * hr)
-    ceiling = (max(reference_eye[0], fit_eye[0]), max(reference_eye[1], fit_eye[1])) if use_fit else fit_eye
+    ceiling = fit_eye
     game = game_render_size(floor, ceiling, quality)
     floor_even = (even_at_least_64(floor[0]), even_at_least_64(floor[1]))
     cs = {"foveation_center_size_x": geometry[0], "foveation_center_size_y": geometry[1], "foveation_center_shift_x": geometry[2],
@@ -248,7 +249,7 @@ def model(declared, rect=None, eye=EYE, reference_eye=None, reference_fov=None, 
     elif engines >= 2 and strips < min(engines, 3):
         warnings.append(f"Split encoding: {strips} strip(s) expected ({why}). A forced mode splits at any size.")
     if quality > 0 and tuple(game) == floor_even and ceiling[0] <= floor[0] + 1e-9 and ceiling[1] <= floor[1] + 1e-9:
-        warnings.append("The render quality slider has no room: the game's size and its ceiling are the same (tick the stream fit or set a larger resolution).")
+        warnings.append("The render quality slider has no room: the game's size and its ceiling are the same (set a larger resolution).")
     out.update({"strips": strips, "strips_why": why, "warnings": warnings, "info": info})
     return out
 
@@ -485,7 +486,7 @@ def selftest():
     m = model(RECT, None, EYE, reference_eye=EYE, reference_fov=DECLARED, fit=True, quality=0.0)
     m2 = model(DECLARED, RECT, EYE, fit=False, quality=1.0)
     m3 = model(DECLARED, None, EYE, fit=False, quality=0.5, engines=-1)
-    ok3 = (m["fit_eye"] == [3168, 2496] and m["game"] == [3168, 2496] and m["encoded"] == [3776, 1312] and m["ceiling"] == [3552, 3200] and m["strips"] == 3
+    ok3 = (m["fit_eye"] == [3168, 2496] and m["game"] == [3168, 2496] and m["encoded"] == [3776, 1312] and m["ceiling"] == [3168, 2496] and m["strips"] == 3
            and m2["game"] == [3552, 3200] and m2["floor"] == [3134, 2506] and not m2["warnings"]
            and m3["strips"] == 0 and len(m3["info"]) == 1 and len(m3["warnings"]) == 1)
     if not ok3:

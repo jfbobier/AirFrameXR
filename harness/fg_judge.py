@@ -5,7 +5,10 @@ each synthesis and scores it against G (PSNR / SSIM over the frame, in the movin
 deficit = blur); holding B and the 50/50 blend are the references. Scenarios: scene (head still), head (scene frozen), both. This script runs it, then prints
 per scenario and rate the means, and the paired differences between the syntheses over all cases with their standard errors, and builds picture montages.
 
-    python3 harness/fg_judge.py [--eye WxH] [--starts N] [--gaps 22.2,33.3,44.4] [--speeds 1,8,24]
+    python3 harness/fg_judge.py [--eye WxH] [--starts N] [--gaps 22.2,33.3,44.4] [--speeds 1,8,24] [--pans 60,180] [--views airframexr_views.json] [--env NAME=value]
+        --pans: the stick-turn scenario (the camera turns at these deg/s, the head the generator is told stays still); --views: the headset's views file
+        (the box the judge renders, e.g. an install's config\airframexr_views.json; default the Vision Pro's measured views); --env: a generator tuning knob
+        (AIRFRAMEXR_FG_MOTION_LIMIT / _COST_SCALE / _PHOTO_SCALE, several joined with +)
     python3 harness/fg_judge.py --report <results dir>      # re-evaluate saved results
 """
 import json, math, subprocess, sys
@@ -25,13 +28,18 @@ def arg(name, default):
 
 def run_on_builder():
     eye, starts, gaps, speeds = arg("--eye", "1032x1104"), arg("--starts", "6"), arg("--gaps", "22.2,33.3,44.4"), arg("--speeds", "1,8,24")
+    pans, views, env, warm = arg("--pans", ""), arg("--views", ""), arg("--env", ""), arg("--pan-warm", "0")
     rid = "fgj_" + datetime.now(timezone.utc).strftime("%H%M%S")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     outdir = lib.RESULTS / f"{stamp}_fg_judge"
     outdir.mkdir(parents=True, exist_ok=True)
     lib.b_run(f"if not exist runs\\{rid} mkdir runs\\{rid}")
     lib.b_put(lib.ROOT / "harness/fixtures/session.user.json", f"runs/{rid}/session.json")
-    r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage22_fg_judge.ps1", "-Label", rid, "-Eye", eye, "-Starts", starts, "-Gaps", gaps.replace(",", "+"), "-Speeds", speeds.replace(",", "+")],
+    if views:
+        lib.b_run(f"if not exist runs\\{rid}\\cfg mkdir runs\\{rid}\\cfg")
+        lib.b_put(Path(views), f"runs/{rid}/cfg/airframexr_views.json")
+    r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage22_fg_judge.ps1", "-Label", rid, "-Eye", eye, "-Starts", starts, "-Gaps", gaps.replace(",", "+"), "-Speeds", speeds.replace(",", "+")]
+                       + (["-Pans", pans.replace(",", "+"), "-PanWarm", warm] if pans else []) + (["-FgEnv", env] if env else []),
                        cwd=lib.ROOT, capture_output=True, timeout=1800)
     o = r.stdout.decode(errors="replace").replace("\x00", "")
     print(o.strip().splitlines()[-2:] if o.strip() else "no output")
@@ -49,6 +57,8 @@ def load_cases(d):
                 e = json.loads(l)
             except ValueError:
                 continue
+            if e.get("event") == "fgj_start":
+                print("optical flow:", e["data"].get("nvof", "?"))
             if e.get("event") == "fgj_case":
                 cases.append(e["data"])
             elif e.get("event") == "fgj_error":
@@ -87,7 +97,7 @@ def report(d):
         print("no cases"); return 2
     gaps = sorted({c["gap_ms"] for c in cases})
     for c in cases:
-        c["label"] = c["scenario"] if c["scenario"] == "head" else f'{c["scenario"]} x{c["speed"]:g}'
+        c["label"] = c["scenario"] if c["scenario"] == "head" else f'{c["scenario"]} {c["speed"]:g}dps' if c["scenario"].startswith("pan") else f'{c["scenario"]} x{c["speed"]:g}'
     scen = sorted({c["label"] for c in cases}, key=lambda x: (x.split()[0] != "head", x))
     print(f"{len(cases)} cases ({len(gaps)} rates of the rendered pair x {len(scen)} scenarios x {len({c['start'] for c in cases})} start times)")
     for s in scen:
@@ -116,6 +126,17 @@ def report(d):
             print(f"  {title[:46]:46s} {a:>10s} - {b:<10s} {m:+8.4f} +- {se:6.4f}  wins {wins:3d}/{len(d_):3d}  {verdict}")
         print()
     print("timing (GPU, last case): flow", cases[-1]["flow_ms"], "ms; synthesis", cases[-1]["synth_ms"])
+    tc = [c for c in cases if c["scenario"].startswith("pan") and c.get("turn", {}).get("measurements", 0) > 0]
+    if tc:
+        print("\n== camera turn (edge generator, after the evaluated pair's first output): the turn measured on it (true: the evaluated pair), corrections over the whole sequence")
+        for s in sorted({c["label"] for c in tc}):
+            for g in gaps:
+                sel = [c for c in tc if c["label"] == s and c["gap_ms"] == g]
+                if sel:
+                    t = [c["turn"] for c in sel]
+                    print(f"{s:16s} {g:5.1f}ms  measured {mean([x['measured_deg'] for x in t]):6.2f} true {mean([x['true_pair_deg'] for x in t]):6.2f} (before A {mean([x['true_warm_deg'] for x in t]):6.2f}) deg  "
+                          f"agree {mean([x['agree'] for x in t]):.2f}  blocks {mean([x['blocks'] for x in t]):.0f}  cpu {mean([x['cpu_ms'] for x in t]):.2f} ms  "
+                          f"corrections {mean([x.get('corrections', 0) for x in t]):.1f}  late {mean([x.get('late', 0) for x in t]):.1f}")
     montage(d)
     print("pictures:", d)
     return 0

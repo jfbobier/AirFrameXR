@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Windows.Forms;
 
 namespace AirFrameXR
@@ -176,6 +177,7 @@ namespace AirFrameXR
             Fsy.Value = Clamp(Fsy, Json.Num(s, V + "foveated_encoding.content.center_shift_y", 0.1));
             Frx.Value = Clamp(Frx, Json.Num(s, V + "foveated_encoding.content.edge_ratio_x", 4));
             Fry.Value = Clamp(Fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
+            ShowMaskChoice();   // after the six numbers: with a mask on the Vision Pro it shows the compiled ones instead
             ChromaOn.Checked = Chroma.Enabled(s);
             try { SetIdle(ColorTranslator.FromHtml("#" + Chroma.Rgb(s))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
             idle.Enabled = ChromaOn.Checked;
@@ -194,6 +196,17 @@ namespace AirFrameXR
             var cur = plans.FindIndex(p => string.Equals(p.Guid, settings.PowerPlan, StringComparison.OrdinalIgnoreCase));
             PowerPlanBox.SelectedIndex = cur >= 0 ? cur + 1 : 0;
         }
+
+        /// 1.4-foundation (docs/PLAN_1_4_FOUNDATION.md F4): with a mask profile in force the two choices are the mask's foveation (the default) or none (MaskChoice)
+        void ShowMaskChoice()
+        {
+            var u = MaskChoice.Profile(settings);
+            foveationComputed = MaskChoice.Apply(settings, u, ProfFov, ProfFull, "Foveated (ALVR foveated encoding; recommended)", "Full frame + split encode (needs a strong link)", new[] { Fcx, Fcy, Fsx, Fsy, Frx, Fry });
+            SetReason(ProfFov, u != null ? MaskChoice.Reason : "");
+            SetReason(Fcx, foveationComputed ? MaskChoice.ComputedReason : "");
+        }
+
+        bool foveationComputed;
 
         /// Puts a proposal into the controls (nothing is written to disk until Save).
         public void Prefill(Proposal p)
@@ -226,12 +239,15 @@ namespace AirFrameXR
             Json.Set(s, V + "bitrate.mode.variant", "ConstantMbps");
             Json.Set(s, V + "bitrate.mode.ConstantMbps", (int)Bitrate.Value);
             Json.Set(s, V + "foveated_encoding.enabled", ProfFov.Checked);
-            Json.Set(s, V + "foveated_encoding.content.center_size_x", (double)Fcx.Value);
-            Json.Set(s, V + "foveated_encoding.content.center_size_y", (double)Fcy.Value);
-            Json.Set(s, V + "foveated_encoding.content.center_shift_x", (double)Fsx.Value);
-            Json.Set(s, V + "foveated_encoding.content.center_shift_y", (double)Fsy.Value);
-            Json.Set(s, V + "foveated_encoding.content.edge_ratio_x", (double)Frx.Value);
-            Json.Set(s, V + "foveated_encoding.content.edge_ratio_y", (double)Fry.Value);
+            if (!foveationComputed)   // with a mask on the Vision Pro the fields show what the compile computed: the golden master never takes them
+            {
+                Json.Set(s, V + "foveated_encoding.content.center_size_x", (double)Fcx.Value);
+                Json.Set(s, V + "foveated_encoding.content.center_size_y", (double)Fcy.Value);
+                Json.Set(s, V + "foveated_encoding.content.center_shift_x", (double)Fsx.Value);
+                Json.Set(s, V + "foveated_encoding.content.center_shift_y", (double)Fsy.Value);
+                Json.Set(s, V + "foveated_encoding.content.edge_ratio_x", (double)Frx.Value);
+                Json.Set(s, V + "foveated_encoding.content.edge_ratio_y", (double)Fry.Value);
+            }
             // ALVR's negotiated-stream cache (the eye size is written by SaveEyeChoice): rewritten at every connection, but the encoder tests (no headset) read it as it is
             Json.Set(s, "openvr_config.refresh_rate", (int)rate);
             Json.Set(s, "openvr_config.enable_foveated_encoding", ProfFov.Checked);
@@ -253,6 +269,45 @@ namespace AirFrameXR
             settings.PowerPlan = PowerPlanBox.SelectedIndex > 0 && PowerPlanBox.SelectedIndex <= plans.Count ? plans[PowerPlanBox.SelectedIndex - 1].Guid : (PowerPlanBox.SelectedIndex < 0 ? settings.PowerPlan : "");
             settings.Save();
             Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {rate} Hz, {Bitrate.Value} Mbps, {settings.EncodeProfile}, split {settings.SplitEncode}, frame generation {settings.FrameGen}, idle #{settings.IdleRgb}, audio {Audio.Checked}, {Proto.SelectedItem}, debug {settings.Debug}");
+            return true;
+        }
+    }
+
+    /// 1.4-foundation F4 (docs/PLAN_1_4_FOUNDATION.md), shared by the wizard's settings step (SettingsPanel) and the Settings window (Configure.cs): with the FOV card's
+    /// profile in force and a mask in it, the Encoding radios read "Foveated from the mask of <profile>" (the default) and "No foveation"; on the Vision Pro the six
+    /// foveation numbers are computed at every start, so they are shown as the last start compiled them (config\session.json), read-only, and never saved.
+    public static class MaskChoice
+    {
+        public const string Reason = "The mask's hidden corners get the encoder's highest quantizer (nearly no bits); the visible picture gets them.";
+        public const string ComputedReason = "Computed at every start from the headset's box and Apple's map (the mask does not change these: they are one curve across and one down).";
+
+        /// the profile whose mask drives the encoding, or null
+        public static UserFov Profile(AppSettings st)
+        {
+            try { var u = PipelineModel.MaskEncoding.ProfileInForce(st); return u != null && u.HasMask ? u : null; }
+            catch (Exception e) { Log.Write("WARN", "settings: the FoV profiles could not be read: " + e.Message); return null; }
+        }
+
+        /// labels the two radios and sets the six fields; returns true when the numbers are computed (read-only, not to be saved)
+        public static bool Apply(AppSettings st, UserFov u, RadioButton fov, RadioButton full, string fovText, string fullText, NumericUpDown[] six)
+        {
+            fov.Text = u != null ? $"Foveated from the mask of '{u.Name}' (recommended)" : fovText;
+            full.Text = u != null ? "No foveation (full frame + split encode)" : fullText;
+            bool computed = u != null && st.Kind == HeadsetKind.VisionPro;
+            foreach (var n in six) n.Enabled = !computed;
+            if (!computed) return false;
+            try
+            {
+                if (!File.Exists(Paths.Session)) return true;
+                var c = Json.Load(Paths.Session);
+                string[] keys = { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" };
+                for (int k = 0; k < 6; k++)
+                {
+                    var v = Json.Num(c, "session_settings.video.foveated_encoding.content." + keys[k], (double)six[k].Value);
+                    six[k].Value = Math.Max(six[k].Minimum, Math.Min(six[k].Maximum, (decimal)v));
+                }
+            }
+            catch (Exception e) { Log.Write("WARN", "settings: the compiled session could not be read: " + e.Message); }
             return true;
         }
     }

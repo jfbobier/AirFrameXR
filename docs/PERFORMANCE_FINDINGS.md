@@ -28,6 +28,33 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 | **Eye-height workflow (IPC v16)** | the head is published at y = 0 and the user's eye height is reported to games (`OVR_KEY_EYE_HEIGHT`). Fixes worlds sitting too low. Confirmed on the headset. |
 | **Hand offset derived from VDXR's calibration** | fixes the reversed hand posture. Confirmed on the headset. |
 
+## 2026-11-20: frame generation by picture preset (lab, 3080 Ti laptop)
+
+Users saw generation slow down with 1.4. The generator and its host code are the same as 1.3.10's (no change in `framegen.cpp`, `pipeline.rs` or the
+host's generation lines); what changed is the size: the generator renders every output at the full side-by-side stream frame, before the foveation, and 1.4's
+presets size the stream (and the game) for a density. `optional/e2e_fg_size_*` (half rate, host 90 Hz, the app held to 45 fps on the CPU, each preset's
+compiled foveation, idle GPU; `harness/fg_size_report.py`):
+
+| Preset | Eye | Encoded (Mpx) | Stream fps | Encode p50 / p95 (ms) | Motion search / output pass (ms) | Generator GPU ms per s |
+|---|---|---|---|---|---|---|
+| 1.3's sizing | 1888 x 1696 | 5.72 | 89.9 | 9.1 / 14.6 | 2.45 / 0.27 | 113 |
+| Performance | 1952 x 1760 | 3.70 | 89.6 | 6.6 / 12.1 | 2.52 / 0.29 | 115 |
+| Balanced (default) | 2624 x 2368 | 6.77 | **79.6** | 10.6 / 17.5 | 3.75 / 0.74 | 171 |
+| Sharp | 3648 x 3200 | 12.61 | **48.3** | 17.2 / 26.9 | 5.08 / 1.38 | 150 |
+
+- With generation on the encoder encodes every display slot (90 here, 100 on the Vision Pro): 11.1 ms a frame at 90 Hz. On this laptop's single encoder,
+  Balanced's encode (p50 10.6 ms) is at that budget and Sharp's beyond it: the encoder is the first limit, before the generator.
+- The generator's own GPU time grows with the pixels: the output pass costs a steady 0.043-0.06 ms per Mpx, the motion search has a large fixed part
+  (2.45 ms at 1.6 Mpx of flow input, 5.08 at 5.8). Balanced takes 1.5 x 1.3's GPU time (171 against 113 ms per second, 17 % of the GPU).
+- Not in the lab: the game's own cost (it renders the same bigger size: SWGR 92.9 -> 73.7 -> 52.1 fps for 1.3 / Balanced / Sharp on the 5090, 2026-11-19),
+  which half rate needs at half the display rate or more; a GPU with three encoders (the 5090, split encode); the headset.
+- Performance is about 1.3's pixel count with a smaller encoded frame than 1.3's (its foveation is stronger): generation behaves as in 1.3 there.
+
+Then (same day) **with a mask profile the generator draws only the visible polygon** (`docs/FRAME_GENERATION.md`): `optional/e2e_fg_mask_on` against
+`_off`, Balanced, the shipped trade-off profile's mask (61.3 % / 57.4 % of the eyes visible), 3 interleaved pairs, idle GPU: output pass 0.74 -> **0.54 ms**
+(beyond noise), generator 172 -> 153 GPU ms per second, stream 77.2 -> 80.4 fps, encode p95 17.8 -> 17.2 ms (each the same way in all three pairs, below
+the 3 x spread rule). The pass saves less than the hidden share (27 % against 41 %): a part of its cost does not follow the pixels. On by default with a mask.
+
 ## Tried and removed or left off
 
 | What | What happened | Lesson |
@@ -38,6 +65,7 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 | **Predicting a missing head sample** (`video.predict_missing_head`, lab `OVRSHIM_INORDER_POSE`) | the predicted timestamp matched one of the client's own only 16% of the time (client timestamps jitter by tens of ns); the client looks the pose up by timestamp, so the picture came out misplaced (tilted, offset, even the head-locked title). | Never invent timestamps; the client's lookup is exact. Opt-in, off. |
 | **`video.head_in_order`** (consume head samples in order, wait up to 8 ms) | lab: duplicates 244 -> 11 and 3.7 ms less pose-to-display. Headset: Cyberpunk 13% -> 7% duplicates, Dead Space unchanged at 20%, and a one-frame flash of the Cyberpunk warning page, shifted out of place. | Tracking packets arrive unevenly (gaps over 12 ms on 13-19% of samples) so the wait often times out; the lab does not capture that. Removed in IPC v18. |
 | **Send pacing variants** (`vsync`, slot, `asap`) | no visible gain over `asap`; `asap` stayed. | |
+| **Optical-flow ROIs over the mask** (masked generation step 2, 2026-11-20, branch `1.4-foundation-fgroi`) | the engine takes a few rectangles on a coarse grid (x in 128 px steps at grid 4): over the trade-off profile's octagons they cover 93 % of the flow input with the margin a head turn needs (82 % with none). Measured against the whole frame (3 pairs, Balanced): the search got slower, 3.79 -> 3.95 ms, generator 159 -> 165 GPU ms per second, the same way in all pairs. | The engine's ROI mode costs more than the 7 % it skips. Not merged. |
 | **Zero-copy encoder input** | about 0.2 ms. | Below the 1 ms bar; it stays on by default (`AIRFRAMEXR_ZEROCOPY=0` disables) because it costs nothing. |
 | **Lower render scale (0.75)** | did not help the moving-head feel. | The GPU budget is not what differs from SteamVR. |
 | **HEVC QP-delta map** (foveal emphasis) | built and proven against a Python oracle, never judged on the headset. | Milder foveation plus a QP map is encode-bound on a one-engine GPU. **On by default** (center -3, edge +6; corrected 2026-10-26, this said opt-in). |
@@ -47,7 +75,7 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 
 ## Findings that changed our mind
 
-1. **Frames "sent but not displayed" are duplicate timestamps, not drops.** On the headset, displayed + same-timestamp frames equal sent (End of Abyss 175 + 5 = 180 per 2 s). The headset skips a frame whose head-sample timestamp equals the previous one. Cyberpunk and Dead Space produce 7-20% of them because the game reads its pose in bursts (interval p05 7.9 ms, p95 24.5 ms), so two reads fall inside one 10 ms tracking sample. Not fixable by a pick policy; the game side decides.
+1. **Frames "sent but not displayed" are duplicate timestamps, not drops.** On the headset, displayed + same-timestamp frames equal sent (End of Abyss 175 + 5 = 180 per 2 s). The headset skips a frame whose head-sample timestamp equals the previous one. **Corrected in 1.3.10**: it does not; the client replaces the queued picture with the newer one for the same timestamp (`EventHandler.swift`, "the very last imageBuffer for a given timestamp") and shows it at the next tick, reprojected from that timestamp's pose (the strobe test, `docs/PLAN_1_3_10_FINISH.md` F3/F4); only the client's timestamp-keyed statistics skip it, which made "displayed" read low. Cyberpunk and Dead Space produce 7-20% of them because the game reads its pose in bursts (interval p05 7.9 ms, p95 24.5 ms), so two reads fall inside one 10 ms tracking sample. Not fixable by a pick policy; the game side decides.
 2. **ALVR's client predicts the head by `headset.max_prediction_ms`.** With 0 (left over from experiments) the client rotated frames by the whole 90-130 ms latency. The default is 100, the personal sessions use 150. This, not our pacing, explained "visibly worse than SteamVR" in one stretch.
 3. **SteamVR + ALVR is the right reference, and it is not perfect.** Packet captures show perfect 90 Hz send spacing there (p95 11.7 ms) because the compositor re-presents on a miss, and 3.8% duplicate-timestamp sends. Same-scene totals: ours 117 ms against stock 107 ms; the game stage and the headset's vsync queue (about 20 ms, ALVR's client, identical in both) account for most of it.
 4. **A standing queue costs a whole period, and only the game can drain it for free.** The in-order queue at a steady rate held about 11.7 ms between arrival and encode start. Dropping a frame on the host (`drain`) removes it at the price of a rendered frame; skipping one release of the game (the intake gate) removes it with nothing rendered lost. A single left-behind frame is not a standing queue (a late frame paired with an on-time one, both shown in order); three boundaries in a row are.
@@ -61,7 +89,7 @@ NVENC (3 strips on 3 engines for the full-frame profile) -> ALVR sockets -> head
 
 ## Still open
 
-- Duplicate timestamps (5-10% of the Vision Pro's frames in heavy games, 20% in Dead Space): the re-stamp that removes them is parked (`exp/restamp-2026-10-13`) until the visionOS client handles stamped frames; the Quest 3 already shows them.
+- Duplicate timestamps (5-10% of the Vision Pro's frames in heavy games, 20% in Dead Space): **displayed** since at least 1.3.10 (see finding 1, corrected), each reprojected from its own pose, so re-stamping them would fix nothing on the headset (re-checked against the 1.4 client source on 2026-11-20: the video pass rotates from the frame's pose to a fresh display-time anchor). The re-stamp stays parked (`exp/restamp-2026-10-13`). What remains open on the Vision Pro is the stale ticks of a clean stream (10-14 %, `docs/VISIONOS_TELEMETRY_LEARNINGS.md`), mostly not same-timestamp frames.
 - Headset decoder queue regimes (12-15 ms against stock 3 ms) when a frame goes missing.
 - Whether foveated or full-frame looks better at the same bitrate on the headset (unjudged).
 

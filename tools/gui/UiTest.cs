@@ -149,6 +149,8 @@ namespace AirFrameXR
             yield return new Case { Name = "analyze-insufficient", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("insufficient") };
             yield return new Case { Name = "analyze-problem-tall", Make = () => new AnalyzeForm(), Prepare = f => { ((AnalyzeForm)f).ApplyDemoState("problem"); f.Height = Ui.WorkArea(f).Height - 40; } };   // the README picture: the window as tall as the screen allows, so the table and the charts show together
             yield return new Case { Name = "analyze-long", Make = () => new AnalyzeForm(), Prepare = f => ((AnalyzeForm)f).ApplyDemoState("long") };
+            yield return new Case { Name = "calibrate-intro", Make = () => new CalibrateForm(Path.Combine(Path.GetTempPath(), "airframexr_calibrate_demo_" + Guid.NewGuid().ToString("N"))) };   // the fit's first page (keys and the Xbox controller)
+            yield return new Case { Name = "calibrate-restrict-intro", Make = () => new CalibrateForm(Path.Combine(Path.GetTempPath(), "airframexr_calibrate_demo_" + Guid.NewGuid().ToString("N")), true) };
             yield return new Case { Name = "calibrate-result", Make = () => new CalibrateForm(Path.Combine(Path.GetTempPath(), "airframexr_calibrate_demo_" + Guid.NewGuid().ToString("N"))), Prepare = f => ((CalibrateForm)f).ApplyDemoResult() };   // the README picture: the rays, the window, the rectangle
             yield return new Case { Name = "performance", Make = () => new PerformanceForm("Cyberpunk2077.exe") };
             yield return new Case { Name = "performance-pipeline", Make = () => new PerformanceForm("LiesOfP-Win64-Shipping.exe") };   // a record whose pipeline block says split encoding did not engage
@@ -502,6 +504,17 @@ namespace AirFrameXR
                     fov.Checked = true; lines.Add($"fov_then: fov={fov.Checked} full={full.Checked}");
                 }
                 File.WriteAllLines(Path.Combine(outDir, "encoding.txt"), lines);
+                return 0;
+            }
+            if (Arg("--mask-choice-selftest") != null)   // harness/mask_compile_check.py (1.4-foundation F4): the settings panel over the config\ next to this exe
+            {
+                var panel = new SettingsPanel(new AppSettings(), Session.Load());
+                panel.Load();
+                var ic = CultureInfo.InvariantCulture;
+                var six = new[] { panel.Fcx, panel.Fcy, panel.Fsx, panel.Fsy, panel.Frx, panel.Fry };
+                var lines = new List<string> { "fov_text=" + panel.ProfFov.Text, "full_text=" + panel.ProfFull.Text, "fov_checked=" + panel.ProfFov.Checked,
+                    "fields_enabled=" + string.Join(",", six.Select(n => n.Enabled)), "fields=" + string.Join(",", six.Select(n => ((double)n.Value).ToString("0.00", ic))) };
+                File.WriteAllLines(Path.Combine(outDir, "mask_choice.txt"), lines);
                 return 0;
             }
             var pmCases = Arg("--pipeline-model-selftest");   // harness/pipeline_model_check.py: the C# pipeline model against the Python oracle, case by case

@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "1.4.0";
+pub const VERSION: &str = "1.4.1";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
 /// `config/` (session.json, airframexr.json) and `logs/` inside it.
@@ -74,10 +74,12 @@ pub struct Settings {
     pub client_box: Option<[f64; 4]>,
     /// 1.4: our client's sharpening of the magnified picture (AMD FidelityFX CAS in its video pass); default on, `client_sharpen on|off` live
     pub client_sharpen: Option<bool>,
-    /// the launcher fits the stream to the box the headset declares at the density of `stream_reference_eye` (the size the user chose over the headset's full box,
-    /// docs/FOV_PIPELINE_OPTIM.md S3); with it on and the reference above the stream's eye size, the reference is the render quality slider's ceiling (ipc renderCeiling)
-    pub stream_fit_window: Option<bool>,
-    pub stream_reference_eye: Option<[i64; 2]>,
+    /// 1.4-foundation (docs/PLAN_1_4_FOUNDATION.md F1): the visible outline of the profile in use, per eye, in the stream eye's uv, written by the launcher's
+    /// session compile when the encoding is foveated and the profile has a mask; absent = no mask. Outside it the encoder's QP climbs to the highest
+    /// across a band (nvidia_profile::MASK_QP_BAND).
+    pub encode_mask: Option<EncodeMask>,
+    /// F2 lab switch: the hidden blocks are also cleared to black before NVENC (default off; `mask_fill on|off` live)
+    pub mask_fill: Option<bool>,
     pub debug: Option<bool>,
     /// verbosity of AirFrameXR.log: error | warn | info (default) | verbose | debug (docs/EXPERIMENTAL_SWITCHES.md)
     pub log_level: Option<String>,
@@ -148,8 +150,8 @@ pub fn load_settings(path: &Path) -> Settings {
         client_box: video["client_box"].as_array().and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?, a.get(3)?.as_f64()?]))
             .filter(|b| b.iter().all(|t| t.is_finite() && *t > 0.05 && *t < 10.0)),
         client_sharpen: video["client_sharpen"].as_bool(),
-        stream_fit_window: video["stream_fit_window"].as_bool(),
-        stream_reference_eye: video["stream_reference_eye"].as_array().and_then(|a| Some([a.first()?.as_i64()?, a.get(1)?.as_i64()?])),
+        encode_mask: parse_encode_mask(&video["encode_mask"]),
+        mask_fill: video["mask_fill"].as_bool(),
         debug: v["debug"].as_bool(),
         log_level: v["log_level"].as_str().map(str::to_string),
         gamma: v["display"]["gamma"].as_f64().map(|g| g as f32),
@@ -210,7 +212,11 @@ pub fn stream_summary(session: &Path, encoded: (i32, i32)) -> String {
     let c = &s["openvr_config"];
     let bitrate = &s["session_settings"]["video"]["bitrate"]["mode"];
     let br = match bitrate["variant"].as_str() {
-        Some("ConstantMbps") => format!("{} Mbps constant", bitrate["ConstantMbps"]),
+        Some("ConstantMbps") => {
+            let fill = crate::nvidia_profile::rate_fill();
+            let mbps = bitrate["ConstantMbps"].as_f64().unwrap_or(0.0);
+            if fill > 1.0 { format!("{mbps} Mbps constant (rate fill: NVENC's target up to x{fill:.2} until the stream averages the setting)") } else { format!("{mbps} Mbps constant") }
+        }
         Some(v) => format!("bitrate {v}"),
         None => "bitrate ?".into(),
     };
@@ -246,11 +252,41 @@ pub static RECENTER_REQ: AtomicBool = AtomicBool::new(false);
 pub static COLOR_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 pub static COLOR_PENDING: AtomicBool = AtomicBool::new(false);
 /// the field-of-view override sent by the streamer when the user touches the tick or a field: on/off, the four tangents (outer, inner, upper, lower; f32 bits), pending flag
-pub static FOV_ON: AtomicBool = AtomicBool::new(false);
-pub static FOV_REQ: [AtomicU32; 4] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
-pub static FOV_PENDING: AtomicBool = AtomicBool::new(false);
+/// 1.4-foundation E4: a `fov_override` line (what the 1.4 streamer sent live) is ignored: the field of view is compiled per streamer start. Set when one arrived.
+pub static FOV_OVERRIDE_IGNORED: AtomicBool = AtomicBool::new(false);
 /// `client_sharpen on|off` from the streamer: -1 = nothing new
 pub static CLIENT_SHARPEN_REQ: AtomicI32 = AtomicI32::new(-1);
+/// `mask_fill on|off` (F2 lab switch, live): -1 = nothing new
+pub static MASK_FILL_REQ: AtomicI32 = AtomicI32::new(-1);
+
+/// The mask the encoder takes (docs/PLAN_1_4_FOUNDATION.md F1): per eye a convex polygon in the stream eye's unfoveated uv (x = 0 at the eye's outer edge,
+/// 1 at its inner edge; y = 0 at the top), and the profile it came from (for the log).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EncodeMask {
+    pub profile: String,
+    pub left: Vec<[f32; 2]>,
+    pub right: Vec<[f32; 2]>,
+}
+
+/// `{"kind":"polygon_uv_v1","profile":"...","left":[[x,y],...],"right":[[x,y],...]}`; None for anything else (another kind, fewer than 3 or more than 64
+/// points, a value that is not a number or lies well outside the eye)
+pub fn parse_encode_mask(v: &Value) -> Option<EncodeMask> {
+    if v["kind"].as_str() != Some("polygon_uv_v1") {
+        return None;
+    }
+    let eye = |k: &str| -> Option<Vec<[f32; 2]>> {
+        let pts: Vec<[f32; 2]> = v[k].as_array()?.iter().map(|p| {
+            let a = p.as_array()?;
+            if a.len() != 2 {
+                return None;
+            }
+            let (x, y) = (a[0].as_f64()? as f32, a[1].as_f64()? as f32);
+            (x.is_finite() && y.is_finite() && (-0.05..=1.05).contains(&x) && (-0.05..=1.05).contains(&y)).then_some([x, y])
+        }).collect::<Option<Vec<_>>>()?;
+        (3..=64).contains(&pts.len()).then_some(pts)
+    };
+    Some(EncodeMask { profile: v["profile"].as_str().unwrap_or("").to_string(), left: eye("left")?, right: eye("right")? })
+}
 
 /// The one JSON line our client takes over `ServerControlPacket::Reserved` (1.4, docs/FOV_CONTRACT_PLAN.md; the format of the 1.4 research line):
 /// `{"airframexr":1,"view":{"left":[o,i,u,d],"right":[o,i,u,d]},"sharpen":true}`; without a box no `view` (the client declares its whole frustum).
@@ -260,15 +296,25 @@ pub fn client_message(b: Option<[f64; 4]>, sharpen: bool) -> String {
         None => json!({ "airframexr": 1, "sharpen": sharpen }).to_string(),
     }
 }
-/// the render quality sent with the override (f32 bits)
-pub static FOV_QUALITY_REQ: AtomicU32 = AtomicU32::new(0);
+/// The visionOS app's stand-in views: before its immersive space renders it declares Apple's raw view frustum with both eyes at one point (fake tracking,
+/// `WorldTracker.sendFakeTracking`). A game that started on them would keep, for its whole run, a render size and eye offsets that are not the headset's.
+pub fn is_placeholder_views(off6: &[f32; 6]) -> bool {
+    ((off6[3] - off6[0]).powi(2) + (off6[4] - off6[1]).powi(2) + (off6[5] - off6[2]).powi(2)).sqrt() < 0.001
+}
+/// 1.4: the views a headset app that takes the streamer's box declares (outer, inner, upper, lower; the right eye mirrored), as fov8 (left eye l r u d, right
+/// eye l r u d), with the eye offsets of the last real views, or a 63 mm IPD without any. They stand in for the app's views from the connection until its real
+/// ones arrive, so a game that starts in between gets the box's render size and real stereo.
+pub fn box_views(b: [f64; 4], known: Option<&([f32; 8], [f32; 6])>) -> ([f32; 8], [f32; 6]) {
+    let (o, i, u, l) = (b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32);
+    let off6 = match known {
+        Some(v) if !is_placeholder_views(&v.1) => v.1,
+        _ => [-0.0315, 0.0, 0.0, 0.0315, 0.0, 0.0],
+    };
+    ([o, i, u, l, i, o, u, l], off6)
+}
 /// 0..1 for a quality given in the settings, the lab flag or the command; anything else is the floor
 pub fn render_quality(v: f64) -> f32 {
     if v.is_finite() { v.clamp(0.0, 1.0) as f32 } else { 0.0 }
-}
-/// percent -> fraction (the lab flag `--fov-scale`), within what a restriction accepts (a view cannot be emptied)
-pub fn fov_fraction(pct: f64) -> f32 {
-    (pct / 100.0).clamp(0.2, 1.0) as f32
 }
 /// The per-edge fractions of the headset's field of view for an override given as tangents (outer, inner, upper, lower): the headset's tangents (fov8 = left eye l r u d,
 /// right eye l r u d) are averaged over the two eyes per edge (outer = the left eye's left and the right eye's right), a value above the headset's is the headset's
@@ -286,8 +332,8 @@ pub fn fov_scale_from(t: &[f32; 4], fov8: &[f32; 8]) -> [f32; 4] {
 }
 
 /// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
-/// `frame_gen_cap <fps>` (0 = none), `fov_override off` | `fov_override on <outer> <inner> <upper> <lower> [<render quality 0..1>]` (the tangents the game is told and where its render size sits between the floor and the stream's eye size, taken by the next game), `recenter`,
-/// `color <brightness> <contrast> <saturation> <sharpening>`, `client_sharpen on|off` (our client's sharpening, live),
+/// `frame_gen_cap <fps>` (0 = none), `recenter` (`fov_override ...` is ignored since 1.4-foundation: the field of view is compiled per streamer start),
+/// `color <brightness> <contrast> <saturation> <sharpening>`, `client_sharpen on|off` (our client's sharpening, live), `mask_fill on|off` (the mask's flat fill, live),
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).
 /// End of input (the GUI went away) = quit.
 /// Virtual-key codes of a combination like "Ctrl+Alt+R" (modifiers, then one key: a letter or digit, F1-F24, Insert, Delete, Home, End, PageUp,
@@ -381,21 +427,8 @@ pub fn spawn_stdin_control() {
                     }
                 }
                 (Some("client_sharpen"), Some(v)) => CLIENT_SHARPEN_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
-                (Some("fov_override"), Some("off")) => {
-                    FOV_ON.store(false, Ordering::SeqCst);
-                    FOV_PENDING.store(true, Ordering::SeqCst);
-                }
-                (Some("fov_override"), Some("on")) => {
-                    let vals: Vec<f32> = w.filter_map(|x| x.parse().ok()).collect();
-                    if (vals.len() == 4 || vals.len() == 5) && vals[..4].iter().all(|v| v.is_finite() && *v > 0.0) {
-                        for (k, t) in vals[..4].iter().enumerate() {
-                            FOV_REQ[k].store(t.to_bits(), Ordering::SeqCst);
-                        }
-                        FOV_QUALITY_REQ.store(vals.get(4).map_or(0.0, |q| render_quality(*q as f64)).to_bits(), Ordering::SeqCst);
-                        FOV_ON.store(true, Ordering::SeqCst);
-                        FOV_PENDING.store(true, Ordering::SeqCst);
-                    }
-                }
+                (Some("mask_fill"), Some(v)) => MASK_FILL_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
+                (Some("fov_override"), _) => FOV_OVERRIDE_IGNORED.store(true, Ordering::SeqCst),
                 (Some("color"), Some(first)) => {
                     let vals: Vec<f32> = std::iter::once(first).chain(w).filter_map(|x| x.parse().ok()).collect();
                     if vals.len() == 4 {
@@ -620,6 +653,19 @@ mod foveation_guard_tests {
 #[cfg(test)]
 mod fov_tests {
     use super::fov_scale_from;
+    #[test]
+    fn box_views_stand_in() {
+        use super::{box_views, is_placeholder_views};
+        assert!(is_placeholder_views(&[0.0; 6]), "both eyes at one point: the app's stand-in");
+        assert!(!is_placeholder_views(&[-0.031, 0.0, 0.0, 0.031, 0.0, 0.0]));
+        let (f, o) = box_views([1.22, 0.81, 0.9, 0.77], None);
+        assert_eq!(f, [1.22, 0.81, 0.9, 0.77, 0.81, 1.22, 0.9, 0.77], "left eye left = outer, right eye right = outer");
+        assert_eq!(o, [-0.0315, 0.0, 0.0, 0.0315, 0.0, 0.0], "no real views known: a 63 mm IPD");
+        let known = ([1.7; 8], [-0.032, 0.001, 0.0, 0.032, 0.001, 0.0]);
+        assert_eq!(box_views([1.0; 4], Some(&known)).1, known.1, "the last real eye offsets");
+        assert_eq!(box_views([1.0; 4], Some(&([1.7; 8], [0.0; 6]))).1[3], 0.0315, "a known stand-in's offsets are not used");
+        assert!(fov_scale_from(&[1.22, 0.81, 0.9, 0.77], &f).iter().all(|s| *s == 1.0), "the box told against itself: unrestricted, full render size");
+    }
     // the Vision Pro's views as the host saved them: left eye l r u d, right eye l r u d
     const AVP: [f32; 8] = [1.7823, 1.0186, 1.2169, 1.0186, 1.0249, 1.7995, 1.2253, 1.0249];
 
@@ -638,5 +684,33 @@ mod fov_tests {
         assert!((s[2] - 0.9 / 1.2211).abs() < 1e-6);
         assert_eq!(s[3], 0.2, "a view cannot be emptied");
         assert_eq!(fov_scale_from(&[0.0, -1.0, f32::NAN, 0.0], &AVP), [1.0; 4], "garbage means not restricted");
+    }
+}
+
+#[cfg(test)]
+mod encode_mask_tests {
+    use super::*;
+
+    #[test]
+    fn parses_the_compiles_mask() {
+        let v = json!({"kind": "polygon_uv_v1", "profile": "AVP optimized trade-off",
+            "left": [[0.0, 0.2], [0.1, 0.0], [0.9, 0.0], [1.0, 0.2], [1.0, 1.0], [0.0, 1.0]],
+            "right": [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]});
+        let m = parse_encode_mask(&v).expect("a mask");
+        assert_eq!(m.profile, "AVP optimized trade-off");
+        assert_eq!(m.left.len(), 6);
+        assert_eq!(m.right[2], [1.0, 1.0]);
+    }
+
+    #[test]
+    fn refuses_what_is_not_a_mask() {
+        assert!(parse_encode_mask(&json!(null)).is_none());
+        assert!(parse_encode_mask(&json!({"kind": "corner_fraction_v1", "left": [[0, 0], [1, 0], [1, 1]], "right": [[0, 0], [1, 0], [1, 1]]})).is_none());
+        let two = json!({"kind": "polygon_uv_v1", "left": [[0, 0], [1, 0]], "right": [[0, 0], [1, 0], [1, 1]]});
+        assert!(parse_encode_mask(&two).is_none(), "fewer than 3 points");
+        let far = json!({"kind": "polygon_uv_v1", "left": [[0, 0], [3, 0], [1, 1]], "right": [[0, 0], [1, 0], [1, 1]]});
+        assert!(parse_encode_mask(&far).is_none(), "a point far outside the eye");
+        let one_eye = json!({"kind": "polygon_uv_v1", "left": [[0, 0], [1, 0], [1, 1]]});
+        assert!(parse_encode_mask(&one_eye).is_none(), "both eyes or none");
     }
 }

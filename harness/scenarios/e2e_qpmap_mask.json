@@ -1,0 +1,153 @@
+{
+ "description": "docs/PLAN_1_4_FOUNDATION.md F1: the encoder mask through the whole OpenXR chain (milder foveation, the probe's fovgrid scene: lines and a white border to the edges). The host takes a per-eye outline (polygon_uv_v1, as the session compile writes it: corners cut at 0.4 of each edge like a real fit's depth: the left eye keeps its upper-outer corner (the probe's stamp), the right eye loses all four, 24 % / 32 % of the eyes; about 9.7 % of the encoded blocks after this foveation, computed offline with the oracle), the QP map gives every block wholly outside it a QP that climbs to +51 across the host's band (nvidia_profile::MASK_QP_BAND, 0.10 of the eye: 672 of the 890 hidden blocks below +51, 218 at +51 with the oracle) and equals the Python port, the engine's hidden count equals the oracle's; with the fill off (the default) the blocks at +51 still carry the picture",
+ "topology": {
+  "host": "builder",
+  "client": "builder",
+  "client_bind_ip": "127.0.0.2",
+  "host_launch": "interactive"
+ },
+ "session_overrides": {
+  "session_settings.video.foveated_encoding.content.edge_ratio_x": 2.5,
+  "session_settings.video.foveated_encoding.content.edge_ratio_y": 3.0,
+  "openvr_config.foveation_edge_ratio_x": 2.5,
+  "openvr_config.foveation_edge_ratio_y": 3.0
+ },
+ "host": {
+  "shim": true,
+  "fps": 90,
+  "seconds": 60,
+  "connect_timeout": 45,
+  "gpu_keepalive": 90,
+  "exit_after_frames": 420,
+  "qp_map": "on",
+  "dump_qpmap": true,
+  "encode_mask": {
+   "kind": "polygon_uv_v1",
+   "profile": "lab octagon",
+   "left": [
+    [
+     0,
+     0
+    ],
+    [
+     0.6,
+     0
+    ],
+    [
+     1,
+     0.4
+    ],
+    [
+     1,
+     0.6
+    ],
+    [
+     0.6,
+     1
+    ],
+    [
+     0.4,
+     1
+    ],
+    [
+     0,
+     0.6
+    ]
+   ],
+   "right": [
+    [
+     0.4,
+     0
+    ],
+    [
+     0.6,
+     0
+    ],
+    [
+     1,
+     0.4
+    ],
+    [
+     1,
+     0.6
+    ],
+    [
+     0.6,
+     1
+    ],
+    [
+     0.4,
+     1
+    ],
+    [
+     0,
+     0.6
+    ],
+    [
+     0,
+     0.4
+    ]
+   ]
+  }
+ },
+ "client": {
+  "seconds": 55,
+  "connect_timeout": 45,
+  "yaw_amp": 0.5,
+  "yaw_hz": 0.25
+ },
+ "client_env": {
+  "RUST_LOG": "warn"
+ },
+ "app": {
+  "frames": 420,
+  "timeout_s": 60,
+  "env": {
+   "XR_PROBE_SCENE": "fovgrid"
+  }
+ },
+ "gpu_sample": true,
+ "timeout_s": 200,
+ "checks": {
+  "host_min_frames": 250,
+  "client_min_frames": 200,
+  "timestamps_monotonic": true,
+  "max_duplicate_timestamps": 400,
+  "min_delivery_ratio": 0.7,
+  "codec": "Hevc",
+  "stream": {
+   "codec_name": "hevc",
+   "profile": "Main 10",
+   "pix_fmt": "yuv420p10le",
+   "color_range": "pc",
+   "width": 4800,
+   "height": 1952
+  },
+  "decode": true,
+  "decode_frame_slack": 60,
+  "app_min_frames": 300,
+  "refresh_hz": 90,
+  "negotiated": {
+   "view_resolution": [
+    3552,
+    3200
+   ],
+   "use_full_range": true,
+   "enable_foveated_encoding": true
+  },
+  "foveation": true,
+  "qpmap": {
+   "on": true,
+   "center": -3,
+   "edge": 6,
+   "transition": 1.0,
+   "mask_min_hidden_share": 0.05,
+   "mask_luma": {
+    "fill": false,
+    "frame": 150,
+    "min_hidden_max": 20
+   },
+   "mask_min_band_share": 0.5
+  }
+ }
+}

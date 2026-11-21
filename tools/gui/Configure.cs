@@ -265,6 +265,9 @@ namespace AirFrameXR
             fsy.Value = Clamp(fsy, Json.Num(s, V + "foveated_encoding.content.center_shift_y", 0.1));
             frx.Value = Clamp(frx, Json.Num(s, V + "foveated_encoding.content.edge_ratio_x", 4));
             fry.Value = Clamp(fry, Json.Num(s, V + "foveated_encoding.content.edge_ratio_y", 5));
+            // 1.4-foundation F4: with a mask profile in force, the mask's foveation or none; on the Vision Pro the numbers are the compiled ones, read-only
+            foveationComputed = MaskChoice.Apply(settings, MaskChoice.Profile(settings), profFov, profFull, "Foveated (ALVR foveated encoding; recommended)",
+                "Full frame + split encode (3x the pixels, needs a strong Wi-Fi link)", new[] { fcx, fcy, fsx, fsy, frx, fry });
             chromaOn.Checked = Chroma.Enabled(s);
             try { SetIdle(ColorTranslator.FromHtml("#" + Chroma.Rgb(s))); } catch { SetIdle(Color.FromArgb(0, 255, 0)); }
             idle.Enabled = chromaOn.Checked;
@@ -284,6 +287,7 @@ namespace AirFrameXR
         }
 
         static decimal Clamp(NumericUpDown n, double v) => Math.Max(n.Minimum, Math.Min(n.Maximum, (decimal)v));
+        bool foveationComputed;   // 1.4-foundation F4 (MaskChoice)
 
         bool SaveSettings(bool confirm)
         {
@@ -306,17 +310,20 @@ namespace AirFrameXR
             Json.Set(s, V + "bitrate.mode.variant", "ConstantMbps");
             Json.Set(s, V + "bitrate.mode.ConstantMbps", (int)bitrate.Value);
             Json.Set(s, V + "foveated_encoding.enabled", profFov.Checked);
-            {   // numbers that differ from what the session held are the user's: the foveation computed from the picture edges leaves them alone until a picture-edges choice is made again
-                var was = new[] { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" }.Select((k, i) => Json.Num(s, V + "foveated_encoding.content." + k, new[] { 0.45, 0.4, 0.4, 0.1, 4, 5 }[i])).ToArray();
-                var now = new[] { fcx.Value, fcy.Value, fsx.Value, fsy.Value, frx.Value, fry.Value }.Select(x => (double)x).ToArray();
-                if (Enumerable.Range(0, 6).Any(i => Math.Abs(was[i] - now[i]) > 0.0005)) settings.FoveationManual = true;
+            if (!foveationComputed)   // 1.4-foundation F4: the compiled numbers shown with a mask are never the user's, and the golden master never takes them
+            {
+                {   // numbers that differ from what the session held are the user's: the foveation computed from the picture edges leaves them alone until a picture-edges choice is made again
+                    var was = new[] { "center_size_x", "center_size_y", "center_shift_x", "center_shift_y", "edge_ratio_x", "edge_ratio_y" }.Select((k, i) => Json.Num(s, V + "foveated_encoding.content." + k, new[] { 0.45, 0.4, 0.4, 0.1, 4, 5 }[i])).ToArray();
+                    var now = new[] { fcx.Value, fcy.Value, fsx.Value, fsy.Value, frx.Value, fry.Value }.Select(x => (double)x).ToArray();
+                    if (Enumerable.Range(0, 6).Any(i => Math.Abs(was[i] - now[i]) > 0.0005)) settings.FoveationManual = true;
+                }
+                Json.Set(s, V + "foveated_encoding.content.center_size_x", (double)fcx.Value);
+                Json.Set(s, V + "foveated_encoding.content.center_size_y", (double)fcy.Value);
+                Json.Set(s, V + "foveated_encoding.content.center_shift_x", (double)fsx.Value);
+                Json.Set(s, V + "foveated_encoding.content.center_shift_y", (double)fsy.Value);
+                Json.Set(s, V + "foveated_encoding.content.edge_ratio_x", (double)frx.Value);
+                Json.Set(s, V + "foveated_encoding.content.edge_ratio_y", (double)fry.Value);
             }
-            Json.Set(s, V + "foveated_encoding.content.center_size_x", (double)fcx.Value);
-            Json.Set(s, V + "foveated_encoding.content.center_size_y", (double)fcy.Value);
-            Json.Set(s, V + "foveated_encoding.content.center_shift_x", (double)fsx.Value);
-            Json.Set(s, V + "foveated_encoding.content.center_shift_y", (double)fsy.Value);
-            Json.Set(s, V + "foveated_encoding.content.edge_ratio_x", (double)frx.Value);
-            Json.Set(s, V + "foveated_encoding.content.edge_ratio_y", (double)fry.Value);
             Json.Set(s, "session_settings.audio.game_audio.enabled", audio.Checked);
             settings.MuteSpeakers = mute.Checked;
             settings.AudioCapture = captureBox.SelectedIndex == 1 ? "device" : "process";

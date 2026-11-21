@@ -23,8 +23,19 @@ double nvh_encode(void* h, uint32_t frame_index, uint64_t ts_ns, int force_idr, 
 void nvh_destroy(void* h);
 // JSON description of what NVENC was actually configured with + the GPU's capabilities + the split-encode conditions (for logs).
 int nvh_describe(void* h, char* buf, int buflen);
-// Writes the current QP delta map ({"w","h","cols","rows","foveated","data":[...]}) to a file. Returns 1 if a map exists.
+// Writes the current QP delta map ({"w","h","cols","rows","foveated","qp_map","mask_hidden","mask_blocks","mask_rects","data":[...]}) to a
+// file. Returns 1 if a map exists.
 int nvh_qpmap_dump(const char* path);
+// The mask (docs/PLAN_1_4_FOUNDATION.md F1): eye 0 = left, 1 = right; `uv` = n (x, y) pairs of a convex polygon in the eye's unfoveated uv
+// (x = 0 at the eye's outer edge, 1 at its inner edge; y = 0 at the top); n < 3 clears that eye. Call before nvh_create: the QP map gives
+// every 32 x 32 block whose whole footprint lies outside the polygon a QP that climbs from its own ramp value to +51 across the band
+// (nvh_set_f "mask_band", a fraction of the eye's source width; 0 = +51 at once) and +51 beyond it, and "mask_fill" (nvh_set, live) clears the
+// blocks at +51 to black after the foveation pass. Returns 0 for a bad eye, more than 64 points or a non-finite value.
+int nvh_set_mask(int eye, const float* uv, int n);
+// After nvh_create: blocks judged hidden, blocks judged (inside an eye with a mask), fill rectangles. Returns 1 when a mask is set.
+int nvh_mask_stats(int* hidden, int* blocks, int* rects);
+// After nvh_create: the hidden blocks at +51 (beyond the band) and the band in force. Returns 1 when a mask is set.
+int nvh_mask_band_stats(int* top, double* band);
 // Number of NVENC engines of the GPU (split-frame encoding needs >= 2).
 int nvh_encoder_engines(void* h);
 // Starts/stops a background GPU load on a second D3D11 device (about `duty_pct` busy) so the driver keeps the GPU in a
@@ -40,7 +51,7 @@ void* nvh_ipc_open(void);
 // encoding_gamma: the negotiated ALVR encoding gamma (openvr_config.encoding_gamma); the shim sends frames as pow(v, 1/gamma).
 // fov_scale4: outer, inner, upper, lower (fractions of the headset's tangents the game is told); ceil_w / ceil_h: the render quality slider's ceiling per eye
 // above the stream's eye size (the panel reference when the stream is fitted to the headset's visible window), 0 = the stream's eye size.
-void nvh_ipc_config(void* ipc, void* nvh, double rate_hz, int eye_w, int eye_h, const float* fov8, const float* eye_offset6, int bits, float encoding_gamma, const float* fov_scale4, float render_quality, int ceil_w, int ceil_h);
+void nvh_ipc_config(void* ipc, void* nvh, double rate_hz, int eye_w, int eye_h, const float* fov8, const float* eye_offset6, int bits, float encoding_gamma, const float* fov_scale4, float render_quality);
 // The per-eye render size the shim told the app (ipc.h ShimToHost::recommendedW/H; 0 before an app started).
 void nvh_ipc_shim_recommended(void* ipc, int* w, int* h);
 void nvh_ipc_set_connected(void* ipc, int connected);
@@ -77,7 +88,8 @@ int nvh_fg_enable(void* nvh, int on, double flow_scale, int perf_level, int grid
 // Takes the shim slot into the frame history (previous <- current <- slot) and computes the flow between the two; q_render8 = the per-eye
 // orientations the frame was rendered with (ipc frameRenderQuat). Returns 1 when two frames exist (interpolation possible), 0 after the
 // first frame, -1 on error. The slot may be released as soon as this returns.
-int nvh_fg_ingest(void* nvh, void* ipc, uint32_t slot, const float* q_render8, char* err, int errlen);
+// frame_s: the frame's content time (the display time it was rendered for, s; 0 = unknown)
+int nvh_fg_ingest(void* nvh, void* ipc, uint32_t slot, const float* q_render8, double frame_s, char* err, int errlen);
 // Encodes a generated frame through the foveation pass + NVENC: mode 0 = the newest rendered frame rotated to q_out4 (x y z w, the head
 // orientation of the tracking sample the frame is stamped with), mode 1 = the frame at fraction t between the two newest rendered frames
 // (0.5 = midpoint), rotated likewise. Returns the time in ms (render + encode), < 0 on error.
@@ -177,10 +189,20 @@ void nvh_bench_close(void* bench);
 // orientation time (frame = times[3*k .. 3*k+2]); RGBA8, 2*eye_w x eye_h. The head's orientation (x y z w) goes to q4 when given.
 int nvh_bench_fgj_frame(void* bench, int eye_w, int eye_h, const double* times3, const float* fov8, float ipd, uint8_t* rgba, float* q4);
 // a frame generator (synth 0 classic, 1 edge, 2 edge-blend) for the judge; NULL + err when there is no optical-flow engine
+// the judge's `pan` scenario: the camera turns at deg_per_s about the world's up axis (times3[0] is then the pan clock, the scene frozen at t_ref, the
+// head the generator is told unchanged: a stick turn); 0 = off
+void nvh_bench_fgj_pan(double deg_per_s, double t_ref);
+// a pan sequence: warm_frames frames before A, gap_s apart, turning at warm_deg_per_s; the evaluated pair at deg_per_s
+void nvh_bench_fgj_pan_seq(double deg_per_s, double t_ref, double warm_deg_per_s, int warm_frames, double gap_s);
+// the judge generator's camera-turn state after its last case: measured turn deg, prediction deg, agreement, blocks, CPU ms, measurements,
+// corrections, late (not ready at the first output)
+int nvh_bench_fgj_turn(void* fgj, float* out8);
 void* nvh_bench_fgj_open(void* bench, int eye_w, int eye_h, int synth, char* err, int errlen);
 // renders frame A (times[0..2]) and B (times[3..5]), generates the midpoint for the head pose of times[6..8] and reads it back (RGBA8); info3 = flow ms, synth ms
 int nvh_bench_fgj_gen(void* bench, void* fgj, int eye_w, int eye_h, const double* times9, const float* fov8, float ipd, uint8_t* rgba, float* info2, char* err, int errlen);
 void nvh_bench_fgj_close(void* fgj);
+// the judge generator's optical-flow engine: its hint / grid / ROI capabilities and the session in use, as text (lab)
+int nvh_bench_fgj_caps(void* fgj, char* out, int outlen);
 #ifdef __cplusplus
 }
 #endif

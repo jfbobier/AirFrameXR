@@ -979,6 +979,16 @@ fn tracking(
         }
         None => [vp, vp],
     };
+    if std::env::var("MOCK_PLACEHOLDER_VIEWS").map(|v| v == "1").unwrap_or(false) {
+        // the visionOS app's stand-in before its immersive space renders (WorldTracker.sendFakeTracking): Apple's raw frustum with the vertical swapped
+        // (1.73 / 1.00 / 1.00 / 1.19, the right eye mirrored) and both eyes at one point; its real views follow (after the first frame with late views)
+        let f = |t: [f32; 4]| Fov { left: -t[0].atan(), right: t[1].atan(), up: t[2].atan(), down: -t[3].atan() };
+        ctx.send_view_params([
+            ViewParams { pose: Pose::default(), fov: f([1.732, 1.0, 1.0, 1.192]) },
+            ViewParams { pose: Pose::default(), fov: f([1.0, 1.732, 1.0, 1.192]) },
+        ]);
+        event(origin, "placeholder_views_sent", json!({}));
+    }
     let mut views_sent = false;
     let mut next = Instant::now();
     while streaming.value() {

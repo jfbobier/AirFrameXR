@@ -1,5 +1,5 @@
 {
- "description": "Control for e2e_qpmap_on: same content and settings with the QP map OFF; decoded detail should be flat across the frame (25 Mbps so rate control is actually constrained; the content itself has ~1.3x more detail in the center region, so the control reads ~1.35 and the map-on run ~1.8)",
+ "description": "Control for e2e_qpmap_on: same content and settings with the QP map OFF; decoded detail should be flat across the frame (25 Mbps so rate control is actually constrained; the content itself has ~1.3x more detail in the center region, so the control reads ~1.35 and the map-on run ~1.8) The rate fill is off here (host env AIRFRAMEXR_RATE_FILL=1): the 25 Mbps must reach NVENC as is, or rate control is not constrained (2026-11-21: with the fill x1.30 the map-on ratio fell from 1.80 to 1.48).",
  "topology": {
   "host": "builder",
   "client": "builder",
@@ -29,7 +29,10 @@
   "gpu_keepalive": 90,
   "qp_map": "off",
   "noise": true,
-  "dump_qpmap": true
+  "dump_qpmap": true,
+  "env": {
+   "AIRFRAMEXR_RATE_FILL": "1"
+  }
  },
  "client": {
   "seconds": 10,

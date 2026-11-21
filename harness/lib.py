@@ -93,13 +93,22 @@ def preflight(sc):
     return notes
 
 
+def foreign_host():
+    """The path of an alvr_host.exe running on the builder from outside the harness's root (an installed AirFrameXR), or None."""
+    rc, out = b_run('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name = \'alvr_host.exe\'\\" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath -notlike (\'*\\' + ROOTNAME + '\\*\') } | ForEach-Object { $_.ExecutablePath }"')
+    paths = [l.strip() for l in (out or "").splitlines() if l.strip().lower().endswith("alvr_host.exe")]
+    return paths[0] if paths else None
+
+
 def kill_stale():
     # the scheduled tasks first: `schtasks /run` does nothing while a task is still running (a feeder or a frozen host left by an aborted run kept the next run's
     # host from starting), and /end takes the task's whole process tree (cmd, feeder, host)
     for task in ("openxr_host_tmp", "openxr_app_tmp", "openxr_ballast_tmp", "openxr_dbg"):
         b_run(f"schtasks /end /tn {task} >nul 2>&1")
-    for exe in ("alvr_host.exe", "alvr_client_headless.exe", "xr_probe.exe", "vram_ballast.exe", "findstr.exe"):
-        b_run(f"taskkill /f /im {exe} >nul 2>&1")
+    # only processes started from the harness's own root: an AirFrameXR the user installed and started (its host, its line test's xr_probe) is never stopped
+    # (until 2026-11-20 this was taskkill /im by name: the lab killed the owner's streamer host five times on the 5090, field log 2026-11-20 00:37-02:00)
+    names = "|".join(n.replace(".", "\\.") for n in ("alvr_host.exe", "alvr_client_headless.exe", "xr_probe.exe", "vram_ballast.exe", "findstr.exe"))
+    b_run('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -match \'^(' + names + ')$\' -and $_.ExecutablePath -like (\'*\\' + ROOTNAME + '\\*\') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1')
     # the audio / UI harnesses start the packaged streamer (and its host) through their own scheduled tasks (va_*): end those tasks too, and any streamer, launcher or desktop mirror
     # running from the harness's own folders (runs\, out\, build\; never an install the user started elsewhere). A streamer left by an aborted run kept its host's ports, and the next
     # start's host died on them.
@@ -404,6 +413,32 @@ def topology(sc):
     return t
 
 
+def gpu_idle_gate(steps, log=print):
+    """AIRFRAMEXR_LAB_IDLE_GPU=<percent>: before a run, wait (at most AIRFRAMEXR_LAB_IDLE_WAIT_S, 1800 s by default) until the builder's GPU is at most that busy in
+    three samples 5 s apart. Another program's load on the builder (2026-11-20: 80-98 % and 88 W for an hour, the fork lab's R6 / D1 pairs) slows both arms of
+    an A/B and fails the pacing checks; the wait and the load found are in result.json (steps.gpu_idle_gate). Off without the variable."""
+    lim = os.environ.get("AIRFRAMEXR_LAB_IDLE_GPU")
+    if not lim:
+        return
+    lim, deadline, t0, seen, calm = float(lim), time.time() + float(os.environ.get("AIRFRAMEXR_LAB_IDLE_WAIT_S", "1800")), time.time(), [], 0
+    while True:
+        rc, o = b_run("nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", timeout=60)
+        try:
+            u = float(o.strip().splitlines()[-1])
+        except Exception:
+            u = -1.0
+        seen.append(u)
+        calm = calm + 1 if 0 <= u <= lim else 0
+        if calm >= 3 or time.time() > deadline or u < 0:
+            break
+        if u > lim and (sum(1 for x in seen if x > lim) == 1 or len(seen) % 12 == 0):
+            log(f"  GPU busy on the builder ({u:.0f} %): waiting for <= {lim:.0f} % before the run")
+        time.sleep(5)
+    steps["gpu_idle_gate"] = {"limit_pct": lim, "waited_s": round(time.time() - t0, 1), "samples_pct": seen[-12:], "idle": calm >= 3}
+    if calm < 3:
+        log(f"  GPU still busy after {time.time() - t0:.0f} s ({seen[-1]:.0f} %): running anyway (steps.gpu_idle_gate in result.json)")
+
+
 def run_scenario(sc, outdir: Path, log=print):
     outdir.mkdir(parents=True, exist_ok=True)
     rid = outdir.name
@@ -418,6 +453,9 @@ def run_scenario(sc, outdir: Path, log=print):
         (outdir / "rig.txt").write_text(next((l.strip() for l in _g.splitlines() if "NVIDIA" in l or "GeForce" in l or "RTX" in l), ""))
     except Exception:
         pass
+    foreign = foreign_host()
+    if foreign:
+        raise Blocked(f"an AirFrameXR streamer outside the harness is running on the builder ({foreign}): it holds the ALVR ports and the lab never stops it; close it, then run again")
     kill_stale()
     kill_local_stale()
     b_run(f"mkdir {rd}")
@@ -430,6 +468,7 @@ def run_scenario(sc, outdir: Path, log=print):
     derive_session(sc, outdir / "session.json", pin)
     b_put(outdir / "session.json", f"runs/{rid}/session.json")
 
+    gpu_idle_gate(steps, log)
     gpu_p = None
     if sc.get("gpu_sample"):
         # sample the NVIDIA GPU on the builder during the run (state, clocks, engine utilization, power, throttle reasons)
@@ -491,6 +530,19 @@ def run_scenario(sc, outdir: Path, log=print):
         else:      # host on the builder (loopback topology: the client binds topology.client_bind_ip)
             src_arg = "" if (h.get("live") or h.get("shim")) else f'--file {sc["source"].replace("/", chr(92))} '
             dump_arg = f"--dump-qpmap {rd}\\qpmap.json " if h.get("dump_qpmap") else ""
+            if h.get("host_settings"):   # docs/PLAN_1_4_FOUNDATION.md E4: the host reads this airframexr.json as an installed host reads config\\airframexr.json (the restriction,
+                # the render quality, ...); the lab flags --fov-override / --fov-scale / --fov-ceiling are gone
+                sf = CACHE / "host_settings.json"
+                CACHE.mkdir(parents=True, exist_ok=True)
+                sf.write_text(json.dumps(h["host_settings"]))
+                b_put(sf, f"runs/{rid}/host_settings.json")
+                dump_arg += f"--settings {rd}\\host_settings.json "
+            if h.get("encode_mask"):   # docs/PLAN_1_4_FOUNDATION.md F1: the mask object (polygon_uv_v1) as the session compile writes it, handed over as a file
+                mf = CACHE / "encode_mask.json"
+                CACHE.mkdir(parents=True, exist_ok=True)
+                mf.write_text(json.dumps(h["encode_mask"]))
+                b_put(mf, f"runs/{rid}/encode_mask.json")
+                dump_arg += f"--encode-mask {rd}\\encode_mask.json "
             envpre = "".join(f"set {k}={v}&& " for k, v in {"AIRFRAMEXR_PIPELINE_CSV": f"{rd}\\host_pipeline.csv", "AIRFRAMEXR_HEAD_CSV": f"{rd}\\host_head.csv", **(h.get("env") or {})}.items())
             feedpre = ""
             if sc.get("stdin_feed"):
@@ -517,7 +569,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
-                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "fov_scale": "--fov-scale", "fov_override": "--fov-override", "client_box": "--client-box", "fov_quality": "--fov-quality", "fov_ceiling": "--fov-ceiling"})
+                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "client_box": "--client-box", "fov_quality": "--fov-quality", "mask_fill": "--mask-fill"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -921,8 +973,59 @@ def read_rgb_at(path, pts, win=4):
     return [[tuple(d[o + 3 * i: o + 3 * i + 3]) for i in range(n)] for o in range(0, len(d) - stride + 1, stride)]
 
 
-def qp_map_expected(cfg, w, h, foveated, c, e, t):
-    """Independent Python port of nvh.cpp build_qp_map (per 32x32 CTB QP deltas). cfg = negotiated openvr_config."""
+def mask_footprint_hidden(poly, u0, u1, v0, v1):
+    """Port of nvh.cpp footprintHidden: the block's footprint [u0, u1] x [v0, v1] lies wholly outside the convex polygon (separating axes)."""
+    n = len(poly)
+    if n < 3:
+        return False
+    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+    if u1 < min(xs) or u0 > max(xs) or v1 < min(ys) or v0 > max(ys):
+        return True
+    area = sum(poly[k][0] * poly[(k + 1) % n][1] - poly[(k + 1) % n][0] * poly[k][1] for k in range(n))
+    if abs(area) < 1e-12:
+        return False
+    sgn = 1.0 if area > 0 else -1.0
+    for k in range(n):
+        ax, ay = poly[k]
+        ex, ey = poly[(k + 1) % n][0] - ax, poly[(k + 1) % n][1] - ay
+        if ex * ex + ey * ey < 1e-12:
+            continue
+        nx, ny = sgn * ey, -sgn * ex
+        if min(nx * (qx - ax) + ny * (qy - ay) for qx, qy in ((u0, v0), (u1, v0), (u1, v1), (u0, v1))) > 1e-6:
+            return True
+    return False
+
+
+def mask_footprint_separation(poly, u0, u1, v0, v1, sx, sy):
+    """Port of nvh.cpp footprintSeparation: how far (source px, the eye is sx x sy) a hidden footprint lies outside the convex polygon, the largest gap
+    along the box's axes and the polygon's edge normals."""
+    import math
+    n = len(poly)
+    if n < 3:
+        return 0.0
+    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+    best = max((min(xs) - u1) * sx, (u0 - max(xs)) * sx, (min(ys) - v1) * sy, (v0 - max(ys)) * sy, 0.0)
+    area = sum(poly[k][0] * poly[(k + 1) % n][1] - poly[(k + 1) % n][0] * poly[k][1] for k in range(n))
+    if abs(area) < 1e-12:
+        return best
+    sgn = 1.0 if area > 0 else -1.0
+    q = ((u0 * sx, v0 * sy), (u1 * sx, v0 * sy), (u1 * sx, v1 * sy), (u0 * sx, v1 * sy))
+    for k in range(n):
+        ax, ay = poly[k][0] * sx, poly[k][1] * sy
+        ex, ey = poly[(k + 1) % n][0] * sx - ax, poly[(k + 1) % n][1] * sy - ay
+        ln = math.hypot(ex, ey)
+        if ln < 1e-6:
+            continue
+        nx, ny = sgn * ey / ln, -sgn * ex / ln
+        best = max(best, min(nx * (x - ax) + ny * (y - ay) for x, y in q))
+    return best
+
+
+def qp_map_expected(cfg, w, h, foveated, c, e, t, mask=None, ramp=True, band=0.0, hidden_out=None):
+    """Independent Python port of nvh.cpp build_qp_map (per 32x32 CTB QP deltas). cfg = negotiated openvr_config. mask = {"left": [[u, v], ...],
+    "right": [...]} (docs/PLAN_1_4_FOUNDATION.md F1): a block whose whole footprint lies outside its eye's polygon is hidden; its QP climbs from its
+    own ramp value to +51 across `band` (a fraction of the eye's source width, the host's nvidia_profile::MASK_QP_BAND as nvenc_config reports it;
+    0 = +51 at once) and is +51 beyond. ramp False = the foveal ramp at 0. hidden_out (a list): filled with each block's hidden flag."""
     import math
     cx, cy = cfg["foveation_center_size_x"], cfg["foveation_center_size_y"]
     sx, sy = cfg["foveation_center_shift_x"], cfg["foveation_center_shift_y"]
@@ -944,17 +1047,43 @@ def qp_map_expected(cfg, w, h, foveated, c, e, t):
     ax, ay = axis(cx, sx, rx), axis(cy, sy, ry)
     cols, rows = (w + 31) // 32, (h + 31) // 32
     eye_w = w / 2
+    src_w, src_h = cfg["eye_resolution_width"], cfg["eye_resolution_height"]   # the eye before the foveation (nvh.cpp m_renderWidth / 2, m_renderHeight)
+    band_px = band * src_w
     out = []
+
+    def lround(x):   # C lroundf: half away from zero
+        return int(math.floor(x + 0.5)) if x >= 0 else -int(math.floor(-x + 0.5))
+
+    def src(v, a, r):
+        try:
+            s_ = _fov_f(v / r, *a[0])
+        except ZeroDivisionError:
+            return 0.5
+        return s_ if math.isfinite(s_) else 0.5
     for j in range(rows):
         for i in range(cols):
             px, py = min((i + .5) * 32, w - .5), min((j + .5) * 32, h - .5)
-            pe = px / eye_w if px < eye_w else (w - px) / eye_w
+            left = px < eye_w
+            pe = px / eye_w if left else (w - px) / eye_w
             exx, eyy = pe / ratio[0], (py / h) / ratio[1]
             sxs, sys_ = _fov_f(exx, *ax[0]), _fov_f(eyy, *ay[0])
             d = math.hypot((sxs - ax[1]) / ax[2], (sys_ - ay[1]) / ay[2])
             tt = min(1.0, max(0.0, (d - 1) / max(1e-3, t)))
             tt = tt * tt * (3 - 2 * tt)
-            val = int(math.floor(c + (e - c) * tt + 0.5))
+            val = int(math.floor(c + (e - c) * tt + 0.5)) if ramp else 0
+            poly = (mask or {}).get("left" if left else "right")
+            hidden = False
+            if poly and len(poly) >= 3:
+                x0, x1, y0, y1 = i * 32, min((i + 1) * 32, w), j * 32, min((j + 1) * 32, h)
+                pa, pb = (x0 / eye_w, x1 / eye_w) if left else ((w - x1) / eye_w, (w - x0) / eye_w)
+                u0, u1 = sorted((src(pa, ax, ratio[0]), src(pb, ax, ratio[0])))
+                v0, v1 = sorted((src(y0 / h, ay, ratio[1]), src(y1 / h, ay, ratio[1])))
+                if mask_footprint_hidden(poly, u0, u1, v0, v1):
+                    hidden = True
+                    sep = mask_footprint_separation(poly, u0, u1, v0, v1, src_w, src_h) if band_px > 0 else 0.0
+                    val = lround(val + (51 - val) * sep / band_px) if band_px > 0 and sep < band_px else 51
+            if hidden_out is not None:
+                hidden_out.append(hidden)
             out.append(max(-51, min(51, val)))
     return cols, rows, out
 
@@ -1037,16 +1166,8 @@ def analyse_fov_restrict(sc, outdir):
     and the restriction, and the decoded stream: the margin the game does not render is black, the stream still covers the headset's whole view."""
     cfgk = sc["checks"]["fov_restrict"]
     out = {}
-    headset = None
     last_decl = "declared" in cfgk   # 1.4 (the box sent to the headset app): the headset declares it after its first declaration; take the last one
-    for line in open(outdir / "host_stdout.txt", errors="replace"):
-        if '"views_config"' in line and '"views_config_ignored"' not in line:
-            try:
-                headset = json.loads(line)["data"]["fov_tan"]
-                if not last_decl:
-                    break
-            except Exception:
-                pass
+    headset = host_views_fov(outdir, last=last_decl)
     if last_decl and headset:
         d = cfgk["declared"]   # outer, inner, upper, lower; the right eye mirrored
         want = [d[0], d[1], d[2], d[3], d[1], d[0], d[2], d[3]]
@@ -1059,13 +1180,18 @@ def analyse_fov_restrict(sc, outdir):
     out["scale"] = s
     log = (outdir / "app.log").read_text(errors="replace") if (outdir / "app.log").exists() else ""
     got = {}
-    for m in re.finditer(r"view fov tan eye (\d): L ([0-9.]+) R ([0-9.]+) U ([0-9.]+) D ([0-9.]+)", log):
+    pos = {}
+    for m in re.finditer(r"view fov tan eye (\d): L ([0-9.]+) R ([0-9.]+) U ([0-9.]+) D ([0-9.]+)(?: pos ([-0-9.]+) ([-0-9.]+) ([-0-9.]+))?", log):
         got[int(m.group(1))] = [float(m.group(k)) for k in range(2, 6)]
+        if m.group(6) is not None:
+            pos[int(m.group(1))] = [float(m.group(k)) for k in range(6, 9)]
+    if len(pos) == 2:   # the eye distance the app got (xr_probe logs the view positions with the first view fov line)
+        out["app_ipd_m"] = round(sum((a - b) ** 2 for a, b in zip(pos[0], pos[1])) ** 0.5, 4)
     rec = re.search(r"views: \d+, recommended (\d+)x(\d+)", log)
     out["host_events"] = sum(1 for line in open(outdir / "host_stdout.txt", errors="replace") if '"event":"fov_restrict"' in line.replace(' ', ''))
     out["headset_fov"], out["app_fov"], out["recommended"] = headset, got, (int(rec.group(1)), int(rec.group(2))) if rec else None
     if not headset or len(got) < 2 or not rec:
-        out["error"] = "no views_config event / no view fov line / no recommended size in the app log"
+        out["error"] = "no views_config / views_placeholder event / no view fov line / no recommended size in the app log"
         return out
     exp = []
     for e in range(2):
@@ -1303,19 +1429,84 @@ def analyse_mirror_clicks(outdir):
     return out
 
 
+def host_views_fov(outdir, last=False):
+    """The views the host published to the shim (host_stdout.txt): its views_config events (the headset's real views); without any, its views_placeholder ones
+    (1.4.0-pre.2: views with both eyes at one point, as the mock client's default +-45 degrees; the host uses them as is when no box was sent to the headset app
+    and no real views came before). The first event's fov_tan, or the last one with `last`; None without either."""
+    real, stand_in = [], []
+    for line in open(outdir / "host_stdout.txt", errors="replace"):
+        for key, acc in (('"views_config"', real), ('"views_placeholder"', stand_in)):
+            if key in line:
+                try:
+                    acc.append(json.loads(line)["data"]["fov_tan"])
+                except Exception:
+                    pass
+    got = real or stand_in
+    return (got[-1] if last else got[0]) if got else None
+
+
+def analyse_fg(hs, host_fps=None):
+    """Frame generation: what it cost and what it delivered, from the host's fg_perf events (one per window of about 10 s; `gen` is nvh_fg_stats: counters
+    and the generator's GPU times as averages over the run: flow = the motion search per rendered frame (prep + optical-flow engine, at the flow size),
+    synth = one output pass per displayed frame at the full side-by-side frame). The steady windows are those where the app ran and outputs went out,
+    after the first one (the start). gpu_ms_per_s = flow_ms x pairs/s + synth_ms x outputs/s: the GPU time the generator takes from the game each second
+    (the passes run on the shaders; only the flow engine itself is separate hardware). Per-Mpx costs compare sizes: a preset's cost should follow its
+    pixels (1.4's Balanced is about 2x 1.3's sizing, Sharp about 3.6x)."""
+    ev = []
+    for l in hs.splitlines():
+        if '"event":"fg_perf"' in l:
+            try:
+                e = json.loads(l)
+                ev.append((float(e.get("t_ms", 0)), e["data"]))
+            except Exception:
+                pass
+    if not ev:
+        return None
+    idx = [k for k, (_, d) in enumerate(ev) if k > 0 and d.get("app_fps", 0) > 1 and d.get("outputs", 0) > 0]
+    if not idx:
+        idx = [k for k, (_, d) in enumerate(ev) if d.get("outputs", 0) > 0]
+    out = {"windows": len(ev), "steady_windows": len(idx)}
+    if not idx:
+        out["error"] = "no fg_perf window with outputs"
+        return out
+    g1 = ev[idx[-1]][1].get("gen") or {}
+    g0 = (ev[idx[0] - 1][1].get("gen") or {}) if idx[0] > 0 else {}
+    dt = (ev[idx[-1]][0] - (ev[idx[0] - 1][0] if idx[0] > 0 else 0.0)) / 1000.0
+    m = re.search(r"frame (\d+)x(\d+)", g1.get("info", ""))
+    frame = [int(m.group(1)), int(m.group(2))] if m else None
+    flow = g1.get("flow_size") or None
+    d = lambda k: (g1.get(k, 0) or 0) - (g0.get(k, 0) or 0)
+    pairs_s = d("pairs") / dt if dt > 0 else 0.0
+    outs_s = (d("synths") + d("reals")) / dt if dt > 0 else 0.0
+    fm, sm = float(g1.get("flow_ms_avg", 0) or 0), float(g1.get("synth_ms_avg", 0) or 0)
+    med = lambda k: (sorted(ev[i][1].get(k, 0) for i in idx)[len(idx) // 2])
+    out.update({
+        "ready": g1.get("ready") == 1, "info": g1.get("info"), "rate": ev[idx[-1]][1].get("rate"),
+        "mask_pts": g1.get("mask_pts"), "mask_visible": g1.get("mask_visible"),   # the mask polygon the output pass draws per eye (none: [0, 0], visible [1, 1])
+        "frame": frame, "frame_mpx": round(frame[0] * frame[1] / 1e6, 3) if frame else None,
+        "flow_size": flow, "flow_mpx": round(flow[0] * flow[1] / 1e6, 3) if flow else None,
+        "flow_ms_avg": fm, "synth_ms_avg": sm, "flow_errors": g1.get("flow_errors", 0), "render_errors": g1.get("render_errors", 0),
+        "pairs_per_s": round(pairs_s, 2), "outputs_per_s": round(outs_s, 2),
+        "synth_share": round(d("synths") / max(1, d("synths") + d("reals")), 3),
+        "gpu_ms_per_s": round(fm * pairs_s + sm * outs_s, 2),
+        "app_fps_p50": round(med("app_fps"), 2), "stream_fps_p50": round(med("stream_fps"), 2), "stream_fps_min": round(min(ev[i][1].get("stream_fps", 0) for i in idx), 2),
+    })
+    out["gpu_share"] = round(out["gpu_ms_per_s"] / 1000.0, 4)
+    if frame:
+        out["synth_ms_per_mpx"] = round(sm / out["frame_mpx"], 4)
+    if flow:
+        out["flow_ms_per_mpx"] = round(fm / out["flow_mpx"], 4)
+    if host_fps:
+        out["stream_fps_frac"] = round(out["stream_fps_p50"] / host_fps, 4)
+    return out
+
+
 def analyse_layers(sc, outdir):
     cfg = negotiated_cfg(outdir)
     ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
-    fov = None
-    for line in open(outdir / "host_stdout.txt", errors="replace"):
-        if '"views_config"' in line:
-            try:
-                fov = json.loads(line)["data"]["fov_tan"]
-                break
-            except Exception:
-                pass
+    fov = host_views_fov(outdir)
     if not fov:
-        return {"error": "no views_config event with the field of view in host_stdout.txt"}
+        return {"error": "no views_config / views_placeholder event with the field of view in host_stdout.txt"}
     tl, tr, tu, td = fov[0], fov[1], fov[2], fov[3]
     exps = layer_expectations(ew, eh, tl, tr, tu, td, cube=int(sc.get("app", {}).get("layer_test", 0)) == 2)
     stamp_pts = [(64 * i + 32, 32) for i in range(16)]
@@ -1581,7 +1772,11 @@ def analyse_qpmap(sc, outdir, host):
         return out
     w, h, fov = fr[0], fr[1], bool(cfgh.get("foveated"))
     cfg = negotiated_cfg(outdir)
-    cols, rows, exp = qp_map_expected(cfg, w, h, fov, qk["center"], qk["edge"], qk["transition"])
+    mask = (sc.get("host") or {}).get("encode_mask")
+    band = float((out["qp"] or {}).get("mask_band") or 0.0)   # the band the host used (absent before the band: 0, the cliff)
+    out["band"] = band
+    hid_flags = []
+    cols, rows, exp = qp_map_expected(cfg, w, h, fov, qk["center"], qk["edge"], qk["transition"], mask=mask, ramp=qk.get("ramp", True), band=band, hidden_out=hid_flags)
     out["expected_hist"] = {str(v): exp.count(v) for v in sorted(set(exp))}
     if dump:
         got = dump["data"]
@@ -1589,6 +1784,41 @@ def analyse_qpmap(sc, outdir, host):
         out["mismatch"] = sum(1 for x, y in zip(exp, got) if x != y)
         out["ctbs"] = len(got)
         out["hist"] = {str(v): got.count(v) for v in sorted(set(got))}
+        out["mask_hidden"], out["mask_blocks"], out["mask_rects"] = dump.get("mask_hidden"), dump.get("mask_blocks"), dump.get("mask_rects")
+        out["mask_top"] = dump.get("mask_top")
+    if mask:
+        out["expected_hidden"] = sum(hid_flags)
+        out["expected_top"] = sum(1 for f, v in zip(hid_flags, exp) if f and v >= 51)
+        out["expected_band_blocks"] = sum(1 for f, v in zip(hid_flags, exp) if f and v < 51)   # hidden blocks below the highest QP (the band)
+        for line in open(outdir / "host_stdout.txt", errors="replace") if (outdir / "host_stdout.txt").exists() else []:
+            if '"encode_mask"' in line and line.lstrip().startswith("{"):
+                try:
+                    out["mask_event"] = json.loads(line).get("data")
+                except ValueError:
+                    pass
+    if qk.get("mask_luma") and (outdir / "client.hevc").exists():
+        # the decoded picture in the hidden blocks at the highest QP (fill on: black) and in the visible ones (the scene's lines), frame `frame`;
+        # the band's blocks (hidden, below the highest) are in neither: the fill leaves them, they carry the picture
+        n = qk["mask_luma"].get("frame", 120)
+        p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", str(outdir / "client.hevc"), "-vf", f"select=eq(n\\,{n})", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-"], capture_output=True, timeout=600)
+        if len(p.stdout) == w * h:
+            import numpy as np
+            img = np.frombuffer(p.stdout, dtype=np.uint8).reshape(h, w)
+            hid, vis = [], []
+            for j in range(rows):
+                for i in range(cols):
+                    blk = img[j * 32:min((j + 1) * 32, h), i * 32:min((i + 1) * 32, w)]
+                    k = j * cols + i
+                    if not hid_flags[k]:
+                        vis.append(blk)
+                    elif exp[k] >= 51:
+                        hid.append(blk)
+            if hid and vis:
+                hv = np.concatenate([b.ravel() for b in hid]); vv = np.concatenate([b.ravel() for b in vis])
+                out["mask_luma"] = {"hidden_mean": round(float(hv.mean()), 2), "hidden_p99": int(np.percentile(hv, 99)), "hidden_max": int(hv.max()),
+                                    "visible_mean": round(float(vv.mean()), 2), "visible_max": int(vv.max()), "hidden_blocks": len(hid)}
+        else:
+            out["mask_luma_error"] = f"decoded {len(p.stdout)} bytes, expected {w * h}"
     if qk.get("effect") and (outdir / "client.hevc").exists():
         n = qk["effect"].get("frame", 60)
         p = subprocess.run([FFMPEG, "-hide_banner", "-v", "error", "-i", str(outdir / "client.hevc"), "-vf", f"select=eq(n\\,{n})", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-"], capture_output=True, timeout=600)
@@ -1617,19 +1847,12 @@ def analyse_tool(sc, outdir):
                 out["events"].append(json.loads(line))
             except ValueError:
                 pass
-    headset = None
-    for line in open(outdir / "host_stdout.txt", errors="replace"):
-        if '"views_config"' in line and '"views_config_ignored"' not in line:
-            try:
-                headset = json.loads(line)["data"]["fov_tan"]
-                break
-            except Exception:
-                pass
+    headset = host_views_fov(outdir)
     cfg = negotiated_cfg(outdir)
     ew, eh = cfg["eye_resolution_width"], cfg["eye_resolution_height"]
     out["headset_fov"], out["stream_eye"] = headset, (ew, eh)
     if not headset or not out["events"] or not (outdir / "client.hevc").exists():
-        out["error"] = "no views_config event / no tool event in app_stdout.txt / no client.hevc"
+        out["error"] = "no views_config / views_placeholder event / no tool event in app_stdout.txt / no client.hevc"
         return out
     hevc = str(outdir / "client.hevc")
 
@@ -1721,9 +1944,18 @@ def analyse(sc, outdir: Path):
         a["client"]["duplicate_timestamps_tracked"] = sum(1 for x, y in zip(ts_, ts_[1:]) if x == y)
     hs = (outdir / "host_stdout.txt").read_text(errors="replace") if (outdir / "host_stdout.txt").exists() else ""
     a["host_event_names"] = sorted(set(re.findall(r'"event":"([a-z_]+)"', hs)))
+    a["host_event_counts"] = {}
+    for name_ in re.findall(r'"event":\s*"([a-z_]+)"', hs):
+        a["host_event_counts"][name_] = a["host_event_counts"].get(name_, 0) + 1
+    # the shim could not reach this host (its IPC version differs: a host built without its shim after an IPC change, 2026-11-20) and the app ran standalone; the
+    # host still streams its idle frames, so nothing else fails clearly
+    sl = (outdir / "ovrshim.log").read_text(errors="replace") if (outdir / "ovrshim.log").exists() else ""
+    a["shim_standalone"] = "host IPC not available" in sl
     a["bench_steps"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"bench_step"' in l]
     a["height_calibrated"] = next((json.loads(l)["data"] for l in hs.splitlines() if '"event":"height_calibrated"' in l), None)
     a["game_runs"] = [json.loads(l)["data"] for l in hs.splitlines() if '"event":"game_run"' in l]   # the run summary the streamer shows (net block: latency medians, outliers)
+    if '"event":"fg_perf"' in hs:
+        a["fg"] = analyse_fg(hs, (sc.get("host") or {}).get("fps"))
     lg = outdir / "logs"
     if lg.exists():
         dbg = sorted((lg / "debug").glob("*")) if (lg / "debug").exists() else []
@@ -2092,6 +2324,8 @@ def evaluate(sc, a):
         chk("reconnect_first_session_streamed", c.get("frames", 0) >= need, c.get("frames"), f">= {need} frames before the disconnect")
     if sc.get("host") is not None and not (sc.get("host") or {}).get("daemon"):
         chk("host_report_present", h is not None, h is not None, True)
+        if (sc.get("host") or {}).get("shim") and a.get("shim_standalone"):
+            chk("shim_reached_host", False, "the shim ran standalone", "the app's shim connects to this host (a different IPC version: build the host and the shim together)")
         if h:
             chk("host_connected", h.get("connected"), h.get("connected"), True)
             if "host_min_frames" in ck:
@@ -2240,6 +2474,11 @@ def evaluate(sc, a):
         chk("handover_mirror_leaves", H_["leave_s"] is not None and H_["leave_s"] <= hk.get("max_leave_s", 2.0) and not H_["forced_out"] and H_["mirror_rc"] == "0", {"leave_s": H_["leave_s"], "forced_out": H_["forced_out"], "rc": H_["mirror_rc"]}, f"the mirror ends by itself within {hk.get('max_leave_s', 2.0)} s of the signal, without the 1.5 s fallback")
         chk("handover_engine_switches", H_["mirror_run_ended_before_game_started"], H_["events"], "the engine ends the mirror's run, then starts the game's (the game is not recorded as the mirror)")
         chk("handover_game_ran", H_["game_ran"], H_["game_rc"], "the game ran to its end after the mirror left")
+    if isinstance(ck.get("host_events"), dict):   # {"event name": minimum count}: the host printed that event at least that often (a list: host_events_present below)
+        counts = a.get("host_event_counts") or {}   # (counted by analyse: evaluate has the analysis only, not the folder)
+        for name, n in ck["host_events"].items():
+            got = counts.get(name, 0)
+            chk(f"host_event_{name}", got >= n, got, f"the host printed the {name} event at least {n} time(s)")
     if "fov_restrict" in ck:
         fa = a.get("fov_restrict") or {}
         if fa.get("error"):
@@ -2253,6 +2492,9 @@ def evaluate(sc, a):
                     "the headset (the mock with the client patch) declared the box the host sent over ServerControlPacket::Reserved (video.client_box), the right eye mirrored")
             chk("fov_restrict_app_fov", fa["fov_max_err"] <= tol, {"max_err": round(fa["fov_max_err"], 4), "got": fa["app_fov"], "expected": fa["expected_fov"]},
                 f"the four tangents per eye the app got from xrLocateViews are the headset's scaled per edge (outer, inner, upper, lower = {[round(x, 3) for x in fa['scale']]} of it), within {tol}")
+            if "app_ipd_min_m" in ck["fov_restrict"]:
+                chk("fov_app_stereo", fa.get("app_ipd_m", 0) >= ck["fov_restrict"]["app_ipd_min_m"], {"app_ipd_m": fa.get("app_ipd_m")},
+                    f"the app's two eyes are at least {ck['fov_restrict']['app_ipd_min_m']} m apart (a game started on the headset app's stand-in views would get both eyes at one point)")
             er, rr = fa["expected_recommended"], fa["recommended"]
             chk("fov_restrict_recommended_size", abs(er[0] - rr[0]) <= 2 and abs(er[1] - rr[1]) <= 2, {"app": rr, "expected": er, "stream_eye": fa["stream_eye"], "ceiling": fa.get("ceiling")},
                 "the recommended image size follows the area of the restricted view and the render quality between the floor and the ceiling (the stream's eye size, or the panel reference when the stream is fitted to the headset's window)")
@@ -2277,6 +2519,25 @@ def evaluate(sc, a):
             chk("qpmap_center_keeps_more_detail", (qa.get("detail_ratio") or 0) >= qk["min_detail_ratio"], qa.get("detail") or qa.get("detail_error"), f"decoded detail center/edge >= {qk['min_detail_ratio']} (ratio {qa.get('detail_ratio')})")
         if "max_detail_ratio" in qk:
             chk("qpmap_off_is_flat", (qa.get("detail_ratio") or 99) <= qk["max_detail_ratio"], qa.get("detail"), f"decoded detail center/edge <= {qk['max_detail_ratio']} with the map off (ratio {qa.get('detail_ratio')})")
+        if "mask_min_hidden_share" in qk:   # docs/PLAN_1_4_FOUNDATION.md F1
+            eh, ctbs = qa.get("expected_hidden") or 0, qa.get("ctbs") or 0
+            chk("mask_hidden_blocks", qa.get("mask_hidden") is not None and abs((qa.get("mask_hidden") or 0) - eh) <= max(1, int(0.005 * ctbs)) and ctbs and eh / ctbs >= qk["mask_min_hidden_share"],
+                {"engine": qa.get("mask_hidden"), "oracle": eh, "ctbs": ctbs, "event": qa.get("mask_event")},
+                f"the engine's hidden block count equals the oracle's and is at least {qk['mask_min_hidden_share']:.0%} of the frame")
+            if "mask_min_band_share" in qk:   # 2026-11-21: past the outline the QP climbs across a band instead of +51 at once
+                et, eb = qa.get("expected_top") or 0, qa.get("expected_band_blocks") or 0
+                chk("mask_band_ramp", (qa.get("band") or 0) > 0 and qa.get("mask_top") is not None and abs((qa.get("mask_top") or 0) - et) <= max(1, int(0.005 * ctbs))
+                    and eh and eb / eh >= qk["mask_min_band_share"] and et > 0,
+                    {"band": qa.get("band"), "engine_top": qa.get("mask_top"), "oracle_top": et, "band_blocks": eb, "hidden": eh},
+                    f"the host reports a band, at least {qk['mask_min_band_share']:.0%} of the hidden blocks climb below the highest QP, and the engine's count at the highest equals the oracle's")
+        if "mask_luma" in qk:
+            ml, want = qa.get("mask_luma") or {}, qk["mask_luma"]
+            if want.get("fill"):
+                chk("mask_fill_black", ml.get("hidden_blocks") and ml.get("hidden_p99", 255) <= want.get("max_hidden_p99", 4) and ml.get("visible_max", 0) >= 100,
+                    ml or qa.get("mask_luma_error"), f"fill on: the hidden blocks decode black (p99 <= {want.get('max_hidden_p99', 4)}), the visible ones keep the scene (max >= 100)")
+            else:
+                chk("mask_hidden_keep_picture", ml.get("hidden_blocks") and ml.get("hidden_max", 0) >= want.get("min_hidden_max", 40),
+                    ml or qa.get("mask_luma_error"), f"fill off: the hidden blocks at the highest QP still carry the picture (max >= {want.get('min_hidden_max', 40)}): the fill is off by default")
     if "tool" in ck:   # the headset tools (xr_probe XR_PROBE_TOOL, scripted keys): analyse_tool
         import math
         tk, ta = ck["tool"], a.get("tool") or {}
@@ -2354,6 +2615,33 @@ def evaluate(sc, a):
         if hc:
             chk("height_calibrated_eye_height", abs(hc.get("eye_height_m", -9) - want["eye_height_m"]) <= want.get("tol", 0.02), hc.get("eye_height_m"), f"{want['eye_height_m']} +- {want.get('tol', 0.02)}")
             chk("height_calibrated_headset_y", abs(hc.get("headset_y", -9) - want["headset_y"]) <= want.get("tol", 0.02), hc.get("headset_y"), f"{want['headset_y']} +- {want.get('tol', 0.02)}")
+    if "fg" in ck:   # frame generation: the generator ran clean, generated its share, held the display rate, and what it cost (analyse_fg)
+        want, f = ck["fg"], a.get("fg") or {}
+        chk("fg_reported", bool(f) and not f.get("error"), f.get("error") or f.get("steady_windows"), "fg_perf windows with outputs (the host's frame generation statistics)")
+        if f and not f.get("error"):
+            chk("fg_cost", True, {k: f.get(k) for k in ("frame", "flow_size", "flow_ms_avg", "synth_ms_avg", "gpu_ms_per_s", "synth_ms_per_mpx", "flow_ms_per_mpx", "app_fps_p50", "stream_fps_p50")},
+                "information: the generator's GPU time per motion search and per output pass, per second, and per Mpx")
+            chk("fg_clean", f.get("ready") and f.get("flow_errors", 1) == 0 and f.get("render_errors", 1) == 0,
+                {k: f.get(k) for k in ("ready", "flow_errors", "render_errors")}, "flow engine ready, no flow or render error")
+            if "frame" in want:
+                chk("fg_frame", f.get("frame") == want["frame"], f.get("frame"), f"{want['frame']} (the side-by-side frame the generator works on: 2 x the stream eye)")
+            if "mask_visible" in want:   # masked generation: the output pass draws each eye's visible polygon (the share of the eye it covers), or the whole eye
+                mv = f.get("mask_visible") or [1.0, 1.0]
+                chk("fg_mask", all(want["mask_visible"][e][0] - 1e-6 <= mv[e] <= want["mask_visible"][e][1] + 1e-6 for e in range(2)), {"mask_pts": f.get("mask_pts"), "mask_visible": mv},
+                    f"the output pass covers {want['mask_visible']} of each eye (1 = the whole eye)")
+            if "synth_share" in want:
+                lo, hi = want["synth_share"]
+                chk("fg_synth_share", lo <= f.get("synth_share", -1) <= hi, f.get("synth_share"), f"[{lo}, {hi}] of the outputs generated (the rest the newest real frame)")
+            if "min_stream_fps_frac" in want:
+                chk("fg_holds_display_rate", f.get("stream_fps_frac", 0) >= want["min_stream_fps_frac"], f.get("stream_fps_p50"),
+                    f">= {want['min_stream_fps_frac']} x the display rate (median of the steady windows; min {f.get('stream_fps_min')})")
+            for k, label in (("max_flow_ms", "flow_ms_avg"), ("max_synth_ms", "synth_ms_avg"), ("max_gpu_ms_per_s", "gpu_ms_per_s")):
+                if k in want:
+                    chk(f"fg_{label}", 0 < f.get(label, 0) <= want[k], f.get(label), f"(0, {want[k]}]")
+            for k in ("synth_ms_per_mpx", "flow_ms_per_mpx"):
+                if k in want:   # the cost of one Mpx, whatever the preset: a regression in the passes shows here, a bigger preset does not
+                    lo, hi = want[k]
+                    chk(f"fg_{k}", lo <= f.get(k, -1) <= hi, f.get(k), f"[{lo}, {hi}] ms per Mpx")
     if "game_run" in ck:   # U7: the run's latency is believable on a clean run (no garbage samples, medians of the windows)
         g = ck["game_run"]
         runs = a.get("game_runs") or []

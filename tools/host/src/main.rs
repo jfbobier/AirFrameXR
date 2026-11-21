@@ -34,7 +34,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -80,20 +80,16 @@ struct Args {
     fg_cap_fps: Option<f64>,
     drop_dup_frames: bool,
     drop_dup_frames_flag: bool,
-    /// field-of-view restriction (outer, inner, upper, lower as fractions of the headset's tangents; 1 = none): what the game is told, taken by the next game
-    fov_scale: [f32; 4],
-    fov_scale_explicit: bool,
     fov_quality: f32,   // 0..1, see vision::render_quality
-    /// the streamer's override (settings, `fov_override` command, `--fov-override`): the tangents the game is told per edge (outer, inner, upper, lower); None = not overridden
+    /// the restriction (settings video.fov_override + fov_outer .. fov_lower, read at start: one contract per streamer start, 1.4-foundation E4): the tangents
+    /// the game is told per edge (outer, inner, upper, lower); None = not restricted
     fov_override: Option<[f32; 4]>,
+    /// lab: an airframexr.json read as an installed host reads config\airframexr.json (`--settings <file>`, without --install-dir)
+    settings_file: Option<PathBuf>,
     /// 1.4: the box and the sharpening sent to our client (settings video.client_box / client_sharpen)
     client_box: Option<[f64; 4]>,
     client_sharpen: bool,
-    /// the render quality slider's ceiling per eye above the stream's eye size (lab `--fov-ceiling WxH`; else the settings' stream_reference_eye when stream_fit_window is on): None = the stream's eye size
-    fov_ceiling: Option<(i32, i32)>,
     fov_quality_explicit: bool,
-    stream_fit_window: bool,
-    stream_reference_eye: Option<(i32, i32)>,
     fg_grid: i32,
     /// 1 = edge-aware synthesis (default), 2 = edge-aware without the photometric gate, 0 = classic, the crossfade recipe (the predictable
     /// fallback) (`video.frame_gen_synthesis`, `--frame-gen-synthesis`, env AIRFRAMEXR_FG_SYNTH)
@@ -102,6 +98,11 @@ struct Args {
     auto_input: Vec<(f64, usize, u32, f32)>,
     qp_map: Option<bool>,
     dump_qpmap: Option<PathBuf>,
+    /// the mask (docs/PLAN_1_4_FOUNDATION.md F1): settings `video.encode_mask` (the session compile), or `--encode-mask <file|off>` (the lab; wins)
+    encode_mask: Option<vision::EncodeMask>,
+    encode_mask_explicit: bool,
+    /// F2: the hidden blocks cleared to black before NVENC (`--mask-fill`, settings `video.mask_fill`, stdin `mask_fill`); default off
+    mask_fill: Option<bool>,
     idle_rgb: Option<u32>,
     gpu_priority: Option<i64>,
     encode_profile: nvidia_profile::EncodeProfile,
@@ -149,6 +150,8 @@ struct Args {
     fgj_starts: usize,
     fgj_gaps: Vec<f64>,
     fgj_speeds: Vec<f64>,
+    fgj_pans: Vec<f64>,
+    fgj_pan_warm: i32,
     bench_scene: Option<PathBuf>,
     /// simrig (cargo feature): run the pipeline without a headset against the synthetic client, results in this directory
     #[cfg(feature = "simrig")]
@@ -190,20 +193,19 @@ fn parse_args() -> Result<Args, String> {
         fg_cap_fps: None,
         drop_dup_frames: false,
         drop_dup_frames_flag: false,
-        fov_scale: [1.0; 4],
-        fov_scale_explicit: false,
         fov_quality: 0.0,
         fov_override: None,
         client_box: None,
         client_sharpen: true,
-        fov_ceiling: None,
+        settings_file: None,
         fov_quality_explicit: false,
-        stream_fit_window: false,
-        stream_reference_eye: None,
         fg_grid: 4,
         fg_synth: 1,
         auto_input: vec![],
         qp_map: None,
+        encode_mask: None,
+        encode_mask_explicit: false,
+        mask_fill: None,
         dump_qpmap: None,
         idle_rgb: None,
         gpu_priority: None,
@@ -239,6 +241,8 @@ fn parse_args() -> Result<Args, String> {
         fgj_starts: 6,
         fgj_gaps: vec![22.2, 33.3, 44.4],
         fgj_speeds: vec![1.0, 8.0, 24.0],
+        fgj_pans: vec![],
+        fgj_pan_warm: 0,
         bq_preview: None,
         bq_ref_scale: 1,
         bench_scene: None,
@@ -310,6 +314,8 @@ fn parse_args() -> Result<Args, String> {
             }
             "--fgj-starts" => a.fgj_starts = v()?.parse().map_err(|e| format!("{e}"))?,
             "--fgj-speeds" => a.fgj_speeds = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
+            "--fgj-pan-warm" => a.fgj_pan_warm = v()?.parse().map_err(|e| format!("{e}"))?,
+            "--fgj-pans" => a.fgj_pans = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
             "--fgj-gaps" => a.fgj_gaps = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
             #[cfg(feature = "simrig")]
             "--simrig" => {
@@ -335,6 +341,18 @@ fn parse_args() -> Result<Args, String> {
                 })
             }
             "--dump-qpmap" => a.dump_qpmap = Some(v()?.into()),
+            "--encode-mask" => {
+                let f = v()?;
+                a.encode_mask_explicit = true;
+                a.encode_mask = if f == "off" {
+                    None
+                } else {
+                    let t = fs::read_to_string(&f).map_err(|e| format!("--encode-mask {f}: {e}"))?;
+                    let j: serde_json::Value = serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|e| format!("--encode-mask {f}: {e}"))?;
+                    Some(vision::parse_encode_mask(&j).ok_or_else(|| format!("--encode-mask {f}: not a polygon_uv_v1 mask (kind, left, right: 3-64 [x, y] points in 0..1)"))?)
+                };
+            }
+            "--mask-fill" => a.mask_fill = Some(parse_on_off("--mask-fill", &v()?)?),
             "--idle-rgb" => a.idle_rgb = Some(parse_rgb(&v()?)?),
             "--gpu-priority" => a.gpu_priority = Some(v()?.parse().map_err(|e| format!("{e}"))?),
             "--running-start-ms" => a.running_start_ms = v()?.parse().map_err(|e| format!("{e}"))?,
@@ -343,26 +361,13 @@ fn parse_args() -> Result<Args, String> {
             "--drop-duplicate-frames" => a.drop_dup_frames_flag = true,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
-            "--fov-scale" => {
-                // lab: the field of view the game is told, percent per edge "outer,inner,upper,lower" (the streamer's Advanced window writes the same four values to the settings)
-                let p: Vec<f64> = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?;
-                if p.len() != 4 {
-                    return Err("--fov-scale outer,inner,upper,lower (percent)".into());
-                }
-                for k in 0..4 {
-                    a.fov_scale[k] = vision::fov_fraction(p[k]);
-                }
-                a.fov_scale_explicit = true;
+            "--settings" => a.settings_file = Some(v()?.into()),   // lab: the settings file of an installed host, without --install-dir (1.4-foundation E4)
+            "--fov-scale" | "--fov-override" | "--fov-ceiling" => {
+                return Err(format!("{k} was removed in 1.4-foundation (E4): the restriction comes from the settings (video.fov_override, fov_outer .. fov_lower; lab: --settings <file>)"));
             }
             "--fov-quality" => {   // lab: where the game's render size sits between the floor and the ceiling, 0..1
                 a.fov_quality = vision::render_quality(v()?.parse::<f64>().map_err(|e| format!("{e}"))?);
                 a.fov_quality_explicit = true;
-            }
-            "--fov-ceiling" => {
-                // lab: the render quality slider's ceiling per eye, "WxH" (the panel reference when the stream is fitted to the headset's window; the settings give it as stream_reference_eye)
-                let t = v()?;
-                let (w, h) = t.split_once('x').ok_or("--fov-ceiling WxH")?;
-                a.fov_ceiling = Some((w.parse::<i32>().map_err(|e| format!("{e}"))?, h.parse::<i32>().map_err(|e| format!("{e}"))?));
             }
             "--client-box" => {
                 // lab (1.4): the box sent to the headset app, "outer,inner,upper,lower" (the settings give it as video.client_box)
@@ -371,15 +376,6 @@ fn parse_args() -> Result<Args, String> {
                     return Err("--client-box outer,inner,upper,lower (tangents)".into());
                 }
                 a.client_box = Some([p[0], p[1], p[2], p[3]]);
-            }
-            "--fov-override" => {
-                // lab: the tangents the game is told, "outer,inner,upper,lower"
-                let p: Vec<f32> = v()?.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?;
-                if p.len() != 4 {
-                    return Err("--fov-override outer,inner,upper,lower (tangents)".into());
-                }
-                a.fov_override = Some([p[0], p[1], p[2], p[3]]);
-                a.fov_scale_explicit = true;
             }
             "--frame-gen-cap" => a.fg_cap_fps = Some(v()?.parse::<f64>().map_err(|e| format!("{e}"))?.clamp(0.0, 240.0)),
             "--frame-gen-grid" => a.fg_grid = v()?.parse::<i32>().map_err(|e| format!("{e}"))?,
@@ -461,9 +457,35 @@ fn parse_args() -> Result<Args, String> {
 
 /// The negotiated ALVR encoding gamma (persisted in `openvr_config` at connect). The client decodes with pow(v, gamma); the shim
 /// sends pow(v, 1/gamma) (ALVR's SteamVR compositor does the same in FrameRender.fx). 1.0 if absent.
+/// The session's encoding gamma (what the shim encodes with). A read that hit the moment a window replaced session.json used to fall back to 1.0 without a
+/// word (field 2026-11-07: a session ran 1.00 instead of 1.5): the read is tried again, then the last good value is kept, and either case is said in the log.
+/// A session without the key is ALVR's 1.0.
 fn read_encoding_gamma(session_path: &std::path::Path) -> f32 {
-    fs::read_to_string(session_path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|s| s["openvr_config"]["encoding_gamma"].as_f64()).filter(|g| *g > 0.1 && *g < 10.0).unwrap_or(1.0) as f32
+    static LAST_GOOD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let read = || -> Result<Option<f64>, String> {
+        let t = fs::read_to_string(session_path).map_err(|e| e.to_string())?;
+        let s: serde_json::Value = serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
+        Ok(s["openvr_config"]["encoding_gamma"].as_f64())
+    };
+    let mut last_err = String::new();
+    for attempt in 0..3 {
+        match read() {
+            Ok(g) => {
+                let v = g.filter(|g| *g > 0.1 && *g < 10.0).unwrap_or(1.0) as f32;
+                if attempt > 0 {
+                    logs::general("INFO", &format!("encoding gamma {v:.2} read at the attempt {} (session.json was being replaced)", attempt + 1));
+                }
+                LAST_GOOD.store(v.to_bits(), Ordering::Relaxed);
+                return v;
+            }
+            Err(e) => last_err = e,
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let last = f32::from_bits(LAST_GOOD.load(Ordering::Relaxed));
+    let v = if last > 0.0 { last } else { 1.0 };
+    logs::general("WARN", &format!("encoding gamma: session.json could not be read ({last_err}); using {v:.2} ({})", if last > 0.0 { "the last value read" } else { "ALVR's default" }));
+    v
 }
 
 fn parse_on_off(flag: &str, v: &str) -> Result<bool, String> {
@@ -530,7 +552,7 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     if a.fg_cap_fps.is_none() {
         a.fg_cap_fps = st.frame_gen_cap_fps.map(|v| v.clamp(0.0, 240.0));
     }
-    if let (Some(true), Some(o), Some(i), Some(u), Some(l), false) = (st.fov_override, st.fov_outer, st.fov_inner, st.fov_upper, st.fov_lower, a.fov_scale_explicit) {
+    if let (Some(true), Some(o), Some(i), Some(u), Some(l)) = (st.fov_override, st.fov_outer, st.fov_inner, st.fov_upper, st.fov_lower) {
         a.fov_override = Some([o as f32, i as f32, u as f32, l as f32]);
     }
     if !a.fov_quality_explicit {
@@ -539,12 +561,10 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
             a.fov_quality = vision::render_quality(q);
         }
     }
-    a.stream_fit_window = st.stream_fit_window.unwrap_or(false);
     if a.client_box.is_none() {
         a.client_box = st.client_box;   // the lab flag --client-box wins
     }
     a.client_sharpen = st.client_sharpen.unwrap_or(true);
-    a.stream_reference_eye = st.stream_reference_eye.map(|r| (r[0] as i32, r[1] as i32)).filter(|r| r.0 > 0 && r.1 > 0);
     if let Some(v) = st.frame_gen_synthesis.as_deref().and_then(|v| parse_fg_synth(v).ok()) {
         a.fg_synth = v;
     }
@@ -556,6 +576,12 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
     }
     if a.qp_map.is_none() {
         a.qp_map = st.qp_map;
+    }
+    if !a.encode_mask_explicit {
+        a.encode_mask = st.encode_mask.clone();
+    }
+    if a.mask_fill.is_none() {
+        a.mask_fill = st.mask_fill;
     }
     if !a.split_explicit {
         if let Some(m) = st.split_encode.as_deref().and_then(|m| parse_split(m).ok()) {
@@ -597,6 +623,10 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
         if !a.split_explicit {
             a.split_encode = 3;
         }
+        // no foveation means no mask either (the owner's two choices: foveated from the mask, or none); the lab flag still wins
+        if !a.encode_mask_explicit {
+            a.encode_mask = None;
+        }
     }
 }
 
@@ -624,6 +654,15 @@ fn describe_encoder(origin: Instant, enc: *mut std::ffi::c_void, dump: &Option<P
         v = serde_json::from_str(&s).unwrap_or_else(|e| json!({ "raw": s, "parse_error": e.to_string() }));
     }
     event(origin, "nvenc_config", v.clone());
+    let (mut hidden, mut blocks, mut rects) = (0i32, 0i32, 0i32);
+    if unsafe { nvh::nvh_mask_stats(&mut hidden, &mut blocks, &mut rects) } == 1 {
+        let share = if blocks > 0 { hidden as f64 / blocks as f64 } else { 0.0 };
+        let (mut top, mut band) = (hidden, 0.0f64);
+        unsafe { nvh::nvh_mask_band_stats(&mut top, &mut band) };
+        event(origin, "encode_mask", json!({ "hidden_blocks": hidden, "blocks": blocks, "fill_rects": rects, "hidden_share": share, "band": band, "top_blocks": top }));
+        logs::general("INFO", &format!("encode mask: {hidden} of {blocks} blocks of 32 x 32 hidden ({:.1} %), {rects} fill rectangles; the QP climbs to the highest across a band of {:.0} % of the eye past the outline: {top} hidden blocks beyond it at the highest",
+            100.0 * share, 100.0 * band));
+    }
     if let Some(p) = dump {
         if let Ok(c) = std::ffi::CString::new(p.to_string_lossy().as_bytes()) {
             let ok = unsafe { nvh::nvh_qpmap_dump(c.as_ptr()) };
@@ -669,6 +708,13 @@ static ENC_WINDOWS: std::sync::Mutex<Vec<serde_json::Value>> = std::sync::Mutex:
 /// the client's tracking cadence was judged not to be a display rate (logged once per connection)
 static RATE_IGNORED: AtomicBool = AtomicBool::new(false);
 static TRACKING_GAP_LAST: Mutex<(f64, f64, u64, u64)> = Mutex::new((0.0, 0.0, 0, 0));
+/// the rate fill loop's factor x1000 (0 = off) and the setting it fills (kbps), for encoder_stats and the run log's encoder line
+static RATE_FILL_K_MILLI: AtomicU32 = AtomicU32::new(0);
+static RATE_FILL_SETTING_KBPS: AtomicU32 = AtomicU32::new(0);
+/// the loop's changes since the last encoder_stats window: (unix seconds, k before, k after, fill measured), for the lab's timing of NVENC's response
+static RATE_FILL_CHANGES: Mutex<Vec<(f64, f64, f64, f64)>> = Mutex::new(Vec::new());
+/// when the run log's encoder line was last written (ms since the host started; one line per 10 s at most)
+static ENC_RUN_LINE_MS: AtomicU64 = AtomicU64::new(0);
 static LAST_TRACKING_NS: AtomicU64 = AtomicU64::new(0);
 
 fn push_bounded(m: &std::sync::Mutex<Vec<f64>>, v: f64) {
@@ -774,6 +820,24 @@ impl StatsWindow {
         }
         if let Some(x) = extra {
             e["pipeline"] = x;
+        }
+        let fill_k = RATE_FILL_K_MILLI.load(Ordering::Relaxed);
+        let setting_mbps = RATE_FILL_SETTING_KBPS.load(Ordering::Relaxed) as f64 / 1000.0;
+        if fill_k > 0 {
+            e["rate_fill"] = json!({ "k": fill_k as f64 / 1000.0, "setting_mbps": setting_mbps });
+            let mut g = RATE_FILL_CHANGES.lock();
+            if !g.is_empty() {
+                e["rate_fill"]["changes"] = json!(g.drain(..).map(|(t, a, b, f)| json!([t, a, b, f])).collect::<Vec<_>>());
+            }
+        }
+        let now_ms = origin.elapsed().as_millis() as u64;
+        if !w.is_empty() && now_ms >= ENC_RUN_LINE_MS.load(Ordering::Relaxed) + 10_000 {
+            // the run log (release sessions too): what the encoder produced against the setting, so a field log shows the fill
+            ENC_RUN_LINE_MS.store(now_ms, Ordering::Relaxed);
+            let mbps = e["mbps"].as_f64().unwrap_or(0.0);
+            let fill = if fill_k > 0 { format!(" for the {setting_mbps:.0} Mbps setting (rate fill x{:.2})", fill_k as f64 / 1000.0) } else { String::new() };
+            logs::run_line(logs::Level::Info, "perf", format!("encoder: {mbps:.0} Mbps over {secs:.1} s{fill}, {:.1} fps, encode p50 {:.2} ms p95 {:.2} ms, {slices_per_packet:.1} slices per frame",
+                w.len() as f64 / secs, q(0.5), q(0.95)));
         }
         if !w.is_empty() {
             if let Ok(mut g) = ENC_WINDOWS.lock() {
@@ -958,10 +1022,13 @@ mod nvh {
         pub fn nvh_encoder_engines(h: *mut c_void) -> i32;
         pub fn nvh_describe(h: *mut c_void, buf: *mut std::ffi::c_char, len: i32) -> i32;
         pub fn nvh_qpmap_dump(path: *const std::ffi::c_char) -> i32;
+        pub fn nvh_set_mask(eye: i32, uv: *const f32, n: i32) -> i32;
+        pub fn nvh_mask_stats(hidden: *mut i32, blocks: *mut i32, rects: *mut i32) -> i32;
+        pub fn nvh_mask_band_stats(top: *mut i32, band: *mut f64) -> i32;
         pub fn nvh_ipc_last_compose_ms(ipc: *mut c_void) -> f32;
         pub fn nvh_last_ffr_gpu_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_open() -> *mut c_void;
-        pub fn nvh_ipc_config(ipc: *mut c_void, nvh: *mut c_void, rate_hz: f64, eye_w: i32, eye_h: i32, fov8: *const f32, off6: *const f32, bits: i32, encoding_gamma: f32, fov_scale4: *const f32, render_quality: f32, ceil_w: i32, ceil_h: i32);
+        pub fn nvh_ipc_config(ipc: *mut c_void, nvh: *mut c_void, rate_hz: f64, eye_w: i32, eye_h: i32, fov8: *const f32, off6: *const f32, bits: i32, encoding_gamma: f32, fov_scale4: *const f32, render_quality: f32);
         pub fn nvh_ipc_shim_recommended(ipc: *mut c_void, w: *mut i32, h: *mut i32);
         pub fn nvh_last_ffr_wait_ms(h: *mut c_void) -> f32;
         pub fn nvh_ipc_set_connected(ipc: *mut c_void, connected: i32);
@@ -972,7 +1039,7 @@ mod nvh {
         pub fn nvh_ipc_poll_haptic(ipc: *mut c_void, side: i32, seq: *mut u32, freq: *mut f32, amp: *mut f32);
         pub fn nvh_ipc_wait_frame(ipc: *mut c_void, timeout_ms: i32, counter: *mut u64, slot: *mut u32, ts: *mut u64, submit_time_s: *mut f64, render_q8: *mut f32, has_projection: *mut i32, display_s: *mut f64, release_s: *mut f64) -> i32;
         pub fn nvh_fg_enable(nvh: *mut c_void, on: i32, flow_scale: f64, perf_level: i32, grid: i32, synth: i32, err: *mut c_char, errlen: i32) -> i32;
-        pub fn nvh_fg_ingest(nvh: *mut c_void, ipc: *mut c_void, slot: u32, q_render8: *const f32, err: *mut c_char, errlen: i32) -> i32;
+        pub fn nvh_fg_ingest(nvh: *mut c_void, ipc: *mut c_void, slot: u32, q_render8: *const f32, frame_s: f64, err: *mut c_char, errlen: i32) -> i32;
         pub fn nvh_fg_reset(nvh: *mut c_void);
         pub fn nvh_fg_encode(nvh: *mut c_void, ipc: *mut c_void, mode: i32, t: f64, age: i32, q_out4: *const f32, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_fg_stats(nvh: *mut c_void, buf: *mut c_char, len: i32) -> i32;
@@ -1068,6 +1135,10 @@ pub(crate) struct LiveCtx {
     cb_ns: u128,     // time spent inside on_packet (server_core hand-off)
     params_ns: u128, // time spent inside on_params
     bitrate_override: u64, // network benchmark: this bitrate instead of server_core's (0 = server_core decides)
+    /// the rate fill loop (constant bitrate only; None = server_core's bitrate as is: adaptive bitrate, off by env)
+    fill: Option<RateFill>,
+    base_bps: u64,  // server_core's last bitrate (the user's setting with a constant bitrate)
+    base_fps: f32,  // and its frame rate (the per-frame budget is base_bps / base_fps)
     bytes_total: u64,
     bitrate_sent: u64,
     fps: f32,
@@ -1102,6 +1173,9 @@ extern "C" fn on_packet(user: *mut std::ffi::c_void, data: *const u8, len: i32, 
         live.slice_samples += 1;
     }
     live.packet_bytes += frame.len();
+    if let Some(f) = live.fill.as_mut() {
+        f.frame(buf.len(), is_idr != 0);
+    }
     live.bytes_total += buf.len() as u64;
     live.packet_idr |= is_idr != 0;
     live.packets += 1;
@@ -1123,15 +1197,111 @@ extern "C" fn on_params(user: *mut std::ffi::c_void, bitrate: *mut u64, fps: *mu
         return 1;
     }
     let r = live.ctx.get_dynamic_encoder_params();
-    live.params_ns += t0.elapsed().as_nanos();
-    match r {
-        Some(p) => unsafe {
-            *bitrate = p.bitrate_bps as u64;
-            *fps = p.framerate;
-            1
-        },
-        None => 0,
+    let mut changed = false;
+    if let Some(p) = r {
+        if live.fill.is_some() && live.base_bps != p.bitrate_bps as u64 {
+            logs::general("INFO", &format!("rate fill on: NVENC's target follows the bits produced, x1.00 to x{:.2} of the {:.0} Mbps setting, once a second (AIRFRAMEXR_RATE_FILL=1 turns it off)",
+                live.fill.as_ref().map_or(1.0, |f| f.max), p.bitrate_bps as f64 / 1e6));
+        }
+        live.base_bps = p.bitrate_bps as u64;
+        live.base_fps = p.framerate;
+        changed = true;
     }
+    let k = match live.fill.as_mut() {
+        Some(f) if live.base_bps > 0 => {
+            if f.update(live.base_bps, live.base_fps, Instant::now()) {
+                changed = true;
+            }
+            RATE_FILL_K_MILLI.store((f.k * 1000.0).round() as u32, Ordering::Relaxed);
+            RATE_FILL_SETTING_KBPS.store((live.base_bps / 1000) as u32, Ordering::Relaxed);
+            f.k
+        }
+        _ => 1.0,
+    };
+    live.params_ns += t0.elapsed().as_nanos();
+    if !changed {
+        return 0;
+    }
+    unsafe {
+        *bitrate = (live.base_bps as f64 * k) as u64;
+        *fps = live.base_fps;
+    }
+    1
+}
+
+/// The rate fill loop (owner 2026-11-21, "the encoder fills the setting"; nvidia_profile::RATE_FILL). NVENC's low-latency CBR with ALVR's VBV of 1.1
+/// frames produces less than its target on most game content (medians 0.76-0.78 at 275 Mbps / 100 Hz in three games) and about all of it on harder
+/// content (the bench scene: 0.96-1.00): once a second the average non-IDR frame of the window is compared with the setting's per-frame budget and
+/// NVENC's target factor k moves halfway (in log) towards setting / produced, within [1, max], until produced is within 2 % of the setting. NVENC is
+/// reconfigured without an IDR, as ALVR's adaptive bitrate does every second.
+pub(crate) struct RateFill {
+    pub max: f64,
+    pub k: f64,
+    fixed: bool,     // lab (AIRFRAMEXR_RATE_FILL_FIXED): k is sent once and never adapted
+    bits: u64,
+    frames: u32,     // non-IDR frames of the window (their bits are measured)
+    all_frames: u32, // every frame of the window (its frame rate)
+    since: Option<Instant>,
+}
+
+impl RateFill {
+    pub fn new(max: f64) -> Self {
+        Self { max: max.max(1.0), k: 1.0, fixed: false, bits: 0, frames: 0, all_frames: 0, since: None }
+    }
+    pub fn fixed(k: f64) -> Self {
+        Self { max: k.max(1.0), k: k.max(1.0), fixed: true, bits: 0, frames: 0, all_frames: 0, since: None }
+    }
+    /// One encoded frame (bytes as sent). IDR frames are left out: they are the rate control's exception, not its average.
+    pub fn frame(&mut self, bytes: usize, idr: bool) {
+        self.all_frames += 1;
+        if !idr {
+            self.bits += bytes as u64 * 8;
+            self.frames += 1;
+        }
+    }
+    /// Once a second (at least 30 frames): true when k changed enough to reconfigure NVENC.
+    pub fn update(&mut self, base_bps: u64, fps: f32, now: Instant) -> bool {
+        let since = *self.since.get_or_insert(now);
+        let secs = now.duration_since(since).as_secs_f64();
+        if self.fixed || secs < 1.0 || self.frames < 30 || base_bps == 0 || !(fps > 0.0) {
+            return false;
+        }
+        // the per-frame budget at the nominal rate, or at the stream's own rate when it runs faster (the Vision Pro's 90 -> 100 Hz request: ALVR's
+        // nominal 90, frames at 100; lab 2026-11-21: sized at /90 the loop overshot 250 Mbps by 10 %). A slower stream (a game without generation)
+        // keeps the per-frame budget: its frames are not pushed to make up the missing ones.
+        let budget = base_bps as f64 / (fps as f64).max(self.all_frames as f64 / secs);
+        let fill = (self.bits as f64 / self.frames as f64 / budget).max(0.25);   // produced / setting
+        self.bits = 0;
+        self.frames = 0;
+        self.all_frames = 0;
+        self.since = Some(now);
+        if (fill - 1.0).abs() < 0.02 {
+            return false;   // within 2 % of the setting
+        }
+        let k = (self.k * fill.powf(-0.5)).clamp(1.0, self.max);
+        if (k - self.k).abs() < 1e-4 {
+            return false;   // held at 1 or at the cap
+        }
+        {
+            let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            let mut g = RATE_FILL_CHANGES.lock();
+            if g.len() < 256 { g.push((unix, self.k, k, fill)); }
+        }
+        self.k = k;
+        true
+    }
+}
+
+/// The rate fill loop for this session's bitrate: with a constant bitrate and nvidia_profile::rate_fill() above 1; none with ALVR's adaptive one
+/// (its own loop sizes the bitrate from the link).
+fn session_rate_fill(session: &std::path::Path) -> Option<RateFill> {
+    let s: serde_json::Value = fs::read_to_string(session).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let max = nvidia_profile::rate_fill();
+    let constant = s["session_settings"]["video"]["bitrate"]["mode"]["variant"].as_str() == Some("ConstantMbps");
+    if let Some(k) = std::env::var("AIRFRAMEXR_RATE_FILL_FIXED").ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 1.0) {
+        return constant.then(|| RateFill::fixed(k.min(2.0)));   // lab A/B: the factor without the loop
+    }
+    (constant && max > 1.0).then(|| RateFill::new(max))
 }
 
 /// One foveation geometry value from the session: `openvr_config[k]`, else the session's foveation settings `[sk]` (ALVR writes zeros to openvr_config
@@ -1148,15 +1318,24 @@ fn fov_geometry(c: &serde_json::Value, fset: &serde_json::Value, k: &str, sk: &s
 
 /// Pushes the encoder configuration to the NVENC code: the encoder parameters are the hardcoded NVIDIA profile, the stream
 /// parameters (refresh rate, eye resolution, foveation) come from the session's `openvr_config` as before.
-fn configure_encoder(session_path: &std::path::Path, split_mode: i64, qp_map: bool, host_keys: &[(&std::ffi::CStr, i64)]) -> (i32, i32, f64) {
+fn configure_encoder(session_path: &std::path::Path, split_mode: i64, qp_map: bool, mask: Option<&vision::EncodeMask>, mask_fill: bool, host_keys: &[(&std::ffi::CStr, i64)]) -> (i32, i32, f64) {
     let s: serde_json::Value = serde_json::from_str(&fs::read_to_string(session_path).expect("read session")).expect("parse session");
     let c = &s["openvr_config"];
+    // the mask's QP (climbing to +51 across the band past the outline) travels in the QP map: with a mask the map is on, its foveal ramp at 0 when the
+    // user turned the map off
+    let ramp = qp_map || mask.is_none();
     unsafe {
         nvh::nvh_set(c"nvenc_split_encode_mode".as_ptr(), split_mode);
-        nvh::nvh_set(c"nvenc_qp_map".as_ptr(), qp_map as i64);
-        nvh::nvh_set(c"qp_map_center_delta".as_ptr(), nvidia_profile::QP_MAP_CENTER_DELTA);
-        nvh::nvh_set(c"qp_map_edge_delta".as_ptr(), nvidia_profile::QP_MAP_EDGE_DELTA);
+        nvh::nvh_set(c"nvenc_qp_map".as_ptr(), (qp_map || mask.is_some()) as i64);
+        nvh::nvh_set(c"qp_map_center_delta".as_ptr(), if ramp { nvidia_profile::QP_MAP_CENTER_DELTA } else { 0 });
+        nvh::nvh_set(c"qp_map_edge_delta".as_ptr(), if ramp { nvidia_profile::QP_MAP_EDGE_DELTA } else { 0 });
         nvh::nvh_set_f(c"qp_map_transition".as_ptr(), nvidia_profile::QP_MAP_TRANSITION);
+        nvh::nvh_set_f(c"mask_band".as_ptr(), nvidia_profile::mask_band());
+        nvh::nvh_set(c"mask_fill".as_ptr(), (mask_fill && mask.is_some()) as i64);
+        for (eye, pts) in [(0, mask.map(|m| &m.left)), (1, mask.map(|m| &m.right))] {
+            let flat: Vec<f32> = pts.map(|p| p.iter().flat_map(|q| [q[0], q[1]]).collect()).unwrap_or_default();
+            nvh::nvh_set_mask(eye, if flat.is_empty() { std::ptr::null() } else { flat.as_ptr() }, (flat.len() / 2) as i32);
+        }
         for (k, v) in host_keys {
             nvh::nvh_set(k.as_ptr(), *v);
         }
@@ -1236,7 +1415,7 @@ fn run_fg_judge(origin: Instant, args: &Args, _layout: &alvr_filesystem::Layout,
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .map(|d| if d.file_name().map(|n| n.eq_ignore_ascii_case("bin")).unwrap_or(false) { d.parent().map(|p| p.to_path_buf()).unwrap_or(d) } else { d });
     let scene = args.bench_scene.clone().unwrap_or_else(|| install.map(|i| i.dir.clone()).or(exe_dir).unwrap_or_default().join("bench").join("littlest_tokyo.vab"));
-    let opt = fg_judge::Options { eye: args.fgj_eye, starts: args.fgj_starts, gaps_ms: args.fgj_gaps.clone(), speeds: args.fgj_speeds.clone(), out };
+    let opt = fg_judge::Options { eye: args.fgj_eye, starts: args.fgj_starts, gaps_ms: args.fgj_gaps.clone(), speeds: args.fgj_speeds.clone(), pans: args.fgj_pans.clone(), pan_warm: args.fgj_pan_warm, out };
     fg_judge::run(origin, &scene, fov, ipd, &opt, &|o, n, d| event(o, n, d))
 }
 
@@ -1246,7 +1425,7 @@ fn run_quality_bench(origin: Instant, args: &Args, layout: &alvr_filesystem::Lay
     let session = layout.session();
     let host_keys = [(c"idle_rgb", 0x00FF00i64), (c"gpu_thread_priority", 0)];
     let qp_on = args.qp_map.unwrap_or(nvidia_profile::QP_MAP_ENABLED);
-    configure_encoder(&session, args.split_encode, qp_on, &host_keys);
+    configure_encoder(&session, args.split_encode, qp_on, args.encode_mask.as_ref(), args.mask_fill.unwrap_or(false), &host_keys);
     let s: serde_json::Value = fs::read_to_string(&session).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
     let c = &s["openvr_config"];
     let fset = &s["session_settings"]["video"]["foveated_encoding"];
@@ -1523,31 +1702,18 @@ fn apply_fg_pacing(ipc: *mut std::ffi::c_void, p: Option<&pipeline::Pipeline>, a
 }
 
 /// The field of view the game is told (percent of the headset's, per edge), logged at the start and whenever it changes.
-/// The per-edge fractions the game's field of view is scaled by: the streamer's override (tangents, converted against the headset's views), else the lab percent flag, else 1.
+/// The per-edge fractions the game's field of view is scaled by: the restriction (tangents, converted against the headset's views), else 1.
 fn effective_fov_scale(a: &Args, fov8: &[f32; 8]) -> [f32; 4] {
     match &a.fov_override {
         Some(t) => vision::fov_scale_from(t, fov8),
-        None => a.fov_scale,
+        None => [1.0; 4],
     }
 }
 
-fn log_fov_restriction(origin: Instant, s: &[f32; 4], quality: f32, ceiling: (i32, i32), why: &str) {
+fn log_fov_restriction(origin: Instant, s: &[f32; 4], quality: f32, why: &str) {
     let p = s.map(|v| (v * 100.0).round());
-    let c = if ceiling.0 > 0 { format!(", render ceiling {} x {}", ceiling.0, ceiling.1) } else { String::new() };
-    logs::general("INFO", &format!("field of view the game is told ({why}): outer {} %, inner {} %, upper {} %, lower {} % of the headset's, render quality {:.2}{c}; a game takes it when it starts", p[0], p[1], p[2], p[3], quality));
-    event(origin, "fov_restrict", json!({ "why": why, "outer": s[0], "inner": s[1], "upper": s[2], "lower": s[3], "render_quality": quality, "ceiling": [ceiling.0, ceiling.1] }));
-}
-
-/// The render quality slider's ceiling per eye (ipc renderCeiling): the lab flag, else the user's reference size when the stream is fitted to the headset's window
-/// and the reference is above the stream's eye size; (0, 0) = the stream's eye size, the way it was.
-fn render_ceiling(a: &Args, eye: (i32, i32)) -> (i32, i32) {
-    if let Some(c) = a.fov_ceiling {
-        return if c.0 > 0 && c.1 > 0 { c } else { (0, 0) };
-    }
-    match (a.stream_fit_window, a.stream_reference_eye) {
-        (true, Some(r)) if r.0 > eye.0 || r.1 > eye.1 => r,
-        _ => (0, 0),
-    }
+    logs::general("INFO", &format!("field of view the game is told ({why}): outer {} %, inner {} %, upper {} %, lower {} % of the headset's, render quality {:.2}; a game takes it when it starts", p[0], p[1], p[2], p[3], quality));
+    event(origin, "fov_restrict", json!({ "why": why, "outer": s[0], "inner": s[1], "upper": s[2], "lower": s[3], "render_quality": quality }));
 }
 
 /// The GPU facts the launcher's pipeline model needs before a run (config/airframexr_gpu.json): name, driver, NVENC engines, the split conditions.
@@ -1563,7 +1729,6 @@ fn pipeline_facts(views: Option<&([f32; 8], [f32; 6])>, args: &Args, ipc: *mut s
                   fg_stats: Option<String>, nvenc_cfg: &serde_json::Value, enc_windows: &[serde_json::Value], compose_ms: &[f64]) -> serde_json::Value {
     let fov8 = views.map(|v| v.0).unwrap_or([0.0; 8]);
     let scale = views.map(|v| effective_fov_scale(args, &v.0)).unwrap_or([1.0; 4]);
-    let ceiling = render_ceiling(args, eye);
     let (mut rw, mut rh) = (0i32, 0i32);
     if !ipc.is_null() {
         unsafe { nvh::nvh_ipc_shim_recommended(ipc, &mut rw, &mut rh) };
@@ -1583,7 +1748,7 @@ fn pipeline_facts(views: Option<&([f32; 8], [f32; 6])>, args: &Args, ipc: *mut s
     let preset = nvidia_profile::NVH_KEYS.iter().find(|(k, _)| *k == "nvenc_quality_preset").map(|(_, v)| *v).unwrap_or(3);
     let round2 = |x: f64| (x * 100.0).round() / 100.0;
     json!({
-        "declared_fov": fov8, "fov_scale": scale, "render_quality": args.fov_quality, "ceiling": [ceiling.0, ceiling.1],
+        "declared_fov": fov8, "fov_scale": scale, "render_quality": args.fov_quality,
         "game_render": [rw, rh], "stream_eye": [eye.0, eye.1], "encoded": [enc.0, enc.1], "foveated": cfg.foveated,
         "foveation": { "center_size": [cfg.geom[0], cfg.geom[1]], "center_shift": [cfg.geom[2], cfg.geom[3]], "edge_ratio": [cfg.geom[4], cfg.geom[5]] },
         "frame_gen": { "on": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "flow_size": gen["flow_size"], "flow_ms": gen["flow_ms_avg"], "synth_ms": gen["synth_ms_avg"] },
@@ -1772,6 +1937,10 @@ fn main() {
         }
         vision::COLOR_PENDING.store(true, Ordering::SeqCst);
         apply_settings(&mut args, &st);
+    } else if let Some(p) = args.settings_file.clone() {
+        // lab (1.4-foundation E4): a settings file read as an installed host reads its own, the command line still wins
+        let st = vision::load_settings(&p);
+        apply_settings(&mut args, &st);
     } else {
         apply_settings(&mut args, &vision::Settings::default());
     }
@@ -1862,10 +2031,28 @@ fn main() {
         // benchmarks try profiles without changing the user's session (they set the encoder's foveation directly)
         let profile_to_session = if args.bench.is_some() || args.bench_network.is_some() { nvidia_profile::EncodeProfile::Session } else { args.encode_profile };
         match nvidia_profile::apply_encode_profile(&args.config_dir.join("session.json"), profile_to_session) {
-            Ok(changed) => event(origin, "encode_profile", json!({
-                "profile": format!("{:?}", args.encode_profile), "session_changes": changed,
-                "qp_map": args.qp_map, "split_encode_mode": args.split_encode,
-            })),
+            Ok(changed) => {
+                // F5 (docs/PLAN_1_4_FOUNDATION.md): the effective foveation and where it came from, once per start; a session that disagreed with the
+                // encode profile used to be overruled without a word (field 2026-10-12, 2026-10-17)
+                let session_on = fs::read_to_string(args.config_dir.join("session.json")).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(t.trim_start_matches('\u{feff}')).ok())
+                    .and_then(|v| v["session_settings"]["video"]["foveated_encoding"]["enabled"].as_bool());
+                let source = match profile_to_session {
+                    nvidia_profile::EncodeProfile::Session => "the session".to_string(),
+                    p => format!("the encode profile {}", if p == nvidia_profile::EncodeProfile::Foveated { "foveated" } else { "full-split" }),
+                };
+                let mask = match (&args.encode_mask, session_on) {
+                    (Some(m), Some(true)) => format!(", from the mask of the profile '{}'", m.profile),
+                    _ => String::new(),
+                };
+                logs::general("INFO", &format!("foveation {} ({source}{mask})", match session_on { Some(true) => "on", Some(false) => "off (full frame)", None => "unknown" }));
+                if !changed.is_empty() {
+                    logs::general("WARN", &format!("the session disagreed with {source}, which wins: {}", changed.join("; ")));
+                }
+                event(origin, "encode_profile", json!({
+                    "profile": format!("{:?}", args.encode_profile), "session_changes": changed,
+                    "qp_map": args.qp_map, "split_encode_mode": args.split_encode, "foveated": session_on, "mask": args.encode_mask.as_ref().map(|m| m.profile.clone()),
+                }))
+            }
             Err(e) => {
                 eprintln!("cannot apply the encode profile to session.json: {e}");
                 exit_now(3);
@@ -1932,10 +2119,14 @@ fn main() {
     // The default output, the virtual cable and its volume are set up by the streamer (tools/gui/AudioRoute.cs); the capture below is ALVR's.
     let mut reconfigs = 0usize;
     if args.live {
-        let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, &host_keys);
+        let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, args.encode_mask.as_ref(), args.mask_fill.unwrap_or(false), &host_keys);
         eye_size = (w / 2, h);
         if !args.fps_explicit {
             args.fps = session_fps; // the session's refresh rate (what the client is asked for), not a hard-coded 90
+        }
+        if let Some(m) = &args.encode_mask {
+            logs::general("INFO", &format!("encode mask from the profile '{}' ({} / {} outline points, left / right): outside it the QP climbs to the highest across {:.0} % of the eye{}",
+                m.profile, m.left.len(), m.right.len(), 100.0 * nvidia_profile::mask_band(), if args.mask_fill.unwrap_or(false) { ", the blocks at the highest are cleared to black (mask fill on)" } else { "" }));
         }
         let benchmarking = args.bench.is_some() || args.bench_network.is_some();
         if benchmarking && args.encode_profile != nvidia_profile::EncodeProfile::Session {
@@ -1951,7 +2142,7 @@ fn main() {
             (args.width.unwrap_or(w), args.height.unwrap_or(h))
         };
         enc_size = (w, h);
-        let mut l = Box::new(LiveCtx { ctx: Arc::clone(&ctx), shared: Arc::clone(&shared), packet_bytes: 0, packet_idr: false, packets: 0, slices: 0, slice_samples: 0, report_in_callback: !args.shim, cb_ns: 0, params_ns: 0, bitrate_override: 0, bytes_total: 0, bitrate_sent: 0, fps: args.fps as f32, hold_now: false, pending: vec![] });
+        let mut l = Box::new(LiveCtx { ctx: Arc::clone(&ctx), shared: Arc::clone(&shared), packet_bytes: 0, packet_idr: false, packets: 0, slices: 0, slice_samples: 0, report_in_callback: !args.shim, cb_ns: 0, params_ns: 0, bitrate_override: 0, fill: session_rate_fill(&layout.session()), base_bps: 0, base_fps: 0.0, bytes_total: 0, bitrate_sent: 0, fps: args.fps as f32, hold_now: false, pending: vec![] });
         let mut err = [0 as std::ffi::c_char; 256];
         enc_handle = unsafe {
             nvh::nvh_create(w, h, args.noise, on_packet, on_params, &mut *l as *mut LiveCtx as *mut _, err.as_mut_ptr(), 256)
@@ -2337,7 +2528,8 @@ fn main() {
                         let off6 = [a[0], a[1], a[2], b[0], b[1], b[2]];
                         // the main loop applies it: it may have to rebuild the encoder for the negotiated stream parameters first
                         *shared.pending_views.lock() = Some((fov8, off6));
-                        event(origin, "views_config", json!({ "fov_tan": fov8, "eye_offsets": off6 }));
+                        // the app's stand-in (both eyes at one point) has its own event: the lab's analysis reads views_config as the headset's real views
+                        event(origin, if vision::is_placeholder_views(&off6) { "views_placeholder" } else { "views_config" }, json!({ "fov_tan": fov8, "eye_offsets": off6 }));
                     }
                     ServerCoreEvent::ViewsConfig(cfg) => event(origin, "views_config", json!({
                         "ipd_m": cfg.local_view_transforms[1].position.x - cfg.local_view_transforms[0].position.x,
@@ -2470,7 +2662,9 @@ fn main() {
     let mut sent_ts: Vec<u64> = vec![];
     let views_path = args.config_dir.join("airframexr_views.json");
     let mut last_views = load_views(&views_path);
-    let mut logged_fov = ([1.0f32; 4], 0.0f32, (0i32, 0i32));   // the field-of-view restriction last logged (a change, or the first publish with one, is logged once)
+    let mut real_views_seen = false;   // this connection's real views arrived (not the app's stand-in)
+    let mut placeholders_ignored = 0usize;
+    let mut logged_fov = ([1.0f32; 4], 0.0f32);   // the field-of-view restriction last logged (a change, or the first publish with one, is logged once)
     let mut views_published = false;
     let mut deferred_reconfig = false;
     let (mut encode_errors, consecutive_errors) = (0usize, 0usize);
@@ -2746,6 +2940,17 @@ fn main() {
                         unsafe { std::ffi::CStr::from_ptr(gb.as_ptr()) }.to_string_lossy().to_string()
                     } else { String::new() };
                     let gen = p.fg_stats_json();
+                    // the camera turn (lab switch AIRFRAMEXR_FG_CAM_TURN): what the generator measured, so a field log shows whether it engaged
+                    if let Ok(g) = serde_json::from_str::<serde_json::Value>(&gen) {
+                        let ct = &g["cam_turn"];
+                        if ct["on"].as_i64() == Some(1) {
+                            logs::run_line(logs::Level::Info, "perf", format!("frame generation camera turn: last pair {:.2} deg (prediction {:.2}), {:.0} % of {} blocks agreed, {:.2} ms CPU; totals: {} measured, {} doubtful, {} not ready, {} late for the first output, {} corrected, {} waited (mean {:.2} ms, max {:.2})",
+                                ct["last_deg"].as_f64().unwrap_or(0.0), ct["pred_deg"].as_f64().unwrap_or(0.0), 100.0 * ct["agree"].as_f64().unwrap_or(0.0), ct["blocks"].as_i64().unwrap_or(0),
+                                ct["cpu_ms"].as_f64().unwrap_or(0.0), ct["measured"].as_u64().unwrap_or(0), ct["doubtful"].as_u64().unwrap_or(0), ct["not_ready"].as_u64().unwrap_or(0),
+                                ct["late"].as_u64().unwrap_or(0), ct["corrections"].as_u64().unwrap_or(0), ct["waits"].as_u64().unwrap_or(0),
+                                ct["wait_ms_avg"].as_f64().unwrap_or(0.0), ct["wait_ms_max"].as_f64().unwrap_or(0.0)));
+                        }
+                    }
                     // the shim's counters restart with every game: a smaller value is a new game's own count, not a negative delta (gears 2026-10-20: 1.8e19 "releases late")
                     let (d_rel, d_late) = if rel < perf_rel || late < perf_late { (rel, late) } else { (rel - perf_rel, late - perf_late) };
                     (perf_rel, perf_late) = (rel, late);
@@ -2783,6 +2988,7 @@ fn main() {
             let connect = shared.connect_pending.swap(false, Ordering::SeqCst);
             if connect {
                 views_published = false;
+                real_views_seen = false;
             }
             if connect || (deferred_reconfig && !app_alive()) {
                 // Rebuild the encoder if the negotiated stream (resolution, refresh rate, foveation) differs from what it was built
@@ -2800,7 +3006,7 @@ fn main() {
                 } else {
                     let mut g = pipeline.as_ref().expect("pipeline").enc.lock();
                     unsafe { nvh::nvh_destroy(g.handle) };
-                    let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, &host_keys);
+                    let (w, h, session_fps) = configure_encoder(&layout.session(), args.split_encode, qp_on, args.encode_mask.as_ref(), args.mask_fill.unwrap_or(false), &host_keys);
                     eye_size = (w / 2, h);
                     if !args.fps_explicit {
                         args.fps = session_fps;
@@ -2845,12 +3051,19 @@ fn main() {
                     shared.stream_ready.store(true, Ordering::SeqCst);
                 }
             }
-            if vision::FOV_PENDING.swap(false, Ordering::SeqCst) {
-                // the user touched the field of view override: publish it once; a game that starts later takes it (a running one keeps what it started with)
-                args.fov_override = if vision::FOV_ON.load(Ordering::SeqCst) { Some([0, 1, 2, 3].map(|k| f32::from_bits(vision::FOV_REQ[k].load(Ordering::SeqCst)))) } else { None };
-                args.fov_quality = f32::from_bits(vision::FOV_QUALITY_REQ.load(Ordering::SeqCst));
-                args.fov_scale_explicit = true;   // the streamer's choice wins over the settings file from now on
-                views_published = false;
+            if vision::FOV_OVERRIDE_IGNORED.swap(false, Ordering::SeqCst) {
+                // 1.4-foundation E4: the field of view is one contract per streamer start (the box, the stream size, the foveation and the mask are compiled then);
+                // a live change made the next game disagree with them
+                logs::general("INFO", "fov_override ignored: the field of view is set at the streamer start (restart the streamer to change it)");
+                event(origin, "command_ignored", json!({ "command": "fov_override", "why": "compiled per streamer start" }));
+            }
+            let mf = vision::MASK_FILL_REQ.swap(-1, Ordering::SeqCst);
+            if mf >= 0 {
+                args.mask_fill = Some(mf == 1);
+                let on = mf == 1 && args.encode_mask.is_some();
+                unsafe { nvh::nvh_set(c"mask_fill".as_ptr(), on as i64) };
+                logs::general("INFO", &format!("mask fill {}{}", if on { "on" } else { "off" }, if mf == 1 && !on { " (no mask in force)" } else { "" }));
+                event(origin, "mask_fill", json!({ "on": on }));
             }
             let cs = vision::CLIENT_SHARPEN_REQ.swap(-1, Ordering::SeqCst);
             if cs >= 0 && (cs == 1) != args.client_sharpen {
@@ -2859,23 +3072,40 @@ fn main() {
                 logs::general("INFO", &format!("headset sharpening {} (sent to the client)", if args.client_sharpen { "on" } else { "off" }));
             }
             if let Some(v) = shared.pending_views.lock().take() {
-                last_views = Some(v);
-                save_views(&views_path, &v);
-                views_published = false;
+                let stand_in = vision::is_placeholder_views(&v.1);
+                if stand_in && (args.client_box.is_some() || last_views.is_some_and(|k| !vision::is_placeholder_views(&k.1))) {
+                    // the app's stand-in views (Apple's raw frustum, both eyes at one point) never replace the box sent to the app or the headset's last
+                    // real views: a game starting now would keep their render size and no stereo for its whole run (field 2026-11-20, SWGR)
+                    if placeholders_ignored == 0 {
+                        logs::general("INFO", "the headset app's stand-in views are not used (they come before its real ones): a game that starts now gets the box sent to the app, or the headset's last real views");
+                    }
+                    placeholders_ignored += 1;
+                } else {
+                    real_views_seen |= !stand_in;
+                    last_views = Some(v);
+                    if !stand_in {
+                        save_views(&views_path, &v);   // only real views are kept for the next start
+                    }
+                    views_published = false;
+                }
             }
             if !views_published && shared.stream_ready.load(Ordering::SeqCst) {
                 // the shim presents the device to an OpenXR app only once it has the FoV: this connection's views, or the ones
-                // the same headset sent last time (they arrive again right after the first decoded frame)
-                if let Some((fov8, off6)) = last_views {
+                // the same headset sent last time (they arrive again right after the first decoded frame). 1.4: with a box sent to
+                // the headset app, that box until the app's real views arrive (a 1.4 app declares exactly the box)
+                let views = match (args.client_box, real_views_seen) {
+                    (Some(b), false) => Some(vision::box_views(b, last_views.as_ref())),
+                    _ => last_views,
+                };
+                if let Some((fov8, off6)) = views {
                     let fov_scale = effective_fov_scale(&args, &fov8);
-                    let ceiling = render_ceiling(&args, eye_size);
-                    let fov_quality = if fov_scale.iter().any(|v| *v < 1.0) || ceiling.0 > 0 { args.fov_quality } else { 0.0 };   // nothing to choose without a restriction or a ceiling
-                    if (fov_scale, fov_quality, ceiling) != logged_fov {
-                        log_fov_restriction(origin, &fov_scale, fov_quality, ceiling, if args.fov_override.is_some() { "override" } else { "none" });
-                        logged_fov = (fov_scale, fov_quality, ceiling);
+                    let fov_quality = if fov_scale.iter().any(|v| *v < 1.0) { args.fov_quality } else { 0.0 };   // nothing to choose without a restriction
+                    if (fov_scale, fov_quality) != logged_fov {
+                        log_fov_restriction(origin, &fov_scale, fov_quality, if args.fov_override.is_some() { "override" } else { "none" });
+                        logged_fov = (fov_scale, fov_quality);
                     }
                     unsafe {
-                        nvh::nvh_ipc_config(ipc, pipeline.as_ref().map(|p| p.enc.lock().handle).unwrap_or(enc_handle), args.fps, eye_size.0, eye_size.1, fov8.as_ptr(), off6.as_ptr(), 10, read_encoding_gamma(&layout.session()), fov_scale.as_ptr(), fov_quality, ceiling.0, ceiling.1);
+                        nvh::nvh_ipc_config(ipc, pipeline.as_ref().map(|p| p.enc.lock().handle).unwrap_or(enc_handle), args.fps, eye_size.0, eye_size.1, fov8.as_ptr(), off6.as_ptr(), 10, read_encoding_gamma(&layout.session()), fov_scale.as_ptr(), fov_quality);
                         nvh::nvh_ipc_set_connected(ipc, 1); // after the config: the shim waits for this flag
                     }
                     views_published = true;
@@ -3210,6 +3440,89 @@ fn main() {
     logs::general("INFO", &format!("host stop ({} frames streamed{})", frames, if encode_errors > 0 { format!(", {encode_errors} encode errors") } else { String::new() }));
     logs::flush();   // the writer thread owns the files: wait until the last lines are on disk
     exit_now(if !connected { 2 } else if pass { 0 } else { 1 });
+}
+
+#[cfg(test)]
+mod rate_fill_tests {
+    use super::*;
+
+    /// NVENC as a fixed fill: produced bits per frame = fill x k x (target / NVENC's nominal rate); returns k after `secs` windows of `per_s` frames
+    fn run_at(fill: f64, max: f64, secs: u32, nominal: f32, per_s: u32) -> (f64, u32) {
+        let base = 275_000_000u64;
+        let mut f = RateFill::new(max);
+        let t0 = Instant::now();
+        let mut sends = 0;
+        f.update(base, nominal, t0);
+        for s in 1..=secs {
+            for _ in 0..per_s {
+                f.frame((fill * f.k * base as f64 / nominal as f64 / 8.0) as usize, false);
+            }
+            if f.update(base, nominal, t0 + Duration::from_secs(s as u64)) {
+                sends += 1;
+            }
+        }
+        (f.k, sends)
+    }
+
+    fn run(fill: f64, max: f64, secs: u32) -> (f64, u32) {
+        run_at(fill, max, secs, 100.0, 100)
+    }
+
+    #[test]
+    fn a_stream_faster_than_nominal_fills_the_setting_per_second() {
+        // ALVR's nominal 90, frames at 100 (the Vision Pro request hack), NVENC filling 0.805 of its own per-frame target (the lab's Tokyo run)
+        let (k, _) = run_at(0.805, 1.3, 15, 90.0, 100);
+        let mbps_share = 0.805 * k * 100.0 / 90.0;   // produced bits per second / setting
+        assert!((mbps_share - 1.0).abs() < 0.025, "k {k}, {mbps_share}");
+    }
+
+    #[test]
+    fn a_slow_stream_keeps_the_per_frame_budget() {
+        // a 48 fps game without generation on a 100 Hz stream: k sized per frame (1 / 0.77), not pushed to the cap for the missing frames
+        let (k, _) = run_at(0.77, 1.3, 15, 100.0, 48);
+        assert!((0.77 * k - 1.0).abs() < 0.025 && k < 1.3, "k {k}");
+    }
+
+    #[test]
+    fn fills_game_content() {
+        let (k, sends) = run(0.77, 1.3, 10);
+        assert!((0.77 * k - 1.0).abs() < 0.025 && k <= 1.3, "k {k}");   // the games' median fill: the setting within 2 %, under the cap
+        assert!(sends <= 5, "{sends} reconfigures");
+    }
+
+    #[test]
+    fn harder_content_gets_little() {
+        let (k, _) = run(0.96, 1.3, 10);
+        assert!((0.96 * k - 1.0).abs() < 0.025 && k < 1.06, "k {k}");
+    }
+
+    #[test]
+    fn overshooting_content_stays_at_one() {
+        let (k, sends) = run(1.24, 1.3, 10);
+        assert_eq!(k, 1.0);
+        assert_eq!(sends, 0, "no reconfigure while k stays at 1");
+    }
+
+    #[test]
+    fn easy_content_is_capped_and_settles() {
+        let (k, sends) = run(0.3, 1.3, 20);
+        assert_eq!(k, 1.3);
+        assert!(sends <= 3, "settles at the cap: {sends} reconfigures");
+    }
+
+    #[test]
+    fn idr_frames_and_short_windows_are_ignored() {
+        let mut f = RateFill::new(1.3);
+        let t0 = Instant::now();
+        f.update(275_000_000, 100.0, t0);
+        for _ in 0..100 { f.frame(10_000_000, true); }   // IDR only: nothing counted, the window stays open
+        assert!(!f.update(275_000_000, 100.0, t0 + Duration::from_secs(2)));
+        assert_eq!(f.k, 1.0);
+        for _ in 0..100 { f.frame(1000, false); }
+        assert!(f.update(275_000_000, 100.0, t0 + Duration::from_millis(2500)), "a window of 100 tiny frames closes and raises k");
+        for _ in 0..100 { f.frame(1000, false); }
+        assert!(!f.update(275_000_000, 100.0, t0 + Duration::from_millis(3000)), "under a second since that window");
+    }
 }
 
 #[cfg(test)]

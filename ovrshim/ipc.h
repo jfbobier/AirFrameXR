@@ -15,7 +15,7 @@
 namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 37;
+constexpr uint32_t kVersion = 38;   // 38 (1.4-foundation E4): renderCeiling removed
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -120,10 +120,6 @@ struct HostToShim {
     // Game frame pacing fix (docs/EXPERIMENTAL_SWITCHES.md): 1 = a frame the app submits with exactly the same render poses as the one
     // before (a game or mod that resubmits its last frame for the next display slot) is not composed or published; 0 = everything goes out.
     uint32_t dropDuplicateFrames;
-    // Ceiling of the game's render size per eye for the render quality slider (render_size.h): the panel reference the user chose (the stream's size over the
-    // headset's full box) when the stream is fitted to a smaller declared window, so the slider can still raise the game's render up to it. 0 = the stream's
-    // eye size (the way it was). Read with the recommended size, so an app that started later takes a new value.
-    int32_t renderCeilingW, renderCeilingH;
     // The host's log verbosity (logsink.rs Level: 0 error, 1 warn, 2 info, 3 verbose, 4 debug): the shim filters its own lines with it, before it formats them.
     uint32_t logLevel;
 };

@@ -45,7 +45,7 @@ namespace AirFrameXR
             Controls.Add(page);
             headset = demoFolder != null ? "Apple Headset" : settings.HeadsetName;
             headsetSlug = FovFit.Slug(headset).Replace('_', '-');
-            FormClosing += (s, e) => EndTool();
+            FormClosing += (s, e) => { closing = true; EndTool(); };
             ShowIntro();
             Ui.ScreenshotWhenShown(this, 1500);
         }
@@ -84,7 +84,7 @@ namespace AirFrameXR
             if (restrictTool) { ShowRestrictIntro(); return; }
             Reset("Fit the picture to your eyes");
             Text_("Two minutes, the headset on, one eye at a time. Four bright lines mark the edges of the picture: look at a line and push it outward until it just disappears behind the lens edge, then bring it back until it is clearly visible again. When all four edges are done, press Enter: the other eye comes, and Enter on the second eye saves. The result is kept as one of your profiles.");
-            Text_("Press SPACE on the PC keyboard (or pinch with hands as controllers) to start; the text in the headset says which eye to close and which edge you are on.", true);
+            Text_("Press SPACE on the PC keyboard (or A on an Xbox controller) to start; the text in the headset says which eye to close and which edge you are on. No numpad: the controller's right stick pushes a line out in its direction, the left stick brings it back (diagonals: the corners), A finishes the eye.", true);
             var problems = new List<string>();
             if (headset.Length == 0) problems.Add("No headset is known yet: connect it once with the streamer.");
             if (demoDir == null && Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime)) { StartStreamer(); return; }
@@ -102,7 +102,7 @@ namespace AirFrameXR
         {
             Reset("Choose what the game renders");
             Text_("Two minutes, the headset on, both eyes open. The tool shows a scene inside a box and black outside it: exactly what a game that honours the restriction shows. Pull an edge in until you notice the black during normal looking around, then one step back. Start with the inner edges and the lower one. The result is kept as one of your profiles and used by the games.");
-            Text_("Press SPACE on the PC keyboard to start. Numpad 8 2 4 6 pull an edge in, Shift + the same key pushes it back out, Tab switches between both eyes and one eye, hold SPACE to see the whole view, Enter saves, Esc leaves. Keep this window in front: it receives the keys.", true);
+            Text_("Press SPACE on the PC keyboard (or A on an Xbox controller) to start. Numpad 8 2 4 6 pull an edge in, Shift + the same key pushes it back out (controller: left stick in, right stick out), Tab switches between both eyes and one eye, hold SPACE to see the whole view, Enter or A saves, Esc leaves. Keep this window in front: it receives the keys.", true);
             var problems = new List<string>();
             if (headset.Length == 0) problems.Add("No headset is known yet: connect it once with the streamer.");
             if (demoDir == null && Process.GetProcessesByName("streamer").Length == 0 && File.Exists(Paths.Runtime)) { StartStreamer(); return; }
@@ -117,6 +117,9 @@ namespace AirFrameXR
 
         Process probe;
         bool toolApplied, hostPrepared; bool? priorOverride;
+        // The streamer reads the restriction only when it starts (1.4-foundation E4): a restriction in force is set aside for the scene by a restart, and the
+        // restriction back (or the new fit) needs another one at the end. closing: the window is closing, so the restart at the end is done before it goes.
+        bool restartedForTool, closing; int restartGen;
         double[][] liveBox, livePanel, liveCorners; double livePct; Label liveLabel, liveState;
         static string ProbeLog => Path.Combine(Paths.Config, "calibration", "probe_tool.log");
 
@@ -141,6 +144,61 @@ namespace AirFrameXR
                 st.Save();
             }
             catch (Exception e) { Log.Write("WARN", "calibrate: could not put the settings back: " + e.Message); }
+            AfterTool();
+        }
+
+        /// After the scene: the restriction put back, or the new fit, reaches the game only through a streamer start.
+        void AfterTool()
+        {
+            if (!(toolApplied || restartedForTool)) return;
+            restartedForTool = false;
+            if (!StreamerProc.Running) return;   // closed meanwhile: its next start reads the settings
+            Log.Write("INFO", "calibrate: restarting the streamer to apply " + (toolApplied ? "the new fit" : "the restriction again"));
+            RestartStreamer(closing, false, null);
+        }
+
+        /// Closes the streamer (the launcher's graceful close) and starts it again, minimized. then: called once it is up and, with waitViews, once the headset
+        /// sent its views on the new connection (the host rewrites config\airframexr_views.json for every real declaration; the stand-in it publishes at its
+        /// start is the last connection's box, which is what the scene must not be told).
+        void RestartStreamer(bool sync, bool waitViews, Action then)
+        {
+            var gen = ++restartGen;
+            if (sync) { StreamerProc.Close(); StartStreamerProcess(); return; }
+            var since = DateTime.Now;
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                StreamerProc.Close();
+                try { BeginInvoke((Action)(() => { if (gen == restartGen) AfterStreamerClosed(since, waitViews, then); })); } catch { }
+            });
+        }
+
+        void AfterStreamerClosed(DateTime since, bool waitViews, Action then)
+        {
+            if (!StartStreamerProcess())
+            {
+                if (then != null) { EndTool(); Reset("The streamer did not start"); Text_("See the log. Start it from the main menu, then try again."); Buttons(Btn("Retry", Retry), Btn("Close", Close)); }
+                return;
+            }
+            if (then == null) return;
+            var views = Path.Combine(Paths.Config, "airframexr_views.json");
+            int waited = 0;
+            var t = new Timer { Interval = 1000 };
+            t.Tick += (s, e) =>
+            {
+                if (!hostPrepared) { t.Stop(); t.Dispose(); return; }   // stopped meanwhile
+                waited++;
+                bool viewsNow = !waitViews || (File.Exists(views) && File.GetLastWriteTime(views) > since);
+                if (StreamerProc.Running && waited >= 4 && viewsNow) { t.Stop(); t.Dispose(); Log.Write("INFO", $"calibrate: the streamer is back and the headset declared its view ({waited} s)"); then(); }
+                else if (waited == 20 && liveState != null) liveState.Text = "Waiting for the headset: keep the headset app open, it reconnects to the restarted streamer...";
+                else if (waited > 120) { t.Stop(); t.Dispose(); EndTool(); Reset("The headset did not reconnect"); Text_("The streamer restarted, but the headset app did not connect within two minutes. Open the headset app, then try again."); Buttons(Btn("Retry", Retry), Btn("Close", Close)); }
+            };
+            t.Start();
+        }
+
+        static bool StartStreamerProcess()
+        {
+            try { Process.Start(new ProcessStartInfo(Paths.Runtime) { WorkingDirectory = Paths.Bin, WindowStyle = ProcessWindowStyle.Minimized }); return true; }
+            catch (Exception e) { Log.Write("WARN", "calibrate: could not start the streamer: " + e.Message); return false; }
         }
 
         void EndTool()
@@ -181,22 +239,31 @@ namespace AirFrameXR
             if (probe != null && !probe.HasExited || starting) return;   // starting: the 6 s before the scene launches, when probe is still null (a second click started a second scene and saved two profiles, 2026-11-08)
             foreach (var stray in Process.GetProcessesByName("xr_probe")) { try { stray.Kill(); Log.Write("WARN", "calibrate: a stray xr_probe.exe was stopped"); } catch { } stray.Dispose(); }   // a scene left over from an earlier run would attach to the new host
             if (!File.Exists(Probe)) { if (note != null) { note.Text = "bench\\xr_probe.exe is missing from this package."; note.ForeColor = Color.Firebrick; } return; }
-            if (Process.GetProcessesByName("streamer").Length == 0) { StartStreamer(); return; }
             starting = true;
             PrepareHost();
             StartGuard();
             Reset(restrictTool ? "Choose what the game renders" : "Fit the picture to your eyes");
-            Text_("Put the headset on. The instructions are in the headset; press SPACE on this PC's keyboard to start.");
+            Text_("Put the headset on. The instructions are in the headset; press SPACE on this PC's keyboard (or A on an Xbox controller) to start.");
             liveState = Text_("Starting the OpenXR scene...", true);
             liveLabel = Text_("", true);
             Text_(restrictTool
-                ? "Four bright lines mark the edges of the picture the game renders: numpad 8 2 4 6 pull a line in 1 degree, Shift + the same key pushes it back out, Tab: both eyes / one eye, hold SPACE: the whole view, Enter: save, Esc: leave. Keep this window in front: it receives the keys."
-                : "Numpad 8 2 4 6 move the yellow edge lines (up, down, left, right), 7 9 1 3 the blue corner lines: push a line out until it disappears, then Shift + the same key until you just see it. Enter: this eye is finished (the second eye saves), Esc: leave. One eye at a time: close the other. Keep this window in front: it receives the keys.", true);
+                ? "Four bright lines mark the edges of the picture the game renders: numpad 8 2 4 6 pull a line in 1 degree, Shift + the same key pushes it back out (Xbox controller: left stick in, right stick out), Tab: both eyes / one eye, hold SPACE: the whole view, Enter or A: save, Esc: leave. Keep this window in front: it receives the keys."
+                : "Numpad 8 2 4 6 move the yellow edge lines (up, down, left, right), 7 9 1 3 the blue corner lines: push a line out until it disappears, then Shift + the same key until you just see it. Xbox controller: the right stick pushes the line in its direction out, the left stick brings it back, the diagonals move the corners. Enter or A: this eye is finished (the second eye saves), Esc: leave. One eye at a time: close the other. Keep this window in front: it receives the keys.", true);
             Buttons(Btn("Stop", () => { EndTool(); ShowIntro(); }));
-            // the streamer takes the settings change within a moment; the scene is started after it so the game is told the whole panel
-            var t = new Timer { Interval = 6000 };
-            t.Tick += (s, e) => { t.Stop(); t.Dispose(); starting = false; if (hostPrepared) LaunchProbe(); };
-            t.Start();
+            // the streamer reads the restriction only when it starts: with one in force (or no streamer) it is (re)started without it, and the scene starts once the
+            // headset declared its view on the new connection (no box is sent without a restriction: the app declares its whole view), so the scene is told the whole panel
+            if (priorOverride == true || !StreamerProc.Running)
+            {
+                restartedForTool = priorOverride == true;
+                liveState.Text = restartedForTool ? "Restarting the streamer without the restriction; the headset reconnects (keep the headset app open)..." : "Starting the streamer...";
+                RestartStreamer(false, true, () => { starting = false; if (hostPrepared) LaunchProbe(); });
+            }
+            else
+            {
+                var t = new Timer { Interval = 1000 };
+                t.Tick += (s, e) => { t.Stop(); t.Dispose(); starting = false; if (hostPrepared) LaunchProbe(); };
+                t.Start();
+            }
         }
 
         bool starting;
@@ -234,7 +301,8 @@ namespace AirFrameXR
         bool finished;
         void ProbeEnded()
         {
-            if (finished || liveLabel == null) return;
+            if (finished) { probe = null; RestoreHost(); return; }   // saved (or left): the restriction back or the new fit, by a streamer restart
+            if (liveLabel == null) return;
             probe = null; RestoreHost();
             ShowIntro();
             if (note != null) { note.Text = "The scene ended without saving (is the headset connected and the game runtime AirFrameXR? See the log)."; note.ForeColor = Color.DarkGoldenrod; }
@@ -293,7 +361,7 @@ namespace AirFrameXR
                 Log.Write("INFO", $"calibrate: '{u.Name}' ({u.Method}) kept and applied");
                 Reset(restrictTool ? "Saved" : "Your fit is saved");
                 Text_($"Kept as \"{u.Name}\" in your profiles and chosen: outer {u.Tan[0]:0.00}  inner {u.Tan[1]:0.00}  upper {u.Tan[2]:0.00}  lower {u.Tan[3]:0.00} (tangents, the larger of the two eyes).");
-                Text_("Needs a streamer restart for games that are already running; the next game gets it.", true);
+                Text_("The streamer restarts by itself when the scene closes, so the next game gets it (a game already running keeps its view until it restarts).", true);
                 if (u.HasMask) Text_($"Mask: the corner lines hide {100 * FovMask.HiddenShare(u.TanLeft ?? u.Tan, u.MaskLeft):0} % of the left eye's picture, {100 * FovMask.HiddenShare(u.TanRight ?? u.Tan, u.MaskRight):0} % of the right eye's (for games that use the runtime's mask).", true);
                 var map = new FovMap { Rectangle = u.TanLeft ?? u.Tan, Mask = u.MaskLeft, Declared = AppSettings.ReadClientFov(), Margin = new Padding(3, 6, 3, 2) }; page.Controls.Add(map);
                 Buttons(Btn("Close", Close));

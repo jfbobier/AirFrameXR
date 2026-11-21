@@ -55,12 +55,12 @@ EXPECT = {
         ("failed", [], ["Audio:", "could not be set"]),
         ("channels", [], ["Audio:", "16 channels"]),
     ],
-    "fov_forward": [
-        ("fov_on", ["sent fov_override on 1.50 1.02 1.22 1.02"], []),
-        ("fov_untouched", [], ["sent fov_override"]),   # the file changed but not the field of view: nothing is sent again
-        ("fov_changed", ["sent fov_override on 1.50 1.00 1.22 1.02"], []),
-        ("fov_quality", ["sent fov_override on 1.50 1.00 1.22 1.02 0.60"], []),   # the render quality is the fifth value
-        ("fov_off", ["sent fov_override off"], []),
+    "fov_forward": [   # E4 (docs/PLAN_1_4_FOUNDATION.md): the field of view is compiled per streamer start; a change is never sent live (the FOV card says "Needs streamer restart")
+        ("fov_on", [], ["sent fov_override"]),
+        ("fov_untouched", [], ["sent fov_override"]),
+        ("fov_changed", [], ["sent fov_override"]),
+        ("fov_quality", [], ["sent fov_override"]),
+        ("fov_off", [], ["sent fov_override"]),
     ],
     "window_size": [],
     "short12": [

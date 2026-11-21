@@ -23,6 +23,9 @@ extern "C" {
     fn nvh_bench_fgj_open(b: *mut c_void, eye_w: i32, eye_h: i32, synth: i32, err: *mut c_char, errlen: i32) -> *mut c_void;
     fn nvh_bench_fgj_gen(b: *mut c_void, j: *mut c_void, eye_w: i32, eye_h: i32, times9: *const f64, fov8: *const f32, ipd: f32, rgba: *mut u8, info2: *mut f32, err: *mut c_char, errlen: i32) -> i32;
     fn nvh_bench_fgj_close(j: *mut c_void);
+    fn nvh_bench_fgj_pan_seq(deg_per_s: f64, t_ref: f64, warm_deg_per_s: f64, warm_frames: i32, gap_s: f64);
+    fn nvh_bench_fgj_turn(j: *mut c_void, out8: *mut f32) -> i32;
+    fn nvh_bench_fgj_caps(j: *mut c_void, out: *mut c_char, outlen: i32) -> i32;
 }
 
 pub struct Options {
@@ -31,6 +34,13 @@ pub struct Options {
     pub gaps_ms: Vec<f64>,
     /// multipliers of the scene's own animation time in the `scene` and `both` scenarios (the animation is slow: 1 moves about 0.3 % of the frame at a 33 ms pair gap)
     pub speeds: Vec<f64>,
+    /// camera turn rates (deg/s) of the `pan` scenario: the camera turns about the world's up axis, the scene and the head the generator is told stay
+    /// still (a game's stick turn; field 2026-11-20: trailing in Hellraiser on the stick, none on head turns). Empty = no pan cases
+    pub pans: Vec<f64>,
+    /// frames rendered before A in the pan cases (0 = the pair alone). With frames before it, each rate also runs as a sequence: `pan` the turn
+    /// sustained, `panstart` still then turning at A, `panstop` turning then still, `panrev` turning then the other way (the camera-turn
+    /// prediction's cases)
+    pub pan_warm: i32,
     pub out: PathBuf,
 }
 
@@ -233,7 +243,10 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
         }
     }
     let _ = fs::create_dir_all(&opt.out);
-    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "scene": scene }));
+    let mut caps = [0 as c_char; 512];
+    unsafe { nvh_bench_fgj_caps(gens[1], caps.as_mut_ptr(), 512) };
+    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "fov": fov, "scene": scene,
+        "nvof": cstr(&caps) }));
     let bytes = w * h * 4;
     let (mut fa, mut fb, mut fg) = (vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]);
     let mut outs = [vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]];
@@ -248,10 +261,29 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                 scenarios.push(("scene", sp));
                 scenarios.push(("both", sp));
             }
+            for &pr in &opt.pans {
+                scenarios.push(("pan", pr));
+                if opt.pan_warm > 0 {
+                    scenarios.push(("panstart", pr));
+                    scenarios.push(("panstop", pr));
+                    scenarios.push(("panrev", pr));
+                }
+            }
             for (scenario, speed) in scenarios {
+                // pan*: the first time is the pan clock (bench.cpp FgjRender), the scene frozen at t0, the head still; (evaluated rate, rate before A)
+                let (rate, warm_rate) = match scenario {
+                    "pan" => (speed, speed),
+                    "panstart" => (speed, 0.0),
+                    "panstop" => (0.0, speed),
+                    "panrev" => (-speed, speed),
+                    _ => (0.0, 0.0),
+                };
+                let warm = if scenario.starts_with("pan") { opt.pan_warm } else { 0 };
+                unsafe { nvh_bench_fgj_pan_seq(rate, t0, warm_rate, warm, g) };
                 // (scene time, head position time, head orientation time) of A, B and the truth G (the midpoint)
                 let tm = |dt: f64| match scenario {
                     "scene" => [t0 + dt * speed, t0, t0],
+                    "pan" | "panstart" | "panstop" | "panrev" => [t0 + dt, t0, t0],
                     "head" => [t0, t0 + dt, t0 + dt],
                     _ => [t0 + dt * speed, t0 + dt, t0 + dt],
                 };
@@ -283,6 +315,8 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     failures += 1;
                     continue;
                 }
+                let mut turn = [0f32; 8];
+                unsafe { nvh_bench_fgj_turn(gens[1], turn.as_mut_ptr()) };
                 let (la, lb, lg) = (luma(&fa), luma(&fb), luma(&fg));
                 let raw: Vec<bool> = la.iter().zip(lb.iter()).map(|(p, q)| (p - q).abs() > 6.0).collect();
                 let moving = dilate(&raw, w, h, 6);
@@ -310,6 +344,8 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     "hold": score(&truth, &lb), "blend": score(&truth, &blend),
                     "classic": score(&truth, &lo[0]), "edge": score(&truth, &lo[1]), "edge_blend": score(&truth, &lo[2]),
                     "flow_ms": timings[1][0], "synth_ms": { "classic": timings[0][1], "edge": timings[1][1], "edge_blend": timings[2][1] },
+                    "turn": { "measured_deg": turn[0], "pred_deg": turn[1], "agree": turn[2], "blocks": turn[3], "cpu_ms": turn[4], "measurements": turn[5], "corrections": turn[6], "late": turn[7],
+                              "true_pair_deg": rate * g, "true_warm_deg": warm_rate * g },
                 });
                 event(origin, "fgj_case", case.clone());
                 cases.push(case);
@@ -327,11 +363,12 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
             }
         }
     }
+    unsafe { nvh_bench_fgj_pan_seq(0.0, 0.0, 0.0, 0, 0.0) };
     for g in gens {
         unsafe { nvh_bench_fgj_close(g) };
     }
     unsafe { nvh_bench_close(b) };
-    let doc = json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "starts": opt.starts, "cases": cases, "failures": failures });
+    let doc = json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "starts": opt.starts, "cases": cases, "failures": failures });
     let _ = fs::write(opt.out.join("fgj.json"), serde_json::to_string(&doc).unwrap_or_default());
     event(origin, "fgj_done", json!({ "cases": cases.len(), "failures": failures }));
     if failures > 0 { 7 } else { 0 }
