@@ -33,11 +33,13 @@ cbuffer CB : register(b0) {
     float4 mode;            // x: pass mode, y: max flow (full-res px), z: confidence gain
     float4 flowIn;          // PSUnpack: x flow-input width of one eye, y flow-input height, z max flow (full-res px)
     float4 synth;           // output pass: x 1 = edge-aware synthesis (else the classic crossfade recipe), y motion limit (full-res px), z cost scale, w photometric scale
+    float4 fbP;             // PSFilter: x 1 = forward/backward consistency on, y tolerance (full-res px), z confidence lost per px beyond it
 };
 Texture2D cur : register(t0);
 Texture2D prev : register(t1);
 Texture2D<int2> flow : register(t2);
 Texture2D<uint> cost : register(t3);
+Texture2D<float4> fwd : register(t6);    // PSFilter with fbP.x: the forward (older -> newer) unpacked flow of the pair
 Texture2D<float4> filt : register(t4);   // the pair's filtered flow (PSFilter): xy backward flow (full-res px), z match cost; PSFilter reads PSUnpack's output here
 SamplerState smp : register(s0);
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
@@ -197,7 +199,18 @@ float4 PSFilter(VSOut i) : SV_Target {
         [unroll] for (int b = 0; b < 9; b++) score += length(s[a].xy - s[b].xy) / (s[b].z + 0.01);
         if (score < bestScore) { bestScore = score; best = a; }
     }
-    return float4(s[best].xy, min(s[best].z, s[4].z), 1);
+    // forward/backward consistency: where the chosen backward vector points in the older frame, the forward vector must point back. w = 1 trusted .. 0 not
+    float cons = 1;
+    [branch] if (fbP.x > 0.5) {
+        const float2 v = s[best].xy;
+        const float2 bpx = (float2(c) + 0.5) * float(blocks.w) / flowP.xy;     // full-res px of the block's centre
+        const int2 qa = int2(floor((bpx + v) * flowP.xy / float(blocks.w)));   // the block it points to in the older frame
+        [branch] if (qa.x >= lo && qa.x <= hi && qa.y >= 0 && qa.y < blocks.z) {
+            const float err = length(fwd.Load(int3(qa, 0)).xy + v);
+            cons = saturate(1 - max(err - fbP.y, 0) * fbP.z);
+        }
+    }
+    return float4(s[best].xy, min(s[best].z, s[4].z), cons);
 }
 // the filtered flow at a full-res SBS pixel, bilinear over the block grid (within this eye's blocks)
 float4 filtAt(float2 px) {
@@ -248,7 +261,7 @@ float3 edgeSynth(float2 pO, float t) {
     // no agreement term on the confidence (VectorXR has none when interpolating): every pixel along a moving hard edge is a motion boundary
     // whose bilinear samples always disagree a little, and shrinking those vectors held the edges back (rig marker position error x2,
     // 2026-10-24). Noise vectors on flat content are zeroed in PSUnpack instead.
-    float conf = saturate((synth.y - shift) / (0.25 * synth.y)) * saturate(1 - max(chosen.z - 0.02, 0) * synth.z);
+    float conf = saturate((synth.y - shift) / (0.25 * synth.y)) * saturate(1 - max(chosen.z - 0.02, 0) * synth.z) * chosen.w;   // w: the forward/backward consistency (1 when off)
     float2 f = chosen.xy * conf;
     float2 uvC = pxToUv(pO - f * s);
     float3 cc = fetchCR(cur, sbs(clamp(uvC, 0, 1)));
@@ -353,6 +366,7 @@ struct Cb {
     float mode[4];
     float flowIn[4];
     float synth[4];
+    float fbP[4];
 };
 
 struct HudCb { float p0[4], p1[4]; };
@@ -416,6 +430,7 @@ struct FrameGen::Impl {
     // edge-aware synthesis (cfg.synth 1): the engine's vectors with our luma cost (unpack), then the 3x3 median (filter) per history pair
     ID3D11PixelShader* psUnpack = nullptr; ID3D11PixelShader* psFilter = nullptr;
     ID3D11Texture2D* unpackTex = nullptr; ID3D11ShaderResourceView* unpackSrv = nullptr; ID3D11RenderTargetView* unpackRtv = nullptr;
+    ID3D11Texture2D* unpackFwdTex = nullptr; ID3D11ShaderResourceView* unpackFwdSrv = nullptr; ID3D11RenderTargetView* unpackFwdRtv = nullptr;   // cfg.fb: the forward flow, unpacked
     ID3D11Texture2D* pairFilt[H] = {}; ID3D11ShaderResourceView* pairFiltSrv[H] = {}; ID3D11RenderTargetView* pairFiltRtv[H] = {};
     ID3D11Texture2D* zeroFilt = nullptr; ID3D11ShaderResourceView* zeroFiltSrv = nullptr;   // no flow: zero motion at the maximum cost
     // the pair's flow is computed by the first render that needs it (a synthetic output), not at ingest
@@ -476,6 +491,7 @@ FrameGen::~FrameGen() {
     if (I.dll) FreeLibrary(I.dll);
     for (int k = 0; k < 2; k++) { rel(I.flowInRtv[k]); rel(I.flowInSrv[k]); rel(I.flowIn[k]); }
     for (int k = 0; k < Impl::H; k++) { rel(I.pairFiltSrv[k]); rel(I.pairFiltRtv[k]); rel(I.pairFilt[k]); }
+    rel(I.unpackFwdSrv); rel(I.unpackFwdRtv); rel(I.unpackFwdTex);
     rel(I.unpackSrv); rel(I.unpackRtv); rel(I.unpackTex); rel(I.zeroFiltSrv); rel(I.zeroFilt); rel(I.psUnpack); rel(I.psFilter);
     for (int k = 0; k < Impl::H; k++) { rel(I.realSrv[k]); rel(I.real[k]); rel(I.pairFlowSrv[k]); rel(I.pairFlow[k]); rel(I.pairCostSrv[k]); rel(I.pairCost[k]); }
     rel(I.flowOutSrv); rel(I.flowOut); rel(I.costSrv); rel(I.costTex); rel(I.outRtv); rel(m_out);
@@ -495,6 +511,10 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     if (const char* v = getenv("AIRFRAMEXR_FG_HUD_TEX")) I.cfg.hudTex = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_HUD_DIL")) I.cfg.hudDil = atoi(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_HUD_VOTE")) I.cfg.hudVote = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_FB")) I.cfg.fb = atoi(v) != 0;
+    if (const char* v = getenv("AIRFRAMEXR_FG_FB_TOL")) I.cfg.fbTol = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_FB_GAIN")) I.cfg.fbGain = (float)atof(v);
+    if (!cfg.synth) I.cfg.fb = 0;
     if (!cfg.synth) I.cfg.hud = 0;   // the mask is applied in the output pass of both syntheses, but the lab tests the edge one only
     m_w = w; m_h = h;
     // shaders
@@ -642,6 +662,7 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
                    SUCCEEDED(m_dev->CreateShaderResourceView(*t, nullptr, sv)) && SUCCEEDED(m_dev->CreateRenderTargetView(*t, nullptr, rt));
         };
         bool ok = filtTex(&I.unpackTex, &I.unpackSrv, &I.unpackRtv);
+        if (ok && I.cfg.fb) ok = filtTex(&I.unpackFwdTex, &I.unpackFwdSrv, &I.unpackFwdRtv);
         for (int k = 0; k < Impl::H && ok; k++) ok = filtTex(&I.pairFilt[k], &I.pairFiltSrv[k], &I.pairFiltRtv[k]);
         // half floats (0, 0, 1, 1): zero motion, cost 1
         std::vector<uint16_t> zf((size_t)I.blocksW * I.blocksH * 4, 0);
@@ -660,9 +681,9 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     }
     stats.flowW = I.flowW; stats.flowH = I.flowH; stats.blocksW = I.blocksW; stats.blocksH = I.blocksH;
     stats.nvofReady = true;
-    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s%s",
+    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s%s%s",
              NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "classic" : cfg.photoScale > 0 ? "edge" : "edge-blend",
-             I.cfg.camTurn ? ", camera turn" : "", I.cfg.hud ? ", HUD" : "");
+             I.cfg.camTurn ? ", camera turn" : "", I.cfg.hud ? ", HUD" : "", I.cfg.fb ? ", fwd/bwd flow" : "");
     return true;
 }
 
@@ -770,6 +791,7 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
         c.flowP[0] = (float)I.flowW / (float)m_w; c.flowP[1] = (float)I.flowH / (float)m_h;
         c.blocks[0] = I.blocksW / 2; c.blocks[1] = I.blocksW; c.blocks[2] = I.blocksH; c.blocks[3] = I.grid;
         c.flowIn[0] = (float)(I.flowW / 2); c.flowIn[1] = (float)I.flowH; c.flowIn[2] = I.cfg.maxFlowPx;
+        c.fbP[0] = I.cfg.fb ? 1.f : 0.f; c.fbP[1] = I.cfg.fbTol; c.fbP[2] = I.cfg.fbGain;
         m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c, 0, 0);
         D3D11_VIEWPORT vp{}; vp.Width = (float)I.blocksW; vp.Height = (float)I.blocksH; vp.MaxDepth = 1.f;
         m_ctx->RSSetViewports(1, &vp);
@@ -790,11 +812,33 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
             memcpy(I.turnFov[n], fov8, sizeof(float) * 8);
             I.turnUsed[n] = I.camYaw[n] - I.camYaw[prev];
         }
+        if (I.cfg.fb) {
+            // the other way: the aligned older frame -> the newer one (the same buffers: the pair's backward flow has been copied and unpacked above)
+            NV_OF_EXECUTE_INPUT_PARAMS inF{};
+            inF.inputFrame = I.hIn[0]; inF.referenceFrame = I.hIn[1]; inF.externalHints = nullptr; inF.disableTemporalHints = NV_OF_FALSE;
+            NV_OF_EXECUTE_OUTPUT_PARAMS outF{};
+            outF.outputBuffer = I.hFlow; outF.outputCostBuffer = I.hCost;
+            if (I.api.nvOFExecute(I.of, &inF, &outF) == NV_OF_SUCCESS) {
+                ID3D11ShaderResourceView* inFwd[3] = { I.flowInSrv[0], I.flowInSrv[1], I.flowOutSrv };   // t0 = the aligned older frame, t1 = the newer
+                m_ctx->OMSetRenderTargets(1, &I.unpackFwdRtv, nullptr);
+                m_ctx->PSSetShader(I.psUnpack, nullptr, 0);
+                m_ctx->PSSetShaderResources(0, 3, inFwd);
+                m_ctx->Draw(3, 0);
+                m_ctx->PSSetShaderResources(0, 3, nulls);
+            } else {
+                stats.flowErrors++;
+                Cb c2{}; c2.flowP[0] = (float)I.flowW / (float)m_w; c2.flowP[1] = (float)I.flowH / (float)m_h;
+                c2.blocks[0] = I.blocksW / 2; c2.blocks[1] = I.blocksW; c2.blocks[2] = I.blocksH; c2.blocks[3] = I.grid;
+                m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c2, 0, 0);   // fbP.x = 0: this pair's filter runs without the check
+            }
+        }
         m_ctx->OMSetRenderTargets(1, &I.pairFiltRtv[n], nullptr);
         m_ctx->PSSetShader(I.psFilter, nullptr, 0);
         m_ctx->PSSetShaderResources(4, 1, &I.unpackSrv);
+        if (I.cfg.fb) m_ctx->PSSetShaderResources(6, 1, &I.unpackFwdSrv);
         m_ctx->Draw(3, 0);
         m_ctx->PSSetShaderResources(4, 1, nulls);
+        { ID3D11ShaderResourceView* n6 = nullptr; m_ctx->PSSetShaderResources(6, 1, &n6); }
         m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     }
     m_ctx->End(I.qT[1]);

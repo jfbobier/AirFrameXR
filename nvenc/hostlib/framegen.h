@@ -40,9 +40,15 @@ struct FrameGenConfig {
     float hudThr = 0.02f;    // a pixel is still when max |A - B| (encoded colour) is below this
     float hudTex = 0.04f;    // ... and textured when the newer frame's luma step to its right and lower neighbour sums above this; a 4 x 4 texel is HUD when 3 in 4 of its textured pixels are still
     float hudVote = 0.75f;   // the share of a texel's textured pixels that must be still
-    int hudDil = 0;          // extra growth of the mask, in texels of the quarter-resolution mask (4 px)
+    int hudDil = 0;
+    int fb = 0;              // forward/backward consistency (see FrameGenFb note above)
+    float fbTol = 2.f, fbGain = 0.25f;          // extra growth of the mask, in texels of the quarter-resolution mask (4 px)
 };
 
+// forward/backward flow consistency (fg-testing branch; AIRFRAMEXR_FG_FB=1; off by default; edge synthesis only): the engine also runs the other way (aligned older
+// frame -> newer), and a block's vector whose round trip does not come back (|forward(a) + backward| beyond fbTol px, a = where the backward vector points in the older frame)
+// is an occlusion or a wrong match: its confidence falls (the vector shrinks toward the still newer frame) by fbGain per px beyond the tolerance. The recipe of NVIDIA's FRUC
+// and FSR 3, re-implemented. Costs a second flow run per pair.
 struct FrameGenStats {
     uint64_t ingests = 0, pairs = 0, synths = 0, reals = 0, copies = 0, flowErrors = 0, renderErrors = 0;
     float lastFlowMs = 0, lastSynthMs = 0, lastIngestMs = 0;   // GPU time of the last flow pass (prep + engine), the last output pass, the last ingest copy
