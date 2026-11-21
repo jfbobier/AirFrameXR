@@ -2,10 +2,11 @@
 
 **Status 2026-11-21:** G0 done and the encoder mask (M-E) shipped, both in 1.4.1 (`main` `8fb3381`: `docs/PLAN_1_4_FOUNDATION.md`, fork lab R1-R6
 and F1-F3 there); **G1 answered in the field: the AC Black Flag mod's duplicate cycle releases nothing** (section 5, with the baseline Phase B is
-judged against). Next: step 2 (Phase A, G0 of Part M). This branch is still 1.4 + the fork work: `main` (49 commits) must be merged in before Phase A
-builds, so the lab runs the engine the field baseline ran (not done; ask first).
+judged against). **`main` (1.4.1, `d0c6435`) merged into this branch (`5da4312`)**: the merged shim, host, nvenc and GUI are identical to `main`, so
+the lab runs the engine the field baseline ran; the branch adds only the identity lab, this plan and the catalogue. Next: step 2 (Phase A, G0 of
+Part M).
 
-Status: plan, nothing run. **Base: 1.4** (`main`, pre-release v1.4.0-pre.1). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
+Status: plan, nothing run. **Base: 1.4.1** (`main` `d0c6435`, merged 2026-11-21; before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
 from `1.4` at `6c73d0b` with `universal-openxr-2` merged in (`469ea14`: the VDXR fork pipeline and the shim's texture-array views from `vdxr-fork`, the
 fork lab, the identity lab). The merge was clean (`build.ps1`, `harness/lib.py`, `harness/run.py` and two docs auto-merged; `tools/wsl/check_cpp.sh` OK);
 nothing is built on a builder yet. `vdxr-fork` and `universal-openxr-2` stay as they were (from 1.3.11); new work goes on `universal-1.4`. Builder roots: the
@@ -44,6 +45,12 @@ What changed from v1, and why:
 Base moved on 2026-11-20 (this branch). From 1.3.11 to 1.4 the engine changed only in `tools/host` (`vision.rs`, `main.rs`: the box message to the headset
 app, `client_sharpen`) and the ALVR patches (`headset-view-message.patch` and the lab's `client-reserved-message*.patch`); the shim, the IPC (version 37 on
 both) and VDXR did not, so nothing in Phase A's design changes. Run it on this branch.
+
+Base moved again on 2026-11-21 (`main` = 1.4.1 merged, `5da4312`). What it changes here: the IPC is at version 38 (the foundation's E4, FoV
+cleanup), so the next IPC field (Phase B's lab switch, or M-G's mask) takes 39, and the host and the shim are always built together (a host
+without its shim leaves the app standalone; `shim_reached_host` fails such a run). VDXR stays at the pin `46deebb`, now the product's. The shim's
+duplicate test did not change; its lines moved (section 3). The fork lab's builder roots (`tools/builder*.local`) are the ones 1.4.1 was built
+and tested on. Phase A's design is unchanged.
 
 ## M. The calibrated mask (the next engine round): the encoder first, the game only with evidence
 
@@ -106,7 +113,7 @@ plays asks, M-G is closed**: no shim, IPC or fork change for it. If some do: the
 GPU frame time, Phase B's decision rule) before any toggle.
 
 **Design, only if G0 opens it.** The session compile writes the per-eye polygon (`video.game_mask`, `polygon_tan_v1`, view-space tangents) -> host ->
-IPC version 38 -> the shim's `GetFovStencil` (one `IDriver` method in the fork; OVRNull's stub returns an empty mesh today, `OVRNull/api.cpp:142`) ->
+IPC version 39 (38 is 1.4.1's E4) -> the shim's `GetFovStencil` (one `IDriver` method in the fork; OVRNull's stub returns an empty mesh today, `OVRNull/api.cpp:142`) ->
 VDXR's `xrGetVisibilityMaskKHR` (`visibility_mask.cpp:39`: SteamVR coordinates 0..1 across the FovPort, y down; 16-bit indices; line loop with every
 second index). Latched per game start, like the box. Lab: `e2e_game_mask` (`xr_probe` draws the hidden mesh in a key colour, the stream shows it only
 outside each eye's octagon). Risks: what a game leaves in hidden pixels is undefined (temporal upscalers can smear at the edge); OpenComposite's
@@ -158,9 +165,9 @@ The engine and ALVR identify a frame by its tracking timestamp. OpenXR gives no 
   at the top of its loop (`frame.cpp:1129`); the app thread sets `m_frameCompleted` at `:600`, after handing over the layers at `:592`. If the async
   thread loops before the app thread reaches `:600`, it submits the next frame under the previous id: an upstream race, rare (a few instructions), never
   measured. So U1 pairs "the facts received since the previous submit", checks the id, and counts mismatches.
-- The shim today (`ovrshim/driver.cpp:1570-1610`): duplicate = the projection layer's `RenderPose` equals the previous submit's (`memcmp`). Windows of 40
+- The shim today (`ovrshim/driver.cpp:1559-1612`): duplicate = the projection layer's `RenderPose` equals the previous submit's (`memcmp`). Windows of 40
   submits; a pattern = 1-2 duplicates per real frame and a 40-70 % share, confirmed by 2 windows; then, with the compatibility mode on, a duplicate is
-  dropped and a real frame refills the free-wait budget (`:945-970`). Quad layers are not looked at.
+  dropped and a real frame refills the free-wait budget (`:952-975`). Quad layers are not looked at.
 - ~~Unknown~~ answered 2026-11-21 (section 5): the AC Black Flag mod releases no image on its duplicate cycle (the 2026-10-28 probe hooked
   wait/begin/end only, 0 acquire/release events; the fork's facts settled it in the field).
 
@@ -263,7 +270,7 @@ engine. Not a one-variable comparison: engine, render size, frame generation mod
 
 ## 6. Phase B: arm U1 (engine, this branch only, after the owner confirms)
 
-Change (shim only, VDXR unchanged; about 30 lines next to `driver.cpp:1570-1610`):
+Change (shim only, VDXR unchanged; about 30 lines next to `driver.cpp:1559-1612`):
 - At submit, the facts are those received since the previous submit: `released` summed, the last id. Counters: submits without facts, facts whose id is
   not this submit's `frameIndex`. Both should stay 0; the pairing uses arrival order, the id is only checked.
 - `same` becomes: same render poses AND the facts say nothing was released. Everything after it is unchanged: the 40-window pattern, the 0.25 s guard,
