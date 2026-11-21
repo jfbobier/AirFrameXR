@@ -389,6 +389,22 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                         write_ppm(&opt.out.join(format!("{stem}_{}_diff.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, Some((&fg, 4.0)));
                     }
                 }
+                // HUD runs: crops around the left eye's panel (its top-left corner, with the world beside and above it and the first strokes), at one pair gap
+                if start == 0 && !hud.is_empty() && (gap - 33.3).abs() < 1.0 {
+                    let (cw, ch) = (480usize.min(w), 360usize.min(h));
+                    let (mut bx, mut by) = (w, h);
+                    for y in 0..h { for x in 0..w / 2 { if hud[y * w + x] { bx = bx.min(x); by = by.min(y); } } }
+                    if bx < w {
+                        let (x0, y0) = (bx.saturating_sub(120).min(w - cw), by.saturating_sub(120).min(h - ch));
+                        let stem = format!("hud_{scenario}_x{}_g{}", speed as i64, gap as i64);
+                        write_ppm(&opt.out.join(format!("{stem}_truth.ppm")), &fg, w, x0, y0, cw, ch, None);
+                        write_ppm(&opt.out.join(format!("{stem}_hold.ppm")), &fb, w, x0, y0, cw, ch, None);
+                        for k in 0..3 {
+                            write_ppm(&opt.out.join(format!("{stem}_{}.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, None);
+                            write_ppm(&opt.out.join(format!("{stem}_{}_diff.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, Some((&fg, 4.0)));
+                        }
+                    }
+                }
             }
         }
     }
