@@ -269,10 +269,57 @@ Duplicates at the generator = its ingests minus the new pictures the shim saw (a
 input, and the frames it generates between two identical pictures do not move; with the mode on none reaches it. For the U1 regression the mode
 must be on (U1 acts inside the compatibility tick): runs 1 and 4 are its references, run 4 the simpler one (no generator).
 
+## 5b. The shaking after the change (2026-11-21, runs 5-6: the game's limiter off, frame generation off)
+
+The owner: with the game's limiter off and no frame generation, in both modes, the picture starts shaking after about 2 minutes (the behaviour the
+universal work is for), and shakes less with the limiter on. Logs `run5-183218` (mode off), `run6-183618` (mode on), same folder; the game's
+settings file says `framerate_limiter=0` (target 100).
+
+**The 2 minutes are the mod's change at submit 12,000**: 2 min 11 s in run 5 (94.5 submits/s), 1 min 51 s in run 6 (108/s); with the limiter
+(33-45 submits/s) it comes after 4.4-6 min. Before it both runs are exact again (nothing released = same poses, 12 and 5 windows). After it:
+
+| | run 5, mode off | run 6, mode on |
+|---|---|---|
+| submits /s before -> after | 94.5 -> 97.9 | 108 -> 129.7 (above the display rate: the free waits let it spin) |
+| new pictures /s before -> after | 47.3 -> 39.6 | 54.0 -> 63.9 |
+| after: nothing released / same poses | 59.6 / 52.7 % | 51.6 / 54.6 % |
+| **old picture under a new pose** (nothing released, new pose; lower bound) | **6.9 % of submits, about 6.8/s** | masked (>= 0) |
+| **new picture under the previous pose** (same poses, an image released; lower bound) | masked (>= 0) | **3.1 % of submits, >= 4/s, all dropped by the mode** |
+| one eye released (of new pictures) | 0.8 % | 3.8 % (2.4/s) |
+| whole run: GPU p50, encode p50, latency p50 / p95, headset ticks without a new frame | 72 %, 16.4 ms, 77.0 / 77.2 ms, 2-12 % | 83 %, 8.2 ms, 65.5 / 77.2 ms, 37-50 % |
+
+Delivery does not change at the change (headset ticks, frame gaps): the shaking is not a cadence problem. **What makes it (inferred from the counts
+and the code, not seen per frame):** the shim stamps a submit with the tracking sample of its layer's render pose (`FrameClientTimestamp`), and the
+headset reprojects the picture to that pose. An old picture under a new pose is put where the new pose looks: for one frame the world moves by the
+head's motion between the two poses (about 0.5-2 degrees at 50-100 degrees/s over 10-20 ms), then back with the next real picture. Still head:
+nothing; turning head: shaking. This is the 2026-10-12 trembling's mechanism (the shim composed frame F-1's picture under pose F), made by the mod
+this time. The mirror case, a new picture under the previous pose, is dropped by today's mode; when the next submit releases nothing, VDXR re-sends
+that picture under the next pose: an old picture under a new pose again. A one-eye submit puts one eye's picture under a pose a frame newer than it.
+
+**Less with the limiter:** mismatched submits per second after the change, limiter at 45 (runs 1-3, frame generation on): 1.8/s (run 2), 3.6/s
+one-eye only (run 1), 1.8/s (run 3); uncapped: 7.1/s (run 5), >= 6.4/s (run 6). Consistent with the owner's "less"; not a clean A/B (frame
+generation was on in runs 1-3, and run 4, limiter on with it off, ended before the change).
+
+**Proposed (owner to decide; nothing built):**
+- **Phase A, three more `xr_modsim` shapes** that start after N submits as the mod's do (`MODSIM_CHANGE_AT`): a share of submits with a new
+  pose and nothing released, a share of duplicate cycles that release a new picture, one eye released. Plus a truth check per outgoing frame: its
+  stamp is the stamp of the submit that released its picture (`identity_stamp_matches_picture`); U0 fails it on the first shape by the count of
+  such submits. No engine change.
+- **Phase B, an arm next to U1 (`lab_identity 2`): a picture keeps its own stamp.** A submit whose projection slices released nothing leaves
+  with the previous submit's timestamp (a true repeat, which the headset shows as one: the 1.3.10 strobe test), whatever its poses; with the mode
+  on it is dropped like a duplicate. U1's rule for same poses stays, so a new picture under the previous pose is kept. No pattern state and no free
+  wait, so U2's objections (a paused app spinning on free waits, the budget) do not apply, and a paused game gets its last picture at its own pose,
+  which is right. One-eye submits stay as today: ALVR v20 carries one pose per frame, so no stamp is right for both eyes.
+- **Field counters** in the shim's statistics (debug only): same poses with an image released, a new pose with nothing released, one eye
+  released, and the angle between a stale submit's pose and its picture's pose (p50 / p95 / max: the shake's size in degrees). They make the lower
+  bounds above exact. Shim change: ask first.
+- Section 8 defers U3 because "it changes statistics, not the picture". That does not hold for these submits, where the stamp decides where the
+  picture lands. The arm above is the narrow part of U3 the field asks for.
+
 What it changes:
-- **U1 gains nothing on this game, by construction:** its case rests on OFXR alone (row `id_ofxr_mimic`, the 2026-11-13 lab: 88 -> 72 new
-  frames/s). Black Flag becomes a regression check: armed, the same dropped count per window as U0 (to within 1) and the same new pictures/s. In
-  section 9 the counts settle it; the owner's blind call is needed on the OFXR title only.
+- **Before the change (and with the game's limiter at 45) U1 gains nothing on this game:** there its case rests on OFXR (row
+  `id_ofxr_mimic`, the 2026-11-13 lab: 88 -> 72 new frames/s) and Black Flag is a regression check (the same dropped count per window as U0, to
+  within 1). **Uncapped and after the change it does gain** (section 5b: today's mode drops new pictures that share the previous pose).
 - **A/B windows stay on one side of submit 12,000** (the mod's shape changes there): pairs all before or all after, never across; the shim logs
   the count every 900 frames.
 - **The same conditions for any comparison** (frame generation "third", the game's limiter at 45, the save): they set the new-picture rate (mode
