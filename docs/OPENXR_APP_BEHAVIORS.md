@@ -1,4 +1,4 @@
-# OpenXR app behaviours that stress the chain (catalogue, 2026-11-13, updated 2026-11-19)
+# OpenXR app behaviours that stress the chain (catalogue, 2026-11-13, updated 2026-11-21)
 
 What the engine assumes of an OpenXR app, and the apps that do not follow it. Measurements are lab or field logs; "inferred" marks what no trace proved.
 Where each one is handled: `docs/EXPERIMENTAL_SWITCHES.md` (`drop_duplicate_frames`, shown as "Maximum OpenXR compatibility mode" in Advanced), `docs/PERFORMANCE_FINDINGS.md`.
@@ -16,7 +16,7 @@ effects (GPU-bound queues, bursts of pose reads), not a different frame loop.
 
 | # | Behaviour | Seen in | Measured | State |
 |---|---|---|---|---|
-| 1 | Every real frame submitted twice with the identical pose (a second wait / begin / end cycle in the worker thread); worker pool of about 9 threads collapsing to 1 at engine frame 12000; cutscene 30 fps lock | NoMoreFlat mod for AC Black Flag (acbfvr) | pairs 1 ms apart then 20 ms; ~25 pose-distinct fps submitted 50/s; second wait paced like a real one halves the real fps (lab mimic 22.5 vs 45) | fixed: game fps lock + `drop_duplicate_frames`, lab `e2e_modsim_*`. Open: does its duplicate cycle release an image? (the probe had no acquire/release hooks; the fork's `app frames (VDXR)` line answers it in one session) |
+| 1 | Every real frame submitted twice with the identical pose (a second wait / begin / end cycle in the worker thread); worker pool of about 9 threads collapsing to 1 at engine frame 12000; cutscene 30 fps lock | NoMoreFlat mod for AC Black Flag (acbfvr) | pairs 1 ms apart then 20 ms; ~25 pose-distinct fps submitted 50/s; second wait paced like a real one halves the real fps (lab mimic 22.5 vs 45) | fixed: game fps lock + `drop_duplicate_frames`, lab `e2e_modsim_*`. **Its duplicate cycle releases no image** (field 2026-11-21, 1.4.1: same-pose submits = submits with nothing released, to the frame, both modes; baseline in `docs/PLAN_UNIVERSAL_OPENXR.md` section 5). After submit 12,000 two more shapes: mode on, 16 % of new pictures release one eye only (that eye one frame behind); mode off, 5 % of submits a new pose with no new picture. It draws one eye per engine frame, so the game's own limiter halves: 45 fps = 22.5 pictures/s |
 | 2 | A layer generates frames: inside the app's `xrEndFrame` it runs its own wait / begin / end cycles, a generated picture in the app's slot then the real one, **same poses, other picture**; the app's begin takes a fresh wait; the app is paced to half rate | OFXR-Bridge (real layer built in the lab, V551 382065f) | n=3, 45 fps game: no OFXR 44.5 new frames/s shown; OFXR 87.9 (game 42.2 fps, 2.4 % repeated ticks); shim sees 50 % same-pose submits | **works through the chain**; stats only count 42.5 unique timestamps/s |
 | 3 | The compatibility mode drops every same-pose frame | OFXR with the mode on | 71.6 new frames/s, 20.5 % repeated ticks (generated frames discarded) | open: the parked commit-count patch is superseded (a commit is not a new picture on VDXR's copy paths, row 10); plan v2 = same poses AND VDXR reports no image released (`docs/PLAN_UNIVERSAL_OPENXR.md`, lab rows `id_ofxr_mimic`, `id_mod_dup_quad`) |
 | 4 | Two pose reads inside one 10 ms tracking sample, so two frames share a timestamp | Cyberpunk, Dead Space (Luke Ross) | 7-20 % same-timestamp frames | statistics only: the headset displays them (strobe test, 1.3.10 notes F3/F4); 1.3.10 UI counts display ticks |
@@ -36,7 +36,7 @@ effects (GPU-bound queues, bursts of pose reads), not a different frame loop.
   may return different poses), so a pose or timestamp is a time coordinate, not an identity; ALVR's own design notes say the same about its timestamps.
 - The two bad actors differ: acbfvr resubmits the SAME picture (a true duplicate: drop it, free the second wait); OFXR submits a NEW picture under the same pose (keep it). A pose-only test cannot tell
   them apart; whether an image was released since the previous submit can (VDXR knows it; the fork sends it to the shim before the submit), unless a mod
-  re-releases a copy of its last picture (row 1's open question, lab row `id_mod_dup_rerelease`).
+  re-releases a copy of its last picture (lab row `id_mod_dup_rerelease`; acbfvr does not, row 1).
 
 ## Lab tools
 

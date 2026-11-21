@@ -1,5 +1,10 @@
 # Plan: universal OpenXR (v3, 2026-11-20): game visibility masks, then a frame identity
 
+**Status 2026-11-21:** G0 done and the encoder mask (M-E) shipped, both in 1.4.1 (`main` `8fb3381`: `docs/PLAN_1_4_FOUNDATION.md`, fork lab R1-R6
+and F1-F3 there); **G1 answered in the field: the AC Black Flag mod's duplicate cycle releases nothing** (section 5, with the baseline Phase B is
+judged against). Next: step 2 (Phase A, G0 of Part M). This branch is still 1.4 + the fork work: `main` (49 commits) must be merged in before Phase A
+builds, so the lab runs the engine the field baseline ran (not done; ask first).
+
 Status: plan, nothing run. **Base: 1.4** (`main`, pre-release v1.4.0-pre.1). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
 from `1.4` at `6c73d0b` with `universal-openxr-2` merged in (`469ea14`: the VDXR fork pipeline and the shim's texture-array views from `vdxr-fork`, the
 fork lab, the identity lab). The merge was clean (`build.ps1`, `harness/lib.py`, `harness/run.py` and two docs auto-merged; `tools/wsl/check_cpp.sh` OK);
@@ -26,11 +31,13 @@ What changed from v1, and why:
 ## 0. Gates and order
 
 1. **G0, the foundation:** the VDXR fork lab R1-R6 (`docs/PLAN_VDXR_FORK_LAB.md`) on this branch's build (1.4 + the fork). The fork lab was written on
-   1.3.11; its rows apply unchanged, and R5 gains 1.4's FoV scenarios (`e2e_fov_client_box`, `e2e_fov_tool_mask`, `e2e_fov_tool_fit`).
+   1.3.11; its rows apply unchanged, and R5 gains 1.4's FoV scenarios (`e2e_fov_client_box`, `e2e_fov_tool_mask`, `e2e_fov_tool_fit`). **Done on `1.4-foundation`, shipped as 1.4.1.**
 2. **No engine change, one lab session:** the identity work's Phase A, the mask's E0 (offline encodes) and G0 (which of the owner's non-UEVR titles ask
    for a mask).
-3. **The encoder mask, E1-E3** (Part M; engine, after the owner confirms at E1). The game mask only if G0 finds titles (M-G).
+3. **The encoder mask, E1-E3** (Part M; engine, after the owner confirms at E1). The game mask only if G0 finds titles (M-G). **The encoder mask
+   shipped in 1.4.1** (foundation F1-F3, then the mask band and rate fill; the headset on SWGR: 88.2 fps against 73.7 at Balanced); E0 is moot.
 4. **G1, the field check** (fork lab plan section 3, 5090, AC Black Flag with the mod, one session): does the mod's duplicate cycle release an image?
+   **Answered 2026-11-21: no** (section 5).
 5. **Phase B (engine, after the owner confirms):** arm U1, the matrix again, regressions, timing A/B. Decision B.
 6. **Headset A/B** (section 9) only if Phase B passes.
 
@@ -154,8 +161,8 @@ The engine and ALVR identify a frame by its tracking timestamp. OpenXR gives no 
 - The shim today (`ovrshim/driver.cpp:1570-1610`): duplicate = the projection layer's `RenderPose` equals the previous submit's (`memcmp`). Windows of 40
   submits; a pattern = 1-2 duplicates per real frame and a 40-70 % share, confirmed by 2 windows; then, with the compatibility mode on, a duplicate is
   dropped and a real frame refills the free-wait budget (`:945-970`). Quad layers are not looked at.
-- Unknown: whether the AC Black Flag mod releases an image on its duplicate cycle (the 2026-10-28 probe hooked wait/begin/end only, 0 acquire/release
-  events). G1 answers it.
+- ~~Unknown~~ answered 2026-11-21 (section 5): the AC Black Flag mod releases no image on its duplicate cycle (the 2026-10-28 probe hooked
+  wait/begin/end only, 0 acquire/release events; the fork's facts settled it in the field).
 
 ## 4. Phase A: is the signal exact? (no engine change)
 
@@ -197,6 +204,63 @@ AC Black Flag with the mod on the 5090 with the fork build, debug logging on, on
   rethink: telling a re-released copy from a new picture needs the picture itself (a GPU checksum per submit), a different cost class; ask before.
 - in between: read it per window (the cutscene lock changes the cadence) before deciding.
 
+**Result (2026-11-21): nothing released, go on.** The owner on the 5090, 1.4.1 (`main` `8fb3381`, VDXR fork `46deebb`), debug on, two sessions of
+about 9 minutes: the compatibility mode on (17:08), then off (17:18). Logs `private/logs/ac-black-flag-2026-11-21/` (game, shim, client CSVs, the
+settings in force, VDXR's log); every number below comes from `python3 harness/shim_identity_windows.py <shim log> --flip 12000` (per 900-frame
+window) and the run's `game_run` event. Conditions: Vision Pro at 100 Hz, profile AVP optimized trade-off (the game renders 1920 x 2368 per eye, the
+encode mask hides 22 % of the blocks), 275 Mbps, frame generation on at "third" (release grid 33.3 Hz, period mul 3), and the game's own limiter at
+45 fps (`Documents\Assassin's Creed Black Flag Resynced\ACBlackFlag.ini`: `framerate_limiter=1`, `framerate_target=45`; it was off in the
+2026-10-25 copy of that file).
+
+- **The duplicate cycle releases nothing.** In every play window before the mod's change of rhythm, in both modes, the submits with no image
+  released are exactly the submits with the previous submit's render poses (mode on: 900 of 1800 in each of 3 windows; mode off: 450 of 900 in each of
+  10), and every other submit releases both eye slices (1800 and 900 slices). So U1 (same poses AND nothing released) takes U0's decision on every
+  frame of this game: `id_mod_dup` is the field's shape, `id_mod_dup_rerelease` does not apply to it.
+- **The change of rhythm is at app submit 12,000** in both runs (4.5 min in at 45 submits/s, 6 min in at 33.3/s: the count, as in October's engine
+  frame 12,000), and its shape depends on the mode:
+  - mode on: same poses and nothing released still agree to within 1 per window; new pictures stay at 22.4/s; but 120-177 of every 899 new
+    pictures (15.9 %) release ONE eye with a new pose, so that eye shows the picture of the frame before. The mod's doing; U0 and U1 both keep them.
+  - mode off: new pictures fall from 16.7 to 14.0/s; 52.7 % same poses but 58.1 % nothing released: 34-50 of every 900 submits (5.4 %) carry a
+    new pose and no new picture (the last picture under a fresh pose). U0 and U1 keep them; only a release-only test would drop them (U2, cut),
+    nothing is dropped with the mode off anyway, and with the mode on this shape does not occur (0-3 per window).
+- No single-pose freeze like the October probe's 6-7 s stretches (one would add about 200 same-pose submits to a window). The headset: periods
+  skipped 0.2-1.2 % per minute in play, no gap over 3.25 periods outside loading screens, both modes, both sides of the change (October, lock 33:
+  hitches of 60-90 ms about once a second after it).
+
+**The baseline (U0 = 1.4.1) that Phase B and section 9 are judged against** (medians of the play windows; windows with a quad loading screen and
+the window that spans submit 12,000 left out):
+
+| | mode on, before 12,000 | mode on, after | mode off, before | mode off, after |
+|---|---|---|---|---|
+| app submits /s | 45.2 | 44.1 | 33.3 | 33.4 |
+| new pictures /s (an image released) | 22.6 | 22.4 | 16.7 | 14.0 |
+| nothing released / same poses / dropped | 50.0 / 50.0 / 50.0 % | 49.2 / 49.1 / 49.1 % | 50.0 / 50.0 / 0 % | 58.1 / 52.7 / 0 % |
+| one eye released (of new pictures) | 0 | 15.9 % | 0 | 0 |
+| new pose, nothing released (of submits) | 0 | 0.1 % | 0 | 5.4 % |
+| releases late | 98 % | 88-92 % | 60-67 % | 63-66 % |
+| xrWaitFrame return -> xrEndFrame p50 | 24.0 ms (9-14 already after the loading screen at submit ~8,900) | 12.7 ms | 14.5 ms | 0.15 ms |
+
+Whole runs (`game_run`, mode on / off): latency p50 65.9 / 57.3 ms, p95 67.1 / 67.1; encode p50 2.7 / 3.5 ms; GPU p50 41 / 31 %, 218 / 183 W;
+stream 98.0 / 96.6 fps; host repeats 32 % / 0.6 %.
+
+What it changes:
+- **U1 gains nothing on this game, by construction:** its case rests on OFXR alone (row `id_ofxr_mimic`, the 2026-11-13 lab: 88 -> 72 new
+  frames/s). Black Flag becomes a regression check: armed, the same dropped count per window as U0 (to within 1) and the same new pictures/s. In
+  section 9 the counts settle it; the owner's blind call is needed on the OFXR title only.
+- **A/B windows stay on one side of submit 12,000** (the mod's shape changes there): pairs all before or all after, never across; the shim logs
+  the count every 900 frames.
+- **The same conditions for any comparison** (frame generation "third", the game's limiter at 45, the save): they set the new-picture rate (mode
+  off: the 33.3 Hz grid / 2; mode on: the limiter's 45 / 2, the mod drawing one eye per engine frame; hence 98 % late releases with the GPU 41 % busy).
+- Two field shapes the matrix lacks, both "keep" in U0 and U1, so they matter only to H3 (no regression): one eye released per submit (mode on,
+  after the change) and a new pose with nothing released (mode off, after). Rows for them are cheap (`xr_modsim`, no engine change); add them to
+  Phase A only if the owner wants H3 to cover the field's late shapes.
+
+Against October (`private/logs/ac-black-flag-2026-10-27*`, `-dupfix-1`, `-freewait-1`; 1.1.x, the game at 2788 x 2976 to 3552 x 3200 per eye,
+frame generation half or uncapped with lock 33, the game's limiter off in its 2026-10-25 settings copy and 62.5 submits/s on 10-28, above 45): the same 50 % same-pose pairs and the same change at 12,000; GPU p50
+61-93 % (324-420 W) -> 31-41 % (183-218 W); encode p50 7.7-18.6 -> 2.7-3.5 ms; latency p50 67-77 -> 57-66 ms, p95 77-87 -> 67 ms; new pictures
+25/s (no fix, grid 50 Hz) and 31.9/s (fix + lock 33) -> 16.7 and 22.6/s, a drop set by the settings above (grid, the game's limiter), not by the
+engine. Not a one-variable comparison: engine, render size, frame generation mode and the game's settings all changed.
+
 ## 6. Phase B: arm U1 (engine, this branch only, after the owner confirms)
 
 Change (shim only, VDXR unchanged; about 30 lines next to `driver.cpp:1570-1610`):
@@ -235,7 +299,8 @@ own switch on top of U0 (Decision A must not stop it), arrival jitter added to t
 
 ## 9. Headset A/B (only if Decision B passes)
 
-Client 1.4.0 on the Vision Pro, the user on the 5090: OFXR on a real title, then AC Black Flag with the mod. Arm switched live with the stdin command
+Client 1.4.0 on the Vision Pro, the user on the 5090: OFXR on a real title, then AC Black Flag with the mod (its counts against the section 5
+baseline, under its conditions, every window on one side of submit 12,000). Arm switched live with the stdin command
 every 3 windows of 10 s, balanced order, start windows dropped. Read: ticks fresh %, `same_ts`, latency, the `identity:` line, and the user's blind call
 on two or three head motions. One night.
 
@@ -253,6 +318,8 @@ on two or three head motions. One night.
 
 - `xr_modsim` shapes: `MODSIM_ARRAY`, `MODSIM_MSAA`, `MODSIM_DUP_RELEASE`, `MODSIM_QUAD`, `MODSIM_PAUSE_S`, `MODSIM_OFXR`, `MODSIM_STROBE`; truth columns in `modsim.csv`.
 - `harness/lib.py` `analyse_identity` and the `identity` checks; `run.py identity` (table: truth classes, VDXR vs app, shim seen/dropped, free waits, wait rate).
+- `harness/shim_identity_windows.py`: the same comparison on a field shim log (per 900-frame window: nothing released, same poses, dropped, one eye
+  released, new pose with nothing released; `--flip N` splits the summary at an app submit count). Checked on the 2026-11-21 logs only.
 - `docs/OPENXR_APP_BEHAVIORS.md` (catalogue), `harness/ofxr_report.py`, the OFXR scenarios (2026-11-13, now in `scenarios/identity/`).
 - Parked: `private/parked/dup_image_identity_2026-11-13.patch` (commit counting; superseded by the trace channel, kept for reference).
 - Tested so far: `xr_modsim` clang-cl syntax check (and a planted error caught); the analysis and checks on synthetic runs (OFXR-like, mod duplicates,
