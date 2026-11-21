@@ -296,10 +296,11 @@ float4 PSOutBase(VSOut i) {
 // output pass applies the mask (t5)
 cbuffer HudCB : register(b2) { float4 hp0; float4 hp1; };
 Texture2D<float> hudIn : register(t5);
-// one texel = 4 x 4 pixels: 1 where one of them did not move on the screen between the older and the newer frame and has texture
+// one texel = 4 x 4 pixels: 1 where the textured pixels (at least 3 of the 16) are almost all (3 in 4) still on the screen between the older and the newer
+// frame. "Any one pixel" was far too permissive: a textured world pixel matches by chance somewhere in every block (2026-11-21: the moving region's PSNR fell 15 dB)
 float PSHudMask(VSOut i) : SV_Target {
     const int2 base = int2(i.pos.xy) * 4;
-    float hit = 0;
+    float nt = 0, ns = 0;
     [loop] for (int y = 0; y < 4; y++) {
         [loop] for (int x = 0; x < 4; x++) {
             const int2 p = base + int2(x, y);
@@ -308,10 +309,10 @@ float PSHudMask(VSOut i) : SV_Target {
             const float3 d = abs(c - a);
             const float l = lumaOf(c);
             const float g = abs(lumaOf(cur.Load(int3(p + int2(1, 0), 0)).rgb) - l) + abs(lumaOf(cur.Load(int3(p + int2(0, 1), 0)).rgb) - l);
-            if (max(d.r, max(d.g, d.b)) < hp0.x && g > hp0.y) hit = 1;
+            if (g > hp0.y) { nt += 1; if (max(d.r, max(d.g, d.b)) < hp0.x) ns += 1; }
         }
     }
-    return hit;
+    return (nt >= 3 && ns >= 0.75 * nt) ? 1.0 : 0.0;
 }
 float PSHudDil(VSOut i) : SV_Target {
     const int r = (int)hp0.z;
@@ -899,7 +900,8 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
                 const float pxPerTan = (m_w * 0.5f) / std::max(0.1f, fov8[e * 4] + fov8[e * 4 + 1]);
                 worst = std::max(worst, tanf(std::min(ang, 1.2f)) * pxPerTan);
             }
-            const int radius = std::max(2, std::min(16, (int)ceilf(worst / 4.f) + I.cfg.hudDil));
+            // under 1.5 px of shift the rotation is invisible: no growth (a moving object next to a still one must not be swallowed)
+            const int radius = worst < 1.5f ? 0 : std::min(16, (int)ceilf(worst / 4.f) + I.cfg.hudDil);
             hc.p0[2] = (float)radius;
             m_ctx->UpdateSubresource(I.cbHud, 0, nullptr, &hc, 0, 0);
             hudPasses(n, prev, radius);
