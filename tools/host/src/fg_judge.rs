@@ -23,6 +23,7 @@ extern "C" {
     fn nvh_bench_fgj_open(b: *mut c_void, eye_w: i32, eye_h: i32, synth: i32, err: *mut c_char, errlen: i32) -> *mut c_void;
     fn nvh_bench_fgj_gen(b: *mut c_void, j: *mut c_void, eye_w: i32, eye_h: i32, times9: *const f64, fov8: *const f32, ipd: f32, rgba: *mut u8, info2: *mut f32, err: *mut c_char, errlen: i32) -> i32;
     fn nvh_bench_fgj_close(j: *mut c_void);
+    fn nvh_bench_fgj_hud_rects(eye_w: i32, eye_h: i32, out: *mut i32, max_rects: i32) -> i32;
     fn nvh_bench_fgj_pan_seq(deg_per_s: f64, t_ref: f64, warm_deg_per_s: f64, warm_frames: i32, gap_s: f64);
     fn nvh_bench_fgj_turn(j: *mut c_void, out8: *mut f32) -> i32;
     fn nvh_bench_fgj_caps(j: *mut c_void, out: *mut c_char, outlen: i32) -> i32;
@@ -166,6 +167,20 @@ struct Truth {
     moving_frac: f64,
     band_frac: f64,
     grad_band: f64,
+    /// the HUD's panels (lab env AIRFRAMEXR_FG_JUDGE_HUD=1; empty = off): a head-locked overlay, identical in A, B and the truth
+    hud: Vec<bool>,
+}
+
+/// the share of the HUD's pixels the output has wrong by more than 24 levels of luma (smear, double strokes, a HUD that moved with the head)
+fn hud_bad(t: &Truth, l: &[f32]) -> f64 {
+    let (mut n, mut bad) = (0usize, 0usize);
+    for i in 0..l.len() {
+        if t.hud[i] {
+            n += 1;
+            if (l[i] - t.g[i]).abs() > 24.0 { bad += 1 }
+        }
+    }
+    bad as f64 / n.max(1) as f64
 }
 
 fn score(t: &Truth, l: &[f32]) -> Value {
@@ -183,6 +198,8 @@ fn score(t: &Truth, l: &[f32]) -> Value {
         "psnr": psnr(l, &t.g, None), "psnr_moving": psnr(l, &t.g, Some(&t.moving)), "psnr_band": psnr(l, &t.g, Some(&t.band)),
         "ssim": ssim_mean(&win, None), "ssim_moving": ssim_mean(&win, Some(&t.moving)),
         "edge_excess": excess / norm, "edge_deficit": deficit / norm,
+        "psnr_hud": if t.hud.is_empty() { None } else { psnr(l, &t.g, Some(&t.hud)) },
+        "hud_bad": if t.hud.is_empty() { None } else { Some(hud_bad(t, l)) },
     })
 }
 
@@ -247,6 +264,17 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
     unsafe { nvh_bench_fgj_caps(gens[1], caps.as_mut_ptr(), 512) };
     event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "fov": fov, "scene": scene,
         "nvof": cstr(&caps) }));
+    // the HUD scenario's panels as a mask (the first rect of each eye is its panel: the area the strokes and the bar sit on)
+    let hud: Vec<bool> = {
+        let mut r = vec![0i32; 4 * 64];
+        let n = unsafe { nvh_bench_fgj_hud_rects(ew, eh, r.as_mut_ptr(), 64) } as usize;
+        let mut m = vec![false; if n > 0 { w * h } else { 0 }];
+        for i in (0..n).step_by((n / 2).max(1)) {   // the panels: the first rect of each eye (HudRects pushes 16 per eye)
+            let (x0, y0, x1, y1) = (r[4 * i].max(0) as usize, r[4 * i + 1].max(0) as usize, (r[4 * i + 2] as usize).min(w), (r[4 * i + 3] as usize).min(h));
+            for y in y0..y1 { for x in x0..x1 { m[y * w + x] = true } }
+        }
+        m
+    };
     let bytes = w * h * 4;
     let (mut fa, mut fb, mut fg) = (vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]);
     let mut outs = [vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]];
@@ -335,6 +363,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     moving,
                     band,
                     grad_band,
+                    hud: hud.clone(),
                 };
                 let blend: Vec<f32> = la.iter().zip(lb.iter()).map(|(p, q)| 0.5 * (p + q)).collect();
                 let lo: Vec<Vec<f32>> = outs.iter().map(|o| luma(o)).collect();

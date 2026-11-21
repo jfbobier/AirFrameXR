@@ -386,6 +386,33 @@ bool ReadRgba8(Bench* b, ID3D11Texture2D* tex, uint8_t* rgba) {
     return true;
 }
 
+// the HUD scenario (lab env AIRFRAMEXR_FG_JUDGE_HUD=1; fg-testing): a head-locked overlay drawn into every frame of the judge (A, B and the truth G) at the
+// same pixels of each eye with a constant disparity, as a game's HUD is: a dark panel with a health bar and a row of thin bright bars standing for text.
+// The judge scores the generator's output inside the panel (a head-locked HUD is identical in A, B and G, so holding B is perfect there).
+struct HudRect { int x0, y0, x1, y1; float c; };   // SBS pixels, grey level (written to the 10-bit frame as is)
+std::vector<HudRect> HudRects(int eye_w, int eye_h) {
+    std::vector<HudRect> r;
+    const int u = std::max(1, eye_h / 100), dx = 6;             // one percent of the eye height; disparity of the HUD plane, px
+    for (int e = 0; e < 2; e++) {
+        const int ox = e * eye_w + (e == 0 ? dx : -dx);
+        const int px = ox + eye_w * 8 / 100, py = eye_h * 80 / 100;
+        r.push_back({ px - 2 * u, py - 2 * u, px + 30 * u, py + 18 * u, 0.04f });                       // panel
+        r.push_back({ px, py + 12 * u, px + 26 * u, py + 15 * u, 0.95f });                               // the bar
+        for (int k = 0; k < 14; k++) r.push_back({ px + k * 2 * u, py, px + k * 2 * u + std::max(1, u * 6 / 10), py + 8 * u, 0.95f });   // thin strokes
+    }
+    return r;
+}
+bool FgjHudOn() { static const bool on = [] { const char* v = getenv("AIRFRAMEXR_FG_JUDGE_HUD"); return v && v[0] == '1'; }(); return on; }
+void FgjDrawHud(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, int eye_w, int eye_h) {
+    ComPtr<ID3D11DeviceContext1> c1;
+    if (FAILED(ctx->QueryInterface(IID_PPV_ARGS(&c1)))) return;
+    for (const HudRect& h : HudRects(eye_w, eye_h)) {
+        const FLOAT col[4] = { h.c, h.c, h.c, 1.f };
+        const D3D11_RECT rc = { h.x0, h.y0, h.x1, h.y1 };
+        c1->ClearView(rtv, col, &rc, 1);
+    }
+}
+
 // the scene at the three times into the benchmark's target of that size, resolved; the 10-bit frame the game hands the shim
 Target* FgjRender(Bench* b, int eye_w, int eye_h, const double* tt, const float* fov8, float ipd, std::string& err) {
     Settings::Instance().m_use10bitEncoder = true;   // what the streamer's frames are (R10G10B10A2)
@@ -398,10 +425,20 @@ Target* FgjRender(Bench* b, int eye_w, int eye_h, const double* tt, const float*
     } else {
         RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, tt[0], tt[1], tt[2], fov8, ipd);
     }
+    if (FgjHudOn()) FgjDrawHud(ctx, tg->rtv.Get(), eye_w, eye_h);
     ctx->ResolveSubresource(tg->resolved.Get(), 0, tg->msaa.Get(), 0, FrameFormat());
     return tg;
 }
 }  // namespace
+
+// the HUD's rectangles for the judge's scoring (x0 y0 x1 y1 per rect, SBS pixels); 0 = the scenario is off
+int nvh_bench_fgj_hud_rects(int eye_w, int eye_h, int32_t* out, int max_rects) {
+    if (!FgjHudOn()) return 0;
+    const auto r = HudRects(eye_w, eye_h);
+    const int n = std::min((int)r.size(), max_rects);
+    for (int i = 0; i < n; i++) { out[4 * i] = r[i].x0; out[4 * i + 1] = r[i].y0; out[4 * i + 2] = r[i].x1; out[4 * i + 3] = r[i].y1; }
+    return n;
+}
 
 int nvh_bench_fgj_frame(void* h, int eye_w, int eye_h, const double* times3, const float* fov8, float ipd, uint8_t* rgba, float* q4) {
     auto* b = (Bench*)h;

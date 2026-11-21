@@ -19,7 +19,8 @@ import lib
 
 KINDS = ["hold", "blend", "classic", "edge", "edge_blend"]
 METRICS = [("psnr_band", "PSNR on the boundary band (dB)", +1), ("psnr_moving", "PSNR in the moving region (dB)", +1), ("psnr", "PSNR whole frame (dB)", +1),
-           ("ssim_moving", "SSIM in the moving region", +1), ("edge_excess", "edge excess on the band (double images)", -1), ("edge_deficit", "edge deficit on the band (blur)", -1)]
+           ("ssim_moving", "SSIM in the moving region", +1), ("edge_excess", "edge excess on the band (double images)", -1), ("edge_deficit", "edge deficit on the band (blur)", -1),
+           ("psnr_hud", "PSNR on the HUD panels (dB; --env AIRFRAMEXR_FG_JUDGE_HUD=1)", +1), ("hud_bad", "share of HUD pixels off by > 24 levels (--env AIRFRAMEXR_FG_JUDGE_HUD=1)", -1)]
 
 
 def arg(name, default):
@@ -96,6 +97,7 @@ def report(d):
     if not cases:
         print("no cases"); return 2
     gaps = sorted({c["gap_ms"] for c in cases})
+    metrics = [m for m in METRICS if any(c["edge"].get(m[0]) is not None for c in cases)]   # the HUD metrics only exist for a HUD run
     for c in cases:
         c["label"] = c["scenario"] if c["scenario"] == "head" else f'{c["scenario"]} {c["speed"]:g}dps' if c["scenario"].startswith("pan") else f'{c["scenario"]} x{c["speed"]:g}'
     scen = sorted({c["label"] for c in cases}, key=lambda x: (x.split()[0] != "head", x))
@@ -103,7 +105,7 @@ def report(d):
     for s in scen:
         print(f"moving region, {s:10s}: {100 * mean([c['moving_frac'] for c in cases if c['label'] == s]):5.1f} % of the frame on average")
     print()
-    for key, title, sign in METRICS:
+    for key, title, sign in metrics:
         print(f"== {title}  (mean over start times; better = {'higher' if sign > 0 else 'lower'})")
         print(f"{'scenario':10s} {'pair gap':>9s} " + " ".join(f"{k:>10s}" for k in KINDS))
         for s in scen:
@@ -114,7 +116,7 @@ def report(d):
         print()
     print("== paired differences over every case (mean, standard error of the mean, wins of the first)")
     pairs = [("edge", "classic"), ("edge", "edge_blend"), ("edge_blend", "classic")]
-    for key, title, sign in METRICS:
+    for key, title, sign in metrics:
         for a, b in pairs:
             d_ = [(c[a][key] - c[b][key]) * sign for c in cases if c["moving_frac"] > 0.0005 and c[a][key] is not None and c[b][key] is not None]
             if len(d_) < 2:
