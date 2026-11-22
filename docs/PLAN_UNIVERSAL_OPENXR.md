@@ -269,6 +269,24 @@ Duplicates at the generator = its ingests minus the new pictures the shim saw (a
 input, and the frames it generates between two identical pictures do not move; with the mode on none reaches it. For the U1 regression the mode
 must be on (U1 acts inside the compatibility tick): runs 1 and 4 are its references, run 4 the simpler one (no generator).
 
+What it changes:
+- **Before the change (and with the game's limiter at 45) U1 gains nothing on this game:** there its case rests on OFXR (row
+  `id_ofxr_mimic`, the 2026-11-13 lab: 88 -> 72 new frames/s) and Black Flag is a regression check (the same dropped count per window as U0, to
+  within 1). **Uncapped and after the change it does gain** (section 5b: today's mode drops new pictures that share the previous pose).
+- **A/B windows stay on one side of submit 12,000** (the mod's shape changes there): pairs all before or all after, never across; the shim logs
+  the count every 900 frames.
+- **The same conditions for any comparison** (frame generation "third", the game's limiter at 45, the save): they set the new-picture rate (mode
+  off: the 33.3 Hz grid / 2; mode on: the limiter's 45 / 2, the mod drawing one eye per engine frame; hence 98 % late releases with the GPU 41 % busy).
+- Two field shapes the matrix lacks, both "keep" in U0 and U1, so they matter only to H3 (no regression): one eye released per submit (mode on,
+  after the change) and a new pose with nothing released (mode off, after). Rows for them are cheap (`xr_modsim`, no engine change); add them to
+  Phase A only if the owner wants H3 to cover the field's late shapes.
+
+Against October (`private/logs/ac-black-flag-2026-10-27*`, `-dupfix-1`, `-freewait-1`; 1.1.x, the game at 2788 x 2976 to 3552 x 3200 per eye,
+frame generation half or uncapped with lock 33, the game's limiter off in its 2026-10-25 settings copy and 62.5 submits/s on 10-28, above 45): the same 50 % same-pose pairs and the same change at 12,000; GPU p50
+61-93 % (324-420 W) -> 31-41 % (183-218 W); encode p50 7.7-18.6 -> 2.7-3.5 ms; latency p50 67-77 -> 57-66 ms, p95 77-87 -> 67 ms; new pictures
+25/s (no fix, grid 50 Hz) and 31.9/s (fix + lock 33) -> 16.7 and 22.6/s, a drop set by the settings above (grid, the game's limiter), not by the
+engine. Not a one-variable comparison: engine, render size, frame generation mode and the game's settings all changed.
+
 ## 5b. The shaking after the change (2026-11-21, runs 5-6: the game's limiter off, frame generation off)
 
 The owner: with the game's limiter off and no frame generation, in both modes, the picture starts shaking after about 2 minutes (the behaviour the
@@ -315,24 +333,6 @@ generation was on in runs 1-3, and run 4, limiter on with it off, ended before t
   bounds above exact. Shim change: ask first.
 - Section 8 defers U3 because "it changes statistics, not the picture". That does not hold for these submits, where the stamp decides where the
   picture lands. The arm above is the narrow part of U3 the field asks for.
-
-What it changes:
-- **Before the change (and with the game's limiter at 45) U1 gains nothing on this game:** there its case rests on OFXR (row
-  `id_ofxr_mimic`, the 2026-11-13 lab: 88 -> 72 new frames/s) and Black Flag is a regression check (the same dropped count per window as U0, to
-  within 1). **Uncapped and after the change it does gain** (section 5b: today's mode drops new pictures that share the previous pose).
-- **A/B windows stay on one side of submit 12,000** (the mod's shape changes there): pairs all before or all after, never across; the shim logs
-  the count every 900 frames.
-- **The same conditions for any comparison** (frame generation "third", the game's limiter at 45, the save): they set the new-picture rate (mode
-  off: the 33.3 Hz grid / 2; mode on: the limiter's 45 / 2, the mod drawing one eye per engine frame; hence 98 % late releases with the GPU 41 % busy).
-- Two field shapes the matrix lacks, both "keep" in U0 and U1, so they matter only to H3 (no regression): one eye released per submit (mode on,
-  after the change) and a new pose with nothing released (mode off, after). Rows for them are cheap (`xr_modsim`, no engine change); add them to
-  Phase A only if the owner wants H3 to cover the field's late shapes.
-
-Against October (`private/logs/ac-black-flag-2026-10-27*`, `-dupfix-1`, `-freewait-1`; 1.1.x, the game at 2788 x 2976 to 3552 x 3200 per eye,
-frame generation half or uncapped with lock 33, the game's limiter off in its 2026-10-25 settings copy and 62.5 submits/s on 10-28, above 45): the same 50 % same-pose pairs and the same change at 12,000; GPU p50
-61-93 % (324-420 W) -> 31-41 % (183-218 W); encode p50 7.7-18.6 -> 2.7-3.5 ms; latency p50 67-77 -> 57-66 ms, p95 77-87 -> 67 ms; new pictures
-25/s (no fix, grid 50 Hz) and 31.9/s (fix + lock 33) -> 16.7 and 22.6/s, a drop set by the settings above (grid, the game's limiter), not by the
-engine. Not a one-variable comparison: engine, render size, frame generation mode and the game's settings all changed.
 
 ## 6. Phase B: arm U1 (engine, this branch only, after the owner confirms)
 
