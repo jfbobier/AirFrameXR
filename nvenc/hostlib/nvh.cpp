@@ -767,6 +767,7 @@ int nvh_fg_enable(void* hh, int on, double flow_scale, int perf_level, int grid,
     FrameGenConfig c;
     c.flowScale = (float)flow_scale; c.perfLevel = perf_level; c.grid = grid; c.synth = synth == 1 ? 1 : 0;
     if (synth == 2) { c.synth = 1; c.photoScale = 0.f; }   // edge-blend: the edge synthesis without the photometric gate
+    if (synth == 4) { c.synth = 1; c.neural = 1; }          // neural (default since 1.4.2): the edge synthesis composing from RIFE 4.4's fields
     // edge synthesis tuning (lab knobs, env only)
     if (const char* v = getenv("AIRFRAMEXR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_COST_SCALE")) c.costScale = (float)atof(v);

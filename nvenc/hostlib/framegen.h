@@ -32,7 +32,8 @@ struct FrameGenConfig {
     // measured turn and removed before the flow like the head's rotation; the output is turned by the yaw interpolated at t; the edge the
     // turned newer frame does not cover is filled from the older one.
     int camTurn = 1;
-    // neural fields (fg-neural branch, lab; AIRFRAMEXR_FG_NEURAL=1; off by default; edge synthesis only; neural.h): RIFE 4.4 computes, per pair, the
+    // neural fields (the synthesis "neural", the streamer's default since 1.4.2: nvh_fg_enable synth 4; edge synthesis only; neural.h; without
+    // the network's files or on a GPU before the RTX 30 series the edge synthesis draws every output): RIFE 4.4 computes, per pair, the
     // motion from the output time to each frame and a blend mask, at neuralScale of the eye resolution, with our CUDA network (nvenc/rife); the output pass
     // composes the picture from them at full resolution (one sample of each original frame through the rotation chain), keeping still content
     // exact where both frames agree within neuralStill and the fields move less than neuralStillPx full-resolution pixels. The optical flow keeps

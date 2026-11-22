@@ -3,18 +3,18 @@ Builds the neural frame generation network (docs/NEURAL_RIFE_CUDA.md): airframex
 weights in the DLL's layout), from pinned inputs with fixed flags, and writes build_manifest.txt (every tool version, input and output hash; no
 dates). Same inputs and tools -> same files (the linker runs with /Brepro).
 
-    powershell -ExecutionPolicy Bypass -File nvenc\rife\build.ps1 -Out <dir> -Python <python.exe with torch>
+    powershell -ExecutionPolicy Bypass -File nvenc\rife\build.ps1 -Out <dir> [-Python <python.exe>]     (harness: run.py build neural)
 
 Inputs, downloaded into -Cache when missing and checked against the pinned SHA-256 (a mismatch stops the build):
     CUTLASS 4.8.1 (BSD-3-Clause; headers only, compiled in)  https://github.com/NVIDIA/cutlass/archive/refs/tags/v4.8.1.zip
     RIFE 4.4 weights (MIT)                                   https://github.com/HolyWu/vs-rife/releases/download/model/flownet_v4.4.pkl
-Tools: the CUDA toolkit 13.5 (only the components nvcc, crt, nvvm, cudart, cccl: cuda_13.5.0_windows_x86_64_network.exe -s nvcc_13.5 crt_13.5
+Tools: Python 3 (standard library only; default `python` on the PATH), the CUDA toolkit 13.5 (only the components nvcc, crt, nvvm, cudart, cccl: cuda_13.5.0_windows_x86_64_network.exe -s nvcc_13.5 crt_13.5
 nvvm_13.5 cudart_13.5 cccl_13.5), Visual Studio 2022 C++ (vcvars64.bat). Another toolkit version: -Cuda <dir> -AnyVersion (the recipe says what
 to re-check).
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Out,
-    [Parameter(Mandatory = $true)][string]$Python,
+    [string]$Python = "python",
     [string]$Cache = "",
     [string]$Cuda = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.5",
     [string]$Vcvars = "",
@@ -96,7 +96,6 @@ $sw = [Diagnostics.Stopwatch]::StartNew()
 cmd /c $cmd
 if ($LASTEXITCODE) { throw "nvcc failed ($LASTEXITCODE)" }
 Write-Host ("built in {0:N0} s" -f $sw.Elapsed.TotalSeconds)
-Remove-Item -ErrorAction SilentlyContinue (Join-Path $Out "airframexr_rife.exp"), (Join-Path $Out "airframexr_rife.lib")
 $clVer = (cmd /c "call `"$Vcvars`" >nul && cl 2>&1" | Select-Object -First 1).ToString().Trim()
 
 # ---- manifest (no dates: two builds from the same inputs give the same file) ----

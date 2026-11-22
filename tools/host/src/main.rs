@@ -91,8 +91,9 @@ struct Args {
     client_sharpen: bool,
     fov_quality_explicit: bool,
     fg_grid: i32,
-    /// 1 = edge-aware synthesis (default), 2 = edge-aware without the photometric gate, 0 = classic, the crossfade recipe (the predictable
-    /// fallback) (`video.frame_gen_synthesis`, `--frame-gen-synthesis`, env AIRFRAMEXR_FG_SYNTH)
+    /// 4 = neural (default since 1.4.2: the edge synthesis's output pass composing from RIFE 4.4's fields; the edge synthesis draws an output
+    /// when the network is not there), 1 = edge-aware synthesis from the optical flow (the fallback), 2 = edge-aware without the photometric
+    /// gate, 0 = classic, the crossfade recipe (`video.frame_gen_synthesis`, `--frame-gen-synthesis`, env AIRFRAMEXR_FG_SYNTH)
     fg_synth: i32,
     /// scripted controller input for unattended runs (harness): (seconds after game start, hand, click mask, trigger)
     auto_input: Vec<(f64, usize, u32, f32)>,
@@ -202,7 +203,7 @@ fn parse_args() -> Result<Args, String> {
         settings_file: None,
         fov_quality_explicit: false,
         fg_grid: 4,
-        fg_synth: 1,
+        fg_synth: 4,
         auto_input: vec![],
         qp_map: None,
         encode_mask: None,
@@ -505,10 +506,11 @@ fn parse_on_off(flag: &str, v: &str) -> Result<bool, String> {
 
 fn parse_fg_synth(v: &str) -> Result<i32, String> {
     match v.to_ascii_lowercase().as_str() {
+        "neural" | "4" => Ok(4),
         "edge" | "1" => Ok(1),
         "edge-blend" | "2" => Ok(2),
         "classic" | "crossfade" | "0" => Ok(0),
-        o => Err(format!("--frame-gen-synthesis edge|edge-blend|classic, got {o}")),
+        o => Err(format!("--frame-gen-synthesis neural|edge|edge-blend|classic, got {o}")),
     }
 }
 
@@ -1897,17 +1899,19 @@ fn enable_frame_gen(origin: Instant, handle: *mut std::ffi::c_void, args: &Args)
     unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 4096) };
     let stats = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
     if ok {
+        let sv = serde_json::from_str::<serde_json::Value>(&stats).ok();
         logs::general("INFO", &format!("frame generation ON: rate {}, flow scale {:.2}, perf {}, grid {}, synthesis {}; {}", args.fg_rate.unwrap_or(FgRate::Half).name(), FG_FLOW_SCALE, FG_PERF, args.fg_grid,
-            match args.fg_synth { 0 => "classic", 2 => "edge-blend", _ => "edge" },
-            serde_json::from_str::<serde_json::Value>(&stats).ok().map(|v| {
-                let info = v["info"].as_str().unwrap_or_default().to_string();
-                // neural fields (AIRFRAMEXR_FG_NEURAL=1): running, or the reason they are not (the edge synthesis then draws every output)
-                match (v["neural"]["on"].as_i64(), v["neural"]["info"].as_str()) {
-                    (Some(1), _) => format!("{info}; neural fields {}x{} per eye", v["neural"]["size"][0], v["neural"]["size"][1]),
-                    (_, Some(why)) if !why.is_empty() => format!("{info}; neural requested but off: {why}"),
-                    _ => info,
-                }
-            }).unwrap_or_default()));
+            match args.fg_synth { 0 => "classic", 2 => "edge-blend", 4 => "neural", _ => "edge" },
+            sv.as_ref().and_then(|v| v["info"].as_str()).unwrap_or_default()));
+        // the neural fields (synthesis "neural", the default): running, or the reason they are not (the edge synthesis then draws every output);
+        // debug mode only
+        if let Some(v) = &sv {
+            match (v["neural"]["on"].as_i64(), v["neural"]["info"].as_str()) {
+                (Some(1), info) => logs::general("DEBUG", &format!("frame generation neural fields {}x{} per eye: {}", v["neural"]["size"][0], v["neural"]["size"][1], info.unwrap_or_default())),
+                (_, Some(why)) if !why.is_empty() => logs::general("DEBUG", &format!("frame generation neural fields off: {why}")),
+                _ => {}
+            }
+        }
     } else {
         let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();
         logs::general("WARN", &format!("frame generation requested but unavailable, streaming without it: {msg}"));
@@ -2964,10 +2968,10 @@ fn main() {
                                 ct["late"].as_u64().unwrap_or(0), ct["corrections"].as_u64().unwrap_or(0), ct["waits"].as_u64().unwrap_or(0),
                                 ct["wait_ms_avg"].as_f64().unwrap_or(0.0), ct["wait_ms_max"].as_f64().unwrap_or(0.0)));
                         }
-                        // neural fields (lab switch AIRFRAMEXR_FG_NEURAL=1, fg-neural): whether they run, how often, at what cost, or why not
+                        // the neural fields: whether they run, how often, at what cost, or why not (debug mode only)
                         let nr = &g["neural"];
                         if nr["on"].as_i64() == Some(1) {
-                            logs::run_line(logs::Level::Info, "perf", format!("frame generation neural: RIFE 4.4 fields {}x{} per eye, {} runs, {} outputs composed, {} failures, GPU {:.2} ms (mean {:.2}), CPU {:.2} ms per run{}",
+                            logs::run_line(logs::Level::Debug, "perf", format!("frame generation neural: RIFE 4.4 fields {}x{} per eye, {} runs, {} outputs composed, {} failures, GPU {:.2} ms (mean {:.2}), CPU {:.2} ms per run{}",
                                 nr["size"][0].as_i64().unwrap_or(0), nr["size"][1].as_i64().unwrap_or(0), nr["runs"].as_u64().unwrap_or(0), nr["outputs"].as_u64().unwrap_or(0),
                                 nr["failures"].as_u64().unwrap_or(0), nr["ms"].as_f64().unwrap_or(0.0), nr["ms_avg"].as_f64().unwrap_or(0.0), nr["cpu_ms"].as_f64().unwrap_or(0.0),
                                 nr["info"].as_str().filter(|i| *i != "on" && !i.is_empty()).map(|i| format!("; last: {i}")).unwrap_or_default()));

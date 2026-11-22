@@ -1,6 +1,6 @@
 # The neural frame generation network: RIFE 4.4 in our own CUDA (the recipe)
 
-Lab, branch `fg-neural` (2026-11-22). The streamer's neural fields (docs/FRAME_GENERATION.md "Neural fields") come from one small DLL we build
+Since 1.4.2 (2026-11-22, on by default). The streamer's neural fields (docs/FRAME_GENERATION.md "Neural fields") come from one small DLL we build
 ourselves: RIFE 4.4's network, hard-coded, as a chain of our CUDA kernels and CUTLASS convolutions. This page is the recipe: what the code
 reproduces from the model, the weight layout, the build, the checks, and what to change for a new CUDA, CUTLASS or RIFE.
 
@@ -22,9 +22,10 @@ other inference engines (libaji / animejanai-inference has no licence).
 
 ## Build: one command, pinned inputs, same bytes every time
 
-On the Windows builder, with a Python that has torch (CPU is enough; the lab's `rife_lab\venv`):
+On the Windows builder (`python3 harness/run.py build neural` does this into `out\neural`; `harness/bundle.py` runs it; the package ships
+both files in `bin\neural` and fails without them):
 
-    powershell -ExecutionPolicy Bypass -File nvenc\rife\build.ps1 -Out <dir> -Python <python.exe>
+    powershell -ExecutionPolicy Bypass -File nvenc\rife\build.ps1 -Out <dir> [-Python <python.exe>]
 
 | pin | value |
 |---|---|
@@ -32,14 +33,15 @@ On the Windows builder, with a Python that has torch (CPU is enough; the lab's `
 | C++ | Visual Studio 2022 (cl 19.44), found by vswhere |
 | CUTLASS | 4.8.1, `https://github.com/NVIDIA/cutlass/archive/refs/tags/v4.8.1.zip`, SHA-256 `3bae692a...a296e5` (headers only) |
 | RIFE 4.4 | `https://github.com/HolyWu/vs-rife/releases/download/model/flownet_v4.4.pkl`, SHA-256 `a0515728...30d5fa` |
+| Python | 3, standard library only (`export_weights.py` reads PyTorch's zip checkpoint itself; same bytes as a torch + numpy export) |
 | flags | `-O3 -std=c++17 --shared -cudart static -DNDEBUG --expt-relaxed-constexpr`, cl `/MT /O2 /EHsc /Zc:__cplusplus /Zc:preprocessor /utf-8`, link `/Brepro`, gencode sm_86 + sm_120 + compute_86 PTX |
 
 The script downloads the two inputs into `external/rife-build` when missing and stops on a hash mismatch, checks nvcc's version (`-AnyVersion`
 to build with another), exports the weights, compiles (about 10 s), and writes `build_manifest.txt`: every tool version, input and output hash,
 no dates. Two builds on 2026-11-22 gave identical files: DLL `db667cbc...`, weights `c844ab0f...` (the manifest has the full hashes).
 
-Not wired into `harness/run.py` or the release packaging yet: the DLL is built apart (the CUDA toolkit is only on the 5090 builder) and copied
-into `target\release\neural` (lab) or the install's `bin\neural`.
+The builder needs the CUDA toolkit (today only the 5090 has it). For the lab's `target\release` host, copy `out\neural\*` into
+`target\release\neural`.
 
 Pitfalls met: CUDA 13's CCCL refuses MSVC's traditional preprocessor (`/Zc:preprocessor`; cl's own message never showed, nvcc said only
 "error 0x2"); CUTLASS's device convolution header must come after the kernel header (`implicit_gemm_tensor_c_size`).
@@ -129,6 +131,7 @@ Frame generation judge (docs/FRAME_GENERATION_JUDGE.md), neural minus edge, boun
 output composed from the fields, 0 failures, 90 fps held).
 
 Not tested: the sm_86 machine code on an RTX 30 / 40 (built, never run), the PTX path, a game with this DLL, any PC but the 5090 builder.
+The streamer's neural log lines are debug-level (debug mode only).
 
 ## Tiles and what was measured
 

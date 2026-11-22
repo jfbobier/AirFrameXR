@@ -163,11 +163,12 @@ pub fn log_line_both(level: Level, component: &'static str, msg: String) {
     }
 }
 
-/// One line in the general log, from the host: "time LEVEL [host] message". `level` is "INFO", "WARN" or "ERROR".
+/// One line in the general log, from the host: "time LEVEL [host] message". `level` is "INFO", "WARN", "ERROR" or "DEBUG" (shown in debug mode only).
 pub fn general(level: &str, msg: &str) {
     let l = match level {
         "ERROR" => Level::Error,
         "WARN" => Level::Warn,
+        "DEBUG" => Level::Debug,
         _ => Level::Info,
     };
     log_line(l, "host", false, msg.to_string());

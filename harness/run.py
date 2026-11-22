@@ -299,6 +299,17 @@ def build(what):
                 print(o[-1200:])
                 return 2
             continue
+        if w == "neural":    # the neural frame generation network: airframexr_rife.dll + rife44.afxw in out\\neural (nvenc/rife/build.ps1, docs/NEURAL_RIFE_CUDA.md)
+            lib.b_run("if not exist nvenc\\rife mkdir nvenc\\rife")
+            for f in sorted((lib.ROOT / "nvenc/rife").glob("*")):
+                lib.b_put(f, f"nvenc/rife/{f.name}")
+            r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage25_neural.ps1"], cwd=lib.ROOT, capture_output=True)
+            o = r.stdout.decode(errors="replace").replace("\x00", "")
+            print(f"build neural: {'ok' if 'RESULT: OK' in o else 'FAILED'}")
+            if "RESULT: OK" not in o:
+                print(o[-3000:])
+                return 2
+            continue
         if w == "nvenc":
             subprocess.run(["bash", str(lib.BUILDER), "put", "nvenc/.", "nvenc/"], cwd=lib.ROOT)
             r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage6_nvenc.ps1"], cwd=lib.ROOT)

@@ -485,7 +485,6 @@ FrameGen::~FrameGen() {
 bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errlen) {
     Impl& I = *m_i;
     I.cfg = cfg;
-    if (const char* v = getenv("AIRFRAMEXR_FG_NEURAL")) I.cfg.neural = atoi(v) != 0;
     if (const char* v = getenv("AIRFRAMEXR_FG_NEURAL_SCALE")) I.cfg.neuralScale = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_NEURAL_STILL")) I.cfg.neuralStill = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_NEURAL_STILL_PX")) I.cfg.neuralStillPx = (float)atof(v);

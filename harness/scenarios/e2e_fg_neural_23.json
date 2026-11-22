@@ -54,7 +54,7 @@
     "running_start_ms": 2.0,
     "frame_gen": "on",
     "env": {
-      "AIRFRAMEXR_FG_NEURAL": "1"
+      "AIRFRAMEXR_FG_SYNTH": "neural"
     },
     "frame_gen_rate": "two_thirds"
   },

@@ -1493,7 +1493,7 @@ def analyse_fg(hs, host_fps=None):
     })
     out["gpu_share"] = round(out["gpu_ms_per_s"] / 1000.0, 4)
     nr = g1.get("neural")
-    if isinstance(nr, dict):   # fg-neural: the neural fields' counters (AIRFRAMEXR_FG_NEURAL=1); their GPU time is CUDA's, outside flow_ms / synth_ms
+    if isinstance(nr, dict):   # the neural fields' counters (synthesis "neural"); their GPU time is CUDA's, outside flow_ms / synth_ms
         out["neural"] = {"on": nr.get("on") == 1, "size": nr.get("size"), "runs": nr.get("runs"), "outputs": nr.get("outputs"), "failures": nr.get("failures"),
                          "gpu_ms_avg": nr.get("ms_avg"), "cpu_ms": nr.get("cpu_ms"), "info": nr.get("info"), "synths_total": g1.get("synths"),
                          "gpu_ms_per_s": round(float(nr.get("ms_avg") or 0) * pairs_s, 2)}

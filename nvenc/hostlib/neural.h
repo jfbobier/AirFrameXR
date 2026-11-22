@@ -1,4 +1,4 @@
-// Neural frame generation fields (fg-neural branch, lab): RIFE 4.4's motion and blend fields for a pair of rendered frames, computed by our own
+// Neural frame generation fields (on by default since 1.4.2): RIFE 4.4's motion and blend fields for a pair of rendered frames, computed by our own
 // CUDA network (nvenc/rife, docs/NEURAL_RIFE_CUDA.md) at a fraction of the eye resolution. The streamer's own output pass composes the picture at
 // full resolution from these fields (framegen.cpp neuralSynth): one sample of each original frame.
 //
