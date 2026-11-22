@@ -85,6 +85,30 @@ the one SteamVR's compositor runs with, so the encoder's copy never queues behin
 
 - **Phase lock** (`tools/host/src/phase.rs`): from the headset's own reports of how long a decoded frame waited for its render tick, it slides the host's display grid in steps of at most 2 ms, no more than one per two evaluations, until the earliest arrivals sit about 7 ms before the tick; the game's release, the pick, the encode and the send all follow that grid. It needs about 4.5 s to settle at a game's start, which is why a pacing check must not judge a run shorter than that (`e2e_baseline` measures the drift from 0.5 s after the last correction and runs 900 frames).
 
+## Frame generation and its neural engine (1.4.2)
+
+Frame generation (`nvenc/hostlib/framegen.cpp`, docs/FRAME_GENERATION.md) runs on the **host encoder thread**, on the encoder's D3D11 device
+and immediate context: no thread of its own, no extra copy of the stream frame on the way to NVENC. Per rendered frame the encoder thread
+copies the slot into a short history, turns the older frame of the pair into the newer frame's camera (the head's rotation and the measured
+camera turn removed) and runs NVIDIA Optical Flow on the pair (the driver's `nvofapi64.dll`). Per output boundary it draws the picture
+(mode 0 = a real frame re-rotated, mode 1 = a generated one at time t) and encodes it.
+
+**The neural fields** (synthesis `neural`, the default since 1.4.2; `nvenc/hostlib/neural.cpp`, `nvenc/rife/`, docs/NEURAL_RIFE_CUDA.md):
+
+| Step | Where | What |
+|---|---|---|
+| prep | D3D11 compute pass | both frames of the pair at half the eye's resolution (padded to multiples of 32), the older one in the newer camera, as planar floats into structured buffers registered with CUDA |
+| map | CUDA driver API (`nvcuda.dll`, no toolkit), the D3D11 adapter's primary context, one stream | `cuGraphicsMapResources` orders the network after the D3D11 work |
+| network | `bin\neural\airframexr_rife.dll` (our CUDA + CUTLASS, loaded by name, interface number checked), weights `rife44.afxw` | RIFE 4.4: per block a pack kernel (the warp computed only where the downscale reads), 10 implicit-GEMM convolutions, the last one, an upscale-and-add into the fields (flow to each frame, blend mask) |
+| unmap | CUDA | orders the D3D11 output pass after the network |
+| output | the edge synthesis's pixel shader (`neuralSynth`) | one sample of each original frame through the fields and the rotation chain, the older frame outside the newer view, still content kept exact |
+
+The fields belong to one output time: run once per pair when the outputs keep one time (the 1/2 rate), else once per output (1.5x, 3x).
+The optical flow keeps running (the camera turn measures from it, the fallback draws from it). The fallback, the edge synthesis from the
+optical flow, draws every output when the user picks `edge`, when the network's files are missing, on a GPU before compute capability 8.0
+(RTX 30) or after a failure (logged in debug mode). The network enqueues in a fraction of a millisecond of the encoder thread's CPU and
+costs GPU time on the shader cores the game also uses (docs/NEURAL_RIFE_CUDA.md "Checks"); its buffers are allocated once.
+
 ## Field of view in 1.4
 
 One rule holds the design together: **the engine never knows the headset type.** Everything headset-specific is computed by the launcher's session compile (from the headset profile in `profiles\`) and reaches the engine through the parameters it already reads (`session.json`, `airframexr.json`, host stdin commands), or lives in our own headset apps. The plan and its measurements: `docs/FOV_CONTRACT_PLAN.md`.
