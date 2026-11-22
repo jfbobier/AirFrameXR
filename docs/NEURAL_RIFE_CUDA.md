@@ -38,7 +38,10 @@ both files in `bin\neural` and fails without them):
 
 The script downloads the two inputs into `external/rife-build` when missing and stops on a hash mismatch, checks nvcc's version (`-AnyVersion`
 to build with another), exports the weights, compiles (about 10 s), and writes `build_manifest.txt`: every tool version, input and output hash,
-no dates. Two builds on 2026-11-22 gave identical files: DLL `db667cbc...`, weights `c844ab0f...` (the manifest has the full hashes).
+no dates. Two builds in the same folder give identical files; the weights are identical anywhere (`c844ab0f...`), the DLL is not: built from
+the same source in another folder (the release builder's against the lab's) its bytes differ (nvcc names a file's internal symbols after its
+path), its results do not (`check_rife_cuda.py` on the 1.4.2 release DLL: the same flow and mask differences as the tested build, 1.81 ms at
+960 x 1184).
 
 The builder needs the CUDA toolkit (today only the 5090 has it). For the lab's `target\release` host, copy `out\neural\*` into
 `target\release\neural`.
