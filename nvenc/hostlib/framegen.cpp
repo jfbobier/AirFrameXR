@@ -35,7 +35,7 @@ cbuffer CB : register(b0) {
     float4 mode;            // x: pass mode, y: max flow (full-res px), z: confidence gain
     float4 flowIn;          // PSUnpack: x flow-input width of one eye, y flow-input height, z max flow (full-res px)
     float4 synth;           // output pass: x 1 = edge-aware synthesis (else the classic crossfade recipe), y motion limit (full-res px), z cost scale, w photometric scale
-    float4 neur;            // output pass, neural fields (FG_NEURAL): x 1 = compose from them, y still gate colour threshold, z still gate motion (full-res px)
+    float4 neur;            // output pass, neural fields (FG_NEURAL): x 1 = compose from them, y still gate colour threshold, z still gate motion (full-res px), w 1 = the run was reversed
     float4 neurDims;        // the fields' used width and height, padded width and height (network pixels)
 };
 Texture2D cur : register(t0);
@@ -284,9 +284,11 @@ float3 neuralSynth(float2 uvB, float t) {
     const int2 p0 = int2(floor(p));
     const int2 p1 = min(p0 + 1, int2(neurDims.xy) - 1);
     const float2 f = p - float2(p0);
-    const float4 fl = float4(nLerp(nFlow, (e * 4 + 0) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 1) * pl, W, p0, p1, f),
-                             nLerp(nFlow, (e * 4 + 2) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 3) * pl, W, p0, p1, f));
-    const float wA = 1.0 / (1.0 + exp(-nLerp(nMask, e * pl, W, p0, p1, f)));
+    float4 fl = float4(nLerp(nFlow, (e * 4 + 0) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 1) * pl, W, p0, p1, f),
+                       nLerp(nFlow, (e * 4 + 2) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 3) * pl, W, p0, p1, f));
+    float lg = nLerp(nMask, e * pl, W, p0, p1, f);
+    if (neur.w > 0.5) { fl = fl.zwxy; lg = -lg; }   // a reversed run (newer frame first, at 1 - t): back to (to the older, to the newer), the older's weight
+    const float wA = 1.0 / (1.0 + exp(-lg));
     const float2 toUv = 1.0 / neurDims.xy;
     const float3 cb = fetchCR(cur, sbs(clamp(uvB + fl.zw * toUv, 0, 1)));
     float3 ca;
@@ -454,7 +456,7 @@ struct FrameGen::Impl {
     void effQ(int k, int e, float* o) const { withYaw(realQ[k] + e * 4, cfg.camTurn ? camYaw[k] : 0.0, o); }
     // neural fields (cfg.neural): the network, and which pair and time its fields belong to (one set: the pair being shown)
     std::unique_ptr<NeuralFields> neural;
-    int neuralPair = -1; float neuralT = -1.f;
+    int neuralPair = -1; float neuralT = -1.f; bool neuralRev = false;
     // the times of the two latest synthetic outputs: equal (the 1/2 rate's 0.5) = a steady pattern, worth running a new pair's fields early, at
     // that time; different (2/3 rate: about 2/3 then 1/3; 1/3 rate: 1/3 and 2/3 within each pair) = each output runs its own
     float lastSynthT[2] = { 0.5f, 0.5f };
@@ -800,6 +802,16 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     return true;
 }
 
+// RIFE 4.4 puts the content at the time it is asked for only in part of 0..1 (measured 2026-11-22 on the judge's walking scenes,
+// harness/rife/t_linearity.py; the PyTorch model does the same): below about 0.12 the content goes the wrong way (asked 0.05, it delivers -0.2),
+// just above 0.5 it sticks to 0.5 (0.55 -> 0.518), above about 0.9 it is off; 0.15-0.45 and 0.6-0.9 are within 0.02. The 1.5x rate and the
+// uncapped mode ask for any time (field 2026-11-22, Hellraiser at 1.5x: a third of the outputs in those zones, the view wobbling). So: an output
+// within kNeuralEdgeLo / kNeuralEdgeHi of a rendered frame is drawn by the edge synthesis (the optical flow scaled by t: exact in time; the judge
+// at t = 0.05: neural -15.0 dB against it, showing the rendered frame instead -0.7 dB; at 0.95: -1.7 and -2.1), and between 0.5 and
+// kNeuralRevHi the pair runs reversed (newer frame first, at 1 - t: 0.55 -> 0.547; judge +0.54 -> +0.81 dB over edge). The fixed rates' times
+// (1/2, 1/3, 2/3) are outside both: unchanged (judge identical).
+static constexpr float kNeuralEdgeLo = 0.12f, kNeuralEdgeHi = 0.90f, kNeuralRevHi = 0.60f;
+
 // Neural fields of pair (n-1, n) at time t: the older frame turned into the newer one's camera (the effective views, camera turn included), as the
 // optical flow sees them. On success the output pass may compose from them; a failure leaves the edge synthesis for this output.
 bool FrameGen::neuralPass(int n, float t) {
@@ -814,14 +826,16 @@ bool FrameGen::neuralPass(int n, float t) {
         rows(m, rot[e], rot[e] + 4, rot[e] + 8);
     }
     char e2[200] = "";
-    if (!I.neural->Run(I.realSrv[prev], I.realSrv[n], rot, I.fov8, t, e2, sizeof e2)) {
+    const bool rev = t > 0.5f && t < kNeuralRevHi;
+    if (!I.neural->Run(I.realSrv[prev], I.realSrv[n], rot, I.fov8, rev ? 1.f - t : t, rev, e2, sizeof e2)) {
         stats.neuralFailures++;
         snprintf(stats.neuralInfo, sizeof stats.neuralInfo, "run failed: %s", e2);
         I.neuralPair = -1;
         return false;
     }
-    I.neuralPair = n; I.neuralT = t;
+    I.neuralPair = n; I.neuralT = t; I.neuralRev = rev;
     stats.neuralRuns++;
+    if (rev) stats.neuralReversed++;
     return true;
 }
 
@@ -861,7 +875,9 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     }
     // neural fields: this pair's, at this output's time
     bool neuralOk = false;
-    if (I.neural && mode == 1 && havePair) {
+    if (I.neural && mode == 1 && havePair && (t < kNeuralEdgeLo || t > kNeuralEdgeHi)) {
+        stats.neuralEdgeNear++;   // the network is wrong this close to a rendered frame (kNeuralEdgeLo above): the edge synthesis draws it
+    } else if (I.neural && mode == 1 && havePair) {
         // this output's own time: fields of another time are run again (a 0.01 tolerance: the steady 1/2 rate reuses its early run)
         neuralOk = (I.neuralPair == n && std::fabs(t - I.neuralT) <= 0.01f) || neuralPass(n, t);
         if (neuralOk) stats.neuralOutputs++;
@@ -886,7 +902,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         c.synth[0] = I.cfg.synth ? 1.f : 0.f; c.synth[1] = std::max(1.f, I.cfg.motionLimit * m_w * 0.5f);
         c.synth[2] = I.cfg.costScale; c.synth[3] = I.cfg.photoScale;
         if (neuralOk) {
-            c.neur[0] = 1.f; c.neur[1] = I.cfg.neuralStill; c.neur[2] = I.cfg.neuralStillPx;
+            c.neur[0] = 1.f; c.neur[1] = I.cfg.neuralStill; c.neur[2] = I.cfg.neuralStillPx; c.neur[3] = I.neuralRev ? 1.f : 0.f;
             c.neurDims[0] = (float)I.neural->NetW; c.neurDims[1] = (float)I.neural->NetH; c.neurDims[2] = (float)I.neural->PadW; c.neurDims[3] = (float)I.neural->PadH;
         }
         float m[9];

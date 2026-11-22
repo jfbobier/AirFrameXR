@@ -1495,6 +1495,7 @@ def analyse_fg(hs, host_fps=None):
     nr = g1.get("neural")
     if isinstance(nr, dict):   # the neural fields' counters (synthesis "neural"); their GPU time is CUDA's, outside flow_ms / synth_ms
         out["neural"] = {"on": nr.get("on") == 1, "size": nr.get("size"), "runs": nr.get("runs"), "outputs": nr.get("outputs"), "failures": nr.get("failures"),
+                         "edge_near": nr.get("edge_near"), "reversed": nr.get("reversed"),
                          "gpu_ms_avg": nr.get("ms_avg"), "cpu_ms": nr.get("cpu_ms"), "info": nr.get("info"), "synths_total": g1.get("synths"),
                          "gpu_ms_per_s": round(float(nr.get("ms_avg") or 0) * pairs_s, 2)}
     if frame:
@@ -2575,9 +2576,18 @@ def evaluate(sc, a):
                     chk(f"fg_{label}", 0 < f.get(label, 0) <= want[k], f.get(label), f"(0, {want[k]}]")
             if want.get("neural"):   # fg-neural: the fields ran and composed (nearly) every generated output, without a failure
                 n = f.get("neural") or {}
-                share = (n.get("outputs") or 0) / max(1, n.get("synths_total") or 0)
-                chk("fg_neural", n.get("on") and (n.get("failures") or 0) == 0 and share >= 0.9, {k: n.get(k) for k in ("on", "size", "runs", "outputs", "failures", "gpu_ms_avg", "gpu_ms_per_s", "cpu_ms", "info")},
+                # (outputs near a rendered frame are the edge synthesis's by design since the 1.4.2 hotfix: not counted as the network's to compose)
+                share = (n.get("outputs") or 0) / max(1, (n.get("synths_total") or 0) - (n.get("edge_near") or 0))
+                chk("fg_neural", n.get("on") and (n.get("failures") or 0) == 0 and share >= 0.9, {k: n.get(k) for k in ("on", "size", "runs", "outputs", "failures", "edge_near", "reversed", "gpu_ms_avg", "gpu_ms_per_s", "cpu_ms", "info")},
                     "neural fields on, 0 failures, >= 90 % of the generated outputs composed from them")
+                # the network's time correction (framegen.cpp kNeuralEdgeLo / kNeuralRevHi): the fixed rates' times (1/2, 1/3, 2/3) never reach it;
+                # the content clock's (1.5x, uncapped) do
+                if want.get("neural_time_fix") == "untouched":
+                    chk("fg_neural_time_fix", (n.get("edge_near") or 0) == 0 and (n.get("reversed") or 0) == 0, {"edge_near": n.get("edge_near"), "reversed": n.get("reversed")},
+                        "0 outputs handed to the edge synthesis, 0 runs reversed (a fixed rate's times are outside the corrected zones)")
+                elif want.get("neural_time_fix") == "engaged":
+                    chk("fg_neural_time_fix", (n.get("edge_near") or 0) > 0 and (n.get("reversed") or 0) > 0, {"edge_near": n.get("edge_near"), "reversed": n.get("reversed")},
+                        "outputs near a rendered frame drawn by the edge synthesis and runs reversed (the content clock asks for times in the corrected zones)")
             for k in ("synth_ms_per_mpx", "flow_ms_per_mpx"):
                 if k in want:   # the cost of one Mpx, whatever the preset: a regression in the passes shows here, a bigger preset does not
                     lo, hi = want[k]

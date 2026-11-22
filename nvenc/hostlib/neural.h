@@ -28,8 +28,10 @@ public:
     // DLLs and the model (UTF-16). false + err: not available (the caller keeps the edge synthesis).
     bool Init(int eyeW, int eyeH, float scale, const wchar_t* dir, char* err, int errlen);
     // The fields of the pair at time t (0 = prev, 1 = cur). prev / cur: the side-by-side frames; rot: per eye three rows (x y z, w unused) turning a
-    // direction of cur's view into prev's view; tan8: per eye l r u d tangents.
-    bool Run(ID3D11ShaderResourceView* prev, ID3D11ShaderResourceView* cur, const float rot[2][12], const float* tan8, float t, char* err, int errlen);
+    // direction of cur's view into prev's view; tan8: per eye l r u d tangents. reversed: the network gets cur first (t is then measured from cur:
+    // the caller passes 1 - t), so the fields come out as (to cur, to prev) with cur's weight; the output pass swaps them back.
+    bool Run(ID3D11ShaderResourceView* prev, ID3D11ShaderResourceView* cur, const float rot[2][12], const float* tan8, float t, bool reversed, char* err,
+             int errlen);
     // flow: per eye 4 planes (x y to prev, x y to cur, network pixels), mask: per eye 1 plane (logit of prev's weight); planes PadW x PadH floats
     ID3D11ShaderResourceView* FlowSrv() const;
     ID3D11ShaderResourceView* MaskSrv() const;

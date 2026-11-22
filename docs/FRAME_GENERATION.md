@@ -186,7 +186,9 @@ pair, the motion from the output time to each frame and a blend mask, at `AIRFRA
 CUDA network (`airframexr_rife.dll`, docs/NEURAL_RIFE_CUDA.md: the recipe, build, checks); the output pass composes the picture at full resolution
 from them (one sample of each original frame through the same rotation chain as the flow; the older frame fills outside the newer view), and
 keeps still content exact where both frames agree within `AIRFRAMEXR_FG_NEURAL_STILL` (0.02) and the fields move less than
-`AIRFRAMEXR_FG_NEURAL_STILL_PX` (1 px). Each output uses fields of its own time (run early per pair at the 1/2 rate, per output at the others).
+`AIRFRAMEXR_FG_NEURAL_STILL_PX` (1 px). The network places the content correctly only for part of the times it can be asked for (docs/NEURAL_RIFE_CUDA.md
+"Output time"): since the 1.4.2 hotfix an output within 0.12 / 0.10 of a rendered frame is the edge synthesis's, and 0.5 < t < 0.6 runs the pair
+reversed (the fixed rates' 1/2, 1/3, 2/3 are untouched; 1.5x and uncapped ask for any time). Each output uses fields of its own time (run early per pair at the 1/2 rate, per output at the others).
 The optical flow keeps running (the camera turn's measurement). Files, loaded at run time from the host's `neural` folder (or
 `AIRFRAMEXR_FG_NEURAL_DIR`): `airframexr_rife.dll` (747 KB, CUTLASS compiled in, BSD-3-Clause) and `rife44.afxw` (10.5 MB of weights), built by
 `nvenc/rife/build.ps1`; CUDA through the driver's nvcuda.dll; RTX 30 or newer. Missing files, a GPU before the RTX 30 series or a failure leave the edge synthesis in charge;

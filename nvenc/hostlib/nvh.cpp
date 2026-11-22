@@ -831,7 +831,7 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
     return snprintf(buf, len, "{\"on\":1,\"ready\":%d,\"info\":\"%s\",\"ingests\":%llu,\"pairs\":%llu,\"synths\":%llu,\"reals\":%llu,\"copies\":%llu,\"flow_errors\":%llu,\"render_errors\":%llu,"
                     "\"flow_ms\":%.2f,\"flow_ms_avg\":%.2f,\"synth_ms\":%.2f,\"synth_ms_avg\":%.2f,\"flow_size\":[%d,%d],\"blocks\":[%d,%d],\"mask_pts\":[%d,%d],\"mask_visible\":[%.3f,%.3f],"
                     "\"cam_turn\":{\"on\":%d,\"last_deg\":%.3f,\"pred_deg\":%.3f,\"agree\":%.2f,\"blocks\":%d,\"cpu_ms\":%.2f,\"measured\":%llu,\"doubtful\":%llu,\"not_ready\":%llu,\"late\":%llu,\"corrections\":%llu,\"waits\":%llu,\"wait_ms_avg\":%.2f,\"wait_ms_max\":%.2f},"
-                    "\"neural\":{\"on\":%d,\"size\":[%d,%d],\"runs\":%llu,\"outputs\":%llu,\"failures\":%llu,\"ms\":%.2f,\"ms_avg\":%.2f,\"cpu_ms\":%.2f,\"info\":\"%s\"}}",
+                    "\"neural\":{\"on\":%d,\"size\":[%d,%d],\"runs\":%llu,\"outputs\":%llu,\"failures\":%llu,\"edge_near\":%llu,\"reversed\":%llu,\"ms\":%.2f,\"ms_avg\":%.2f,\"cpu_ms\":%.2f,\"info\":\"%s\"}}",
                     s.nvofReady ? 1 : 0, info, (unsigned long long)s.ingests, (unsigned long long)s.pairs, (unsigned long long)s.synths, (unsigned long long)s.reals, (unsigned long long)s.copies,
                     (unsigned long long)s.flowErrors, (unsigned long long)s.renderErrors, s.lastFlowMs, s.flowN ? s.flowMsSum / s.flowN : 0.0, s.lastSynthMs,
                     s.synthN ? s.synthMsSum / s.synthN : 0.0, s.flowW, s.flowH, s.blocksW, s.blocksH, s.maskPts[0], s.maskPts[1], s.maskVisible[0], s.maskVisible[1],
@@ -839,7 +839,7 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
                     (unsigned long long)s.camTurnMeasured, (unsigned long long)s.camTurnDoubtful, (unsigned long long)s.camTurnNotReady, (unsigned long long)s.camTurnLate,
                     (unsigned long long)s.camTurnCorrections, (unsigned long long)s.camTurnWaits, s.camTurnWaits ? s.camTurnWaitMsSum / s.camTurnWaits : 0.0, s.camTurnWaitMsMax,
                     s.neuralOn ? 1 : 0, s.neuralW, s.neuralH, (unsigned long long)s.neuralRuns, (unsigned long long)s.neuralOutputs, (unsigned long long)s.neuralFailures,
-                    s.neuralMs, s.neuralMsAvg, s.neuralCpuMs, ninfo);
+                    (unsigned long long)s.neuralEdgeNear, (unsigned long long)s.neuralReversed, s.neuralMs, s.neuralMsAvg, s.neuralCpuMs, ninfo);
 }
 
 void nvh_ipc_set_app_min_period(void* i, uint32_t us) { ((Ipc*)i)->state->host.appMinPeriodUs = us; }

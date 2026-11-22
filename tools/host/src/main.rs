@@ -2971,9 +2971,9 @@ fn main() {
                         // the neural fields: whether they run, how often, at what cost, or why not (debug mode only)
                         let nr = &g["neural"];
                         if nr["on"].as_i64() == Some(1) {
-                            logs::run_line(logs::Level::Debug, "perf", format!("frame generation neural: RIFE 4.4 fields {}x{} per eye, {} runs, {} outputs composed, {} failures, GPU {:.2} ms (mean {:.2}), CPU {:.2} ms per run{}",
-                                nr["size"][0].as_i64().unwrap_or(0), nr["size"][1].as_i64().unwrap_or(0), nr["runs"].as_u64().unwrap_or(0), nr["outputs"].as_u64().unwrap_or(0),
-                                nr["failures"].as_u64().unwrap_or(0), nr["ms"].as_f64().unwrap_or(0.0), nr["ms_avg"].as_f64().unwrap_or(0.0), nr["cpu_ms"].as_f64().unwrap_or(0.0),
+                            logs::run_line(logs::Level::Debug, "perf", format!("frame generation neural: RIFE 4.4 fields {}x{} per eye, {} runs ({} reversed), {} outputs composed, {} drawn by the edge synthesis (time near a rendered frame), {} failures, GPU {:.2} ms (mean {:.2}), CPU {:.2} ms per run{}",
+                                nr["size"][0].as_i64().unwrap_or(0), nr["size"][1].as_i64().unwrap_or(0), nr["runs"].as_u64().unwrap_or(0), nr["reversed"].as_u64().unwrap_or(0),
+                                nr["outputs"].as_u64().unwrap_or(0), nr["edge_near"].as_u64().unwrap_or(0), nr["failures"].as_u64().unwrap_or(0), nr["ms"].as_f64().unwrap_or(0.0), nr["ms_avg"].as_f64().unwrap_or(0.0), nr["cpu_ms"].as_f64().unwrap_or(0.0),
                                 nr["info"].as_str().filter(|i| *i != "on" && !i.is_empty()).map(|i| format!("; last: {i}")).unwrap_or_default()));
                         }
                     }

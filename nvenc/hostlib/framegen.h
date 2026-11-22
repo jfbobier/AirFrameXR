@@ -64,6 +64,7 @@ struct FrameGenStats {
     // failures, GPU ms of the last run and the average, CPU ms of the last Run call, the network's size, what is running or why not
     bool neuralOn = false;
     uint64_t neuralRuns = 0, neuralOutputs = 0, neuralFailures = 0;
+    uint64_t neuralEdgeNear = 0, neuralReversed = 0;   // outputs within 0.12 / 0.10 of a rendered frame, drawn by the edge synthesis; runs made reversed (0.5 < t < 0.6)
     float neuralMs = 0, neuralMsAvg = 0, neuralCpuMs = 0;
     int neuralW = 0, neuralH = 0;
     char neuralInfo[200] = "";

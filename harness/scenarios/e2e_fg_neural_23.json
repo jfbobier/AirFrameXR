@@ -1,5 +1,5 @@
 {
-  "description": "fg-neural at the 2/3 rate (x1.5): the outputs' times vary (about 2/3 and 1/3), each output must be composed from fields of its own time (field 2026-11-22: the 0.5 fields reused for them shook menu text); one network run per generated output, no wasted early run, 0 failures, the display rate held.",
+  "description": "fg-neural at the 2/3 rate (x1.5): the outputs' times vary (about 2/3 and 1/3), each output must be composed from fields of its own time (field 2026-11-22: the 0.5 fields reused for them shook menu text); one network run per generated output, no wasted early run, 0 failures, the display rate held. Since the 1.4.2 hotfix: the content clock asks for any time, so outputs within 0.12 / 0.10 of a rendered frame are drawn by the edge synthesis and 0.5 < t < 0.6 runs the pair reversed (both counted).",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -100,7 +100,8 @@
         0.005,
         0.1
       ],
-      "neural": true
+      "neural": true,
+      "neural_time_fix": "engaged"
     }
   }
 }
