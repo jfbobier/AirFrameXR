@@ -29,11 +29,9 @@ EXPECT = {
         ("run_clean", ["57 ms", "p95 70"], ["n/a"]),   # 2 outliers of 800 samples: still believable
     ],
     "controls_avp": [
-        ("avp_auto", ["headset reports 1.62 m", "Eye height", "Debug logging", "Export logs...", "Open logs folder", "Features", "Frame generation", "Position", "Picture", "Desktop mirror", "button \u2630", "x1.5", "x2", "x3"], ["Between games", "vectors", "1/3", "1/2", "2/3"]),
+        ("avp_auto", ["headset reports 1.62 m", "Eye height", "Debug logging", "Export logs...", "Open logs folder", "Features", "Frame generation", "Position", "Picture", "Desktop mirror", "button \u2630", "x2", "x3"], ["Between games", "vectors", "1/3", "1/2", "2/3", "x1.5", "Uncapped"]),
         ("frame_gen_on", ["sent frame_gen on"], []),
-        ("rate", ["sent frame_gen_rate two_thirds"], []),
-        ("uncapped_on", [], []),   # the Uncapped tick lives in the Advanced window since 2026-10-23 (hidden in the streamer): nothing here to drive or read
-        ("uncapped_off", [], []),
+        ("rate", ["sent frame_gen_rate third"], []),
         ("recenter", ["sent recenter"], []),
         ("manual", ["sent height 1.30"], ["headset reports"]),
         ("height", ["sent height 1.55"], []),

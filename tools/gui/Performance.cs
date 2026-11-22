@@ -226,7 +226,7 @@ namespace AirFrameXR
             return all;
         }
 
-        /// the last run of this game as the general log saw it: a chart for each series the log has (fps, the generation lag, the GPU memory)
+        /// the last run of this game as the general log saw it: a chart for each series the log has (fps, the GPU memory)
         Control Timeline(LogTimeline.Run run)
         {
             if (run == null) return null;
@@ -235,14 +235,11 @@ namespace AirFrameXR
             var charts = new List<TrendChart>();
             if (run.PerfT.Count >= 2 && run.App.Concat(run.Stream).Any(v => v > 0))
             {
-                LogTimeline.Downsample(run.PerfT, run.App, 240, out var pt, out var pa); LogTimeline.Downsample(run.PerfT, run.Stream, 240, out _, out var ps); LogTimeline.Downsample(run.PerfT, run.Lag, 240, out _, out var pl);
+                LogTimeline.Downsample(run.PerfT, run.App, 240, out var pt, out var pa); LogTimeline.Downsample(run.PerfT, run.Stream, 240, out _, out var ps);
                 var fps = new TrendChart { Title = "Frames per second", Labels = pt.Select(Lbl).ToArray(), AxisLabel = l => l.Substring(11, 5) };
                 fps.Series.Add(new TrendSeries { Name = "game", Color = blue, V = pa.ToArray() });
                 fps.Series.Add(new TrendSeries { Name = "streamed", Color = orange, V = ps.ToArray() });
                 charts.Add(fps);
-                var lag = new TrendChart { Title = "Generation lag (ms)", Unit = " ms", Labels = pt.Select(Lbl).ToArray(), AxisLabel = l => l.Substring(11, 5) };
-                lag.Series.Add(new TrendSeries { Name = "lag", Color = grey, V = pl.ToArray() });
-                charts.Add(lag);
             }
             if (run.GpuT.Count >= 2)
             {

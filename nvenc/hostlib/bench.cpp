@@ -473,13 +473,11 @@ void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, in
     auto j = std::make_unique<Fgj>();
     j->fg = std::make_unique<FrameGen>(b->render->GetDevice(), b->render->GetContext());
     FrameGenConfig c;   // the streamer's defaults: flow at half scale, the fast preset, grid 4
-    c.synth = synth == 0 ? 0 : 1;
-    if (synth == 2) c.photoScale = 0.f;   // edge-blend: the edge synthesis without the photometric gate
     if (synth == 4) c.neural = 1;         // edge + RIFE 4.4 fields (neural.h; the host's neural folder; AIRFRAMEXR_FG_NEURAL_SCALE / _STILL / _STILL_PX apply)
     // the streamer's env tuning knobs (nvh_fg_enable reads the same), so the judge measures what a changed knob does
     if (const char* v = getenv("AIRFRAMEXR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_COST_SCALE")) c.costScale = (float)atof(v);
-    if (const char* v = getenv("AIRFRAMEXR_FG_PHOTO_SCALE")) if (synth != 2) c.photoScale = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_PHOTO_SCALE")) c.photoScale = (float)atof(v);
     // the judge's own sweep of the flow engine (the streamer has these fixed: main.rs FG_FLOW_SCALE 0.5, FG_PERF 20, grid 4)
     if (const char* v = getenv("AIRFRAMEXR_FG_JUDGE_PERF")) c.perfLevel = atoi(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_JUDGE_FLOW_SCALE")) c.flowScale = (float)atof(v);

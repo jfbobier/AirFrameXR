@@ -73,10 +73,10 @@ struct Args {
     /// between from the optical flow of the last two rendered frames. None = settings file (`video.frame_gen`, default off); env
     /// AIRFRAMEXR_FRAME_GEN=1/0 and `--frame-gen on|off` win over it.
     frame_gen: Option<bool>,
-    /// frame generation rate (pipeline::FgRate: third | half | two_thirds | uncapped; docs/FRAME_GENERATION.md, docs/FRAME_GENERATION_UNCAPPED.md);
+    /// frame generation rate (pipeline::FgRate: third | half; docs/FRAME_GENERATION.md; an older two_thirds / uncapped setting runs at half);
     /// None = settings `video.frame_gen_rate` ("half" default). `--frame-gen-rate`, env AIRFRAMEXR_FG_RATE.
     fg_rate: Option<FgRate>,
-    /// uncapped mode: fps cap on the game's releases (0 = none), headroom for the host's own GPU work
+    /// the game fps lock (`video.frame_gen_cap_fps`): minimum spacing of the game's releases in every mode (0 = none)
     fg_cap_fps: Option<f64>,
     drop_dup_frames: bool,
     drop_dup_frames_flag: bool,
@@ -91,9 +91,9 @@ struct Args {
     client_sharpen: bool,
     fov_quality_explicit: bool,
     fg_grid: i32,
-    /// 4 = neural (default since 1.4.2: the edge synthesis's output pass composing from RIFE 4.4's fields; the edge synthesis draws an output
-    /// when the network is not there), 1 = edge-aware synthesis from the optical flow (the fallback), 2 = edge-aware without the photometric
-    /// gate, 0 = classic, the crossfade recipe (`video.frame_gen_synthesis`, `--frame-gen-synthesis`, env AIRFRAMEXR_FG_SYNTH)
+    /// 4 = neural (the default: the edge synthesis's output pass composing from RIFE 4.4's fields; the edge synthesis draws an output when the
+    /// network is not there), 1 = edge, the edge-aware synthesis from the optical flow (the user's fallback) (`video.frame_gen_synthesis`,
+    /// `--frame-gen-synthesis`, env AIRFRAMEXR_FG_SYNTH)
     fg_synth: i32,
     /// scripted controller input for unattended runs (harness): (seconds after game start, hand, click mask, trigger)
     auto_input: Vec<(f64, usize, u32, f32)>,
@@ -367,7 +367,7 @@ fn parse_args() -> Result<Args, String> {
             "--predict-missing-head" => a.predict_missing_head = true,
             "--drop-duplicate-frames" => a.drop_dup_frames_flag = true,
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
-            "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half | two_thirds | uncapped")?),
+            "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half")?),
             "--settings" => a.settings_file = Some(v()?.into()),   // lab: the settings file of an installed host, without --install-dir (1.4-foundation E4)
             "--fov-scale" | "--fov-override" | "--fov-ceiling" => {
                 return Err(format!("{k} was removed in 1.4-foundation (E4): the restriction comes from the settings (video.fov_override, fov_outer .. fov_lower; lab: --settings <file>)"));
@@ -508,9 +508,9 @@ fn parse_fg_synth(v: &str) -> Result<i32, String> {
     match v.to_ascii_lowercase().as_str() {
         "neural" | "4" => Ok(4),
         "edge" | "1" => Ok(1),
-        "edge-blend" | "2" => Ok(2),
-        "classic" | "crossfade" | "0" => Ok(0),
-        o => Err(format!("--frame-gen-synthesis neural|edge|edge-blend|classic, got {o}")),
+        // removed in 1.5.0 (the edge synthesis beat them: docs/FRAME_GENERATION.md): an older setting draws with the edge synthesis
+        "edge-blend" | "2" | "classic" | "crossfade" | "0" => Ok(1),
+        o => Err(format!("--frame-gen-synthesis neural|edge, got {o}")),
     }
 }
 
@@ -1682,16 +1682,13 @@ pub(crate) fn push_recent_sample(shared: &Shared, ts: Duration, q: [f32; 4]) {
 }
 
 /// The shim's pacing for the frame-generation rate in force: (release step in display periods, minimum release spacing in us; 0 = none).
-/// Generation off: every boundary, only the user's lock. Third / half: every 3rd / 2nd boundary. Two thirds: free-running held to two thirds of
-/// the display rate (the pipeline refreshes it when the display period changes). Uncapped: free-running. The user's game fps lock
-/// (`frame_gen_cap_fps`) applies in every mode, on top of the rate's own spacing.
-fn fg_pacing(args: &Args, fg_active: bool, display_period_s: f64) -> (u32, u32) {
+/// Generation off: every boundary. x3 / x2: every 3rd / 2nd boundary. The user's game fps lock (`frame_gen_cap_fps`) applies in every mode.
+fn fg_pacing(args: &Args, fg_active: bool) -> (u32, u32) {
     let lock = fps_lock_us(args);
     if !fg_active {
         return (1, lock);
     }
-    let rate = args.fg_rate.unwrap_or(FgRate::Half);
-    (rate.period_mul(), rate.min_period_us(display_period_s).max(lock))
+    (args.fg_rate.unwrap_or(FgRate::Half).period_mul(), lock)
 }
 
 /// The user's game fps lock as a minimum release spacing in us (0 = none).
@@ -1700,9 +1697,8 @@ fn fps_lock_us(args: &Args) -> u32 {
 }
 
 /// Applies `fg_pacing` to the shim (ipc appPeriodMul and appMinPeriodUs).
-fn apply_fg_pacing(ipc: *mut std::ffi::c_void, p: Option<&pipeline::Pipeline>, args: &Args, fg_active: bool) {
-    let period_s = p.map(|p| p.period().as_secs_f64()).unwrap_or(1.0 / args.fps);
-    let (mul, cap) = fg_pacing(args, fg_active, period_s);
+fn apply_fg_pacing(ipc: *mut std::ffi::c_void, args: &Args, fg_active: bool) {
+    let (mul, cap) = fg_pacing(args, fg_active);
     unsafe {
         nvh::nvh_ipc_set_app_period_mul(ipc, mul);
         nvh::nvh_ipc_set_app_min_period(ipc, cap);
@@ -1886,7 +1882,7 @@ fn set_frame_gen_live(origin: Instant, p: &pipeline::Pipeline, args: &Args, want
     }
     drop(g);
     p.set_frame_gen(*fg_active);
-    apply_fg_pacing(ipc, Some(p), args, *fg_active);
+    apply_fg_pacing(ipc, args, *fg_active);
     log_fg_config(origin, args, *fg_active, why);
 }
 
@@ -1901,7 +1897,7 @@ fn enable_frame_gen(origin: Instant, handle: *mut std::ffi::c_void, args: &Args)
     if ok {
         let sv = serde_json::from_str::<serde_json::Value>(&stats).ok();
         logs::general("INFO", &format!("frame generation ON: rate {}, flow scale {:.2}, perf {}, grid {}, synthesis {}; {}", args.fg_rate.unwrap_or(FgRate::Half).name(), FG_FLOW_SCALE, FG_PERF, args.fg_grid,
-            match args.fg_synth { 0 => "classic", 2 => "edge-blend", 4 => "neural", _ => "edge" },
+            match args.fg_synth { 4 => "neural", _ => "edge" },
             sv.as_ref().and_then(|v| v["info"].as_str()).unwrap_or_default()));
         // the neural fields (synthesis "neural", the default): running, or the reason they are not (the edge synthesis then draws every output);
         // debug mode only
@@ -2288,14 +2284,13 @@ fn main() {
             fg_active = enable_frame_gen(origin, p.enc.lock().handle, &args);
             p.set_frame_gen(fg_active);
         }
-        p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half), 0.0);
-        p.set_fps_lock_us(fps_lock_us(&args));
-        apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
+        p.set_frame_gen_rate(args.fg_rate.unwrap_or(FgRate::Half));
+        apply_fg_pacing(ipc, &args, fg_active);
         log_fg_config(origin, &args, fg_active, "start");
         p.start();
         event(origin, "pacing_config", json!({ "running_start_ms": args.running_start_ms,
             "head_wait_ms": args.head_wait_ms, "predict_missing_head": args.predict_missing_head, "ring_slots": 6,
-            "frame_gen": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "app_period_mul": fg_pacing(&args, fg_active, 1.0 / args.fps).0 }));
+            "frame_gen": fg_active, "rate": args.fg_rate.unwrap_or(FgRate::Half).name(), "app_period_mul": fg_pacing(&args, fg_active).0 }));
         #[cfg(feature = "simrig")]
         if let Some(dir) = &args.simrig {
             simrig::set_ipc(ipc_addr);
@@ -2812,16 +2807,16 @@ fn main() {
                     restart_segment(&mut game, &pipeline, ipc, &mut run_windows, &mut run_client0, &mut run_rep0, old_level, &args, &mut run_stats, facts);
                 }
             }
-            // frame generation rate, the fps cap and the content lag from AirFrameXR.exe (live; the settings are read at start too)
+            // frame generation rate and the game fps lock from AirFrameXR.exe (live; the settings are read at start too)
             let rate = vision::FG_RATE_REQ.swap(-1, Ordering::SeqCst);
             if rate >= 0 {
                 let r = FgRate::from_index(rate);
                 let old_level = if fg_active { args.fg_rate.unwrap_or(FgRate::Half).name() } else { "off" };
                 args.fg_rate = Some(r);
                 if let Some(p) = pipeline.as_ref() {
-                    p.set_frame_gen_rate(r, 0.0);
+                    p.set_frame_gen_rate(r);
                 }
-                apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
+                apply_fg_pacing(ipc, &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_rate");
                 {
                     let facts = pipeline_facts(last_views.as_ref(), &args, ipc, eye_size, enc_size, &cur_cfg, fg_active, pipeline.as_ref().map(|p| p.fg_stats_json()), &nvenc_cfg, &run_stats.enc, &compose_ms);
@@ -2831,10 +2826,7 @@ fn main() {
             let cap = vision::FG_CAP_REQ.swap(-1, Ordering::SeqCst);
             if cap >= 0 {
                 args.fg_cap_fps = Some(cap as f64);
-                if let Some(p) = pipeline.as_ref() {
-                    p.set_fps_lock_us(fps_lock_us(&args));
-                }
-                apply_fg_pacing(ipc, pipeline.as_deref(), &args, fg_active);
+                apply_fg_pacing(ipc, &args, fg_active);
                 log_fg_config(origin, &args, fg_active, "frame_gen_cap");
             }
             // game start / end, for the general log and the GUI
@@ -2947,10 +2939,9 @@ fn main() {
                 }
             }
             if fg_active {
-                // bottleneck log for frame generation: the game's own pace (shim envelope, late releases = free-running), the generator's
-                // GPU times, the uncapped mode's lag and repeats, and the GPU's utilisation and clocks (NVML)
+                // bottleneck log for frame generation: the game's own pace (shim envelope, late releases), the generator's GPU times, and the
+                // GPU's utilisation and clocks (NVML)
                 if let Some(p) = pipeline.as_ref() {
-                    let u = p.fg_uncapped_stats();
                     let (mut waits, mut app_ms, mut rel, mut late, mut gh, mut gs) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
                     unsafe { nvh::nvh_ipc_shim_pacing(ipc, &mut waits, &mut app_ms, &mut rel, &mut late, &mut gh, &mut gs) };
                     let mut gb = [0 as std::ffi::c_char; 512];
@@ -2972,16 +2963,16 @@ fn main() {
                         let nr = &g["neural"];
                         if nr["on"].as_i64() == Some(1) {
                             logs::run_line(logs::Level::Debug, "perf", format!("frame generation neural: RIFE 4.4 fields {}x{} per eye, {} runs, {} outputs composed, {} failures, GPU {:.2} ms (mean {:.2}), CPU {:.2} ms per run{}",
-                                nr["size"][0].as_i64().unwrap_or(0), nr["size"][1].as_i64().unwrap_or(0), nr["runs"].as_u64().unwrap_or(0), nr["outputs"].as_u64().unwrap_or(0),
-                                nr["failures"].as_u64().unwrap_or(0), nr["ms"].as_f64().unwrap_or(0.0), nr["ms_avg"].as_f64().unwrap_or(0.0), nr["cpu_ms"].as_f64().unwrap_or(0.0),
+                                nr["size"][0].as_i64().unwrap_or(0), nr["size"][1].as_i64().unwrap_or(0), nr["runs"].as_u64().unwrap_or(0),
+                                nr["outputs"].as_u64().unwrap_or(0), nr["failures"].as_u64().unwrap_or(0), nr["ms"].as_f64().unwrap_or(0.0), nr["ms_avg"].as_f64().unwrap_or(0.0), nr["cpu_ms"].as_f64().unwrap_or(0.0),
                                 nr["info"].as_str().filter(|i| *i != "on" && !i.is_empty()).map(|i| format!("; last: {i}")).unwrap_or_default()));
                         }
                     }
                     // the shim's counters restart with every game: a smaller value is a new game's own count, not a negative delta (gears 2026-10-20: 1.8e19 "releases late")
                     let (d_rel, d_late) = if rel < perf_rel || late < perf_late { (rel, late) } else { (rel - perf_rel, late - perf_late) };
                     (perf_rel, perf_late) = (rel, late);
-                    logs::run_line(logs::Level::Info, "perf", format!("frame generation perf: app {:.1} fps (envelope {app_ms:.1} ms, {d_late}/{d_rel} releases late), stream {:.1} fps, game period {:.1} ms (p50 {:.1} p95 {:.1} max {:.1}), lag {:.1} ms (slack p5 {:.1} p50 {:.1}), mean t {:.2} mean age {:.2}, behind {} ahead {}, gpu [{gpu}]",
-                        rendered as f64 / secs, streamed as f64 / secs, u.game_period_ms, u.interval_p50, u.interval_p95, u.interval_max, u.lag_ms, u.slack_p5, u.slack_p50, u.mean_t, u.mean_age, u.behind, u.ahead));
+                    logs::run_line(logs::Level::Info, "perf", format!("frame generation perf: app {:.1} fps (envelope {app_ms:.1} ms, {d_late}/{d_rel} releases late), stream {:.1} fps, gpu [{gpu}]",
+                        rendered as f64 / secs, streamed as f64 / secs));
                     // the tracking samples the outputs are stamped with: skipped boundaries (none newer than the last sent frame), waits for one,
                     // stamps that left one in hand, and the spacing of the headset's samples at the host (the cause of the misses, 2026-10-16)
                     let now_fg = [p.fg_synths.load(Ordering::Relaxed), p.fg_reals.load(Ordering::Relaxed), p.fg_no_sample.load(Ordering::Relaxed),
@@ -2998,9 +2989,7 @@ fn main() {
                     event(origin, "fg_perf", json!({ "app_fps": rendered as f64 / secs, "stream_fps": streamed as f64 / secs, "app_envelope_ms": app_ms,
                         "outputs": outputs, "no_sample": d[2], "sample_waits": d[3], "sample_wait_ms_sum": d[4] as f64 / 1000.0, "in_hand": d[5], "stale_stamps": d[6],
                         "tracking_gap_p95_ms": gap_p95, "tracking_gap_max_ms": gap_max, "tracking_gaps_over_15ms": gap_over15, "tracking_gaps": gap_n,
-                        "releases": d_rel, "releases_late": d_late, "slot_waits": waits, "game_period_ms": u.game_period_ms, "lag_ms": u.lag_ms, "mean_t": u.mean_t,
-                        "unc_synths": u.synths, "mean_age": u.mean_age, "behind": u.behind, "ahead": u.ahead, "arrivals": u.arrivals, "slack_ms_p5": u.slack_p5, "slack_ms_p50": u.slack_p50,
-                        "interval_ms_p50": u.interval_p50, "interval_ms_p95": u.interval_p95, "interval_ms_max": u.interval_max, "gpu_csv": gpu,
+                        "releases": d_rel, "releases_late": d_late, "slot_waits": waits, "gpu_csv": gpu,
                         "rate": args.fg_rate.unwrap_or(FgRate::Half).name(),
                         "gen": serde_json::from_str::<serde_json::Value>(&gen).unwrap_or(serde_json::Value::Null) }));
                 }
@@ -3054,7 +3043,7 @@ fn main() {
                         fg_active = enable_frame_gen(origin, g.handle, &args);
                         let p = pipeline.as_ref().expect("pipeline");
                         p.set_frame_gen(fg_active);
-                        apply_fg_pacing(ipc, Some(p.as_ref()), &args, fg_active);
+                        apply_fg_pacing(ipc, &args, fg_active);
                     }
                     nvenc_cfg = describe_encoder(origin, g.handle, &args.dump_qpmap);
                     save_gpu_info(&args.config_dir.join("airframexr_gpu.json"), &gpu_info, &nvenc_cfg);

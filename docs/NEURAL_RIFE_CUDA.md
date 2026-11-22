@@ -130,11 +130,34 @@ Time, both eyes: 0.72 ms at 544 x 576 per eye, 1.82 ms at 960 x 1184 (back-to-ba
 and 1.77 ms (1920 x 2368 eyes); in the streamer path (`e2e_fg_neural`, 880 x 800, the probe loading the GPU) 1.24 ms, CPU 0.28 ms per run.
 
 Frame generation judge (docs/FRAME_GENERATION_JUDGE.md), neural minus edge, boundary band PSNR: +0.91 dB (60 cases, 1032 x 1104; t = 1/3:
-+0.89), +1.04 dB (36 cases, 1920 x 2368), within 0.002 dB of the earlier runtime. `e2e_fg_neural` and `e2e_fg_neural_23` pass (every generated
++0.89), +1.04 dB (36 cases, 1920 x 2368), within 0.002 dB of the earlier runtime. `e2e_fg_neural` (x2) and `e2e_fg_neural_13` (x3) pass (every generated
 output composed from the fields, 0 failures, 90 fps held).
 
-Not tested: the sm_86 machine code on an RTX 30 / 40 (built, never run), the PTX path, a game with this DLL, any PC but the 5090 builder.
+Played (the author, 5090 + Vision Pro, 2026-11-22): Hellraiser at x2 with this DLL, "works incredibly well"; at 1.5x the view wobbled (see
+"Output time": the 1.5x rate was removed in 1.5.0). Not tested: the sm_86 machine code on an RTX 30 / 40 (built, never run), the PTX path, any PC
+but the 5090.
 The streamer's neural log lines are debug-level (debug mode only).
+
+## Output time: why only x2 and x3 (2026-11-22, 1.5.0)
+
+Field (the author, Hellraiser at 1.5x on 1.4.2): the view wobbled around its average; 2x and 3x were clean. The 1.5x rate and the uncapped mode
+followed the game's real timing (a content clock), so each output asked the network for another time t anywhere in 0..0.98; 2x asks for 0.5,
+3x for 1/3 and 2/3. RIFE 4.4 does not put the content at every asked time (`harness/rife/t_linearity.py`, 5 walking scenes; the PyTorch model
+gives the same numbers, so it is the model, not this port):
+
+| asked t | where the content lands | judge, neural minus edge (band PSNR, 60 cases) |
+|---|---|---|
+| 0.02-0.10 | wrong: behind frame 0 (-0.13 at 0.05) | -15.0 dB at 0.05 (0 of 60) |
+| 0.15-0.45, 0.6-0.85, 0.5 | within 0.02 (1/3: 0.322, 0.5: 0.499, 2/3: 0.668) | +0.89 at 1/3, +0.91 at 0.5, +0.71 at 2/3 |
+| 0.5-0.6 | stuck near 0.5 (0.55: 0.519) | +0.54 at 0.55 |
+| 0.9-0.98 | beyond frame 1 | -1.7 dB at 0.95 |
+
+In that 1.5x session 31.8 % of the outputs asked for one of the weak zones. A 1.4.2 hotfix (never released) handed the outputs near a rendered
+frame to the edge synthesis and ran 0.5-0.6 with the pair reversed (0.55 -> 0.547): it stopped the wobble, but in the headset 1.5x was then no
+better than the optical-flow generation, and x2 looked better. 1.5.0 keeps the fixed rates only (x2: t = 1/2, x3: t = 1/3 and 2/3, all inside
+the range where the network is right) and removed the content clock, the hotfix and the 1.5x / uncapped modes. OFXR-Bridge's RIFE backend made
+the same choice: whole multipliers, RIFE sampled at fixed fractions whatever the timing jitter (their V741 / V795). `t_linearity.py` stays as
+the regression check of the network's output time.
 
 ## Tiles and what was measured
 

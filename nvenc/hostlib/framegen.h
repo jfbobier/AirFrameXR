@@ -4,11 +4,10 @@
 // flow between the previous rendered frame A (rotated into B's camera first, so the flow is in-scene motion only, never head rotation) and B
 // with the GPU's optical-flow engine (NVIDIA Optical Flow API, driver nvofapi64.dll, Turing and later), and renders either B itself or the
 // midpoint between A and B, rotated to the head sample the frame is stamped with. The output texture has the frame's size and format and
-// feeds the usual foveation pass + NVENC like a shim slot. Two syntheses, our own D3D11 passes (no third-party code; the flow comes from the
-// NVIDIA Optical Flow SDK directly): the edge-aware one (default) re-implements ideas studied in VectorXR (vector median, source-solved flow,
-// per-pixel candidate choice at motion boundaries, doubtful motion shrinks toward the still frame); the classic one (crossfade) the recipe
-// studied in OFXR-Bridge (rotation-compensated residual flow, confidence from colour disagreement and the engine's cost, crossfade fallback),
-// kept as the predictable fallback.
+// feeds the usual foveation pass + NVENC like a shim slot. Two syntheses, our own passes: neural (the default: RIFE 4.4's motion and blend
+// fields, our CUDA network, composed in the output pass; neural.h) and edge (the fallback: the optical flow's vectors, ideas studied in
+// VectorXR re-implemented: vector median, source-solved flow, per-pixel candidate choice at motion boundaries, doubtful motion shrinks toward
+// the still frame). Since 1.5.0 the classic crossfade (OFXR-Bridge's recipe) and edge-blend are gone: edge beat both.
 #pragma once
 #include <d3d11.h>
 #include <cstdint>
@@ -18,27 +17,23 @@ struct FrameGenConfig {
     int perfLevel = 20;       // NV_OF_PERF_LEVEL: 5 slow (best), 10 medium, 20 fast
     int grid = 4;             // output vector grid (1, 2, 4)
     float maxFlowPx = 512.f;  // clamp on a flow vector, full-resolution pixels
-    float confGain = 6.f;     // confidence = saturate(1 - gain * max |A - B|) at the matched points
     float copyDeg = 0.02f;    // a rendered frame whose stamp orientation is within this angle of its render orientation is copied, not resampled
-    // synthesis: 1 = edge-aware (vector median, source-solved flow, per-pixel candidates at motion boundaries, doubtful motion shrinks toward
-    // the still frame: ideas from VectorXR, MPL-2.0, re-implemented); 0 = classic, the crossfade recipe (OFXR-Bridge's ideas).
-    int synth = 1;
     float motionLimit = 0.10f;   // edge: content shift beyond this share of the eye width falls back to the still frame (soft over the last quarter)
     float costScale = 17.f;      // edge: confidence = 1 - (luma cost - 0.02) * this
-    float photoScale = 13.5f;    // edge: where a vector is doubted, the previous frame is blended in by 1 - (max |dRGB| - 0.03) * this (0 = always: "edge-blend")
+    float photoScale = 13.5f;    // edge: where a vector is doubted, the previous frame is blended in by 1 - (max |dRGB| - 0.03) * this
     // camera turn (on by default since 1.4.1; AIRFRAMEXR_FG_CAM_TURN=0 turns it off; edge synthesis only; docs/FRAME_GENERATION.md "Stick turns"): a game's stick turn is a
     // turn of the play space about the tracking up axis that the head pose does not carry, so it reached the optical flow whole and came out as
     // double images. With it on, each rendered frame carries a camera yaw on top of its head orientation, predicted from the previous pair's
     // measured turn and removed before the flow like the head's rotation; the output is turned by the yaw interpolated at t; the edge the
     // turned newer frame does not cover is filled from the older one.
     int camTurn = 1;
-    // neural fields (the synthesis "neural", the streamer's default since 1.4.2: nvh_fg_enable synth 4; edge synthesis only; neural.h; without
-    // the network's files or on a GPU before the RTX 30 series the edge synthesis draws every output): RIFE 4.4 computes, per pair, the
+    // neural fields (the synthesis "neural", the streamer's default: nvh_fg_enable synth 4; neural.h; without the network's files or on a GPU
+    // before the RTX 30 series the edge synthesis draws every output): RIFE 4.4 computes, per pair, the
     // motion from the output time to each frame and a blend mask, at neuralScale of the eye resolution, with our CUDA network (nvenc/rife); the output pass
     // composes the picture from them at full resolution (one sample of each original frame through the rotation chain), keeping still content
     // exact where both frames agree within neuralStill and the fields move less than neuralStillPx full-resolution pixels. The optical flow keeps
-    // running for the camera turn's measurement. The fields belong to one output time: each output uses fields of its own time (run early per pair
-    // when the outputs keep one time, the 1/2 rate; else per output). Judge (2026-11-22): +0.91 dB on motion boundaries at 0.5, stick walks +2.3 .. +3.9.
+    // running for the camera turn's measurement. The fields belong to one output time: each output uses fields of its own time (x2: one run per
+    // pair at 1/2, run early; x3: one per output, at 1/3 and 2/3, the fixed fractions where RIFE 4.4 places the content right). Judge (2026-11-22): +0.91 dB on motion boundaries at 0.5, stick walks +2.3 .. +3.9.
     int neural = 0;
     float neuralScale = 0.5f;
     float neuralStill = 0.02f, neuralStillPx = 1.f;
@@ -71,7 +66,7 @@ struct FrameGenStats {
 
 class FrameGen {
 public:
-    // rendered frames kept (newest first by `age`): the uncapped mode shows content up to a few game frames behind the newest one
+    // rendered frames kept (newest first by `age`; the fixed rates draw from the newest pair, the camera turn reads the pair before it)
     static constexpr int kHist = 4;
     FrameGen(ID3D11Device* dev, ID3D11DeviceContext* ctx);
     ~FrameGen();

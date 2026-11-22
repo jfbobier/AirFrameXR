@@ -41,7 +41,7 @@ namespace AirFrameXR
 
     public static class Version
     {
-        public const string Number = "1.4.2";
+        public const string Number = "1.5.0";
         /// "1.1.0", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
@@ -585,10 +585,9 @@ namespace AirFrameXR
         public string IdleRgb { get => Json.Str(Root, "video.idle_rgb", Chroma.DefaultRgb); set => Json.Set(Root, "video.idle_rgb", value); }
         /// frame generation (docs/FRAME_GENERATION.md): the game renders every other frame, the streamer interpolates the one in between (off by default)
         public bool FrameGen { get => Json.Bool(Root, "video.frame_gen", false); set => Json.Set(Root, "video.frame_gen", value); }
-        // frame generation rate: "third" | "half" (default) | "two_thirds" (the game's rate as a fraction of the display rate, the streamer generates the
-        // frames in between; docs/FRAME_GENERATION.md), "uncapped" (experimental, from the Advanced settings; docs/FRAME_GENERATION_UNCAPPED.md)
+        // frame generation rate: "half" (x2, default) | "third" (x3): the game's rate as a fraction of the display rate, the streamer generates the
+        // frames in between (docs/FRAME_GENERATION.md); an older "two_thirds" / "uncapped" runs at half
         public string FrameGenRate { get => Json.Str(Root, "video.frame_gen_rate", "half"); set => Json.Set(Root, "video.frame_gen_rate", value); }
-        /// uncapped mode's minimum spacing of the game's releases in fps (0 = none) and its content lag in ms (0 = automatic); the streamer takes a change live
         /// the streamer's override of the field of view the game is told (the launcher's FOV restriction card): on/off and the tangents per edge (outer = away from the nose,
         /// inner, upper, lower; 0 = not set); the headset's own when off
         public bool FovOverride => Json.Bool(Root, "video.fov_override", false);
@@ -2085,7 +2084,8 @@ namespace AirFrameXR
         }
 
         /// A statistics tile: small title, a big value, a one-line note. Sizes from its text (no fixed width), so it follows the display scale.
-        /// The name of a frame generation rate everywhere in the UI: the multiplier of the game's frames (the settings keep third | half | two_thirds, the share the game renders).
+        /// The name of a frame generation rate everywhere in the UI: the multiplier of the game's frames (the settings keep third | half, the share the game renders;
+        /// a game record of an older version may still say two_thirds: x1.5).
         public static string FgName(string level) => level == "third" ? "x3" : level == "half" ? "x2" : level == "two_thirds" ? "x1.5" : level;
         public static Tile MakeTile(string title, string value = "-", string note = "", Color? color = null) { var t = new Tile(title, value, note); if (color != null) t.Set(value, note, color); return t; }
 

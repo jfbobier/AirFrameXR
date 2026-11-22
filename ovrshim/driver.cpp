@@ -1056,7 +1056,7 @@ namespace {
                     // for the same queue.
                     const bool gateOn = m_ipc.state->host.intakeGate != 0 && m_ipc.state->host.clientConnected != 0;
                     bool wasGated = false;
-                    // fps cap (ipc appMinPeriodUs, uncapped frame generation): the release never comes sooner than the cap's period after the last one
+                    // the game fps lock (ipc appMinPeriodUs): the release never comes sooner than the lock's period after the last one
                     const double minPeriod = (double)(*(volatile uint32_t*)&m_ipc.state->host.appMinPeriodUs) * 1e-6;
                     const double capRelease = minPeriod > 0 ? m_lastReleaseS.load() + minPeriod : 0.0;
                     if (capRelease > 0) {

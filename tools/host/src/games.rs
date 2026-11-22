@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! { "exe": "Game.exe", "name": "<main window title>", "paths": ["C:\\...\\Game.exe"],
-//!   "levels": { "<headset>": { "<off|third|half|two_thirds>": <last run at that level> } },   // what the launcher's "Recommended" reads
+//!   "levels": { "<headset>": { "<off|third|half>": <last run at that level> } },   // what the launcher's "Recommended" reads
 //!   "sessions": [ <the last SESSIONS_KEPT sessions, newest last> ] }
 //! ```
 //! The host only records; the launcher proposes. The launcher's own choices (dismissed popups, the DLLs an earlier release installed in game folders) live in config/mv_dll.json, not here.

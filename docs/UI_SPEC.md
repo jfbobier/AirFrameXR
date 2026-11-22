@@ -48,7 +48,7 @@ Game: Lies of P   (none while the mirror runs)    GPU ... · OpenXR runtime ...
 |  one line: repeat / skip shares (and the next rate proposed after a session)      |
 |  one line: Streamed fps · bitrate · packets lost (red when any)                    |
 +- Features ----------------------------------------------------------------------+
-|  (switch) Frame generation   [x1.5][x2][x3]  [Auto]                                |   one column of switches: they line up
+|  (switch) Frame generation   [x2][x3]  [Auto]                                      |   one column of switches: they line up
 |  (switch) Desktop mirror                                                           |
 +- Picture ----------------------+- Position ------------------------------------+
 |  Gamma      [----o---]  1.20   |  Eye height (o) Auto ( ) Manual [1.30] m        |   Auto only on the Vision Pro; "headset reports 1.62 m" under it
@@ -65,9 +65,10 @@ Rules:
   (the footer and the export result, which take turns; the audio notes are in the log only) have one reserved line, so nothing resizes or moves the window while you use it. Only *Advanced* changes its size (and back), and a
   blocking message (the firewall warning at the top, a long error in the footer) makes it grow once to show it. `harness/streamer_events.py` window_size holds this.
 - **Features** (2026-11-10): the two switches, Frame generation and Desktop mirror, share one column (a `TableLayoutPanel`), so they line up. Frame generation: the multiplier
-  as three segments **x1.5 / x2 / x3** (the game renders 2 of 3, 1 of 2, 1 of 3 frames; the settings keep `two_thirds | half | third`, the tooltips give the share) and **Auto** (the rate
-  proposed from the game's recorded runs; **off by default** since 2026-11-10). The *Uncapped* experiment lives in Advanced (here only its note while on). The same names (x3, x2, x1.5) are used
-  in Game history and Diagnose. Frame generation is forced off while `mirrordesktop.exe` runs (command `frame_gen off` to the engine; the saved choice returns when it ends). The DLSS motion
+  as two segments **x2 / x3** (the game renders 1 of 2, 1 of 3 frames; the settings keep `half | third`, the tooltips give the share; since 1.5.0 fixed regimes only,
+  docs/FRAME_GENERATION.md "Rates": the x1.5 segment and the *Uncapped* experiment are gone, an older setting shows and runs as x2) and **Auto** (the rate
+  proposed from the game's recorded runs; **off by default** since 2026-11-10). The same names (x3, x2) are used in Game history and Diagnose (a record made
+  before 1.5.0 at `two_thirds` still reads x1.5). Frame generation is forced off while `mirrordesktop.exe` runs (command `frame_gen off` to the engine; the saved choice returns when it ends). The DLSS motion
   vectors were removed in 0.6.1: no tick, no line, no DLL offer.
 - **Position**: *Auto* sends height 0 (the engine uses the headset's own floor estimate: correct when the Vision Pro saw enough of the room, i.e. standing at the
   start of the session); *Manual* sends the number (default 1.30 m, recommended seated). A Quest or other headset reports its floor correctly: the choice is

@@ -1,5 +1,5 @@
 {
-  "description": "MOD-LOOP MIMIC, THE FIELD FLIP with the fps lock at 33 and a GPU load: at 25 s the submit pool collapses to one thread and the engine frame gets cheaper and raggeder (14 ms -> 8 +- 4 ms), as measured on the mod about 3-4 minutes after it started; the game then wants 47 real fps (the unlocked twin, e2e_modsim_flip_nolock_gpu, goes ragged: spacing stdev 4.7 ms) but the lock must hold it to 33 with an even cadence: stdev <= 1.5 ms, no gap over 40 ms, in both phases. Knob on (the lock counts real frames: the duplicate cycles' waits are free).",
+  "description": "the fallback synthesis at x2: frame generation drawn by the edge synthesis from the GPU's optical flow (synthesis edge pinned), the probe app under GPU load, a yaw head motion; the run must stream like e2e_fg_neural (synth share, stream fps, believable latency) with the network not running.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -47,18 +47,18 @@
   "host": {
     "shim": true,
     "fps": 90,
-    "seconds": 100,
+    "seconds": 70,
     "connect_timeout": 45,
     "gpu_keepalive": 90,
     "exit_after_frames": 100000,
     "running_start_ms": 2.0,
     "frame_gen": "on",
-    "frame_gen_rate": "uncapped",
-    "drop_duplicate_frames": true,
-    "frame_gen_cap": 33
+    "env": {
+      "AIRFRAMEXR_FG_SYNTH": "edge"
+    }
   },
   "client": {
-    "seconds": 105,
+    "seconds": 75,
     "connect_timeout": 45,
     "yaw_amp": 0.5,
     "yaw_hz": 0.25,
@@ -71,31 +71,38 @@
     "RUST_LOG": "warn"
   },
   "app": {
-    "exe": "xr_modsim",
     "frames": 1800,
-    "timeout_s": 95,
+    "timeout_s": 60,
     "env": {
-      "MODSIM_ENGINE_MS": "14",
-      "MODSIM_GPU_COPIES": "7",
-      "MODSIM_DUP": "1",
-      "MODSIM_POOL": "9",
-      "MODSIM_SWITCH_S": "25",
-      "MODSIM_SWITCH_ENGINE_MS": "8",
-      "MODSIM_SWITCH_JITTER_MS": "4"
+      "XR_PROBE_CPU_MS": "1",
+      "XR_PROBE_GPU_COPIES": "0",
+      "XR_PROBE_LOAD": "fps:50:70"
     }
   },
   "gpu_sample": true,
-  "timeout_s": 260,
+  "timeout_s": 220,
   "checks": {
     "host_min_frames": 600,
     "client_min_frames": 600,
+    "game_run": {
+      "max_latency_ms": 200,
+      "max_latency_outliers": 0
+    },
     "max_duplicate_timestamps": 10,
-    "modsim": {
-      "fix": "on",
-      "min_real_frames": 600,
-      "min_real_fps": 30,
-      "max_spacing_stdev_ms": 1.5,
-      "max_gap_ms": 40
+    "fg": {
+      "frame": [
+        3520,
+        1600
+      ],
+      "synth_share": [
+        0.4,
+        0.6
+      ],
+      "min_stream_fps_frac": 0.95,
+      "synth_ms_per_mpx": [
+        0.005,
+        0.1
+      ]
     }
   }
 }

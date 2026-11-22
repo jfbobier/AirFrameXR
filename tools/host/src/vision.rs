@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "1.4.2";
+pub const VERSION: &str = "1.5.0";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
 /// `config/` (session.json, airframexr.json) and `logs/` inside it.
@@ -52,13 +52,12 @@ pub struct Settings {
     pub gpu_keepalive: Option<i64>,
     /// frame generation (docs/FRAME_GENERATION.md): half-rate pacing + optical-flow interpolated frames; default off
     pub frame_gen: Option<bool>,
-    /// "edge" (default) | "edge-blend" | "classic" (the crossfade recipe, the predictable fallback): the synthesis of generated frames
-    /// (nvenc/hostlib/framegen.cpp)
+    /// "neural" (default) | "edge" (the optical flow's synthesis, the fallback): how generated frames are drawn (nvenc/hostlib/framegen.cpp);
+    /// an older "classic" / "edge-blend" draws with edge
     pub frame_gen_synthesis: Option<String>,
-    /// "half" (default) | "uncapped": the game paced at half the display rate with strict alternation, or at the display rate with every
-    /// output interpolated (docs/FRAME_GENERATION_UNCAPPED.md)
+    /// "half" (x2, default) | "third" (x3): the game paced at that fraction of the display rate; an older "two_thirds" / "uncapped" runs at half
     pub frame_gen_rate: Option<String>,
-    /// uncapped mode: minimum spacing of the game's releases as an fps cap (0 = none): headroom for the host's own GPU work
+    /// the game fps lock: minimum spacing of the game's releases in every mode (0 = none)
     pub frame_gen_cap_fps: Option<f64>,
     /// the field of view the game is told, set from the streamer (Advanced picture and FOV settings): override on/off and, per edge, the tangents the game gets
     /// (outer = the side away from the nose, inner, upper, lower; never more than the headset's own, see `fov_scale_from`). Off: the headset's, untouched.
@@ -241,11 +240,10 @@ pub static GAMMA_REQ: AtomicU32 = AtomicU32::new(0);
 pub static DEBUG_REQ: AtomicI32 = AtomicI32::new(-1);
 /// frame generation on/off from AirFrameXR.exe (-1 none, 0 off, 1 on); applied by the main loop to the running encoder and the shim's pacing
 pub static FRAME_GEN_REQ: AtomicI32 = AtomicI32::new(-1);
-/// frame generation rate from AirFrameXR.exe (-1 none, else `pipeline::FgRate::index`: 0 third, 1 half, 2 two_thirds, 3 uncapped)
+/// frame generation rate from AirFrameXR.exe (-1 none, else `pipeline::FgRate::index`: 0 third, 1 half)
 pub static FG_RATE_REQ: AtomicI32 = AtomicI32::new(-1);
-/// fps cap of the game's releases (uncapped mode), -1 none, 0 = no cap
+/// the game fps lock, -1 none, 0 = no lock
 pub static FG_CAP_REQ: AtomicI32 = AtomicI32::new(-1);
-/// uncapped mode content lag in tenths of ms (-1 none, 0 = automatic)
 /// `recenter`: turn the published tracking space so the head's forward is -Z and its position the origin (taken at the next tracking sample)
 pub static RECENTER_REQ: AtomicBool = AtomicBool::new(false);
 /// colour correction (brightness, contrast, saturation, sharpening as f32 bits) and its "pending" flag
@@ -331,7 +329,7 @@ pub fn fov_scale_from(t: &[f32; 4], fov8: &[f32; 8]) -> [f32; 4] {
     s
 }
 
-/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half|two_thirds|uncapped`,
+/// Commands (one per line): `quit`, `gamma <0.5..2.0>`, `debug on|off`, `frame_gen on|off`, `frame_gen_rate third|half`,
 /// `frame_gen_cap <fps>` (0 = none), `recenter` (`fov_override ...` is ignored since 1.4-foundation: the field of view is compiled per streamer start),
 /// `color <brightness> <contrast> <saturation> <sharpening>`, `client_sharpen on|off` (our client's sharpening, live), `mask_fill on|off` (the mask's flat fill, live),
 /// `height <m>` (headset height above the floor handed to games, re-anchored to the current pose; 0 = headset floor).

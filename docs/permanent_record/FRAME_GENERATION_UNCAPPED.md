@@ -1,5 +1,7 @@
 # Frame generation, uncapped: every output synthesised (2026-10-15)
 
+**Archived 2026-11-22:** the uncapped mode and the 2/3 rate this note's planner ran were removed in 1.5.0 (fixed regimes only, x2 and x3: docs/FRAME_GENERATION.md, "Rates"). Kept for the record; nothing below describes the current code.
+
 Status: implemented on branch `fg/uncapped` (host pipeline, shim cap, GUI, logs), lab-checked on the 3080 Ti simrig, first headset night 2026-10-15 (verdict below).
 Builds on `docs/FRAME_GENERATION.md` (half rate, optical flow) and the game's DLSS vectors (removed in 0.6.1, archived). Replaces the 2/3-ratio
 plan of the archived 2/3-ratio note (docs/PERMANENT_RECORD.md: why ratios are not the answer).

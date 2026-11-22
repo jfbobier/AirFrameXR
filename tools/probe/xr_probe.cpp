@@ -194,7 +194,7 @@ int main(int argc, char** argv) {
     double movingAmp = 0, movingHz = 0;
     if (const char* mv = getenv("XR_PROBE_MOVING")) { movingAmp = atof(mv); if (const char* c = strchr(mv, ':')) movingHz = atof(c + 1); }
     // XR_PROBE_MOVING_CLOCK=wall: the marker's time is the wall clock at the frame's start (what a game engine's delta-time animation does), not the
-    // predicted display time (quantised to the display grid; two frames can share one). The uncapped generation is judged against the former.
+    // predicted display time (quantised to the display grid; two frames can share one).
     const bool movingWall = getenv("XR_PROBE_MOVING_CLOCK") && strcmp(getenv("XR_PROBE_MOVING_CLOCK"), "wall") == 0;
     double movingWallT0 = 0.0, movingFrameStartMs = 0.0;
     long long movingT0 = 0;

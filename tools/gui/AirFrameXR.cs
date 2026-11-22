@@ -55,13 +55,12 @@ namespace AirFrameXR
         readonly CheckBox debug = new CheckBox { Text = "Debug logging", AutoSize = true, Font = Ui.Body };
         readonly ToggleSwitch frameGen = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Frame generation" };
         readonly ToggleSwitch mirror = new ToggleSwitch { Margin = new Padding(3, 6, 10, 3), AccessibleName = "Mirror the Windows desktop between sessions" };
-        // the game's rate as a fraction of the display rate: 1/3, 1/2 (default), 2/3 (settings video.frame_gen_rate third | half | two_thirds)
-        static readonly string[] FgRates = { "two_thirds", "half", "third" };   // the segments, left to right: x1.5, x2, x3
+        // the game's rate as a fraction of the display rate: 1/2 (default) or 1/3 (settings video.frame_gen_rate half | third; fixed regimes only since 1.5.0)
+        static readonly string[] FgRates = { "half", "third" };   // the segments, left to right: x2, x3
         static readonly string[] FgRateText = {
-            "x1.5 (the game renders 2 of every 3 frames): every frame sent is interpolated (games above 67 fps).",
             "x2 (the game renders 1 of every 2 frames): one generated frame per rendered one (default).",
             "x3 (the game renders 1 of every 3 frames): two generated frames per rendered one (games at 34-49 fps)." };
-        readonly Segmented fgRate = new Segmented("x1.5", "x2", "x3") { AccessibleName = "Frame generation multiplier" };
+        readonly Segmented fgRate = new Segmented("x2", "x3") { AccessibleName = "Frame generation multiplier" };
         class TipText { public Action<string> On; public string Text { set { On?.Invoke(value); } } }   // explanations go to tooltips, not to the window
         readonly TipText fgRateText = new TipText();
         readonly Segmented heightMode = new Segmented("Auto", "Manual") { AccessibleName = "Eye height mode" };
@@ -69,10 +68,6 @@ namespace AirFrameXR
         readonly Label heightReport = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(8, 7, 0, 0), Visible = false };
         readonly Label exportStatus = new Label { AutoSize = true, Margin = new Padding(3, 4, 3, 0), MaximumSize = new Size(560, 0) };
         readonly LinkLabel exportLink = new LinkLabel { Text = "Open folder", AutoSize = true, Margin = new Padding(3, 4, 3, 0) };
-        // uncapped generation (settings video.frame_gen_rate uncapped, docs/FRAME_GENERATION_UNCAPPED.md): the game runs at its own rate, every output interpolated
-        // experimental, set in the Advanced settings window: here only the state, with a note under the slider while it is on
-        readonly CheckBox fgUnc = new CheckBox { Text = "Uncapped", AutoSize = true, Visible = false };
-        readonly Label fgUncNote = new Label { Text = "Uncapped (experimental) is on: set in Advanced settings", AutoSize = true, ForeColor = Color.DarkGoldenrod, Visible = false, Margin = new Padding(3, 0, 0, 2) };
         readonly ToggleButton fgRecommend = new ToggleButton { Text = "Auto", Margin = new Padding(0, 0, 8, 0), AccessibleName = "Choose the game rate automatically from this game's recorded runs" };
                 readonly Button recenter = new Button { Text = "Recenter", AutoSize = true, Margin = new Padding(8, 3, 3, 3) };
         bool fgRateFromHost;   // the slider follows the host's rate: no command back
@@ -155,9 +150,8 @@ namespace AirFrameXR
             // Features: one column of switches (Frame generation, Desktop mirror), the same column for both so the switches line up; the label and the choices go to their right
             var feat = new TableLayoutPanel { AutoSize = true, ColumnCount = 3, Margin = new Padding(0) };
             feat.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); feat.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); feat.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            fgUnc.Margin = new Padding(14, 8, 0, 0);
             var fgChoices = Row();
-            // x1.5, x2, x3 and Auto are one size (a design size, scaled with the window); Auto sits a little apart: it is not a rate
+            // x2, x3 and Auto are one size (a design size, scaled with the window); Auto sits a little apart: it is not a rate
             var segSize = new Size(58, 28);
             fgRate.MinButton = segSize; fgRecommend.AutoSize = false; fgRecommend.Size = segSize; fgRecommend.Padding = new Padding(0);
             fgChoices.Controls.Add(fgRate); fgChoices.Controls.Add(fgRecommend);
@@ -173,7 +167,6 @@ namespace AirFrameXR
             feat.Controls.Add(FeatLabel("Desktop mirror"), 1, 1);
             var fgCol = Col();
             fgCol.Controls.Add(feat);
-            fgCol.Controls.Add(fgUncNote);
             body.Controls.Add(Group("Features", fgCol));
 
             // Position and Picture side by side, each a short stack (the window stays narrow); the desktop mirror switch sits with Recenter, the Advanced picture
@@ -214,7 +207,7 @@ namespace AirFrameXR
             body.Controls.Add(pair);
             body.Controls.Add(Ui.Expander("Advanced", adv, false, () => Ui.Refit(this)));
             tips.SetToolTip(mirror, "Between games the headset shows the Windows desktop on a floating screen; your hand is the mouse (pinch = click). Off by default.");
-            tips.SetToolTip(fgRecommend, "Auto: the rate is set from this game's recorded runs on this headset, the fastest one that stayed clean. Pick x1.5, x2 or x3 yourself to leave Auto.");
+            tips.SetToolTip(fgRecommend, "Auto: the rate is set from this game's recorded runs on this headset, the fastest one that stayed clean. Pick x2 or x3 yourself to leave Auto.");
             tips.SetToolTip(recenter, "Forward becomes forward and your position the origin. Done at every game start; the recenter key (End by default) does the same while playing.");
             tips.SetToolTip(heightMode, "Auto: the headset's own floor estimate, right when it saw the room (start standing). Manual: the value you type (about 1.30 m seated).");
             tips.SetToolTip(heightBox, "Eye height above the floor, 0.5-2.2 m.");
@@ -304,7 +297,7 @@ namespace AirFrameXR
                 settings.Save();
                 Log.Write("INFO", "desktop mirror " + (mirror.Checked ? "on" : "off"));
             };
-            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !fgUnc.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = frameGen.Checked && !fgUnc.Checked; fgUnc.Enabled = frameGen.Checked; };
+            Action fgEnable = () => { fgRate.Enabled = frameGen.Checked && !(fgRecommend.Checked && recommendationApplied); fgRecommend.Enabled = frameGen.Checked; };
             fgEnableAll = fgEnable;
             frameGen.CheckedChanged += (s, e) =>
             {
@@ -314,29 +307,21 @@ namespace AirFrameXR
                 fgEnable();
                 Log.Write("INFO", "frame generation " + (frameGen.Checked ? "on" : "off"));
             };
-            // "uncapped" is the tick; the slider keeps its own position (1/2 when the config holds uncapped) for when the tick goes off
             var savedRate = Array.IndexOf(FgRates, settings.FrameGenRate);
-            fgRate.Value = savedRate >= 0 ? savedRate : 1;
+            fgRate.Value = savedRate >= 0 ? savedRate : 0;   // an older x1.5 / uncapped setting shows x2, as the streamer runs it
             fgRateText.Text = FgRateText[fgRate.Value];
-            fgUnc.Checked = settings.FrameGenRate == "uncapped";
             fgRecommend.Checked = settings.FrameGenRecommended;
             fgEnable();
             fgRate.ValueChanged += (s, e) =>
             {
                 var rate = FgRates[fgRate.Value];
                 fgRateText.Text = FgRateText[fgRate.Value];
-                if (fgRateFromHost || fgUnc.Checked || rate == settings.FrameGenRate) return;   // uncapped: the slider only waits for the tick to go off
+                if (fgRateFromHost || rate == settings.FrameGenRate) return;
                 host.Send("frame_gen_rate " + rate);
                 settings.FrameGenRate = rate;
                 settings.Save();
                 Log.Write("INFO", "frame generation rate " + rate);
             };
-            fgUnc.CheckedChanged += (s, e) =>
-            {
-                fgEnable();
-                if (fgUncNote.Visible != fgUnc.Checked) { fgUncNote.Visible = fgUnc.Checked; if (IsHandleCreated) BeginInvoke((Action)(() => Ui.Refit(this))); }
-            };
-            fgUncNote.Visible = fgUnc.Checked;
             ConfigWatchStart();
             fgRecommend.CheckedChanged += (s, e) =>
             {
@@ -365,7 +350,7 @@ namespace AirFrameXR
         }
 
         // The Advanced settings window is a separate process: it writes config\airframexr.json, and this timer hands the switches that act live to the running streamer
-        // (the rate, the uncapped mode's cap and lag) and reloads the file, so that this window's own saves never put old values back over its edits.
+        // (the rate and the game fps lock) and reloads the file, so that this window's own saves never put old values back over its edits.
         readonly Timer configWatch = new Timer { Interval = 1500 };
 
         // The headset line: red = not found, orange-yellow = available (ALVR is connecting to it, or the streamer saw its app on the network in the last 30 s: the mDNS
@@ -421,7 +406,6 @@ namespace AirFrameXR
                 watchRate = settings.FrameGenRate;
                 host.Send("frame_gen_rate " + watchRate);
                 fgRateFromHost = true;
-                fgUnc.Checked = watchRate == "uncapped";
                 var pos = Array.IndexOf(FgRates, watchRate);
                 if (pos >= 0 && fgRate.Value != pos) fgRate.Value = pos;
                 fgRateFromHost = false;
@@ -539,8 +523,8 @@ namespace AirFrameXR
         // frame every period, frozen content; Valor Mortis at 1/2 on the Vision Pro read 0.4 % headset / 14 % host, 2026-10-17). The fastest
         // clean level is proposed; if that run rendered at least 95 % of the level's fps cap (the game was held back) and the next level has no
         // run yet, the next level is proposed once. No clean level: the one with the fewest repeats (headset and host added).
-        static readonly string[] Levels = { "third", "half", "two_thirds" };
-        static readonly double[] LevelCap = { 1.0 / 3, 0.5, 2.0 / 3 };
+        static readonly string[] Levels = { "third", "half" };
+        static readonly double[] LevelCap = { 1.0 / 3, 0.5 };
         (string level, string why)? Recommend(string exe, string hs)
         {
             try
@@ -558,11 +542,11 @@ namespace AirFrameXR
                     if (clean || (!bestClean && (best < 0 || headsetRep + hostRep < bestScore))) { best = i; bestClean = clean; bestScore = headsetRep + hostRep; bestRun = run; }
                 }
                 if (best < 0) return null;
-                string[] names = { "x3", "x2", "x1.5" };   // in the order of Levels
+                string[] names = { "x3", "x2" };   // in the order of Levels
                 var fps = D(bestRun, "rendered_fps"); var hz = D(bestRun, "display_hz");
                 var low = D(bestRun, "rendered_fps_low");
                 var text = $"{names[best]}: last run {fps:0} fps{(low > 0 ? $", {low:0} in its slowest tenth" : "")}, headset repeated {D(bestRun, "headset_repeated_typ") * 100:0.0} % typical ({D(bestRun, "headset_repeated_p90") * 100:0.0} % in its heavy parts), host repeats {D(bestRun, "host_repeats_typ") * 100:0.0} %";
-                if (bestClean && best < 2 && hz > 0 && fps >= 0.95 * hz * LevelCap[best] && !runs.ContainsKey(Levels[best + 1]))
+                if (bestClean && best < Levels.Length - 1 && hz > 0 && fps >= 0.95 * hz * LevelCap[best] && !runs.ContainsKey(Levels[best + 1]))
                     return (Levels[best + 1], $"{names[best + 1]} to try: {names[best]} was clean and filled its cap ({fps:0} fps)");
                 return (Levels[best], text);
             }
@@ -876,7 +860,7 @@ namespace AirFrameXR
                         lastSession = true;
                         var mins = D(d, "seconds") / 60;
                         statsBox.Text = $"Streaming: last session, {S(d, "exe")}, {F(mins, "0.0")} min, {S(d, "headset")}";
-                        string[] names = { "x1.5", "x2", "x3" };   // in the order of FgRates
+                        string[] names = { "x2", "x3" };   // in the order of FgRates
                         var lvl = S(d, "level"); var li = Array.IndexOf(FgRates, lvl);
                         var rec = Recommend(S(d, "exe"), S(d, "headset"));
                         var ri = rec == null ? -1 : Array.IndexOf(FgRates, rec.Value.level);
@@ -898,11 +882,10 @@ namespace AirFrameXR
                     if (d != null && d.TryGetValue("headset", out var ho) && ho is Dictionary<string, object> hd) HeightSource(S(hd, "name"));
                     if (d != null && d.ContainsKey("fg_rate") && S(d, "fg_on") == "True")
                     {
-                        // the rate in force (the slider and the uncapped tick follow the streamer, e.g. a rate set in the config file)
+                        // the rate in force (the slider follows the streamer, e.g. a rate set in the config file)
                         var hostRate = S(d, "fg_rate");
                         var pos = Array.IndexOf(FgRates, hostRate);
                         fgRateFromHost = true;
-                        if (fgUnc.Checked != (hostRate == "uncapped")) fgUnc.Checked = hostRate == "uncapped";
                         if (pos >= 0 && fgRate.Value != pos) fgRate.Value = pos;
                         fgRateFromHost = false;
                     }
@@ -944,7 +927,6 @@ namespace AirFrameXR
                 case "frame_gen": frameGen.Checked = on; break;
                 case "rate": fgRate.Value = int.Parse(value); break;
                 case "auto": fgRecommend.Checked = on; break;
-                case "uncapped": fgUnc.Checked = on; break;
                 case "recenter": recenter.PerformClick(); break;
                 case "height_mode": heightMode.Value = value == "auto" ? 0 : 1; break;
                 case "height": heightBox.Value = decimal.Parse(value, CultureInfo.InvariantCulture); break;

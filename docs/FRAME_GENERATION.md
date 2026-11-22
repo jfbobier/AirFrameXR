@@ -9,15 +9,15 @@ ticks, and in-scene motion (and everything the headset's own rotation reprojecti
 animation) stutters. With frame generation on:
 
 1. The shim paces the game at **a fraction of the display rate** (IPC `appPeriodMul` m: `WaitForVsync` releases the app every m-th
-   compositor boundary; the predicted display time moves accordingly, see below). At the default **1/2** a 60 fps game becomes a steady
-   50 fps (100 Hz) or 45 fps (90 Hz) game with a 20 ms budget per frame; at **1/3** a 40 fps game becomes a steady 33 fps game with a 30 ms
+   compositor boundary; the predicted display time moves accordingly, see below). At the default **1/2** (x2) a 60 fps game becomes a steady
+   50 fps (100 Hz) or 45 fps (90 Hz) game with a 20 ms budget per frame; at **1/3** (x3) a 40 fps game becomes a steady 33 fps game with a 30 ms
    budget and two generated frames per rendered one (see "Rates" below).
 2. For every rendered frame B the host keeps a copy, computes the **optical flow** between the previous rendered frame A, rotated into
    B's camera first, and B (NVIDIA Optical Flow API: the flow engine of Turing-and-later GPUs, through the driver's `nvofapi64.dll`,
-   on the frame downscaled to 50 %, 4x4 vector grid, cost output), and sends the **interpolated frame S(A, B)**: each pixel samples A
-   and B at the two ends of its flow vector, weighted for the midpoint, with a confidence from the colour disagreement at the two ends
-   and the engine's cost, falling back to the crossfade of the rotation-aligned A and B where the flow is doubtful (ghosting rather
-   than holes). This is OFXR-Bridge's synthesis (`frame_synthesis.hlsl`), ported to one D3D11 pass per eye in `nvenc/hostlib/framegen.cpp`.
+   on the frame downscaled to 50 %, 4x4 vector grid, cost output), and sends the **interpolated frame S(A, B)**, drawn by the synthesis in
+   force: **neural** (the default since 1.4.2: RIFE 4.4's fields, "Neural fields" below) or **edge** (from the optical flow alone, the
+   fallback; "Synthesis" below), one D3D11 output pass per eye in `nvenc/hostlib/framegen.cpp`. The first version (2026-10-14) used
+   OFXR-Bridge's crossfade recipe, the "classic" synthesis, removed in 1.5.0.
 3. At the next boundary the host sends **B itself**. A boundary with nothing new re-sends B. So the headset receives one picture per
    display period: S, B, S, C, S, D ... each a period apart.
 4. **Every output is stamped with the newest tracking sample** (newer than the last sent frame) and **rotated to that sample's head
@@ -72,22 +72,33 @@ skipped boundaries (2.6 % of boundaries against 0.6-2.4 % with the old rule on e
 67/77 ms reading is not a slow cycle but a sample late by more than a period about three times a second, a Wi-Fi fact the pipeline can only
 trade between a repeat and a pose-age jump; the old rule (jump) is the only rule now, and `regime_switches` stays as the counter.
 
-## Rates (2026-10-16): 1/3, 1/2, 2/3
+## Rates (1.5.0): x2 and x3
 
-The launcher offers the game's rate as a fraction of the display rate, one slider with three positions (`video.frame_gen_rate`):
+The streamer window offers the multiplier as two segments, **x2** and **x3** (`video.frame_gen_rate`, live command `frame_gen_rate <name>`). The
+game is paced at a fixed fraction of the display rate, and every generated frame sits at a fixed fraction of the time between two rendered frames:
 
-| rate | setting | the game | the host | for games that render at |
+| multiplier | setting | the game | the host | for games that render at |
 |---|---|---|---|---|
-| 1/3 | `third` | released every 3rd boundary (33 fps at 100 Hz, 30 at 90) | S(A, B, 1/3), S(A, B, 2/3), B | 34-49 fps |
-| 1/2 | `half` (default) | every 2nd boundary (50 / 45 fps) | S(A, B, 1/2), B | 50-66 fps, and the safe choice |
-| 2/3 | `two_thirds` | free-running, held to two thirds of the display rate by the shim's minimum release spacing (67 / 60 fps) | the content-clock planner of `docs/FRAME_GENERATION_UNCAPPED.md`: every output interpolated at the fraction its time falls at | 67 fps and above |
+| x2 | `half` (default) | released every 2nd boundary (50 fps at 100 Hz, 45 at 90) | S(A, B, 1/2), B | 50-66 fps, and the safe choice |
+| x3 | `third` | every 3rd boundary (33 / 30 fps) | S(A, B, 1/3), S(A, B, 2/3), B | 34-49 fps |
 
-Why these three and not a free ratio: on the boundary grid only 1/m patterns are regular (a 2/3 pattern with boundary-locked releases
-alternates 10 and 20 ms frame times, which engines with frame-time smoothing turn into judder), so 2/3 is the free-running planner with a
-cap rather than a pattern. Why not "uncapped" in the launcher: the two headset nights of 2026-10-15/16 showed that the free-running game's
-render queue (2 to 3 frames when GPU-bound) sets the content lag, and that the user preferred the locked cadences on latency; `uncapped`
-stays available from the config and the command line, with `video.frame_gen_cap_fps`, for experiments.
-Choosing: the 10-second `frame generation perf` line reports the game's `app fps`; pick the largest fraction the game sustains with margin.
+An older `two_thirds` or `uncapped` setting runs at x2. The game fps lock (`video.frame_gen_cap_fps`, docs/EXPERIMENTAL_SWITCHES.md) applies in
+every mode, generation off included. Choosing: the 10-second `frame generation perf` line reports the game's `app fps`; pick the multiplier the
+game sustains with margin. x4 was considered and not added (the owner: visually bad).
+
+Why fixed regimes only (1.5.0, 2026-11-22):
+- **RIFE 4.4 places the content right only at fixed fractions.** Measured 2026-11-22 (`harness/rife/t_linearity.py`, docs/NEURAL_RIFE_CUDA.md
+  "Output time"): below about t = 0.12 it puts the content behind frame 0, between 0.5 and 0.6 it sticks to 0.5, above about 0.9 it overshoots;
+  1/3, 1/2 and 2/3 are within 0.02. The 2/3 rate ("x1.5") asked for any t and wobbled in the field (Hellraiser, 2026-11-22); the 1.4.2 hotfix
+  made it steady but no better than the optical-flow generation. On the boundary grid a 2/3 rate cannot be a fixed pattern (boundary-locked
+  releases alternate 10 and 20 ms frame times, which engines with frame-time smoothing turn into judder), so it had to ask for any t.
+- **A regime that follows the game's jitter amplifies its hitches.** The automatic level ladder was removed on 2026-10-17 for the same reason
+  (each switch a visible hiccup, "Game profiles" below).
+- **OFXR-Bridge reached the same design**: fixed integer multipliers and fixed RIFE fractions.
+
+Removed in 1.5.0: the 2/3 rate (`two_thirds`, "x1.5", since 2026-10-16) and the experimental **uncapped** mode (config and an Advanced row, since 2026-10-15), both run by
+the content-clock planner (any t between two rendered frames, behind a lag controller; `fg_uncapped.csv`, the perf line's game period, lag,
+mean t, mean age, behind and ahead). Their design and headset nights are archived in docs/permanent_record/FRAME_GENERATION_UNCAPPED.md.
 
 ### Game profiles (2026-10-17): the engine records, the launcher proposes
 
@@ -98,7 +109,7 @@ headsets (the plain path repeats 9-14 % of the display periods at display rate).
 concerned; the launcher owns the judgement.
 
 - **The host records.** At every game end (runs of 20 s or more) one entry in `config/games.json`, keyed by executable, then the headset's
-  name, then the level (`third` | `half` | `two_thirds` | `off`): duration, display Hz, rendered and streamed fps, the headset's repeated
+  name, then the level (`third` | `half` | `off`; a record made before 1.5.0 may hold `two_thirds`, shown as x1.5 in Game history): duration, display Hz, rendered and streamed fps, the headset's repeated
   display periods as the **median 10-second window** of the run (`headset_repeated_typ`, what the game is like most of the time) and its
   90th percentile (`headset_repeated_p90`, the heavy parts), the rendered fps of the slowest tenth of the windows (`rendered_fps_low`), the
   host's repeat share, the skipped-boundary share, the run count. A level
@@ -120,9 +131,8 @@ concerned; the launcher owns the judgement.
   Carma, 2026-10-17; the Vision Pro's own centring at connection agrees with it) and has a "Recenter" button.
 
 Lab for the rates (3080 Ti simrig, 2026-10-16, 40 s each, marker on the wall clock; `third`, `third_slow`, `third_mv`, `stutter_third`,
-`two_thirds`, `jitter_two_thirds`, `stutter_fg` as the half-rate regression):
+`stutter_fg` as the half-rate regression; the 2/3 rate's variants went with it in 1.5.0):
 - 1/2 unchanged: stutter_fg SMOOTH, frozen 1.3 %, step cv 0.18-0.20.
-- 2/3: an 80-100 fps app held to 67 fps, SMOOTH, frozen 2.4 %, step cv 0.34; the ~75 fps jittery app SMOOTH, frozen 3.7 %, step cv 0.36-0.38.
 - 1/3: the pattern runs as designed (two synthetic outputs then the rendered frame, superseded frames 8-10 per 2200 once the sample-miss
   rule below was in), but the lab's 5 px marker is a hard case at 30 ms game steps: it moves 14 px per pair, past what the optical flow's
   8 px blocks resolve, so the synthetic frames under-move it and the rendered frame catches up (steps small, small, big). With the probe's
@@ -161,20 +171,24 @@ rendered and encoded for real in the rig (the viewer shows the encoder's input).
 
 Live harness: variant setting `{"frame_gen": true}`; scenario key `frame_gen` in `harness/scenarios/*.json`.
 
-## Synthesis: edge (default) and classic (0.6.1)
+## Synthesis: neural (default) and edge (the fallback)
 
-Two syntheses draw a generated frame from the same optical flow (`video.frame_gen_synthesis`, Advanced settings):
+Two syntheses draw a generated frame (`video.frame_gen_synthesis`, Advanced settings: `neural` | `edge`; env `AIRFRAMEXR_FG_SYNTH`,
+`--frame-gen-synthesis`): **neural** (the default since 1.4.2, "Neural fields" below) and **edge**, from the optical flow alone:
 
-- **edge** (default since 0.6.1), ideas from VectorXR (MPL-2.0, github.com/DienerTech/vectorxr), re-implemented: per flow block our own luma
+- **edge** (the default from 0.6.1 to 1.4.1, the fallback since; it also draws every output by itself without the network's files or on a GPU
+  before the RTX 30 series), ideas from VectorXR (MPL-2.0, github.com/DienerTech/vectorxr), re-implemented: per flow block our own luma
   match cost (sampled at the sub-texel vector; a vector must beat no motion, which zeroes the engine's noise vectors on flat content) and a
   3x3 cost-weighted vector median; per output pixel the vector solved where the content comes from (two fixed-point steps), at motion
   boundaries the neighbouring vector both frames agree on, doubtful motion shrunk toward the real frame (a little local judder instead of a
   double image), the previous frame blended in by the time weight, gated by its colour agreement only as far as the vector is doubted.
-  `edge-blend` is the same without that gate. Lab (5090, steady_fg / stutter_fg, marker position error): classic 0.024-0.031 deg, edge
-  0.030-0.036, edge-blend 0.017-0.022, all CLEAN + SMOOTH; headset (Valor Mortis, 2026-10-24): edge "looked great". Cost (5090, 7104x3200,
-  stutter_fg, all outputs): synthesis 0.24 ms average against 0.33 for classic, flow 2.17 ms either way (the two extra passes after the
-  flow are within its noise), no added latency.
-- **classic**: the 0.4-0.6 recipe below, kept as the predictable fallback.
+  Lab (5090, steady_fg / stutter_fg, marker position error): 0.030-0.036 deg, CLEAN + SMOOTH; headset (Valor Mortis, 2026-10-24): "looked
+  great". Cost (5090, 7104x3200, stutter_fg, all outputs): synthesis 0.24 ms average, flow 2.17 ms, no added latency.
+
+Removed in 1.5.0: **classic** (the 0.4-0.6 crossfade recipe studied from OFXR-Bridge, see "Borrowed from OFXR-Bridge") and **edge-blend** (edge
+without the photometric gate). Edge beat classic (judge, 2026-10-26: whole-frame PSNR +2.0 dB, 52 of 63 cases; sharper at the motion boundaries in
+63 of 63; visibly better side by side on the headset, 2026-10) and tied with edge-blend (docs/FRAME_GENERATION_JUDGE.md). An older `classic` /
+`edge-blend` setting draws with edge.
 
 The game's DLSS motion vectors were an alternative motion source from 0.4 to 0.6; they were removed in 0.6.1 (archived: docs/PERMANENT_RECORD.md).
 
@@ -186,7 +200,8 @@ pair, the motion from the output time to each frame and a blend mask, at `AIRFRA
 CUDA network (`airframexr_rife.dll`, docs/NEURAL_RIFE_CUDA.md: the recipe, build, checks); the output pass composes the picture at full resolution
 from them (one sample of each original frame through the same rotation chain as the flow; the older frame fills outside the newer view), and
 keeps still content exact where both frames agree within `AIRFRAMEXR_FG_NEURAL_STILL` (0.02) and the fields move less than
-`AIRFRAMEXR_FG_NEURAL_STILL_PX` (1 px). Each output uses fields of its own time (run early per pair at the 1/2 rate, per output at the others).
+`AIRFRAMEXR_FG_NEURAL_STILL_PX` (1 px). The network places the content right only at fixed fractions, so the rates ask only for those (docs/NEURAL_RIFE_CUDA.md
+"Output time"). Each output uses fields of its own time: x2, one run per game frame at t = 1/2, made early; x3, one run per output, at 1/3 and 2/3.
 The optical flow keeps running (the camera turn's measurement). Files, loaded at run time from the host's `neural` folder (or
 `AIRFRAMEXR_FG_NEURAL_DIR`): `airframexr_rife.dll` (747 KB, CUTLASS compiled in, BSD-3-Clause) and `rife44.afxw` (10.5 MB of weights), built by
 `nvenc/rife/build.ps1`; CUDA through the driver's nvcuda.dll; RTX 30 or newer. Missing files, a GPU before the RTX 30 series or a failure leave the edge synthesis in charge;
@@ -196,8 +211,8 @@ perf line per window).
 Measured: judge (5090, docs/FRAME_GENERATION_JUDGE.md), neural minus edge, boundary band PSNR: +0.91 dB over 60 cases at 1032 x 1104 (stick walks
 +2.3 .. +3.9; t = 1/3: +0.89), +1.04 dB at the owner's 1920 x 2368 (walks +2.5 .. +3.1, head +0.3 .. +0.5, scene x8 -0.3 .. -1.1); fewer double
 images, a little softer. Cost at the owner's size: the network 1.77 ms GPU per run (CUDA, on the shader cores the game uses), the compose pass
-0.14 ms (edge 0.19), CPU 0.3 ms per run. Streamer path `e2e_fg_neural` (1760 x 1600, probe at 45 fps) and `e2e_fg_neural_23` (the 2/3 rate):
-every generated output composed from the fields, 0 failures, 90 fps held, 1.24 ms per run. Field (TensorRT backend, same model, same fields,
+0.14 ms (edge 0.19), CPU 0.3 ms per run. Streamer path (2026-11-22) `e2e_fg_neural` (1760 x 1600, probe at 45 fps) and `e2e_fg_neural_23` (the 2/3
+rate, removed with it in 1.5.0): every generated output composed from the fields, 0 failures, 90 fps held, 1.24 ms per run. Field (TensorRT backend, same model, same fields,
 2026-11-22, Hellraiser, Gears): better than the edge synthesis; x1.5 / x3 shook until each output got fields of its own time (fixed). Not yet: a
 game on the CUDA backend; the GPU cost under a GPU-bound game.
 
@@ -240,14 +255,15 @@ does not follow a large uniform motion (no engine setting helps: `docs/FRAME_GEN
 
 Cost (5090, the owner's stream 1920 x 2368): the flow as before (1 ms) plus one more at turn changes (5.6 % of the pairs on the lab's stick
 cycle), the measurement 0.35-0.9 ms CPU per pair on the encoder thread. Measured: `harness/fg_judge.py --pans ... --pan-warm 3` (sustained, start,
-stop, reverse) and `optional/e2e_fg_stick_turn_{off,on}` (the probe's `XR_PROBE_STICK_TURN`). Not yet: a headset, classic synthesis (stays off),
+stop, reverse) and `optional/e2e_fg_stick_turn_{off,on}` (the probe's `XR_PROBE_STICK_TURN`; at x3 since 1.5.0). Not yet: a headset,
 pitch (yaw only: VR games turn on the stick in yaw), a game whose stick turn rolls the view.
 
-## Borrowed from OFXR-Bridge (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge): the classic synthesis
+## Borrowed from OFXR-Bridge (LGPL-3.0, github.com/tig3rmast3r/OFXR-Bridge): the first synthesis and the never-block rule
 
-The synthesis: rotation-compensated flow (there analytically subtracted, here by aligning A into B's camera before the engine),
-midpoint sampling at ±flow/2, confidence = saturate(1 - 6 max|dRGB|) x (1 - cost/255), crossfade fallback, no hole filling; the
-never-block rule (the generator runs in the encoder thread off the game's path; errors fall back to the plain frame). Not taken: its
+The first synthesis ("classic": the default until 0.6, an option until 1.4.2, removed in 1.5.0: edge beat it): rotation-compensated flow (there analytically subtracted,
+here by aligning A into B's camera before the engine), midpoint sampling at ±flow/2, confidence = saturate(1 - 6 max|dRGB|) x (1 - cost/255),
+crossfade fallback, no hole filling. Still in use: the rotation compensation before the flow and the never-block rule (the generator runs in the
+encoder thread off the game's path; errors fall back to the plain frame). Not taken: its
 D3D12 synthesis path and D3D11 interop (our frames are already composed side by side on the encoder's device), the FidelityFX backend
 (NVIDIA only), the DLSS motion-vector provider.
 
@@ -258,19 +274,18 @@ D3D12 synthesis path and D3D11 interop (our frames are already composed side by 
   the first headset session (2026-10-14, Callisto Protocol, 5090) was visually good, no tremble, 1.1 % missed display periods against 38 %
   without the generator, total latency 57 ms against 86 ms (the half-rate budget removes the GPU-bound game's standing queue). Generator cost
   on the 5090 at the foveated size: flow 2.3 ms, synthesis 0.13 ms.
-- Interpolation only (t = 0.5): `--frame-gen-t` exists for experiments; extrapolation (t > 1) would remove the added period at the cost of
+- Interpolation only (t = 1/2 at x2, 1/3 and 2/3 at x3); extrapolation (t > 1) would remove the added period at the cost of
   disocclusion artefacts.
-- Rates 1/3, 1/2, 2/3 and an Auto level that includes generation off (2026-10-16): a game holding a steady 70-75 fps is often better left at
-  full rate; the checkbox and the Auto tick in the streamer window switch live.
+- Generation off is a choice, not a level: a game holding a steady 70-75 fps is often better left at full rate (2026-10-16); the switch and
+  the multiplier in the streamer window act live.
 - Quad/cylinder layers are composed into the frame by the shim before the generator sees them, so HUD quads are interpolated like the
   scene (OFXR-Bridge copies them verbatim instead). A frame with no projection layer at all (a loading screen or a menu made of quads:
   Zelda BotW through BetterVR) is passed through as it is and drops the generator's held frame, so nothing stale is repeated between such
   frames (2026-10-16: the inventory alternated with the last world frame before this).
 - The flow runs on gamma-encoded colour at 50 %; its input scale (0.5) and engine preset (fast) are fixed.
-- **Small fast high-contrast objects ghost.** The confidence saturate(1 - 6 max|dRGB|) is zero at any misaligned hard edge, so such an object
-  falls back to the crossfade (two half-bright copies). The rig's marker (a white rectangle on black, ~9 px per app frame at 1024 px per eye)
-  is lost in 11 % of the synthetic frames, 33 % at its top speed; game content is softer, but HUD elements and particles will show this.
-  A softer confidence, or the engine's cost alone, is the first thing to try.
+- **Small fast high-contrast objects ghosted** with the first (classic) synthesis (2026-10-14): its confidence fell to zero at any misaligned hard
+  edge, so the rig's marker fell back to the crossfade (two half-bright copies) in 11 % of the synthetic frames. Edge shows the real frame where
+  the motion is doubtful instead, and classic was removed in 1.5.0.
 - **Sharpness.** Every output is a resample of the rendered frame at sub-pixel offsets (the rotation to the stamp sample; the flow displacement
   for synthetic frames), which the first headset session saw as a lower resolution. Since a1dfeb3 the colour fetches are Catmull-Rom (5 bilinear
   taps) and a rendered frame whose stamp orientation is within 0.02 deg of its render orientation is copied as is (`gen.copies`). If it still

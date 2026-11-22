@@ -29,7 +29,7 @@ def plan(seconds, seed=7):
         back = round(t + rng.uniform(5, 40), 1)
         stdin += [{"t": t, "line": "frame_gen off"}, {"t": back, "line": "frame_gen on"}]
     for t in _times(rng, seconds, 5):
-        stdin.append({"t": t, "line": f"frame_gen_rate {rng.choice(['half', 'two_thirds', 'third', 'uncapped'])}"})
+        stdin.append({"t": t, "line": f"frame_gen_rate {rng.choice(['half', 'third'])}"})
     for t in _times(rng, seconds, 3):
         stdin += [{"t": t, "line": "debug on"}, {"t": round(t + rng.uniform(10, 60), 1), "line": "debug off"}]
     stdin.sort(key=lambda e: e["t"])

@@ -108,8 +108,7 @@ struct HostToShim {
     // other compositor boundary; the host interpolates the frame in between from the optical flow of the last two rendered frames) and its
     // predicted display time moves one display period later (an interpolated frame is shown before each rendered one). 0 or 1 = every boundary.
     uint32_t appPeriodMul;
-    // Uncapped frame generation (docs/FRAME_GENERATION_UNCAPPED.md): the app is paced at every boundary (appPeriodMul 1) and may be held to a
-    // minimum spacing between releases (an fps cap chosen by the user: headroom for the host's own GPU work). 0 = no cap.
+    // The game fps lock (`video.frame_gen_cap_fps`): a minimum spacing between releases, in every mode, chosen by the user. 0 = no lock.
     uint32_t appMinPeriodUs;
     // the field of view the GAME is told, as fractions of the headset's tangents (eyeFovTan): outer (the side away from the nose), inner, upper, lower; 1 = all of it.
     // The stream frame keeps covering the headset's whole FoV (the client maps it over the FoV it declared); an app that started later takes new values.

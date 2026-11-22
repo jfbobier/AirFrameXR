@@ -60,7 +60,7 @@ struct Arrived {
     has_projection: bool,
     /// the display time the app rendered the frame for (shim/host QPC clock, s); 0 = unknown
     display_s: f64,
-    /// shim clock when the app was released for this frame (its start): the uncapped generation's content time (a wall-clock engine animates from it)
+    /// shim clock when the app was released for this frame (its start): the frame's time for the camera turn when the display time is unknown
     release_s: f64,
 }
 
@@ -123,16 +123,14 @@ enum Job {
     FgHold,
 }
 
-/// The frame-generation rate (docs/FRAME_GENERATION.md, docs/FRAME_GENERATION_UNCAPPED.md): the game runs at a fraction of the display rate.
-/// Third and Half lock the game to the display cadence (ipc appPeriodMul 3 / 2) and the host fills the boundaries in between with a fixed
-/// pattern (t = k/m); TwoThirds and Uncapped let the game run free (appPeriodMul 1), TwoThirds held to two thirds of the display rate by
-/// the shim's minimum release spacing, and every output is interpolated at the fraction the content clock falls at.
+/// The frame-generation rate (docs/FRAME_GENERATION.md): the game runs at a fraction of the display rate, locked to the display cadence
+/// (ipc appPeriodMul 3 / 2), and the host fills the boundaries in between with a fixed pattern (t = k/m): x3 and x2. Fixed regimes only since
+/// 1.5.0: the 2/3 rate and the uncapped mode (a content clock asking for any t) were removed: RIFE 4.4 misplaces the content for times outside
+/// its fixed fractions (docs/NEURAL_RIFE_CUDA.md "Output time"), and a regime that follows the game's jitter amplifies its hitches.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FgRate {
     Third,
     Half,
-    TwoThirds,
-    Uncapped,
 }
 
 impl FgRate {
@@ -140,31 +138,23 @@ impl FgRate {
         match v.trim().to_ascii_lowercase().as_str() {
             "third" | "1/3" => Some(FgRate::Third),
             "half" | "1/2" => Some(FgRate::Half),
-            "two_thirds" | "two-thirds" | "2/3" => Some(FgRate::TwoThirds),
-            "uncapped" => Some(FgRate::Uncapped),
+            // removed in 1.5.0: a setting saved by an older version runs at x2
+            "two_thirds" | "two-thirds" | "2/3" | "uncapped" => Some(FgRate::Half),
             _ => None,
         }
     }
     pub fn from_index(i: i32) -> FgRate {
-        match i { 0 => FgRate::Third, 2 => FgRate::TwoThirds, 3 => FgRate::Uncapped, _ => FgRate::Half }
+        match i { 0 => FgRate::Third, _ => FgRate::Half }
     }
     pub fn index(self) -> i32 {
-        match self { FgRate::Third => 0, FgRate::Half => 1, FgRate::TwoThirds => 2, FgRate::Uncapped => 3 }
+        match self { FgRate::Third => 0, FgRate::Half => 1 }
     }
     pub fn name(self) -> &'static str {
-        match self { FgRate::Third => "third", FgRate::Half => "half", FgRate::TwoThirds => "two_thirds", FgRate::Uncapped => "uncapped" }
+        match self { FgRate::Third => "third", FgRate::Half => "half" }
     }
-    /// the shim's release step in display periods (1 = free-running)
+    /// the shim's release step in display periods
     pub fn period_mul(self) -> u32 {
-        match self { FgRate::Third => 3, FgRate::Half => 2, FgRate::TwoThirds | FgRate::Uncapped => 1 }
-    }
-    /// the content-clock planner (`fg_plan_uncapped`) rather than the fixed pattern
-    pub fn is_uncapped(self) -> bool {
-        matches!(self, FgRate::TwoThirds | FgRate::Uncapped)
-    }
-    /// the shim's minimum release spacing (us) for this rate at this display period; 0 = none (Uncapped: the user's cap applies instead)
-    pub fn min_period_us(self, display_period_s: f64) -> u32 {
-        match self { FgRate::TwoThirds => (display_period_s * 1.5e6).round() as u32, _ => 0 }
+        match self { FgRate::Third => 3, FgRate::Half => 2 }
     }
 }
 
@@ -188,34 +178,6 @@ struct FgState {
     last_arrival: Option<Instant>,
     /// the shim slot of the newest rendered frame could not be used (no projection layer): the slot went out as is
     passthrough: u64,
-    /// Uncapped mode (docs/FRAME_GENERATION_UNCAPPED.md): the game is paced at the display rate and runs at whatever rate it reaches; every
-    /// boundary shows the content at (newest tracking sample - lag) interpolated between the two newest rendered frames at the fraction that
-    /// time falls at (t = 1: the newest frame itself, then repeats of it while the next one is late). Content time = the tracking timestamp
-    /// the game rendered the frame with; the lag = `lag_override` or the game's measured frame period plus half a display period.
-    uncapped: bool,
-    /// content times (the display time each frame was rendered for, QPC s) of the generator's frame history, newest last (at most
-    /// FrameGen::kHist = 4; the generator's ring is kept in step)
-    hist: Vec<f64>,
-    /// automatic lag: envelope of (headset time at a frame's arrival - the previous frame's content time), fast attack, slow decay
-    lag_auto_s: f64,
-    unc_age_sum: u64,
-    /// the newest rendered frame already went out as the real frame (t reached 1): further boundaries without a new frame repeat it
-    real_sent: bool,
-    /// EMA of the game's frame period (s), from the content timestamps of consecutive rendered frames
-    game_period_s: f64,
-    lag_override_s: f64,
-    last_lag_s: f64,
-    last_t: f64,
-    /// boundaries that found the content time past the newest frame (the game slower than the lag assumed): the headset sees a repeat
-    unc_behind: u64,
-    /// boundaries that found the content time before the older frame (the lag longer than the pair: clamped to the older frame)
-    unc_ahead: u64,
-    unc_t_sum: f64,
-    unc_synths: u64,
-    /// per arrival: the lag margin that remained when the frame came (ms; negative = the headset already saw a repeat), and the content interval
-    /// between consecutive rendered frames (ms): the night's numbers for the automatic lag (window since the last perf line)
-    unc_slack_ms: Vec<f64>,
-    unc_interval_ms: Vec<f64>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -223,12 +185,6 @@ enum FgKind {
     Synth,
     Real,
     Repeat,
-}
-
-/// uncapped frame generation numbers since the last perf line (see `fg_uncapped_stats`)
-pub struct UncStats {
-    pub game_period_ms: f64, pub lag_ms: f64, pub mean_t: f64, pub mean_age: f64, pub behind: u64, pub ahead: u64, pub synths: u64,
-    pub slack_p5: f64, pub slack_p50: f64, pub interval_p50: f64, pub interval_p95: f64, pub interval_max: f64, pub arrivals: u64,
 }
 
 /// what one boundary encodes
@@ -333,8 +289,6 @@ pub struct Pipeline {
     fg: Mutex<FgState>,
     /// mirror of `FgState::on` for the clock thread (which must never wait on the encoder thread's mutex)
     fg_on: AtomicBool,
-    /// mirror of `FgState::uncapped` for the clock thread
-    fg_uncapped: AtomicBool,
     /// a rendered frame is in the generator's history (set by the encoder thread, read by the clock thread)
     fg_have_frame: AtomicBool,
     pub fg_synths: AtomicU64,
@@ -355,10 +309,6 @@ pub struct Pipeline {
     pub fg_pairs_skipped: AtomicU64,
     /// mirror of `!FgState::due.is_empty()` for the clock thread: while an output is due, a new arrival waits in the intake (see `on_boundary`)
     fg_real_due: AtomicBool,
-    /// the shim's minimum release spacing the pipeline last applied for the two-thirds rate (us); 0 = none applied
-    fg_cap_us: AtomicU32,
-    /// the user's game fps lock as a minimum release spacing (us; 0 = none), kept when the rate's own spacing is refreshed
-    fps_lock_us: AtomicU32,
     /// boundaries at which an arrived frame was left waiting because the previous rendered frame was still due
     pub fg_queued: AtomicU64,
     /// how long a boundary with nothing due waits for the expected rendered frame (AIRFRAMEXR_FG_ARRIVAL_WAIT_MS, default 4)
@@ -439,9 +389,7 @@ impl Pipeline {
             green_active: AtomicBool::new(false),
             last_green_boundary: AtomicU64::new(0),
             gpu_sched: Mutex::new(None),
-            fg: Mutex::new(FgState { on: false, rate: FgRate::Half, due: VecDeque::new(), last_counter: 0, last_submit_s: 0.0, last_arrival: None, passthrough: 0,
-                uncapped: false, hist: Vec::new(), lag_auto_s: 0.0, unc_age_sum: 0, real_sent: false, game_period_s: 0.0, lag_override_s: 0.0, last_lag_s: 0.0, last_t: 0.0, unc_behind: 0, unc_ahead: 0, unc_t_sum: 0.0, unc_synths: 0, unc_slack_ms: Vec::new(), unc_interval_ms: Vec::new() }),
-            fg_uncapped: AtomicBool::new(false),
+            fg: Mutex::new(FgState { on: false, rate: FgRate::Half, due: VecDeque::new(), last_counter: 0, last_submit_s: 0.0, last_arrival: None, passthrough: 0 }),
             fg_on: AtomicBool::new(false),
             fg_have_frame: AtomicBool::new(false),
             fg_synths: AtomicU64::new(0),
@@ -455,8 +403,6 @@ impl Pipeline {
             fg_dropped: AtomicU64::new(0),
             fg_pairs_skipped: AtomicU64::new(0),
             fg_real_due: AtomicBool::new(false),
-            fg_cap_us: AtomicU32::new(0),
-            fps_lock_us: AtomicU32::new(0),
             fg_queued: AtomicU64::new(0),
             fg_arrival_wait: Duration::from_secs_f64(
                 std::env::var("AIRFRAMEXR_FG_ARRIVAL_WAIT_MS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(4.0).clamp(0.0, 10.0) / 1000.0),
@@ -483,127 +429,21 @@ impl Pipeline {
         st.on = on;
         self.fg_on.store(on, Ordering::Relaxed);
         st.due.clear();
-        st.hist.clear();
-        st.real_sent = false;
         if !on {
             self.fg_have_frame.store(false, Ordering::Relaxed);
         }
     }
 
-    /// Frame generation rate (`FgRate`): the fixed patterns (third, half) or the content-clock planner (two thirds, uncapped).
-    /// `lag_ms` = 0: the lag of the content-clock planner follows the arrivals.
-    pub fn set_fps_lock_us(&self, us: u32) {
-        self.fps_lock_us.store(us, Ordering::Relaxed);
-    }
-
-    pub fn set_frame_gen_rate(&self, rate: FgRate, lag_ms: f64) {
+    /// Frame generation rate (`FgRate`: the fixed pattern of x3 or x2).
+    pub fn set_frame_gen_rate(&self, rate: FgRate) {
         let mut st = self.fg.lock();
-        let uncapped = rate.is_uncapped();
         st.rate = rate;
-        st.uncapped = uncapped;
-        st.lag_override_s = (lag_ms.max(0.0)) / 1000.0;
         st.due.clear();
-        self.fg_cap_us.store(0, Ordering::Relaxed);
-        st.hist.clear();
-        st.real_sent = false;
-        st.game_period_s = 0.0;
-        st.lag_auto_s = 0.0;
         self.fg_real_due.store(false, Ordering::Relaxed);
-        self.fg_uncapped.store(uncapped, Ordering::Relaxed);
     }
 
     pub fn fg_stats_json(&self) -> String {
         self.fg_stats.lock().clone()
-    }
-
-    /// Uncapped mode numbers for the logs since the last call: game period ms, lag ms, mean t of the synthetic outputs, behind, ahead, synths,
-    /// slack ms (p5, p50), content interval ms (p50, p95, max). Resets the window.
-    pub fn fg_uncapped_stats(&self) -> UncStats {
-        let mut st = self.fg.lock();
-        fn pct(v: &mut Vec<f64>, q: f64) -> f64 {
-            if v.is_empty() { return 0.0; }
-            v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            v[((v.len() - 1) as f64 * q).round() as usize]
-        }
-        let mean_t = if st.unc_synths > 0 { st.unc_t_sum / st.unc_synths as f64 } else { 0.0 };
-        let r = UncStats {
-            game_period_ms: st.game_period_s * 1000.0, lag_ms: st.last_lag_s * 1000.0, mean_t, behind: st.unc_behind, ahead: st.unc_ahead, synths: st.unc_synths,
-            mean_age: if st.unc_synths > 0 { st.unc_age_sum as f64 / st.unc_synths as f64 } else { 0.0 },
-            slack_p5: pct(&mut st.unc_slack_ms, 0.05), slack_p50: pct(&mut st.unc_slack_ms, 0.5),
-            interval_p50: pct(&mut st.unc_interval_ms, 0.5), interval_p95: pct(&mut st.unc_interval_ms, 0.95), interval_max: pct(&mut st.unc_interval_ms, 1.0),
-            arrivals: st.unc_slack_ms.len() as u64,
-        };
-        st.unc_t_sum = 0.0;
-        st.unc_synths = 0;
-        st.unc_age_sum = 0;
-        st.unc_slack_ms.clear();
-        st.unc_interval_ms.clear();
-        r
-    }
-
-    /// Uncapped mode: what this boundary shows. The content time is the newest tracking sample minus the lag; the pair of history frames that
-    /// brackets it gives `age` (0 = the newest pair) and the fraction t. Past the newest frame: that frame once, then repeats (behind). Before
-    /// the oldest frame kept: the oldest frame (ahead: the lag is longer than the history spans). Called with the state locked, after any ingest.
-    fn fg_plan_uncapped(&self, st: &mut FgState) -> Plan {
-        let Some((sts, q)) = self.fg_pick_sample() else {
-            self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
-            return Plan::Skip;
-        };
-        let (counter, submit_s, arrival) = (st.last_counter, st.last_submit_s, st.last_arrival);
-        let Some(&cur) = st.hist.last() else {
-            return Plan::Fg { mode: 0, t: 0.0, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Repeat };
-        };
-        let period = self.period().as_secs_f64();
-        // The content clock is now - lag: a lag that jumps makes the content stall or leap (the first lab runs: the envelope's fast attack froze
-        // the marker for a period at every late frame, JUDDER). So the lag in force slews toward its target by at most 5 % of a display
-        // period per boundary (content speed within 0.95..1.05 of real time); a frame later than the lag in force costs one repeat instead.
-        let target = if st.lag_override_s > 0.0 { st.lag_override_s } else if st.lag_auto_s > 0.0 { st.lag_auto_s } else { st.game_period_s.max(period) * 2.0 + 0.5 * period }.min(0.080);
-        let max_step = period * 0.05;
-        let lag = if st.last_lag_s <= 0.0 || st.lag_override_s > 0.0 { target } else { st.last_lag_s + (target - st.last_lag_s).clamp(-max_step, max_step) };
-        st.last_lag_s = lag;
-        let now = unsafe { nvh::nvh_qpc_seconds() };
-        let content = now - lag;
-        let n = st.hist.len();
-        let (hist0, gp_ms) = (st.hist[0], st.game_period_s * 1000.0);
-        let csv_row = move |kind: &str, t: f64, age: i32| {
-            logs::csv("fg_uncapped.csv", "time,kind,t,age,lag_ms,content_minus_newest_ms,now_s,hist_oldest_s,newest_s,history,game_period_ms",
-                &format!("{:.6},{kind},{t:.3},{age},{:.2},{:.2},{now:.6},{hist0:.6},{cur:.6},{n},{:.2}", logs::qpc_at(Instant::now()), lag * 1000.0, (content - cur) * 1000.0, gp_ms));
-        };
-        if content >= cur || n < 2 {
-            // the content time has reached the newest frame: the frame itself, then repeats until the next one arrives
-            st.last_t = 1.0;
-            if st.real_sent {
-                csv_row("Q", 1.0, 0);
-                st.unc_behind += 1;
-                return Plan::Fg { mode: 0, t: 0.0, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Repeat };
-            }
-            csv_row("R", 1.0, 0);
-            st.real_sent = true;
-            return Plan::Fg { mode: 0, t: 0.0, age: 0, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Real };
-        }
-        // the bracketing pair, newest first
-        let mut age = (n - 2) as i32;
-        let mut t = 0.0;
-        let mut found = false;
-        for i in (1..n).rev() {
-            let (a, b) = (st.hist[i - 1], st.hist[i]);
-            if content >= a && b > a {
-                age = (n - 1 - i) as i32;
-                t = (content - a) / (b - a);
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            st.unc_ahead += 1;   // older than the whole history: the oldest pair at its start
-        }
-        let t = t.clamp(0.0, 0.98);
-        csv_row("G", t, age);
-        st.last_t = t;
-        st.unc_t_sum += t;
-        st.unc_age_sum += age as u64;
-        st.unc_synths += 1;
-        Plan::Fg { mode: 1, t, age, q, ts: sts, counter, submit_s, arrival, kind: FgKind::Synth }
     }
 
     /// The tracking sample an output is stamped with (and rotated to): a sample newer than the last sent frame, and when two or more are
@@ -709,15 +549,13 @@ impl Pipeline {
             let mut st = self.fg.lock();
             st.passthrough += 1;
             st.due.clear();
-            st.hist.clear();
-            st.real_sent = false;
             self.fg_have_frame.store(false, Ordering::Relaxed);
             self.fg_real_due.store(false, Ordering::Relaxed);
             unsafe { nvh::nvh_fg_reset(handle) };   // the generator's pair history too: no interpolation across the menu
             return Plan::Slot(a);
         }
         let mut st = self.fg.lock();
-        if !st.due.is_empty() && !st.uncapped && self.fg_have_frame.load(Ordering::Relaxed) {
+        if !st.due.is_empty() && self.fg_have_frame.load(Ordering::Relaxed) {
             // The previous rendered frame B is still due and the new frame C is here. `on_boundary` leaves C waiting while B is due, so this
             // is the encoder-overrun fallback (a boundary was replaced before it was encoded): B is dropped and this boundary gets S(B, C),
             // C next, which keeps the motion continuous (0.5 -> 1.5 -> 2) where sending B and then C twice froze a tick and jumped.
@@ -743,50 +581,6 @@ impl Pipeline {
         st.last_counter = a.counter;
         st.last_submit_s = a.submit_s;
         st.last_arrival = Some(a.arrival);
-        if st.uncapped {
-            // content time = the shim clock when the app was released for the frame (its start: a wall-clock engine's animation time). Not the
-            // tracking timestamp (handed out one per frame, so spaced by the display period whatever the app's real frame time) and not the
-            // layer's SensorSampleTime (VDXR's label did not follow the app's display time one-to-one in the lab): both made JUDDER.
-            let ts = if a.release_s > 0.0 { a.release_s } else if a.display_s > 0.0 { a.display_s } else { a.submit_s };
-            let period = self.period().as_secs_f64();
-            // the lag must cover (now - the previous frame's content time) at every arrival, or the headset sees a repeat before this frame is
-            // usable: an envelope with a fast attack and a slow decay (0.2 ms per arrival)
-            let now = unsafe { nvh::nvh_qpc_seconds() };
-            if let Some(&prev) = st.hist.last() {
-                let need = now - prev;
-                if need > 0.0 && need < 0.2 {
-                    let want = (need + 0.5 * period).min(0.080);
-                    st.lag_auto_s = if st.lag_auto_s <= 0.0 { want } else { want.max(st.lag_auto_s - 0.0002) };
-                    let lag_s = st.last_lag_s;
-                    if lag_s > 0.0 && st.unc_slack_ms.len() < 4096 {
-                        st.unc_slack_ms.push((lag_s - need) * 1000.0);
-                    }
-                }
-            }
-            if r < 1 {
-                st.hist.clear();   // the generator holds this frame only (first frame, or a size change)
-            }
-            match st.hist.last() {
-                Some(&cur) if ts > cur => {
-                    let d = ts - cur;
-                    if d < 0.1 {
-                        st.game_period_s = if st.game_period_s > 0.0 { st.game_period_s * 0.9 + d * 0.1 } else { d };
-                        if st.unc_interval_ms.len() < 4096 {
-                            st.unc_interval_ms.push(d * 1000.0);
-                        }
-                    }
-                }
-                Some(_) => st.hist.clear(),   // not newer than the frame before (a repeated display time): the history restarts here
-                None => {}
-            }
-            st.hist.push(ts);
-            while st.hist.len() > 4 {
-                st.hist.remove(0);
-            }
-            st.real_sent = false;
-            st.due.clear();
-            return self.fg_plan_uncapped(&mut *st);
-        }
         // the fixed pattern of one game period: m - 1 synthetic frames at k/m between the two newest rendered frames, then the newest itself
         let m = st.rate.period_mul().max(2) as usize;
         let mut pattern: VecDeque<f64> = (1..m).map(|k| k as f64 / m as f64).collect();
@@ -824,10 +618,6 @@ impl Pipeline {
             if !st.due.is_empty() {
                 return None;
             }
-            if st.uncapped {
-                // the content lags the newest frame by design: nothing is expected at this boundary in particular
-                return self.intake.lock().pop_front();
-            }
         }
         let deadline = boundary + self.fg_arrival_wait;
         let t0 = Instant::now();
@@ -860,9 +650,6 @@ impl Pipeline {
             return Plan::Skip;
         }
         let mut st = self.fg.lock();
-        if st.uncapped {
-            return self.fg_plan_uncapped(&mut *st);
-        }
         let Some((sts, q)) = self.fg_pick_sample() else {
             // no fresh sample: the output stays owed (the pattern slides one boundary; with one sample in hand this is rare)
             self.fg_no_sample.fetch_add(1, Ordering::Relaxed);
@@ -993,15 +780,7 @@ impl Pipeline {
         let keeps_up = idx.wrapping_sub(self.last_empty_idx.load(Ordering::Relaxed)) > self.keepup_boundaries;
         // frame generation: while a rendered frame is still due, a frame that has already arrived waits one boundary (the stream shows
         // B, S(B, C), C in order rather than dropping or doubling one; see `FgState`)
-        let fg_unc = self.fg_on.load(Ordering::Relaxed) && self.fg_uncapped.load(Ordering::Relaxed);
-        if fg_unc {
-            // two-thirds rate: the shim's minimum release spacing follows the display period (the host clock follows the client's rate)
-            let want = self.fg.lock().rate.min_period_us(self.period().as_secs_f64()).max(self.fps_lock_us.load(Ordering::Relaxed));
-            if want != 0 && self.fg_cap_us.swap(want, Ordering::Relaxed) != want && self.ipc != 0 {
-                unsafe { nvh::nvh_ipc_set_app_min_period(self.ipc(), want) };
-            }
-        }
-        let fg_queue = self.fg_on.load(Ordering::Relaxed) && !fg_unc && self.fg_have_frame.load(Ordering::Relaxed) && self.fg_real_due.load(Ordering::Relaxed)
+        let fg_queue = self.fg_on.load(Ordering::Relaxed) && self.fg_have_frame.load(Ordering::Relaxed) && self.fg_real_due.load(Ordering::Relaxed)
             && !self.intake.lock().is_empty();
         let newest = if fg_queue {
             self.fg_queued.fetch_add(1, Ordering::Relaxed);
@@ -1013,13 +792,10 @@ impl Pipeline {
             // frame generation: the shim's half-rate pacing runs open loop (the intake gate does not apply) and the generator consumes exactly one
             // frame per two boundaries, so a queue that once formed never drains by itself: the newest frame wins, the older ones are superseded
             // (2026-10-14: the in-order pick kept 2-3 frames standing, 40 ms of latency; the synthetic frame then spans two app frames once)
-            // uncapped frame generation: every rendered frame is a link in the interpolation chain (and the frame the game's vectors describe
-            // the motion from), so the frames go in order and none is superseded; the app is paced at the display rate, so at most one
-            // arrives per boundary on average and a bunch drains at the next empty boundary
             // frames go in order, plus one dropped frame to resynchronise a queue that has stood AIRFRAMEXR_DRAIN_AFTER boundaries (the only pick policy
             // left: `oldest` left a standing queue a period late, `newest` lost 15-30 % of the frames of heavy games; the intake gate normally drains the
             // queue first, this fires only when it could not: a shim without the gate, or the app ignoring its release)
-            let take_older = (fg_unc && q.len() >= 2) || !self.fg_on.load(Ordering::Relaxed) && q.len() >= 2
+            let take_older = !self.fg_on.load(Ordering::Relaxed) && q.len() >= 2
                 && {
                 // 30 boundaries (0.3 s): the gate normally clears a standing queue within a few boundaries; the drain is the last resort and must
                 // not fire on the arrival jitter the duplicate-timestamp re-stamp adds (77 frames dropped in 206 s of End of Abyss at 8)
@@ -1376,8 +1152,6 @@ impl Pipeline {
     pub fn stats_json(&self) -> serde_json::Value {
         let (mut waits, mut app_ms, mut releases, mut late, mut gate_holds, mut gate_suppressed) = (0u32, 0f32, 0u64, 0u64, 0u64, 0u64);
         unsafe { nvh::nvh_ipc_shim_pacing(self.ipc(), &mut waits, &mut app_ms, &mut releases, &mut late, &mut gate_holds, &mut gate_suppressed) };
-        let unc_state = self.fg.try_lock().map(|s| json!({ "game_period_ms": s.game_period_s * 1000.0, "lag_ms": s.last_lag_s * 1000.0, "last_t": s.last_t,
-            "behind": s.unc_behind, "ahead": s.unc_ahead })).unwrap_or(serde_json::Value::Null);
         json!({
             "arrived": self.arrived.load(Ordering::Relaxed),
             "superseded": self.superseded.load(Ordering::Relaxed),
@@ -1400,8 +1174,6 @@ impl Pipeline {
                 "repeats": self.fg_repeats.load(Ordering::Relaxed), "holds": self.fg_holds.load(Ordering::Relaxed), "no_sample": self.fg_no_sample.load(Ordering::Relaxed), "in_hand": self.fg_in_hand.load(Ordering::Relaxed),
                 "dropped": self.fg_dropped.load(Ordering::Relaxed), "pairs_skipped": self.fg_pairs_skipped.load(Ordering::Relaxed), "errors": self.fg_errors.load(Ordering::Relaxed),
                 "passthrough": self.fg.try_lock().map(|s| s.passthrough).unwrap_or(0),
-                "uncapped": self.fg_uncapped.load(Ordering::Relaxed),
-                "uncapped_state": unc_state,
                 "sample_waits": self.fg_sample_waits.load(Ordering::Relaxed), "sample_wait_ms_sum": self.fg_sample_wait_us.load(Ordering::Relaxed) as f64 / 1000.0,
                 "sample_wait_ms": self.fg_sample_wait.lock().as_secs_f64() * 1000.0,
                 "regime_switches": self.fg_regime_switches.load(Ordering::Relaxed),

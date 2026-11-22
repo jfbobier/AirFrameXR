@@ -49,7 +49,7 @@ through an array view, so a single-pass stereo swapchain (OpenXR `arraySize` 2) 
 | **Host clock**: display ticks to the shim, **compositor boundary** pick (newest complete frame → encoder mailbox; green idle frame at 30 fps with no game; empty boundary left empty) | host vsync thread (HIGHEST, sleep-then-spin) | ALVR's `duration_until_next_vsync` grid at the headset's refresh | nothing (one-deep mailboxes, newest wins) |
 | **Field of view**: the headset's FoV (ViewsConfig) is the stream frame's and the composition target's; the game is told a per-edge restricted FoV and a recommended size reduced with its area (shim `GetEyeFov` / `GetRecommendedResolution`, host `fovScale`, taken at the app's start). 1.4: our Vision Pro app declares the box the host sent it (`video.client_box`, Reserved message), so the restriction scales nothing and the game's frame is the stream's | shim, host | the FOV card's profile | nothing |
 | **Host intake**: IPC frame event → frame queue (three deep, oldest first), slot marked busy for the shim | host intake thread (HIGHEST) | the shim's publish event | nothing |
-| **Host encoder**: foveation pass + NVENC on the picked slot (slot released when its copy is done), packets → sender queue | host encoder thread (HIGHEST) | encoder mailbox | the encode itself only; the main loop rebuilds the encoder under the same lock, only when no game runs |
+| **Host encoder**: foveation pass + NVENC on the picked slot (slot released when its copy is done), packets → sender queue; with frame generation on, the generator's passes first (see "Frame generation") | host encoder thread (HIGHEST) | encoder mailbox | the encode itself only; the main loop rebuilds the encoder under the same lock, only when no game runs |
 | **Host sender**: release each packet at its send time `asap` \| `vsync` (next tick) \| `phase` (boundary + encode-time envelope, default) → `send_video_nal` | host sender thread (HIGHEST) | sender queue | nothing |
 | Network send (shards over UDP/TCP) | ALVR sender thread (`server_core`) | | socket |
 | Tracking receive → head/hand poses into the IPC block (seqlock), PLL residual statistics | ALVR receive thread → host event thread | the headset's one sample per display frame | nothing |
@@ -85,15 +85,36 @@ the one SteamVR's compositor runs with, so the encoder's copy never queues behin
 
 - **Phase lock** (`tools/host/src/phase.rs`): from the headset's own reports of how long a decoded frame waited for its render tick, it slides the host's display grid in steps of at most 2 ms, no more than one per two evaluations, until the earliest arrivals sit about 7 ms before the tick; the game's release, the pick, the encode and the send all follow that grid. It needs about 4.5 s to settle at a game's start, which is why a pacing check must not judge a run shorter than that (`e2e_baseline` measures the drift from 0.5 s after the last correction and runs 900 frames).
 
-## Frame generation and its neural engine (1.4.2)
+## Frame generation (1.5.0: x2 / x3, neural or edge)
 
-Frame generation (`nvenc/hostlib/framegen.cpp`, docs/FRAME_GENERATION.md) runs on the **host encoder thread**, on the encoder's D3D11 device
-and immediate context: no thread of its own, no extra copy of the stream frame on the way to NVENC. Per rendered frame the encoder thread
-copies the slot into a short history, turns the older frame of the pair into the newer frame's camera (the head's rotation and the measured
-camera turn removed) and runs NVIDIA Optical Flow on the pair (the driver's `nvofapi64.dll`). Per output boundary it draws the picture
-(mode 0 = a real frame re-rotated, mode 1 = a generated one at time t) and encodes it.
+For a game that cannot hold the headset's refresh rate (docs/FRAME_GENERATION.md). Two fixed regimes and two ways to draw the frames in
+between, nothing adaptive: a regime that follows the game's jitter amplifies its hitches, and the network places the picture right only at
+fixed moments (docs/NEURAL_RIFE_CUDA.md "Output time"). The 2/3 rate and the uncapped mode (a content clock asking for any moment) and the
+classic / edge-blend syntheses were removed in 1.5.0.
 
-**The neural fields** (synthesis `neural`, the default since 1.4.2; `nvenc/hostlib/neural.cpp`, `nvenc/rife/`, docs/NEURAL_RIFE_CUDA.md):
+**Pacing (shim + host).** The rate (`video.frame_gen_rate`: `half` = x2, `third` = x3) sets the IPC's `appPeriodMul` = m: the shim releases
+the game every m-th compositor boundary, so its frames come one game period (m display periods) apart and each is rendered for the boundary
+it will be shown at. The user's game fps lock (`appMinPeriodUs`, `video.frame_gen_cap_fps`) applies on top, in every mode. The host's encoder
+thread keeps a fixed pattern per game period (`pipeline.rs` `FgState`): rendered frame B arrives, A being the previous one, and the
+boundaries get S(A, B, 1/m), ..., S(A, B, (m-1)/m), then B itself. A frame C that arrives while any of these is still due waits in the intake
+(the clock thread does not pick it), so the schedule never shifts and every rendered frame is shown in order; if the encoder fell a boundary
+behind, the late B is dropped and C's pattern starts at once (the motion stays continuous). A boundary with nothing due waits up to 4 ms
+for the expected frame (`fg_wait_arrival`), else re-sends B rotated to the new head sample. Every output is stamped with a tracking sample
+newer than the last sent frame, one sample kept in hand, and rotated to it (head turns stay at the display rate); no such sample: the
+boundary is skipped and what it owed stays owed. A frame without a projection layer (a loading screen, a menu of quads) goes out as is and
+the generator's history restarts. The streamer's x2 / x3 buttons change the rate live (stdin `frame_gen_rate`: the pattern and
+`appPeriodMul` change together, the game record starts a new segment).
+
+**The generator** (`nvenc/hostlib/framegen.cpp`) runs on the **host encoder thread**, on the encoder's D3D11 device and immediate context:
+no thread of its own, no extra copy of the stream frame on the way to NVENC. Per rendered frame it copies the slot into a short history
+(4 frames), turns the older frame of the pair into the newer frame's camera (the head's rotation and the measured camera turn removed) and
+runs NVIDIA Optical Flow on the pair (the driver's `nvofapi64.dll`; the camera turn measures from it and the edge synthesis draws from it).
+Per output boundary it draws the picture (mode 0 = a real frame re-rotated, mode 1 = a generated one at time t = k/m) and encodes it.
+Two syntheses (`video.frame_gen_synthesis`): **neural** (default, below) and **edge**, the fallback: the optical flow's vectors with a
+3 x 3 median, the vector solved where the content comes from, a per-pixel choice at motion boundaries, doubtful motion shrinking toward the
+real frame (ideas studied in VectorXR, re-implemented).
+
+**The neural fields** (synthesis `neural`, the default since 1.4.2; `nvenc/hostlib/neural.cpp`, `nvenc/rife/`, docs/NEURAL_RIFE_CUDA.md), per network run:
 
 | Step | Where | What |
 |---|---|---|
@@ -103,10 +124,9 @@ camera turn removed) and runs NVIDIA Optical Flow on the pair (the driver's `nvo
 | unmap | CUDA | orders the D3D11 output pass after the network |
 | output | the edge synthesis's pixel shader (`neuralSynth`) | one sample of each original frame through the fields and the rotation chain, the older frame outside the newer view, still content kept exact |
 
-The fields belong to one output time: run once per pair when the outputs keep one time (the 1/2 rate), else once per output (1.5x, 3x).
-The optical flow keeps running (the camera turn measures from it, the fallback draws from it). The fallback, the edge synthesis from the
-optical flow, draws every output when the user picks `edge`, when the network's files are missing, on a GPU before compute capability 8.0
-(RTX 30) or after a failure (logged in debug mode). The network enqueues in a fraction of a millisecond of the encoder thread's CPU and
+The fields belong to one output time: x2, one network run per game frame at t = 1/2 (run as soon as the pair exists); x3, one per output,
+at 1/3 and 2/3. The edge synthesis draws every output when the user picks `edge`, when the network's files are missing, on a GPU before
+compute capability 8.0 (RTX 30) or after a failure (logged in debug mode). The network enqueues in a fraction of a millisecond of the encoder thread's CPU and
 costs GPU time on the shader cores the game also uses (docs/NEURAL_RIFE_CUDA.md "Checks"); its buffers are allocated once.
 
 ## Field of view in 1.4

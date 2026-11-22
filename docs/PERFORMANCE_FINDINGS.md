@@ -402,7 +402,7 @@ Rig (3080 Ti, `harness/simrig` scenarios `gpu_fg` / `gpu_fg_spikes`, `SIM_GPU_CO
 
 Fixed 1/2 is better while the game holds the cap (even steps, no content lag), uncapped clearly better when it cannot: the 2026-10-15
 headset verdict again. A game swinging around the cap (Gears at 100 Hz) sits on the line; next is a headset A/B of uncapped
-(`video.frame_gen_rate: "uncapped"`, optionally `frame_gen_cap_fps`) against 1/2 on the same section.
+(`video.frame_gen_rate: "uncapped"`, optionally `frame_gen_cap_fps`) against 1/2 on the same section. (Not done: the uncapped mode was removed in 1.5.0, docs/FRAME_GENERATION.md "Rates"; a game that cannot hold x2's cap goes to x3.)
 
 ## 2026-10-23: the game's frame start was never gated (VDXR's own running start)
 
