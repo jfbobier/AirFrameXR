@@ -497,11 +497,15 @@ def main(argv):
                 S = (a.get("modsim") or {}).get("shim") or {}
             w = max(W.get("submits") or 0, 1)
             pc = lambda k: f'{100.0 * (W.get(k) or 0) / w:.0f}' if W else "-"
-            rows.append([n, r["status"], str(W.get("submits", "-")), pc("true_dup"), pc("same_pose_new_pic"), pc("re_released"),
+            T = a.get("identity_stamp") or {}   # plan 5b: share of received frames showing a picture under another pose, before / after the late shapes
+            sh = lambda p: f'{100.0 * p["share"]:.1f}' if p and p.get("frames") else "-"
+            rows.append([n, r["status"], str(W.get("submits", "-")), pc("true_dup"), pc("same_pose_new_pic"), pc("re_released"), pc("stale_pose"), pc("one_eye"),
                          f'{V.get("resubmits", "-")}/{W.get("no_release", "-")}', f'{S.get("dups_seen", "-")}/{S.get("dups_dropped", "-")}', str(S.get("free_waits", "-")),
                          str(I.get("pause_wait_rate_hz", I.get("wait_rate_hz", "-"))),
+                         f'{sh(T.get("before"))}/{sh(T.get("after"))}' if T else "-",
                          ",".join(c["name"] for c in r.get("checks", []) if not c["ok"]) or "-"])
-        hdr = ["scenario", "status", "submits", "true_dup%", "samepose_new%", "rereleased%", "vdxr/app_norel", "seen/dropped", "free_waits", "wait_hz", "failed checks"]
+        hdr = ["scenario", "status", "submits", "true_dup%", "samepose_new%", "rereleased%", "stale%", "one_eye%", "vdxr/app_norel", "seen/dropped", "free_waits",
+               "wait_hz", "stamp_err% b/a", "failed checks"]
         w = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(hdr)]
         print("\n== frame-identity matrix (record the arm: AIRFRAMEXR_LAB_UNIVERSAL / build)")
         print("  ".join(h.ljust(w[i]) for i, h in enumerate(hdr)))

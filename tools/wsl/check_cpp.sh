@@ -38,4 +38,6 @@ for f in nvh.cpp framegen.cpp neural.cpp bench.cpp simviewer.cpp; do   # (STBI_N
 done
 echo "== tools/probe/xr_probe.cpp"
 clang-cl /std:c++17 /EHsc -fsyntax-only /DNOMINMAX /DSTBI_NO_SIMD -Wno-everything /I"$R/external/VDXR/external/OpenXR-SDK/include" /I"$R/nvenc/hostlib" /I"$R/third_party/stb" $W "$R/tools/probe/xr_probe.cpp" || rc=1
+echo "== tools/probe/xr_modsim.cpp"
+clang-cl /std:c++17 /EHsc -fsyntax-only /DNOMINMAX /DSTBI_NO_SIMD -Wno-everything /I"$R/external/VDXR/external/OpenXR-SDK/include" /I"$R/nvenc/hostlib" /I"$R/third_party/stb" $W "$R/tools/probe/xr_modsim.cpp" || rc=1
 echo "check_cpp: $([ $rc = 0 ] && echo OK || echo FAILED)"; exit $rc

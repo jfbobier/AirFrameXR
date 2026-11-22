@@ -2088,6 +2088,8 @@ def analyse(sc, outdir: Path):
         a["modsim"] = analyse_modsim(sc, outdir)
     if sc.get("checks", {}).get("identity") and sc.get("app"):
         a["identity"] = analyse_identity(sc, outdir)
+        if (sc["checks"]["identity"] or {}).get("stamp") is not None:
+            a["identity_stamp"] = analyse_stamp_truth(sc, outdir)
     if sc.get("checks", {}).get("pacing") and sc.get("app"):
         a["pacing"] = analyse_pacing(sc, outdir, 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0))
     period = 1000.0 / ((a.get("host") or {}).get("fps_target") or 90.0)
@@ -2251,8 +2253,8 @@ def analyse_identity(sc, outdir):
     for line in f.read_text(errors="replace").splitlines()[1:]:
         q = line.split(",")
         if len(q) >= 8 and q[2] == "END":
-            try:
-                ends.append((float(q[0]) / 1000.0, int(q[5]), int(q[6]), int(q[7])))
+            try:   # the 9th column (eyes: projection eye images released) came with the late shapes; older CSVs have none
+                ends.append((float(q[0]) / 1000.0, int(q[5]), int(q[6]), int(q[7]), int(q[8]) if len(q) >= 9 else -1))
             except ValueError:
                 pass
         elif len(q) >= 3 and q[2] == "WAIT_OUT":
@@ -2264,14 +2266,17 @@ def analyse_identity(sc, outdir):
         return None
 
     def classes(rows):
-        c = {"submits": len(rows), "no_release": 0, "repeat_pic": 0, "same_pose": 0, "true_dup": 0, "same_pose_new_pic": 0, "re_released": 0}
-        for _, rel, newp, same in rows:
+        c = {"submits": len(rows), "no_release": 0, "repeat_pic": 0, "same_pose": 0, "true_dup": 0, "same_pose_new_pic": 0, "re_released": 0,
+             "stale_pose": 0, "one_eye": 0}
+        for _, rel, newp, same, eyes in rows:
             c["no_release"] += rel == 0
             c["repeat_pic"] += newp == 0
             c["same_pose"] += same == 1
             c["true_dup"] += same == 1 and newp == 0
             c["same_pose_new_pic"] += same == 1 and newp == 1
             c["re_released"] += rel > 0 and newp == 0
+            c["stale_pose"] += rel == 0 and same == 0   # the old picture under a new pose (Black Flag after its change, plan 5b)
+            c["one_eye"] += eyes == 1                    # one eye's picture new, the other's from the frame before
         return c
     res = {"all": classes(ends)}
     V = analyse_vdxr_trace(outdir)
@@ -2302,6 +2307,68 @@ def analyse_identity(sc, outdir):
         res["pause_wait_rate_hz"] = rate(t0 + lo + 1.0, t0 + hi - 1.0)
         res["pause"] = classes([e for e in ends if t0 + lo + 1.0 <= e[0] < t0 + hi - 1.0])
     return res
+
+
+def analyse_stamp_truth(sc, outdir):
+    """Does each picture reach the client under the pose it was rendered with? (docs/PLAN_UNIVERSAL_OPENXR.md 5b: the shaking.) The client
+    reprojects a frame from the pose of its timestamp, so a picture shown under another pose moves by the difference: the stamping error.
+    Per received frame: the picture's id decoded from its 16 stamp blocks (left eye), the yaw xr_modsim rendered that picture with (its DRAW
+    rows), and the yaw the mock client sent for the frame's timestamp (frames.csv `yaw`, else `yaw_near`). A constant offset between the
+    app's and the client's yaw is removed (the median, from the frames before MODSIM_CHANGE_AT when there are enough). A frame is a mismatch
+    when |error - offset| > checks.identity.stamp.max_rad (default 0.002 rad: one frame of the rows' head motion is about 0.009). Pictures
+    with an id below the CHANGE row's are "before" (the control), from it on and the extra pictures (ids from 40000) "after". None without
+    the inputs (an xr_modsim without DRAW rows, no recorded stream)."""
+    import csv
+    outdir = Path(outdir)
+    f, cl, fc = outdir / "modsim.csv", outdir / "client.hevc", outdir / "frames.csv"
+    if not (f.exists() and fc.exists() and cl.exists() and cl.stat().st_size > 0):
+        return None
+    draws, change_id = {}, None
+    for line in f.read_text(errors="replace").splitlines()[1:]:
+        q = line.split(",")
+        try:
+            if len(q) >= 5 and q[2] == "DRAW":
+                draws[int(q[3]) & 0xFFFF] = int(q[4]) / 1e6   # the stamp holds 16 bits (OFXR's generated ids are id + 100000)
+            elif len(q) >= 5 and q[2] == "CHANGE" and change_id is None:
+                change_id = int(q[4])
+        except ValueError:
+            pass
+    if not draws:
+        return None
+    thr = ((sc.get("checks", {}).get("identity") or {}).get("stamp") or {}).get("max_rad", 0.002)
+    cfg = negotiated_cfg(outdir)
+    vals, _ = read_stamps_at(cl, stamp_points(cfg, 64, bool(cfg.get("enable_foveated_encoding"))))
+    rows = list(csv.DictReader(open(fc)))
+    shift = len(rows) - len(vals)   # frames the decoder could not output are at the start
+    errs, unknown, no_yaw = [], 0, 0
+    for i, v in enumerate(vals):
+        ci = i + shift
+        if not 0 <= ci < len(rows) or v in (0, 65535):   # green / idle frames read all-ones, an empty first frame reads 0
+            continue
+        y = rows[ci].get("yaw") or rows[ci].get("yaw_near")
+        if not y:
+            no_yaw += 1
+            continue
+        if v not in draws:
+            unknown += 1
+            continue
+        late = v >= 40000 or (change_id is not None and v >= change_id)
+        errs.append((late, draws[v] - float(y)))
+    if not errs:
+        return {"frames": 0, "unknown_ids": unknown, "no_client_yaw": no_yaw, "decoded": len(vals), "received": len(rows)}
+    base = [e for late, e in errs if not late]
+    ref = base if len(base) >= 20 else [e for _, e in errs]
+    off = sorted(ref)[len(ref) // 2]
+
+    def part(sel):
+        r = sorted(abs(e - off) for late, e in errs if late == sel)
+        if not r:
+            return {"frames": 0}
+        mis = sum(1 for x in r if x > thr)
+        return {"frames": len(r), "mismatches": mis, "share": round(mis / len(r), 4), "p50_mrad": round(1000 * r[len(r) // 2], 2),
+                "p95_mrad": round(1000 * r[int(0.95 * (len(r) - 1))], 2), "max_mrad": round(1000 * r[-1], 2)}
+    return {"frames": len(errs), "decoded": len(vals), "received": len(rows), "unknown_ids": unknown, "no_client_yaw": no_yaw,
+            "offset_rad": round(off, 5), "threshold_rad": thr, "change_id": change_id, "before": part(False), "after": part(True)}
 
 
 def evaluate(sc, a):
@@ -2925,6 +2992,16 @@ def evaluate(sc, a):
                     + (" inside the pause" if "pause_wait_rate_hz" in I else ""))
             if "max_free_waits" in ik:
                 chk("identity_free_waits", S is not None and S["free_waits"] <= ik["max_free_waits"], S and S["free_waits"], f"<= {ik['max_free_waits']} free waits")
+            if ik.get("stamp") is not None:   # plan 5b: each picture reaches the client under the pose it was rendered with
+                st, sk = a.get("identity_stamp") or {}, ik["stamp"]
+                b, af = st.get("before") or {}, st.get("after") or {}
+                chk("identity_stamp_decoded", st.get("frames", 0) >= sk.get("min_frames", 300), st and {k: st.get(k) for k in ("frames", "decoded", "received", "unknown_ids", "no_client_yaw")},
+                    f">= {sk.get('min_frames', 300)} received frames with a decoded picture id and the client's yaw for their timestamp")
+                chk("identity_stamp_clean_before_change", b.get("frames", 0) > 0 and b.get("share", 1) <= sk.get("max_before_share", 0.005), b,
+                    f"before the late shapes: <= {sk.get('max_before_share', 0.005)} of the frames show a picture under another pose (> {st.get('threshold_rad', 0.002)} rad)")
+                if "max_after_share" in sk:   # rows whose shape no arm can fix (one eye released) leave it out: the numbers are in the analysis
+                    chk("identity_stamp_matches_picture", af.get("frames", 0) > 0 and af.get("share", 1) <= sk["max_after_share"], af,
+                        f"after the late shapes: <= {sk['max_after_share']} of the frames show a picture under another pose")
     if "shim_submit_mode" in ck and h and h.get("shim"):
         chk("shim_submit_mode", h["shim"].get("submit_mode") == ck["shim_submit_mode"], h["shim"].get("submit_mode"), ck["shim_submit_mode"])
     if "gray_patch" in ck:

@@ -203,6 +203,9 @@ only if it fails. Expected on this build, which is arm U0 (today's pose-only dec
 | `id_pause` | normal game paused 10-30 s (last picture, its poses, no release) | about 50 % of the first 1800 submits true duplicates | same | PASS: waits paced (<= 100/s), no pattern (100 % share) |
 | `e2e_modsim_ofxr_fix_on/off` | the 2026-11-13 OFXR mimic scenarios | | | as on 2026-11-13 |
 | `e2e_ofxr_tokyo_off/on/on_compat` | the real OFXR layer (V551) on `xr_probe` | no app truth | read: OFXR's frames released? | `harness/ofxr_report.py` |
+| `id_mod_late_stale` | the mod's late shape (5b), mode off, frame generation off: from submit 1000, 14 % of the duplicate cycles submit new poses with the old images | about 5 % of all submits an old picture under a new pose | = app | **FAIL** `identity_stamp_matches_picture` (U0 stamps by the pose: about 7 % of the frames after the change shown under another pose); the control before the change clean |
+| `id_mod_late_samepose_new` | mode on: from submit 1000, 6 % of the duplicate cycles draw a new picture under the same poses | about 2 % same poses, new picture | = app | **FAIL** `identity_no_new_picture_dropped` (U0 drops them); stamp clean before and after (the check's false-alarm control) |
+| `id_mod_late_oneeye` | mode on: from submit 1000, 10 % of the real frames release the right eye only | about 3 % one eye | = app | PASS (drops, control); the stamp error after the change is reported, not checked: no arm can stamp both eyes right on ALVR v20 |
 
 The real OFXR rows need the layer rebuilt into `D:\_ofxr\lab` (the 3080 Ti's D: is the new USB drive, so the scenarios' path works again):
 clone `djules75/OFXR-Bridge` at `382065f`, FidelityFX v1.1.4 optical flow, DLSS headers, CMake (recipe in the 2026-11-13 notes).
@@ -333,7 +336,12 @@ generation was on in runs 1-3, and run 4, limiter on with it off, ended before t
 - **Phase A, three more `xr_modsim` shapes** that start after N submits as the mod's do (`MODSIM_CHANGE_AT`): a share of submits with a new
   pose and nothing released, a share of duplicate cycles that release a new picture, one eye released. Plus a truth check per outgoing frame: its
   stamp is the stamp of the submit that released its picture (`identity_stamp_matches_picture`); U0 fails it on the first shape by the count of
-  such submits. No engine change.
+  such submits. No engine change. **Built 2026-11-22 (owner: add them to tomorrow's Phase A):** `MODSIM_CHANGE_AT`, `MODSIM_STALE_POSE`,
+  `MODSIM_SAMEPOSE_NEW`, `MODSIM_ONE_EYE`, DRAW / CHANGE rows and an `eyes` column; `lib.analyse_stamp_truth` (the decoded picture id of every
+  received frame, the yaw it was rendered with against the client's yaw for the frame's timestamp, the constant offset removed, before / after
+  the change); rows `id_mod_late_stale`, `id_mod_late_samepose_new`, `id_mod_late_oneeye` (section 4). Tested: `xr_modsim` clang-cl check (a
+  planted error caught); the analysis and the checks on synthetic runs (U0 stale fails at 6.7 % after / 0 before, a fixed stamp passes at 0, one
+  eye reported, the offset recovered exactly, decoder start loss, idle and unknown ids, old 8-column CSVs). Not run on a builder.
 - **Phase B, an arm next to U1 (`lab_identity 2`): a picture keeps its own stamp.** A submit whose projection slices released nothing leaves
   with the previous submit's timestamp (a true repeat, which the headset shows as one: the 1.3.10 strobe test), whatever its poses; with the mode
   on it is dropped like a duplicate. U1's rule for same poses stays, so a new picture under the previous pose is kept. No pattern state and no free
@@ -400,7 +408,10 @@ on two or three head motions. One night.
 
 ## 11. Assets
 
-- `xr_modsim` shapes: `MODSIM_ARRAY`, `MODSIM_MSAA`, `MODSIM_DUP_RELEASE`, `MODSIM_QUAD`, `MODSIM_PAUSE_S`, `MODSIM_OFXR`, `MODSIM_STROBE`; truth columns in `modsim.csv`.
+- `xr_modsim` shapes: `MODSIM_ARRAY`, `MODSIM_MSAA`, `MODSIM_DUP_RELEASE`, `MODSIM_QUAD`, `MODSIM_PAUSE_S`, `MODSIM_OFXR`, `MODSIM_STROBE`, and the
+  late ones from `MODSIM_CHANGE_AT`: `MODSIM_STALE_POSE`, `MODSIM_SAMEPOSE_NEW`, `MODSIM_ONE_EYE`; truth columns in `modsim.csv` (rel, new_pic,
+  same_pose, eyes; DRAW rows: each picture's render yaw). `lib.analyse_stamp_truth` + the `identity.stamp` checks; `run.py identity` prints
+  stale %, one-eye % and the stamp error before / after. `xr_modsim` is in `tools/wsl/check_cpp.sh` since 2026-11-22.
 - `harness/lib.py` `analyse_identity` and the `identity` checks; `run.py identity` (table: truth classes, VDXR vs app, shim seen/dropped, free waits, wait rate).
 - `harness/shim_identity_windows.py`: the same comparison on a field shim log (per 900-frame window: nothing released, same poses, dropped, one eye
   released, new pose with nothing released; `--flip N` splits the summary at an app submit count). Checked on the 2026-11-21 logs only.

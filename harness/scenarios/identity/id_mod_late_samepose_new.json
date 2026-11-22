@@ -1,0 +1,116 @@
+{
+  "description": "FRAME-IDENTITY MATRIX, the AC Black Flag mod's late shapes (docs/PLAN_UNIVERSAL_OPENXR.md 5b: after its change at submit 12,000 picture and pose stop matching, the shaking the owner saw). As id_mod_dup, frame generation off (field runs 5-6), the shape from MODSIM_CHANGE_AT=1000 submits on. The stamp checks decode each received picture's id and compare the yaw it was rendered with against the client's yaw for the frame's timestamp (lib.analyse_stamp_truth); before the change is the control. Row: a share of the duplicate cycles draw and release a NEW picture under the previous submit's poses (field run 6, mode on: >= 3.1 % of submits, all dropped by the mode). Truth: same poses, new picture: must be kept. U0 drops them: identity_no_new_picture_dropped FAILS by design (U1 keeps them). The stamp after the change stays clean (a dropped picture is never shown): the stamp check's control for a false alarm.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 75,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 100000,
+    "running_start_ms": 2.0,
+    "frame_gen": "off",
+    "drop_duplicate_frames": true
+  },
+  "client": {
+    "seconds": 80,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "display_sim": true,
+    "poll_ms": 5,
+    "queue_max": 2,
+    "motion": "yaw"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "exe": "xr_modsim",
+    "frames": 1500,
+    "timeout_s": 70,
+    "env": {
+      "MODSIM_ENGINE_MS": "9",
+      "MODSIM_GPU_COPIES": "0",
+      "MODSIM_DUP": "1",
+      "MODSIM_POOL": "9",
+      "MODSIM_SWITCH_S": "25",
+      "MODSIM_CHANGE_AT": "1000",
+      "MODSIM_SAMEPOSE_NEW": "0.06"
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 240,
+  "checks": {
+    "host_min_frames": 600,
+    "client_min_frames": 600,
+    "max_duplicate_timestamps": 100000,
+    "vdxr_trace": {
+      "min_frames": 900
+    },
+    "identity": {
+      "min_submits": 900,
+      "shape": {
+        "same_pose_new_pic": [
+          0.01,
+          0.045
+        ],
+        "true_dup": [
+          0.42,
+          0.54
+        ]
+      },
+      "stamp": {
+        "max_rad": 0.002,
+        "min_frames": 300,
+        "max_before_share": 0.005,
+        "max_after_share": 0.005
+      },
+      "min_true_dups_dropped_frac": 0.95,
+      "max_dropped_new_pictures_frac": 0.02
+    }
+  }
+}

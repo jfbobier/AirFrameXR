@@ -28,11 +28,21 @@
 //    repeats but whose picture changed (a menu or HUD over a frozen view);
 //  - MODSIM_PAUSE_S=a:b: the frames posted between a and b seconds after the loop starts draw nothing and resubmit the last picture with its
 //    poses (a game paused on its last frame; OpenXR allows it): no release, same poses, the app still paced by its waits.
-// The app's own truth for every submit is in the CSV's END rows (columns rel, new_pic, same_pose; harness lib.analyse_identity).
+// The AC Black Flag mod's late shapes (field 2026-11-21, docs/PLAN_UNIVERSAL_OPENXR.md 5b: after its change at submit 12,000 picture and pose stop
+// matching), from MODSIM_CHANGE_AT submits on (0 = from the start), each a fraction drawn from a fixed-seed generator:
+//  - MODSIM_STALE_POSE=p: a share p of the duplicate cycles locate the views again and submit the NEW poses with the old images (nothing released):
+//    an old picture under a new pose;
+//  - MODSIM_SAMEPOSE_NEW=p: a share p of the duplicate cycles draw and release a new picture (its own id) under the previous submit's poses;
+//  - MODSIM_ONE_EYE=p: a share p of the real frames draw and release the RIGHT eye only, under the new poses: the left eye (the one with the id
+//    stamp) keeps the picture of the frame before. Not with MODSIM_ARRAY.
+// The app's own truth for every submit is in the CSV's END rows (columns rel, new_pic, same_pose, eyes; harness lib.analyse_identity). DRAW rows
+// give the yaw each stamped picture was rendered with (a = its id, b = yaw in microradians, from the left eye's pose like xr_probe's app_pose.csv):
+// the harness decodes the id of every frame the client received and compares that yaw with the client's for the frame's timestamp
+// (lib.analyse_stamp_truth: the stamp follows the picture or it does not). A CHANGE row marks MODSIM_CHANGE_AT (a = submits, b = the first picture counted as after).
 //
 // Usage: xr_modsim.exe <logfile> [real_frames=300] [timeout_s=60]
 // Env: MODSIM_ENGINE_MS (default 8), MODSIM_GPU_COPIES (0), MODSIM_DUP (1), MODSIM_POOL (9), MODSIM_SWITCH_S (0), MODSIM_CSV = per-event CSV
-// (t_ms, tid, event, a, b, rel, new_pic, same_pose): EF / WAIT_IN / WAIT_OUT / BEGIN / END with the display time in a and, for END, the real-frame
+// (t_ms, tid, event, a, b, rel, new_pic, same_pose, eyes): EF / WAIT_IN / WAIT_OUT / BEGIN / END with the display time in a and, for END, the real-frame
 // id in b (the duplicate carries the id of the frame it repeats), the lab's equivalent of the probe's log. END rows also carry rel = swapchain
 // images released since the previous END (what VDXR counts as "newly released"), new_pic = 1 when the picture differs from every earlier submit's
 // (0: a resubmit, a DUP_RELEASE copy, a paused frame), same_pose = 1 when the projection poses equal the previous END's exactly; -1 on other rows.
@@ -47,6 +57,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
@@ -74,10 +85,15 @@ static void L(const char* fmt, ...) {
     vfprintf(g_log, fmt, a); fputc('\n', g_log); fflush(g_log);
     va_end(a);
 }
-static void ev(const char* name, long long a = 0, long long b = 0, int rel = -1, int newPic = -1, int samePose = -1) {
+static void ev(const char* name, long long a = 0, long long b = 0, int rel = -1, int newPic = -1, int samePose = -1, int eyes = -1) {
     if (!g_csv) return;
     std::lock_guard<std::mutex> lk(g_logMx);
-    fprintf(g_csv, "%.3f,%lu,%s,%lld,%lld,%d,%d,%d\n", qpcMs(), GetCurrentThreadId(), name, a, b, rel, newPic, samePose);
+    fprintf(g_csv, "%.3f,%lu,%s,%lld,%lld,%d,%d,%d,%d\n", qpcMs(), GetCurrentThreadId(), name, a, b, rel, newPic, samePose, eyes);
+}
+// yaw of a pose in microradians, the formula of xr_probe's app_pose.csv (harness pose round trip)
+static long long yawUrad(const XrPosef& p) {
+    const XrQuaternionf& q = p.orientation;
+    return (long long)llround(1e6 * atan2(2.0 * (q.w * q.y + q.x * q.z), 1.0 - 2.0 * (q.y * q.y + q.x * q.x)));
 }
 static int fail(const char* what, XrResult r) { L("FAIL %s -> %d", what, (int)r); return 1; }
 #define CK(x) do { XrResult r_ = (x); if (XR_FAILED(r_)) return fail(#x, r_); L("ok   %s", #x); } while (0)
@@ -108,18 +124,30 @@ static XrSwapchain g_quadSc = XR_NULL_HANDLE;
 static std::vector<XrSwapchainImageD3D11KHR> g_quadImgs;
 static const int kQuadPx = 512;
 static uint32_t g_lastIdx[2] = {};    // the image each swapchain released last (MODSIM_DUP_RELEASE copies it)
+// the late shapes (header comment); the worker threads never run at once (the render thread waits for the worker), so plain state is enough
+static int g_changeAt = 0;            // MODSIM_CHANGE_AT: submits before the late shapes start
+static double g_stalePose = 0.0, g_samePoseNew = 0.0, g_oneEye = 0.0;
+static std::atomic<int> g_endCount{0};
+static std::atomic<bool> g_lateOn{false};
+static uint32_t g_shapeRng = 2026112u;
+static double shapeRnd() { g_shapeRng ^= g_shapeRng << 13; g_shapeRng ^= g_shapeRng >> 17; g_shapeRng ^= g_shapeRng << 5; return (double)(g_shapeRng & 0xFFFFFF) / 16777216.0; }
+static int g_extraId = 0;             // ids of MODSIM_SAMEPOSE_NEW pictures: 40000 + n (16-bit stamp, apart from the real ids and OFXR's id + 100000)
 // The app's truth per submit (CSV END rows). The submits of one frame never overlap (the render thread waits for the worker; OFXR mode is one
 // thread), so plain variables are enough for the pose; the counters are atomics because the worker changes from frame to frame.
 static std::atomic<int> g_relSinceEnd{0};
+static std::atomic<int> g_eyesSinceEnd{0};   // projection eye images released since the previous submit (the quad's are not counted)
 static std::atomic<bool> g_newPicSinceEnd{false};
 static XrPosef g_lastEndPose[2];
 static bool g_haveLastEnd = false;
-static std::atomic<int> g_truthEnds{0}, g_truthNoRelease{0}, g_truthRepeatPic{0}, g_truthSamePose{0};
+static std::atomic<int> g_truthEnds{0}, g_truthNoRelease{0}, g_truthRepeatPic{0}, g_truthSamePose{0}, g_truthStale{0}, g_truthOneEye{0};
 
-// draws the next image of both eyes (a flat colour from the frame id, the id stamped in the left eye) and releases them
-static bool drawFrame(int id) {
+// draws the next image of the eyes in eyeMask (bit 0 left, bit 1 right; a flat colour from the frame id, the id stamped in the left eye) and
+// releases them; a DRAW row gives the yaw of the pose the stamped (left) picture was rendered with
+static bool drawFrame(int id, const XrPosef* pose = nullptr, int eyeMask = 3) {
     const int nsc = g_array ? 1 : 2;   // MODSIM_ARRAY: one image holds both eyes
+    if (pose && (eyeMask & 1) && g_samples == 1) ev("DRAW", id, yawUrad(*pose));
     for (int s = 0; s < nsc; s++) {
+        if (!g_array && !(eyeMask & (1 << s))) continue;
         XrSwapchainImageAcquireInfo ai{ XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO }; uint32_t idx;
         if (XR_FAILED(xrAcquireSwapchainImage(g_sc[s], &ai, &idx))) return false;
         XrSwapchainImageWaitInfo wi{ XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO }; wi.timeout = XR_INFINITE_DURATION;
@@ -149,7 +177,7 @@ static bool drawFrame(int id) {
         }
         XrSwapchainImageReleaseInfo rl{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
         if (XR_FAILED(xrReleaseSwapchainImage(g_sc[s], &rl))) return false;
-        g_lastIdx[s] = idx; g_relSinceEnd++;
+        g_lastIdx[s] = idx; g_relSinceEnd++; g_eyesSinceEnd += g_array ? 2 : 1;
     }
     g_newPicSinceEnd = true;
     return true;
@@ -166,7 +194,7 @@ static bool rereleaseLast() {
         if (idx != g_lastIdx[s]) { std::lock_guard<std::mutex> g(g_gpuMx); g_ctx->CopyResource(g_imgs[s][idx].texture, g_imgs[s][g_lastIdx[s]].texture); g_ctx->Flush(); }
         XrSwapchainImageReleaseInfo rl{ XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO };
         if (XR_FAILED(xrReleaseSwapchainImage(g_sc[s], &rl))) return false;
-        g_lastIdx[s] = idx; g_relSinceEnd++;
+        g_lastIdx[s] = idx; g_relSinceEnd++; g_eyesSinceEnd += g_array ? 2 : 1;
     }
     return true;
 }
@@ -210,11 +238,18 @@ static bool endFrame(const Task& t, XrTime displayTime, int id) {
     fe.displayTime = displayTime; fe.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE; fe.layerCount = g_quad ? 2 : 1; fe.layers = lay;
     // the truth for this submit: images released since the previous submit, a picture never submitted before, the previous submit's poses
     const int rel = g_relSinceEnd.exchange(0);
+    const int eyes = g_eyesSinceEnd.exchange(0);
     const bool newPic = g_newPicSinceEnd.exchange(false);
     const bool samePose = g_haveLastEnd && memcmp(&g_lastEndPose[0], &t.views[0].pose, sizeof(XrPosef)) == 0 && memcmp(&g_lastEndPose[1], &t.views[1].pose, sizeof(XrPosef)) == 0;
     g_lastEndPose[0] = t.views[0].pose; g_lastEndPose[1] = t.views[1].pose; g_haveLastEnd = true;
     g_truthEnds++; if (rel == 0) g_truthNoRelease++; if (!newPic) g_truthRepeatPic++; if (samePose) g_truthSamePose++;
-    ev("END", (long long)displayTime, id, rel, newPic ? 1 : 0, samePose ? 1 : 0);
+    if (rel == 0 && !samePose) g_truthStale++;        // the old picture under a new pose
+    if (eyes == 1 && !g_array) g_truthOneEye++;        // one eye's picture new, the other's from the frame before
+    ev("END", (long long)displayTime, id, rel, newPic ? 1 : 0, samePose ? 1 : 0, eyes);
+    const int n = ++g_endCount;
+    if (!g_lateOn && n >= g_changeAt && (g_stalePose > 0 || g_samePoseNew > 0 || g_oneEye > 0)) {
+        g_lateOn = true; ev("CHANGE", n, id);   // b = the picture whose next cycle may already take a shape: the first "after" picture L("change: the late shapes from submit %d on (stale_pose=%.3f samepose_new=%.3f one_eye=%.3f)", n, g_stalePose, g_samePoseNew, g_oneEye);
+    }
     return XR_SUCCEEDED(xrEndFrame(g_sess, &fe));
 }
 
@@ -227,7 +262,9 @@ static void workerLoop(Worker* w) {
             if (w->q.empty()) return;
             t = w->q.front(); w->q.pop_front();
         }
-        if ((!t.paused && !drawFrame(t.id)) || !endFrame(t, t.time, t.id)) { g_failed = true; g_taskDone++; continue; }   // paused: the last picture again
+        // MODSIM_ONE_EYE (late): the right eye only, so the stamped left eye keeps the frame before's picture under these new poses
+        const int mask = (g_lateOn && g_oneEye > 0 && !g_array && shapeRnd() < g_oneEye) ? 2 : 3;
+        if ((!t.paused && !drawFrame(t.id, &t.views[0].pose, mask)) || !endFrame(t, t.time, t.id)) { g_failed = true; g_taskDone++; continue; }   // paused: the last picture again
         for (int k = 0, n = g_dupN.load(); k < n; k++) {
             // the extra cycle: a new frame (wait, begin) that only resubmits the same layers
             XrFrameState fs{ XR_TYPE_FRAME_STATE };
@@ -237,7 +274,19 @@ static void workerLoop(Worker* w) {
             if (XR_FAILED(xrBeginFrame(g_sess, nullptr))) { g_failed = true; g_taskDone++; continue; }
             ev("BEGIN", (long long)fs.predictedDisplayTime, t.id);
             if (g_dupRelease && !rereleaseLast()) { g_failed = true; }
-            if (!endFrame(t, fs.predictedDisplayTime, t.id)) { g_failed = true; }
+            Task d = t;   // what this cycle submits: the same layers, or a late shape
+            if (g_lateOn) {
+                const double r = shapeRnd();
+                if (r < g_stalePose) {   // the old images under poses located again for this cycle's display time
+                    XrViewLocateInfo li{ XR_TYPE_VIEW_LOCATE_INFO }; li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                    li.displayTime = fs.predictedDisplayTime; li.space = g_space;
+                    XrViewState vs{ XR_TYPE_VIEW_STATE }; XrView v[2] = { { XR_TYPE_VIEW }, { XR_TYPE_VIEW } }; uint32_t vc = 0;
+                    if (XR_SUCCEEDED(xrLocateViews(g_sess, &li, &vs, 2, &vc, v)) && vc == 2 && !g_staticPose) { d.views[0] = v[0]; d.views[1] = v[1]; }
+                } else if (r < g_stalePose + g_samePoseNew) {   // a new picture of its own under the previous submit's poses
+                    if (!drawFrame(40000 + (g_extraId++ % 20000), &t.views[0].pose, 3)) { g_failed = true; }
+                }
+            }
+            if (!endFrame(d, fs.predictedDisplayTime, t.id)) { g_failed = true; }
         }
         g_taskDone++;
     }
@@ -249,7 +298,7 @@ int main(int argc, char** argv) {
     const int realFrames = argc > 2 ? atoi(argv[2]) : 300;
     const int timeoutS = argc > 3 ? atoi(argv[3]) : 60;
     g_log = fopen(logPath, "w"); if (!g_log) return 2;
-    if (const char* c = getenv("MODSIM_CSV")) { g_csv = fopen(c, "w"); if (g_csv) fprintf(g_csv, "t_ms,tid,ev,a,b,rel,new_pic,same_pose\n"); }
+    if (const char* c = getenv("MODSIM_CSV")) { g_csv = fopen(c, "w"); if (g_csv) fprintf(g_csv, "t_ms,tid,ev,a,b,rel,new_pic,same_pose,eyes\n"); }
     const double engineMs = getenv("MODSIM_ENGINE_MS") ? atof(getenv("MODSIM_ENGINE_MS")) : 8.0;
     const int gpuCopies = getenv("MODSIM_GPU_COPIES") ? atoi(getenv("MODSIM_GPU_COPIES")) : 0;
     g_dupN = getenv("MODSIM_DUP") ? std::max(0, atoi(getenv("MODSIM_DUP"))) : 1;
@@ -260,6 +309,9 @@ int main(int argc, char** argv) {
     g_samples = std::max(1, getenv("MODSIM_MSAA") ? atoi(getenv("MODSIM_MSAA")) : 1);
     g_dupRelease = getenv("MODSIM_DUP_RELEASE") && atoi(getenv("MODSIM_DUP_RELEASE")) != 0;
     g_quad = getenv("MODSIM_QUAD") && atoi(getenv("MODSIM_QUAD")) != 0;
+    g_changeAt = getenv("MODSIM_CHANGE_AT") ? std::max(0, atoi(getenv("MODSIM_CHANGE_AT"))) : 0;
+    auto frac = [](const char* k) { const char* v = getenv(k); return v ? std::min(1.0, std::max(0.0, atof(v))) : 0.0; };
+    g_stalePose = frac("MODSIM_STALE_POSE"); g_samePoseNew = frac("MODSIM_SAMEPOSE_NEW"); g_oneEye = frac("MODSIM_ONE_EYE");
     double pauseFrom = 0.0, pauseTo = 0.0;   // MODSIM_PAUSE_S=a:b
     if (const char* ps = getenv("MODSIM_PAUSE_S")) { if (sscanf(ps, "%lf:%lf", &pauseFrom, &pauseTo) != 2 || pauseTo <= pauseFrom) { pauseFrom = pauseTo = 0.0; } }
     const double dupStopS = getenv("MODSIM_DUP_STOP_S") ? atof(getenv("MODSIM_DUP_STOP_S")) : 0.0;
@@ -272,7 +324,10 @@ int main(int argc, char** argv) {
     const double switchS = getenv("MODSIM_SWITCH_S") ? atof(getenv("MODSIM_SWITCH_S")) : 0.0;
     L("start real_frames=%d timeout=%ds engine_ms=%.1f gpu_copies=%d dup=%d pool=%d switch_s=%.1f dup_stop_s=%.1f static_pose=%d jitter_ms=%.1f switch_engine_ms=%.1f switch_jitter_ms=%.1f", realFrames, timeoutS, engineMs, gpuCopies, g_dupN.load(), pool, switchS, dupStopS, (int)g_staticPose, jitterMs, switchEngineMs, switchJitterMs);
     L("shapes: array=%d msaa=%d dup_release=%d quad=%d pause_s=%.1f:%.1f ofxr=%d", (int)g_array, g_samples, (int)g_dupRelease, (int)g_quad, pauseFrom, pauseTo, (int)g_ofxr);
+    L("late shapes: change_at=%d stale_pose=%.3f samepose_new=%.3f one_eye=%.3f", g_changeAt, g_stalePose, g_samePoseNew, g_oneEye);
     if (g_array && g_samples > 1) { L("FAIL MODSIM_MSAA with MODSIM_ARRAY is not supported"); return 2; }
+    if (g_array && g_oneEye > 0) { L("FAIL MODSIM_ONE_EYE with MODSIM_ARRAY is not supported"); return 2; }
+    if (g_ofxr && (g_stalePose > 0 || g_samePoseNew > 0 || g_oneEye > 0)) { L("FAIL the late shapes need the mod's duplicate cycle, not MODSIM_OFXR"); return 2; }
 
     XrInstanceCreateInfo ici{ XR_TYPE_INSTANCE_CREATE_INFO };
     const char* ext[] = { XR_KHR_D3D11_ENABLE_EXTENSION_NAME };
@@ -392,14 +447,14 @@ int main(int argc, char** argv) {
             if (!paused && pauseState == 1) { pauseState = 2; L("pause ends (%.1f s)", ls); }
         }
         if (g_ofxr) {   // the layer's end: generated frame in the app's slot, then an internal cycle for the real frame (same poses, other image)
-            if (!drawFrame(t.id + 100000) || !endFrame(t, t.time, t.id)) { L("FAIL ofxr generated frame"); rc = 4; break; }
+            if (!drawFrame(t.id + 100000, &t.views[0].pose) || !endFrame(t, t.time, t.id)) { L("FAIL ofxr generated frame"); rc = 4; break; }
             XrFrameState fs2{ XR_TYPE_FRAME_STATE };
             ev("WAIT_IN", 0, t.id);
             if (XR_FAILED(xrWaitFrame(g_sess, nullptr, &fs2))) { L("FAIL ofxr internal wait"); rc = 4; break; }
             ev("WAIT_OUT", (long long)fs2.predictedDisplayTime, t.id);
             if (XR_FAILED(xrBeginFrame(g_sess, nullptr))) { L("FAIL ofxr internal begin"); rc = 4; break; }
             ev("BEGIN", (long long)fs2.predictedDisplayTime, t.id);
-            if (!drawFrame(t.id) || !endFrame(t, fs2.predictedDisplayTime, t.id)) { L("FAIL ofxr real frame"); rc = 4; break; }
+            if (!drawFrame(t.id, &t.views[0].pose) || !endFrame(t, fs2.predictedDisplayTime, t.id)) { L("FAIL ofxr real frame"); rc = 4; break; }
             posted++; g_taskDone++;
             continue;
         }
@@ -413,8 +468,9 @@ int main(int argc, char** argv) {
     while (g_taskDone.load() < posted && GetTickCount64() - t0 < (ULONGLONG)(timeoutS + 5) * 1000) Sleep(1);
     const double secs = (qpcMs() - loopStart) / 1000.0;
     L("done: %d real frames in %.1f s (%.1f real fps), %d engine frames, rc=%d", posted, secs, secs > 0 ? posted / secs : 0.0, ef, rc);
-    L("identity truth: %d submits, %d with no image released, %d repeating an earlier picture, %d with the previous submit's poses",
-      g_truthEnds.load(), g_truthNoRelease.load(), g_truthRepeatPic.load(), g_truthSamePose.load());
+    L("identity truth: %d submits, %d with no image released, %d repeating an earlier picture, %d with the previous submit's poses, "
+      "%d an old picture under a new pose, %d one eye released",
+      g_truthEnds.load(), g_truthNoRelease.load(), g_truthRepeatPic.load(), g_truthSamePose.load(), g_truthStale.load(), g_truthOneEye.load());
     if (running) {   // leave the session the way a game does
         xrRequestExitSession(g_sess);
         for (int i = 0; i < 200 && running; i++) {
