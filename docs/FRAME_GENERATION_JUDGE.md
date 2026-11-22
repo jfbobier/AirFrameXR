@@ -117,6 +117,29 @@ block size (8 px at full resolution); depth is not the missing information for e
 background vector from beyond the 2 x 2 block neighbourhood) and depth-based extrapolation (no wait for the newer frame), both larger designs.
 Verdict: depth forwarding (shim + IPC + host) is not worth building for frame generation's boundaries; the lab switch stays on fg-testing.
 
+## A neural interpolator offline: RIFE 4.4 against the edge synthesis (2026-11-22, RTX 5090, fg-testing)
+
+`--env AIRFRAMEXR_FG_JUDGE_DUMP=<dir on the builder>` writes every case's full frames A, B, the truth G and the edge synthesis's output with a
+`cases.jsonl` index. `harness/rife/rife_eval.py` (venv from `harness/rife/setup_rife_5090.ps1`: PyTorch 2.11 cu128, RIFE 4.4 = vs-rife's model code at
+3488617, MIT, weights `flownet_v4.4.pkl`, both downloaded, not in this repo) interpolates the midpoint per eye (batch 2, FP16) at RIFE scales 1, 0.5,
+0.25 (scale < 1: the network at reduced resolution, the final warp at full resolution) and scores it with a numpy port of this judge's metrics (equal
+to the judge's own edge numbers within 0.0000 dB on all 60 cases). RIFE gets the raw A and B: no head-rotation removal, unlike the edge synthesis.
+
+60 cases (1032 x 1104, 3 starts, gaps 22.2 / 33.3 ms), band PSNR, RIFE minus edge:
+
+| | scale 1 | scale 0.5 | scale 0.25 |
+|---|---|---|---|
+| all cases | +0.66 +- 0.29 dB (31 / 60) | +0.01 | -2.36 |
+| walk 0.5 / 1 / 2 m/s | +1.3 / +3.4 / +4.8 | +0.1 / +2.1 / +3.4 | -3.3 / -1.4 / +0.6 |
+| scene x1 / x8 / x24 | +1.0 / +0.7 / +0.3 | +0.1 / +0.7 / -0.3 | -2.1 / -0.1 / -0.1 |
+| head, both | -1.0 .. -1.4 | -1.2 .. -1.8 | -3.9 .. -4.9 |
+
+Double images (edge excess): RIFE lower in 55 / 60 cases at scale 1; blur (edge deficit): RIFE higher in 60 / 60 (softer). The walk crops show the
+edge synthesis tearing outlines where RIFE keeps them whole. The head / both losses are expected without the rotation removal: the next test feeds
+RIFE the older frame aligned into the newer one's camera, as the flow gets it. Time (PyTorch eager FP16, no TensorRT, both eyes): 1032 x 1104 per
+eye 5.2 / 3.9 / 3.7 ms at scale 1 / 0.5 / 0.25; the owner's 1920 x 2368 per eye 21.0 / 12.7 / 11.5 ms (launch-bound at small scales; TensorRT
+and CUDA graphs not tried). These run on the shader cores the game needs, unlike the optical-flow engine.
+
 ## What it does not tell
 
 One scene, one GPU, one frame size; PSNR rewards blending and SSIM is a proxy; nothing here sees judder over time or the feel of a double image in a headset.

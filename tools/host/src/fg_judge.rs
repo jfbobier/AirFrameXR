@@ -268,6 +268,11 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
         }
     }
     let _ = fs::create_dir_all(&opt.out);
+    let dump: Option<PathBuf> = std::env::var("AIRFRAMEXR_FG_JUDGE_DUMP").ok().filter(|v| !v.is_empty()).map(PathBuf::from);
+    if let Some(d) = &dump {
+        let _ = fs::create_dir_all(d);
+        let _ = fs::remove_file(d.join("cases.jsonl"));   // the index describes this run only
+    }
     let mut caps = [0 as c_char; 512];
     unsafe { nvh_bench_fgj_caps(gens[1], caps.as_mut_ptr(), 512) };
     event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "walks": opt.walks,
@@ -397,6 +402,17 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     case["depth"] = json!({ "frames": ds[0], "outputs": ds[1] });
                 }
                 event(origin, "fgj_case", case.clone());
+                // AIRFRAMEXR_FG_JUDGE_DUMP=<dir> (lab): every case's full frames A, B, the truth G and the edge synthesis's output (PPM, side by side) with
+                // a cases.jsonl index, for offline generators (e.g. a neural interpolator) scored the same way; a directory on the builder, not in `out`
+                if let Some(dd) = &dump {
+                    let idx = cases.len();
+                    for (name, buf) in [("A", &fa), ("B", &fb), ("G", &fg), ("edge", &outs[1])] {
+                        write_ppm(&dd.join(format!("case_{idx:03}_{name}.ppm")), buf, w, 0, 0, w, h, None);
+                    }
+                    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(dd.join("cases.jsonl")) {
+                        let _ = writeln!(f, "{}", json!({ "idx": idx, "eye": [ew, eh], "case": case }));
+                    }
+                }
                 cases.push(case);
                 if start == 0 && truth.band_frac > 0.0005 {
                     let (cw, ch) = (480usize.min(w), 360usize.min(h));
