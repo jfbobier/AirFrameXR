@@ -4,9 +4,10 @@
 and F1-F3 there); **G1 answered in the field: the AC Black Flag mod's duplicate cycle releases nothing** (section 5, with the baseline Phase B is
 judged against). **`main` (1.4.1, `d0c6435`) merged into this branch (`5da4312`)**: the merged shim, host, nvenc and GUI are identical to `main`, so
 the lab runs the engine the field baseline ran; the branch adds only the identity lab, this plan and the catalogue. Next: step 2 (Phase A, G0 of
-Part M).
+Part M). **2026-11-22: `main` = v1.4.2 (`e5ee359`, neural frame generation) merged as `d4b486e`**, engine, GUI and build scripts again identical
+to `main`, IPC still 38; Phase A runs on the 3080 Ti from there (run sheet in section 4).
 
-Status: plan, nothing run. **Base: 1.4.1** (`main` `d0c6435`, merged 2026-11-21; before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
+Status: plan, nothing run. **Base: 1.4.2** (`main` `e5ee359`, merged 2026-11-22; 1.4.1 on 2026-11-21, before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
 from `1.4` at `6c73d0b` with `universal-openxr-2` merged in (`469ea14`: the VDXR fork pipeline and the shim's texture-array views from `vdxr-fork`, the
 fork lab, the identity lab). The merge was clean (`build.ps1`, `harness/lib.py`, `harness/run.py` and two docs auto-merged; `tools/wsl/check_cpp.sh` OK);
 nothing is built on a builder yet. `vdxr-fork` and `universal-openxr-2` stay as they were (from 1.3.11); new work goes on `universal-1.4`. Builder roots: the
@@ -172,6 +173,16 @@ The engine and ALVR identify a frame by its tracking timestamp. OpenXR gives no 
   wait/begin/end only, 0 acquire/release events; the fork's facts settled it in the field).
 
 ## 4. Phase A: is the signal exact? (no engine change)
+
+**Run sheet (3080 Ti, this branch at 1.4.2; prepared 2026-11-22, run on the owner's "go"):**
+1. The 3080 Ti answers (`ssh`), no AirFrameXR streamer runs there (the lab blocks while one does), nothing else loads its GPU.
+2. `bash harness/vdxr_fork_preflight.sh` (reads only): root `VisionALVR_vdxrfork` on D: behind its junction, VDXR at `46deebb`, free space.
+3. `python3 harness/run.py build vdxr shim nvenc neural host client probe` (host and shim together after IPC 38; `neural` needs the CUDA
+   toolkit 13.5, which the 3080 Ti has: the first run of the DLL's sm_86 code on an RTX 30. The host falls back to the edge synthesis by
+   itself and says why at debug level, so check the `frame generation neural` line in a frame generation row's run log).
+4. `AIRFRAMEXR_LAB_IDLE_GPU=10 python3 harness/run.py identity`; compare the table with the U0 column below; Decision A.
+5. Optional: the real OFXR rows only if `D:\_ofxr\lab` is there again (else rebuild it first, recipe below); the manual sharpen row (admin).
+G0 of Part M is a 5090 field check (VDXR's log per title), not part of this run.
 
 Build: the fork lab's B1 on this branch (VDXR at the pin, the shim of 1.4 with `vdxr-fork`'s array views), then `python3 harness/run.py build probe` from this worktree (adds the `xr_modsim`
 shapes; `xr_probe` is unchanged, the CSV only gains columns, so the fork lab's runs are not affected). Builder root: the fork lab's
