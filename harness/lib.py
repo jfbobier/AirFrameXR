@@ -1492,6 +1492,11 @@ def analyse_fg(hs, host_fps=None):
         "app_fps_p50": round(med("app_fps"), 2), "stream_fps_p50": round(med("stream_fps"), 2), "stream_fps_min": round(min(ev[i][1].get("stream_fps", 0) for i in idx), 2),
     })
     out["gpu_share"] = round(out["gpu_ms_per_s"] / 1000.0, 4)
+    nr = g1.get("neural")
+    if isinstance(nr, dict):   # the neural fields' counters (synthesis "neural"); their GPU time is CUDA's, outside flow_ms / synth_ms
+        out["neural"] = {"on": nr.get("on") == 1, "size": nr.get("size"), "runs": nr.get("runs"), "outputs": nr.get("outputs"), "failures": nr.get("failures"),
+                         "gpu_ms_avg": nr.get("ms_avg"), "cpu_ms": nr.get("cpu_ms"), "info": nr.get("info"), "synths_total": g1.get("synths"),
+                         "gpu_ms_per_s": round(float(nr.get("ms_avg") or 0) * pairs_s, 2)}
     if frame:
         out["synth_ms_per_mpx"] = round(sm / out["frame_mpx"], 4)
     if flow:
@@ -2638,6 +2643,11 @@ def evaluate(sc, a):
             for k, label in (("max_flow_ms", "flow_ms_avg"), ("max_synth_ms", "synth_ms_avg"), ("max_gpu_ms_per_s", "gpu_ms_per_s")):
                 if k in want:
                     chk(f"fg_{label}", 0 < f.get(label, 0) <= want[k], f.get(label), f"(0, {want[k]}]")
+            if want.get("neural"):   # fg-neural: the fields ran and composed (nearly) every generated output, without a failure
+                n = f.get("neural") or {}
+                share = (n.get("outputs") or 0) / max(1, n.get("synths_total") or 0)
+                chk("fg_neural", n.get("on") and (n.get("failures") or 0) == 0 and share >= 0.9, {k: n.get(k) for k in ("on", "size", "runs", "outputs", "failures", "gpu_ms_avg", "gpu_ms_per_s", "cpu_ms", "info")},
+                    "neural fields on, 0 failures, >= 90 % of the generated outputs composed from them")
             for k in ("synth_ms_per_mpx", "flow_ms_per_mpx"):
                 if k in want:   # the cost of one Mpx, whatever the preset: a regression in the passes shows here, a bigger preset does not
                     lo, hi = want[k]

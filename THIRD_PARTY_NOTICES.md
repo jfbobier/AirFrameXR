@@ -20,6 +20,12 @@ Versions, sources and checksums: `third_party/README.md`, `deps.lock.json`.
   `deps.lock.json`, with its submodules (OpenXR SDK: Apache-2.0; LibOVR; FidelityFX; fmt; cJSON; ...): the OpenXR runtime DLL is
   built from it (`tools/remote/stage15_vdxr.ps1`).
 - **Draco 1.5.7** (Apache-2.0) and the *Littlest Tokyo* GLB: only for the offline scene converter (`tools/bench_scene/build.sh`).
+- Neural frame generation (lab branch `fg-neural`, not in the release zip yet; `nvenc/rife/build.ps1`, docs/NEURAL_RIFE_CUDA.md):
+  **CUTLASS 4.8.1** (BSD-3-Clause, Copyright (c) 2017-2026 NVIDIA Corporation & affiliates: `third_party/licenses/CUTLASS-LICENSE.txt`), headers
+  compiled into `airframexr_rife.dll` together with the CUDA runtime (`cudart_static`, NVIDIA CUDA EULA, redistributable part);
+  **RIFE 4.4** weights (MIT, Copyright (c) 2021 hzwer, Practical-RIFE: `third_party/licenses/Practical-RIFE-LICENSE.txt`), downloaded from
+  vs-rife's release (MIT, Copyright (c) 2021 HolyWu: `third_party/licenses/vs-rife-LICENSE.txt`; its model code is what the DLL follows) and
+  converted to `rife44.afxw`.
 
 ## In the release zip
 - `alvr_host.exe`: AirFrameXR + ALVR (MIT) + 263 Rust crates, listed with their licenses in

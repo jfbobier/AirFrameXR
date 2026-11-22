@@ -5,7 +5,9 @@ each synthesis and scores it against G (PSNR / SSIM over the frame, in the movin
 deficit = blur); holding B and the 50/50 blend are the references. Scenarios: scene (head still), head (scene frozen), both. This script runs it, then prints
 per scenario and rate the means, and the paired differences between the syntheses over all cases with their standard errors, and builds picture montages.
 
-    python3 harness/fg_judge.py [--eye WxH] [--starts N] [--gaps 22.2,33.3,44.4] [--speeds 1,8,24] [--pans 60,180] [--views airframexr_views.json] [--env NAME=value]
+    python3 harness/fg_judge.py [--eye WxH] [--starts N] [--gaps 22.2,33.3,44.4] [--speeds 1,8,24] [--pans 60,180] [--walks 0.5,1,2] [--views airframexr_views.json] [--env NAME=value]
+        --walks: the stick-strafe scenario (the camera moves sideways at these scene metres per second, the head the generator is told stays still);
+        --env AIRFRAMEXR_FG_JUDGE_DEPTH=1: a fourth generator, edge_depth (the scene's depth handed to the generator with each frame, like a game's depth layer)
         --pans: the stick-turn scenario (the camera turns at these deg/s, the head the generator is told stays still); --views: the headset's views file
         (the box the judge renders, e.g. an install's config\airframexr_views.json; default the Vision Pro's measured views); --env: a generator tuning knob
         (AIRFRAMEXR_FG_MOTION_LIMIT / _COST_SCALE / _PHOTO_SCALE, several joined with +)
@@ -19,7 +21,8 @@ import lib
 
 KINDS = ["hold", "blend", "classic", "edge", "edge_blend"]
 METRICS = [("psnr_band", "PSNR on the boundary band (dB)", +1), ("psnr_moving", "PSNR in the moving region (dB)", +1), ("psnr", "PSNR whole frame (dB)", +1),
-           ("ssim_moving", "SSIM in the moving region", +1), ("edge_excess", "edge excess on the band (double images)", -1), ("edge_deficit", "edge deficit on the band (blur)", -1)]
+           ("ssim_moving", "SSIM in the moving region", +1), ("edge_excess", "edge excess on the band (double images)", -1), ("edge_deficit", "edge deficit on the band (blur)", -1),
+           ("psnr_hud", "PSNR on the HUD panels (dB; --env AIRFRAMEXR_FG_JUDGE_HUD=1)", +1), ("hud_bad", "share of HUD pixels off by > 24 levels (--env AIRFRAMEXR_FG_JUDGE_HUD=1)", -1)]
 
 
 def arg(name, default):
@@ -28,7 +31,7 @@ def arg(name, default):
 
 def run_on_builder():
     eye, starts, gaps, speeds = arg("--eye", "1032x1104"), arg("--starts", "6"), arg("--gaps", "22.2,33.3,44.4"), arg("--speeds", "1,8,24")
-    pans, views, env, warm = arg("--pans", ""), arg("--views", ""), arg("--env", ""), arg("--pan-warm", "0")
+    pans, views, env, warm, walks, tt = arg("--pans", ""), arg("--views", ""), arg("--env", ""), arg("--pan-warm", "0"), arg("--walks", ""), arg("--t", "")
     rid = "fgj_" + datetime.now(timezone.utc).strftime("%H%M%S")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     outdir = lib.RESULTS / f"{stamp}_fg_judge"
@@ -39,7 +42,8 @@ def run_on_builder():
         lib.b_run(f"if not exist runs\\{rid}\\cfg mkdir runs\\{rid}\\cfg")
         lib.b_put(Path(views), f"runs/{rid}/cfg/airframexr_views.json")
     r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage22_fg_judge.ps1", "-Label", rid, "-Eye", eye, "-Starts", starts, "-Gaps", gaps.replace(",", "+"), "-Speeds", speeds.replace(",", "+")]
-                       + (["-Pans", pans.replace(",", "+"), "-PanWarm", warm] if pans else []) + (["-FgEnv", env] if env else []),
+                       + (["-Pans", pans.replace(",", "+"), "-PanWarm", warm] if pans else []) + (["-Walks", walks.replace(",", "+")] if walks else []) + (["-OutT", tt] if tt else [])
+                       + (["-FgEnv", env] if env else []),
                        cwd=lib.ROOT, capture_output=True, timeout=1800)
     o = r.stdout.decode(errors="replace").replace("\x00", "")
     print(o.strip().splitlines()[-2:] if o.strip() else "no output")
@@ -80,7 +84,9 @@ def montage(d):
     out = d / "out"
     for truth in sorted(out.glob("*_truth.ppm")):
         stem = truth.name[:-len("_truth.ppm")]
-        for label, names in (("pictures", ["truth", "hold", "classic", "edge", "edge_blend"]), ("difference_x4", ["classic_diff", "edge_diff", "edge_blend_diff"])):
+        extra = [k for k in ("edge_depth", "neural") if (out / f"{stem}_{k}.ppm").exists()]
+        for label, names in (("pictures", ["truth", "hold", "classic", "edge", "edge_blend"] + extra),
+                             ("difference_x4", ["classic_diff", "edge_diff", "edge_blend_diff"] + [k + "_diff" for k in extra])):
             files = [out / f"{stem}_{n}.ppm" for n in names]
             if not all(f.exists() for f in files):
                 continue
@@ -96,25 +102,28 @@ def report(d):
     if not cases:
         print("no cases"); return 2
     gaps = sorted({c["gap_ms"] for c in cases})
+    kinds = KINDS + [k for k in ("edge_depth", "neural") if any(k in c for c in cases)]
+    metrics = [m for m in METRICS if any(c["edge"].get(m[0]) is not None for c in cases)]   # the HUD metrics only exist for a HUD run
     for c in cases:
-        c["label"] = c["scenario"] if c["scenario"] == "head" else f'{c["scenario"]} {c["speed"]:g}dps' if c["scenario"].startswith("pan") else f'{c["scenario"]} x{c["speed"]:g}'
+        c["label"] = (c["scenario"] if c["scenario"] == "head" else f'{c["scenario"]} {c["speed"]:g}dps' if c["scenario"].startswith("pan")
+                      else f'walk {c["speed"]:g}m/s' if c["scenario"] == "walk" else f'{c["scenario"]} x{c["speed"]:g}')
     scen = sorted({c["label"] for c in cases}, key=lambda x: (x.split()[0] != "head", x))
     print(f"{len(cases)} cases ({len(gaps)} rates of the rendered pair x {len(scen)} scenarios x {len({c['start'] for c in cases})} start times)")
     for s in scen:
         print(f"moving region, {s:10s}: {100 * mean([c['moving_frac'] for c in cases if c['label'] == s]):5.1f} % of the frame on average")
     print()
-    for key, title, sign in METRICS:
+    for key, title, sign in metrics:
         print(f"== {title}  (mean over start times; better = {'higher' if sign > 0 else 'lower'})")
-        print(f"{'scenario':10s} {'pair gap':>9s} " + " ".join(f"{k:>10s}" for k in KINDS))
+        print(f"{'scenario':10s} {'pair gap':>9s} " + " ".join(f"{k:>10s}" for k in kinds))
         for s in scen:
             for g in gaps:
                 sel = [c for c in cases if c["label"] == s and c["gap_ms"] == g]
                 if sel:
-                    print(f"{s:10s} {g:7.1f}ms " + " ".join(f"{fmt(mean([c[k][key] for c in sel])):>10s}" for k in KINDS))
+                    print(f"{s:10s} {g:7.1f}ms " + " ".join(f"{fmt(mean([c[k][key] for c in sel])):>10s}" for k in kinds))
         print()
     print("== paired differences over every case (mean, standard error of the mean, wins of the first)")
-    pairs = [("edge", "classic"), ("edge", "edge_blend"), ("edge_blend", "classic")]
-    for key, title, sign in METRICS:
+    pairs = [("edge", "classic"), ("edge", "edge_blend"), ("edge_blend", "classic")] + [(k, "edge") for k in ("edge_depth", "neural") if k in kinds]
+    for key, title, sign in metrics:
         for a, b in pairs:
             d_ = [(c[a][key] - c[b][key]) * sign for c in cases if c["moving_frac"] > 0.0005 and c[a][key] is not None and c[b][key] is not None]
             if len(d_) < 2:
@@ -126,6 +135,12 @@ def report(d):
             print(f"  {title[:46]:46s} {a:>10s} - {b:<10s} {m:+8.4f} +- {se:6.4f}  wins {wins:3d}/{len(d_):3d}  {verdict}")
         print()
     print("timing (GPU, last case): flow", cases[-1]["flow_ms"], "ms; synthesis", cases[-1]["synth_ms"])
+    if "neural" in kinds:
+        ns = cases[-1].get("neural_state", {})
+        print(f"neural generator: {ns}")
+    if "edge_depth" in kinds:
+        dep = cases[-1].get("depth", {})
+        print(f"depth generator: {dep.get('frames', 0):.0f} frames ingested with depth, {dep.get('outputs', 0):.0f} synthetic outputs used it (0 = the depth path never ran)")
     tc = [c for c in cases if c["scenario"].startswith("pan") and c.get("turn", {}).get("measurements", 0) > 0]
     if tc:
         print("\n== camera turn (edge generator, after the evaluated pair's first output): the turn measured on it (true: the evaluated pair), corrections over the whole sequence")

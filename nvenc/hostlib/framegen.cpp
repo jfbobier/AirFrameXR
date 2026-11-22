@@ -11,6 +11,7 @@
 //                                         the crossfade of the rotation-aligned A and B (ghosting, not holes).
 #define NOMINMAX
 #include "framegen.h"
+#include "neural.h"
 #include <windows.h>
 #include <d3dcompiler.h>
 #include "nvOpticalFlowD3D11.h"
@@ -18,6 +19,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -33,6 +35,8 @@ cbuffer CB : register(b0) {
     float4 mode;            // x: pass mode, y: max flow (full-res px), z: confidence gain
     float4 flowIn;          // PSUnpack: x flow-input width of one eye, y flow-input height, z max flow (full-res px)
     float4 synth;           // output pass: x 1 = edge-aware synthesis (else the classic crossfade recipe), y motion limit (full-res px), z cost scale, w photometric scale
+    float4 neur;            // output pass, neural fields (FG_NEURAL): x 1 = compose from them, y still gate colour threshold, z still gate motion (full-res px)
+    float4 neurDims;        // the fields' used width and height, padded width and height (network pixels)
 };
 Texture2D cur : register(t0);
 Texture2D prev : register(t1);
@@ -260,6 +264,46 @@ float3 edgeSynth(float2 pO, float t) {
     float photo = lerp(saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w), 1, conf);
     return lerp(cc, pc, s * photo);
 }
+#ifdef FG_NEURAL
+)"
+// (a third literal: the 16 KB cap)
+R"(// ---- neural fields (fg-neural; FrameGenConfig::neural, neural.h): RIFE 4.4's fields at the network's resolution, composed here at full resolution
+StructuredBuffer<float> nFlow : register(t11);   // per eye 4 planes: x y to the older frame, x y to the newer one (network pixels)
+StructuredBuffer<float> nMask : register(t12);   // per eye 1 plane: the logit of the older frame's weight
+float nLerp(StructuredBuffer<float> buf, uint base, uint W, int2 p0, int2 p1, float2 f) {
+    const float a = buf[base + p0.y * W + p0.x], b = buf[base + p0.y * W + p1.x], c = buf[base + p1.y * W + p0.x], d = buf[base + p1.y * W + p1.x];
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+// One output pixel at uvB (the newer frame's camera, eye uv): the fields there, ONE sample of each original frame (the older one through the rotation
+// into its own camera), blended by the network's mask; where both frames already agree and the fields barely move, the still frames themselves
+// (the fields are never exactly zero: resampling still content through them costs detail; harness/rife/rife_compose.py, the still gate)
+float3 neuralSynth(float2 uvB, float t) {
+    const uint e = eyeRect.x > 0.25 ? 1u : 0u;
+    const uint W = (uint)neurDims.z, pl = W * (uint)neurDims.w;
+    const float2 p = clamp(uvB * neurDims.xy - 0.5, 0, neurDims.xy - 1);
+    const int2 p0 = int2(floor(p));
+    const int2 p1 = min(p0 + 1, int2(neurDims.xy) - 1);
+    const float2 f = p - float2(p0);
+    const float4 fl = float4(nLerp(nFlow, (e * 4 + 0) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 1) * pl, W, p0, p1, f),
+                             nLerp(nFlow, (e * 4 + 2) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 3) * pl, W, p0, p1, f));
+    const float wA = 1.0 / (1.0 + exp(-nLerp(nMask, e * pl, W, p0, p1, f)));
+    const float2 toUv = 1.0 / neurDims.xy;
+    const float3 cb = fetchCR(cur, sbs(clamp(uvB + fl.zw * toUv, 0, 1)));
+    float3 ca;
+    float3 o = samplePrev(uvB + fl.xy * toUv, ca) ? lerp(cb, ca, wA) : cb;
+    const float pxScale = eyeRect.y * eyeRect.z / neurDims.x;   // full-resolution pixels per network pixel
+    [branch] if (max(length(fl.xy), length(fl.zw)) * pxScale < neur.z) {
+        float3 pz;
+        if (samplePrev(uvB, pz)) {
+            const float3 bz = fetchCR(cur, sbs(uvB));
+            if (maxDiff(pz, bz) < neur.y) o = lerp(pz, bz, t);
+        }
+    }
+    return o;
+}
+#endif
+)"
+R"(
 float4 PSOut(VSOut i) : SV_Target {
     float2 uvB;
     float3 dB = rot(oA, oB, oC, dirOf(i.uv));
@@ -269,6 +313,9 @@ float4 PSOut(VSOut i) : SV_Target {
         [branch] if (mode.w > 0.5 && mode.x > 0.5 && projectTo(rot(pA, pB, pC, dB), uvA)) return float4(fetchCR(prev, sbs(uvA)), 1);
         return float4(0, 0, 0, 1);
     }
+#ifdef FG_NEURAL   // compiled in only with FrameGenConfig::neural: without it the output pass is the edge synthesis's bytecode, unchanged
+    [branch] if (mode.x > 0.5 && synth.x > 0.5 && neur.x > 0.5) return float4(neuralSynth(uvB, flowP.w), 1);
+#endif
     [branch] if (mode.x > 0.5 && synth.x > 0.5) return float4(edgeSynth(uvToPx(uvB), flowP.w), 1);
     float3 curHere = fetchCR(cur, sbs(uvB));
     if (mode.x < 0.5) return float4(curHere, 1);
@@ -304,6 +351,8 @@ struct Cb {
     float mode[4];
     float flowIn[4];
     float synth[4];
+    float neur[4];
+    float neurDims[4];
 };
 
 void qmatRow(const float* q, double m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w)
@@ -403,6 +452,12 @@ struct FrameGen::Impl {
     bool turnRecompute = false;           // computeFlow is redoing a pair with a corrected turn: no new measurement
     // the effective orientation of history frame k, eye e: its render orientation turned by its camera yaw
     void effQ(int k, int e, float* o) const { withYaw(realQ[k] + e * 4, cfg.camTurn ? camYaw[k] : 0.0, o); }
+    // neural fields (cfg.neural): the network, and which pair and time its fields belong to (one set: the pair being shown)
+    std::unique_ptr<NeuralFields> neural;
+    int neuralPair = -1; float neuralT = -1.f;
+    // the times of the two latest synthetic outputs: equal (the 1/2 rate's 0.5) = a steady pattern, worth running a new pair's fields early, at
+    // that time; different (2/3 rate: about 2/3 then 1/3; 1/3 rate: 1/3 and 2/3 within each pair) = each output runs its own
+    float lastSynthT[2] = { 0.5f, 0.5f };
 };
 
 FrameGen::FrameGen(ID3D11Device* dev, ID3D11DeviceContext* ctx) : m_i(new Impl()), m_dev(dev), m_ctx(ctx) {}
@@ -430,13 +485,19 @@ FrameGen::~FrameGen() {
 bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errlen) {
     Impl& I = *m_i;
     I.cfg = cfg;
+    if (const char* v = getenv("AIRFRAMEXR_FG_NEURAL_SCALE")) I.cfg.neuralScale = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_NEURAL_STILL")) I.cfg.neuralStill = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_NEURAL_STILL_PX")) I.cfg.neuralStillPx = (float)atof(v);
+    if (const wchar_t* v = _wgetenv(L"AIRFRAMEXR_FG_NEURAL_DIR")) wcsncpy_s(I.cfg.neuralDir, v, _TRUNCATE);
+    if (!cfg.synth) I.cfg.neural = 0;   // the fields are composed in the edge synthesis's output pass
     m_w = w; m_h = h;
     // shaders
     ID3DBlob *vb = nullptr, *vp = nullptr, *p1 = nullptr, *p2 = nullptr, *p5 = nullptr, *p6 = nullptr, *e = nullptr;
+    const D3D_SHADER_MACRO neuralDefs[] = { { "FG_NEURAL", "1" }, { nullptr, nullptr } };   // the output pass with the neural compose (cfg.neural only)
     if (FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vb, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "VSPoly", "vs_5_0", 0, 0, &vp, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSPrep", "ps_5_0", 0, 0, &p1, &e)) ||
-        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSOut", "ps_5_0", 0, 0, &p2, &e)) ||
+        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", I.cfg.neural ? neuralDefs : nullptr, nullptr, "PSOut", "ps_5_0", 0, 0, &p2, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSUnpack", "ps_5_0", 0, 0, &p5, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSFilter", "ps_5_0", 0, 0, &p6, &e))) {
         seterr(err, errlen, e ? (const char*)e->GetBufferPointer() : "frame generation shader compile failed");
@@ -568,9 +629,28 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     }
     stats.flowW = I.flowW; stats.flowH = I.flowH; stats.blocksW = I.blocksW; stats.blocksH = I.blocksH;
     stats.nvofReady = true;
-    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s",
+    if (I.cfg.neural) {
+        // neural fields: a failure (no DLLs, no model, an old driver) leaves the edge synthesis in charge, with the reason in the stats
+        wchar_t dir[300] = L"";
+        if (I.cfg.neuralDir[0]) wcsncpy_s(dir, I.cfg.neuralDir, _TRUNCATE);
+        else {
+            GetModuleFileNameW(nullptr, dir, 300);
+            if (wchar_t* sl = wcsrchr(dir, L'\\')) *sl = 0;
+            wcsncat_s(dir, L"\\neural", _TRUNCATE);
+        }
+        I.neural = std::make_unique<NeuralFields>(m_dev, m_ctx);
+        char ne[200] = "";
+        if (I.neural->Init(w / 2, h, I.cfg.neuralScale, dir, ne, sizeof ne)) {
+            stats.neuralOn = true; stats.neuralW = I.neural->NetW; stats.neuralH = I.neural->NetH;
+        } else {
+            I.neural.reset();
+        }
+        snprintf(stats.neuralInfo, sizeof stats.neuralInfo, "%s", stats.neuralOn ? "" : ne);
+        if (stats.neuralOn) snprintf(stats.neuralInfo, sizeof stats.neuralInfo, "%s", "on");
+    }
+    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s%s",
              NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "classic" : cfg.photoScale > 0 ? "edge" : "edge-blend",
-             I.cfg.camTurn ? ", camera turn" : "");
+             I.cfg.camTurn ? ", camera turn" : "", stats.neuralOn ? ", neural" : "");
     return true;
 }
 
@@ -706,6 +786,10 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     m_ctx->End(I.qT[1]);
     m_ctx->End(I.qDisjoint);
     I.flowTimed = true;
+    // the fields early (with the pair's possibly corrected camera turn, as the flow just saw it), only when the outputs keep one time: RIFE's fields
+    // belong to one output time, and an output shown with another time's fields puts the content at the wrong place (field 2026-11-22: the 2/3
+    // rate shook on menu text with the 0.5 fields reused for its 1/3 and 2/3 outputs)
+    if (I.neural && std::fabs(I.lastSynthT[0] - I.lastSynthT[1]) <= 0.01f) neuralPass(n, I.lastSynthT[0]);
     if (st != NV_OF_SUCCESS) {
         stats.flowErrors++;
         char le[MIN_ERROR_STRING_SIZE + 1] = ""; uint32_t ls = MIN_ERROR_STRING_SIZE; I.api.nvOFGetLastError(I.of, le, &ls);
@@ -713,6 +797,31 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
         seterr(err, errlen, b);
         return false;
     }
+    return true;
+}
+
+// Neural fields of pair (n-1, n) at time t: the older frame turned into the newer one's camera (the effective views, camera turn included), as the
+// optical flow sees them. On success the output pass may compose from them; a failure leaves the edge synthesis for this output.
+bool FrameGen::neuralPass(int n, float t) {
+    Impl& I = *m_i;
+    if (!I.neural) return false;
+    const int prev = (n + Impl::H - 1) % Impl::H;
+    float rot[2][12] = {};
+    for (int e = 0; e < 2; e++) {
+        float qa[4], qb[4], m[9];
+        I.effQ(prev, e, qa); I.effQ(n, e, qb);
+        relRot(qa, qb, m);   // direction in the newer view -> the older view
+        rows(m, rot[e], rot[e] + 4, rot[e] + 8);
+    }
+    char e2[200] = "";
+    if (!I.neural->Run(I.realSrv[prev], I.realSrv[n], rot, I.fov8, t, e2, sizeof e2)) {
+        stats.neuralFailures++;
+        snprintf(stats.neuralInfo, sizeof stats.neuralInfo, "run failed: %s", e2);
+        I.neuralPair = -1;
+        return false;
+    }
+    I.neuralPair = n; I.neuralT = t;
+    stats.neuralRuns++;
     return true;
 }
 
@@ -750,6 +859,14 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         char e2[160];
         computeFlow(n, e2, sizeof e2);   // a failure leaves the zero flow bound below: the classic synthesis's crossfade fallback
     }
+    // neural fields: this pair's, at this output's time
+    bool neuralOk = false;
+    if (I.neural && mode == 1 && havePair) {
+        // this output's own time: fields of another time are run again (a 0.01 tolerance: the steady 1/2 rate reuses its early run)
+        neuralOk = (I.neuralPair == n && std::fabs(t - I.neuralT) <= 0.01f) || neuralPass(n, t);
+        if (neuralOk) stats.neuralOutputs++;
+        I.lastSynthT[1] = I.lastSynthT[0]; I.lastSynthT[0] = t;
+    }
     // camera turn: the output view is the stamp's head orientation turned by the camera yaw at t (the newer frame's for a rendered output)
     const double yawOut = !I.cfg.camTurn ? 0.0 : (mode == 1 && havePair) ? I.camYaw[prev] + (double)t * (I.camYaw[n] - I.camYaw[prev]) : I.camYaw[n];
     float qOutE[4]; withYaw(qOut4, yawOut, qOutE);
@@ -763,10 +880,15 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     ID3D11ShaderResourceView* srvs[4] = { I.realSrv[n], havePair ? I.realSrv[prev] : I.realSrv[n], flowOk ? I.pairFlowSrv[n] : I.zeroFlowSrv, flowOk ? I.pairCostSrv[n] : I.maxCostSrv };
     m_ctx->PSSetShaderResources(0, 4, srvs);
     m_ctx->PSSetShaderResources(4, 1, flowOk && I.cfg.synth ? &I.pairFiltSrv[n] : &I.zeroFiltSrv);
+    if (neuralOk) { ID3D11ShaderResourceView* ns[2] = { I.neural->FlowSrv(), I.neural->MaskSrv() }; m_ctx->PSSetShaderResources(11, 2, ns); }
     for (int e = 0; e < 2; e++) {
         Cb c{};
         c.synth[0] = I.cfg.synth ? 1.f : 0.f; c.synth[1] = std::max(1.f, I.cfg.motionLimit * m_w * 0.5f);
         c.synth[2] = I.cfg.costScale; c.synth[3] = I.cfg.photoScale;
+        if (neuralOk) {
+            c.neur[0] = 1.f; c.neur[1] = I.cfg.neuralStill; c.neur[2] = I.cfg.neuralStillPx;
+            c.neurDims[0] = (float)I.neural->NetW; c.neurDims[1] = (float)I.neural->NetH; c.neurDims[2] = (float)I.neural->PadW; c.neurDims[3] = (float)I.neural->PadH;
+        }
         float m[9];
         float qn[4], qp[4];
         I.effQ(n, e, qn); I.effQ(havePair ? prev : n, e, qp);
@@ -794,6 +916,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         }
     }
     ID3D11ShaderResourceView* nulls[5] = {}; m_ctx->PSSetShaderResources(0, 5, nulls);
+    if (neuralOk) m_ctx->PSSetShaderResources(11, 2, nulls);
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     m_ctx->End(I.qT[3]);
     m_ctx->End(I.qDisjointR);
@@ -870,11 +993,17 @@ void FrameGen::CollectTimings() {
     };
     if (I.flowTimed && pair(I.qDisjoint, I.qT[0], I.qT[1], &stats.lastFlowMs, &stats.flowMsSum, &stats.flowN)) I.flowTimed = false;
     if (I.synthTimed && pair(I.qDisjointR, I.qT[2], I.qT[3], &stats.lastSynthMs, &stats.synthMsSum, &stats.synthN)) I.synthTimed = false;
+    if (I.neural) {
+        I.neural->CollectTiming();
+        const auto& ns = I.neural->stats;
+        stats.neuralMs = ns.lastMs; stats.neuralMsAvg = ns.msN ? (float)(ns.msSum / ns.msN) : 0.f; stats.neuralCpuMs = ns.lastCpuMs;
+    }
 }
 
 void FrameGen::ResetHistory() {
     Impl& I = *m_i;
     m_have = 0;
+    I.neuralPair = -1;
     I.turnPred = 0; I.turnRate = 0; I.haveRate = false;
     for (auto& t : I.realT) t = 0;
     for (auto& p : I.turnPending) p = false;

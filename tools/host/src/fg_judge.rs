@@ -23,9 +23,13 @@ extern "C" {
     fn nvh_bench_fgj_open(b: *mut c_void, eye_w: i32, eye_h: i32, synth: i32, err: *mut c_char, errlen: i32) -> *mut c_void;
     fn nvh_bench_fgj_gen(b: *mut c_void, j: *mut c_void, eye_w: i32, eye_h: i32, times9: *const f64, fov8: *const f32, ipd: f32, rgba: *mut u8, info2: *mut f32, err: *mut c_char, errlen: i32) -> i32;
     fn nvh_bench_fgj_close(j: *mut c_void);
+    fn nvh_bench_fgj_hud_rects(eye_w: i32, eye_h: i32, out: *mut i32, max_rects: i32) -> i32;
     fn nvh_bench_fgj_pan_seq(deg_per_s: f64, t_ref: f64, warm_deg_per_s: f64, warm_frames: i32, gap_s: f64);
     fn nvh_bench_fgj_turn(j: *mut c_void, out8: *mut f32) -> i32;
     fn nvh_bench_fgj_caps(j: *mut c_void, out: *mut c_char, outlen: i32) -> i32;
+    fn nvh_bench_fgj_walk(m_per_s: f64, t_ref: f64);
+    fn nvh_bench_fgj_set_t(t: f64);
+    fn nvh_bench_fgj_neural(j: *mut c_void, out6: *mut f64, info: *mut c_char, infolen: i32) -> i32;
 }
 
 pub struct Options {
@@ -41,6 +45,12 @@ pub struct Options {
     /// sustained, `panstart` still then turning at A, `panstop` turning then still, `panrev` turning then the other way (the camera-turn
     /// prediction's cases)
     pub pan_warm: i32,
+    /// sideways camera speeds (scene metres per second; the scene is ~3 m wide, the head ~1.9 m from its centre) of the `walk` scenario: the camera
+    /// strafes while the scene and the head the generator is told stay still (a game's stick walk: parallax and newly uncovered background behind every
+    /// near object). Empty = no walk cases
+    pub walks: Vec<f64>,
+    /// the output time as a fraction of the pair gap (0.5 = the midpoint, the 1/2 rate's; 1/3 and 2/3 are what the 2/3 and 1/3 rates show)
+    pub t: f64,
     pub out: PathBuf,
 }
 
@@ -166,6 +176,20 @@ struct Truth {
     moving_frac: f64,
     band_frac: f64,
     grad_band: f64,
+    /// the HUD's panels (lab env AIRFRAMEXR_FG_JUDGE_HUD=1; empty = off): a head-locked overlay, identical in A, B and the truth
+    hud: Vec<bool>,
+}
+
+/// the share of the HUD's pixels the output has wrong by more than 24 levels of luma (smear, double strokes, a HUD that moved with the head)
+fn hud_bad(t: &Truth, l: &[f32]) -> f64 {
+    let (mut n, mut bad) = (0usize, 0usize);
+    for i in 0..l.len() {
+        if t.hud[i] {
+            n += 1;
+            if (l[i] - t.g[i]).abs() > 24.0 { bad += 1 }
+        }
+    }
+    bad as f64 / n.max(1) as f64
 }
 
 fn score(t: &Truth, l: &[f32]) -> Value {
@@ -183,6 +207,8 @@ fn score(t: &Truth, l: &[f32]) -> Value {
         "psnr": psnr(l, &t.g, None), "psnr_moving": psnr(l, &t.g, Some(&t.moving)), "psnr_band": psnr(l, &t.g, Some(&t.band)),
         "ssim": ssim_mean(&win, None), "ssim_moving": ssim_mean(&win, Some(&t.moving)),
         "edge_excess": excess / norm, "edge_deficit": deficit / norm,
+        "psnr_hud": if t.hud.is_empty() { None } else { psnr(l, &t.g, Some(&t.hud)) },
+        "hud_bad": if t.hud.is_empty() { None } else { Some(hud_bad(t, l)) },
     })
 }
 
@@ -233,23 +259,44 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
     }
     let mut gpu = [0 as c_char; 128];
     unsafe { nvh_bench_gpu(b, gpu.as_mut_ptr(), 128) };
-    let names = ["classic", "edge", "edge_blend"];
-    let mut gens = [std::ptr::null_mut::<c_void>(); 3];
+    // AIRFRAMEXR_FG_JUDGE_NEURAL=1: a fourth generator, `neural` (synth 4: the edge synthesis's output pass composing RIFE 4.4's fields, neural.h;
+    // the host's neural folder must hold airframexr_rife.dll and rife44.afxw: nvenc/rife/build.ps1)
+    let neural = std::env::var("AIRFRAMEXR_FG_JUDGE_NEURAL").map_or(false, |v| v == "1");
+    let names: Vec<&str> = if neural { vec!["classic", "edge", "edge_blend", "neural"] } else { vec!["classic", "edge", "edge_blend"] };
+    let codes = [0, 1, 2, 4];
+    let mut gens = vec![std::ptr::null_mut::<c_void>(); names.len()];
     for (k, g) in gens.iter_mut().enumerate() {
-        *g = unsafe { nvh_bench_fgj_open(b, ew, eh, k as i32, err.as_mut_ptr(), 256) };
+        *g = unsafe { nvh_bench_fgj_open(b, ew, eh, codes[k], err.as_mut_ptr(), 256) };
         if g.is_null() {
             event(origin, "fgj_error", json!({ "message": format!("frame generator {}: {}", names[k], cstr(&err)) }));
             return 6;
         }
     }
     let _ = fs::create_dir_all(&opt.out);
+    unsafe { nvh_bench_fgj_set_t(opt.t) };
+    let dump: Option<PathBuf> = std::env::var("AIRFRAMEXR_FG_JUDGE_DUMP").ok().filter(|v| !v.is_empty()).map(PathBuf::from);
+    if let Some(d) = &dump {
+        let _ = fs::create_dir_all(d);
+        let _ = fs::remove_file(d.join("cases.jsonl"));   // the index describes this run only
+    }
     let mut caps = [0 as c_char; 512];
     unsafe { nvh_bench_fgj_caps(gens[1], caps.as_mut_ptr(), 512) };
-    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "fov": fov, "scene": scene,
-        "nvof": cstr(&caps) }));
+    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "walks": opt.walks, "t": opt.t,
+        "fov": fov, "scene": scene, "nvof": cstr(&caps), "generators": names }));
+    // the HUD scenario's panels as a mask (the first rect of each eye is its panel: the area the strokes and the bar sit on)
+    let hud: Vec<bool> = {
+        let mut r = vec![0i32; 4 * 64];
+        let n = unsafe { nvh_bench_fgj_hud_rects(ew, eh, r.as_mut_ptr(), 64) } as usize;
+        let mut m = vec![false; if n > 0 { w * h } else { 0 }];
+        for i in (0..n).step_by((n / 2).max(1)) {   // the panels: the first rect of each eye (HudRects pushes 16 per eye)
+            let (x0, y0, x1, y1) = (r[4 * i].max(0) as usize, r[4 * i + 1].max(0) as usize, (r[4 * i + 2] as usize).min(w), (r[4 * i + 3] as usize).min(h));
+            for y in y0..y1 { for x in x0..x1 { m[y * w + x] = true } }
+        }
+        m
+    };
     let bytes = w * h * 4;
     let (mut fa, mut fb, mut fg) = (vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]);
-    let mut outs = [vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]];
+    let mut outs = vec![vec![0u8; bytes]; names.len()];
     let mut cases: Vec<Value> = vec![];
     let mut failures = 0;
     for start in 0..opt.starts {
@@ -269,6 +316,9 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     scenarios.push(("panrev", pr));
                 }
             }
+            for &wv in &opt.walks {
+                scenarios.push(("walk", wv));
+            }
             for (scenario, speed) in scenarios {
                 // pan*: the first time is the pan clock (bench.cpp FgjRender), the scene frozen at t0, the head still; (evaluated rate, rate before A)
                 let (rate, warm_rate) = match scenario {
@@ -280,14 +330,15 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                 };
                 let warm = if scenario.starts_with("pan") { opt.pan_warm } else { 0 };
                 unsafe { nvh_bench_fgj_pan_seq(rate, t0, warm_rate, warm, g) };
+                unsafe { nvh_bench_fgj_walk(if scenario == "walk" { speed } else { 0.0 }, t0) };
                 // (scene time, head position time, head orientation time) of A, B and the truth G (the midpoint)
                 let tm = |dt: f64| match scenario {
                     "scene" => [t0 + dt * speed, t0, t0],
-                    "pan" | "panstart" | "panstop" | "panrev" => [t0 + dt, t0, t0],
+                    "pan" | "panstart" | "panstop" | "panrev" | "walk" => [t0 + dt, t0, t0],
                     "head" => [t0, t0 + dt, t0 + dt],
                     _ => [t0 + dt * speed, t0 + dt, t0 + dt],
                 };
-                let (ta, tb, tg) = (tm(0.0), tm(g), tm(g / 2.0));
+                let (ta, tb, tg) = (tm(0.0), tm(g), tm(g * opt.t));
                 let times9: Vec<f64> = ta.iter().chain(tb.iter()).chain(tg.iter()).copied().collect();
                 let ok_frames = unsafe {
                     nvh_bench_fgj_frame(b, ew, eh, ta.as_ptr(), fov.as_ptr(), ipd, fa.as_mut_ptr(), std::ptr::null_mut()) > 0
@@ -299,9 +350,9 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     failures += 1;
                     continue;
                 }
-                let mut timings = [[0f32; 2]; 3];
+                let mut timings = vec![[0f32; 2]; names.len()];
                 let mut gen_ok = true;
-                for k in 0..3 {
+                for k in 0..names.len() {
                     let r = unsafe {
                         nvh_bench_fgj_gen(b, gens[k], ew, eh, times9.as_ptr(), fov.as_ptr(), ipd, outs[k].as_mut_ptr(), timings[k].as_mut_ptr(), err.as_mut_ptr(), 256)
                     };
@@ -335,10 +386,11 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     moving,
                     band,
                     grad_band,
+                    hud: hud.clone(),
                 };
                 let blend: Vec<f32> = la.iter().zip(lb.iter()).map(|(p, q)| 0.5 * (p + q)).collect();
                 let lo: Vec<Vec<f32>> = outs.iter().map(|o| luma(o)).collect();
-                let case = json!({
+                let mut case = json!({
                     "start": start, "t0": t0, "gap_ms": gap, "scenario": scenario, "speed": speed,
                     "moving_frac": truth.moving_frac, "band_frac": truth.band_frac,
                     "hold": score(&truth, &lb), "blend": score(&truth, &blend),
@@ -347,7 +399,27 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     "turn": { "measured_deg": turn[0], "pred_deg": turn[1], "agree": turn[2], "blocks": turn[3], "cpu_ms": turn[4], "measurements": turn[5], "corrections": turn[6], "late": turn[7],
                               "true_pair_deg": rate * g, "true_warm_deg": warm_rate * g },
                 });
+                if neural {
+                    // the neural generator's score and state (on, runs, outputs composed from the fields, failures, GPU ms, CPU ms, what runs or why not)
+                    let mut ns = [0f64; 6];
+                    let mut ninfo = [0 as c_char; 200];
+                    unsafe { nvh_bench_fgj_neural(gens[3], ns.as_mut_ptr(), ninfo.as_mut_ptr(), 200) };
+                    case["neural"] = score(&truth, &lo[3]);
+                    case["synth_ms"]["neural"] = json!(timings[3][1]);
+                    case["neural_state"] = json!({ "on": ns[0], "runs": ns[1], "outputs": ns[2], "failures": ns[3], "gpu_ms": ns[4], "cpu_ms": ns[5], "info": cstr(&ninfo) });
+                }
                 event(origin, "fgj_case", case.clone());
+                // AIRFRAMEXR_FG_JUDGE_DUMP=<dir> (lab): every case's full frames A, B, the truth G and the edge synthesis's output (PPM, side by side) with
+                // a cases.jsonl index, for offline generators (e.g. a neural interpolator) scored the same way; a directory on the builder, not in `out`
+                if let Some(dd) = &dump {
+                    let idx = cases.len();
+                    for (name, buf) in [("A", &fa), ("B", &fb), ("G", &fg), ("edge", &outs[1])] {
+                        write_ppm(&dd.join(format!("case_{idx:03}_{name}.ppm")), buf, w, 0, 0, w, h, None);
+                    }
+                    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(dd.join("cases.jsonl")) {
+                        let _ = writeln!(f, "{}", json!({ "idx": idx, "eye": [ew, eh], "case": case }));
+                    }
+                }
                 cases.push(case);
                 if start == 0 && truth.band_frac > 0.0005 {
                     let (cw, ch) = (480usize.min(w), 360usize.min(h));
@@ -355,20 +427,37 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     let stem = format!("{scenario}_x{}_g{}", speed as i64, gap as i64);
                     write_ppm(&opt.out.join(format!("{stem}_truth.ppm")), &fg, w, x0, y0, cw, ch, None);
                     write_ppm(&opt.out.join(format!("{stem}_hold.ppm")), &fb, w, x0, y0, cw, ch, None);
-                    for k in 0..3 {
+                    for k in 0..names.len() {
                         write_ppm(&opt.out.join(format!("{stem}_{}.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, None);
                         write_ppm(&opt.out.join(format!("{stem}_{}_diff.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, Some((&fg, 4.0)));
+                    }
+                }
+                // HUD runs: crops around the left eye's panel (its top-left corner, with the world beside and above it and the first strokes), at one pair gap
+                if start == 0 && !hud.is_empty() && (gap - 33.3).abs() < 1.0 {
+                    let (cw, ch) = (480usize.min(w), 360usize.min(h));
+                    let (mut bx, mut by) = (w, h);
+                    for y in 0..h { for x in 0..w / 2 { if hud[y * w + x] { bx = bx.min(x); by = by.min(y); } } }
+                    if bx < w {
+                        let (x0, y0) = (bx.saturating_sub(120).min(w - cw), by.saturating_sub(120).min(h - ch));
+                        let stem = format!("hud_{scenario}_x{}_g{}", speed as i64, gap as i64);
+                        write_ppm(&opt.out.join(format!("{stem}_truth.ppm")), &fg, w, x0, y0, cw, ch, None);
+                        write_ppm(&opt.out.join(format!("{stem}_hold.ppm")), &fb, w, x0, y0, cw, ch, None);
+                        for k in 0..names.len() {
+                            write_ppm(&opt.out.join(format!("{stem}_{}.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, None);
+                            write_ppm(&opt.out.join(format!("{stem}_{}_diff.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, Some((&fg, 4.0)));
+                        }
                     }
                 }
             }
         }
     }
     unsafe { nvh_bench_fgj_pan_seq(0.0, 0.0, 0.0, 0, 0.0) };
+    unsafe { nvh_bench_fgj_walk(0.0, 0.0) };
     for g in gens {
         unsafe { nvh_bench_fgj_close(g) };
     }
     unsafe { nvh_bench_close(b) };
-    let doc = json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "starts": opt.starts, "cases": cases, "failures": failures });
+    let doc = json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "walks": opt.walks, "starts": opt.starts, "cases": cases, "failures": failures });
     let _ = fs::write(opt.out.join("fgj.json"), serde_json::to_string(&doc).unwrap_or_default());
     event(origin, "fgj_done", json!({ "cases": cases.len(), "failures": failures }));
     if failures > 0 { 7 } else { 0 }

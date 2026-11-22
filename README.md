@@ -31,7 +31,7 @@ For the Quest there is a dedicated **AirFrameXR Quest client** ([releases](https
 | Runtime | SteamVR runtime and compositor | Dedicated OpenXR runtime based on VirtualDesktop-OpenXR (VDXR), with OVRShim |
 | Streaming | Separate ALVR PC streamer | Integrated streaming pipeline using ALVR server components and protocol v20 |
 | Encoding | General-purpose ALVR configuration | NVIDIA-specific NVENC HEVC 10-bit path |
-| Frame generation | Requires a separate approach if desired | Optional, built into the frame pipeline with NVIDIA Optical Flow and edge-aware synthesis |
+| Frame generation | Requires a separate approach if desired | Optional, built into the frame pipeline: a neural interpolator (RIFE) running on our own small CUDA engine, with NVIDIA Optical Flow and an edge-aware synthesis as the fallback |
 | Headset | ALVR client | **Same ALVR client — no custom headset app required** |
 | Compatibility priority | Broad SteamVR ecosystem | Lean OpenXR-first path; **OpenVR-only titles go through the bundled [OpenComposite](#openvr-only-games-opencomposite) translation** (one switch in the launcher), the rest need SteamVR |
 
@@ -44,7 +44,7 @@ AirFrameXR is built for people with a wireless headset and an NVIDIA GPU who wan
 - **A proven network layer.** [ALVR](https://github.com/alvr-org/ALVR) provides the networking, encoding and decoding that a large community has stabilised, and the headset only needs the ALVR app. **Meta Quest** and **Apple Vision Pro** are the tested headsets.
 - **Made for NVIDIA.** NVENC HEVC 10-bit encoding, and **split encoding** that uses all of the GPU's NVENC units instead of one (the RTX 5090 has three), tuned with the pacing and the network.
 - **The game renders only what you see.** One choice for every headset: the vendor's own view (Apple, Meta: the default) or a restriction, a rectangle the game is told. *AVP optimized* is a window measured on a Vision Pro and is always in the list; your own takes about a minute in the headset (four bright lines, one eye at a time). A game that renders less is a faster game, and the saving can be spent as render quality. See [How FOV restriction works](#how-fov-restriction-works).
-- **Frame generation in the pipeline.** Optional GPU optical-flow interpolation with an edge-aware synthesis (the edge technique comes from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented) can improve displayed smoothness when a game cannot sustain the headset's refresh rate. It is experimental, off by default and **can add interpolation latency**; it is not a free FPS boost.
+- **Frame generation in the pipeline.** Optional neural frame generation: a [RIFE](https://github.com/hzwer/Practical-RIFE) network finds how every part of the picture moved between two game frames, and the streamer draws the frames in between at full resolution (fewer double images on moving objects, still content left exact). It runs on our own small CUDA engine shipped with AirFrameXR (11 MB; no TensorRT, no Python). The GPU's optical flow with an edge-aware synthesis (the edge technique comes from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented) remains as the fallback. It can improve displayed smoothness when a game cannot sustain the headset's refresh rate. It is experimental, off by default and **can add interpolation latency**; it is not a free FPS boost.
 - **Measure per game.** Game statistics record fps, latency, network and GPU for each game you play.
 - **Less guesswork.** The setup wizard reads what your headset supports, offers a community profile (shareable as a JSON file) and tests the result on your PC and network.
 - **Native Windows tools.** One launcher and native windows for the streamer, statistics, diagnosis and setup, plus an optional desktop mirror you can use from inside the headset.
@@ -109,7 +109,7 @@ flowchart LR
         G["OpenXR game<br/>(UEVR, native VR)"]
         V["VirtualDesktop-OpenXR<br/>OpenXR runtime, small patches"]
         S["OVRShim (LibOVRRT64_1.dll)<br/>composes layers, paces the game<br/>to 1/3, 1/2, 2/3 of the display rate,<br/>10-bit frame ring in shared GPU memory"]
-        H["alvr_host.exe<br/>frame generation (NVIDIA Optical Flow,<br/>edge-aware synthesis), head-pose stamping,<br/>foveated encoding, NVENC HEVC 10-bit split encode,<br/>ALVR 20.14 server core"]
+        H["alvr_host.exe<br/>frame generation (RIFE neural fields,<br/>NVIDIA Optical Flow), head-pose stamping,<br/>foveated encoding, NVENC HEVC 10-bit split encode,<br/>ALVR 20.14 server core"]
         L["AirFrameXR.exe launcher<br/>settings, game records,<br/>proposals, recenter"]
         G --> V --> S --> H
         G -.-> D -.->|same process,<br/>no copy| S
@@ -221,13 +221,19 @@ the same code built with the telemetry on, so a diagnosis never changes the numb
   **Find headset...** in the streamer window searches the network and pairs. Any NVIDIA GPU with NVENC API 12.2+ works.
 - **Frame pacing** with an intake gate and a three-deep in-order queue. The Vision Pro profile defaults to foveated encoding at 300 Mbps.
 - **Frame generation** (off by default, a switch in the streamer and in Settings; experimental): for games that cannot hold the display rate. A slider sets the game's rate as a
-  fraction of the display rate, **1/3, 1/2 (default) or 2/3**, and the streamer generates the frames in between. In-scene motion comes from the GPU's optical-flow engine
-  (NVIDIA Optical Flow, Turing or later), the synthesis is edge-aware (motion edges stay sharp, and where the motion is uncertain the real frame is shown instead of a double
-  image; ideas from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented; the earlier algorithm stays as **classic** in Advanced video and performance settings), and
-  every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3.
+  fraction of the display rate, **1/3, 1/2 (default) or 2/3**, and the streamer generates the frames in between. **Since 1.4.2 the frames in between are neural:**
+  [RIFE](https://github.com/hzwer/Practical-RIFE) 4.4, run by our own CUDA engine (`bin\neural`: CUTLASS convolutions and a few kernels of our own, hard-coded
+  for this network, built from pinned sources by one script), computes for each pair of game frames where every part of the picture moved and how to blend
+  the two frames, at half the eye's resolution; the streamer then draws the picture at full resolution from one sample of each game frame, keeps still content
+  exact, and each generated frame gets the motion of its own moment. It needs an RTX 30 series or newer. The fallback, chosen in Advanced video and performance
+  settings (*Generated-frame synthesis*: **neural** or **edge**) and used by itself on older GPUs, is 1.4.1's synthesis: in-scene motion from the GPU's optical-flow
+  engine (NVIDIA Optical Flow, Turing or later) and an edge-aware synthesis (motion edges stay sharp, and where the motion is uncertain the real frame is shown instead
+  of a double image; ideas from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented; the earlier algorithm stays as **classic**). Head turns are removed
+  before either looks for motion, stick turns are measured and removed too, and every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3.
   It costs latency by construction (interpolation: one game period), and it is not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
   A **Recommended** tick sets the rate from the game's recorded runs on the connected headset, and **Recenter** (a button and a key, **End** by default; also sent at every game start) turns the tracking space to your
-  current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), and
+  current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/NEURAL_RIFE_CUDA.md](docs/NEURAL_RIFE_CUDA.md) (the neural engine: how it is built
+  and checked, and what it measured), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), and
   [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) (archive) for why DLSS motion vectors were tried and removed.
 - **A field of view for the game, set from the streamer**, the savings shown against what the game would have rendered, a percentage to spend them on quality, a one-minute calibration in the headset (four lines per eye) and, on a Vision Pro, a foveation computed from Apple's rate map and your choice: [how it works](#how-fov-restriction-works).
 - **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the field of view calibration, the firewall and OpenXR-layer reviews. They follow the display
@@ -318,7 +324,7 @@ only, needs the client to declare that window; the host alone cannot do it. Deta
 The game's sound reaches the headset without installing anything: the host captures it with **Windows' process loopback** (everything the PC plays, taken before the output's volume and mute), so your Windows default output is left alone and games started as administrator are heard too. While the streamer runs it can mute your PC speakers (a checkbox in Settings, on by default) and puts the mute back when it closes. A virtual cable (VB-CABLE, a separate product) is the fallback, and the only way to get the headset's **microphone** into a game. Details, and what is not tested: [docs/INSTALL.md](docs/INSTALL.md#game-audio-and-headset-microphone).
 
 ## Requirements
-- Windows 10/11, an **NVIDIA** GPU with a current driver (NVENC API 12.2+); RTX 40 series or newer recommended (several NVENC chips enable split encoding).
+- Windows 10/11, an **NVIDIA** GPU with a current driver (NVENC API 12.2+); RTX 40 series or newer recommended (several NVENC chips enable split encoding). Neural frame generation needs an RTX 30 series or newer (older GPUs use the optical-flow synthesis).
 - An **Apple Vision Pro** or a **Meta Quest 3** with the AirFrameXR client (or the stock **ALVR** app, 20.14.x; see above); PC and headset on the same LAN (Wi-Fi 6 on 5 GHz for the first Vision Pro; 6 GHz is for newer models and Quest 3). Only these two headsets are targeted for now.
 - **Wired connection**: a Meta Quest on USB works through **USB tethering** (the headset then appears to the PC as a network interface) or through [ADBForwarder](https://github.com/alvr-org/ADBForwarder) (ALVR's small adb helper; run it, open the ALVR app on the Quest, and use `127.0.0.1` as the headset address: the wizard shows a *Meta Quest on a USB cable?* link when nothing is found). AirFrameXR itself does not run adb. The Vision Pro Developer Strap works as a network link the same way.
 - SteamVR and ALVR's own launcher closed while streaming (same ports).
@@ -407,16 +413,21 @@ AirFrameXR stands on the shoulders of giants: the projects below made it possibl
 - **[VectorXR](https://github.com/DienerTech/vectorxr)** (MPL-2.0) by DienerTech: the edge-aware synthesis (vector median, source-solved
   flow, per-pixel candidate choice at motion boundaries, doubtful motion shrinking toward the real frame) was studied from its code and
   re-implemented here.
+- **[RIFE](https://github.com/hzwer/Practical-RIFE)** (MIT) by hzwer (Zhewei Huang) and co-authors ("Real-Time Intermediate Flow Estimation for
+  Video Frame Interpolation", ECCV 2022): the network behind neural frame generation. Its 4.4 weights ship, converted, in `bin\neural`; our CUDA
+  engine follows the model code of **[vs-rife](https://github.com/HolyWu/vs-rife)** (MIT) by HolyWu, whose release hosts the weights file.
+  Thank you for making real-time interpolation open.
 - **[OpenComposite](https://gitlab.com/znixian/OpenOVR)** (GPL-3.0-or-later) by znixian and its contributors: the OpenVR-to-OpenXR translation that lets
   old OpenVR games run on AirFrameXR without SteamVR. Its project's own prebuilt DLLs ship unmodified in `opencomposite\` with their source and
   licences; they are separate programs (not linked into AirFrameXR), loaded by the games when the launcher's OpenVR switch is on.
-- NVIDIA Video Codec SDK and Optical Flow SDK headers (MIT). cgltf (MIT), stb_image (public domain / MIT), Draco (Apache-2.0, offline converter only).
+- NVIDIA Video Codec SDK and Optical Flow SDK headers (MIT); NVIDIA [CUTLASS](https://github.com/NVIDIA/cutlass) (BSD-3-Clause), compiled into the neural
+  engine. cgltf (MIT), stb_image (public domain / MIT), Draco (Apache-2.0, offline converter only).
 - Benchmark scene: "Littlest Tokyo" by Glen Fox ([glenatron](https://sketchfab.com/glenatron)), CC-BY-4.0, converted and placed
   in a textured room. Its music: "Sakura Breeze" by [Roa Music](https://soundcloud.com/roa_music1031), royalty-free music from
   [free-stock-music.com](https://www.free-stock-music.com), CC BY 3.0 ([licence](https://creativecommons.org/licenses/by/3.0/deed.en_US)), shortened and re-encoded.
 
 Details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). AirFrameXR is not affiliated with or endorsed by the ALVR project,
-Apple, NVIDIA, Virtual Desktop, OFXR-Bridge, VectorXR or OpenComposite. Apple Vision Pro and visionOS are trademarks of Apple Inc.
+Apple, NVIDIA, Virtual Desktop, OFXR-Bridge, VectorXR, the RIFE authors or OpenComposite. Apple Vision Pro and visionOS are trademarks of Apple Inc.
 
 ## License
 MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)); OpenComposite, shipped as separate files, is GPL-3.0-or-later (`docs\licenses\OpenComposite-LICENSE.txt`).
