@@ -187,6 +187,8 @@ int nvh_bench_run(void* bench, const NvhBenchConfig* cfg, NvhBenchResult* result
 void nvh_bench_close(void* bench);
 // Frame generation judge (tools/host/src/fg_judge.rs): the scene at eye_w x eye_h per eye, side by side, rendered at a scene time, a head position time and a head
 // orientation time (frame = times[3*k .. 3*k+2]); RGBA8, 2*eye_w x eye_h. The head's orientation (x y z w) goes to q4 when given.
+// the judge's HUD scenario (lab env AIRFRAMEXR_FG_JUDGE_HUD=1): its rectangles, 4 ints each (x0 y0 x1 y1, side-by-side pixels); 0 when the scenario is off
+int nvh_bench_fgj_hud_rects(int eye_w, int eye_h, int32_t* out, int max_rects);
 int nvh_bench_fgj_frame(void* bench, int eye_w, int eye_h, const double* times3, const float* fov8, float ipd, uint8_t* rgba, float* q4);
 // a frame generator (synth 0 classic, 1 edge, 2 edge-blend) for the judge; NULL + err when there is no optical-flow engine
 // the judge's `pan` scenario: the camera turns at deg_per_s about the world's up axis (times3[0] is then the pan clock, the scene frozen at t_ref, the
@@ -197,6 +199,9 @@ void nvh_bench_fgj_pan_seq(double deg_per_s, double t_ref, double warm_deg_per_s
 // the judge generator's camera-turn state after its last case: measured turn deg, prediction deg, agreement, blocks, CPU ms, measurements,
 // corrections, late (not ready at the first output)
 int nvh_bench_fgj_turn(void* fgj, float* out8);
+// the judge's `walk` scenario: the camera moves sideways at m_per_s (scene metres per second; times3[0] is then the walk clock, the scene frozen at t_ref,
+// the head the generator is told unchanged: a stick strafe); 0 = off
+void nvh_bench_fgj_walk(double m_per_s, double t_ref);
 void* nvh_bench_fgj_open(void* bench, int eye_w, int eye_h, int synth, char* err, int errlen);
 // renders frame A (times[0..2]) and B (times[3..5]), generates the midpoint for the head pose of times[6..8] and reads it back (RGBA8); info3 = flow ms, synth ms
 int nvh_bench_fgj_gen(void* bench, void* fgj, int eye_w, int eye_h, const double* times9, const float* fov8, float ipd, uint8_t* rgba, float* info2, char* err, int errlen);

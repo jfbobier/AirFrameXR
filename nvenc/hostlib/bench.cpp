@@ -347,6 +347,9 @@ int nvh_bench_preview(void* h, int eye_w, int eye_h, double t, const float* fov8
 // ---- frame generation judge ---------------------------------------------------------------------------------------------------
 namespace {
 struct Fgj { std::unique_ptr<FrameGen> fg; int eyeW = 0, eyeH = 0; };
+// the `walk` scenario (nvh_bench_fgj_walk): the camera moves sideways (the head's right at the frame's head time) at this speed (scene metres per
+// second; the scene is ~3 m wide) while the scene and the head the generator is told stay still: a game's stick strafe. 0 = off.
+double g_fgjWalkMS = 0, g_fgjWalkRef = 0;
 // the `pan` scenario (nvh_bench_fgj_pan): the camera turns at this rate (deg/s) about the world's up axis while the scene's animation stays at
 // the reference time and the head the generator is told stays where it is: a stick turn. 0 = off.
 double g_fgjPanDegS = 0, g_fgjPanRef = 0;
@@ -386,22 +389,63 @@ bool ReadRgba8(Bench* b, ID3D11Texture2D* tex, uint8_t* rgba) {
     return true;
 }
 
+// the HUD scenario (lab env AIRFRAMEXR_FG_JUDGE_HUD=1; fg-testing): a head-locked overlay drawn into every frame of the judge (A, B and the truth G) at the
+// same pixels of each eye with a constant disparity, as a game's HUD is: a dark panel with a health bar and a row of thin bright bars standing for text.
+// The judge scores the generator's output inside the panel (a head-locked HUD is identical in A, B and G, so holding B is perfect there).
+struct HudRect { int x0, y0, x1, y1; float c; };   // SBS pixels, grey level (written to the 10-bit frame as is)
+std::vector<HudRect> HudRects(int eye_w, int eye_h) {
+    std::vector<HudRect> r;
+    const int u = std::max(1, eye_h / 100), dx = 6;             // one percent of the eye height; disparity of the HUD plane, px
+    for (int e = 0; e < 2; e++) {
+        const int ox = e * eye_w + (e == 0 ? dx : -dx);
+        const int px = ox + eye_w * 8 / 100, py = eye_h * 80 / 100;
+        r.push_back({ px - 2 * u, py - 2 * u, px + 30 * u, py + 18 * u, 0.04f });                       // panel
+        r.push_back({ px, py + 12 * u, px + 26 * u, py + 15 * u, 0.95f });                               // the bar
+        for (int k = 0; k < 14; k++) r.push_back({ px + k * 2 * u, py, px + k * 2 * u + std::max(1, u * 6 / 10), py + 8 * u, 0.95f });   // thin strokes
+    }
+    return r;
+}
+bool FgjHudOn() { static const bool on = [] { const char* v = getenv("AIRFRAMEXR_FG_JUDGE_HUD"); return v && v[0] == '1'; }(); return on; }
+void FgjDrawHud(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, int eye_w, int eye_h) {
+    ComPtr<ID3D11DeviceContext1> c1;
+    if (FAILED(ctx->QueryInterface(IID_PPV_ARGS(&c1)))) return;
+    for (const HudRect& h : HudRects(eye_w, eye_h)) {
+        const FLOAT col[4] = { h.c, h.c, h.c, 1.f };
+        const D3D11_RECT rc = { h.x0, h.y0, h.x1, h.y1 };
+        c1->ClearView(rtv, col, &rc, 1);
+    }
+}
+
 // the scene at the three times into the benchmark's target of that size, resolved; the 10-bit frame the game hands the shim
 Target* FgjRender(Bench* b, int eye_w, int eye_h, const double* tt, const float* fov8, float ipd, std::string& err) {
     Settings::Instance().m_use10bitEncoder = true;   // what the streamer's frames are (R10G10B10A2)
     Target* tg = b->target(eye_w * 2, eye_h, err);
     if (!tg) return nullptr;
     auto ctx = b->render->GetContext();
-    if (g_fgjPanDegS != 0 || g_fgjWarmDegS != 0) {   // tt[0] is the pan clock: the scene frozen at the reference, the camera turned by panYawAt
+    if (g_fgjWalkMS != 0) {   // tt[0] is the walk clock: the scene frozen at the reference, the camera moved sideways by the walk
+        XMVECTOR hp0, hr0; HeadPose(tt[2], hp0, hr0);
+        const XMVECTOR off = XMVectorScale(XMVector3Rotate(XMVectorSet(1, 0, 0, 0), hr0), (float)(g_fgjWalkMS * (tt[0] - g_fgjWalkRef)));
+        RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, g_fgjWalkRef, tt[1], tt[2], fov8, ipd, 0.f, &off);
+    } else if (g_fgjPanDegS != 0 || g_fgjWarmDegS != 0) {   // tt[0] is the pan clock: the scene frozen at the reference, the camera turned by panYawAt
         const float yaw = (float)panYawAt(tt[0]);
         RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, g_fgjPanRef, tt[1], tt[2], fov8, ipd, yaw);
     } else {
         RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, tt[0], tt[1], tt[2], fov8, ipd);
     }
+    if (FgjHudOn()) FgjDrawHud(ctx, tg->rtv.Get(), eye_w, eye_h);   // (a HUD drawn after the scene leaves the scene's depth under it, as a game's does)
     ctx->ResolveSubresource(tg->resolved.Get(), 0, tg->msaa.Get(), 0, FrameFormat());
     return tg;
 }
 }  // namespace
+
+// the HUD's rectangles for the judge's scoring (x0 y0 x1 y1 per rect, SBS pixels); 0 = the scenario is off
+int nvh_bench_fgj_hud_rects(int eye_w, int eye_h, int32_t* out, int max_rects) {
+    if (!FgjHudOn()) return 0;
+    const auto r = HudRects(eye_w, eye_h);
+    const int n = std::min((int)r.size(), max_rects);
+    for (int i = 0; i < n; i++) { out[4 * i] = r[i].x0; out[4 * i + 1] = r[i].y0; out[4 * i + 2] = r[i].x1; out[4 * i + 3] = r[i].y1; }
+    return n;
+}
 
 int nvh_bench_fgj_frame(void* h, int eye_w, int eye_h, const double* times3, const float* fov8, float ipd, uint8_t* rgba, float* q4) {
     auto* b = (Bench*)h;
@@ -416,6 +460,8 @@ void nvh_bench_fgj_pan(double deg_per_s, double t_ref) { g_fgjPanDegS = deg_per_
 void nvh_bench_fgj_pan_seq(double deg_per_s, double t_ref, double warm_deg_per_s, int warm_frames, double gap_s) {
     g_fgjPanDegS = deg_per_s; g_fgjPanRef = t_ref; g_fgjWarmDegS = warm_deg_per_s; g_fgjWarm = std::max(0, std::min(8, warm_frames)); g_fgjGapS = gap_s;
 }
+
+void nvh_bench_fgj_walk(double m_per_s, double t_ref) { g_fgjWalkMS = m_per_s; g_fgjWalkRef = t_ref; }
 
 void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, int errlen) {
     auto* b = (Bench*)h;
@@ -446,6 +492,7 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
     std::string e;
     j->fg->ResetHistory();
     float q8[8];
+    auto ingest = [&](Target* tg, double frameS) { return j->fg->Ingest(tg->resolved.Get(), q8, fov8, err, errlen, frameS); };
     // pan sequences: the frames before A, each pair's flow computed as the streamer's first synthetic output of it would (the camera turn's
     // measurement of one pair is the next pair's prediction)
     for (int k = g_fgjWarm; k >= 1 && (g_fgjPanDegS != 0 || g_fgjWarmDegS != 0); k--) {
@@ -453,7 +500,7 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
         Target* tg = FgjRender(b, eye_w, eye_h, tw, fov8, ipd, e);
         if (!tg) return fail(e);
         HeadQuatYaw(tw[2], panYaw(tw[0]), q8); memcpy(q8 + 4, q8, 16);
-        if (j->fg->Ingest(tg->resolved.Get(), q8, fov8, err, errlen, 10.0 + tw[0]) < 0) return fail(std::string("ingest: ") + (err ? err : ""));
+        if (ingest(tg, 10.0 + tw[0]) < 0) return fail(std::string("ingest: ") + (err ? err : ""));
         if (j->fg->HasPair()) { float qw[4]; HeadQuatYaw(tw[2], panYaw(tw[0]), qw); if (!j->fg->Render(1, 0.5f, 0, qw, fov8, err, errlen)) return fail("warm render"); }
         b->finish();
     }
@@ -463,7 +510,7 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
         // pan oracle (AIRFRAMEXR_FG_JUDGE_PAN_ORACLE=1): the generator is told the camera's turn as if it were the head's, the upper bound of a
         // global-rotation compensation; otherwise it is told the head only (a stick turn as the streamer sees one)
         HeadQuatYaw(tt[3 * k + 2], panYaw(tt[3 * k]), q8); memcpy(q8 + 4, q8, 16);
-        const int r = j->fg->Ingest(tg->resolved.Get(), q8, fov8, err, errlen, 10.0 + tt[3 * k]);   // the content time: the pan clock (scene time otherwise), offset to stay > 0
+        const int r = ingest(tg, 10.0 + tt[3 * k]);   // the content time: the pan clock (scene time otherwise), offset to stay > 0
         if (r < 0 || (k == 1 && r != 1)) return fail(std::string("ingest: ") + (err ? err : ""));
         // the streamer renders a pair's outputs a lag (~60 ms) after its newer frame arrived: by then the GPU has finished the frame's work
         // (the camera turn's measurement of the pair is ready without waiting); the judge waits for it explicitly
