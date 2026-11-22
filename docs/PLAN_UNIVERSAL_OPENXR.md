@@ -5,9 +5,14 @@ and F1-F3 there); **G1 answered in the field: the AC Black Flag mod's duplicate 
 judged against). **`main` (1.4.1, `d0c6435`) merged into this branch (`5da4312`)**: the merged shim, host, nvenc and GUI are identical to `main`, so
 the lab runs the engine the field baseline ran; the branch adds only the identity lab, this plan and the catalogue. Next: step 2 (Phase A, G0 of
 Part M). **2026-11-22: `main` = v1.4.2 (`e5ee359`, neural frame generation) merged as `d4b486e`**, engine, GUI and build scripts again identical
-to `main`, IPC still 38; Phase A runs on the 3080 Ti from there (run sheet in section 4).
+to `main`, IPC still 38. **2026-11-23: the owner's 1.5 branch is the universal engine's base: `1.5-simplify` (v1.5.0-pre.1, `7d0d55e`)
+merged as `6f0461a`**: frame generation x2 / x3 with the neural or edge synthesis only; engine, GUI and build scripts identical to `1.5-simplify`,
+IPC still 38, the identity lab unchanged (its rows use x2, "half"). Phase A runs on the 3080 Ti from there (run sheet in section 4). The
+timing code 1.5 removed (x1.5 = `two_thirds` and `uncapped`: the content-clock planner with its lag controller and statistics, and the
+two-thirds hold, about 250-300 lines of `tools/host/src/pipeline.rs`) stays at tag `v1.4.2` (`e5ee359`; `main` `cf8bc70` with its hotfix) if
+this work needs it again.
 
-Status: plan, nothing run. **Base: 1.4.2** (`main` `e5ee359`, merged 2026-11-22; 1.4.1 on 2026-11-21, before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
+Status: plan, nothing run. **Base: 1.5** (`1.5-simplify` `7d0d55e`, merged 2026-11-23; 1.4.2 on 2026-11-22, 1.4.1 on 2026-11-21, before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
 from `1.4` at `6c73d0b` with `universal-openxr-2` merged in (`469ea14`: the VDXR fork pipeline and the shim's texture-array views from `vdxr-fork`, the
 fork lab, the identity lab). The merge was clean (`build.ps1`, `harness/lib.py`, `harness/run.py` and two docs auto-merged; `tools/wsl/check_cpp.sh` OK);
 nothing is built on a builder yet. `vdxr-fork` and `universal-openxr-2` stay as they were (from 1.3.11); new work goes on `universal-1.4`. Builder roots: the
