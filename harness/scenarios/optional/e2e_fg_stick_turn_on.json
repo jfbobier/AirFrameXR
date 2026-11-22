@@ -1,5 +1,5 @@
 {
- "description": "STICK TURN on the streamer path, camera turn ON: pace_game_fg23 (generation 2/3 at 100 Hz, the Vision Pro display emulation) with the probe drawing the Littlest Tokyo scene at ~41 fps (Hellraiser's field rate, 2026-11-20) and turning it like a game's right stick (XR_PROBE_STICK_TURN=180:1:0.5: 1 s at +180 deg/s, 0.5 s still, 1 s at -180, 1 s at +180 (a reversal), 0.5 s still, repeated); the head pose does not carry the turn. Lab switch AIRFRAMEXR_FG_CAM_TURN=1. Read: the host log's 'frame generation camera turn:' lines (the measured turn against 180 deg/s x the game period, the waits of a first output for its pair's measurement and their time, corrections), and stream fps / latency against e2e_fg_stick_turn_off. The picture quality of the turn is the judge's (harness/fg_judge.py --pans, docs/FRAME_GENERATION_JUDGE.md): this run has no ground truth.",
+ "description": "STICK TURN on the streamer path, camera turn ON: generation x3 at 100 Hz (the Vision Pro display emulation; x1.5 until 1.5.0) with the probe drawing the Littlest Tokyo scene at ~41 fps (Hellraiser's field rate, 2026-11-20) and turning it like a game's right stick (XR_PROBE_STICK_TURN=180:1:0.5: 1 s at +180 deg/s, 0.5 s still, 1 s at -180, 1 s at +180 (a reversal), 0.5 s still, repeated); the head pose does not carry the turn. Lab switch AIRFRAMEXR_FG_CAM_TURN=1. Read: the host log's 'frame generation camera turn:' lines (the measured turn against 180 deg/s x the game period, the waits of a first output for its pair's measurement and their time, corrections), and stream fps / latency against e2e_fg_stick_turn_off. The picture quality of the turn is the judge's (harness/fg_judge.py --pans, docs/FRAME_GENERATION_JUDGE.md): this run has no ground truth.",
  "topology": {
   "host": "builder",
   "client": "builder",
@@ -53,7 +53,7 @@
   "exit_after_frames": 100000,
   "frame_gen": "on",
   "running_start_ms": 2.0,
-  "frame_gen_rate": "two_thirds",
+  "frame_gen_rate": "third",
   "env": {
    "AIRFRAMEXR_FG_CAM_TURN": "1"
   }

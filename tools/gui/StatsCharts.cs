@@ -212,7 +212,7 @@ namespace AirFrameXR
     }
 
     /// The last run of a game: since 1.3.10 the run's own log (logs\games\<exe>\<yyyymmdd-hhmmss>.log, `ForGame`), before that the general log (logs\AirFrameXR.log, `Last`): what the host wrote every 10 s or 30 s while it ran. Only what is logged: the game's and the stream's fps and
-    /// the generation lag (when frame generation is on), the GPU memory in use. Nothing is recorded for this: it reads the log that is already there.
+    /// the GPU memory in use. Nothing is recorded for this: it reads the log that is already there.
     public static class LogTimeline
     {
         /// at most `max` points: the mean of each bucket, at the bucket's last time
@@ -231,12 +231,12 @@ namespace AirFrameXR
         public class Run
         {
             public string Exe; public DateTime Start, End; public bool Ended;
-            public List<DateTime> PerfT = new List<DateTime>(); public List<double> App = new List<double>(), Stream = new List<double>(), Lag = new List<double>();
+            public List<DateTime> PerfT = new List<DateTime>(); public List<double> App = new List<double>(), Stream = new List<double>();
             public List<DateTime> GpuT = new List<DateTime>(); public List<double> GpuMb = new List<double>();
             public List<DateTime> ArrT = new List<DateTime>(); public List<double> Arr = new List<double>(); public double ArrTarget = double.NaN;   // phase lock: how long before the render tick the frames arrive
         }
         static readonly System.Text.RegularExpressions.Regex Head = new System.Text.RegularExpressions.Regex(@"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ \[host\] INFO  (game started|game ended): (.+?)(?: after .*)?\s*$", System.Text.RegularExpressions.RegexOptions.Compiled);   // a name may have spaces (Dead Space.exe)
-        static readonly System.Text.RegularExpressions.Regex Perf = new System.Text.RegularExpressions.Regex(@"frame generation perf: app ([\d.]+) fps.*? stream ([\d.]+) fps.*? lag ([\d.]+) ms", System.Text.RegularExpressions.RegexOptions.Compiled);
+        static readonly System.Text.RegularExpressions.Regex Perf = new System.Text.RegularExpressions.Regex(@"frame generation perf: app ([\d.]+) fps.*? stream ([\d.]+) fps", System.Text.RegularExpressions.RegexOptions.Compiled);
         static readonly System.Text.RegularExpressions.Regex Arrival = new System.Text.RegularExpressions.Regex(@"phase lock: arrivals (-?[\d.]+) ms before the render tick \(target ([\d.]+)\)", System.Text.RegularExpressions.RegexOptions.Compiled);
         static readonly System.Text.RegularExpressions.Regex Gpu = new System.Text.RegularExpressions.Regex(@"GPU (\d+) of \d+ MB used", System.Text.RegularExpressions.RegexOptions.Compiled);
 
@@ -320,7 +320,7 @@ namespace AirFrameXR
             var p = Perf.Match(line);
             if (p.Success)
             {
-                cur.PerfT.Add(t); cur.App.Add(double.Parse(p.Groups[1].Value, CultureInfo.InvariantCulture)); cur.Stream.Add(double.Parse(p.Groups[2].Value, CultureInfo.InvariantCulture)); cur.Lag.Add(double.Parse(p.Groups[3].Value, CultureInfo.InvariantCulture));
+                cur.PerfT.Add(t); cur.App.Add(double.Parse(p.Groups[1].Value, CultureInfo.InvariantCulture)); cur.Stream.Add(double.Parse(p.Groups[2].Value, CultureInfo.InvariantCulture)); 
                 return;
             }
             var g = Gpu.Match(line);

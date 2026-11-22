@@ -4,11 +4,9 @@
 // Passes per pair (first synthetic output): prep: A seen from B's camera and B, both downscaled to the flow size | optical-flow engine:
 //                                         backward flow B -> A' (+ cost) on a block grid | edge only: our luma cost per block, 3x3 median
 // Passes per output (Render):             one full-screen pass per eye: output pixel -> direction in the stamp pose -> B's camera; mode 0
-//                                         samples B there; mode 1 synthesises the frame at t between A and B: edge (default) solves the
-//                                         vector where the content comes from, picks the candidate both frames agree on at motion
-//                                         boundaries and shrinks doubtful motion toward B; classic samples A' and B at the two ends of the
-//                                         flow vector with a confidence from the colour disagreement and the engine's cost, falling back to
-//                                         the crossfade of the rotation-aligned A and B (ghosting, not holes).
+//                                         samples B there; mode 1 synthesises the frame at t between A and B: neural composes from RIFE 4.4's
+//                                         fields (neural.h); edge solves the vector where the content comes from, picks the candidate both
+//                                         frames agree on at motion boundaries and shrinks doubtful motion toward B.
 #define NOMINMAX
 #include "framegen.h"
 #include "neural.h"
@@ -34,8 +32,8 @@ cbuffer CB : register(b0) {
     int4   blocks;          // x0 y0 x1 y1: block bounds of this eye in the flow texture (inclusive)
     float4 mode;            // x: pass mode, y: max flow (full-res px), z: confidence gain
     float4 flowIn;          // PSUnpack: x flow-input width of one eye, y flow-input height, z max flow (full-res px)
-    float4 synth;           // output pass: x 1 = edge-aware synthesis (else the classic crossfade recipe), y motion limit (full-res px), z cost scale, w photometric scale
-    float4 neur;            // output pass, neural fields (FG_NEURAL): x 1 = compose from them, y still gate colour threshold, z still gate motion (full-res px), w 1 = the run was reversed
+    float4 synth;           // output pass: x unused, y motion limit (full-res px), z cost scale, w photometric scale
+    float4 neur;            // output pass, neural fields (FG_NEURAL): x 1 = compose from them, y still gate colour threshold, z still gate motion (full-res px)
     float4 neurDims;        // the fields' used width and height, padded width and height (network pixels)
 };
 Texture2D cur : register(t0);
@@ -83,26 +81,6 @@ float4 PSPrep(VSOut i) : SV_Target {
         if (!projectTo(rot(pA, pB, pC, dirOf(i.uv)), uv)) return float4(0, 0, 0, 1);
     }
     return float4(cur.SampleLevel(smp, sbs(uv), 0).rgb, 1);
-}
-// backward flow (current -> previous, both in the current camera) at a full-res SBS pixel, in full-res pixels, bilinear over the block grid
-float2 flowAt(float2 px) {
-    float2 fc = (px * flowP.xy + 0.5) / flowP.z - 0.5;
-    fc = clamp(fc, float2(blocks.xy), float2(blocks.zw));
-    int2 tl = int2(floor(fc));
-    int2 br = min(tl + int2(1, 1), blocks.zw);
-    float2 fr = fc - float2(tl);
-    float2 f00 = float2(flow.Load(int3(tl, 0)));
-    float2 f10 = float2(flow.Load(int3(br.x, tl.y, 0)));
-    float2 f01 = float2(flow.Load(int3(tl.x, br.y, 0)));
-    float2 f11 = float2(flow.Load(int3(br, 0)));
-    float2 f = lerp(lerp(f00, f10, fr.x), lerp(f01, f11, fr.x), fr.y) * (1.0 / 32.0) / flowP.xy;
-    float m = length(f);
-    return m > mode.y ? f * (mode.y / m) : f;
-}
-float costAt(float2 px) {
-    float2 fc = (px * flowP.xy + 0.5) / flowP.z - 0.5;
-    int2 c = clamp(int2(round(fc)), blocks.xy, blocks.zw);
-    return float(cost.Load(int3(c, 0)) & 0xffu) / 255.0;
 }
 // Catmull-Rom (bicubic) fetch of a colour texture at an SBS uv, 5 bilinear taps (corner taps dropped, weights renormalised). The output is a
 // resample of the rendered frame at sub-pixel offsets on every frame (the rotation to the stamp sample, the flow displacement); bilinear
@@ -284,11 +262,9 @@ float3 neuralSynth(float2 uvB, float t) {
     const int2 p0 = int2(floor(p));
     const int2 p1 = min(p0 + 1, int2(neurDims.xy) - 1);
     const float2 f = p - float2(p0);
-    float4 fl = float4(nLerp(nFlow, (e * 4 + 0) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 1) * pl, W, p0, p1, f),
-                       nLerp(nFlow, (e * 4 + 2) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 3) * pl, W, p0, p1, f));
-    float lg = nLerp(nMask, e * pl, W, p0, p1, f);
-    if (neur.w > 0.5) { fl = fl.zwxy; lg = -lg; }   // a reversed run (newer frame first, at 1 - t): back to (to the older, to the newer), the older's weight
-    const float wA = 1.0 / (1.0 + exp(-lg));
+    const float4 fl = float4(nLerp(nFlow, (e * 4 + 0) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 1) * pl, W, p0, p1, f),
+                             nLerp(nFlow, (e * 4 + 2) * pl, W, p0, p1, f), nLerp(nFlow, (e * 4 + 3) * pl, W, p0, p1, f));
+    const float wA = 1.0 / (1.0 + exp(-nLerp(nMask, e * pl, W, p0, p1, f)));
     const float2 toUv = 1.0 / neurDims.xy;
     const float3 cb = fetchCR(cur, sbs(clamp(uvB + fl.zw * toUv, 0, 1)));
     float3 ca;
@@ -316,30 +292,10 @@ float4 PSOut(VSOut i) : SV_Target {
         return float4(0, 0, 0, 1);
     }
 #ifdef FG_NEURAL   // compiled in only with FrameGenConfig::neural: without it the output pass is the edge synthesis's bytecode, unchanged
-    [branch] if (mode.x > 0.5 && synth.x > 0.5 && neur.x > 0.5) return float4(neuralSynth(uvB, flowP.w), 1);
+    [branch] if (mode.x > 0.5 && neur.x > 0.5) return float4(neuralSynth(uvB, flowP.w), 1);
 #endif
-    [branch] if (mode.x > 0.5 && synth.x > 0.5) return float4(edgeSynth(uvToPx(uvB), flowP.w), 1);
-    float3 curHere = fetchCR(cur, sbs(uvB));
-    if (mode.x < 0.5) return float4(curHere, 1);
-    float t = flowP.w;
-    float3 prevHere;
-    bool havePrev = samplePrev(uvB, prevHere);
-    float3 stable = havePrev ? lerp(prevHere, curHere, t) : curHere;
-    float2 pB = uvToPx(uvB);
-    float2 f = flowAt(pB);
-    // t = 0 is the previous frame A, 1 the newest B. The content shown at pB comes from B-pixel b = pB - f (1 - t) and from its A position b + f = pB + f t
-    // (the half-rate mode only ever used t = 0.5, where this and the swapped form coincide; the uncapped mode exposed the swap: JUDDER, 2026-10-15).
-    float2 uvC = pxToUv(pB - f * (1 - t));
-    float2 uvPb = pxToUv(pB + f * t);
-    float3 pc;
-    bool okC = all(uvC >= 0) && all(uvC <= 1);
-    bool okP = all(uvPb >= 0) && all(uvPb <= 1) && samplePrev(uvPb, pc);
-    if (!(okC && okP)) return float4(stable, 1);
-    float3 cc = fetchCR(cur, sbs(uvC));
-    float3 mid = lerp(pc, cc, t);
-    float dis = max(abs(pc.r - cc.r), max(abs(pc.g - cc.g), abs(pc.b - cc.b)));
-    float conf = saturate(1 - dis * mode.z) * saturate(1 - costAt(pB));
-    return float4(lerp(stable, mid, conf), 1);
+    [branch] if (mode.x > 0.5) return float4(edgeSynth(uvToPx(uvB), flowP.w), 1);
+    return float4(fetchCR(cur, sbs(uvB)), 1);   // mode 0: the rendered frame, rotated to the stamp
 }
 )";
 
@@ -413,7 +369,7 @@ struct FrameGen::Impl {
     float realQ[H][8] = {};
     ID3D11Texture2D* pairFlow[H] = {}; ID3D11ShaderResourceView* pairFlowSrv[H] = {};
     ID3D11Texture2D* pairCost[H] = {}; ID3D11ShaderResourceView* pairCostSrv[H] = {};
-    // edge-aware synthesis (cfg.synth 1): the engine's vectors with our luma cost (unpack), then the 3x3 median (filter) per history pair
+    // edge-aware synthesis: the engine's vectors with our luma cost (unpack), then the 3x3 median (filter) per history pair
     ID3D11PixelShader* psUnpack = nullptr; ID3D11PixelShader* psFilter = nullptr;
     ID3D11Texture2D* unpackTex = nullptr; ID3D11ShaderResourceView* unpackSrv = nullptr; ID3D11RenderTargetView* unpackRtv = nullptr;
     ID3D11Texture2D* pairFilt[H] = {}; ID3D11ShaderResourceView* pairFiltSrv[H] = {}; ID3D11RenderTargetView* pairFiltRtv[H] = {};
@@ -456,7 +412,7 @@ struct FrameGen::Impl {
     void effQ(int k, int e, float* o) const { withYaw(realQ[k] + e * 4, cfg.camTurn ? camYaw[k] : 0.0, o); }
     // neural fields (cfg.neural): the network, and which pair and time its fields belong to (one set: the pair being shown)
     std::unique_ptr<NeuralFields> neural;
-    int neuralPair = -1; float neuralT = -1.f; bool neuralRev = false;
+    int neuralPair = -1; float neuralT = -1.f;
     // the times of the two latest synthetic outputs: equal (the 1/2 rate's 0.5) = a steady pattern, worth running a new pair's fields early, at
     // that time; different (2/3 rate: about 2/3 then 1/3; 1/3 rate: 1/3 and 2/3 within each pair) = each output runs its own
     float lastSynthT[2] = { 0.5f, 0.5f };
@@ -491,7 +447,6 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     if (const char* v = getenv("AIRFRAMEXR_FG_NEURAL_STILL")) I.cfg.neuralStill = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_NEURAL_STILL_PX")) I.cfg.neuralStillPx = (float)atof(v);
     if (const wchar_t* v = _wgetenv(L"AIRFRAMEXR_FG_NEURAL_DIR")) wcsncpy_s(I.cfg.neuralDir, v, _TRUNCATE);
-    if (!cfg.synth) I.cfg.neural = 0;   // the fields are composed in the edge synthesis's output pass
     m_w = w; m_h = h;
     // shaders
     ID3DBlob *vb = nullptr, *vp = nullptr, *p1 = nullptr, *p2 = nullptr, *p5 = nullptr, *p6 = nullptr, *e = nullptr;
@@ -591,7 +546,7 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     if (I.api.nvOFRegisterResourceD3D11(I.of, I.costTex, &I.hCost) != NV_OF_SUCCESS) { seterr(err, errlen, "nvOFRegisterResourceD3D11 (cost)"); return false; }
     {
         // flow-less synthesis (the engine failed): zero flow and the maximum cost bound to the flow slots, so the output pass falls back to
-        // the crossfade (classic) or to the rendered frame (edge)
+        // the rendered frame
         std::vector<uint8_t> z((size_t)I.blocksW * I.blocksH * 4, 0), mx((size_t)I.blocksW * I.blocksH * 4, 0xFF);
         D3D11_TEXTURE2D_DESC zd{}; zd.Width = I.blocksW; zd.Height = I.blocksH; zd.MipLevels = 1; zd.ArraySize = 1; zd.SampleDesc.Count = 1;
         zd.Usage = D3D11_USAGE_IMMUTABLE; zd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -623,7 +578,6 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
         ok = ok && SUCCEEDED(m_dev->CreateTexture2D(&zd, &zi, &I.zeroFilt)) && SUCCEEDED(m_dev->CreateShaderResourceView(I.zeroFilt, nullptr, &I.zeroFiltSrv));
         if (!ok) { seterr(err, errlen, "filtered flow textures"); return false; }
     }
-    if (cfg.camTurn && !cfg.synth) I.cfg.camTurn = 0;   // the measurement reads the edge synthesis's unpacked flow
     if (I.cfg.camTurn) {
         D3D11_TEXTURE2D_DESC sd2{}; sd2.Width = I.blocksW; sd2.Height = I.blocksH; sd2.MipLevels = 1; sd2.ArraySize = 1; sd2.SampleDesc.Count = 1;
         sd2.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; sd2.Usage = D3D11_USAGE_STAGING; sd2.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
@@ -651,8 +605,8 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
         if (stats.neuralOn) snprintf(stats.neuralInfo, sizeof stats.neuralInfo, "%s", "on");
     }
     snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s%s",
-             NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "classic" : cfg.photoScale > 0 ? "edge" : "edge-blend",
-             I.cfg.camTurn ? ", camera turn" : "", stats.neuralOn ? ", neural" : "");
+             NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, stats.neuralOn ? "neural" : "edge",
+             I.cfg.camTurn ? ", camera turn" : "", "");
     return true;
 }
 
@@ -752,7 +706,7 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     out.outputBuffer = I.hFlow; out.outputCostBuffer = I.hCost;
     const NV_OF_STATUS st = I.api.nvOFExecute(I.of, &in, &out);
     if (st == NV_OF_SUCCESS) { m_ctx->CopyResource(I.pairFlow[n], I.flowOut); m_ctx->CopyResource(I.pairCost[n], I.costTex); I.pairFlowValid[n] = true; }
-    if (st == NV_OF_SUCCESS && I.cfg.synth) {
+    if (st == NV_OF_SUCCESS) {
         // edge-aware synthesis: the vectors with our luma cost, then the 3x3 median, into this pair's filtered flow
         Cb c{};
         c.flowP[0] = (float)I.flowW / (float)m_w; c.flowP[1] = (float)I.flowH / (float)m_h;
@@ -802,16 +756,6 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     return true;
 }
 
-// RIFE 4.4 puts the content at the time it is asked for only in part of 0..1 (measured 2026-11-22 on the judge's walking scenes,
-// harness/rife/t_linearity.py; the PyTorch model does the same): below about 0.12 the content goes the wrong way (asked 0.05, it delivers -0.2),
-// just above 0.5 it sticks to 0.5 (0.55 -> 0.518), above about 0.9 it is off; 0.15-0.45 and 0.6-0.9 are within 0.02. The 1.5x rate and the
-// uncapped mode ask for any time (field 2026-11-22, Hellraiser at 1.5x: a third of the outputs in those zones, the view wobbling). So: an output
-// within kNeuralEdgeLo / kNeuralEdgeHi of a rendered frame is drawn by the edge synthesis (the optical flow scaled by t: exact in time; the judge
-// at t = 0.05: neural -15.0 dB against it, showing the rendered frame instead -0.7 dB; at 0.95: -1.7 and -2.1), and between 0.5 and
-// kNeuralRevHi the pair runs reversed (newer frame first, at 1 - t: 0.55 -> 0.547; judge +0.54 -> +0.81 dB over edge). The fixed rates' times
-// (1/2, 1/3, 2/3) are outside both: unchanged (judge identical).
-static constexpr float kNeuralEdgeLo = 0.12f, kNeuralEdgeHi = 0.90f, kNeuralRevHi = 0.60f;
-
 // Neural fields of pair (n-1, n) at time t: the older frame turned into the newer one's camera (the effective views, camera turn included), as the
 // optical flow sees them. On success the output pass may compose from them; a failure leaves the edge synthesis for this output.
 bool FrameGen::neuralPass(int n, float t) {
@@ -826,16 +770,14 @@ bool FrameGen::neuralPass(int n, float t) {
         rows(m, rot[e], rot[e] + 4, rot[e] + 8);
     }
     char e2[200] = "";
-    const bool rev = t > 0.5f && t < kNeuralRevHi;
-    if (!I.neural->Run(I.realSrv[prev], I.realSrv[n], rot, I.fov8, rev ? 1.f - t : t, rev, e2, sizeof e2)) {
+    if (!I.neural->Run(I.realSrv[prev], I.realSrv[n], rot, I.fov8, t, e2, sizeof e2)) {
         stats.neuralFailures++;
         snprintf(stats.neuralInfo, sizeof stats.neuralInfo, "run failed: %s", e2);
         I.neuralPair = -1;
         return false;
     }
-    I.neuralPair = n; I.neuralT = t; I.neuralRev = rev;
+    I.neuralPair = n; I.neuralT = t;
     stats.neuralRuns++;
-    if (rev) stats.neuralReversed++;
     return true;
 }
 
@@ -871,13 +813,11 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     // the pair's optical flow, once, by the first synthetic output that needs it
     if (mode == 1 && havePair && !I.pairFlowValid[n]) {
         char e2[160];
-        computeFlow(n, e2, sizeof e2);   // a failure leaves the zero flow bound below: the classic synthesis's crossfade fallback
+        computeFlow(n, e2, sizeof e2);   // a failure leaves the zero flow bound below: the rendered frame
     }
     // neural fields: this pair's, at this output's time
     bool neuralOk = false;
-    if (I.neural && mode == 1 && havePair && (t < kNeuralEdgeLo || t > kNeuralEdgeHi)) {
-        stats.neuralEdgeNear++;   // the network is wrong this close to a rendered frame (kNeuralEdgeLo above): the edge synthesis draws it
-    } else if (I.neural && mode == 1 && havePair) {
+    if (I.neural && mode == 1 && havePair) {
         // this output's own time: fields of another time are run again (a 0.01 tolerance: the steady 1/2 rate reuses its early run)
         neuralOk = (I.neuralPair == n && std::fabs(t - I.neuralT) <= 0.01f) || neuralPass(n, t);
         if (neuralOk) stats.neuralOutputs++;
@@ -895,14 +835,14 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
     const bool flowOk = havePair && I.pairFlowValid[n];
     ID3D11ShaderResourceView* srvs[4] = { I.realSrv[n], havePair ? I.realSrv[prev] : I.realSrv[n], flowOk ? I.pairFlowSrv[n] : I.zeroFlowSrv, flowOk ? I.pairCostSrv[n] : I.maxCostSrv };
     m_ctx->PSSetShaderResources(0, 4, srvs);
-    m_ctx->PSSetShaderResources(4, 1, flowOk && I.cfg.synth ? &I.pairFiltSrv[n] : &I.zeroFiltSrv);
+    m_ctx->PSSetShaderResources(4, 1, flowOk ? &I.pairFiltSrv[n] : &I.zeroFiltSrv);
     if (neuralOk) { ID3D11ShaderResourceView* ns[2] = { I.neural->FlowSrv(), I.neural->MaskSrv() }; m_ctx->PSSetShaderResources(11, 2, ns); }
     for (int e = 0; e < 2; e++) {
         Cb c{};
-        c.synth[0] = I.cfg.synth ? 1.f : 0.f; c.synth[1] = std::max(1.f, I.cfg.motionLimit * m_w * 0.5f);
+        c.synth[0] = 1.f; c.synth[1] = std::max(1.f, I.cfg.motionLimit * m_w * 0.5f);
         c.synth[2] = I.cfg.costScale; c.synth[3] = I.cfg.photoScale;
         if (neuralOk) {
-            c.neur[0] = 1.f; c.neur[1] = I.cfg.neuralStill; c.neur[2] = I.cfg.neuralStillPx; c.neur[3] = I.neuralRev ? 1.f : 0.f;
+            c.neur[0] = 1.f; c.neur[1] = I.cfg.neuralStill; c.neur[2] = I.cfg.neuralStillPx;
             c.neurDims[0] = (float)I.neural->NetW; c.neurDims[1] = (float)I.neural->NetH; c.neurDims[2] = (float)I.neural->PadW; c.neurDims[3] = (float)I.neural->PadH;
         }
         float m[9];
@@ -917,7 +857,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         c.flowP[0] = (float)I.flowW / (float)m_w; c.flowP[1] = (float)I.flowH / (float)m_h; c.flowP[2] = (float)I.grid; c.flowP[3] = t;
         const int x0 = (e * I.flowW / 2) / I.grid, x1 = std::min(I.blocksW - 1, ((e + 1) * I.flowW / 2 - 1) / I.grid);
         c.blocks[0] = x0; c.blocks[1] = 0; c.blocks[2] = std::max(x0, x1); c.blocks[3] = I.blocksH - 1;
-        c.mode[0] = mode == 1 ? 1.f : 0.f; c.mode[1] = I.cfg.maxFlowPx; c.mode[2] = I.cfg.confGain; c.mode[3] = I.cfg.camTurn && havePair ? 1.f : 0.f;
+        c.mode[0] = mode == 1 ? 1.f : 0.f; c.mode[1] = I.cfg.maxFlowPx; c.mode[3] = I.cfg.camTurn && havePair ? 1.f : 0.f;
         m_ctx->UpdateSubresource(I.cb, 0, nullptr, &c, 0, 0);
         D3D11_VIEWPORT vp{}; vp.TopLeftX = e ? m_w * 0.5f : 0.f; vp.Width = m_w * 0.5f; vp.Height = (float)m_h; vp.MaxDepth = 1.f;
         m_ctx->RSSetViewports(1, &vp);

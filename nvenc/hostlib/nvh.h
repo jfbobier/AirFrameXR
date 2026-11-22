@@ -82,7 +82,7 @@ double nvh_encode_shared(void* nvh, void* ipc, uint32_t slot, uint32_t frame_no,
 void nvh_release_shared(void* nvh);
 // ---- Frame generation (nvenc/hostlib/framegen.cpp, docs/FRAME_GENERATION.md) -------------------------------------------------
 // Creates the optical-flow session for the stream's composed frame (2 x eye width by eye height). flow_scale: the flow input is the frame
-// downscaled by this (0.25..1); perf_level: 5 slow / 10 medium / 20 fast; grid: 1, 2 or 4; synth: 4 neural (edge + RIFE 4.4's fields), 1 edge, 2 edge-blend, 0 classic. Returns 1, or 0 with the reason in err (no
+// downscaled by this (0.25..1); perf_level: 5 slow / 10 medium / 20 fast; grid: 1, 2 or 4; synth: 4 neural (RIFE 4.4's fields, composed in the edge synthesis's output pass), 1 edge. Returns 1, or 0 with the reason in err (no
 // optical-flow engine on this GPU/driver: the feature must stay off). on = 0 releases everything.
 int nvh_fg_enable(void* nvh, int on, double flow_scale, int perf_level, int grid, int synth, char* err, int errlen);
 // Takes the shim slot into the frame history (previous <- current <- slot) and computes the flow between the two; q_render8 = the per-eye
@@ -115,9 +115,9 @@ void nvh_ipc_shim_pacing(void* ipc, uint32_t* slot_busy_waits, float* app_frame_
 // Intake gate (ipc.h HostToShim::intakeWaiting / intakeGate): frames a boundary passed over and still held, and whether the shim holds releases for them.
 void nvh_ipc_set_intake(void* ipc, uint32_t waiting);
 void nvh_ipc_set_intake_gate(void* ipc, uint32_t on);
-// Frame generation pacing (ipc.h appPeriodMul): 2 = the game is released every other compositor boundary; 1 = every boundary.
+// Frame generation pacing (ipc.h appPeriodMul): 2 / 3 = the game is released every 2nd / 3rd compositor boundary; 1 = every boundary.
 void nvh_ipc_set_app_period_mul(void* ipc, uint32_t mul);
-// Uncapped frame generation: the minimum spacing of the game's releases (us, 0 = none): an fps cap that leaves the host GPU headroom.
+// The game fps lock: the minimum spacing of the game's releases (us, 0 = none), in every mode.
 void nvh_ipc_set_app_min_period(void* ipc, uint32_t min_period_us);
 void nvh_ipc_set_drop_duplicates(void* ipc, uint32_t on);
 // Process-wide GPU scheduling class (D3DKMT): 0 idle .. 4 high, 5 realtime (needs the increase-base-priority privilege, i.e. an
@@ -190,7 +190,7 @@ void nvh_bench_close(void* bench);
 // the judge's HUD scenario (lab env AIRFRAMEXR_FG_JUDGE_HUD=1): its rectangles, 4 ints each (x0 y0 x1 y1, side-by-side pixels); 0 when the scenario is off
 int nvh_bench_fgj_hud_rects(int eye_w, int eye_h, int32_t* out, int max_rects);
 int nvh_bench_fgj_frame(void* bench, int eye_w, int eye_h, const double* times3, const float* fov8, float ipd, uint8_t* rgba, float* q4);
-// a frame generator (synth 0 classic, 1 edge, 2 edge-blend, 4 edge + neural fields) for the judge; NULL + err when there is no optical-flow engine
+// a frame generator (synth 1 edge, 4 neural fields) for the judge; NULL + err when there is no optical-flow engine
 // the judge's `pan` scenario: the camera turns at deg_per_s about the world's up axis (times3[0] is then the pan clock, the scene frozen at t_ref, the
 // head the generator is told unchanged: a stick turn); 0 = off
 void nvh_bench_fgj_pan(double deg_per_s, double t_ref);

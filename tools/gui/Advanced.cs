@@ -32,7 +32,6 @@ namespace AirFrameXR
         readonly List<Knob> knobs = new List<Knob>();
         readonly Label status = Ui.Line("");
         readonly ToolTip tips = new ToolTip { AutoPopDelay = 20000, InitialDelay = 300 };
-        readonly CheckBox uncapped = new CheckBox { AutoSize = true, Text = "Uncapped mode", AccessibleName = "Uncapped mode" };
         readonly CheckBox gate = new CheckBox { AutoSize = true, Text = "Frame-start gate", AccessibleName = "Frame-start gate" };
         readonly Label gateNow = Ui.Line("");
         bool loading;
@@ -59,7 +58,7 @@ namespace AirFrameXR
             knobs.AddRange(new[]
             {
                 N(GF, "frame_gen_cap_fps", "Game fps lock (fps)", 0, 0, 240, 5, 0, Live, "0 = no lock. Holds the game back to at most this many frames per second, with or without frame generation. For a game that forces its own rate (cutscenes locked at 30, a game that renders in bursts) or a GPU-bound game that builds a queue of frames in front of the GPU. Pick a rate that divides the headset's refresh rate evenly (45 or 30 at 90 Hz, 50 or 25 at 100 Hz); a lock that does not divide it gives uneven repeats. Hover for the numbers."),
-                C(FG, "frame_gen_synthesis", "Generated-frame synthesis", "neural", new[] { "neural", "edge", "classic", "edge-blend" }, Restart, "How a generated frame is drawn. neural (default since 1.4.2): a neural network (RIFE 4.4, bin\\neural) finds where every part of the picture moved between the two game frames; fewer double images and torn outlines on moving objects, still content exact, about 1.8 ms of GPU per game frame pair on an RTX 5090 at the Vision Pro's stream size; needs an RTX 30 series or newer (older GPUs get edge by themselves). The others draw from the GPU's optical flow: edge: the fallback, sharp motion boundaries; where the motion is uncertain the real frame is shown (a little local judder) instead of a double image. classic: the algorithm of 0.6 and earlier, the predictable fallback if edge misbehaves in a game. edge-blend: edge, but uncertain motion blends both frames. What we know: in games on the headset edge looks visibly better than classic, and edge could not be told apart from edge-blend. The lab's ground-truth test agrees (a frame generated from two rendered frames of the animated benchmark scene, compared with the frame the scene really has there): edge keeps the parts that did not move intact where classic softens them (whole-frame PSNR +2.0 dB, sharper in 63 of 63 cases), and edge against edge-blend is a statistical tie. Edge also costs less GPU (0.24 ms against 0.33 ms per generated frame). Hover for the numbers."),
+                C(FG, "frame_gen_synthesis", "Generated-frame synthesis", "neural", new[] { "neural", "edge" }, Restart, "How a generated frame is drawn. neural (default): a neural network (RIFE 4.4, bin\\neural) finds where every part of the picture moved between the two game frames; fewer double images and torn outlines on moving objects, still content exact, about 1.8 ms of GPU per game frame pair on an RTX 5090 at the Vision Pro's stream size; needs an RTX 30 series or newer (older GPUs get edge by themselves). edge: the fallback, drawn from the GPU's optical flow: sharp motion boundaries; where the motion is uncertain the real frame is shown (a little local judder) instead of a double image. Hover for the numbers."),
                 B(AR, "phase_lock", "Phase lock", true, Restart, "Slides the host's frame clock (up to 2 ms every 2-4 s) so frames arrive 7 ms before the headset's render tick. The margin matters: at 3 ms 1.2-2.3 % of the headset's refreshes repeated, at 7 ms 0.5 %, with the same 67 ms latency. Known flaw: it slides 12-25 times a minute even when it has nothing to correct (999 slides in an hour of a game running free at 56 fps). Leave it on; turn it off only to compare. Hover for the numbers."),
                 N(AR, "running_start_ms", "Running-start margin (ms)", 2, 0, 10, 0.5, 1, Restart, "How much earlier than the display tick the game is released, on top of its own frame-time envelope: 0 releases it at the tick, higher gives the game's frame more time to finish before the host needs it. The default is 2 ms; 1-4 are plausible. Honest status: no headset A/B for this value. In the lab a run with 0 was the cleanest (0.1 % repeats, no empty boundary) and a lead capped below one game period changed nothing. Hover for the context."),
                 B(GF, "drop_duplicate_frames", "Maximum OpenXR compatibility mode (lower performance)", false, Restart, "Off (default): nothing changes. On: a frame the game submits with exactly the same render poses as the previous one is not sent on. Some VR mods submit every frame twice (the second time for the next display slot, with no new picture): frame generation then interpolates between two identical frames and the motion looks uneven. Found with a Black Flag VR mod, 25 real frames a second submitted 50 times. Turn it on only if a game shows this; the debug log's pacing line counts the duplicates it sees."),
@@ -71,10 +70,10 @@ namespace AirFrameXR
             knobs.Find(k => k.Key == "frame_gen_cap_fps").Tip =
                 "Game fps lock\r\n" +
                 "\r\n" +
-                "Applies in every mode: frame generation off, fixed rates, uncapped. The shim never releases the game sooner than 1/lock after the last release.\r\n" +
+                "Applies in every mode: frame generation off, x2, x3. The shim never releases the game sooner than 1/lock after the last release.\r\n" +
                 "Choose a rate that divides the headset's refresh rate: at 100 Hz, 45 gives 2-2-2-2-3 repeats; at 90 Hz it is an even 2.\r\n" +
                 "\r\n" +
-                "What we measured (uncapped frame generation):\r\n" +
+                "What we measured (the uncapped frame generation of 2026-10, since removed, but the lock behaves the same):\r\n" +
                 "Headset nights of 2026-10-15/16 (RTX 5090, Vision Pro at 100 Hz), uncapped, free-running against capped at 70 fps:\r\n" +
                 "   Dead Space:  80 fps, lag 62 ms, newest rendered frame 35 ms old (2.8 periods)  ->  67 fps, lag 41 then 31 ms, 13 ms (0.9 periods)\r\n" +
                 "   Avatar:      98 fps, lag 22-61 ms  ->  67 fps, lag 30 ms\r\n" +
@@ -87,22 +86,12 @@ namespace AirFrameXR
             knobs.Find(k => k.Key == "frame_gen_synthesis").Tip =
                 "Generated-frame synthesis: what confirms what\r\n" +
                 "\r\n" +
-                "neural (2026-11-22, RTX 5090): the same lab judge on 60 cases (1032 x 1104 per eye, the network at half resolution) gives neural against edge +0.91 dB on the motion boundaries (41 of 60 cases), +2.3 to +3.9 dB when walking, +1.04 dB at the Vision Pro's stream size (1920 x 2368 per eye); fewer double images, slightly softer. In games (the maintainer, Hellraiser and Gears of War E-Day): 'clearly better', 'sharper'. Cost: about 1.8 ms of GPU per game frame pair at 1920 x 2368 per eye, 0.3 ms of CPU; the optical flow keeps running (the camera turn measures from it). docs/FRAME_GENERATION.md, docs/NEURAL_RIFE_CUDA.md.\r\n" +
+                "neural (2026-11-22, RTX 5090): the lab judge (harness/fg_judge.py: the animated benchmark scene rendered at two times and at the moment in between, the generated frame compared with the real one) on 60 cases at 1032 x 1104 per eye, the network at half resolution: neural against edge +0.91 dB on the motion boundaries (41 of 60 cases), +2.3 to +3.9 dB when walking, +1.04 dB at the Vision Pro's stream size (1920 x 2368 per eye); at x3's 1/3 and 2/3 +0.89 and +0.71 dB. Fewer double images, slightly softer. In games (the maintainer, Hellraiser and Gears of War E-Day): 'clearly better', 'sharper'. Cost: about 1.8 ms of GPU per network run at 1920 x 2368 per eye (one per game frame at x2, two at x3), 0.3 ms of CPU; the optical flow keeps running (the camera turn measures from it). docs/FRAME_GENERATION.md, docs/NEURAL_RIFE_CUDA.md.\r\n" +
                 "\r\n" +
-                "Looks (the maintainer, side by side in games on the headset, 2026-10): edge is visibly better than classic; edge and edge-blend could not be told apart. Edge 'looked great' in Valor Mortis (2026-10-24).\r\n" +
-                "\r\n" +
-                "Lab ground-truth judge (harness/fg_judge.py, 2026-10-26: Littlest Tokyo animated scene, RTX 3080 Ti laptop, 1032 x 1104 per eye, 63 cases = 3 rates of the rendered pair x head still / head moving / both x 3 start times). The midpoint is generated from two rendered frames and compared with the frame the scene really has there (G):\r\n" +
-                "   Whole-frame PSNR, scene moving and head still: classic 43.2 dB, hold the last frame 47.7, blend 51.8, edge 54.1, edge-blend 54.3. Classic degrades the parts that did not move (it re-samples the whole frame): worse than simply repeating a frame.\r\n" +
-                "   Over all cases with motion, edge against classic: whole-frame PSNR +2.0 dB (52 of 63 cases), SSIM in the moving region +0.013 (59 of 63), blur at the motion boundaries lower in 63 of 63. Edge shows slightly more edge energy than the truth at the boundaries (+0.006), i.e. a little more double-edge risk.\r\n" +
-                "   Edge against edge-blend: PSNR on the boundary band -0.12 +- 0.08 dB, SSIM +0.004 +- 0.003: a statistical tie. Edge-blend hedges where the motion is uncertain, which PSNR rewards; edge is slightly sharper (blur -0.004 +- 0.002) and carries slightly more edge energy than the truth (+0.006). Not distinguishable by eye either.\r\n" +
-                "   With the head moving the three are within 0.1 dB of each other: the rotation reprojection dominates.\r\n" +
-                "Cost (RTX 5090, 7104 x 3200 frame, per generated output): edge synthesis 0.24 ms, classic 0.33 ms; the optical flow itself 2.17 ms either way. No added latency in any mode.\r\n" +
-                "Older marker test (high-frequency rms of the marker's position error, degrees): classic 0.024-0.031, edge 0.030-0.036, edge-blend 0.017-0.022. It measures where the marker is, not sharpness: it does not contradict the above.\r\n" +
-                "\r\n" +
-                "Limits: one scene, one GPU, PSNR / SSIM are not what the eye sees (PSNR rewards blending), and the judge cannot see judder over time.\r\n" +
-                "\r\n" +
+                "edge (default from 0.6.1 to 1.4.1): against the older classic crossfade, whole-frame PSNR +2.0 dB (52 of 63 cases), sharper at the motion boundaries in 63 of 63, and visibly better side by side in games on the headset (2026-10); the classic and edge-blend variants were removed in 1.5.0.\r\n" +
                 "edge: 3 x 3 vector median, the vector solved where the content comes from, per-pixel choice among neighbouring vectors at motion boundaries; doubtful motion shrinks towards the real frame.\r\n" +
-                "classic: the crossfade recipe of 0.4-0.6. edge-blend: edge without the photometric gate (doubtful motion blends both frames).";
+                "\r\n" +
+                "Limits: one scene, one GPU, PSNR / SSIM are not what the eye sees, and the judge cannot see judder over time.";
             knobs.Find(k => k.Key == "phase_lock").Tip =
                 "Phase lock\r\n" +
                 "\r\n" +
@@ -154,18 +143,6 @@ namespace AirFrameXR
             foreach (var k in knobs.Where(x => x.Section == SS)) AddKnob(body, k);
             var exp = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0), AccessibleName = "Experimental settings" };
             Section(exp, FG);
-            Row(exp, uncapped, "Experimental", Live, "Frame generation without a fixed rate. Normally frame generation holds the game to a fraction of the display rate (1/3, 1/2, 2/3); here the game runs at its own speed and every frame the headset gets is interpolated between the two newest rendered ones, shown a little behind so the next real frame is already known. It pays off when the game cannot hold half the display rate (below 50 fps: Carma 25 % repeats at half rate, 4.5 % uncapped) or runs well above it (Lies of P 74 fps rendered against 50). At exactly 50 fps it changes nothing and adds latency: about two game periods of scene latency (head turns stay immediate). Headset nights 2026-10-15/16; it has not worked reliably since, so treat it as a test. Hover for the numbers.", "Uncapped mode, what the headset nights measured (RTX 5090, Vision Pro 100 Hz, nine games, 16 runs, optical flow)\r\n" +
-                "\r\n" +
-                "Smoothness, repeated outputs, half rate against uncapped:\r\n" +
-                "   Carma (41 fps):          25 %  ->  4.5 %\r\n" +
-                "   Valor Mortis (40 fps):   16 %  ->  1-10 %   (1.2 % with a 70 fps cap)\r\n" +
-                "   Lies of P:               rendered 50 fps at half rate  ->  74 fps uncapped (dips to 49)\r\n" +
-                "   Mortal Shell II (50 fps): no difference (1-3 % repeats either way), plus the lag: half rate stays the right mode there.\r\n" +
-                "   Luke Ross titles above 50: 80-98 fps rendered (Dead Space 80, Cyberpunk 89, Avatar 98), repeats 0 %.\r\n" +
-                "Cost, free-running: the lag in force is 22-80 ms, the newest rendered frame already 2.2-2.9 game periods old when an output is made (the game's render queue). Capped at 70: 0.7-0.9 periods (see the cap).\r\n" +
-                "Client intervals over 15 ms: 1-3 % in every mode. GPU: optical flow + synthesis 2.6-3.3 ms + 0.4 ms per output on the 5090 at 3552 x 1600 flow input.\r\n" +
-                "The user: 'works as intended'; capping at 70 fps felt better than free-running in every game that could exceed it; no obvious smoothness gain over half rate.");
-            uncapped.CheckedChanged += (s, e) => { if (!loading) SetUncapped(uncapped.Checked); };
             foreach (var k in knobs.Where(x => x.Section == FG)) AddKnob(exp, k);
             Section(exp, AR);
             foreach (var k in knobs.Where(x => x.Section == AR)) AddKnob(exp, k);
@@ -284,7 +261,7 @@ namespace AirFrameXR
             return f;
         }
 
-        static string DefaultText(Knob k) => k.Kind == Kind.Bool ? (k.DefBool ? "on" : "off") : k.Kind == Kind.Number ? k.Def.ToString("0.##", CultureInfo.InvariantCulture) + (k.Key == "frame_gen_cap_fps" ? " (none)" : k.Key == "frame_gen_lag_ms" ? " (automatic)" : "") : k.DefChoice;
+        static string DefaultText(Knob k) => k.Kind == Kind.Bool ? (k.DefBool ? "on" : "off") : k.Kind == Kind.Number ? k.Def.ToString("0.##", CultureInfo.InvariantCulture) + (k.Key == "frame_gen_cap_fps" ? " (none)" : "") : k.DefChoice;
 
         /// the values on disk (what is read back, not the last click)
         void LoadValues()
@@ -301,7 +278,6 @@ namespace AirFrameXR
                     default: var v = Json.Str(st.Root, p, k.DefChoice); var co = (ComboBox)k.Ctl; co.SelectedItem = co.Items.Contains(v) ? v : k.DefChoice; break;
                 }
             }
-            uncapped.Checked = st.FrameGenRate == "uncapped";
             ShowGate();
             loading = false;
         }
@@ -321,18 +297,6 @@ namespace AirFrameXR
             if (isDef) Json.Remove(st.Root, p); else Json.Set(st.Root, p, val);
             Save(st, $"{k.Key} = {text}{(isDef ? " (default)" : "")}", k.When);
         }
-
-        void SetUncapped(bool on)
-        {
-            var st = new AppSettings();
-            var cur = st.FrameGenRate;
-            if (on) { if (cur != "uncapped") Json.Set(st.Root, "video.frame_gen_rate_before_uncapped", cur); st.FrameGenRate = "uncapped"; }
-            else st.FrameGenRate = Back(st);
-            Save(st, "frame_gen_rate = " + st.FrameGenRate, Live);
-        }
-
-        /// the finite rate the streamer's slider had before uncapped was ticked
-        static string Back(AppSettings st) { var b = Json.Str(st.Root, "video.frame_gen_rate_before_uncapped", "half"); return b == "uncapped" ? "half" : b; }
 
         void Save(AppSettings st, string what, string when)
         {
@@ -357,7 +321,6 @@ namespace AirFrameXR
         {
             var st = new AppSettings();
             foreach (var k in knobs) Json.Remove(st.Root, V + k.Key);
-            if (st.FrameGenRate == "uncapped") st.FrameGenRate = Back(st);
             Save(st, "all the switches back to their defaults", Restart);
             LoadValues();
         }

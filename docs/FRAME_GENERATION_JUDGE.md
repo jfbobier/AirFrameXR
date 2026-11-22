@@ -11,8 +11,10 @@ host's own D3D11 path at three moments, in the stream's frame format (10-bit, si
 * **A** and **B**: the pair of rendered frames a game at half the display rate delivers (pair gap 22.2 / 33.3 / 44.4 ms = 45 / 30 / 22.5 fps);
 * **G**, the **ground truth**: the scene as it really is at the midpoint, for the head pose of the midpoint.
 
-The streamer's own generator (`FrameGen`, flow at half scale, fast preset, grid 4: the shipped settings) ingests A then B and renders the midpoint with each
-synthesis (classic, edge, edge-blend). Every result is scored against G on the luma:
+The streamer's own generator (`FrameGen`, flow at half scale, fast preset, grid 4: the shipped settings) ingests A then B and renders the midpoint (or the
+time `--t`: x3's 1/3 and 2/3) with each synthesis: **edge**, and **neural** with `--env AIRFRAMEXR_FG_JUDGE_NEURAL=1` (the host's `neural` folder must hold the
+network). Until 1.5.0 the judge also scored **classic** and **edge-blend**; both syntheses were removed then, on the strength of the first run below. Every result is scored
+against G on the luma:
 
 | metric | what it says |
 |---|---|
@@ -26,10 +28,12 @@ scripted head moves: rotation reprojection and parallax) and `both x1/8/24`; `pa
 metres per second, the scene and the head the generator is told stay still: a game's stick walk, parallax and newly uncovered background behind every near
 object). Several start times along the animation (1.9 s apart). `--eye WxH` (default
 1032 x 1104 per eye), `--starts N`, `--gaps`, `--speeds`. 63 cases take about 20 s on the 3080 Ti laptop. The report gives the means per scenario and rate and
-the paired differences between the syntheses over all cases with their standard errors and win counts; crops of the moving region (truth, hold, the three
-results and 4x difference images) are written as PNG montages.
+the paired differences (edge against hold, neural against edge) over all cases with their standard errors and win counts; crops of the moving region (truth,
+hold, edge, neural and 4x difference images) are written as PNG montages.
 
 ## First run (2026-10-26, RTX 3080 Ti laptop, 1032 x 1104 per eye, 63 cases)
+
+With the three syntheses of the time; this run, with the side-by-side look on the headset (2026-10), is why classic and edge-blend were removed in 1.5.0.
 
 * **Edge against classic:** whole-frame PSNR +2.0 dB (edge better in 52 of 63 cases), SSIM in the moving region +0.013 (59 of 63), edge deficit (blur) lower in
   63 of 63. With the scene moving and the head still, classic scores 43.2 dB over the whole frame, below even repeating a frame (47.7) and far below edge (54.1):
@@ -43,14 +47,14 @@ results and 4x difference images) are written as PNG montages.
 ## Stick turns: the `pan` scenario (2026-11-20, RTX 5090)
 
 `--pans 60,120,...` (deg/s; `fg_judge.py --pans`): the camera turns about the world's up axis while the scene stays frozen and the head the generator is told
-does not move: what a game's stick turn is to the generator (field 2026-11-20, Hellraiser at 1.5x: trailing on the stick, none on head turns). `--views` renders
+does not move: what a game's stick turn is to the generator (field 2026-11-20, Hellraiser at the 1.5x rate of the time: trailing on the stick, none on head turns). `--views` renders
 with an install's box, `--env AIRFRAMEXR_FG_MOTION_LIMIT=...` (and the other two knobs) changes the generator's tuning for the run.
 
 Run on the owner's stream (1920 x 2368 per eye, box 0.92 / 0.58 / 0.90 / 0.77, 3 start times; `harness/results/20261120T210125Z_fg_judge`), whole-frame PSNR of
 edge at a 24.4 ms pair gap (a 41 fps game): head turn 27.7 dB; stick 60 deg/s 27.3, 120 22.7, 180 20.2, 270 17.8, 360 16.1. The double-image energy on the
 boundary band (edge excess) goes 0.12 (head) -> 0.18 / 0.32 / 0.45 / 0.62 / 0.77; blur rises with it. The score follows the step between the two frames
-(about 3 deg per gap already costs 5 dB: 120 deg/s at 24 ms equals 180 deg/s at 16.7 ms); classic, edge and edge-blend all fail the same way (edge-blend
-+0.3 dB). **Not the motion limit**: `AIRFRAMEXR_FG_MOTION_LIMIT=0.25` gives the same numbers (only 270 / 360 deg/s at 33 ms move, by 0.1 / 1 dB). The pictures
+(about 3 deg per gap already costs 5 dB: 120 deg/s at 24 ms equals 180 deg/s at 16.7 ms); classic, edge and edge-blend, the judge's syntheses then, all
+failed the same way (edge-blend +0.3 dB). **Not the motion limit**: `AIRFRAMEXR_FG_MOTION_LIMIT=0.25` gives the same numbers (only 270 / 360 deg/s at 33 ms move, by 0.1 / 1 dB). The pictures
 (`pan_x180_g24_pictures.png`) show torn, doubled vertical edges and ghosted texture; the head turn's are clean. A head turn never reaches the optical flow
 (A is turned into B's camera first); a stick turn reaches it whole, and the flow as configured (half scale, fast preset, grid 4, no hints) does not follow it.
 

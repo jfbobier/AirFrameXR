@@ -6,7 +6,7 @@
 Per run: app fps; release -> GPU done (shim CSV, misleading when the app woke before the release); release -> submit (the app's CPU work
 after the release: 0.1 ms = the layers were already waiting); frame start -> GPU done (the probe's xrWaitFrame return joined to the shim's
 publish on the display time: the real render queue); how long before the shim's release xrWaitFrame returned (0 = gated); the host's hold;
-the app's wait and frame time; the shim's envelope and late releases; content lag (uncapped runs); host repeats; verdicts; GPU load."""
+the app's wait and frame time; the shim's envelope and late releases; host repeats; verdicts; GPU load."""
 import csv, glob, json, re, sys
 from pathlib import Path
 import numpy as np
@@ -51,16 +51,11 @@ def line(d):
             try: fg = json.loads(l)
             except Exception: pass
     rep = ""
-    lag = float("nan")
     if fg:
         g = fg.get("data", {}).get("pipeline", {}).get("frame_gen")
         if g:
             tot = g["synths"] + g["reals"] + g["repeats"]
             rep = f"repeats {100 * g['repeats'] / max(1, tot):.1f}% holds {g['holds']}"
-    fu = d / "debug" / "fg_uncapped.csv"
-    if fu.exists():
-        lags = [float(r["lag_ms"]) for r in csv.DictReader(open(fu)) if r.get("lag_ms")]
-        lag = float(np.median(lags[200:])) if len(lags) > 200 else float("nan")
     j = judge.judge(str(d / "out"))
     mo = j.get("motion", {})
     m0 = mo.get("eye0", {})
@@ -71,7 +66,7 @@ def line(d):
     hold = np.array([float(r["hold_ms"]) for r in hf_[300:]])
     return (f"{d.name[:16]} {d.name[24:]:14s} app {fps:5.1f} fps | release->done p50 {pct(inflight,50):5.1f} p95 {pct(inflight,95):5.1f} ms | release->submit p50 {pct(cpu,50):4.1f} ms | "
             f"frame start->GPU done p50 {pct(s2d,50):5.1f} p95 {pct(s2d,95):5.1f} ms | xrWaitFrame return before release p50 {pct(early,50):5.1f} ms | host hold p50 {pct(hold,50):4.1f} | wait p50 {pct(wait,50):4.1f} frame p50 {pct(ft,50):4.1f} ms | envelope {env:4.1f} late {late:4.0f}% | "
-            f"lag {lag:5.1f} | {rep} | {j['verdict']} {mo.get('verdict','')} frozen {m0.get('frozen_pct',0):.1f}% cv {m0.get('step_cv',0):.2f} | gpu {gp:3.0f}% {pw:3.0f} W")
+            f"{rep} | {j['verdict']} {mo.get('verdict','')} frozen {m0.get('frozen_pct',0):.1f}% cv {m0.get('step_cv',0):.2f} | gpu {gp:3.0f}% {pw:3.0f} W")
 
 if __name__ == "__main__":
     for x in sys.argv[1:]:

@@ -1,6 +1,6 @@
 //! Frame generation judge (docs/FRAME_GENERATION_JUDGE.md, `--fg-judge <dir>`): how close are the generated frames to the frame the game would have
 //! rendered? The benchmark scene (Littlest Tokyo, animated) is rendered at times A and B (the pair a game at half the display rate delivers) and at the
-//! midpoint G, the ground truth. Each synthesis (classic, edge, edge-blend) generates the midpoint from A and B, with the streamer's own generator and
+//! midpoint G, the ground truth. Each synthesis (edge; neural with AIRFRAMEXR_FG_JUDGE_NEURAL=1) generates the midpoint from A and B, with the streamer's own generator and
 //! settings, and is scored against G: PSNR and SSIM over the whole frame, inside the moving region and on its boundary band, plus how much edge energy the
 //! boundary has too much (double images) or too little (blur) against G. Two trivial references are scored the same way: holding B, and the 50/50 blend.
 //! Scenarios: `scene` (the scene animates, the head is still), `head` (the scene is frozen, the scripted head moves: the rotation reprojection and the
@@ -259,11 +259,11 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
     }
     let mut gpu = [0 as c_char; 128];
     unsafe { nvh_bench_gpu(b, gpu.as_mut_ptr(), 128) };
-    // AIRFRAMEXR_FG_JUDGE_NEURAL=1: a fourth generator, `neural` (synth 4: the edge synthesis's output pass composing RIFE 4.4's fields, neural.h;
+    // AIRFRAMEXR_FG_JUDGE_NEURAL=1: a second generator, `neural` (synth 4: the edge synthesis's output pass composing RIFE 4.4's fields, neural.h;
     // the host's neural folder must hold airframexr_rife.dll and rife44.afxw: nvenc/rife/build.ps1)
     let neural = std::env::var("AIRFRAMEXR_FG_JUDGE_NEURAL").map_or(false, |v| v == "1");
-    let names: Vec<&str> = if neural { vec!["classic", "edge", "edge_blend", "neural"] } else { vec!["classic", "edge", "edge_blend"] };
-    let codes = [0, 1, 2, 4];
+    let names: Vec<&str> = if neural { vec!["edge", "neural"] } else { vec!["edge"] };
+    let codes = [1, 4];
     let mut gens = vec![std::ptr::null_mut::<c_void>(); names.len()];
     for (k, g) in gens.iter_mut().enumerate() {
         *g = unsafe { nvh_bench_fgj_open(b, ew, eh, codes[k], err.as_mut_ptr(), 256) };
@@ -280,7 +280,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
         let _ = fs::remove_file(d.join("cases.jsonl"));   // the index describes this run only
     }
     let mut caps = [0 as c_char; 512];
-    unsafe { nvh_bench_fgj_caps(gens[1], caps.as_mut_ptr(), 512) };
+    unsafe { nvh_bench_fgj_caps(gens[0], caps.as_mut_ptr(), 512) };
     event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "walks": opt.walks, "t": opt.t,
         "fov": fov, "scene": scene, "nvof": cstr(&caps), "generators": names }));
     // the HUD scenario's panels as a mask (the first rect of each eye is its panel: the area the strokes and the bar sit on)
@@ -367,7 +367,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     continue;
                 }
                 let mut turn = [0f32; 8];
-                unsafe { nvh_bench_fgj_turn(gens[1], turn.as_mut_ptr()) };
+                unsafe { nvh_bench_fgj_turn(gens[0], turn.as_mut_ptr()) };
                 let (la, lb, lg) = (luma(&fa), luma(&fb), luma(&fg));
                 let raw: Vec<bool> = la.iter().zip(lb.iter()).map(|(p, q)| (p - q).abs() > 6.0).collect();
                 let moving = dilate(&raw, w, h, 6);
@@ -394,8 +394,8 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     "start": start, "t0": t0, "gap_ms": gap, "scenario": scenario, "speed": speed,
                     "moving_frac": truth.moving_frac, "band_frac": truth.band_frac,
                     "hold": score(&truth, &lb), "blend": score(&truth, &blend),
-                    "classic": score(&truth, &lo[0]), "edge": score(&truth, &lo[1]), "edge_blend": score(&truth, &lo[2]),
-                    "flow_ms": timings[1][0], "synth_ms": { "classic": timings[0][1], "edge": timings[1][1], "edge_blend": timings[2][1] },
+                    "edge": score(&truth, &lo[0]),
+                    "flow_ms": timings[0][0], "synth_ms": { "edge": timings[0][1] },
                     "turn": { "measured_deg": turn[0], "pred_deg": turn[1], "agree": turn[2], "blocks": turn[3], "cpu_ms": turn[4], "measurements": turn[5], "corrections": turn[6], "late": turn[7],
                               "true_pair_deg": rate * g, "true_warm_deg": warm_rate * g },
                 });
@@ -403,9 +403,9 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     // the neural generator's score and state (on, runs, outputs composed from the fields, failures, GPU ms, CPU ms, what runs or why not)
                     let mut ns = [0f64; 6];
                     let mut ninfo = [0 as c_char; 200];
-                    unsafe { nvh_bench_fgj_neural(gens[3], ns.as_mut_ptr(), ninfo.as_mut_ptr(), 200) };
-                    case["neural"] = score(&truth, &lo[3]);
-                    case["synth_ms"]["neural"] = json!(timings[3][1]);
+                    unsafe { nvh_bench_fgj_neural(gens[1], ns.as_mut_ptr(), ninfo.as_mut_ptr(), 200) };
+                    case["neural"] = score(&truth, &lo[1]);
+                    case["synth_ms"]["neural"] = json!(timings[1][1]);
                     case["neural_state"] = json!({ "on": ns[0], "runs": ns[1], "outputs": ns[2], "failures": ns[3], "gpu_ms": ns[4], "cpu_ms": ns[5], "info": cstr(&ninfo) });
                 }
                 event(origin, "fgj_case", case.clone());
@@ -413,7 +413,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                 // a cases.jsonl index, for offline generators (e.g. a neural interpolator) scored the same way; a directory on the builder, not in `out`
                 if let Some(dd) = &dump {
                     let idx = cases.len();
-                    for (name, buf) in [("A", &fa), ("B", &fb), ("G", &fg), ("edge", &outs[1])] {
+                    for (name, buf) in [("A", &fa), ("B", &fb), ("G", &fg), ("edge", &outs[0])] {
                         write_ppm(&dd.join(format!("case_{idx:03}_{name}.ppm")), buf, w, 0, 0, w, h, None);
                     }
                     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(dd.join("cases.jsonl")) {

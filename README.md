@@ -108,7 +108,7 @@ flowchart LR
         direction LR
         G["OpenXR game<br/>(UEVR, native VR)"]
         V["VirtualDesktop-OpenXR<br/>OpenXR runtime, small patches"]
-        S["OVRShim (LibOVRRT64_1.dll)<br/>composes layers, paces the game<br/>to 1/3, 1/2, 2/3 of the display rate,<br/>10-bit frame ring in shared GPU memory"]
+        S["OVRShim (LibOVRRT64_1.dll)<br/>composes layers, paces the game<br/>to 1/2 or 1/3 of the display rate,<br/>10-bit frame ring in shared GPU memory"]
         H["alvr_host.exe<br/>frame generation (RIFE neural fields,<br/>NVIDIA Optical Flow), head-pose stamping,<br/>foveated encoding, NVENC HEVC 10-bit split encode,<br/>ALVR 20.14 server core"]
         L["AirFrameXR.exe launcher<br/>settings, game records,<br/>proposals, recenter"]
         G --> V --> S --> H
@@ -130,11 +130,11 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 <p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, Game statistics, Settings, Advanced video and performance settings, Diagnostics and headset setup, and the two switches: OpenXR runtime AirFrameXR and OpenVR through OpenComposite"></p>
 
-**The streamer.** Three live tiles (the game's fps, what the headset shows, the latency), a line under them with the streamed fps, the bitrate and the packets lost, then **Features**: frame generation (x1.5, x2 or x3, or Auto) and the optional desktop mirror, aligned switches; gamma and sharpening, eye height and Recenter. The menu in the header (the three bars) opens the main menu, the game statistics and the advanced settings.
+**The streamer.** Three live tiles (the game's fps, what the headset shows, the latency), a line under them with the streamed fps, the bitrate and the packets lost, then **Features**: frame generation (x2 or x3, or Auto) and the optional desktop mirror, aligned switches; gamma and sharpening, eye height and Recenter. The menu in the header (the three bars) opens the main menu, the game statistics and the advanced settings.
 
-<p align="center"><img src="docs/images/ui_streamer.png" width="640" alt="The streamer window: three live tiles and a line of numbers, the Features box with frame generation x1.5 / x2 / x3 and the desktop mirror, picture and position"></p>
+<p align="center"><img src="docs/images/ui_streamer.png" width="640" alt="The streamer window: three live tiles and a line of numbers, the Features box with frame generation x2 / x3 and the desktop mirror, picture and position"></p>
 
-**What happened in each game.** One record per game. The last session is drawn from the game (left) to the headset (right): its fps, the frame generation, encode, network and decode times, what the headset shows, and the latency split into its parts. Trend charts over the last sessions (fps, latency, repeated frames), the last run over time from the general log (fps, generation lag, GPU memory, how early frames arrive), the session history, and a log export.
+**What happened in each game.** One record per game. The last session is drawn from the game (left) to the headset (right): its fps, the frame generation, encode, network and decode times, what the headset shows, and the latency split into its parts. Trend charts over the last sessions (fps, latency, repeated frames), the last run over time from the general log (fps, GPU memory, how early frames arrive), the session history, and a log export.
 
 <p align="center"><img src="docs/images/ui_performance.png" width="860" alt="Game statistics: a session drawn from the game to the headset as six stages with the latency split, trend charts over the sessions, and the last run over time from the log"></p>
 
@@ -220,21 +220,23 @@ the same code built with the telemetry on, so a diagnosis never changes the numb
   tests the result (system and NVENC, encoder speed, network at the configured bitrate, a real scene streamed through the pipeline with the headset's own head pose, audio).
   **Find headset...** in the streamer window searches the network and pairs. Any NVIDIA GPU with NVENC API 12.2+ works.
 - **Frame pacing** with an intake gate and a three-deep in-order queue. The Vision Pro profile defaults to foveated encoding at 300 Mbps.
-- **Frame generation** (off by default, a switch in the streamer and in Settings; experimental): for games that cannot hold the display rate. A slider sets the game's rate as a
-  fraction of the display rate, **1/3, 1/2 (default) or 2/3**, and the streamer generates the frames in between. **Since 1.4.2 the frames in between are neural:**
+- **Frame generation** (off by default, a switch in the streamer and in Settings; experimental): for games that cannot hold the display rate. A multiplier sets how many frames the
+  headset gets per game frame, **x2** (default: the game runs at half the display rate) or **x3** (a third), and the streamer generates the frames in
+  between at fixed moments, the ones the network places right ([why only these](docs/FRAME_GENERATION.md#rates-150-x2-and-x3)). **Since 1.4.2 the frames in between are neural:**
   [RIFE](https://github.com/hzwer/Practical-RIFE) 4.4, run by our own CUDA engine (`bin\neural`: CUTLASS convolutions and a few kernels of our own, hard-coded
   for this network, built from pinned sources by one script), computes for each pair of game frames where every part of the picture moved and how to blend
   the two frames, at half the eye's resolution; the streamer then draws the picture at full resolution from one sample of each game frame, keeps still content
   exact, and each generated frame gets the motion of its own moment. It needs an RTX 30 series or newer. The fallback, chosen in Advanced video and performance
   settings (*Generated-frame synthesis*: **neural** or **edge**) and used by itself on older GPUs, is 1.4.1's synthesis: in-scene motion from the GPU's optical-flow
   engine (NVIDIA Optical Flow, Turing or later) and an edge-aware synthesis (motion edges stay sharp, and where the motion is uncertain the real frame is shown instead
-  of a double image; ideas from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented; the earlier algorithm stays as **classic**). Head turns are removed
+  of a double image; ideas from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented). Head turns are removed
   before either looks for motion, stick turns are measured and removed too, and every output is rotated to the newest tracking sample. Verified on a Vision Pro at 100 Hz with an RTX 5090: missed display periods 38 % -> 1 % at half rate; also run on a Quest 3.
   It costs latency by construction (interpolation: one game period), and it is not automatic by design: a game that holds a steady 70-75 fps is often better left alone.
   A **Recommended** tick sets the rate from the game's recorded runs on the connected headset, and **Recenter** (a button and a key, **End** by default; also sent at every game start) turns the tracking space to your
   current forward. See [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/NEURAL_RIFE_CUDA.md](docs/NEURAL_RIFE_CUDA.md) (the neural engine: how it is built
-  and checked, and what it measured), [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), and
-  [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) (archive) for why DLSS motion vectors were tried and removed.
+  and checked, and what it measured), and the archive: [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) for why DLSS motion vectors were tried and
+  removed, [docs/permanent_record/FRAME_GENERATION_UNCAPPED.md](docs/permanent_record/FRAME_GENERATION_UNCAPPED.md) for the uncapped mode and the x1.5
+  rate (removed in 1.5.0).
 - **A field of view for the game, set from the streamer**, the savings shown against what the game would have rendered, a percentage to spend them on quality, a one-minute calibration in the headset (four lines per eye) and, on a Vision Pro, a foveation computed from Apple's rate map and your choice: [how it works](#how-fov-restriction-works).
 - **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the field of view calibration, the firewall and OpenXR-layer reviews. They follow the display
   (1080p laptops to 4K, 100-200 % scale), checked by the UI harness below.
@@ -407,9 +409,10 @@ AirFrameXR stands on the shoulders of giants: the projects below made it possibl
 - **[VirtualDesktop-OpenXR (VDXR)](https://github.com/mbucchia/VirtualDesktop-OpenXR)** (MIT) by Matthieu Bucchianeri and its
   contributors: the excellent, highly optimized OpenXR runtime every game here runs on; OVRShim started as its OVRNull sample.
   Thanks also for the many other OpenXR tools from the same author that the PC VR community relies on.
-- **[OFXR-Bridge](https://github.com/tig3rmast3r/OFXR-Bridge)** (LGPL-3.0) by tig3rmast3r: the frame-generation synthesis recipe
-  (rotation-compensated residual flow, midpoint sampling, confidence and crossfade fallback) and its never-block safety rules were
-  studied from its code and re-implemented here; it is the "classic" synthesis.
+- **[OFXR-Bridge](https://github.com/tig3rmast3r/OFXR-Bridge)** (LGPL-3.0) by tig3rmast3r: its ideas shaped the frame generator's early design.
+  Its synthesis recipe (rotation-compensated residual flow, midpoint sampling, confidence and crossfade fallback) was studied from its code and
+  re-implemented here as the first synthesis ("classic", removed in 1.5.0 after the edge-aware one beat it); its never-block safety rules
+  still guard the generator.
 - **[VectorXR](https://github.com/DienerTech/vectorxr)** (MPL-2.0) by DienerTech: the edge-aware synthesis (vector median, source-solved
   flow, per-pixel candidate choice at motion boundaries, doubtful motion shrinking toward the real frame) was studied from its code and
   re-implemented here.
@@ -435,7 +438,7 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licences ([TH
 ## Documentation
 
 - **Start here:** [docs/INSTALL.md](docs/INSTALL.md) (install, settings, logs, audio), [docs/PERFORMANCE_KNOBS.md](docs/PERFORMANCE_KNOBS.md) (every knob and what should drive it), [docs/EXPERIMENTAL_SWITCHES.md](docs/EXPERIMENTAL_SWITCHES.md) (the Advanced video and performance settings window), [docs/HMD_PROFILES.md](docs/HMD_PROFILES.md) (community profiles).
-- **How it works:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (frame pipeline, threads, buffers), [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md) and [docs/FRAME_GENERATION_UNCAPPED.md](docs/FRAME_GENERATION_UNCAPPED.md), [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md), [docs/AVP_FOV.md](docs/AVP_FOV.md) and [docs/FOV_GRID.md](docs/FOV_GRID.md) (field of view; [how FOV restriction works](#how-fov-restriction-works)), [docs/CHROMA_KEY_PROTOCOL.md](docs/CHROMA_KEY_PROTOCOL.md), [docs/DESKTOP_MIRROR.md](docs/DESKTOP_MIRROR.md), [docs/UI_SPEC.md](docs/UI_SPEC.md), [docs/CONFIGURE_WIZARD.md](docs/CONFIGURE_WIZARD.md), [docs/BENCHMARK_DESIGN.md](docs/BENCHMARK_DESIGN.md).
+- **How it works:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (frame pipeline, threads, buffers), [docs/FRAME_GENERATION.md](docs/FRAME_GENERATION.md), [docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md), [docs/AVP_FOV.md](docs/AVP_FOV.md) and [docs/FOV_GRID.md](docs/FOV_GRID.md) (field of view; [how FOV restriction works](#how-fov-restriction-works)), [docs/CHROMA_KEY_PROTOCOL.md](docs/CHROMA_KEY_PROTOCOL.md), [docs/DESKTOP_MIRROR.md](docs/DESKTOP_MIRROR.md), [docs/UI_SPEC.md](docs/UI_SPEC.md), [docs/CONFIGURE_WIZARD.md](docs/CONFIGURE_WIZARD.md), [docs/BENCHMARK_DESIGN.md](docs/BENCHMARK_DESIGN.md).
 - **What we learned:** [docs/PERFORMANCE_FINDINGS.md](docs/PERFORMANCE_FINDINGS.md) (what was tried, so nobody repeats the dead ends).
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), [docs/DEVELOPMENT_PHILOSOPHY.md](docs/DEVELOPMENT_PHILOSOPHY.md), [docs/UPSTREAM.md](docs/UPSTREAM.md), [harness/README.md](harness/README.md).
 - **Status and history:** [docs/progress.md](docs/progress.md), [docs/releases/](docs/releases/). The older plans and logs are archived in [docs/PERMANENT_RECORD.md](docs/PERMANENT_RECORD.md) (only for revisiting a past decision).

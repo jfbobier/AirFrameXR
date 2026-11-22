@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Frame generation judge (docs/FRAME_GENERATION_JUDGE.md): classic, edge and edge-blend scored against a rendered ground truth on the benchmark scene.
+"""Frame generation judge (docs/FRAME_GENERATION_JUDGE.md): the edge and neural syntheses scored against a rendered ground truth on the benchmark scene.
 The builder renders Littlest Tokyo at times A and B (the pair a game at half the display rate delivers) and at the midpoint G, generates the midpoint with
 each synthesis and scores it against G (PSNR / SSIM over the frame, in the moving region and on its boundary band, edge energy in excess = double images or in
 deficit = blur); holding B and the 50/50 blend are the references. Scenarios: scene (head still), head (scene frozen), both. This script runs it, then prints
@@ -7,7 +7,7 @@ per scenario and rate the means, and the paired differences between the synthese
 
     python3 harness/fg_judge.py [--eye WxH] [--starts N] [--gaps 22.2,33.3,44.4] [--speeds 1,8,24] [--pans 60,180] [--walks 0.5,1,2] [--views airframexr_views.json] [--env NAME=value]
         --walks: the stick-strafe scenario (the camera moves sideways at these scene metres per second, the head the generator is told stays still);
-        --env AIRFRAMEXR_FG_JUDGE_DEPTH=1: a fourth generator, edge_depth (the scene's depth handed to the generator with each frame, like a game's depth layer)
+        --env AIRFRAMEXR_FG_JUDGE_NEURAL=1: the neural generator too (bin\\neural beside the builder's host); --t: the output time (default 0.5; x3: 0.333 / 0.667)
         --pans: the stick-turn scenario (the camera turns at these deg/s, the head the generator is told stays still); --views: the headset's views file
         (the box the judge renders, e.g. an install's config\airframexr_views.json; default the Vision Pro's measured views); --env: a generator tuning knob
         (AIRFRAMEXR_FG_MOTION_LIMIT / _COST_SCALE / _PHOTO_SCALE, several joined with +)
@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import lib
 
-KINDS = ["hold", "blend", "classic", "edge", "edge_blend"]
+KINDS = ["hold", "blend", "edge"]
 METRICS = [("psnr_band", "PSNR on the boundary band (dB)", +1), ("psnr_moving", "PSNR in the moving region (dB)", +1), ("psnr", "PSNR whole frame (dB)", +1),
            ("ssim_moving", "SSIM in the moving region", +1), ("edge_excess", "edge excess on the band (double images)", -1), ("edge_deficit", "edge deficit on the band (blur)", -1),
            ("psnr_hud", "PSNR on the HUD panels (dB; --env AIRFRAMEXR_FG_JUDGE_HUD=1)", +1), ("hud_bad", "share of HUD pixels off by > 24 levels (--env AIRFRAMEXR_FG_JUDGE_HUD=1)", -1)]
@@ -80,13 +80,13 @@ def fmt(x, nd=2):
 
 
 def montage(d):
-    """truth | hold | classic | edge | edge-blend crops, and the 4x difference images, per scenario and rate (first start time)."""
+    """truth | hold | edge | neural crops, and the 4x difference images, per scenario and rate (first start time)."""
     out = d / "out"
     for truth in sorted(out.glob("*_truth.ppm")):
         stem = truth.name[:-len("_truth.ppm")]
-        extra = [k for k in ("edge_depth", "neural") if (out / f"{stem}_{k}.ppm").exists()]
-        for label, names in (("pictures", ["truth", "hold", "classic", "edge", "edge_blend"] + extra),
-                             ("difference_x4", ["classic_diff", "edge_diff", "edge_blend_diff"] + [k + "_diff" for k in extra])):
+        extra = [k for k in ("neural",) if (out / f"{stem}_{k}.ppm").exists()]
+        for label, names in (("pictures", ["truth", "hold", "edge"] + extra),
+                             ("difference_x4", ["edge_diff"] + [k + "_diff" for k in extra])):
             files = [out / f"{stem}_{n}.ppm" for n in names]
             if not all(f.exists() for f in files):
                 continue
@@ -102,7 +102,7 @@ def report(d):
     if not cases:
         print("no cases"); return 2
     gaps = sorted({c["gap_ms"] for c in cases})
-    kinds = KINDS + [k for k in ("edge_depth", "neural") if any(k in c for c in cases)]
+    kinds = KINDS + [k for k in ("neural",) if any(k in c for c in cases)]
     metrics = [m for m in METRICS if any(c["edge"].get(m[0]) is not None for c in cases)]   # the HUD metrics only exist for a HUD run
     for c in cases:
         c["label"] = (c["scenario"] if c["scenario"] == "head" else f'{c["scenario"]} {c["speed"]:g}dps' if c["scenario"].startswith("pan")
@@ -122,7 +122,7 @@ def report(d):
                     print(f"{s:10s} {g:7.1f}ms " + " ".join(f"{fmt(mean([c[k][key] for c in sel])):>10s}" for k in kinds))
         print()
     print("== paired differences over every case (mean, standard error of the mean, wins of the first)")
-    pairs = [("edge", "classic"), ("edge", "edge_blend"), ("edge_blend", "classic")] + [(k, "edge") for k in ("edge_depth", "neural") if k in kinds]
+    pairs = [("edge", "hold")] + [("neural", "edge")] * ("neural" in kinds)
     for key, title, sign in metrics:
         for a, b in pairs:
             d_ = [(c[a][key] - c[b][key]) * sign for c in cases if c["moving_frac"] > 0.0005 and c[a][key] is not None and c[b][key] is not None]
@@ -138,9 +138,6 @@ def report(d):
     if "neural" in kinds:
         ns = cases[-1].get("neural_state", {})
         print(f"neural generator: {ns}")
-    if "edge_depth" in kinds:
-        dep = cases[-1].get("depth", {})
-        print(f"depth generator: {dep.get('frames', 0):.0f} frames ingested with depth, {dep.get('outputs', 0):.0f} synthetic outputs used it (0 = the depth path never ran)")
     tc = [c for c in cases if c["scenario"].startswith("pan") and c.get("turn", {}).get("measurements", 0) > 0]
     if tc:
         print("\n== camera turn (edge generator, after the evaluated pair's first output): the turn measured on it (true: the evaluated pair), corrections over the whole sequence")

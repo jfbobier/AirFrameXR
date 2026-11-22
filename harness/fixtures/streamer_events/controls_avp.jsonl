@@ -3,12 +3,8 @@
 {"dump": "avp_auto"}
 {"ui": "frame_gen", "value": "on"}
 {"dump": "frame_gen_on"}
-{"ui": "rate", "value": "0"}
+{"ui": "rate", "value": "1"}
 {"dump": "rate"}
-{"ui": "uncapped", "value": "on"}
-{"dump": "uncapped_on"}
-{"ui": "uncapped", "value": "off"}
-{"dump": "uncapped_off"}
 {"ui": "recenter", "value": ""}
 {"dump": "recenter"}
 {"ui": "height_mode", "value": "manual"}

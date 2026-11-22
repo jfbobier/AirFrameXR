@@ -236,8 +236,7 @@ bool NeuralFields::Init(int eyeW, int eyeH, float scale, const wchar_t* dir, cha
     return true;
 }
 
-bool NeuralFields::Run(ID3D11ShaderResourceView* prev, ID3D11ShaderResourceView* cur, const float rot[2][12], const float* tan8, float t, bool reversed,
-                       char* err, int errlen) {
+bool NeuralFields::Run(ID3D11ShaderResourceView* prev, ID3D11ShaderResourceView* cur, const float rot[2][12], const float* tan8, float t, char* err, int errlen) {
     Impl& I = *m;
     if (!I.net) { seterr(err, errlen, "neural fields not initialised"); return false; }
     LARGE_INTEGER c0, c1, cq; QueryPerformanceCounter(&c0); QueryPerformanceFrequency(&cq);
@@ -270,7 +269,7 @@ bool NeuralFields::Run(ID3D11ShaderResourceView* prev, ID3D11ShaderResourceView*
     const float tt[2] = { t, t };
     char e2[300] = "";
     I.cu.EventRecord(I.ev[0], I.stream);
-    const int rr = reversed ? I.rife.Run(I.net, p[1], p[0], tt, p[2], p[3], I.stream, e2, sizeof e2) : I.rife.Run(I.net, p[0], p[1], tt, p[2], p[3], I.stream, e2, sizeof e2);
+    const int rr = I.rife.Run(I.net, p[0], p[1], tt, p[2], p[3], I.stream, e2, sizeof e2);
     I.cu.EventRecord(I.ev[1], I.stream);
     I.cu.GraphicsUnmapResources(4, I.res, I.stream);
     QueryPerformanceCounter(&c1);

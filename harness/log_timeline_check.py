@@ -25,7 +25,7 @@ def expected(text, exe):
             continue
         if cur is None:
             continue
-        if re.search(r"frame generation perf: app [\d.]+ fps.*? stream [\d.]+ fps.*? lag [\d.]+ ms", l):
+        if re.search(r"frame generation perf: app [\d.]+ fps.*? stream [\d.]+ fps", l):
             cur["perf"] += 1
         elif re.search(r"GPU \d+ of \d+ MB used", l):
             cur["gpu"] += 1
@@ -52,7 +52,7 @@ def expected_run_log(path):
         cur.setdefault("start", last)
         if re.search(r"\[log\] INFO  (game ended: |log closed)", l):
             cur["end"] = last
-        elif re.search(r"frame generation perf: app [\d.]+ fps.*? stream [\d.]+ fps.*? lag [\d.]+ ms", l):
+        elif re.search(r"frame generation perf: app [\d.]+ fps.*? stream [\d.]+ fps", l):
             cur["perf"] += 1
         elif re.search(r"GPU \d+ of \d+ MB used", l):
             cur["gpu"] += 1

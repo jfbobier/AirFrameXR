@@ -103,8 +103,7 @@
         0.005,
         0.1
       ],
-      "neural": true,
-      "neural_time_fix": "untouched"
+      "neural": true
     }
   }
 }
