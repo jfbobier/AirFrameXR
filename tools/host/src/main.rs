@@ -1890,13 +1890,21 @@ fn set_frame_gen_live(origin: Instant, p: &pipeline::Pipeline, args: &Args, want
 fn enable_frame_gen(origin: Instant, handle: *mut std::ffi::c_void, args: &Args) -> bool {
     let mut err = [0 as std::ffi::c_char; 256];
     let ok = unsafe { nvh::nvh_fg_enable(handle, 1, FG_FLOW_SCALE, FG_PERF, args.fg_grid, args.fg_synth, err.as_mut_ptr(), 256) } != 0;
-    let mut buf = [0 as std::ffi::c_char; 1536];
-    unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 1536) };
+    let mut buf = [0 as std::ffi::c_char; 4096];
+    unsafe { nvh::nvh_fg_stats(handle, buf.as_mut_ptr(), 4096) };
     let stats = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
     if ok {
         logs::general("INFO", &format!("frame generation ON: rate {}, flow scale {:.2}, perf {}, grid {}, synthesis {}; {}", args.fg_rate.unwrap_or(FgRate::Half).name(), FG_FLOW_SCALE, FG_PERF, args.fg_grid,
             match args.fg_synth { 0 => "classic", 2 => "edge-blend", _ => "edge" },
-            serde_json::from_str::<serde_json::Value>(&stats).ok().and_then(|v| v["info"].as_str().map(str::to_string)).unwrap_or_default()));
+            serde_json::from_str::<serde_json::Value>(&stats).ok().map(|v| {
+                let info = v["info"].as_str().unwrap_or_default().to_string();
+                // neural fields (AIRFRAMEXR_FG_NEURAL=1): running, or the reason they are not (the edge synthesis then draws every output)
+                match (v["neural"]["on"].as_i64(), v["neural"]["info"].as_str()) {
+                    (Some(1), _) => format!("{info}; neural fields {}x{} per eye", v["neural"]["size"][0], v["neural"]["size"][1]),
+                    (_, Some(why)) if !why.is_empty() => format!("{info}; neural requested but off: {why}"),
+                    _ => info,
+                }
+            }).unwrap_or_default()));
     } else {
         let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().to_string();
         logs::general("WARN", &format!("frame generation requested but unavailable, streaming without it: {msg}"));
@@ -2952,6 +2960,14 @@ fn main() {
                                 ct["cpu_ms"].as_f64().unwrap_or(0.0), ct["measured"].as_u64().unwrap_or(0), ct["doubtful"].as_u64().unwrap_or(0), ct["not_ready"].as_u64().unwrap_or(0),
                                 ct["late"].as_u64().unwrap_or(0), ct["corrections"].as_u64().unwrap_or(0), ct["waits"].as_u64().unwrap_or(0),
                                 ct["wait_ms_avg"].as_f64().unwrap_or(0.0), ct["wait_ms_max"].as_f64().unwrap_or(0.0)));
+                        }
+                        // neural fields (lab switch AIRFRAMEXR_FG_NEURAL=1, fg-neural): whether they run, how often, at what cost, or why not
+                        let nr = &g["neural"];
+                        if nr["on"].as_i64() == Some(1) {
+                            logs::run_line(logs::Level::Info, "perf", format!("frame generation neural: RIFE 4.4 fields {}x{} per eye, {} runs, {} outputs composed, {} failures, GPU {:.2} ms (mean {:.2}), CPU {:.2} ms per run{}",
+                                nr["size"][0].as_i64().unwrap_or(0), nr["size"][1].as_i64().unwrap_or(0), nr["runs"].as_u64().unwrap_or(0), nr["outputs"].as_u64().unwrap_or(0),
+                                nr["failures"].as_u64().unwrap_or(0), nr["ms"].as_f64().unwrap_or(0.0), nr["ms_avg"].as_f64().unwrap_or(0.0), nr["cpu_ms"].as_f64().unwrap_or(0.0),
+                                nr["info"].as_str().filter(|i| *i != "on" && !i.is_empty()).map(|i| format!("; last: {i}")).unwrap_or_default()));
                         }
                     }
                     // the shim's counters restart with every game: a smaller value is a new game's own count, not a negative delta (gears 2026-10-20: 1.8e19 "releases late")

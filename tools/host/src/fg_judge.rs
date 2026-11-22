@@ -28,6 +28,7 @@ extern "C" {
     fn nvh_bench_fgj_turn(j: *mut c_void, out8: *mut f32) -> i32;
     fn nvh_bench_fgj_caps(j: *mut c_void, out: *mut c_char, outlen: i32) -> i32;
     fn nvh_bench_fgj_walk(m_per_s: f64, t_ref: f64);
+    fn nvh_bench_fgj_neural(j: *mut c_void, out6: *mut f64, info: *mut c_char, infolen: i32) -> i32;
 }
 
 pub struct Options {
@@ -255,10 +256,14 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
     }
     let mut gpu = [0 as c_char; 128];
     unsafe { nvh_bench_gpu(b, gpu.as_mut_ptr(), 128) };
-    let names: Vec<&str> = vec!["classic", "edge", "edge_blend"];
+    // AIRFRAMEXR_FG_JUDGE_NEURAL=1: a fourth generator, `neural` (synth 4: the edge synthesis's output pass composing RIFE 4.4's fields, neural.h;
+    // the host's neural folder must hold TensorRT for RTX and rife44_fields.onnx)
+    let neural = std::env::var("AIRFRAMEXR_FG_JUDGE_NEURAL").map_or(false, |v| v == "1");
+    let names: Vec<&str> = if neural { vec!["classic", "edge", "edge_blend", "neural"] } else { vec!["classic", "edge", "edge_blend"] };
+    let codes = [0, 1, 2, 4];
     let mut gens = vec![std::ptr::null_mut::<c_void>(); names.len()];
     for (k, g) in gens.iter_mut().enumerate() {
-        *g = unsafe { nvh_bench_fgj_open(b, ew, eh, k as i32, err.as_mut_ptr(), 256) };
+        *g = unsafe { nvh_bench_fgj_open(b, ew, eh, codes[k], err.as_mut_ptr(), 256) };
         if g.is_null() {
             event(origin, "fgj_error", json!({ "message": format!("frame generator {}: {}", names[k], cstr(&err)) }));
             return 6;
@@ -381,7 +386,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                 };
                 let blend: Vec<f32> = la.iter().zip(lb.iter()).map(|(p, q)| 0.5 * (p + q)).collect();
                 let lo: Vec<Vec<f32>> = outs.iter().map(|o| luma(o)).collect();
-                let case = json!({
+                let mut case = json!({
                     "start": start, "t0": t0, "gap_ms": gap, "scenario": scenario, "speed": speed,
                     "moving_frac": truth.moving_frac, "band_frac": truth.band_frac,
                     "hold": score(&truth, &lb), "blend": score(&truth, &blend),
@@ -390,6 +395,15 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     "turn": { "measured_deg": turn[0], "pred_deg": turn[1], "agree": turn[2], "blocks": turn[3], "cpu_ms": turn[4], "measurements": turn[5], "corrections": turn[6], "late": turn[7],
                               "true_pair_deg": rate * g, "true_warm_deg": warm_rate * g },
                 });
+                if neural {
+                    // the neural generator's score and state (on, runs, outputs composed from the fields, failures, GPU ms, CPU ms, what runs or why not)
+                    let mut ns = [0f64; 6];
+                    let mut ninfo = [0 as c_char; 200];
+                    unsafe { nvh_bench_fgj_neural(gens[3], ns.as_mut_ptr(), ninfo.as_mut_ptr(), 200) };
+                    case["neural"] = score(&truth, &lo[3]);
+                    case["synth_ms"]["neural"] = json!(timings[3][1]);
+                    case["neural_state"] = json!({ "on": ns[0], "runs": ns[1], "outputs": ns[2], "failures": ns[3], "gpu_ms": ns[4], "cpu_ms": ns[5], "info": cstr(&ninfo) });
+                }
                 event(origin, "fgj_case", case.clone());
                 // AIRFRAMEXR_FG_JUDGE_DUMP=<dir> (lab): every case's full frames A, B, the truth G and the edge synthesis's output (PPM, side by side) with
                 // a cases.jsonl index, for offline generators (e.g. a neural interpolator) scored the same way; a directory on the builder, not in `out`

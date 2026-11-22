@@ -84,9 +84,9 @@ def montage(d):
     out = d / "out"
     for truth in sorted(out.glob("*_truth.ppm")):
         stem = truth.name[:-len("_truth.ppm")]
-        depth = (out / f"{stem}_edge_depth.ppm").exists()
-        for label, names in (("pictures", ["truth", "hold", "classic", "edge", "edge_blend"] + (["edge_depth"] if depth else [])),
-                             ("difference_x4", ["classic_diff", "edge_diff", "edge_blend_diff"] + (["edge_depth_diff"] if depth else []))):
+        extra = [k for k in ("edge_depth", "neural") if (out / f"{stem}_{k}.ppm").exists()]
+        for label, names in (("pictures", ["truth", "hold", "classic", "edge", "edge_blend"] + extra),
+                             ("difference_x4", ["classic_diff", "edge_diff", "edge_blend_diff"] + [k + "_diff" for k in extra])):
             files = [out / f"{stem}_{n}.ppm" for n in names]
             if not all(f.exists() for f in files):
                 continue
@@ -102,7 +102,7 @@ def report(d):
     if not cases:
         print("no cases"); return 2
     gaps = sorted({c["gap_ms"] for c in cases})
-    kinds = KINDS + (["edge_depth"] if any("edge_depth" in c for c in cases) else [])
+    kinds = KINDS + [k for k in ("edge_depth", "neural") if any(k in c for c in cases)]
     metrics = [m for m in METRICS if any(c["edge"].get(m[0]) is not None for c in cases)]   # the HUD metrics only exist for a HUD run
     for c in cases:
         c["label"] = (c["scenario"] if c["scenario"] == "head" else f'{c["scenario"]} {c["speed"]:g}dps' if c["scenario"].startswith("pan")
@@ -122,7 +122,7 @@ def report(d):
                     print(f"{s:10s} {g:7.1f}ms " + " ".join(f"{fmt(mean([c[k][key] for c in sel])):>10s}" for k in kinds))
         print()
     print("== paired differences over every case (mean, standard error of the mean, wins of the first)")
-    pairs = [("edge", "classic"), ("edge", "edge_blend"), ("edge_blend", "classic")] + ([("edge_depth", "edge")] if "edge_depth" in kinds else [])
+    pairs = [("edge", "classic"), ("edge", "edge_blend"), ("edge_blend", "classic")] + [(k, "edge") for k in ("edge_depth", "neural") if k in kinds]
     for key, title, sign in metrics:
         for a, b in pairs:
             d_ = [(c[a][key] - c[b][key]) * sign for c in cases if c["moving_frac"] > 0.0005 and c[a][key] is not None and c[b][key] is not None]
@@ -135,6 +135,9 @@ def report(d):
             print(f"  {title[:46]:46s} {a:>10s} - {b:<10s} {m:+8.4f} +- {se:6.4f}  wins {wins:3d}/{len(d_):3d}  {verdict}")
         print()
     print("timing (GPU, last case): flow", cases[-1]["flow_ms"], "ms; synthesis", cases[-1]["synth_ms"])
+    if "neural" in kinds:
+        ns = cases[-1].get("neural_state", {})
+        print(f"neural generator: {ns}")
     if "edge_depth" in kinds:
         dep = cases[-1].get("depth", {})
         print(f"depth generator: {dep.get('frames', 0):.0f} frames ingested with depth, {dep.get('outputs', 0):.0f} synthetic outputs used it (0 = the depth path never ran)")

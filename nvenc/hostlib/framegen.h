@@ -32,6 +32,15 @@ struct FrameGenConfig {
     // measured turn and removed before the flow like the head's rotation; the output is turned by the yaw interpolated at t; the edge the
     // turned newer frame does not cover is filled from the older one.
     int camTurn = 1;
+    // neural fields (fg-neural branch, lab; AIRFRAMEXR_FG_NEURAL=1; off by default; edge synthesis only; neural.h): RIFE 4.4 computes, per pair, the
+    // motion from the output time to each frame and a blend mask, at neuralScale of the eye resolution, with TensorRT for RTX; the output pass
+    // composes the picture from them at full resolution (one sample of each original frame through the rotation chain), keeping still content
+    // exact where both frames agree within neuralStill and the fields move less than neuralStillPx full-resolution pixels. The optical flow keeps
+    // running for the camera turn's measurement. Judge (2026-11-22, offline): +0.93 dB on motion boundaries at 0.5, stick walks +2.7 / +3.7 dB.
+    int neural = 0;
+    float neuralScale = 0.5f;
+    float neuralStill = 0.02f, neuralStillPx = 1.f;
+    wchar_t neuralDir[260] = L"";   // the folder with tensorrt_rtx_1_8.dll, its ONNX parser and rife44_fields.onnx (empty: the host's `neural` folder)
 };
 
 struct FrameGenStats {
@@ -49,6 +58,13 @@ struct FrameGenStats {
     double camTurnWaitMsSum = 0; float camTurnWaitMsMax = 0;   // the first outputs that waited for their pair's measurement (a turn in progress)
     bool nvofReady = false;
     char nvofInfo[160] = "";   // "api 5.0, grids ..." or the failure reason
+    // neural fields (cfg.neural): on and running, network runs (per pair, and again when an output's time differs), outputs composed from them,
+    // failures, GPU ms of the last run and the average, CPU ms of the last Run call, the network's size, what is running or why not
+    bool neuralOn = false;
+    uint64_t neuralRuns = 0, neuralOutputs = 0, neuralFailures = 0;
+    float neuralMs = 0, neuralMsAvg = 0, neuralCpuMs = 0;
+    int neuralW = 0, neuralH = 0;
+    char neuralInfo[200] = "";
 };
 
 class FrameGen {
@@ -65,6 +81,8 @@ public:
     // measured rate times the pair's own time step (under our pacing a game's frames are 2 or 3 display periods apart, and so is its turn)
     int Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen, double frameS = 0.0);
     bool computeFlow(int n, char* err, int errlen);
+    // neural fields (cfg.neural) of pair (n-1, n) at time t; false: not available for this output (the edge synthesis draws it)
+    bool neuralPass(int n, float t);
     // Renders the output for a boundary: mode 0 = the rendered frame `age` frames before the newest (0 = the newest) rotated to qOut4, 1 = the
     // frame at fraction t (0..1) between that frame's predecessor and it (midpoint = 0.5), rotated to qOut4. Returns the output texture (owned
     // by this object), nullptr on error.

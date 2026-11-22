@@ -471,6 +471,7 @@ void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, in
     FrameGenConfig c;   // the streamer's defaults: flow at half scale, the fast preset, grid 4
     c.synth = synth == 0 ? 0 : 1;
     if (synth == 2) c.photoScale = 0.f;   // edge-blend: the edge synthesis without the photometric gate
+    if (synth == 4) c.neural = 1;         // edge + RIFE 4.4 fields (neural.h; the host's neural folder; AIRFRAMEXR_FG_NEURAL_SCALE / _STILL / _STILL_PX apply)
     // the streamer's env tuning knobs (nvh_fg_enable reads the same), so the judge measures what a changed knob does
     if (const char* v = getenv("AIRFRAMEXR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_COST_SCALE")) c.costScale = (float)atof(v);
@@ -532,6 +533,17 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
 }
 
 void nvh_bench_fgj_close(void* jh) { delete (Fgj*)jh; }
+
+// the neural generator's state (synth 4): on, network runs, outputs composed from them, failures, average GPU ms, last CPU ms; its info text
+int nvh_bench_fgj_neural(void* jh, double* out6, char* info, int infolen) {
+    auto* j = (Fgj*)jh;
+    if (!j || !j->fg || !out6) return 0;
+    const auto& s = j->fg->stats;
+    out6[0] = s.neuralOn ? 1 : 0; out6[1] = (double)s.neuralRuns; out6[2] = (double)s.neuralOutputs; out6[3] = (double)s.neuralFailures;
+    out6[4] = s.neuralMsAvg; out6[5] = s.neuralCpuMs;
+    if (info && infolen > 0) strncpy_s(info, infolen, s.neuralInfo, _TRUNCATE);
+    return 1;
+}
 
 int nvh_bench_fgj_turn(void* jh, float* out8) {
     auto* j = (Fgj*)jh;
