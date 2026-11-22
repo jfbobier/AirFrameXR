@@ -132,7 +132,8 @@ struct MetricCB {
 };
 static_assert(sizeof(MetricCB) % 16 == 0, "cbuffer size");
 
-struct Target { ComPtr<ID3D11Texture2D> msaa, resolved, depth; ComPtr<ID3D11RenderTargetView> rtv; ComPtr<ID3D11DepthStencilView> dsv; ComPtr<ID3D11ShaderResourceView> srv; int w = 0, h = 0; };
+// depthSrv: the depth buffer as R32_FLOAT (multisampled): the frame generation judge hands the generator the frame's depth like a game's depth layer
+struct Target { ComPtr<ID3D11Texture2D> msaa, resolved, depth; ComPtr<ID3D11RenderTargetView> rtv; ComPtr<ID3D11DepthStencilView> dsv; ComPtr<ID3D11ShaderResourceView> srv, depthSrv; int w = 0, h = 0; };
 
 // What the game hands the shim (and the shim the encoder): 10-bit R10G10B10A2 for the 10-bit encoder, else RGBA8.
 DXGI_FORMAT FrameFormat() { return Settings::Instance().m_use10bitEncoder ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM; }
@@ -142,12 +143,15 @@ bool MakeTarget(ID3D11Device* dev, int w, int h, Target& t, std::string& err) {
     D3D11_TEXTURE2D_DESC td{}; td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1; td.Format = FrameFormat();
     td.SampleDesc.Count = 4; td.BindFlags = D3D11_BIND_RENDER_TARGET;
     if (FAILED(dev->CreateTexture2D(&td, nullptr, &t.msaa))) { err = "MSAA target"; return false; }
-    td.Format = DXGI_FORMAT_D32_FLOAT; td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    td.Format = DXGI_FORMAT_R32_TYPELESS; td.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;   // D32 for the scene, R32_FLOAT to read
     if (FAILED(dev->CreateTexture2D(&td, nullptr, &t.depth))) { err = "depth target"; return false; }
     td.SampleDesc.Count = 1; td.Format = FrameFormat(); td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     if (FAILED(dev->CreateTexture2D(&td, nullptr, &t.resolved))) { err = "resolve target"; return false; }
     dev->CreateRenderTargetView(t.msaa.Get(), nullptr, &t.rtv);
-    dev->CreateDepthStencilView(t.depth.Get(), nullptr, &t.dsv);
+    D3D11_DEPTH_STENCIL_VIEW_DESC dvd{}; dvd.Format = DXGI_FORMAT_D32_FLOAT; dvd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DMS;
+    if (FAILED(dev->CreateDepthStencilView(t.depth.Get(), &dvd, &t.dsv))) { err = "depth view"; return false; }
+    D3D11_SHADER_RESOURCE_VIEW_DESC dsd{}; dsd.Format = DXGI_FORMAT_R32_FLOAT; dsd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMS;
+    dev->CreateShaderResourceView(t.depth.Get(), &dsd, &t.depthSrv);
     dev->CreateShaderResourceView(t.resolved.Get(), nullptr, &t.srv);
     return true;
 }
@@ -346,7 +350,29 @@ int nvh_bench_preview(void* h, int eye_w, int eye_h, double t, const float* fov8
 
 // ---- frame generation judge ---------------------------------------------------------------------------------------------------
 namespace {
-struct Fgj { std::unique_ptr<FrameGen> fg; int eyeW = 0, eyeH = 0; };
+// depth (the edge_depth generator, synth 3): the scene's multisampled depth resolved to the nearest sample of each pixel (an edge pixel belongs to the
+// surface in front, the convention a game's depth has at a resolved colour edge) into z, handed to the generator with each frame
+struct Fgj {
+    std::unique_ptr<FrameGen> fg; int eyeW = 0, eyeH = 0;
+    bool depth = false;
+    ComPtr<ID3D11Texture2D> z; ComPtr<ID3D11RenderTargetView> zRtv; ComPtr<ID3D11VertexShader> zVs; ComPtr<ID3D11PixelShader> zPs;
+};
+const char* kFgjDepthHlsl = R"(
+Texture2DMS<float> dz : register(t0);
+float4 VS(uint id : SV_VertexID) : SV_Position { float2 p = float2((id << 1) & 2, id & 2); return float4(p * float2(2, -2) + float2(-1, 1), 0, 1); }
+float PS(float4 pos : SV_Position) : SV_Target {
+    uint w, h, n; dz.GetDimensions(w, h, n);
+    float m = 1;
+    for (uint s = 0; s < n; s++) m = min(m, dz.Load(int2(pos.xy), s));
+    return m;
+}
+)";
+// the projection the benchmark scene renders with (bench_scene.h RenderSceneAt: near 0.05, far 100, D3D depth 0..1) as LibOVR's P22 / P23, what VDXR
+// hands the runtime for a game's depth layer
+const float kFgjProj2[2] = { 100.f / (0.05f - 100.f), 0.05f * 100.f / (0.05f - 100.f) };
+// the `walk` scenario (nvh_bench_fgj_walk): the camera moves sideways (the head's right at the frame's head time) at this speed (scene metres per
+// second; the scene is ~3 m wide) while the scene and the head the generator is told stay still: a game's stick strafe. 0 = off.
+double g_fgjWalkMS = 0, g_fgjWalkRef = 0;
 // the `pan` scenario (nvh_bench_fgj_pan): the camera turns at this rate (deg/s) about the world's up axis while the scene's animation stays at
 // the reference time and the head the generator is told stays where it is: a stick turn. 0 = off.
 double g_fgjPanDegS = 0, g_fgjPanRef = 0;
@@ -419,15 +445,33 @@ Target* FgjRender(Bench* b, int eye_w, int eye_h, const double* tt, const float*
     Target* tg = b->target(eye_w * 2, eye_h, err);
     if (!tg) return nullptr;
     auto ctx = b->render->GetContext();
-    if (g_fgjPanDegS != 0 || g_fgjWarmDegS != 0) {   // tt[0] is the pan clock: the scene frozen at the reference, the camera turned by panYawAt
+    if (g_fgjWalkMS != 0) {   // tt[0] is the walk clock: the scene frozen at the reference, the camera moved sideways by the walk
+        XMVECTOR hp0, hr0; HeadPose(tt[2], hp0, hr0);
+        const XMVECTOR off = XMVectorScale(XMVector3Rotate(XMVectorSet(1, 0, 0, 0), hr0), (float)(g_fgjWalkMS * (tt[0] - g_fgjWalkRef)));
+        RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, g_fgjWalkRef, tt[1], tt[2], fov8, ipd, 0.f, &off);
+    } else if (g_fgjPanDegS != 0 || g_fgjWarmDegS != 0) {   // tt[0] is the pan clock: the scene frozen at the reference, the camera turned by panYawAt
         const float yaw = (float)panYawAt(tt[0]);
         RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, g_fgjPanRef, tt[1], tt[2], fov8, ipd, yaw);
     } else {
         RenderSceneAt(b->scene, ctx, tg->rtv.Get(), tg->dsv.Get(), tg->w, tg->h, tt[0], tt[1], tt[2], fov8, ipd);
     }
-    if (FgjHudOn()) FgjDrawHud(ctx, tg->rtv.Get(), eye_w, eye_h);
+    if (FgjHudOn()) FgjDrawHud(ctx, tg->rtv.Get(), eye_w, eye_h);   // (a HUD drawn after the scene leaves the scene's depth under it, as a game's does)
     ctx->ResolveSubresource(tg->resolved.Get(), 0, tg->msaa.Get(), 0, FrameFormat());
     return tg;
+}
+// the frame's depth (FgjRender's target) into j->z: the nearest of each pixel's samples
+void FgjResolveDepth(Bench* b, Fgj* j, Target* tg) {
+    auto ctx = b->render->GetContext();
+    ctx->IASetInputLayout(nullptr); ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ctx->VSSetShader(j->zVs.Get(), nullptr, 0); ctx->PSSetShader(j->zPs.Get(), nullptr, 0);
+    ctx->RSSetState(nullptr); ctx->OMSetBlendState(nullptr, nullptr, 0xffffffff); ctx->OMSetDepthStencilState(nullptr, 0);
+    ctx->OMSetRenderTargets(1, j->zRtv.GetAddressOf(), nullptr);
+    ctx->PSSetShaderResources(0, 1, tg->depthSrv.GetAddressOf());
+    D3D11_VIEWPORT vp{ 0, 0, (float)tg->w, (float)tg->h, 0, 1 };
+    ctx->RSSetViewports(1, &vp);
+    ctx->Draw(3, 0);
+    ID3D11ShaderResourceView* n = nullptr; ctx->PSSetShaderResources(0, 1, &n);
+    ID3D11RenderTargetView* nr = nullptr; ctx->OMSetRenderTargets(1, &nr, nullptr);
 }
 }  // namespace
 
@@ -454,6 +498,16 @@ void nvh_bench_fgj_pan_seq(double deg_per_s, double t_ref, double warm_deg_per_s
     g_fgjPanDegS = deg_per_s; g_fgjPanRef = t_ref; g_fgjWarmDegS = warm_deg_per_s; g_fgjWarm = std::max(0, std::min(8, warm_frames)); g_fgjGapS = gap_s;
 }
 
+void nvh_bench_fgj_walk(double m_per_s, double t_ref) { g_fgjWalkMS = m_per_s; g_fgjWalkRef = t_ref; }
+
+// the depth generator's counters: frames ingested with depth, synthetic outputs that used it (proof that the depth path ran, not just that it exists)
+int nvh_bench_fgj_depth_stats(void* jh, double* out2) {
+    auto* j = (Fgj*)jh;
+    if (!j || !j->fg || !out2) return 0;
+    out2[0] = (double)j->fg->stats.depthFrames; out2[1] = (double)j->fg->stats.depthOutputs;
+    return 1;
+}
+
 void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, int errlen) {
     auto* b = (Bench*)h;
     Settings::Instance().m_use10bitEncoder = true;
@@ -462,6 +516,24 @@ void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, in
     FrameGenConfig c;   // the streamer's defaults: flow at half scale, the fast preset, grid 4
     c.synth = synth == 0 ? 0 : 1;
     if (synth == 2) c.photoScale = 0.f;   // edge-blend: the edge synthesis without the photometric gate
+    if (synth == 3) {                     // edge with the game's depth (the scene's own depth buffer, every frame)
+        c.depth = 1; j->depth = true;
+        auto dev = b->render->GetDevice();
+        ComPtr<ID3DBlob> vb, pb, eb;
+        if (FAILED(D3DCompile(kFgjDepthHlsl, strlen(kFgjDepthHlsl), "fgj_depth", nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vb, &eb)) ||
+            FAILED(D3DCompile(kFgjDepthHlsl, strlen(kFgjDepthHlsl), "fgj_depth", nullptr, nullptr, "PS", "ps_5_0", 0, 0, &pb, &eb))) {
+            if (err && errlen > 0) strncpy_s(err, errlen, eb ? (const char*)eb->GetBufferPointer() : "depth resolve shader", _TRUNCATE);
+            return nullptr;
+        }
+        dev->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &j->zVs);
+        dev->CreatePixelShader(pb->GetBufferPointer(), pb->GetBufferSize(), nullptr, &j->zPs);
+        D3D11_TEXTURE2D_DESC td{}; td.Width = eye_w * 2; td.Height = eye_h; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32_FLOAT;
+        td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        if (!j->zVs || !j->zPs || FAILED(dev->CreateTexture2D(&td, nullptr, &j->z)) || FAILED(dev->CreateRenderTargetView(j->z.Get(), nullptr, &j->zRtv))) {
+            if (err && errlen > 0) strncpy_s(err, errlen, "depth resolve target", _TRUNCATE);
+            return nullptr;
+        }
+    }
     // the streamer's env tuning knobs (nvh_fg_enable reads the same), so the judge measures what a changed knob does
     if (const char* v = getenv("AIRFRAMEXR_FG_MOTION_LIMIT")) c.motionLimit = (float)atof(v);
     if (const char* v = getenv("AIRFRAMEXR_FG_COST_SCALE")) c.costScale = (float)atof(v);
@@ -483,6 +555,12 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
     std::string e;
     j->fg->ResetHistory();
     float q8[8];
+    // a rendered frame into the generator, with its depth for the depth generator (resolved from the target before the next render reuses it)
+    auto ingest = [&](Target* tg, double frameS) {
+        ID3D11Texture2D* z = nullptr;
+        if (j->depth) { FgjResolveDepth(b, j, tg); z = j->z.Get(); }
+        return j->fg->Ingest(tg->resolved.Get(), q8, fov8, err, errlen, frameS, z, j->depth ? kFgjProj2 : nullptr);
+    };
     // pan sequences: the frames before A, each pair's flow computed as the streamer's first synthetic output of it would (the camera turn's
     // measurement of one pair is the next pair's prediction)
     for (int k = g_fgjWarm; k >= 1 && (g_fgjPanDegS != 0 || g_fgjWarmDegS != 0); k--) {
@@ -490,7 +568,7 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
         Target* tg = FgjRender(b, eye_w, eye_h, tw, fov8, ipd, e);
         if (!tg) return fail(e);
         HeadQuatYaw(tw[2], panYaw(tw[0]), q8); memcpy(q8 + 4, q8, 16);
-        if (j->fg->Ingest(tg->resolved.Get(), q8, fov8, err, errlen, 10.0 + tw[0]) < 0) return fail(std::string("ingest: ") + (err ? err : ""));
+        if (ingest(tg, 10.0 + tw[0]) < 0) return fail(std::string("ingest: ") + (err ? err : ""));
         if (j->fg->HasPair()) { float qw[4]; HeadQuatYaw(tw[2], panYaw(tw[0]), qw); if (!j->fg->Render(1, 0.5f, 0, qw, fov8, err, errlen)) return fail("warm render"); }
         b->finish();
     }
@@ -500,7 +578,7 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
         // pan oracle (AIRFRAMEXR_FG_JUDGE_PAN_ORACLE=1): the generator is told the camera's turn as if it were the head's, the upper bound of a
         // global-rotation compensation; otherwise it is told the head only (a stick turn as the streamer sees one)
         HeadQuatYaw(tt[3 * k + 2], panYaw(tt[3 * k]), q8); memcpy(q8 + 4, q8, 16);
-        const int r = j->fg->Ingest(tg->resolved.Get(), q8, fov8, err, errlen, 10.0 + tt[3 * k]);   // the content time: the pan clock (scene time otherwise), offset to stay > 0
+        const int r = ingest(tg, 10.0 + tt[3 * k]);   // the content time: the pan clock (scene time otherwise), offset to stay > 0
         if (r < 0 || (k == 1 && r != 1)) return fail(std::string("ingest: ") + (err ? err : ""));
         // the streamer renders a pair's outputs a lag (~60 ms) after its newer frame arrived: by then the GPU has finished the frame's work
         // (the camera turn's measurement of the pair is ready without waiting); the judge waits for it explicitly

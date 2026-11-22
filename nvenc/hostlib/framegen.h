@@ -51,6 +51,22 @@ struct FrameGenConfig {
                              // the pair's backward runs and would hint them with another direction's flow: compare those variants against a no-hints reference
     int stereo = 0;
     float stereoMargin = 0.004f, stereoMaxCost = 0.05f;          // extra growth of the mask, in texels of the quarter-resolution mask (4 px)
+    // the game's depth (fg-testing branch; lab: AIRFRAMEXR_FG_DEPTH=1 or the judge's edge_depth generator; off by default; edge synthesis only): frames
+    // ingested with their depth (what a game's XR_KHR_composition_layer_depth carries, VDXR's ovrLayerType_EyeFovDepth) let the output pass tell the
+    // surfaces apart where the colours cannot. Each candidate vector is classified by the distance its two ends see: the same surface in both frames
+    // (scored by the colour test, as without depth), shown by the newer frame only (its older end is hidden behind something nearer: newly uncovered),
+    // or by the older frame only (its newer end is hidden: about to be covered). The one-sided kinds cost depthOcc instead of a colour error and are
+    // drawn from their one frame (no blend with the other frame's occluder: no halo); among both-sided candidates within depthMargin of the best colour
+    // error, the nearest surface wins (it is in front at t). Runs where the block vectors disagree (as the colour test does) and where the solved
+    // vector's two ends are not one surface. Judge with the scene's own depth (2026-11-22, docs/FRAME_GENERATION_JUDGE.md): this rule -0.6 dB on the
+    // boundary band, mode 1 +0.02 .. +0.04 dB: not worth forwarding a game's depth for; kept as a lab switch.
+    int depth = 0;
+    float depthTol = 0.06f;      // two distances are one surface within this share of the nearer
+    float depthOcc = 0.08f;      // the colour error a one-sided (occlusion) candidate is charged
+    float depthMargin = 0.03f;   // near-tie of colour errors within which the nearer surface wins
+    // 0: the rule above; 1: the edge synthesis exactly, depth only breaking near-ties at its motion boundaries (the nearer one-surface candidate wins);
+    // 2: 1 + the ghost gate (the older frame is not blended in where its end of the vector is a nearer surface than the newer frame's)
+    int depthMode = 0;
 };
 
 // forward/backward flow consistency (fg-testing branch; AIRFRAMEXR_FG_FB=1; off by default; edge synthesis only): the engine also runs the other way (aligned older
@@ -72,6 +88,7 @@ struct FrameGenStats {
     double camTurnWaitMsSum = 0; float camTurnWaitMsMax = 0;   // the first outputs that waited for their pair's measurement (a turn in progress)
     bool nvofReady = false;
     char nvofInfo[160] = "";   // "api 5.0, grids ..." or the failure reason
+    uint64_t depthFrames = 0, depthOutputs = 0;   // cfg.depth: frames ingested with depth, synthetic outputs whose pair had depth on both frames
 };
 
 class FrameGen {
@@ -86,7 +103,11 @@ public:
     // orientation (x y z w) the frame was rendered with; fov8: per eye {l, r, u, d} tangents (the host's eye FoV). 1 = two frames exist, 0 = one, -1 error.
     // frameS: the frame's content time in seconds (the display time it was rendered for; 0 = unknown): the camera turn predicts a pair's turn as the
     // measured rate times the pair's own time step (under our pacing a game's frames are 2 or 3 display periods apart, and so is its turn)
-    int Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen, double frameS = 0.0);
+    // depthNdc (cfg.depth; nullptr = none): the frame's depth, side by side like src (any size: sampled by uv), R32_FLOAT or R32_TYPELESS, as the game
+    // wrote it; proj2 = { P22, P23 } of its projection (LibOVR ovrTimewarpProjectionDesc, which VDXR fills from the layer's nearZ / farZ): the view
+    // distance along -z = P23 / (d + P22), standard, reversed and infinite-far depth alike
+    int Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen, double frameS = 0.0,
+               ID3D11Texture2D* depthNdc = nullptr, const float* proj2 = nullptr);
     bool computeFlow(int n, char* err, int errlen);
     // Renders the output for a boundary: mode 0 = the rendered frame `age` frames before the newest (0 = the newest) rotated to qOut4, 1 = the
     // frame at fraction t (0..1) between that frame's predecessor and it (midpoint = 0.5), rotated to qOut4. Returns the output texture (owned

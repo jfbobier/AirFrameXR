@@ -199,6 +199,12 @@ void nvh_bench_fgj_pan_seq(double deg_per_s, double t_ref, double warm_deg_per_s
 // the judge generator's camera-turn state after its last case: measured turn deg, prediction deg, agreement, blocks, CPU ms, measurements,
 // corrections, late (not ready at the first output)
 int nvh_bench_fgj_turn(void* fgj, float* out8);
+// the judge's `walk` scenario: the camera moves sideways at m_per_s (scene metres per second; times3[0] is then the walk clock, the scene frozen at t_ref,
+// the head the generator is told unchanged: a stick strafe); 0 = off
+void nvh_bench_fgj_walk(double m_per_s, double t_ref);
+// the depth generator (synth 3): frames ingested with depth, synthetic outputs that used it
+int nvh_bench_fgj_depth_stats(void* fgj, double* out2);
+// synth 3 = edge with the scene's depth handed to the generator with each frame (FrameGenConfig::depth)
 void* nvh_bench_fgj_open(void* bench, int eye_w, int eye_h, int synth, char* err, int errlen);
 // renders frame A (times[0..2]) and B (times[3..5]), generates the midpoint for the head pose of times[6..8] and reads it back (RGBA8); info3 = flow ms, synth ms
 int nvh_bench_fgj_gen(void* bench, void* fgj, int eye_w, int eye_h, const double* times9, const float* fov8, float ipd, uint8_t* rgba, float* info2, char* err, int errlen);

@@ -296,6 +296,159 @@ float3 edgeSynth(float2 pO, float t) {
     float photo = lerp(saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w), 1, conf);
     return lerp(cc, pc, s * photo);
 }
+)"
+// (a third literal: the 16 KB cap again)
+R"(// ---- the game's depth (FrameGenConfig::depth; fg-testing) --------------------------------------------------------------------------------------
+// depP: x 1 = on (both frames of the pair have depth), y one-surface tolerance (share of the nearer distance), z the colour error charged to a one-sided
+// candidate, w the colour-error margin within which the nearer surface wins. PSDepthLin: dTanL / dTanR the l r u d tangents per eye, dProj x P22, y P23,
+// z frame width, w frame height (px)
+// depQ: x the mode (FrameGenConfig::depthMode): 0 the full rule (edgeSynthDepth), 1 edgeSynth with depth as the near-tie breaker only (edgeSynthZ), 2 = 1 + the
+// ghost gate (the older frame is not blended in where its sample is a nearer surface than the newer frame's)
+cbuffer DepthCB : register(b3) { float4 depP; float4 dTanL; float4 dTanR; float4 dProj; float4 depQ; };
+Texture2D<float> zCur : register(t8);     // the newer frame's distance per pixel (radial, scene units): FrameGen's depth history
+Texture2D<float> zPrev : register(t9);    // the older frame's, in its own view
+Texture2D<float> depNdc : register(t10);  // PSDepthLin's input: the game's depth as written
+SamplerState smpPt : register(s1);
+// Ingest: the game's depth -> each pixel's radial distance. Along -z: P23 / (d + P22) (standard, reversed and infinite-far depth alike); radial = that x
+// |(tan x, tan y, 1)|, which a rotation does not change: the older frame's distance compares with the newer one's through the rotation alone
+float PSDepthLin(VSOut i) : SV_Target {
+    const float2 px = i.pos.xy;
+    const float d = depNdc.SampleLevel(smpPt, px / dProj.zw, 0);
+    const bool right = px.x >= 0.5 * dProj.z;
+    const float4 tn = right ? dTanR : dTanL;
+    const float u = (px.x - (right ? 0.5 * dProj.z : 0)) / (0.5 * dProj.z), v = px.y / dProj.w;
+    const float2 tt = float2(lerp(-tn.x, tn.y, u), lerp(tn.z, -tn.w, v));
+    float z = dProj.y / (d + dProj.x);
+    if (!(z > 0) || z > 1e5) z = 1e5;   // the far plane at infinity (reversed depth's 0), garbage
+    return z * sqrt(1 + dot(tt, tt));
+}
+// the nearest pixel of a full-res SBS position, inside this eye's column (no filtering across a depth edge)
+int2 eyePx(float2 px) {
+    const float x0 = eyeRect.x * eyeRect.z, x1 = (eyeRect.x + eyeRect.y) * eyeRect.z - 1;
+    return int2(clamp(floor(px.x), x0, x1), clamp(floor(px.y), 0, eyeRect.w - 1));
+}
+float zNew(float2 px) { return zCur.Load(int3(eyePx(px), 0)); }
+bool oneSurface(float a, float b) { return abs(a - b) <= depP.y * min(a, b); }
+// What the two ends of candidate f (at time t, s = 1 - t) see: 0 one surface in both frames, 1 the newer frame only (the older end is nearer: it hid this
+// surface), 2 the older frame only (the newer end is nearer), 3 the newer end is outside the eye. z: the distance of the surface the candidate shows
+int depthKind(float2 pO, float2 f, float s, out float z) {
+    const float2 b = pO - f * s;
+    z = 1e9;
+    const float2 uvB = pxToUv(b);
+    if (any(uvB < 0) || any(uvB > 1)) return 3;
+    const float zb = zNew(b);
+    float2 uvP;
+    if (!projectTo(rot(pA, pB, pC, dirOf(pxToUv(b + f))), uvP)) { z = zb; return 1; }   // the older view did not cover it
+    const float za = zPrev.Load(int3(eyePx(uvToPx(uvP)), 0));
+    if (oneSurface(za, zb)) { z = zb; return 0; }
+    if (za < zb) { z = zb; return 1; }
+    z = za; return 2;
+}
+// Modes 1 and 2: edgeSynth exactly, with depth in two places only. At a motion boundary (where edgeSynth picks among its candidates by the colour test) a
+// candidate whose two ends are one surface, within depP.w of the best colour error and nearer than the pick, wins (the surface in front at t). Mode 2
+// also gates the blend: where the older frame's end of the vector is a nearer surface than the newer frame's (it hid what the newer frame shows), the
+// older frame is not blended in (no ghost of the occluder).
+float3 edgeSynthZ(float2 pO, float t) {
+    float s = 1 - t;
+    float4 here = filtAt(pO);
+    float4 sol = filtAt(pO - here.xy * s);
+    sol = filtAt(pO - sol.xy * s);
+    float4 cand[7];
+    cand[0] = sol; cand[1] = here;
+    float2 fc = clamp((pO * flowP.xy + 0.5) / flowP.z - 0.5, float2(blocks.xy), float2(blocks.zw));
+    int2 base = int2(floor(fc));
+    [unroll] for (int k = 0; k < 4; k++) cand[2 + k] = filt.Load(int3(min(base + int2(k & 1, k >> 1), blocks.zw), 0));
+    cand[6] = float4(0, 0, here.z, 1);
+    float4 chosen = cand[0];
+    float spread = 0;
+    [unroll] for (int j = 1; j < 6; j++) spread = max(spread, length(cand[j].xy - chosen.xy));
+    [branch] if (spread > 0.5) {
+        float ek[7];
+        float zk[7];
+        int kind[7];
+        int best = 0;
+        [unroll] for (int c = 0; c < 7; c++) {
+            ek[c] = candidateError(pO, cand[c].xy, s) + (c == 0 ? 0.0 : (c == 6 ? 0.03 : 0.01));
+            kind[c] = depthKind(pO, cand[c].xy, s, zk[c]);
+            if (ek[c] < ek[best]) best = c;
+        }
+        const float bestE = ek[best];
+        [unroll] for (int m = 0; m < 7; m++)
+            if (kind[m] == 0 && ek[m] <= bestE + depP.w && (kind[best] != 0 || zk[m] < zk[best] * (1 - depP.y))) best = m;
+        chosen = cand[best];
+    }
+    float shift = length(chosen.xy * s);
+    float conf = saturate((synth.y - shift) / (0.25 * synth.y)) * saturate(1 - max(chosen.z - 0.02, 0) * synth.z) * chosen.w;
+    float2 f = chosen.xy * conf;
+    float2 uvC = pxToUv(pO - f * s);
+    float3 cc = fetchCR(cur, sbs(clamp(uvC, 0, 1)));
+    float3 pc;
+    if (!samplePrev(pxToUv(pO - f * s + f), pc)) return cc;
+    float photo = lerp(saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w), 1, conf);
+    [branch] if (depQ.x > 1.5) {
+        float zf;
+        if (depthKind(pO, f, s, zf) == 1) photo = 0;   // the older end is a nearer surface: it hid this one, do not blend it in
+    }
+    return lerp(cc, pc, s * photo);
+}
+// The edge synthesis with the game's depth (mode 0, the full rule). Where the colour-only one has no doubt (the block vectors agree, the solved vector's two
+// ends are one surface and it was read on the surface it carries) it IS the colour-only one. Elsewhere every candidate is classified by depth: a one-sided
+// one (content that only one frame shows) costs depP.z instead of a colour error and is drawn from its one frame alone; among the both-sided ones near the
+// best error the nearest surface is in front at t.
+float3 edgeSynthDepth(float2 pO, float t) {
+    [branch] if (depQ.x > 0.5) return edgeSynthZ(pO, t);
+    const float s = 1 - t;
+    const float4 here = filtAt(pO);
+    const float2 x2 = pO - filtAt(pO - here.xy * s).xy * s;   // where edgeSynth's second fixed-point step reads its vector
+    const float4 sol = filtAt(x2);
+    float4 cand[7];
+    cand[0] = sol; cand[1] = here;
+    const float2 fc = clamp((pO * flowP.xy + 0.5) / flowP.z - 0.5, float2(blocks.xy), float2(blocks.zw));
+    const int2 base = int2(floor(fc));
+    [unroll] for (int k = 0; k < 4; k++) cand[2 + k] = filt.Load(int3(min(base + int2(k & 1, k >> 1), blocks.zw), 0));
+    cand[6] = float4(0, 0, here.z, 1);
+    float spread = 0;
+    [unroll] for (int j = 1; j < 6; j++) spread = max(spread, length(cand[j].xy - sol.xy));
+    float zs;
+    const int ks = depthKind(pO, sol.xy, s, zs);
+    [branch] if (spread <= 0.5 && ks == 0 && oneSurface(zNew(x2), zNew(pO - sol.xy * s))) return edgeSynth(pO, t);
+    int best = -1;
+    int kind[7];
+    float bestE = 1e9;
+    float zk[7];
+    float ek[7];
+    [unroll] for (int c = 0; c < 7; c++) {
+        kind[c] = depthKind(pO, cand[c].xy, s, zk[c]);
+        const float bias = c == 0 ? 0.0 : (c == 6 ? 0.03 : 0.01);   // edgeSynth's preferences: the solved vector, then the blocks, standing still last
+        ek[c] = kind[c] == 3 ? 1e9 : (kind[c] == 0 ? candidateError(pO, cand[c].xy, s) : depP.z) + bias;
+        if (ek[c] < bestE) { bestE = ek[c]; best = c; }
+    }
+    [branch] if (best < 0) return edgeSynth(pO, t);
+    // the z-test: a both-sided candidate within the margin of the best error and nearer than it is the surface in front at t
+    [unroll] for (int m = 0; m < 7; m++)
+        if (kind[m] == 0 && ek[m] <= bestE + depP.w && zk[m] < zk[best] * (1 - depP.y)) best = m;
+    const float4 chosen = cand[best];
+    const int kd = kind[best];
+    const float shift = length(chosen.xy * s);
+    const float lim = saturate((synth.y - shift) / (0.25 * synth.y));   // the motion limit, as without depth
+    [branch] if (kd != 0) {
+        const float2 f1 = chosen.xy * lim;
+        const float3 cc1 = fetchCR(cur, sbs(clamp(pxToUv(pO - f1 * s), 0, 1)));
+        float3 pc1;
+        [branch] if (kd == 2 && samplePrev(pxToUv(pO - f1 * s + f1), pc1)) return pc1;   // only the older frame shows it
+        return cc1;                                                                      // only the newer frame shows it
+    }
+    // one surface at both ends: edgeSynth's blend for this vector
+    const float conf = lim * saturate(1 - max(chosen.z - 0.02, 0) * synth.z) * chosen.w;
+    const float2 f = chosen.xy * conf;
+    const float3 cc = fetchCR(cur, sbs(clamp(pxToUv(pO - f * s), 0, 1)));
+    float3 pc;
+    if (!samplePrev(pxToUv(pO - f * s + f), pc)) return cc;
+    const float photo = lerp(saturate(1 - max(maxDiff(pc, cc) - 0.03, 0) * synth.w), 1, conf);
+    return lerp(cc, pc, s * photo);
+}
+)"
+R"(
 float4 PSOutBase(VSOut i) {
     float2 uvB;
     float3 dB = rot(oA, oB, oC, dirOf(i.uv));
@@ -305,7 +458,11 @@ float4 PSOutBase(VSOut i) {
         [branch] if (mode.w > 0.5 && mode.x > 0.5 && projectTo(rot(pA, pB, pC, dB), uvA)) return float4(fetchCR(prev, sbs(uvA)), 1);
         return float4(0, 0, 0, 1);
     }
+#ifdef FG_DEPTH   // compiled in only with FrameGenConfig::depth: without it the output pass is the edge synthesis's bytecode, unchanged
+    [branch] if (mode.x > 0.5 && synth.x > 0.5) return float4(depP.x > 0.5 ? edgeSynthDepth(uvToPx(uvB), flowP.w) : edgeSynth(uvToPx(uvB), flowP.w), 1);
+#else
     [branch] if (mode.x > 0.5 && synth.x > 0.5) return float4(edgeSynth(uvToPx(uvB), flowP.w), 1);
+#endif
     float3 curHere = fetchCR(cur, sbs(uvB));
     if (mode.x < 0.5) return float4(curHere, 1);
     float t = flowP.w;
@@ -394,6 +551,7 @@ struct Cb {
 };
 
 struct HudCb { float p0[4], p1[4]; };
+struct DepthCb { float depP[4], tanL[4], tanR[4], proj[4], depQ[4]; };   // HLSL DepthCB (b3)
 
 void qmatRow(const float* q, double m[9]) {   // row-major rotation matrix of a unit quaternion (x y z w)
     double x = q[0], y = q[1], z = q[2], w = q[3];
@@ -473,6 +631,10 @@ struct FrameGen::Impl {
     ID3D11Texture2D* hudRaw[H] = {}; ID3D11ShaderResourceView* hudRawSrv[H] = {}; ID3D11RenderTargetView* hudRawRtv[H] = {}; bool hudValid[H] = {};
     ID3D11Texture2D* hudTmp = nullptr; ID3D11ShaderResourceView* hudTmpSrv = nullptr; ID3D11RenderTargetView* hudTmpRtv = nullptr;
     ID3D11Texture2D* hudOut = nullptr; ID3D11ShaderResourceView* hudOutSrv = nullptr; ID3D11RenderTargetView* hudOutRtv = nullptr;
+    // the game's depth (cfg.depth): per history frame its radial distance per pixel (R32_FLOAT, the frame's size), valid when the frame came with depth;
+    // the constant buffer is bound to every output pass (depP.x = 0: off)
+    ID3D11PixelShader* psDepthLin = nullptr; ID3D11Buffer* cbDepth = nullptr; ID3D11SamplerState* smpPt = nullptr;
+    ID3D11Texture2D* realZ[H] = {}; ID3D11ShaderResourceView* realZSrv[H] = {}; ID3D11RenderTargetView* realZRtv[H] = {}; bool realZValid[H] = {};
     int cur = 0;                      // ring index of the newest rendered frame in real[]
     DXGI_FORMAT fmt = DXGI_FORMAT_UNKNOWN;
     ID3D11RenderTargetView* outRtv = nullptr;
@@ -533,6 +695,8 @@ FrameGen::~FrameGen() {
     for (auto& q : I.qT) rel(q);
     for (int k = 0; k < Impl::H; k++) { rel(I.hudRawSrv[k]); rel(I.hudRawRtv[k]); rel(I.hudRaw[k]); }
     rel(I.hudTmpSrv); rel(I.hudTmpRtv); rel(I.hudTmp); rel(I.hudOutSrv); rel(I.hudOutRtv); rel(I.hudOut); rel(I.psHudMask); rel(I.psHudDil); rel(I.cbHud);
+    for (int k = 0; k < Impl::H; k++) { rel(I.realZSrv[k]); rel(I.realZRtv[k]); rel(I.realZ[k]); }
+    rel(I.psDepthLin); rel(I.cbDepth); rel(I.smpPt);
     delete m_i;
 }
 
@@ -554,13 +718,20 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     if (const char* v = getenv("AIRFRAMEXR_FG_STEREO_MAXCOST")) I.cfg.stereoMaxCost = (float)atof(v);
     if (!cfg.synth) I.cfg.stereo = 0;
     if (!cfg.synth) I.cfg.hud = 0;   // the mask is applied in the output pass of both syntheses, but the lab tests the edge one only
+    if (const char* v = getenv("AIRFRAMEXR_FG_DEPTH")) I.cfg.depth = atoi(v) != 0;
+    if (const char* v = getenv("AIRFRAMEXR_FG_DEPTH_TOL")) I.cfg.depthTol = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_DEPTH_OCC")) I.cfg.depthOcc = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_DEPTH_MARGIN")) I.cfg.depthMargin = (float)atof(v);
+    if (const char* v = getenv("AIRFRAMEXR_FG_DEPTH_MODE")) I.cfg.depthMode = atoi(v);
+    if (!cfg.synth) I.cfg.depth = 0;   // the depth test lives in the edge synthesis
     m_w = w; m_h = h;
     // shaders
     ID3DBlob *vb = nullptr, *vp = nullptr, *p1 = nullptr, *p2 = nullptr, *p5 = nullptr, *p6 = nullptr, *e = nullptr;
+    const D3D_SHADER_MACRO depthDefs[] = { { "FG_DEPTH", "1" }, { nullptr, nullptr } };   // the output pass with the depth path (cfg.depth only)
     if (FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vb, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "VSPoly", "vs_5_0", 0, 0, &vp, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSPrep", "ps_5_0", 0, 0, &p1, &e)) ||
-        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSOut", "ps_5_0", 0, 0, &p2, &e)) ||
+        FAILED(D3DCompile(kShader, strlen(kShader), "framegen", I.cfg.depth ? depthDefs : nullptr, nullptr, "PSOut", "ps_5_0", 0, 0, &p2, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSUnpack", "ps_5_0", 0, 0, &p5, &e)) ||
         FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSFilter", "ps_5_0", 0, 0, &p6, &e))) {
         seterr(err, errlen, e ? (const char*)e->GetBufferPointer() : "frame generation shader compile failed");
@@ -606,6 +777,30 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
         bool ok = I.psHudMask && I.psHudDil && mk(&I.hudTmp, &I.hudTmpSrv, &I.hudTmpRtv) && mk(&I.hudOut, &I.hudOutSrv, &I.hudOutRtv);
         for (int k = 0; k < Impl::H && ok; k++) ok = mk(&I.hudRaw[k], &I.hudRawSrv[k], &I.hudRawRtv[k]);
         if (!ok) { seterr(err, errlen, "HUD mask textures"); return false; }
+    }
+    {   // the depth constants always exist and are bound with the output pass (depP.x = 0: off), like the HUD's
+        D3D11_BUFFER_DESC db{}; db.ByteWidth = sizeof(DepthCb); db.Usage = D3D11_USAGE_DEFAULT; db.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        m_dev->CreateBuffer(&db, nullptr, &I.cbDepth);
+        if (!I.cbDepth) { seterr(err, errlen, "depth constant buffer"); return false; }
+    }
+    if (I.cfg.depth) {
+        ID3DBlob *d1 = nullptr, *de = nullptr;
+        if (FAILED(D3DCompile(kShader, strlen(kShader), "framegen", nullptr, nullptr, "PSDepthLin", "ps_5_0", 0, 0, &d1, &de))) {
+            seterr(err, errlen, de ? (const char*)de->GetBufferPointer() : "depth shader compile failed");
+            if (de) de->Release();
+            return false;
+        }
+        m_dev->CreatePixelShader(d1->GetBufferPointer(), d1->GetBufferSize(), nullptr, &I.psDepthLin);
+        d1->Release();
+        D3D11_SAMPLER_DESC pd{}; pd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT; pd.AddressU = pd.AddressV = pd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; pd.MaxLOD = D3D11_FLOAT32_MAX;
+        m_dev->CreateSamplerState(&pd, &I.smpPt);
+        D3D11_TEXTURE2D_DESC td{}; td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32_FLOAT; td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        bool ok = I.psDepthLin && I.smpPt;
+        for (int k = 0; k < Impl::H && ok; k++)
+            ok = SUCCEEDED(m_dev->CreateTexture2D(&td, nullptr, &I.realZ[k])) && SUCCEEDED(m_dev->CreateShaderResourceView(I.realZ[k], nullptr, &I.realZSrv[k])) &&
+                 SUCCEEDED(m_dev->CreateRenderTargetView(I.realZ[k], nullptr, &I.realZRtv[k]));
+        if (!ok) { seterr(err, errlen, "depth history textures"); return false; }
     }
     D3D11_QUERY_DESC qd{ D3D11_QUERY_TIMESTAMP_DISJOINT, 0 }, qt{ D3D11_QUERY_TIMESTAMP, 0 };
     m_dev->CreateQuery(&qd, &I.qDisjoint);
@@ -733,9 +928,10 @@ bool FrameGen::Init(int w, int h, const FrameGenConfig& cfg, char* err, int errl
     }
     stats.flowW = I.flowW; stats.flowH = I.flowH; stats.blocksW = I.blocksW; stats.blocksH = I.blocksH;
     stats.nvofReady = true;
-    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s%s%s%s%s",
+    snprintf(stats.nvofInfo, sizeof stats.nvofInfo, "NVOF API %d.%d, flow input %dx%d, grid %d (%dx%d vectors), perf %d, frame %dx%d, synthesis %s%s%s%s%s%s%s",
              NV_OF_API_MAJOR_VERSION, NV_OF_API_MINOR_VERSION, I.flowW, I.flowH, I.grid, I.blocksW, I.blocksH, cfg.perfLevel, w, h, !cfg.synth ? "classic" : cfg.photoScale > 0 ? "edge" : "edge-blend",
-             I.cfg.camTurn ? ", camera turn" : "", I.cfg.hud ? ", HUD" : "", I.cfg.fb ? ", fwd/bwd flow" : "", I.cfg.stereo ? ", stereo fusion" : "", I.cfg.noHints ? ", no temporal hints" : "");
+             I.cfg.camTurn ? ", camera turn" : "", I.cfg.hud ? ", HUD" : "", I.cfg.fb ? ", fwd/bwd flow" : "", I.cfg.stereo ? ", stereo fusion" : "", I.cfg.noHints ? ", no temporal hints" : "",
+             I.cfg.depth ? ", depth" : "");
     return true;
 }
 
@@ -763,12 +959,44 @@ bool FrameGen::ensureFrames(ID3D11Texture2D* like, char* err, int errlen) {
     return true;
 }
 
-int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen, double frameS) {
+int FrameGen::Ingest(ID3D11Texture2D* src, const float* qRender8, const float* fov8, char* err, int errlen, double frameS, ID3D11Texture2D* depthNdc, const float* proj2) {
     Impl& I = *m_i;
     if (!stats.nvofReady) { seterr(err, errlen, "frame generation not initialised"); return -1; }
     if (!ensureFrames(src, err, errlen)) return -1;
     const int next = m_have == 0 ? 0 : (I.cur + 1) % Impl::H;
     m_ctx->CopyResource(I.real[next], src);
+    I.realZValid[next] = false;
+    if (I.cfg.depth && I.psDepthLin && depthNdc && proj2) {
+        // the frame's depth -> its radial distance per pixel, into the depth history (a typeless depth texture is read as R32_FLOAT)
+        D3D11_TEXTURE2D_DESC dd{}; depthNdc->GetDesc(&dd);
+        D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
+        sv.Format = (dd.Format == DXGI_FORMAT_R32_TYPELESS || dd.Format == DXGI_FORMAT_D32_FLOAT) ? DXGI_FORMAT_R32_FLOAT : dd.Format;
+        sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; sv.Texture2D.MipLevels = 1;
+        ID3D11ShaderResourceView* dsrv = nullptr;
+        if (dd.SampleDesc.Count == 1 && (dd.BindFlags & D3D11_BIND_SHADER_RESOURCE) && SUCCEEDED(m_dev->CreateShaderResourceView(depthNdc, &sv, &dsrv))) {
+            DepthCb dc{};
+            memcpy(dc.tanL, fov8, sizeof(float) * 4); memcpy(dc.tanR, fov8 + 4, sizeof(float) * 4);
+            dc.proj[0] = proj2[0]; dc.proj[1] = proj2[1]; dc.proj[2] = (float)m_w; dc.proj[3] = (float)m_h;
+            m_ctx->UpdateSubresource(I.cbDepth, 0, nullptr, &dc, 0, 0);
+            ID3D11ShaderResourceView* n8[3] = {};
+            m_ctx->PSSetShaderResources(8, 3, n8);   // the history textures may still be bound as inputs of the last output pass
+            m_ctx->IASetInputLayout(nullptr); m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            m_ctx->VSSetShader(I.vs, nullptr, 0); m_ctx->PSSetShader(I.psDepthLin, nullptr, 0);
+            m_ctx->OMSetBlendState(nullptr, nullptr, 0xffffffff);   // the distance is data (a caller's alpha blend left bound would mix it)
+            m_ctx->OMSetRenderTargets(1, &I.realZRtv[next], nullptr);
+            m_ctx->PSSetConstantBuffers(3, 1, &I.cbDepth);
+            m_ctx->PSSetSamplers(1, 1, &I.smpPt);
+            m_ctx->PSSetShaderResources(10, 1, &dsrv);
+            D3D11_VIEWPORT vp{}; vp.Width = (float)m_w; vp.Height = (float)m_h; vp.MaxDepth = 1.f;
+            m_ctx->RSSetViewports(1, &vp);
+            m_ctx->Draw(3, 0);
+            ID3D11ShaderResourceView* n1 = nullptr; m_ctx->PSSetShaderResources(10, 1, &n1);
+            ID3D11RenderTargetView* nr = nullptr; m_ctx->OMSetRenderTargets(1, &nr, nullptr);
+            dsrv->Release();
+            I.realZValid[next] = true;
+            stats.depthFrames++;
+        }
+    }
     memcpy(I.realQ[next], qRender8, sizeof(float) * 8);
     I.realT[next] = frameS;
     I.camYaw[next] = m_have == 0 ? 0.0 : I.camYaw[I.cur] + I.predictTurn(I.cur, next);   // provisional: computeFlow sets it again with the newest prediction
@@ -1064,6 +1292,18 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         m_ctx->PSSetShaderResources(5, 1, &hs);
         m_ctx->PSSetConstantBuffers(2, 1, &I.cbHud);
     }
+    // the game's depth: on for a synthetic output whose two frames both came with it
+    const bool depthOn = I.cfg.depth && I.cfg.synth && mode == 1 && flowOk && I.realZValid[n] && I.realZValid[prev];
+    {
+        DepthCb dc{};
+        dc.depP[0] = depthOn ? 1.f : 0.f; dc.depP[1] = I.cfg.depthTol; dc.depP[2] = I.cfg.depthOcc; dc.depP[3] = I.cfg.depthMargin;
+        dc.depQ[0] = (float)I.cfg.depthMode;
+        m_ctx->UpdateSubresource(I.cbDepth, 0, nullptr, &dc, 0, 0);
+        m_ctx->PSSetConstantBuffers(3, 1, &I.cbDepth);
+        ID3D11ShaderResourceView* zs[2] = { depthOn ? I.realZSrv[n] : nullptr, depthOn ? I.realZSrv[prev] : nullptr };
+        m_ctx->PSSetShaderResources(8, 2, zs);
+        if (depthOn) stats.depthOutputs++;
+    }
     for (int e = 0; e < 2; e++) {
         Cb c{};
         c.synth[0] = I.cfg.synth ? 1.f : 0.f; c.synth[1] = std::max(1.f, I.cfg.motionLimit * m_w * 0.5f);
@@ -1095,6 +1335,7 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         }
     }
     ID3D11ShaderResourceView* nulls[6] = {}; m_ctx->PSSetShaderResources(0, 6, nulls);
+    m_ctx->PSSetShaderResources(8, 2, nulls);
     ID3D11RenderTargetView* nullRtv = nullptr; m_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
     m_ctx->End(I.qT[3]);
     m_ctx->End(I.qDisjointR);

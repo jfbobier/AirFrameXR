@@ -27,6 +27,8 @@ extern "C" {
     fn nvh_bench_fgj_pan_seq(deg_per_s: f64, t_ref: f64, warm_deg_per_s: f64, warm_frames: i32, gap_s: f64);
     fn nvh_bench_fgj_turn(j: *mut c_void, out8: *mut f32) -> i32;
     fn nvh_bench_fgj_caps(j: *mut c_void, out: *mut c_char, outlen: i32) -> i32;
+    fn nvh_bench_fgj_walk(m_per_s: f64, t_ref: f64);
+    fn nvh_bench_fgj_depth_stats(j: *mut c_void, out2: *mut f64) -> i32;
 }
 
 pub struct Options {
@@ -42,6 +44,10 @@ pub struct Options {
     /// sustained, `panstart` still then turning at A, `panstop` turning then still, `panrev` turning then the other way (the camera-turn
     /// prediction's cases)
     pub pan_warm: i32,
+    /// sideways camera speeds (scene metres per second; the scene is ~3 m wide, the head ~1.9 m from its centre) of the `walk` scenario: the camera
+    /// strafes while the scene and the head the generator is told stay still (a game's stick walk: parallax and newly uncovered background behind every
+    /// near object). Empty = no walk cases
+    pub walks: Vec<f64>,
     pub out: PathBuf,
 }
 
@@ -250,8 +256,10 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
     }
     let mut gpu = [0 as c_char; 128];
     unsafe { nvh_bench_gpu(b, gpu.as_mut_ptr(), 128) };
-    let names = ["classic", "edge", "edge_blend"];
-    let mut gens = [std::ptr::null_mut::<c_void>(); 3];
+    // AIRFRAMEXR_FG_JUDGE_DEPTH=1: a fourth generator, edge with the scene's depth handed over with each frame (synth 3), what a game's depth layer gives
+    let depth = std::env::var("AIRFRAMEXR_FG_JUDGE_DEPTH").map_or(false, |v| v == "1");
+    let names: Vec<&str> = if depth { vec!["classic", "edge", "edge_blend", "edge_depth"] } else { vec!["classic", "edge", "edge_blend"] };
+    let mut gens = vec![std::ptr::null_mut::<c_void>(); names.len()];
     for (k, g) in gens.iter_mut().enumerate() {
         *g = unsafe { nvh_bench_fgj_open(b, ew, eh, k as i32, err.as_mut_ptr(), 256) };
         if g.is_null() {
@@ -262,8 +270,8 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
     let _ = fs::create_dir_all(&opt.out);
     let mut caps = [0 as c_char; 512];
     unsafe { nvh_bench_fgj_caps(gens[1], caps.as_mut_ptr(), 512) };
-    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "fov": fov, "scene": scene,
-        "nvof": cstr(&caps) }));
+    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "walks": opt.walks,
+        "fov": fov, "scene": scene, "nvof": cstr(&caps), "generators": names }));
     // the HUD scenario's panels as a mask (the first rect of each eye is its panel: the area the strokes and the bar sit on)
     let hud: Vec<bool> = {
         let mut r = vec![0i32; 4 * 64];
@@ -277,7 +285,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
     };
     let bytes = w * h * 4;
     let (mut fa, mut fb, mut fg) = (vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]);
-    let mut outs = [vec![0u8; bytes], vec![0u8; bytes], vec![0u8; bytes]];
+    let mut outs = vec![vec![0u8; bytes]; names.len()];
     let mut cases: Vec<Value> = vec![];
     let mut failures = 0;
     for start in 0..opt.starts {
@@ -297,6 +305,9 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     scenarios.push(("panrev", pr));
                 }
             }
+            for &wv in &opt.walks {
+                scenarios.push(("walk", wv));
+            }
             for (scenario, speed) in scenarios {
                 // pan*: the first time is the pan clock (bench.cpp FgjRender), the scene frozen at t0, the head still; (evaluated rate, rate before A)
                 let (rate, warm_rate) = match scenario {
@@ -308,10 +319,11 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                 };
                 let warm = if scenario.starts_with("pan") { opt.pan_warm } else { 0 };
                 unsafe { nvh_bench_fgj_pan_seq(rate, t0, warm_rate, warm, g) };
+                unsafe { nvh_bench_fgj_walk(if scenario == "walk" { speed } else { 0.0 }, t0) };
                 // (scene time, head position time, head orientation time) of A, B and the truth G (the midpoint)
                 let tm = |dt: f64| match scenario {
                     "scene" => [t0 + dt * speed, t0, t0],
-                    "pan" | "panstart" | "panstop" | "panrev" => [t0 + dt, t0, t0],
+                    "pan" | "panstart" | "panstop" | "panrev" | "walk" => [t0 + dt, t0, t0],
                     "head" => [t0, t0 + dt, t0 + dt],
                     _ => [t0 + dt * speed, t0 + dt, t0 + dt],
                 };
@@ -327,9 +339,9 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     failures += 1;
                     continue;
                 }
-                let mut timings = [[0f32; 2]; 3];
+                let mut timings = vec![[0f32; 2]; names.len()];
                 let mut gen_ok = true;
-                for k in 0..3 {
+                for k in 0..names.len() {
                     let r = unsafe {
                         nvh_bench_fgj_gen(b, gens[k], ew, eh, times9.as_ptr(), fov.as_ptr(), ipd, outs[k].as_mut_ptr(), timings[k].as_mut_ptr(), err.as_mut_ptr(), 256)
                     };
@@ -367,7 +379,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                 };
                 let blend: Vec<f32> = la.iter().zip(lb.iter()).map(|(p, q)| 0.5 * (p + q)).collect();
                 let lo: Vec<Vec<f32>> = outs.iter().map(|o| luma(o)).collect();
-                let case = json!({
+                let mut case = json!({
                     "start": start, "t0": t0, "gap_ms": gap, "scenario": scenario, "speed": speed,
                     "moving_frac": truth.moving_frac, "band_frac": truth.band_frac,
                     "hold": score(&truth, &lb), "blend": score(&truth, &blend),
@@ -376,6 +388,14 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     "turn": { "measured_deg": turn[0], "pred_deg": turn[1], "agree": turn[2], "blocks": turn[3], "cpu_ms": turn[4], "measurements": turn[5], "corrections": turn[6], "late": turn[7],
                               "true_pair_deg": rate * g, "true_warm_deg": warm_rate * g },
                 });
+                if depth {
+                    // the depth generator's score, and its counters so far (frames that came with depth, outputs that used it: 0 = the path never ran)
+                    let mut ds = [0f64; 2];
+                    unsafe { nvh_bench_fgj_depth_stats(gens[3], ds.as_mut_ptr()) };
+                    case["edge_depth"] = score(&truth, &lo[3]);
+                    case["synth_ms"]["edge_depth"] = json!(timings[3][1]);
+                    case["depth"] = json!({ "frames": ds[0], "outputs": ds[1] });
+                }
                 event(origin, "fgj_case", case.clone());
                 cases.push(case);
                 if start == 0 && truth.band_frac > 0.0005 {
@@ -384,7 +404,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     let stem = format!("{scenario}_x{}_g{}", speed as i64, gap as i64);
                     write_ppm(&opt.out.join(format!("{stem}_truth.ppm")), &fg, w, x0, y0, cw, ch, None);
                     write_ppm(&opt.out.join(format!("{stem}_hold.ppm")), &fb, w, x0, y0, cw, ch, None);
-                    for k in 0..3 {
+                    for k in 0..names.len() {
                         write_ppm(&opt.out.join(format!("{stem}_{}.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, None);
                         write_ppm(&opt.out.join(format!("{stem}_{}_diff.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, Some((&fg, 4.0)));
                     }
@@ -399,7 +419,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                         let stem = format!("hud_{scenario}_x{}_g{}", speed as i64, gap as i64);
                         write_ppm(&opt.out.join(format!("{stem}_truth.ppm")), &fg, w, x0, y0, cw, ch, None);
                         write_ppm(&opt.out.join(format!("{stem}_hold.ppm")), &fb, w, x0, y0, cw, ch, None);
-                        for k in 0..3 {
+                        for k in 0..names.len() {
                             write_ppm(&opt.out.join(format!("{stem}_{}.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, None);
                             write_ppm(&opt.out.join(format!("{stem}_{}_diff.ppm", names[k])), &outs[k], w, x0, y0, cw, ch, Some((&fg, 4.0)));
                         }
@@ -409,11 +429,12 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
         }
     }
     unsafe { nvh_bench_fgj_pan_seq(0.0, 0.0, 0.0, 0, 0.0) };
+    unsafe { nvh_bench_fgj_walk(0.0, 0.0) };
     for g in gens {
         unsafe { nvh_bench_fgj_close(g) };
     }
     unsafe { nvh_bench_close(b) };
-    let doc = json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "starts": opt.starts, "cases": cases, "failures": failures });
+    let doc = json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "walks": opt.walks, "starts": opt.starts, "cases": cases, "failures": failures });
     let _ = fs::write(opt.out.join("fgj.json"), serde_json::to_string(&doc).unwrap_or_default());
     event(origin, "fgj_done", json!({ "cases": cases.len(), "failures": failures }));
     if failures > 0 { 7 } else { 0 }

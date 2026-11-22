@@ -22,7 +22,9 @@ synthesis (classic, edge, edge-blend). Every result is scored against G on the l
 | references | **hold** (repeat B) and **blend** (50/50 of A and B): a generator that does not beat these is no use |
 
 Scenarios: `scene x1/8/24` (the scene animates at 1x, 8x, 24x speed, the head is still: its own animation is slow, ~3 % of the frame moves), `head` (scene frozen, the
-scripted head moves: rotation reprojection and parallax) and `both x1/8/24`. Several start times along the animation (1.9 s apart). `--eye WxH` (default
+scripted head moves: rotation reprojection and parallax) and `both x1/8/24`; `pan` (below) and `walk` (`--walks 0.5,1,2`: the camera strafes at these scene
+metres per second, the scene and the head the generator is told stay still: a game's stick walk, parallax and newly uncovered background behind every near
+object). Several start times along the animation (1.9 s apart). `--eye WxH` (default
 1032 x 1104 per eye), `--starts N`, `--gaps`, `--speeds`. 63 cases take about 20 s on the 3080 Ti laptop. The report gives the means per scenario and rate and
 the paired differences between the syntheses over all cases with their standard errors and win counts; crops of the moving region (truth, hold, the three
 results and 4x difference images) are written as PNG montages.
@@ -86,6 +88,34 @@ At 33.3 ms (30 fps) the same shape (180 deg/s 18.3 -> 30.0, reverse 17.9 -> 29.5
 scene x1 / x8 unchanged (56.2 / 42.6). The measured turn of a pair equals the truth within 0.01 deg. Lessons on the way: the unpack pass's alpha is
 data, so the generator sets its own blend state (the benchmark scene left alpha blending bound and broke every edge result once); a prediction
 from the last pair's turn alone missed on most real pairs (2 / 3 display periods apart): the rate times the pair's own time step fixed it.
+
+## The game's depth: what perfect depth buys the edge synthesis (2026-11-22, RTX 5090, fg-testing)
+
+The question: is forwarding a game's depth layer (XR_KHR_composition_layer_depth, which VDXR already hands the shim as `ovrLayerType_EyeFovDepth` and
+the shim drops) worth building for frame generation? Measured with the best depth there is, the scene's own depth buffer, before any shim work.
+`--env AIRFRAMEXR_FG_JUDGE_DEPTH=1` adds a fourth generator, `edge_depth`: the edge synthesis with each frame's depth (`FrameGen::Ingest` takes NDC depth
+and LibOVR's P22 / P23, what VDXR fills from the layer's near / far; the multisampled depth is resolved to each pixel's nearest sample). Its rule is
+`AIRFRAMEXR_FG_DEPTH_MODE` (framegen.h `depthMode`; knobs `_TOL` 0.06, `_OCC` 0.08, `_MARGIN` 0.03); the report pairs it with `edge` on the same cases.
+Depth off, the output pass compiles to the same bytecode as before (the depth path sits behind a shader macro).
+
+Paired difference `edge_depth - edge`, PSNR on the boundary band, 60 cases each (3 starts, 2 gaps, head / scene / both / walk 0.5, 1, 2 m/s):
+
+| rule | 1032 x 1104 | owner's stream (1920 x 2368, box 0.92 / 0.58 / 0.90 / 0.77, gaps 24.4 / 33.3 ms) |
+|---|---|---|
+| mode 0: candidates classified by depth (one surface / newer frame only / older frame only), one-sided content drawn from its one frame, the nearer surface wins near-ties, also where the solved vector's ends are not one surface | -0.61 +- 0.08 dB, 6 / 60 wins | -0.65 +- 0.14, 2 / 60 |
+| mode 0 without the one-sided picks (`_OCC=10`) | -0.44 | |
+| mode 0 without the near-tie rule (`_MARGIN=0`) | -0.72 | |
+| mode 0 without either (only the extra places where candidates are re-chosen) | -0.46 | |
+| mode 1: the edge synthesis exactly, depth only breaking near-ties at its own motion boundaries | +0.04 +- 0.01, 40 / 60 (walk +0.04 .. +0.10) | +0.02 +- 0.004, 46 / 60 (walk +0.04 .. +0.08) |
+| mode 2: mode 1 + the ghost gate (the older frame not blended in where its end is a nearer surface) | -0.16 +- 0.06 (animated scene -0.4 .. -1.2) | |
+
+Reading: the edge synthesis's blend of both frames already hides most boundary errors; every rule that replaces it with a hard per-pixel decision
+(re-chosen vectors, one-frame-only drawing, the gate) loses more where it is wrong than it wins where it is right, and adds speckle along the edges
+(the nearest-pixel depth flips at sub-pixel edges). The one part that helps, depth as the near-tie breaker, is worth a few hundredths of a dB: invisible.
+What limits the walk instead is the strip each eye's border uncovers (content neither frame has there, as for a turn) and thin silhouettes at the flow's
+block size (8 px at full resolution); depth is not the missing information for either. Not tried: depth-guided vector fill in wide disocclusions (a
+background vector from beyond the 2 x 2 block neighbourhood) and depth-based extrapolation (no wait for the newer frame), both larger designs.
+Verdict: depth forwarding (shim + IPC + host) is not worth building for frame generation's boundaries; the lab switch stays on fg-testing.
 
 ## What it does not tell
 
