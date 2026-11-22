@@ -33,7 +33,7 @@ struct FrameGenConfig {
     // turned newer frame does not cover is filled from the older one.
     int camTurn = 1;
     // neural fields (fg-neural branch, lab; AIRFRAMEXR_FG_NEURAL=1; off by default; edge synthesis only; neural.h): RIFE 4.4 computes, per pair, the
-    // motion from the output time to each frame and a blend mask, at neuralScale of the eye resolution, with TensorRT for RTX; the output pass
+    // motion from the output time to each frame and a blend mask, at neuralScale of the eye resolution, with our CUDA network (nvenc/rife); the output pass
     // composes the picture from them at full resolution (one sample of each original frame through the rotation chain), keeping still content
     // exact where both frames agree within neuralStill and the fields move less than neuralStillPx full-resolution pixels. The optical flow keeps
     // running for the camera turn's measurement. The fields belong to one output time: each output uses fields of its own time (run early per pair
@@ -41,7 +41,7 @@ struct FrameGenConfig {
     int neural = 0;
     float neuralScale = 0.5f;
     float neuralStill = 0.02f, neuralStillPx = 1.f;
-    wchar_t neuralDir[260] = L"";   // the folder with tensorrt_rtx_1_8.dll, its ONNX parser and rife44_fields.onnx (empty: the host's `neural` folder)
+    wchar_t neuralDir[260] = L"";   // the folder with airframexr_rife.dll and rife44.afxw (empty: the host's `neural` folder)
 };
 
 struct FrameGenStats {

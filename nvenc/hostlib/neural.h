@@ -1,10 +1,10 @@
-// Neural frame generation fields (fg-neural branch, lab): RIFE 4.4's motion and blend fields for a pair of rendered frames, computed by
-// TensorRT for RTX at a fraction of the eye resolution (docs/FRAME_GENERATION_JUDGE.md "A neural interpolator offline"). The streamer's own output
-// pass composes the picture at full resolution from these fields (framegen.cpp neuralSynth): one sample of each original frame.
+// Neural frame generation fields (fg-neural branch, lab): RIFE 4.4's motion and blend fields for a pair of rendered frames, computed by our own
+// CUDA network (nvenc/rife, docs/NEURAL_RIFE_CUDA.md) at a fraction of the eye resolution. The streamer's own output pass composes the picture at
+// full resolution from these fields (framegen.cpp neuralSynth): one sample of each original frame.
 //
-// Everything is loaded at run time from one folder (default: the host's `neural` folder): tensorrt_rtx_1_8.dll and tensorrt_onnxparser_rtx_1_8.dll
-// (NVIDIA TensorRT for RTX, its own license), rife44_fields.onnx (harness/rife/export_fields_onnx.py: vs-rife's RIFE 4.4 model code and weights,
-// MIT); CUDA through the driver's nvcuda.dll. Without them the streamer works as before (the edge synthesis).
+// Loaded at run time from one folder (default: the host's `neural` folder): airframexr_rife.dll (nvenc/rife/build.ps1; CUTLASS compiled in,
+// BSD-3-Clause) and rife44.afxw (RIFE 4.4's weights, MIT, nvenc/rife/export_weights.py); CUDA through the driver's nvcuda.dll. Without them the
+// streamer works as before (the edge synthesis).
 //
 // Data path per pair: a D3D11 compute pass writes both frames at the network's resolution (the older one turned into the newer one's camera, as
 // the optical flow sees them) into buffers CUDA maps; the engine writes the fields into buffers the output pass reads. Map / unmap order the D3D11

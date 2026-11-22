@@ -1,5 +1,5 @@
 {
-  "description": "fg-neural: the streamer path with the neural fields (AIRFRAMEXR_FG_NEURAL=1; TensorRT for RTX + rife44_fields.onnx in the host's neural folder): generation on, the probe app under GPU load, a yaw head motion; the run must stream like e2e_fg_latency (synth share, stream fps, believable latency) with the fields composing the outputs (host log: 'neural fields' at enable, 'frame generation neural' perf lines with runs > 0 and 0 failures).",
+  "description": "fg-neural: the streamer path with the neural fields (AIRFRAMEXR_FG_NEURAL=1; airframexr_rife.dll + rife44.afxw in the host's neural folder): generation on, the probe app under GPU load, a yaw head motion; the run must stream like e2e_fg_latency (synth share, stream fps, believable latency) with the fields composing the outputs (host log: 'neural fields' at enable, 'frame generation neural' perf lines with runs > 0 and 0 failures).",
   "topology": {
     "host": "builder",
     "client": "builder",

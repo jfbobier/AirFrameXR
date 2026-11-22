@@ -183,9 +183,8 @@ void FFR::RenderTo(ID3D11Texture2D* target) {\n\
         .include(nvenc.join("../ovrshim"))
         .include(nvenc.join("../third_party/stb"))
         .include(nvenc.join("../third_party/nvof")) // NVIDIA Optical Flow API headers (MIT notice); the engine is in the driver (nvofapi64.dll)
-        // TensorRT for RTX headers (Apache-2.0) + our stand-in for the CUDA runtime header they include: neural.cpp loads the library at run time
-        .include(nvenc.join("../third_party/trtrtx/include"))
-        .include(nvenc.join("../third_party/trtrtx/cudastub"))
+        // the neural network's C interface (neural.cpp loads airframexr_rife.dll at run time; the DLL is built apart: nvenc/rife/build.ps1)
+        .include(nvenc.join("rife"))
         .file(nvenc.join("hostlib/nvh.cpp"))
         .file(nvenc.join("hostlib/framegen.cpp"))
         .file(nvenc.join("hostlib/neural.cpp"))
@@ -215,7 +214,6 @@ void FFR::RenderTo(ID3D11Texture2D* target) {\n\
     println!("cargo:rerun-if-changed={}", nvenc.display());
     println!("cargo:rerun-if-changed={}", nvenc.join("../third_party/stb").display());
     println!("cargo:rerun-if-changed={}", nvenc.join("../third_party/nvof").display());
-    println!("cargo:rerun-if-changed={}", nvenc.join("../third_party/trtrtx").display());
 }
 
 /// Maps the SDK 12.0 bit-depth fields used by ALVR's encoder files to the SDK 12.2 ones (exact-text replacements; the build

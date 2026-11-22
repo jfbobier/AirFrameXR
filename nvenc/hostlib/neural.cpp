@@ -11,8 +11,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include "NvInfer.h"
-#include "NvOnnxParser.h"
+#include "airframexr_rife.h"   // the network's C interface (nvenc/rife); the DLL is loaded at run time
 
 namespace {
 // ---- the CUDA driver API, loaded from the driver's nvcuda.dll (no CUDA toolkit, no runtime DLL) ---------------------------------------------------
@@ -64,11 +63,21 @@ struct Cu {
     }
 };
 
-class TrtLog : public nvinfer1::ILogger {
-public:
-    std::string last;
-    void log(Severity s, nvinfer1::AsciiChar const* msg) noexcept override {
-        if (s <= Severity::kWARNING) { last = msg ? msg : ""; OutputDebugStringA("[neural] "); OutputDebugStringA(last.c_str()); OutputDebugStringA("\n"); }
+// airframexr_rife.dll (nvenc/rife, docs/NEURAL_RIFE_CUDA.md), by name: the streamer runs without it
+struct Rife {
+    HMODULE dll = nullptr;
+    int(__cdecl* Abi)() = nullptr;
+    AfxRife*(__cdecl* Create)(const wchar_t*, int, int, int, char*, int) = nullptr;
+    int(__cdecl* Run)(AfxRife*, uint64_t, uint64_t, const float*, uint64_t, uint64_t, void*, char*, int) = nullptr;
+    const char*(__cdecl* Info)(AfxRife*) = nullptr;
+    void(__cdecl* Destroy)(AfxRife*) = nullptr;
+    bool load(const std::wstring& dir, std::string& why) {
+        dll = LoadLibraryExW((dir + L"\\airframexr_rife.dll").c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        if (!dll) { why = "airframexr_rife.dll not found in the neural folder"; return false; }
+        auto get = [&](auto& fn, const char* name) { fn = reinterpret_cast<std::remove_reference_t<decltype(fn)>>(GetProcAddress(dll, name)); if (!fn) why = std::string("airframexr_rife.dll lacks ") + name; return fn != nullptr; };
+        if (!(get(Abi, "afx_rife_abi") && get(Create, "afx_rife_create") && get(Run, "afx_rife_run") && get(Info, "afx_rife_info") && get(Destroy, "afx_rife_destroy"))) return false;
+        if (Abi() != AFX_RIFE_ABI) { why = "airframexr_rife.dll has interface " + std::to_string(Abi()) + ", this streamer needs " + std::to_string(AFX_RIFE_ABI); return false; }
+        return true;
     }
 };
 
@@ -112,14 +121,12 @@ void seterr(char* err, int n, const std::string& s) { if (err && n > 0) { strncp
 struct NeuralFields::Impl {
     Cu cu;
     CUdevice dev = 0; CUcontext ctx = nullptr; CUstream stream = nullptr; CUevent ev[2] = {}; bool timed = false;
-    HMODULE trt = nullptr, onnx = nullptr;
-    TrtLog log;
-    nvinfer1::IRuntime* runtime = nullptr; nvinfer1::ICudaEngine* engine = nullptr; nvinfer1::IExecutionContext* exec = nullptr;
-    // D3D11 side: inputs (img0 = older, img1 = newer), the time, the outputs
-    ID3D11Buffer* buf[5] = {};   // 0 img0, 1 img1, 2 t, 3 flow, 4 mask
+    Rife rife; AfxRife* net = nullptr;
+    // D3D11 side: inputs (img0 = older, img1 = newer), the outputs
+    ID3D11Buffer* buf[4] = {};   // 0 img0, 1 img1, 2 flow, 3 mask
     ID3D11UnorderedAccessView* uav[2] = {};
     ID3D11ShaderResourceView* srvFlow = nullptr; ID3D11ShaderResourceView* srvMask = nullptr;
-    CUgraphicsResource res[5] = {};
+    CUgraphicsResource res[4] = {};
     ID3D11ComputeShader* cs = nullptr; ID3D11Buffer* cb = nullptr; ID3D11SamplerState* smp = nullptr;
     struct CtxScope {   // the CUDA context current on this thread for the scope
         Cu& cu; bool on;
@@ -135,7 +142,7 @@ NeuralFields::~NeuralFields() {
     if (I.ctx) {
         Impl::CtxScope sc(I.cu, I.ctx);
         if (I.stream) I.cu.StreamSynchronize(I.stream);
-        delete I.exec; delete I.engine; delete I.runtime;
+        if (I.net) { I.rife.Destroy(I.net); I.net = nullptr; }
         for (auto& r : I.res) if (r) { I.cu.GraphicsUnregisterResource(r); r = nullptr; }
         for (auto& e : I.ev) if (e) I.cu.EventDestroy(e);
         if (I.stream) I.cu.StreamDestroy(I.stream);
@@ -144,7 +151,7 @@ NeuralFields::~NeuralFields() {
     for (auto& b : I.buf) rel(b);
     for (auto& u : I.uav) rel(u);
     rel(I.srvFlow); rel(I.srvMask); rel(I.cs); rel(I.cb); rel(I.smp);
-    // the TensorRT DLLs stay loaded: unloading them while the CUDA context lives (other users of the primary context) is not worth the risk
+    // the network's DLL stays loaded (its CUDA runtime is linked in; unloading it while the primary context lives is not worth the risk)
     delete m;
 }
 
@@ -173,60 +180,19 @@ bool NeuralFields::Init(int eyeW, int eyeH, float scale, const wchar_t* dir, cha
     if ((r = I.cu.StreamCreate(&I.stream, 1 /* CU_STREAM_NON_BLOCKING */))) return fail(I.cu.err("cuStreamCreate", r));
     for (auto& e : I.ev) if ((r = I.cu.EventCreate(&e, 0))) return fail(I.cu.err("cuEventCreate", r));
 
-    // TensorRT for RTX and its ONNX parser, from the folder (the parser finds the library beside it)
+    // the network: our CUDA DLL and RIFE 4.4's weights, from the folder
     const std::wstring d(dir ? dir : L"");
-    I.trt = LoadLibraryExW((d + L"\\tensorrt_rtx_1_8.dll").c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    if (!I.trt) return fail("tensorrt_rtx_1_8.dll not found in the neural folder");
-    I.onnx = LoadLibraryExW((d + L"\\tensorrt_onnxparser_rtx_1_8.dll").c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    if (!I.onnx) return fail("tensorrt_onnxparser_rtx_1_8.dll not found in the neural folder");
-    auto mkBuilder = (void* (*)(void*, int32_t))GetProcAddress(I.trt, "createInferBuilder_INTERNAL");
-    auto mkRuntime = (void* (*)(void*, int32_t))GetProcAddress(I.trt, "createInferRuntime_INTERNAL");
-    auto mkParser = (void* (*)(void*, void*, int))GetProcAddress(I.onnx, "createNvOnnxParser_INTERNAL");
-    if (!mkBuilder || !mkRuntime || !mkParser) return fail("TensorRT-RTX entry points missing (wrong DLL version?)");
-    std::vector<char> model;
-    {
-        FILE* f = _wfopen((d + L"\\rife44_fields.onnx").c_str(), L"rb");
-        if (!f) return fail("rife44_fields.onnx not found in the neural folder");
-        fseek(f, 0, SEEK_END); model.resize((size_t)ftell(f)); fseek(f, 0, SEEK_SET);
-        const size_t got = fread(model.data(), 1, model.size(), f); fclose(f);
-        if (got != model.size() || model.empty()) return fail("rife44_fields.onnx unreadable");
-    }
+    if (!I.rife.load(d, why)) return fail(why);
     LARGE_INTEGER f0, f1, fq; QueryPerformanceCounter(&f0); QueryPerformanceFrequency(&fq);
-    {   // ahead-of-time build for this size (TensorRT-RTX: GPU-agnostic, fast); the kernels are compiled for this GPU at first use
-        auto* builder = static_cast<nvinfer1::IBuilder*>(mkBuilder(&I.log, NV_TENSORRT_VERSION));
-        if (!builder) return fail("createInferBuilder failed: " + I.log.last);
-        nvinfer1::INetworkDefinition* net = builder->createNetworkV2(0);
-        auto* parser = net ? static_cast<nvonnxparser::IParser*>(mkParser(net, &I.log, NV_ONNX_PARSER_VERSION)) : nullptr;
-        bool ok = parser && parser->parse(model.data(), model.size());
-        std::string perr = !parser ? "no parser" : ok ? "" : (parser->getNbErrors() > 0 ? parser->getError(0)->desc() : I.log.last);
-        nvinfer1::IHostMemory* plan = nullptr;
-        if (ok) {
-            nvinfer1::IBuilderConfig* cfg = builder->createBuilderConfig();
-            nvinfer1::IOptimizationProfile* prof = builder->createOptimizationProfile();
-            const nvinfer1::Dims4 img(2, 3, PadH, PadW), tt(2, 1, 1, 1);
-            for (const char* name : { "img0", "img1" })
-                for (auto sel : { nvinfer1::OptProfileSelector::kMIN, nvinfer1::OptProfileSelector::kOPT, nvinfer1::OptProfileSelector::kMAX }) prof->setDimensions(name, sel, img);
-            for (auto sel : { nvinfer1::OptProfileSelector::kMIN, nvinfer1::OptProfileSelector::kOPT, nvinfer1::OptProfileSelector::kMAX }) prof->setDimensions("t", sel, tt);
-            cfg->addOptimizationProfile(prof);
-            plan = builder->buildSerializedNetwork(*net, *cfg);
-            delete cfg;
-            if (!plan) perr = "engine build failed: " + I.log.last;
-        }
-        delete parser; delete net; delete builder;
-        if (!plan) return fail(perr);
-        I.runtime = static_cast<nvinfer1::IRuntime*>(mkRuntime(&I.log, NV_TENSORRT_VERSION));
-        I.engine = I.runtime ? I.runtime->deserializeCudaEngine(plan->data(), plan->size()) : nullptr;
-        delete plan;
-        I.exec = I.engine ? I.engine->createExecutionContext() : nullptr;
-        if (!I.exec) return fail("engine load failed: " + I.log.last);
-        if (!I.exec->setInputShape("img0", nvinfer1::Dims4(2, 3, PadH, PadW)) || !I.exec->setInputShape("img1", nvinfer1::Dims4(2, 3, PadH, PadW)) ||
-            !I.exec->setInputShape("t", nvinfer1::Dims4(2, 1, 1, 1)))
-            return fail("input shapes rejected: " + I.log.last);
+    {
+        char e2[300] = "";
+        I.net = I.rife.Create((d + L"\\rife44.afxw").c_str(), 2, PadW, PadH, e2, sizeof e2);
+        if (!I.net) return fail(e2);
     }
     // D3D11 buffers shared with CUDA: structured floats
     const UINT img = 2u * 3u * PadW * PadH, fl = 2u * 4u * PadW * PadH, mk = 2u * PadW * PadH;
-    const UINT counts[5] = { img, img, 2u, fl, mk };
-    for (int k = 0; k < 5; k++) {
+    const UINT counts[4] = { img, img, fl, mk };
+    for (int k = 0; k < 4; k++) {
         D3D11_BUFFER_DESC bd{}; bd.ByteWidth = counts[k] * 4u; bd.Usage = D3D11_USAGE_DEFAULT; bd.StructureByteStride = 4; bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
         bd.BindFlags = D3D11_BIND_SHADER_RESOURCE | (k < 2 ? D3D11_BIND_UNORDERED_ACCESS : 0);
         if (FAILED(m_dev->CreateBuffer(&bd, nullptr, &I.buf[k]))) return fail("D3D11 buffer");
@@ -238,8 +204,8 @@ bool NeuralFields::Init(int eyeW, int eyeH, float scale, const wchar_t* dir, cha
     }
     {
         D3D11_SHADER_RESOURCE_VIEW_DESC sd{}; sd.Format = DXGI_FORMAT_UNKNOWN; sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        sd.Buffer.NumElements = fl; if (FAILED(m_dev->CreateShaderResourceView(I.buf[3], &sd, &I.srvFlow))) return fail("D3D11 SRV");
-        sd.Buffer.NumElements = mk; if (FAILED(m_dev->CreateShaderResourceView(I.buf[4], &sd, &I.srvMask))) return fail("D3D11 SRV");
+        sd.Buffer.NumElements = fl; if (FAILED(m_dev->CreateShaderResourceView(I.buf[2], &sd, &I.srvFlow))) return fail("D3D11 SRV");
+        sd.Buffer.NumElements = mk; if (FAILED(m_dev->CreateShaderResourceView(I.buf[3], &sd, &I.srvMask))) return fail("D3D11 SRV");
     }
     {
         ID3DBlob *b = nullptr, *e = nullptr;
@@ -253,27 +219,26 @@ bool NeuralFields::Init(int eyeW, int eyeH, float scale, const wchar_t* dir, cha
         m_dev->CreateSamplerState(&sd, &I.smp);
         if (!I.cs || !I.cb || !I.smp) return fail("prep pipeline objects");
     }
-    {   // first run now (the JIT compile for this GPU), not on the first generated frame
-        CUdeviceptr p[5] = {}; size_t sz = 0;
-        if ((r = I.cu.GraphicsMapResources(5, I.res, I.stream))) return fail(I.cu.err("cuGraphicsMapResources", r));
-        for (int k = 0; k < 5; k++) I.cu.GraphicsResourceGetMappedPointer(&p[k], &sz, I.res[k]);
-        const char* names[5] = { "img0", "img1", "t", "flow", "mask" };
-        bool ok = true;
-        for (int k = 0; k < 5; k++) ok = ok && I.exec->setTensorAddress(names[k], (void*)p[k]);
-        ok = ok && I.exec->enqueueV3((cudaStream_t)I.stream);
-        I.cu.GraphicsUnmapResources(5, I.res, I.stream);
+    {   // first run now (CUDA loads the kernels at their first launch), not on the first generated frame
+        CUdeviceptr p[4] = {}; size_t sz = 0;
+        if ((r = I.cu.GraphicsMapResources(4, I.res, I.stream))) return fail(I.cu.err("cuGraphicsMapResources", r));
+        for (int k = 0; k < 4; k++) I.cu.GraphicsResourceGetMappedPointer(&p[k], &sz, I.res[k]);
+        const float tt[2] = { 0.5f, 0.5f };
+        char e2[300] = "";
+        const int rr = I.rife.Run(I.net, p[0], p[1], tt, p[2], p[3], I.stream, e2, sizeof e2);
+        I.cu.GraphicsUnmapResources(4, I.res, I.stream);
         r = I.cu.StreamSynchronize(I.stream);
-        if (!ok || r) return fail("first inference failed: " + (r ? I.cu.err("cuStreamSynchronize", r) : I.log.last));
+        if (rr || r) return fail(std::string("first run failed: ") + (rr ? e2 : I.cu.err("cuStreamSynchronize", r)));
     }
     QueryPerformanceCounter(&f1);
-    snprintf(stats.info, sizeof stats.info, "neural RIFE 4.4 fields %dx%d per eye (TensorRT-RTX %d.%d.%d, ready in %.1f s)", NetW, NetH, NV_TENSORRT_MAJOR, NV_TENSORRT_MINOR,
-             NV_TENSORRT_PATCH, (double)(f1.QuadPart - f0.QuadPart) / (double)fq.QuadPart);
+    snprintf(stats.info, sizeof stats.info, "neural %s (fields %dx%d per eye, ready in %.2f s)", I.rife.Info(I.net), NetW, NetH,
+             (double)(f1.QuadPart - f0.QuadPart) / (double)fq.QuadPart);
     return true;
 }
 
 bool NeuralFields::Run(ID3D11ShaderResourceView* prev, ID3D11ShaderResourceView* cur, const float rot[2][12], const float* tan8, float t, char* err, int errlen) {
     Impl& I = *m;
-    if (!I.exec) { seterr(err, errlen, "neural fields not initialised"); return false; }
+    if (!I.net) { seterr(err, errlen, "neural fields not initialised"); return false; }
     LARGE_INTEGER c0, c1, cq; QueryPerformanceCounter(&c0); QueryPerformanceFrequency(&cq);
     // 1. both frames at the network's resolution (D3D11)
     PrepCb pc{};
@@ -283,8 +248,6 @@ bool NeuralFields::Run(ID3D11ShaderResourceView* prev, ID3D11ShaderResourceView*
     }
     pc.dims[0] = (float)NetW; pc.dims[1] = (float)NetH; pc.dims[2] = (float)PadW; pc.dims[3] = (float)PadH;
     m_ctx->UpdateSubresource(I.cb, 0, nullptr, &pc, 0, 0);
-    const float tt[2] = { t, t };
-    m_ctx->UpdateSubresource(I.buf[2], 0, nullptr, tt, 0, 0);
     ID3D11ShaderResourceView* srvs[2] = { cur, prev };
     m_ctx->CSSetShader(I.cs, nullptr, 0);
     m_ctx->CSSetConstantBuffers(0, 1, &I.cb);
@@ -299,20 +262,19 @@ bool NeuralFields::Run(ID3D11ShaderResourceView* prev, ID3D11ShaderResourceView*
     m_ctx->Flush();   // the prep work reaches the GPU before CUDA's map waits on it
     // 2. the network (CUDA): map orders it after the D3D11 work above, unmap orders the D3D11 work after it
     Impl::CtxScope sc(I.cu, I.ctx);
-    CUresult r = I.cu.GraphicsMapResources(5, I.res, I.stream);
+    CUresult r = I.cu.GraphicsMapResources(4, I.res, I.stream);
     if (r) { stats.failures++; seterr(err, errlen, I.cu.err("cuGraphicsMapResources", r)); return false; }
-    CUdeviceptr p[5] = {}; size_t sz = 0;
-    for (int k = 0; k < 5; k++) I.cu.GraphicsResourceGetMappedPointer(&p[k], &sz, I.res[k]);
-    const char* names[5] = { "img0", "img1", "t", "flow", "mask" };
-    bool ok = true;
-    for (int k = 0; k < 5; k++) ok = ok && I.exec->setTensorAddress(names[k], (void*)p[k]);
+    CUdeviceptr p[4] = {}; size_t sz = 0;
+    for (int k = 0; k < 4; k++) I.cu.GraphicsResourceGetMappedPointer(&p[k], &sz, I.res[k]);
+    const float tt[2] = { t, t };
+    char e2[300] = "";
     I.cu.EventRecord(I.ev[0], I.stream);
-    ok = ok && I.exec->enqueueV3((cudaStream_t)I.stream);
+    const int rr = I.rife.Run(I.net, p[0], p[1], tt, p[2], p[3], I.stream, e2, sizeof e2);
     I.cu.EventRecord(I.ev[1], I.stream);
-    I.cu.GraphicsUnmapResources(5, I.res, I.stream);
+    I.cu.GraphicsUnmapResources(4, I.res, I.stream);
     QueryPerformanceCounter(&c1);
     stats.lastCpuMs = (float)((c1.QuadPart - c0.QuadPart) * 1000.0 / (double)cq.QuadPart); stats.cpuMsSum += stats.lastCpuMs;
-    if (!ok) { stats.failures++; seterr(err, errlen, "enqueue failed: " + I.log.last); return false; }
+    if (rr) { stats.failures++; seterr(err, errlen, std::string("network run failed: ") + e2); return false; }
     stats.runs++;
     I.timed = true;
     return true;

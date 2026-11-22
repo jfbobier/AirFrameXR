@@ -180,22 +180,25 @@ The game's DLSS motion vectors were an alternative motion source from 0.4 to 0.6
 
 ## Neural fields (lab, branch fg-neural, 2026-11-22)
 
-`AIRFRAMEXR_FG_NEURAL=1` (env, off by default; edge synthesis only): RIFE 4.4 (vs-rife's model code and weights, MIT) computes, per pair, the motion
-from the output time to each frame and a blend mask, at `AIRFRAMEXR_FG_NEURAL_SCALE` (0.5) of the eye resolution, with NVIDIA TensorRT for RTX
-(nvenc/hostlib/neural.cpp); the output pass composes the picture at full resolution from them (one sample of each original frame through the same
-rotation chain as the flow; the older frame fills outside the newer view), and keeps still content exact where both frames agree within
-`AIRFRAMEXR_FG_NEURAL_STILL` (0.02) and the fields move less than `AIRFRAMEXR_FG_NEURAL_STILL_PX` (1 px). The optical flow keeps running (the camera
-turn's measurement). Files, loaded at run time from the host's `neural` folder (or `AIRFRAMEXR_FG_NEURAL_DIR`): `tensorrt_rtx_1_8.dll` (198 MB) and
-`tensorrt_onnxparser_rtx_1_8.dll` (TensorRT for RTX 1.8.1, NVIDIA's license), `rife44_fields.onnx` (9.9 MB, `harness/rife/export_fields_onnx.py`);
-CUDA through the driver's nvcuda.dll. Missing files or a failure leave the edge synthesis in charge; the host log says which ("neural fields WxH per
-eye" or "neural requested but off: ..." at enable, a "frame generation neural" perf line per window).
+`AIRFRAMEXR_FG_NEURAL=1` (env, off by default; edge synthesis only): RIFE 4.4 (Practical-RIFE's weights, vs-rife's model code, MIT) computes, per
+pair, the motion from the output time to each frame and a blend mask, at `AIRFRAMEXR_FG_NEURAL_SCALE` (0.5) of the eye resolution, with our own
+CUDA network (`airframexr_rife.dll`, docs/NEURAL_RIFE_CUDA.md: the recipe, build, checks); the output pass composes the picture at full resolution
+from them (one sample of each original frame through the same rotation chain as the flow; the older frame fills outside the newer view), and
+keeps still content exact where both frames agree within `AIRFRAMEXR_FG_NEURAL_STILL` (0.02) and the fields move less than
+`AIRFRAMEXR_FG_NEURAL_STILL_PX` (1 px). Each output uses fields of its own time (run early per pair at the 1/2 rate, per output at the others).
+The optical flow keeps running (the camera turn's measurement). Files, loaded at run time from the host's `neural` folder (or
+`AIRFRAMEXR_FG_NEURAL_DIR`): `airframexr_rife.dll` (747 KB, CUTLASS compiled in, BSD-3-Clause) and `rife44.afxw` (10.5 MB of weights), built by
+`nvenc/rife/build.ps1`; CUDA through the driver's nvcuda.dll; RTX 30 or newer. Missing files or a failure leave the edge synthesis in charge;
+the host log says which ("neural fields WxH per eye" or "neural requested but off: ..." at enable, a "frame generation neural" perf line per
+window).
 
 Measured: judge (5090, docs/FRAME_GENERATION_JUDGE.md), neural minus edge, boundary band PSNR: +0.91 dB over 60 cases at 1032 x 1104 (stick walks
-+2.3 .. +3.9), +1.04 dB at the owner's 1920 x 2368 (walks +2.5 .. +3.1, head +0.3 .. +0.5, scene x8 -0.3 .. -1.1); fewer double images, a little
-softer. Cost at the owner's size: the network 1.97 ms GPU per pair (CUDA, on the shader cores the game uses), the compose pass 0.14 ms (edge 0.19),
-CPU 0.5 ms per run. Streamer path `e2e_fg_neural` (1760 x 1600, probe at 45 fps): 1 790 runs, every generated output composed, 0 failures, 90 fps
-held, 1.46 ms per run. Not yet: a game (the GPU cost under a GPU-bound game is the open question), the 2/3 and uncapped rates (an output whose time
-is more than 0.2 from 0.5 runs the network again).
++2.3 .. +3.9; t = 1/3: +0.89), +1.04 dB at the owner's 1920 x 2368 (walks +2.5 .. +3.1, head +0.3 .. +0.5, scene x8 -0.3 .. -1.1); fewer double
+images, a little softer. Cost at the owner's size: the network 1.77 ms GPU per run (CUDA, on the shader cores the game uses), the compose pass
+0.14 ms (edge 0.19), CPU 0.3 ms per run. Streamer path `e2e_fg_neural` (1760 x 1600, probe at 45 fps) and `e2e_fg_neural_23` (the 2/3 rate):
+every generated output composed from the fields, 0 failures, 90 fps held, 1.24 ms per run. Field (TensorRT backend, same model, same fields,
+2026-11-22, Hellraiser, Gears): better than the edge synthesis; x1.5 / x3 shook until each output got fields of its own time (fixed). Not yet: a
+game on the CUDA backend; the GPU cost under a GPU-bound game.
 
 ## With a mask profile: only what the lens shows is generated (1.4-foundation, 2026-11-20)
 

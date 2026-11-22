@@ -260,7 +260,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
     let mut gpu = [0 as c_char; 128];
     unsafe { nvh_bench_gpu(b, gpu.as_mut_ptr(), 128) };
     // AIRFRAMEXR_FG_JUDGE_NEURAL=1: a fourth generator, `neural` (synth 4: the edge synthesis's output pass composing RIFE 4.4's fields, neural.h;
-    // the host's neural folder must hold TensorRT for RTX and rife44_fields.onnx)
+    // the host's neural folder must hold airframexr_rife.dll and rife44.afxw: nvenc/rife/build.ps1)
     let neural = std::env::var("AIRFRAMEXR_FG_JUDGE_NEURAL").map_or(false, |v| v == "1");
     let names: Vec<&str> = if neural { vec!["classic", "edge", "edge_blend", "neural"] } else { vec!["classic", "edge", "edge_blend"] };
     let codes = [0, 1, 2, 4];

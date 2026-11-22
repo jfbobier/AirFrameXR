@@ -141,19 +141,10 @@ Three stages, each fairer to how a FrameGen backend would run:
 | fields at half resolution | +0.93 +- 0.19 (40 / 60) | +0.97 (40 / 60) | +0.08 | -0.13 .. +0.44 | +0.76 / +0.80 / -0.20 | +0.89 / +2.71 / +3.68 |
 | fields at quarter resolution (no gate) | -0.42 | -1.54 | -0.51 | | | -3.37 / +0.07 / +1.78 |
 
-Cost of the network alone, both eyes batched, FP16, the owner's stream (1920 x 2368 per eye), `trt_time.py` / `trtrtx_time.py`:
-
-| network at | PyTorch eager | TensorRT 11.5 | TensorRT for RTX 1.7.1 |
-|---|---|---|---|
-| full resolution | 21.0 ms | 9.2 ms | 9.9 ms |
-| half (960 x 1184 per eye) | (12.7 ms at scale 0.5) | 2.25 ms | 2.22 ms |
-| quarter (480 x 608) | (11.5 ms at scale 0.25) | 0.83 ms | 0.73 ms |
-
-TensorRT matches PyTorch on a real frame pair (mean 0.03 levels, max 2.8). Runtime weight: TensorRT 11.5's `nvinfer_11.dll` is 394 MB, building
-engines needs 160-650 MB of builder resources per GPU generation, engines are per GPU and per resolution (27-57 MB, 25-48 s to build); TensorRT for
-RTX ships `tensorrt_rtx_1_7.dll` 219 MB + a 2.2 MB ONNX parser, builds a GPU-agnostic engine in 0.3 s (24 MB at half resolution) that compiles on
-the user's GPU at first use, CUDA 13. The network runs on the shader cores the game needs (the optical-flow engine does not): 2.2 ms per pair is
-about 10 % of the GPU at 45 pairs per second.
+Cost of the network alone, both eyes batched, the owner's stream (1920 x 2368 per eye): PyTorch eager (FP16, `rife_time.py`) 21.0 ms at full
+resolution, 12.7 ms with IFNet's own 0.5 scale; our CUDA network (docs/NEURAL_RIFE_CUDA.md) 1.82 ms at half (960 x 1184 per eye). The network runs on the shader
+cores the game needs (the optical-flow engine does not): 1.8 ms per pair is about 8 % of the GPU at 45 pairs per second. (An earlier backend
+ran the model under TensorRT for RTX; its timings are not published here, its licence forbids it.)
 
 ## What it does not tell
 

@@ -322,11 +322,6 @@ def build(what):
             lib.b_run("if not exist third_party\\nvof mkdir third_party\\nvof")
             for hdr in sorted((lib.ROOT / "third_party/nvof").glob("*.h")):
                 lib.b_put(hdr, f"third_party/nvof/{hdr.name}")
-            # TensorRT for RTX headers (Apache-2.0) and the CUDA runtime header stand-in (neural.cpp, the neural frame generation backend)
-            for sub in ("include", "cudastub"):
-                lib.b_run(f"if not exist third_party\\trtrtx\\{sub} mkdir third_party\\trtrtx\\{sub}")
-                for hdr in sorted((lib.ROOT / "third_party/trtrtx" / sub).glob("*.h")):
-                    lib.b_put(hdr, f"third_party/trtrtx/{sub}/{hdr.name}")
             vab = lib.ROOT / "build/bench/littlest_tokyo.vab"
             if vab.exists():
                 lib.b_run("if not exist bench mkdir bench")
