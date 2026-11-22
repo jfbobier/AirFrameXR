@@ -36,7 +36,8 @@ struct FrameGenConfig {
     // motion from the output time to each frame and a blend mask, at neuralScale of the eye resolution, with TensorRT for RTX; the output pass
     // composes the picture from them at full resolution (one sample of each original frame through the rotation chain), keeping still content
     // exact where both frames agree within neuralStill and the fields move less than neuralStillPx full-resolution pixels. The optical flow keeps
-    // running for the camera turn's measurement. Judge (2026-11-22, offline): +0.93 dB on motion boundaries at 0.5, stick walks +2.7 / +3.7 dB.
+    // running for the camera turn's measurement. The fields belong to one output time: each output uses fields of its own time (run early per pair
+    // when the outputs keep one time, the 1/2 rate; else per output). Judge (2026-11-22): +0.91 dB on motion boundaries at 0.5, stick walks +2.3 .. +3.9.
     int neural = 0;
     float neuralScale = 0.5f;
     float neuralStill = 0.02f, neuralStillPx = 1.f;

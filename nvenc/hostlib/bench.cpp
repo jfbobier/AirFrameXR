@@ -463,6 +463,10 @@ void nvh_bench_fgj_pan_seq(double deg_per_s, double t_ref, double warm_deg_per_s
 
 void nvh_bench_fgj_walk(double m_per_s, double t_ref) { g_fgjWalkMS = m_per_s; g_fgjWalkRef = t_ref; }
 
+// the output time the generators render (nvh_bench_fgj_gen: the truth G must be rendered at that fraction of the pair gap); 0.5 = the midpoint
+double g_fgjT = 0.5;
+void nvh_bench_fgj_set_t(double t) { g_fgjT = t > 0.0 && t < 1.0 ? t : 0.5; }
+
 void* nvh_bench_fgj_open(void* h, int eye_w, int eye_h, int synth, char* err, int errlen) {
     auto* b = (Bench*)h;
     Settings::Instance().m_use10bitEncoder = true;
@@ -523,7 +527,7 @@ int nvh_bench_fgj_gen(void* h, void* jh, int eye_w, int eye_h, const double* tt,
         }
     }
     float q4[4]; HeadQuatYaw(tt[8], panYaw(tt[6]), q4);
-    ID3D11Texture2D* tex = j->fg->Render(1, 0.5f, 0, q4, fov8, err, errlen);
+    ID3D11Texture2D* tex = j->fg->Render(1, (float)g_fgjT, 0, q4, fov8, err, errlen);
     if (!tex) return fail(std::string("render: ") + (err ? err : ""));
     b->finish();
     j->fg->CollectTimings();

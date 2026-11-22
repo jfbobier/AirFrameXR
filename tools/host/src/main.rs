@@ -153,6 +153,7 @@ struct Args {
     fgj_pans: Vec<f64>,
     fgj_pan_warm: i32,
     fgj_walks: Vec<f64>,
+    fgj_t: f64,
     bench_scene: Option<PathBuf>,
     /// simrig (cargo feature): run the pipeline without a headset against the synthetic client, results in this directory
     #[cfg(feature = "simrig")]
@@ -245,6 +246,7 @@ fn parse_args() -> Result<Args, String> {
         fgj_pans: vec![],
         fgj_pan_warm: 0,
         fgj_walks: vec![],
+        fgj_t: 0.5,
         bq_preview: None,
         bq_ref_scale: 1,
         bench_scene: None,
@@ -318,6 +320,7 @@ fn parse_args() -> Result<Args, String> {
             "--fgj-speeds" => a.fgj_speeds = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
             "--fgj-pan-warm" => a.fgj_pan_warm = v()?.parse().map_err(|e| format!("{e}"))?,
             "--fgj-pans" => a.fgj_pans = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
+            "--fgj-t" => a.fgj_t = v()?.parse().map_err(|e| format!("{e}"))?,
             "--fgj-walks" => a.fgj_walks = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
             "--fgj-gaps" => a.fgj_gaps = v()?.split(',').map(|x| x.trim().parse::<f64>().map_err(|e| format!("{e}"))).collect::<Result<_, _>>()?,
             #[cfg(feature = "simrig")]
@@ -1418,7 +1421,7 @@ fn run_fg_judge(origin: Instant, args: &Args, _layout: &alvr_filesystem::Layout,
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .map(|d| if d.file_name().map(|n| n.eq_ignore_ascii_case("bin")).unwrap_or(false) { d.parent().map(|p| p.to_path_buf()).unwrap_or(d) } else { d });
     let scene = args.bench_scene.clone().unwrap_or_else(|| install.map(|i| i.dir.clone()).or(exe_dir).unwrap_or_default().join("bench").join("littlest_tokyo.vab"));
-    let opt = fg_judge::Options { eye: args.fgj_eye, starts: args.fgj_starts, gaps_ms: args.fgj_gaps.clone(), speeds: args.fgj_speeds.clone(), pans: args.fgj_pans.clone(), pan_warm: args.fgj_pan_warm, walks: args.fgj_walks.clone(), out };
+    let opt = fg_judge::Options { eye: args.fgj_eye, starts: args.fgj_starts, gaps_ms: args.fgj_gaps.clone(), speeds: args.fgj_speeds.clone(), pans: args.fgj_pans.clone(), pan_warm: args.fgj_pan_warm, walks: args.fgj_walks.clone(), t: args.fgj_t, out };
     fg_judge::run(origin, &scene, fov, ipd, &opt, &|o, n, d| event(o, n, d))
 }
 

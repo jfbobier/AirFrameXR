@@ -31,7 +31,7 @@ def arg(name, default):
 
 def run_on_builder():
     eye, starts, gaps, speeds = arg("--eye", "1032x1104"), arg("--starts", "6"), arg("--gaps", "22.2,33.3,44.4"), arg("--speeds", "1,8,24")
-    pans, views, env, warm, walks = arg("--pans", ""), arg("--views", ""), arg("--env", ""), arg("--pan-warm", "0"), arg("--walks", "")
+    pans, views, env, warm, walks, tt = arg("--pans", ""), arg("--views", ""), arg("--env", ""), arg("--pan-warm", "0"), arg("--walks", ""), arg("--t", "")
     rid = "fgj_" + datetime.now(timezone.utc).strftime("%H%M%S")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     outdir = lib.RESULTS / f"{stamp}_fg_judge"
@@ -42,7 +42,7 @@ def run_on_builder():
         lib.b_run(f"if not exist runs\\{rid}\\cfg mkdir runs\\{rid}\\cfg")
         lib.b_put(Path(views), f"runs/{rid}/cfg/airframexr_views.json")
     r = subprocess.run(["bash", str(lib.BUILDER), "ps", "tools/remote/stage22_fg_judge.ps1", "-Label", rid, "-Eye", eye, "-Starts", starts, "-Gaps", gaps.replace(",", "+"), "-Speeds", speeds.replace(",", "+")]
-                       + (["-Pans", pans.replace(",", "+"), "-PanWarm", warm] if pans else []) + (["-Walks", walks.replace(",", "+")] if walks else [])
+                       + (["-Pans", pans.replace(",", "+"), "-PanWarm", warm] if pans else []) + (["-Walks", walks.replace(",", "+")] if walks else []) + (["-OutT", tt] if tt else [])
                        + (["-FgEnv", env] if env else []),
                        cwd=lib.ROOT, capture_output=True, timeout=1800)
     o = r.stdout.decode(errors="replace").replace("\x00", "")

@@ -28,6 +28,7 @@ extern "C" {
     fn nvh_bench_fgj_turn(j: *mut c_void, out8: *mut f32) -> i32;
     fn nvh_bench_fgj_caps(j: *mut c_void, out: *mut c_char, outlen: i32) -> i32;
     fn nvh_bench_fgj_walk(m_per_s: f64, t_ref: f64);
+    fn nvh_bench_fgj_set_t(t: f64);
     fn nvh_bench_fgj_neural(j: *mut c_void, out6: *mut f64, info: *mut c_char, infolen: i32) -> i32;
 }
 
@@ -48,6 +49,8 @@ pub struct Options {
     /// strafes while the scene and the head the generator is told stay still (a game's stick walk: parallax and newly uncovered background behind every
     /// near object). Empty = no walk cases
     pub walks: Vec<f64>,
+    /// the output time as a fraction of the pair gap (0.5 = the midpoint, the 1/2 rate's; 1/3 and 2/3 are what the 2/3 and 1/3 rates show)
+    pub t: f64,
     pub out: PathBuf,
 }
 
@@ -270,6 +273,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
         }
     }
     let _ = fs::create_dir_all(&opt.out);
+    unsafe { nvh_bench_fgj_set_t(opt.t) };
     let dump: Option<PathBuf> = std::env::var("AIRFRAMEXR_FG_JUDGE_DUMP").ok().filter(|v| !v.is_empty()).map(PathBuf::from);
     if let Some(d) = &dump {
         let _ = fs::create_dir_all(d);
@@ -277,7 +281,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
     }
     let mut caps = [0 as c_char; 512];
     unsafe { nvh_bench_fgj_caps(gens[1], caps.as_mut_ptr(), 512) };
-    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "walks": opt.walks,
+    event(origin, "fgj_start", json!({ "gpu": cstr(&gpu), "eye": [ew, eh], "starts": opt.starts, "gaps_ms": opt.gaps_ms, "speeds": opt.speeds, "pans": opt.pans, "walks": opt.walks, "t": opt.t,
         "fov": fov, "scene": scene, "nvof": cstr(&caps), "generators": names }));
     // the HUD scenario's panels as a mask (the first rect of each eye is its panel: the area the strokes and the bar sit on)
     let hud: Vec<bool> = {
@@ -334,7 +338,7 @@ pub fn run(origin: Instant, scene: &Path, fov: [f32; 8], ipd: f32, opt: &Options
                     "head" => [t0, t0 + dt, t0 + dt],
                     _ => [t0 + dt * speed, t0 + dt, t0 + dt],
                 };
-                let (ta, tb, tg) = (tm(0.0), tm(g), tm(g / 2.0));
+                let (ta, tb, tg) = (tm(0.0), tm(g), tm(g * opt.t));
                 let times9: Vec<f64> = ta.iter().chain(tb.iter()).chain(tg.iter()).copied().collect();
                 let ok_frames = unsafe {
                     nvh_bench_fgj_frame(b, ew, eh, ta.as_ptr(), fov.as_ptr(), ipd, fa.as_mut_ptr(), std::ptr::null_mut()) > 0

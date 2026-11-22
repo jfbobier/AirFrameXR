@@ -455,6 +455,9 @@ struct FrameGen::Impl {
     // neural fields (cfg.neural): the network, and which pair and time its fields belong to (one set: the pair being shown)
     std::unique_ptr<NeuralFields> neural;
     int neuralPair = -1; float neuralT = -1.f;
+    // the times of the two latest synthetic outputs: equal (the 1/2 rate's 0.5) = a steady pattern, worth running a new pair's fields early, at
+    // that time; different (2/3 rate: about 2/3 then 1/3; 1/3 rate: 1/3 and 2/3 within each pair) = each output runs its own
+    float lastSynthT[2] = { 0.5f, 0.5f };
 };
 
 FrameGen::FrameGen(ID3D11Device* dev, ID3D11DeviceContext* ctx) : m_i(new Impl()), m_dev(dev), m_ctx(ctx) {}
@@ -784,7 +787,10 @@ bool FrameGen::computeFlow(int n, char* err, int errlen) {
     m_ctx->End(I.qT[1]);
     m_ctx->End(I.qDisjoint);
     I.flowTimed = true;
-    if (I.neural) neuralPass(n, 0.5f);   // with the pair's (possibly corrected) camera turn, as the flow just saw it
+    // the fields early (with the pair's possibly corrected camera turn, as the flow just saw it), only when the outputs keep one time: RIFE's fields
+    // belong to one output time, and an output shown with another time's fields puts the content at the wrong place (field 2026-11-22: the 2/3
+    // rate shook on menu text with the 0.5 fields reused for its 1/3 and 2/3 outputs)
+    if (I.neural && std::fabs(I.lastSynthT[0] - I.lastSynthT[1]) <= 0.01f) neuralPass(n, I.lastSynthT[0]);
     if (st != NV_OF_SUCCESS) {
         stats.flowErrors++;
         char le[MIN_ERROR_STRING_SIZE + 1] = ""; uint32_t ls = MIN_ERROR_STRING_SIZE; I.api.nvOFGetLastError(I.of, le, &ls);
@@ -854,11 +860,13 @@ ID3D11Texture2D* FrameGen::Render(int mode, float t, int age, const float* qOut4
         char e2[160];
         computeFlow(n, e2, sizeof e2);   // a failure leaves the zero flow bound below: the classic synthesis's crossfade fallback
     }
-    // neural fields: this pair's, at this output's time (the pair's flow ran them at 0.5; a time further than 0.2 from it runs them again)
+    // neural fields: this pair's, at this output's time
     bool neuralOk = false;
     if (I.neural && mode == 1 && havePair) {
-        neuralOk = (I.neuralPair == n && std::fabs(t - I.neuralT) <= 0.2f) || neuralPass(n, t);
+        // this output's own time: fields of another time are run again (a 0.01 tolerance: the steady 1/2 rate reuses its early run)
+        neuralOk = (I.neuralPair == n && std::fabs(t - I.neuralT) <= 0.01f) || neuralPass(n, t);
         if (neuralOk) stats.neuralOutputs++;
+        I.lastSynthT[1] = I.lastSynthT[0]; I.lastSynthT[0] = t;
     }
     // camera turn: the output view is the stamp's head orientation turned by the camera yaw at t (the newer frame's for a rendered output)
     const double yawOut = !I.cfg.camTurn ? 0.0 : (mode == 1 && havePair) ? I.camYaw[prev] + (double)t * (I.camYaw[n] - I.camYaw[prev]) : I.camYaw[n];
