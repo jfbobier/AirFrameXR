@@ -2326,8 +2326,11 @@ def analyse_stamp_truth(sc, outdir):
     rows), and the yaw the mock client sent for the frame's timestamp (frames.csv `yaw`, else `yaw_near`). A constant offset between the
     app's and the client's yaw is removed (the median, from the frames before MODSIM_CHANGE_AT when there are enough). A frame is a mismatch
     when |error - offset| > checks.identity.stamp.max_rad (default 0.002 rad: one frame of the rows' head motion is about 0.009). Pictures
-    with an id below the CHANGE row's are "before" (the control), from it on and the extra pictures (ids from 40000) "after". None without
-    the inputs (an xr_modsim without DRAW rows, no recorded stream)."""
+    with an id below the CHANGE row's are "before" (the control), from it on and the extra pictures (ids from 40000) "after". The frames of
+    the stream's first checks.identity.stamp.warmup_s (default 2 s, from the first decoded one) are left out: the ALVR server turns the
+    tracking space once when the client's PlayspaceSync arrives (server_core connection.rs, rotation_recentering_mode Yaw), so the
+    pictures that reach the client before it carry another offset (2026-11-23 Phase B arm 0: 25 frames 0 mrad, then 174 mrad for the
+    whole run; whether any picture beats it is a race). None without the inputs (an xr_modsim without DRAW rows, no recorded stream)."""
     import csv
     outdir = Path(outdir)
     f, cl, fc = outdir / "modsim.csv", outdir / "client.hevc", outdir / "frames.csv"
@@ -2347,15 +2350,24 @@ def analyse_stamp_truth(sc, outdir):
             pass
     if not draws:
         return None
-    thr = ((sc.get("checks", {}).get("identity") or {}).get("stamp") or {}).get("max_rad", 0.002)
+    scfg = ((sc.get("checks", {}).get("identity") or {}).get("stamp") or {})
+    thr, warm_ns = scfg.get("max_rad", 0.002), int(1e9 * scfg.get("warmup_s", 2.0))
     cfg = negotiated_cfg(outdir)
     vals, _ = read_stamps_at(cl, stamp_points(cfg, 64, bool(cfg.get("enable_foveated_encoding"))))
     rows = list(csv.DictReader(open(fc)))
     shift = len(rows) - len(vals)   # frames the decoder could not output are at the start
-    errs, unknown, no_yaw = [], 0, 0
+    errs, unknown, no_yaw, warm, t0 = [], 0, 0, 0, None
     for i, v in enumerate(vals):
         ci = i + shift
         if not 0 <= ci < len(rows) or v in (0, 65535):   # green / idle frames read all-ones, an empty first frame reads 0
+            continue
+        try:
+            ts = int(rows[ci].get("ts_ns") or 0)
+        except ValueError:
+            ts = 0
+        t0 = ts if t0 is None else t0
+        if ts and ts - t0 < warm_ns:   # before the server's PlayspaceSync recenter (see above)
+            warm += 1
             continue
         y = rows[ci].get("yaw") or rows[ci].get("yaw_near")
         if not y:
@@ -2369,7 +2381,7 @@ def analyse_stamp_truth(sc, outdir):
     shown = {v for v in vals if v in extra}   # the extra pictures any received frame showed (a dropped one never reaches the client)
     if not errs:
         return {"frames": 0, "unknown_ids": unknown, "no_client_yaw": no_yaw, "decoded": len(vals), "received": len(rows),
-                "extra_drawn": len(extra), "extra_shown": len(shown)}
+                "warmup_skipped": warm, "extra_drawn": len(extra), "extra_shown": len(shown)}
     base = [e for late, e in errs if not late]
     ref = base if len(base) >= 20 else [e for _, e in errs]
     off = sorted(ref)[len(ref) // 2]
@@ -2382,7 +2394,7 @@ def analyse_stamp_truth(sc, outdir):
         return {"frames": len(r), "mismatches": mis, "share": round(mis / len(r), 4), "p50_mrad": round(1000 * r[len(r) // 2], 2),
                 "p95_mrad": round(1000 * r[int(0.95 * (len(r) - 1))], 2), "max_mrad": round(1000 * r[-1], 2)}
     return {"frames": len(errs), "decoded": len(vals), "received": len(rows), "unknown_ids": unknown, "no_client_yaw": no_yaw,
-            "offset_rad": round(off, 5), "threshold_rad": thr, "change_id": change_id, "before": part(False), "after": part(True),
+            "warmup_skipped": warm, "offset_rad": round(off, 5), "threshold_rad": thr, "change_id": change_id, "before": part(False), "after": part(True),
             "extra_drawn": len(extra), "extra_shown": len(shown)}
 
 

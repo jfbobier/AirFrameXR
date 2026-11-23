@@ -12,7 +12,7 @@ timing code 1.5 removed (x1.5 = `two_thirds` and `uncapped`: the content-clock p
 two-thirds hold, about 250-300 lines of `tools/host/src/pipeline.rs`) stays at tag `v1.4.2` (`e5ee359`; `main` `cf8bc70` with its hotfix) if
 this work needs it again.
 
-Status: plan, nothing run. **Base: 1.5** (`1.5-simplify` `7d0d55e`, merged 2026-11-23; 1.4.2 on 2026-11-22, 1.4.1 on 2026-11-21, before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
+Status: **Phase A done 2026-11-23 (Decision A = go, section 4); Phase B built (`685a07d`, arms 0-2 behind one lab switch) and its matrix run the same day (section 6): arm 0 = Phase A on every row, arm 1 fixes the new-picture rows, arm 2 also the shaking row; the regressions and the timing A/B follow, then Decision B.** **Base: 1.5** (`1.5-simplify` `7d0d55e`, merged 2026-11-23; 1.4.2 on 2026-11-22, 1.4.1 on 2026-11-21, before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
 from `1.4` at `6c73d0b` with `universal-openxr-2` merged in (`469ea14`: the VDXR fork pipeline and the shim's texture-array views from `vdxr-fork`, the
 fork lab, the identity lab). The merge was clean (`build.ps1`, `harness/lib.py`, `harness/run.py` and two docs auto-merged; `tools/wsl/check_cpp.sh` OK);
 nothing is built on a builder yet. `vdxr-fork` and `universal-openxr-2` stay as they were (from 1.3.11); new work goes on `universal-1.4`. Builder roots: the
@@ -409,6 +409,45 @@ Window 10-40 s, drop windows under 85 % fresh frames. An arm "changes" a metric 
 compatibility mode on within 2 fps of OFXR with it off; pairing counters 0; the mod's numbers (`e2e_modsim_fix_on`: >= 95 % of duplicates dropped,
 second wait free, >= 40 real fps) unchanged. It ships as a small change inside the compatibility tick (no effect when the mode is off) in a point release;
 the owner decides.
+
+**As built (`685a07d`, owner: go).** One switch, three arms: host `--lab-identity N`, stdin `lab_identity N`, the lab's `AIRFRAMEXR_LAB_IDENTITY=N`
+(IPC 39 `labIdentity`; no GUI, no config file). 0 = 1.5 exactly; 1 = U1 as above; 2 = U1, and a submit whose slices released nothing leaves with the
+previous frame's timestamp, whatever its poses (section 5b's "a picture keeps its own stamp"). Note: arm 2 re-stamps with the mode off too, so it is not
+confined to the compatibility tick. The id check is not built: `ovr_EndFrame` does not carry the frame index (OVRNull `api.cpp:393-400`), so the
+counter is "submits that took several facts" next to "submits without facts". Stats line: `identity: arm, submits, same poses with an image released,
+new poses with nothing released, re-stamped, without runtime facts, with several`.
+
+**Phase B result, the matrix (2026-11-23, 3080 Ti, same root and flavour as Phase A, shim + host lib + host built together at `685a07d`; 13 rows per arm,
+36 min each; results arm 0 `harness/results/20261123T0948*`-`T1022*`, arm 1 `T1024*`-`T1058*`, arm 2 `T1101*`-`T1136*`):**
+
+| row | arm 0 (= 1.5) | arm 1 (U1) | arm 2 (U1 + own stamp) |
+|---|---|---|---|
+| `e2e_modsim_ofxr_fix_off` | PASS | PASS | PASS |
+| `e2e_modsim_ofxr_fix_on` | PASS (860 seen / 821 dropped) | FAIL by design: nothing dropped (see below) | FAIL by design, same |
+| `id_normal_game` | PASS | PASS | PASS |
+| `id_mod_dup`, `_array`, `_msaa` | PASS x3, 860/821 | PASS x3, 860/821 | PASS x3, 860/821 (the 39 kept duplicates re-stamped) |
+| `id_mod_dup_quad` | FAIL: 50 % of the submits (a new quad) dropped | **PASS**: 0 dropped | **PASS** |
+| `id_mod_dup_rerelease` | PASS | FAIL `identity_true_dups_dropped` (the known blind spot) | FAIL, same |
+| `id_ofxr_mimic` | FAIL: the generated pictures dropped | **PASS** (one submit took 2 facts) | **PASS** |
+| `id_pause` | PASS, 901 seen / 0 dropped | PASS | PASS (901 re-stamped, one submit took 2 facts) |
+| `id_mod_late_stale` (mode off) | FAIL: stamp error 0.0 / 5.6 % (p95 2.9, max 16.8 mrad) | FAIL: 0.0 / 5.3 % | **PASS: 0.0 / 0.0 %** (1350 re-stamped) |
+| `id_mod_late_samepose_new` | FAIL: 0 of 50 new pictures shown | **PASS**: 50 of 50 | **PASS**: 50 of 50 |
+| `id_mod_late_oneeye` (report) | PASS, 8.2 % after | PASS, 7.6 % | PASS, 8.0 % (as expected: no arm fixes one eye) |
+
+- **Arm 0 = Phase A**: the same decision on every row and the same counts (truth, VDXR / app no-release, seen / dropped, free waits); the stamp error
+  after the change 5.6 % against 5.1 %. The switch's default changes nothing.
+- **Pairing**: submits without facts 0 on every row of every arm; one submit with two facts in all (arm 1 `id_ofxr_mimic`, arm 2 `id_pause`), so
+  arrival order holds.
+- **`e2e_modsim_ofxr_fix_on` asserts 1.5's drop** (`fix_on_dups_dropped`, `fix_on_free_waits`, `fix_on_second_wait_free`, <= 100 duplicate
+  timestamps). Under U1 OFXR's second submit released a new image: it is kept, both pictures go out with one timestamp (1457, as with the mode off), the
+  app runs as with the mode off: real frames 44.22 / 44.25 fps (arm 1 / 2) with the mode on against 44.21 / 44.24 off, so Decision B's "OFXR with the
+  mode on within 2 fps of off" holds (arm 0: 48.8 on, 44.2 off, because the generated pictures are dropped). If an arm ships, this row's checks become
+  "as `_fix_off`".
+- **A measurement fix on the way**: the first arm 0 table failed the three late rows "before the change" (2.5-5.1 %, up to 455 mrad). Cause: the ALVR
+  server turns the tracking space once when the client's `PlayspaceSync` arrives (`server_core/src/connection.rs:1178`, `rotation_recentering_mode`
+  Yaw); pictures that reach the client before it carry another offset (25 frames at 0, then 174 mrad for the whole run). Phase A never had a picture
+  that early; arm 0 did: a race, not the arm. `analyse_stamp_truth` now leaves out the stream's first `checks.identity.stamp.warmup_s` (2 s, the late
+  shapes start near 11 s); re-evaluated, every saved run (Phase A, the arm 2 smoke run, arms 0-2) reads 0.0 % before the change.
 
 ## 7. U2: cut
 
