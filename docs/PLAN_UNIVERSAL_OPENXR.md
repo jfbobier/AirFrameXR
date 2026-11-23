@@ -533,6 +533,41 @@ baseline, under its conditions, every window on one side of submit 12,000). Arm 
 every 3 windows of 10 s, balanced order, start windows dropped. Read: ticks fresh %, `same_ts`, latency, the `identity:` line, and the user's blind call
 on two or three head motions. One night.
 
+## 9b. Noted for later: the just-in-time game release (owner, 2026-11-23)
+
+The owner asked to test it again, now that the chain is understood end to end. It is not a gate of this plan. It is an engine step of its own, after
+Decision B, and the owner's go comes first.
+
+- **What it is.** The shim holds the game's release until the previous frame is predicted done on the GPU, minus the app's CPU time and a 1 ms lead.
+  - The prediction is the last GPU completion plus the frames pending times the GPU time per frame.
+  - The app's CPU time is release to submit.
+  - The frame the game starts then reaches the GPU as the GPU frees up: one frame in flight, and no idle GPU. With the GPU idle, nothing is held.
+  - Built 2026-10-16 (`ac8004a`, IPC v28 `appPacingJit`); removed 2026-10-17 (`e7a8d25`, IPC v30).
+- **Why it held nothing then.** It recorded 0 holds in 8,000+ releases. The cause was in VDXR, not the shim: its running start woke the game's
+  `xrWaitFrame` a period minus 2 ms after the previous release, whatever the shim did (`docs/PERFORMANCE_FINDINGS.md`, 2026-10-23).
+  - VDXR patch 5 turned that early wake off, and the fork keeps it off: `session.cpp:525` at `46deebb`.
+  - `ovrshim_vdxr_running_start` = 1 restores the early wake for an A/B.
+- **What there is to win.** The rig on 2026-10-23 measured a GPU-bound game with a 21 ms GPU frame: it still took 42 ms from frame start to GPU done.
+  - The cause is the shim's rule "at most one frame still completing on the GPU at the release", which amounts to double buffering.
+  - The game reads its pose at `xrWaitFrame`, so a hold that works takes up to one GPU frame off pose-to-photon latency.
+  - It does nothing for a game that holds the rate.
+  - The risk is a misjudged hold: an idle GPU, which means lost fps.
+- **What is new since October.**
+  - The fork reports each frame's real start and end to the shim (`xrWaitFrame` return, `xrBeginFrame`, `xrEndFrame`), printed in the
+    `app frames (VDXR)` line. On the 2026-11-23 OFXR off rows, `xrWaitFrame` return to `xrEndFrame` was 22.3 ms p50, the probe's 22 ms of CPU.
+  - So whether the game started when the shim released it can be checked on every frame.
+  - The lab reads new frames/s, repeated ticks, arrival and pose age in the 10-40 s window (`display_sim`, `harness/ofxr_report.py`).
+- **Step 1, no engine change.**
+  - On a GPU-bound row, as the 2026-10-23 rig did (`harness/simrig`, `ab_gate.py`), measure on the current engine:
+    - release to `xrWaitFrame` return (about 0 with the fork);
+    - frame start to GPU done, against the GPU time per frame.
+  - If start to done is already about one GPU frame, there is nothing to win, and the note closes there.
+- **Step 2, engine, after the owner's go.** Bring the hold back from `ac8004a` behind a lab switch. Run 3 interleaved pairs with the hold on and off, on a
+  GPU-bound row, a row that holds the rate, and `id_mod_dup`; the mod's free waits must stay as they are.
+  - Read: app fps, new frames/s, repeated ticks, frame start to GPU done, pose age, and the holds count.
+  - Section 6's rule decides. Fps must stay within 2.
+  - Then the headset, on a GPU-bound title.
+
 ## 10. Risks and open points
 
 - The async id race (section 3): measured by the U1 pairing counters; if it is frequent, pair by order only.
