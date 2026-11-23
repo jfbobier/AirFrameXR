@@ -679,6 +679,33 @@ on two or three head motions. One night.
     newer, angle mean, max)".
   - A Black Flag count of 0 after submit 12,000 would mean the mod declares the new pose for its stale eye, as `MODSIM_ONE_EYE` models it.
     Then no runtime can place that eye right.
+- **Field, the same night (bundle sha256 `899d463c…`).** Logs in `private/logs/universal-arm3-2026-11-23/`. The owner: "seems the
+  implementation is working fine, no visible regression"; arm 3 stays as the implementation to improve.
+  - **Normal games: arm 3 is the identity.**
+    - Dead Space: 1 mapped submit in 53,676 (3.9 degrees, at start).
+    - Mortal Shell 2: 96.4 fps.
+    - Gears: no problem seen.
+  - **AC Black Flag: 0 mapped submits in about 62,000 (two debug sessions).** The mod declares the same head orientation for both eyes in every
+    submit, so its alternate-eye rendering never shows in its poses.
+  - **Uncapped, mode off, before submit 12,000: clean.**
+    - 47.7 new pictures/s.
+    - Every frame stamped by its own pose (matched by display time, 0 fallbacks).
+    - The client's timestamp steps a steady 2 samples (20 ms).
+  - **The mod's change at submit 12,000 (2 min 6 s in at 95 submits/s).**
+    - Its xrWaitFrame return to xrEndFrame falls from 12 ms to 0.15 ms: it now submits a picture rendered before the wait.
+    - New pictures fall to 40.3/s with the mode off; old pictures under a new pose come at about 6/s (re-stamped).
+    - The picture stream gets holes: steps of 5 or more samples (50 ms or more) rise from 0-1 to 30-50 per 10 s, and the client's receive gap
+      p90 goes from 20-30 to 40-50 ms.
+    - Timestamps never go back (0 of 14,490), so this is a broken cadence, not frames out of order: the owner's "flickering".
+    - With the mode on (second session) after the change: 58 new pictures/s at 117 submits/s.
+  - **A 33 s stretch before the change (second session, about 1-1.5 min in): every real submit released one eye**, with both eyes declared
+    at the new pose. That is true alternate-eye rendering at the submit level, with the stale eye under the new pose. Poses cannot tell it.
+  - **Next, arm 3's own gap: an eye that brought no new image keeps the pose of the submit that brought it.** This is arm 2's rule per eye;
+    arm 3's map then rotates that eye.
+    - The shim can tell per eye without VDXR's count: in Black Flag each eye has its own swapchain (0 copies into a second one), and VDXR
+      commits a swapchain to the shim when the app releases it.
+    - To check in the fork's source first: when VDXR commits.
+    - Then an AER row in `xr_modsim` with a per-eye picture-position check.
 - **Tested so far:** clang-cl check from WSL, then the 5090 build. No lab row yet: the 3080 Ti was offline. Owed:
   - an AER shape in `xr_modsim` (the stale eye keeps its old pose) with a per-eye picture-position check;
   - the regression set under arm 3.
