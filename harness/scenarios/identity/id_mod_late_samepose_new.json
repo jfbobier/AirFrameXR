@@ -1,5 +1,5 @@
 {
-  "description": "FRAME-IDENTITY MATRIX, the AC Black Flag mod's late shapes (docs/PLAN_UNIVERSAL_OPENXR.md 5b: after its change at submit 12,000 picture and pose stop matching, the shaking the owner saw). As id_mod_dup, frame generation off (field runs 5-6), the shape from MODSIM_CHANGE_AT=1000 submits on. The stamp checks decode each received picture's id and compare the yaw it was rendered with against the client's yaw for the frame's timestamp (lib.analyse_stamp_truth); before the change is the control. Row: a share of the duplicate cycles draw and release a NEW picture under the previous submit's poses (field run 6, mode on: >= 3.1 % of submits, all dropped by the mode). Truth: same poses, new picture: must be kept. U0 drops them: identity_no_new_picture_dropped FAILS by design (U1 keeps them). The stamp after the change stays clean (a dropped picture is never shown): the stamp check's control for a false alarm.",
+  "description": "FRAME-IDENTITY MATRIX, the AC Black Flag mod's late shapes (docs/PLAN_UNIVERSAL_OPENXR.md 5b: after its change at submit 12,000 picture and pose stop matching, the shaking the owner saw). As id_mod_dup, frame generation off (field runs 5-6), the shape from MODSIM_CHANGE_AT=1000 submits on. The stamp checks decode each received picture's id and compare the yaw it was rendered with against the client's yaw for the frame's timestamp (lib.analyse_stamp_truth); before the change is the control. Row: a share of the duplicate cycles draw and release a NEW picture under the previous submit's poses (field run 6, mode on: >= 3.1 % of submits, all dropped by the mode). Truth: same poses, new picture: must be kept. U0 drops them: identity_new_pictures_shown FAILS by design (U1 keeps them; 2026-11-23 on the 3080 Ti: 50 drawn, 0 reached the client). identity_no_new_picture_dropped is an aggregate and passes here (the new pictures are 2 % of the same-pose submits, inside its allowance). The stamp after the change stays clean (a dropped picture is never shown): the stamp check's control for a false alarm.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -107,7 +107,8 @@
         "max_rad": 0.002,
         "min_frames": 300,
         "max_before_share": 0.005,
-        "max_after_share": 0.005
+        "max_after_share": 0.005,
+        "min_extra_shown_frac": 0.95
       },
       "min_true_dups_dropped_frac": 0.95,
       "max_dropped_new_pictures_frac": 0.02

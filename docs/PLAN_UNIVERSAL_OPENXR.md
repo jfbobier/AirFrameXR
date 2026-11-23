@@ -179,14 +179,18 @@ The engine and ALVR identify a frame by its tracking timestamp. OpenXR gives no 
 
 ## 4. Phase A: is the signal exact? (no engine change)
 
-**Run sheet (3080 Ti, this branch at 1.4.2; prepared 2026-11-22, run on the owner's "go"):**
+**Run sheet (3080 Ti, this branch at 1.5; prepared 2026-11-22, run on the owner's "go" 2026-11-23):**
 1. The 3080 Ti answers (`ssh`), no AirFrameXR streamer runs there (the lab blocks while one does), nothing else loads its GPU.
-2. `bash harness/vdxr_fork_preflight.sh` (reads only): root `VisionALVR_vdxrfork` on D: behind its junction, VDXR at `46deebb`, free space.
+2. Root: **`VisionALVR_universal` on C:** (owner 2026-11-23: not the D: drive; C: had 200 GB free, D: unplugged, so the old
+   `VisionALVR_vdxrfork` junction points nowhere). Set in this worktree's `tools/builder.local`; the folder was empty, so `python3 harness/run.py
+   setup` first (pinned ALVR + VDXR clones and every build; its last step, `package`, needs the neural files and fails until step 3).
 3. `python3 harness/run.py build vdxr shim nvenc neural host client probe` (host and shim together after IPC 38; `neural` needs the CUDA
    toolkit 13.5, which the 3080 Ti has: the first run of the DLL's sm_86 code on an RTX 30. The host falls back to the edge synthesis by
    itself and says why at debug level, so check the `frame generation neural` line in a frame generation row's run log).
-4. `AIRFRAMEXR_LAB_IDLE_GPU=10 python3 harness/run.py identity`; compare the table with the U0 column below; Decision A.
-5. Optional: the real OFXR rows only if `D:\_ofxr\lab` is there again (else rebuild it first, recipe below); the manual sharpen row (admin).
+4. `AIRFRAMEXR_LAB_IDLE_GPU=10 python3 harness/run.py identity <rows>`: the 13 rows without the three `e2e_ofxr_tokyo_*` (they load the real
+   OFXR layer from `D:\_ofxr\lab`); compare the table with the U0 column below; Decision A.
+5. Optional: the real OFXR rows only with the layer rebuilt on C: and the three scenarios' path changed (recipe below); the manual sharpen
+   row (admin).
 G0 of Part M is a 5090 field check (VDXR's log per title), not part of this run.
 
 Build: the fork lab's B1 on this branch (VDXR at the pin, the shim of 1.4 with `vdxr-fork`'s array views), then `python3 harness/run.py build probe` from this worktree (adds the `xr_modsim`
@@ -209,10 +213,11 @@ only if it fails. Expected on this build, which is arm U0 (today's pose-only dec
 | `e2e_modsim_ofxr_fix_on/off` | the 2026-11-13 OFXR mimic scenarios | | | as on 2026-11-13 |
 | `e2e_ofxr_tokyo_off/on/on_compat` | the real OFXR layer (V551) on `xr_probe` | no app truth | read: OFXR's frames released? | `harness/ofxr_report.py` |
 | `id_mod_late_stale` | the mod's late shape (5b), mode off, frame generation off: from submit 1000, 14 % of the duplicate cycles submit new poses with the old images | about 5 % of all submits an old picture under a new pose | = app | **FAIL** `identity_stamp_matches_picture` (U0 stamps by the pose: about 7 % of the frames after the change shown under another pose); the control before the change clean |
-| `id_mod_late_samepose_new` | mode on: from submit 1000, 6 % of the duplicate cycles draw a new picture under the same poses | about 2 % same poses, new picture | = app | **FAIL** `identity_no_new_picture_dropped` (U0 drops them); stamp clean before and after (the check's false-alarm control) |
+| `id_mod_late_samepose_new` | mode on: from submit 1000, 6 % of the duplicate cycles draw a new picture under the same poses | about 2 % same poses, new picture | = app | **FAIL** `identity_new_pictures_shown` (U0 drops them; the aggregate `identity_no_new_picture_dropped` cannot see 2 % and passes); stamp clean before and after (the check's false-alarm control) |
 | `id_mod_late_oneeye` | mode on: from submit 1000, 10 % of the real frames release the right eye only | about 3 % one eye | = app | PASS (drops, control); the stamp error after the change is reported, not checked: no arm can stamp both eyes right on ALVR v20 |
 
-The real OFXR rows need the layer rebuilt into `D:\_ofxr\lab` (the 3080 Ti's D: is the new USB drive, so the scenarios' path works again):
+The real OFXR rows need the layer rebuilt (their scenarios load it from `D:\_ofxr\lab`; the D: drive is not used since 2026-11-23, so build
+it on C: and change the three scenarios' path):
 clone `djules75/OFXR-Bridge` at `382065f`, FidelityFX v1.1.4 optical flow, DLSS headers, CMake (recipe in the 2026-11-13 notes).
 
 One manual row, admin needed (VDXR reads `HKLM\SOFTWARE\Virtual Desktop, Inc.\OpenXR`): sharpen on, then `id_mod_dup`, then off.
@@ -220,6 +225,30 @@ One manual row, admin needed (VDXR reads `HKLM\SOFTWARE\Virtual Desktop, Inc.\Op
 
 **Decision A.** `identity_signal_matches_app` passes on every modsim row (and the manual one): H1a holds, go on. A row where it fails: stop. The fork is
 ours: fix the count there (one more fork commit, the fork lab's R2-R6 again) before any engine arm. The U0 table is the baseline Phase B is judged against.
+
+**Phase A result (2026-11-23, 3080 Ti, root `VisionALVR_universal` on C:, this branch at `c4e813f` = 1.5 + the identity lab, debug flavour,
+`AIRFRAMEXR_LAB_IDLE_GPU=10`; 13 rows in 38 min, results `harness/results/20261123T0848*` to `T0924*`): Decision A = go.** VDXR's "nothing
+released" equals the app's truth on every row, frame for frame in count:
+
+| row | status | submits | truth | VDXR / app no-release | shim seen / dropped | stamp error before / after | as expected |
+|---|---|---|---|---|---|---|---|
+| `e2e_modsim_ofxr_fix_off` / `_on` | PASS / PASS | | | | 0/0, 860/821 | | yes (as 2026-11-13) |
+| `id_normal_game` | PASS | 1800 | all new | 0/0 | 0/0 | | yes |
+| `id_mod_dup`, `_array`, `_msaa` | PASS x3 | 1721 | 50 % true duplicates | 860/860 each | 860/821 | | yes |
+| `id_mod_dup_rerelease` | PASS | 1721 | 50 % re-released | 0/0 | 860/821 | | yes (poses alone drop them) |
+| `id_mod_dup_quad` | FAIL `identity_no_new_picture_dropped` | 1721 | 50 % same poses, new picture | 0/0 | 860/821 | | yes (U0 drops them) |
+| `id_ofxr_mimic` | FAIL `identity_no_new_picture_dropped` | 1721 | 50 % same poses, new picture | 0/0 | 860/821 | | yes (U0 drops them) |
+| `id_pause` | PASS | 1800 | 50 % paused repeats | 901/901 | 901/0 | | yes (waits 45.1/s, no pattern) |
+| `id_mod_late_stale` | FAIL `identity_stamp_matches_picture` | 2700 | 4 % old picture under a new pose | 1350/1350 | 0/0 (mode off) | 0.0 / 5.1 % (p95 2.1, max 11.8 mrad) | yes: **the shaking reproduced** |
+| `id_mod_late_samepose_new` | FAIL `identity_new_pictures_shown` (re-evaluated) | 1721 | 1 % same poses, new picture | 839/839 | 860/821 | 0.0 / 0.0 % | yes: **50 drawn, 0 reached the client** |
+| `id_mod_late_oneeye` | PASS (report) | 1721 | 2 % one eye | 860/860 | 860/821 | 0.0 / 8.1 % (max 17.5 mrad) | yes |
+
+Notes: the window of the counts is the first 900 host frames' VDXR line (1721 submits with the mode on), so most late shapes fall after it; the
+stamp analysis uses the whole stream. `id_mod_late_samepose_new` first PASSED: `identity_no_new_picture_dropped` compares totals (dropped /
+seen <= true-duplicate share + 0.02), and new pictures at 2 % of the same-pose submits fit its allowance; the decoded ids are exact
+(`identity_new_pictures_shown`, added the same day, re-evaluated on the saved run: 0 of 50). The neural frame generation ran on the RTX 30
+for the first time (rows with frame generation: synthesis neural, 0 failures, 7.8 ms per run on 880 x 800 fields against about 1.8 ms on the
+5090). Not run: the three real OFXR rows (D: is gone) and the manual sharpen row (admin).
 
 ## 5. G1: the field check decides U1's reach
 

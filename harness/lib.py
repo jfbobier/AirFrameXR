@@ -2323,12 +2323,14 @@ def analyse_stamp_truth(sc, outdir):
     f, cl, fc = outdir / "modsim.csv", outdir / "client.hevc", outdir / "frames.csv"
     if not (f.exists() and fc.exists() and cl.exists() and cl.stat().st_size > 0):
         return None
-    draws, change_id = {}, None
+    draws, change_id, extra = {}, None, set()
     for line in f.read_text(errors="replace").splitlines()[1:]:
         q = line.split(",")
         try:
             if len(q) >= 5 and q[2] == "DRAW":
                 draws[int(q[3]) & 0xFFFF] = int(q[4]) / 1e6   # the stamp holds 16 bits (OFXR's generated ids are id + 100000)
+                if 40000 <= int(q[3]) < 60000:
+                    extra.add(int(q[3]))   # MODSIM_SAMEPOSE_NEW's own pictures: new, under the previous poses (must reach the client)
             elif len(q) >= 5 and q[2] == "CHANGE" and change_id is None:
                 change_id = int(q[4])
         except ValueError:
@@ -2354,8 +2356,10 @@ def analyse_stamp_truth(sc, outdir):
             continue
         late = v >= 40000 or (change_id is not None and v >= change_id)
         errs.append((late, draws[v] - float(y)))
+    shown = {v for v in vals if v in extra}   # the extra pictures any received frame showed (a dropped one never reaches the client)
     if not errs:
-        return {"frames": 0, "unknown_ids": unknown, "no_client_yaw": no_yaw, "decoded": len(vals), "received": len(rows)}
+        return {"frames": 0, "unknown_ids": unknown, "no_client_yaw": no_yaw, "decoded": len(vals), "received": len(rows),
+                "extra_drawn": len(extra), "extra_shown": len(shown)}
     base = [e for late, e in errs if not late]
     ref = base if len(base) >= 20 else [e for _, e in errs]
     off = sorted(ref)[len(ref) // 2]
@@ -2368,7 +2372,8 @@ def analyse_stamp_truth(sc, outdir):
         return {"frames": len(r), "mismatches": mis, "share": round(mis / len(r), 4), "p50_mrad": round(1000 * r[len(r) // 2], 2),
                 "p95_mrad": round(1000 * r[int(0.95 * (len(r) - 1))], 2), "max_mrad": round(1000 * r[-1], 2)}
     return {"frames": len(errs), "decoded": len(vals), "received": len(rows), "unknown_ids": unknown, "no_client_yaw": no_yaw,
-            "offset_rad": round(off, 5), "threshold_rad": thr, "change_id": change_id, "before": part(False), "after": part(True)}
+            "offset_rad": round(off, 5), "threshold_rad": thr, "change_id": change_id, "before": part(False), "after": part(True),
+            "extra_drawn": len(extra), "extra_shown": len(shown)}
 
 
 def evaluate(sc, a):
@@ -3002,6 +3007,10 @@ def evaluate(sc, a):
                 if "max_after_share" in sk:   # rows whose shape no arm can fix (one eye released) leave it out: the numbers are in the analysis
                     chk("identity_stamp_matches_picture", af.get("frames", 0) > 0 and af.get("share", 1) <= sk["max_after_share"], af,
                         f"after the late shapes: <= {sk['max_after_share']} of the frames show a picture under another pose")
+                if "min_extra_shown_frac" in sk:   # exact where identity_no_new_picture_dropped is aggregate: each new same-pose picture by its id
+                    dr, sh = st.get("extra_drawn", 0), st.get("extra_shown", 0)
+                    chk("identity_new_pictures_shown", dr > 0 and sh >= sk["min_extra_shown_frac"] * dr, {"drawn": dr, "reached_client": sh},
+                        f">= {sk['min_extra_shown_frac']} of the new pictures drawn under the previous poses reach the client (decoded ids)")
     if "shim_submit_mode" in ck and h and h.get("shim"):
         chk("shim_submit_mode", h["shim"].get("submit_mode") == ck["shim_submit_mode"], h["shim"].get("submit_mode"), ck["shim_submit_mode"])
     if "gray_patch" in ck:
