@@ -716,6 +716,32 @@ on two or three head motions. One night.
   - Both eyes unchanged is arm 2's whole-frame case (re-stamped). Static-image swapchains are left alone. Normal games release both eyes every
     frame, or share one swapchain, so nothing changes for them.
   - Counted as "one eye kept its picture's pose" in the identity line and the game-exit line. `lab_identity 3` gives arm 3 for an A/B.
+- **Arm 4 in the field (2026-11-23/24 night, bundle sha256 `f9b11c67…`, logs `private/logs/universal-arm4-2026-11-24/`).** The owner: no
+  regression seen, "let's base on it, it's even more universal". The games: Black Flag (debug), Dead Space, Mortal Shell 2, Titanfall 2 VR.
+  - **Normal games:**
+    - Dead Space: 1 mapped / 1 kept submit in 25,166, at start; 79.6 fps rendered, 97.6 streamed.
+    - Mortal Shell 2: 91.9 / 91.7 fps.
+    - Titanfall 2 VR: 94.6 / 94.3 fps, 1.4-2.2 % of ticks without a new frame.
+    - No warnings other than Titanfall's start-up stall (5 s, its loading).
+  - **Black Flag (mode on, 44,494 submits):** 0 kept or mapped before submit 12,000. After it:
+    - 1,430 submits where one eye kept its picture's pose, and 1,393 rotated: the right eye newer in 95 %, mean 0.35 degree, max 6.0.
+    - 761 re-stamped.
+    - Delivery about the same across the change: 56.2 then 53.8 new pictures/s, gaps of 3 periods or more 16-94 per minute.
+    - The mod's xrWaitFrame return to xrEndFrame falls from 12 ms to 0.14 ms, as before.
+    - The owner: the 12,000 issue still kicks in.
+  - **What arm 4 cannot fix.** On a one-eye submit the stale eye's picture comes from another moment: animation, world motion and the camera's
+    position. Only its rotation is corrected. And since the change the mod submits a picture rendered before its wait, so it is shown one frame
+    late.
+  - **Gap: no counters for most mods.** Black Flag, Mortal Shell 2 and Titanfall 2 VR write no game-exit line: the shim's destructor does not run
+    when they quit. Without debug their counters are lost.
+- **Next, proposed:**
+  1. One counter line per minute in the run log, only when a count moved (kept, mapped, re-stamped, dropped, free waits). A shim log change, so
+     every mod session shows what the engine did.
+  2. Per-eye columns in the shim's per-frame CSV (released per eye, kept, both eyes' orientations), then one Black Box session of Black Flag past
+     12,000. It shows whether the late eye of a one-eye submit comes in the very next submit (a race: holding that frame for the late eye
+     would give a consistent pair) or the mod alternates eyes (true AER: nothing more to do on our side).
+  3. Aside, not the engine: the launcher threw `ObjectDisposedException` ('LauncherForm') at 19:59:30 on 2026-11-23, right after the Advanced
+     toggles.
 - **Tested so far:** clang-cl check from WSL, then the 5090 build. No lab row yet: the 3080 Ti was offline. Owed:
   - an AER shape in `xr_modsim` (the stale eye keeps its old pose) with a per-eye picture-position check;
   - the regression set under arm 3.
