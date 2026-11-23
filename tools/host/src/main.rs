@@ -81,7 +81,8 @@ struct Args {
     drop_dup_frames: bool,
     drop_dup_frames_flag: bool,
     /// the frame-identity lab arm (ipc.h labIdentity, docs/PLAN_UNIVERSAL_OPENXR.md Phase B): 0 = 1.5, 1 = U1, 2 = U1 + a picture keeps its own
-    /// timestamp; `--lab-identity N` or stdin `lab_identity N`, no GUI or config file
+    /// timestamp; `--lab-identity N` or stdin `lab_identity N`, no GUI or config file. Default 2 since Decision B (owner, 2026-11-23); 0 is 1.5's
+    /// behaviour for an A/B
     lab_identity: u32,
     fov_quality: f32,   // 0..1, see vision::render_quality
     /// the restriction (settings video.fov_override + fov_outer .. fov_lower, read at start: one contract per streamer start, 1.4-foundation E4): the tangents
@@ -199,7 +200,7 @@ fn parse_args() -> Result<Args, String> {
         fg_cap_fps: None,
         drop_dup_frames: false,
         drop_dup_frames_flag: false,
-        lab_identity: 0,
+        lab_identity: 2,
         fov_quality: 0.0,
         fov_override: None,
         client_box: None,
