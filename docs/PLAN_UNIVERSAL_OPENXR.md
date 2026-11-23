@@ -635,6 +635,29 @@ baseline, under its conditions, every window on one side of submit 12,000). Arm 
 every 3 windows of 10 s, balanced order, start windows dropped. Read: ticks fresh %, `same_ts`, latency, the `identity:` line, and the user's blind call
 on two or three head motions. One night.
 
+**First field session, not the A/B (2026-11-23 evening).** The setup:
+- The personal bundle `AirFrameXR-1.5.0-bundle-personal-universal-arm2.zip`: `9ee1bd5`, arm 2 by default, sha256 `5d48cb7e…`.
+- On the 5090 at `D:\_VR\AirFrameXR`, with the mode on and the release flavour.
+- Logs in `private/logs/universal-arm2-2026-11-23/`.
+
+- **AC Black Flag** (16 min 34 s; the game at 22.6 new pictures/s, i.e. its limiter at 45 as in section 5):
+  - Frame generation was off for 12 min: a 22.6 fps stream, 77 % of headset ticks without a new frame, as in section 5's run 4.
+  - Then x3: a 99.6 fps stream, 0.5-1.3 % of ticks without a new frame.
+  - The owner: "transformed". It worked well natively and "the behavior is exactly right at start now".
+  - The mod's change still kicks in. The owner places it after about 2 minutes. At 45 submits/s the mod's submit 12,000 falls about 4.5 min in;
+    about 2 min matches it only uncapped (about 100 submits/s, section 5b).
+  - Debug was off, so no identity counts. Expected after the change, from section 5's run 1: one-eye releases, 15.9 % of new pictures. No arm
+    fixes these, since ALVR v20 carries one pose per frame.
+- **Dead Space** (12 min 46 s, then 2 min 51 s with debug on): the owner felt it slower than usual. Nothing from the new engine behaviour shows:
+  - 0 dropped, 0 free waits and 1 re-stamp in 16,200 submits.
+  - 13.5 % of its new pictures carry the previous frame's poses: under the 40 % trigger, so 1.5 behaves the same.
+  - Rendered 96.8 fps (slowest tenth 94.7), headset repeats 2.8 %: as 1.4 / 1.4.1 on 2026-11-20 (96.3-97.9 fps, 2.1-3.1 %, same 1920 x 2368 per
+    eye at 100 Hz).
+  - What does show is the GPU at its limit: 97 % busy, 543 W, the power cap reported in 163 of 181 samples, after 26 min of PBZ.
+  - The game's own latency stage grows from about 38 ms to 45-60 ms over the session (total p50 107 ms).
+  - There is no earlier Dead Space debug run to compare the latency with.
+  - Frame generation x2 was on for most of the first session: 50 fps by design.
+
 ## 9b. Noted for later: the just-in-time game release (owner, 2026-11-23)
 
 The owner asked to test it again, now that the chain is understood end to end. It is not a gate of this plan. It is an engine step of its own, after
