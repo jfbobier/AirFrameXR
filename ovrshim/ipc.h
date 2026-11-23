@@ -126,7 +126,8 @@ struct HostToShim {
     // that no image was released since the previous frame; 2 = U1, and a submit that released nothing goes out with the previous frame's
     // timestamp whatever its poses (the picture keeps the pose it was first submitted with; with the pacing fix acting it is dropped as a
     // duplicate); 3 = arm 2, and each eye of the projection layers is drawn rotated from its own render pose to the frame's (the newer eye's)
-    // when the two eyes were rendered with different head orientations (alternate-eye rendering; normal games: identity, as arm 2).
+    // when the two eyes were rendered with different head orientations (alternate-eye rendering; normal games: identity, as arm 2); 4 = arm 3,
+    // and an eye whose swapchain image did not change since the previous submit keeps the pose declared with the submit that brought it.
     // Without the runtime's per-frame facts (stock VDXR, a libOVR game) every arm decides duplicates as arm 0.
     uint32_t labIdentity;
 };

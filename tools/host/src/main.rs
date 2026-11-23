@@ -81,8 +81,9 @@ struct Args {
     drop_dup_frames: bool,
     drop_dup_frames_flag: bool,
     /// the frame-identity lab arm (ipc.h labIdentity, docs/PLAN_UNIVERSAL_OPENXR.md Phase B): 0 = 1.5, 1 = U1, 2 = U1 + a picture keeps its own
-    /// timestamp, 3 = arm 2 + each eye mapped by its own render pose; `--lab-identity N` or stdin `lab_identity N`, no GUI or config file.
-    /// Default 3 (Decision B, owner 2026-11-23, then the per-eye map the same night); 2 and 0 are the A/B arms
+    /// timestamp, 3 = arm 2 + each eye mapped by its own render pose, 4 = arm 3 + an eye whose picture did not change keeps the pose it came with;
+    /// `--lab-identity N` or stdin `lab_identity N`, no GUI or config file. Default 4 (Decision B, owner 2026-11-23, then arms 3 and 4 the same
+    /// night); 3, 2 and 0 are the A/B arms
     lab_identity: u32,
     fov_quality: f32,   // 0..1, see vision::render_quality
     /// the restriction (settings video.fov_override + fov_outer .. fov_lower, read at start: one contract per streamer start, 1.4-foundation E4): the tangents
@@ -200,7 +201,7 @@ fn parse_args() -> Result<Args, String> {
         fg_cap_fps: None,
         drop_dup_frames: false,
         drop_dup_frames_flag: false,
-        lab_identity: 3,
+        lab_identity: 4,
         fov_quality: 0.0,
         fov_override: None,
         client_box: None,
@@ -371,7 +372,7 @@ fn parse_args() -> Result<Args, String> {
             "--head-wait-ms" => a.head_wait_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--predict-missing-head" => a.predict_missing_head = true,
             "--drop-duplicate-frames" => a.drop_dup_frames_flag = true,
-            "--lab-identity" => a.lab_identity = v()?.parse::<u32>().map_err(|e| format!("--lab-identity: {e}"))?.min(3),
+            "--lab-identity" => a.lab_identity = v()?.parse::<u32>().map_err(|e| format!("--lab-identity: {e}"))?.min(4),
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half")?),
             "--settings" => a.settings_file = Some(v()?.into()),   // lab: the settings file of an installed host, without --install-dir (1.4-foundation E4)
