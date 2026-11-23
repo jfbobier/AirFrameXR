@@ -256,6 +256,8 @@ pub static FOV_OVERRIDE_IGNORED: AtomicBool = AtomicBool::new(false);
 pub static CLIENT_SHARPEN_REQ: AtomicI32 = AtomicI32::new(-1);
 /// `mask_fill on|off` (F2 lab switch, live): -1 = nothing new
 pub static MASK_FILL_REQ: AtomicI32 = AtomicI32::new(-1);
+/// `lab_identity 0|1|2` (the frame-identity lab arm, live, docs/PLAN_UNIVERSAL_OPENXR.md Phase B): -1 = nothing new
+pub static LAB_IDENTITY_REQ: AtomicI32 = AtomicI32::new(-1);
 
 /// The mask the encoder takes (docs/PLAN_1_4_FOUNDATION.md F1): per eye a convex polygon in the stream eye's unfoveated uv (x = 0 at the eye's outer edge,
 /// 1 at its inner edge; y = 0 at the top), and the profile it came from (for the log).
@@ -426,6 +428,11 @@ pub fn spawn_stdin_control() {
                 }
                 (Some("client_sharpen"), Some(v)) => CLIENT_SHARPEN_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
                 (Some("mask_fill"), Some(v)) => MASK_FILL_REQ.store((v == "on" || v == "1") as i32, Ordering::SeqCst),
+                (Some("lab_identity"), Some(v)) => {
+                    if let Ok(n) = v.parse::<i32>() {
+                        LAB_IDENTITY_REQ.store(n.clamp(0, 2), Ordering::SeqCst);
+                    }
+                }
                 (Some("fov_override"), _) => FOV_OVERRIDE_IGNORED.store(true, Ordering::SeqCst),
                 (Some("color"), Some(first)) => {
                     let vals: Vec<f32> = std::iter::once(first).chain(w).filter_map(|x| x.parse().ok()).collect();

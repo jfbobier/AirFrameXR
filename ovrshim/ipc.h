@@ -15,7 +15,7 @@
 namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 38;   // 38 (1.4-foundation E4): renderCeiling removed
+constexpr uint32_t kVersion = 39;   // 39 (universal-1.4 Phase B): labIdentity; 38 (1.4-foundation E4): renderCeiling removed
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -121,6 +121,12 @@ struct HostToShim {
     uint32_t dropDuplicateFrames;
     // The host's log verbosity (logsink.rs Level: 0 error, 1 warn, 2 info, 3 verbose, 4 debug): the shim filters its own lines with it, before it formats them.
     uint32_t logLevel;
+    // Frame-identity lab arm (docs/PLAN_UNIVERSAL_OPENXR.md Phase B; host --lab-identity N / stdin `lab_identity N`; no GUI, no config file):
+    // 0 = 1.5 exactly (a duplicate = the previous submit's exact render poses); 1 = U1: a duplicate needs the same poses AND the runtime's word
+    // that no image was released since the previous frame; 2 = U1, and a submit that released nothing goes out with the previous frame's
+    // timestamp whatever its poses (the picture keeps the pose it was first submitted with; with the pacing fix acting it is dropped as a
+    // duplicate). Without the runtime's per-frame facts (stock VDXR, a libOVR game) every arm decides as arm 0.
+    uint32_t labIdentity;
 };
 
 struct Haptic {

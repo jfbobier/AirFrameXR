@@ -560,6 +560,8 @@ def run_scenario(sc, outdir: Path, log=print):
                 feedpre = f"powershell -NoProfile -ExecutionPolicy Bypass -File {rd}\\feed.ps1 | "
                 steps["stdin_feed_events"] = len(feed)
             lab_knob = ' --drop-duplicate-frames' if os.environ.get('AIRFRAMEXR_LAB_DROP_DUP') and 'drop_duplicate_frames' not in h else ''   # AIRFRAMEXR_LAB_DROP_DUP=1: the game frame pacing fix ON in every scenario (a scenario that sets the key itself keeps its value)
+            if os.environ.get('AIRFRAMEXR_LAB_IDENTITY') and 'lab_identity' not in h:   # the frame-identity arm (0 / 1 / 2, docs/PLAN_UNIVERSAL_OPENXR.md Phase B) in every scenario
+                lab_knob += f" --lab-identity {int(os.environ['AIRFRAMEXR_LAB_IDENTITY'])}"
             hostcmd = (envpre + feedpre + f'{host_exe} --config-dir {rd}\\host_cfg --session {rd}\\session.json {src_arg}{dump_arg}'
                        f'--report {rd}\\host_report.json --frames-csv {rd}\\host_frames.csv ' + ('' if 'idle_rgb' in h else '--idle-rgb 00ff00 ') + lab_knob.lstrip()+' '
                        + argline(h, {"fps": "--fps", "seconds": "--seconds", "min_frames": "--min-frames", "live": "--live", "shim": "--shim", "daemon": "--daemon", "gui": "--gui", "split_encode": "--split-encode", "gpu_keepalive": "--gpu-keepalive",
@@ -569,7 +571,7 @@ def run_scenario(sc, outdir: Path, log=print):
                                      "connect_timeout": "--connect-timeout", "exit_after_frames": "--exit-after-frames",
                                      "running_start_ms": "--running-start-ms",
                                      "head_wait_ms": "--head-wait-ms", "predict_missing_head": "--predict-missing-head", "head_in_order": "--head-in-order",
-                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "frame_gen_t": "--frame-gen-t", "client_box": "--client-box", "fov_quality": "--fov-quality", "mask_fill": "--mask-fill"})
+                                     "frame_gen": "--frame-gen", "frame_gen_rate": "--frame-gen-rate", "frame_gen_cap": "--frame-gen-cap", "drop_duplicate_frames": "--drop-duplicate-frames", "lab_identity": "--lab-identity", "frame_gen_t": "--frame-gen-t", "client_box": "--client-box", "fov_quality": "--fov-quality", "mask_fill": "--mask-fill"})
                        + (f' 2>&1 | findstr "^" > {rd}\\host_stdout.txt' if h.get("stdout_pipe") else f' > {rd}\\host_stdout.txt 2>&1'))   # stdout_pipe: through a reader that a fault can freeze (the GUI reads it like that)
             if topo.get("host_launch") == "interactive":
                 log("  starting host (builder, interactive session, limited)")
@@ -2294,6 +2296,14 @@ def analyse_identity(sc, outdir):
                 last = m
         if last:
             res["shim"] = {"dups_seen": int(last.group(1)), "dups_dropped": int(last.group(2)), "fix": last.group(3), "free_waits": int(last.group(5))}
+        idl = None
+        for line in sl.read_text(errors="replace").splitlines():
+            m = re.search(r"identity: arm (\d+), submits (\d+), same poses with an image released (\d+), new poses with nothing released (\d+), "
+                          r"re-stamped (\d+), without runtime facts (\d+), with several (\d+)", line)
+            if m:
+                idl = m
+        if idl:   # the frame-identity arm in force and its cumulative counters (Phase B; absent before IPC 39)
+            res["shim_identity"] = dict(zip(("arm", "submits", "same_pose_released", "stale_pose", "restamped", "no_facts", "multi_facts"), map(int, idl.groups())))
     # the app's wait rate: steady part, and inside MODSIM_PAUSE_S when set (a paused app must stay paced, not spin)
     t0 = ends[0][0]
     def rate(a, b):

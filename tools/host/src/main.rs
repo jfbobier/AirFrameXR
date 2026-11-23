@@ -80,6 +80,9 @@ struct Args {
     fg_cap_fps: Option<f64>,
     drop_dup_frames: bool,
     drop_dup_frames_flag: bool,
+    /// the frame-identity lab arm (ipc.h labIdentity, docs/PLAN_UNIVERSAL_OPENXR.md Phase B): 0 = 1.5, 1 = U1, 2 = U1 + a picture keeps its own
+    /// timestamp; `--lab-identity N` or stdin `lab_identity N`, no GUI or config file
+    lab_identity: u32,
     fov_quality: f32,   // 0..1, see vision::render_quality
     /// the restriction (settings video.fov_override + fov_outer .. fov_lower, read at start: one contract per streamer start, 1.4-foundation E4): the tangents
     /// the game is told per edge (outer, inner, upper, lower); None = not restricted
@@ -196,6 +199,7 @@ fn parse_args() -> Result<Args, String> {
         fg_cap_fps: None,
         drop_dup_frames: false,
         drop_dup_frames_flag: false,
+        lab_identity: 0,
         fov_quality: 0.0,
         fov_override: None,
         client_box: None,
@@ -366,6 +370,7 @@ fn parse_args() -> Result<Args, String> {
             "--head-wait-ms" => a.head_wait_ms = v()?.parse().map_err(|e| format!("{e}"))?,
             "--predict-missing-head" => a.predict_missing_head = true,
             "--drop-duplicate-frames" => a.drop_dup_frames_flag = true,
+            "--lab-identity" => a.lab_identity = v()?.parse::<u32>().map_err(|e| format!("--lab-identity: {e}"))?.min(2),
             "--frame-gen" => a.frame_gen = Some(parse_on_off("--frame-gen", &v()?)?),
             "--frame-gen-rate" => a.fg_rate = Some(FgRate::parse(&v()?).ok_or("--frame-gen-rate: third | half")?),
             "--settings" => a.settings_file = Some(v()?.into()),   // lab: the settings file of an installed host, without --install-dir (1.4-foundation E4)
@@ -1054,6 +1059,7 @@ mod nvh {
         pub fn nvh_ipc_set_app_period_mul(ipc: *mut c_void, mul: u32);
         pub fn nvh_ipc_set_app_min_period(ipc: *mut c_void, min_period_us: u32);
         pub fn nvh_ipc_set_drop_duplicates(ipc: *mut c_void, on: u32);
+        pub fn nvh_ipc_set_lab_identity(ipc: *mut c_void, arm: u32);
         pub fn nvh_qpc_seconds() -> f64;
         pub fn nvh_encode_green(nvh: *mut c_void, frame_no: u32, ts_ns: u64, force_idr: i32, err: *mut c_char, errlen: i32) -> f64;
         pub fn nvh_ipc_shim_alive(ipc: *mut c_void) -> i32;
@@ -2238,6 +2244,11 @@ fn main() {
         unsafe { nvh::nvh_ipc_set_pacing(ipc, 0.0, args.running_start_ms as f32) };
         unsafe { nvh::nvh_ipc_set_intake_gate(ipc, if pipeline::intake_gate_enabled() { 1 } else { 0 }) };
         unsafe { nvh::nvh_ipc_set_drop_duplicates(ipc, if args.drop_dup_frames { 1 } else { 0 }) };
+        unsafe { nvh::nvh_ipc_set_lab_identity(ipc, args.lab_identity) };
+        if args.lab_identity != 0 {
+            logs::general("INFO", &format!("lab identity arm {} (docs/PLAN_UNIVERSAL_OPENXR.md Phase B)", args.lab_identity));
+            event(origin, "lab_identity", json!({ "arm": args.lab_identity, "why": "start" }));
+        }
         unsafe { nvh::nvh_ipc_set_head_policy(ipc, args.head_wait_ms as f32, if args.predict_missing_head { 1.0 } else { 0.0 }) };
         {
             // hand pose convention fix (see Args::hand_rotation_deg); the right hand mirrors y and z like ALVR's own offsets
@@ -3071,6 +3082,13 @@ fn main() {
                 // a live change made the next game disagree with them
                 logs::general("INFO", "fov_override ignored: the field of view is set at the streamer start (restart the streamer to change it)");
                 event(origin, "command_ignored", json!({ "command": "fov_override", "why": "compiled per streamer start" }));
+            }
+            let li = vision::LAB_IDENTITY_REQ.swap(-1, Ordering::SeqCst);
+            if li >= 0 && !ipc.is_null() {
+                args.lab_identity = li as u32;
+                unsafe { nvh::nvh_ipc_set_lab_identity(ipc, args.lab_identity) };
+                logs::general("INFO", &format!("lab identity arm {} (docs/PLAN_UNIVERSAL_OPENXR.md Phase B)", args.lab_identity));
+                event(origin, "lab_identity", json!({ "arm": args.lab_identity, "why": "lab_identity" }));
             }
             let mf = vision::MASK_FILL_REQ.swap(-1, Ordering::SeqCst);
             if mf >= 0 {

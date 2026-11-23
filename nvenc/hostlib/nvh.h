@@ -120,6 +120,7 @@ void nvh_ipc_set_app_period_mul(void* ipc, uint32_t mul);
 // The game fps lock: the minimum spacing of the game's releases (us, 0 = none), in every mode.
 void nvh_ipc_set_app_min_period(void* ipc, uint32_t min_period_us);
 void nvh_ipc_set_drop_duplicates(void* ipc, uint32_t on);
+void nvh_ipc_set_lab_identity(void* ipc, uint32_t arm);   // 0 / 1 / 2: docs/PLAN_UNIVERSAL_OPENXR.md Phase B (ipc.h labIdentity)
 // Process-wide GPU scheduling class (D3DKMT): 0 idle .. 4 high, 5 realtime (needs the increase-base-priority privilege, i.e. an
 // elevated host). SteamVR's compositor runs realtime, so its copy/encode never queues behind the game's GPU work. Returns the
 // NTSTATUS (0 = success).

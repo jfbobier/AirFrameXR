@@ -843,6 +843,7 @@ int nvh_fg_stats(void* hh, char* buf, int len) {
 
 void nvh_ipc_set_app_min_period(void* i, uint32_t us) { ((Ipc*)i)->state->host.appMinPeriodUs = us; }
 void nvh_ipc_set_drop_duplicates(void* i, uint32_t on) { ((Ipc*)i)->state->host.dropDuplicateFrames = on; }
+void nvh_ipc_set_lab_identity(void* i, uint32_t arm) { ((Ipc*)i)->state->host.labIdentity = arm; }   // the frame-identity lab arm (ipc.h)
 
 void nvh_ipc_set_user(void* i, float user_gamma, int debug_on, const wchar_t* debug_dir) {
     auto& h = ((Ipc*)i)->state->host;

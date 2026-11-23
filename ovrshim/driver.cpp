@@ -369,12 +369,22 @@ extern "C" __declspec(dllexport) uint32_t __cdecl ovrshim_Capabilities() {
 // (xrWaitFrame returned, xrBeginFrame) and whether a submit holds a newly released picture or resubmits the last one.
 // The AirFrameXR fork of VDXR (virtualdesktop-openxr/airframexr_trace.h, deps.lock.json) resolves ovrshim_Trace from this
 // DLL and calls it from the app's xrWaitFrame / xrBeginFrame / xrEndFrame; stock VDXR and libOVR games never call it.
-// Diagnostic only for now: counted and printed with the pacing lines, no behaviour depends on it. Times are OVR seconds.
+// Counted and printed with the pacing lines; the frame-identity lab arms (ipc labIdentity 1 / 2, SubmitFrame) also decide with the facts
+// taken since the previous submit; arm 0 (the default) decides nothing with them. Times are OVR seconds.
 namespace vdxrinfo {
     enum Kind : int { WaitFrameReturn = 1, BeginFrame = 2, EndFrame = 4, FrameContent = 8, FrameCopies = 9 };
     struct Stats {
         uint64_t calls{0}, frames{0}, resubmits{0}, slices{0}, released{0}, copied{0}, unchanged{0}, discarded{0};
         std::vector<float> waitToEndMs, beginToEndMs; // since the last pacing line
+    };
+    // FrameContent facts since the shim's previous submit, paired with the next submit by arrival order: the fork sends them before the
+    // frame goes to its submit (on the app thread, or before the layers go to its async submission thread), and ovr_EndFrame does not
+    // pass the frame index on to the driver. count != 1 at a submit is counted (identity line): 0 = no facts (stock VDXR, a libOVR game,
+    // a layer VDXR rejected), 2+ = the async thread fell a frame behind.
+    struct Facts {
+        uint32_t count{0};
+        double released{0.0};
+        long long lastId{-1};
     };
     struct Frame {
         long long id{-1};
@@ -382,7 +392,15 @@ namespace vdxrinfo {
     };
     static std::mutex g_mutex;
     static Stats g_stats;
+    static Facts g_facts;
     static Frame g_frames[8]; // frames in flight by id (an app may wait for frame N+1 before it ends N)
+
+    static Facts TakeFacts() {
+        std::lock_guard lock(g_mutex);
+        const Facts f = g_facts;
+        g_facts = Facts{};
+        return f;
+    }
 
     static Frame& Slot(long long id) {
         Frame& f = g_frames[(unsigned long long)id % 8];
@@ -423,6 +441,9 @@ extern "C" __declspec(dllexport) void __cdecl ovrshim_Trace(int kind, long long 
         g_stats.resubmits += (a == 0.0 && b > 0.0) ? 1 : 0;
         g_stats.released += (uint64_t)a;
         g_stats.slices += (uint64_t)b;
+        g_facts.count++;
+        g_facts.released += a;
+        g_facts.lastId = frameId;
         break;
     case FrameCopies: // a = slices copied into a second OVR swapchain (array slice > 0, MSAA), b = copies skipped (unchanged)
         g_stats.copied += (uint64_t)a;
@@ -1563,9 +1584,19 @@ namespace {
             // the duplicates are neither composed nor published (their release tokens are taken so the queue stays in step). A client whose
             // poses never change (every submit "the same") is not that pattern and is left alone; a duplicate is also published when no frame
             // was for 250 ms.
+            // Frame-identity lab arm (ipc labIdentity, docs/PLAN_UNIVERSAL_OPENXR.md Phase B): the runtime's facts since the previous submit
+            // (taken in every arm so none pile up; arm 0 decides nothing with them).
+            const uint32_t idArmRaw = m_ipc.state ? *(volatile uint32_t*)&m_ipc.state->host.labIdentity : 0u;
+            const uint32_t idArm = idArmRaw > 2u ? 2u : idArmRaw;
+            const vdxrinfo::Facts facts = vdxrinfo::TakeFacts();
+            const bool haveFacts = facts.count > 0;
+            const bool nothingReleased = haveFacts && facts.released == 0.0;
+            m_idSubmits++;
+            m_idNoFacts += haveFacts ? 0 : 1;
+            m_idMultiFacts += facts.count > 1 ? 1 : 0;
             if (m_ipc.state) {
                 const bool dropOn = *(volatile uint32_t*)&m_ipc.state->host.dropDuplicateFrames != 0;
-                if (dropOn || shimlog::DebugActive()) {
+                if (dropOn || shimlog::DebugActive() || idArm > 0) {
                     const ovrLayerEyeFov* proj = nullptr;
                     for (const ovrLayerHeader* h : layers) {
                         if (h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth)) {
@@ -1577,7 +1608,16 @@ namespace {
                         m_dupPoseValid = false;
                         m_freeBudget.store(0, std::memory_order_relaxed);
                     } else {
-                        const bool same = m_dupPoseValid && memcmp(proj->RenderPose, m_dupLastPose, sizeof(m_dupLastPose)) == 0;
+                        const bool samePose = m_dupPoseValid && memcmp(proj->RenderPose, m_dupLastPose, sizeof(m_dupLastPose)) == 0;
+                        if (samePose && haveFacts && !nothingReleased) {
+                            m_idSamePoseReleased++;   // a new picture under the previous poses (OFXR, a quad redrawn): arm 0 calls it a duplicate
+                        }
+                        if (m_dupPoseValid && !samePose && nothingReleased) {
+                            m_idStalePose++;          // the last picture under new poses (AC Black Flag after its change at submit 12,000)
+                        }
+                        // the duplicate decision: arm 0 = poses only; arm 1 = same poses and nothing released; arm 2 = nothing released, whatever
+                        // the poses; without facts every arm is arm 0
+                        const bool same = (idArm == 0 || !haveFacts) ? samePose : idArm == 1 ? (samePose && nothingReleased) : nothingReleased;
                         memcpy(m_dupLastPose, proj->RenderPose, sizeof(m_dupLastPose));
                         m_dupPoseValid = true;
                         if (same) {
@@ -1617,7 +1657,14 @@ namespace {
             // frame's the headset skips the frame (5-10 % of the Vision Pro's frames in heavy games, 2026-10-13). Re-stamping with
             // the next sample fixes that on the Quest but trembles on the Vision Pro: parked in branch exp/restamp-2026-10-13 until
             // the visionOS client handles it.
-            const uint64_t clientTs = FrameClientTimestamp(layers);
+            // Arm 2: a submit that released nothing shows the previous frame's picture, so it leaves with that frame's timestamp (a true
+            // repeat, which the headset shows as one: 1.3.10 strobe test), whatever poses the app put on it; the pose matching is skipped so
+            // its state (the previous frame's timestamp, never going back) stays the real frames'.
+            const bool restamp = idArm == 2 && nothingReleased && m_idHaveLastTs;
+            const uint64_t clientTs = restamp ? m_idLastTs : FrameClientTimestamp(layers);
+            m_idRestamped += restamp ? 1 : 0;
+            m_idLastTs = clientTs;
+            m_idHaveLastTs = true;
 
             bool ok = true;
             if (m_mirrorRTV) {
@@ -1713,6 +1760,10 @@ namespace {
                             (unsigned long long)m_slotBusyWaits.load(), (unsigned)m_ipc.state->host.slotBusyMask, (unsigned)m_ipc.state->host.appPeriodMul,
                             m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds,
                             (unsigned long long)m_dupSeen, (unsigned long long)m_dupDropped, m_ipc.state->host.dropDuplicateFrames ? "on" : "off", m_dupPerReal.load(), (unsigned long long)m_freeWaits);
+                    ShimLog("identity: arm %u, submits %llu, same poses with an image released %llu, new poses with nothing released %llu, "
+                            "re-stamped %llu, without runtime facts %llu, with several %llu",
+                            idArm, (unsigned long long)m_idSubmits, (unsigned long long)m_idSamePoseReleased, (unsigned long long)m_idStalePose,
+                            (unsigned long long)m_idRestamped, (unsigned long long)m_idNoFacts, (unsigned long long)m_idMultiFacts);
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
                             return 0.0f;
@@ -2880,7 +2931,12 @@ namespace {
         std::atomic<int> m_freeBudget{0};          // waits after the last real submit that return at once (WaitForVsync)
         uint64_t m_freeWaits{0};                   // waits of a duplicate cycle returned at once (pacing fix)
         bool m_vdxrInfoNoneLogged{false};          // the "no per-frame facts from the runtime" line was printed once (vdxrinfo)
-        uint64_t m_dupSeen{0}, m_dupDropped{0};    // frames with the previous frame's exact render poses / of those, the ones not published
+        uint64_t m_dupSeen{0}, m_dupDropped{0};    // frames the duplicate decision called duplicates (arm 0: the previous frame's exact render poses) / of those, the ones not published
+        // frame-identity lab (ipc labIdentity, SubmitFrame; the identity statistics line): submits, those without runtime facts or with several,
+        // same poses with an image released, new poses with nothing released, and the ones arm 2 sent with the previous frame's timestamp
+        uint64_t m_idSubmits{0}, m_idNoFacts{0}, m_idMultiFacts{0}, m_idSamePoseReleased{0}, m_idStalePose{0}, m_idRestamped{0};
+        uint64_t m_idLastTs{0};                    // the timestamp the previous published frame left with
+        bool m_idHaveLastTs{false};
         std::atomic<double> m_appTimeS{0.004};     // envelope of release -> frame GPU-complete (published), seconds
         long long m_lastTargetBoundary{0};         // boundary (tick index) the last release aimed at: one release per boundary
         double m_latestTickS{0.0};                 // shim-clock time of the host's latest display tick (under m_frameMutex)
