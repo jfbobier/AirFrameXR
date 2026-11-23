@@ -742,6 +742,39 @@ on two or three head motions. One night.
      would give a consistent pair) or the mod alternates eyes (true AER: nothing more to do on our side).
   3. Aside, not the engine: the launcher threw `ObjectDisposedException` ('LauncherForm') at 19:59:30 on 2026-11-23, right after the Advanced
      toggles.
+- **The Black Flag 12,000 mystery, measured (2026-11-24 night).**
+  - **The setup:** a temporary diagnostic build (local branch `universal-1.4-diag`, `bb00834`, not for merge), one session, mode on, debug
+    on. It recorded every fork trace event, wait, pose read, swapchain commit, submit and decision; logs in
+    `private/logs/universal-arm4-diag-2026-11-24/`.
+  - **Analysis:** scratchpad `diag_bf.py` / `diag_frames.py`, 53,090 submits, submit 12,000 at 113 s.
+  - **What changes at 12,000 is the mod's threads.**
+    - Before: thread 11000 waits for every real frame and reads every pose; a pool of about 10 threads ends the real frames and runs the
+      duplicate cycles (wait, begin, end).
+    - After: the same structure on one fixed second thread (3588). The pool is gone, as October's disassembly said (9 threads to 1).
+  - **What stays correct, before and after:**
+    - Every real picture's pose was read for exactly that frame's display time (0 of 20,413 off by more than 0.5 ms).
+    - The display time steps 20 ms (p10 10).
+    - Content never goes backwards (0).
+    - The pose read to submit time is 16.0 ms p50 before, 11.3 after.
+    - So the pictures are neither out of order nor stamped for the wrong time.
+  - **The artifact is a left eye that misses its frame.**
+    - Before 12,000: 0 to 11 one-eye submits. After: 780, the left eye missing in 762.
+    - They run 1-4 % of real pictures, in bursts of 9-20 % (300-310 s: 127 of 629). The bursts come when the mod runs faster.
+    - The left eye's late image does not arrive at the next submit (the duplicate). It comes with the next real frame, so the eye simply shows
+      the previous picture for one picture.
+    - The mod declares the fresh pose for the stale eye every time (780 of 780). Arm 4 corrects that eye's rotation; its content (motion,
+      animation, the camera's position) stays one picture old. That is the flicker.
+  - **Verdict: a race inside this mod, not a general OpenXR pattern.** After its thread change, its left-eye release sometimes lands after
+    the frame's xrEndFrame.
+    - Arm 4 already does the general, spec-faithful part.
+    - Holding the frame for the late eye would cost a whole picture (about 20 ms), because the late image only comes with the next real
+      frame. That is not worth a general rule.
+    - Left as is; the mod author could be told.
+  - **One of ours, minor:** after the change the compatibility mode's free waits sometimes go to the wrong thread's wait. 872 real frames got
+    a free wait and 1,045 duplicates were paced (0 and 35 before), because the budget goes to the next waits whatever the thread. This is
+    not the flicker: the owner saw it with the mode off as well.
+    - The general fix needs the app's thread at the wait. The shim's wait runs on VDXR's submission thread, so the fork would have to say
+      it: low priority.
 - **Tested so far:** clang-cl check from WSL, then the 5090 build. No lab row yet: the 3080 Ti was offline. Owed:
   - an AER shape in `xr_modsim` (the stale eye keeps its old pose) with a per-eye picture-position check;
   - the regression set under arm 3.
