@@ -12,7 +12,7 @@ timing code 1.5 removed (x1.5 = `two_thirds` and `uncapped`: the content-clock p
 two-thirds hold, about 250-300 lines of `tools/host/src/pipeline.rs`) stays at tag `v1.4.2` (`e5ee359`; `main` `cf8bc70` with its hotfix) if
 this work needs it again.
 
-Status: **Phase A done 2026-11-23 (Decision A = go, section 4); Phase B built (`685a07d`, arms 0-2 behind one lab switch) and its matrix run the same day (section 6): arm 0 = Phase A on every row, arm 1 fixes the new-picture rows, arm 2 also the shaking row; the regressions and the timing A/B follow, then Decision B.** **Base: 1.5** (`1.5-simplify` `7d0d55e`, merged 2026-11-23; 1.4.2 on 2026-11-22, 1.4.1 on 2026-11-21, before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
+Status: **Phase A done 2026-11-23 (Decision A = go, section 4); Phase B built (`685a07d`, arms 0-2 behind one lab switch) and its matrix run the same day (section 6): arm 0 = Phase A on every row, arm 1 fixes the new-picture rows, arm 2 also the shaking row; then the regressions and the timing A/B: no regression beyond two checks that assert 1.5's behaviour, the mod's numbers unchanged, OFXR's generated pictures kept. Decision B's table is in section 6: arm 2 meets every criterion except "no effect with the mode off"; the owner decides.** **Base: 1.5** (`1.5-simplify` `7d0d55e`, merged 2026-11-23; 1.4.2 on 2026-11-22, 1.4.1 on 2026-11-21, before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
 from `1.4` at `6c73d0b` with `universal-openxr-2` merged in (`469ea14`: the VDXR fork pipeline and the shim's texture-array views from `vdxr-fork`, the
 fork lab, the identity lab). The merge was clean (`build.ps1`, `harness/lib.py`, `harness/run.py` and two docs auto-merged; `tools/wsl/check_cpp.sh` OK);
 nothing is built on a builder yet. `vdxr-fork` and `universal-openxr-2` stay as they were (from 1.3.11); new work goes on `universal-1.4`. Builder roots: the
@@ -448,6 +448,70 @@ new poses with nothing released, re-stamped, without runtime facts, with several
   Yaw); pictures that reach the client before it carry another offset (25 frames at 0, then 174 mrad for the whole run). Phase A never had a picture
   that early; arm 0 did: a race, not the arm. `analyse_stamp_truth` now leaves out the stream's first `checks.identity.stamp.warmup_s` (2 s, the late
   shapes start near 11 s); re-evaluated, every saved run (Phase A, the arm 2 smoke run, arms 0-2) reads 0.0 % before the change.
+
+**Phase B result, regressions and timing (2026-11-23, same build; regressions arm 2 `harness/results/20261123T1141*`-`T1221*`, arm 1
+`T1224*`-`T1303*`; timing `T1306*`-`T1353*`):**
+
+- **Regressions (the R5 set and the `e2e_modsim_*` rows, 15 per arm): 14 of 15 pass under arm 1 and under arm 2.** The 15th,
+  `e2e_modsim_static_pose_fix_on`, fails `fix_on_idle_nothing_dropped` under both, by design. The row runs the mod's loop (every real frame submitted
+  twice) with a still head and asserts 1.5's outcome, nothing dropped: 1.5's pose-only test calls every submit "same", finds no pattern and stays out.
+  With the facts, the real frames (an image released) and the duplicate cycles (nothing released) are told apart, so both arms find the mod's
+  pattern and drop the true duplicates as with a moving head (860 seen, 821 dropped, 820 free waits, under both arms). Like
+  `e2e_modsim_ofxr_fix_on`, the check encodes 1.5's blind spot; if an arm ships it becomes "as `e2e_modsim_fix_on`".
+- Arm 1's `e2e_openxr_probe` failed `pacing_latency_steady` on its first run (last third minus first third -7.8 ms, limit 4): latency per third
+  32.6 / 24.7 / 22.3 ms while the GPU went from P0 to P8. Arm 2's passing run has the same step a third later (32.4 / 32.8 / 24.3). With the mode
+  off, arm 1 only counts. Rerun (`T135642Z`): PASS, -1.7 ms. A start-up race, not the arm.
+- **The mod's numbers** (`e2e_modsim_fix_on`): arm 2 860 seen / 821 dropped / 820 free waits, second wait 0.1 ms p50, 45.0 real fps; arm 1
+  859 / 820 / 819, 0.1 ms, 45.05 fps; 1.4.1 (`openxr-foundation` `20261120T182139Z`) 860 / 821 / 820, 0.1 ms, 44.77 fps: unchanged.
+- **Pairing**: "without runtime facts" 0 in every run that prints the stats line (the regression rows `e2e_layers`, `e2e_fov_restrict_none`,
+  `e2e_fov_restrict_quality_full` and `e2e_fov_client_box` print none). "With several" is 1 in 6 runs (matrix: arm 1 `id_ofxr_mimic`, arm 2 `id_pause` and `e2e_modsim_ofxr_fix_off`;
+  regressions: arm 2 `e2e_openxr_probe`, arm 1 `e2e_modsim_fix_on` and `e2e_modsim_control_ts`) and 0 in the other runs, including all 18
+  timing runs and the probe rerun. One submit per run took two facts and none took none, so one fact had no submit of its own; the facts are
+  summed, so that submit counts as new if either frame released. Cause not found: on the sync path VDXR calls `ovr_EndFrame` after every frame's
+  facts (fork `frame.cpp:504-563`, a dummy layer when the frame has none).
+
+**Timing A/B.** 3 pairs, interleaved, the order rotated per pair (0-1-2, 1-2-0, 2-0-1), on `id_mod_dup` and `id_ofxr_mimic`. Whole-run values (the
+display analysis skips its warm-up ticks), not the 10-40 s window. Arm 0 has no steady window on `id_ofxr_mimic`, so the repeat and skip
+figures are whole-run for every arm, and pose age is missing there. A 1 ms floor for the ms metrics (the plan names none). Medians of the 3 pairs;
+**bold** = "changes" by the rule against arm 0:
+
+| metric | `id_mod_dup` arm 0 / 1 / 2 | `id_ofxr_mimic` arm 0 / 1 / 2 |
+|---|---|---|
+| app frame rate (waits/s) | 90.1 / 90.1 / 90.0 | 97.6 / **88.3** / **88.5** |
+| client fps | 45.9 / 45.9 / 45.9 | 38.2 / **55.8** / **55.8** |
+| unique timestamps/s | 45.9 / 45.9 / 45.4 | 37.7 / 36.3 / 36.4 |
+| repeated ticks % | 48.9 / 48.8 / 48.8 | 57.5 / **37.7** / **37.9** |
+| skipped % | 60.0 / 60.0 / 59.9 | 90.6 / **64.5** / **64.4** |
+| encode ms p50 / p95 | 8.4 / 23.7, 8.3 / 24.0, 8.4 / 23.9 | 8.0 / 9.3, 7.9 / 9.1, 8.1 / 9.2 |
+| arrival minus timestamp ms p50 / p95 | 26.4 / 54.7, 26.7 / 57.6, 26.2 / 58.4 | 21.5 / 55.9, 27.3 / 53.0, 28.2 / 53.9 |
+| pose age ms p50 / p95 | 38.3 / 49.9, 38.4 / 49.9, 38.3 / 49.9 | -, 44.6 / 56.1, 44.6 / 56.1 |
+
+- `id_mod_dup`: nothing changes. The arms cost the mod's row nothing, including arm 2's 39 re-stamped kept duplicates.
+- `id_ofxr_mimic`: the four changes are the fix itself. Arm 0 drops OFXR's generated pictures and frees their waits (hence 97.6 waits/s); arms 1 and 2
+  keep them, so 55.8 pictures/s reach the client instead of 38.2. Encode time does not move. Arrival minus timestamp p50 rises by 4-7 ms in 3 of 3
+  pairs, but stays under 3 x arm 0's spread (2.6 ms), so it is not a change by the rule. The kept generated pictures carry their frame's
+  timestamp (36.4 unique timestamps/s for 55.8 pictures/s), so they arrive one frame later than their stamp, as with the mode off. That reading is
+  not measured on this row with the mode off.
+- Not run: `e2e_ofxr_tokyo_on_compat` (real OFXR; its layer was built on the 3080 Ti's D: drive, which is no longer used, so it needs a rebuild on
+  C:). The OFXR criterion below therefore rests on the lab mimic.
+
+**Decision B, where it stands (the owner decides):**
+
+| criterion | arm 1 (U1) | arm 2 (U1 + own stamp) |
+|---|---|---|
+| every matrix row passes except the re-release row | no: `id_mod_late_stale` fails (the shaking row; section 5b added it after this rule was written) | yes |
+| no regression in R5 and `e2e_modsim_*` | yes, apart from the 1.5-only check above (the probe passed on rerun) | yes, apart from the 1.5-only check above |
+| OFXR with the mode on within 2 fps of off | yes (44.22 / 44.21, lab mimic) | yes (44.25 / 44.24, lab mimic) |
+| pairing counters 0 | without facts 0; several 1 in 3 runs | without facts 0; several 1 in 3 runs |
+| the mod's numbers unchanged | yes | yes |
+| ships inside the compatibility tick, no effect with the mode off | yes (with the mode off it only counts) | **no**: it re-stamps with the mode off, and that is how it fixes the shaking row |
+
+`e2e_modsim_ofxr_fix_on` (in the matrix) and `e2e_modsim_static_pose_fix_on` (in the regressions) are the two checks that assert 1.5's
+behaviour. Both arms fail them for the right reason, and they are rewritten if an arm ships. Arm 2 is the only arm that meets the matrix
+criterion. Before section 9's headset A/B, three things are owed:
+- the owner accepts arm 2's mode-off re-stamp, or keeps arm 1;
+- the two checks are rewritten;
+- the real-OFXR row is rebuilt on C: and run.
 
 ## 7. U2: cut
 
