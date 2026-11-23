@@ -706,6 +706,16 @@ on two or three head motions. One night.
       commits a swapchain to the shim when the app releases it.
     - To check in the fork's source first: when VDXR commits.
     - Then an AER row in `xr_modsim` with a per-eye picture-position check.
+- **Arm 4, built the same night (owner: "build the proposal of arm 2 rule's per eye", `8e5b4fb`, the default).** Arm 4 = arm 3, and an eye
+  whose picture did not change keeps the pose it came with.
+  - VDXR commits an eye's OVR swapchain only when the app released a new image into it (fork `d3d11_native.cpp` 560-582: it commits until the
+    committed index matches the last released one).
+  - So an eye of the first projection layer whose compose slot did not move since the previous submit shows an earlier submit's picture. Its
+    source orientation is then the one declared with that submit, not the one declared now.
+  - Arm 3's map then rotates it to the newer eye, and the frame is stamped with the newer eye's sample.
+  - Both eyes unchanged is arm 2's whole-frame case (re-stamped). Static-image swapchains are left alone. Normal games release both eyes every
+    frame, or share one swapchain, so nothing changes for them.
+  - Counted as "one eye kept its picture's pose" in the identity line and the game-exit line. `lab_identity 3` gives arm 3 for an A/B.
 - **Tested so far:** clang-cl check from WSL, then the 5090 build. No lab row yet: the 3080 Ti was offline. Owed:
   - an AER shape in `xr_modsim` (the stale eye keeps its old pose) with a per-eye picture-position check;
   - the regression set under arm 3.
