@@ -12,7 +12,8 @@ timing code 1.5 removed (x1.5 = `two_thirds` and `uncapped`: the content-clock p
 two-thirds hold, about 250-300 lines of `tools/host/src/pipeline.rs`) stays at tag `v1.4.2` (`e5ee359`; `main` `cf8bc70` with its hotfix) if
 this work needs it again.
 
-Status: **Phase A done 2026-11-23 (Decision A = go, section 4); Phase B built (`685a07d`, arms 0-2 behind one lab switch) and its matrix run the same day (section 6): arm 0 = Phase A on every row, arm 1 fixes the new-picture rows, arm 2 also the shaking row; then the regressions and the timing A/B: no regression beyond two checks that assert 1.5's behaviour, the mod's numbers unchanged, OFXR's generated pictures kept. Decision B's table is in section 6: arm 2 meets every criterion except "no effect with the mode off"; the owner decides.** **Base: 1.5** (`1.5-simplify` `7d0d55e`, merged 2026-11-23; 1.4.2 on 2026-11-22, 1.4.1 on 2026-11-21, before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
+Status: **Phase A done 2026-11-23 (Decision A = go, section 4); Phase B built (`685a07d`, arms 0-2 behind one lab switch) and its matrix run the same day (section 6): arm 0 = Phase A on every row, arm 1 fixes the new-picture rows, arm 2 also the shaking row; then the regressions and the timing A/B: no regression beyond two checks that assert 1.5's behaviour, the mod's numbers unchanged, OFXR's generated pictures kept. Decision B's table is in section 6: arm 2 meets every criterion except "no effect with the mode off". **Decision B (owner, 2026-11-23): arm 2, with the compatibility mode always on and its switch removed. With the spec as the arbiter, the
+OpenXR letter holds for every app that follows it, and the mode does not engage for an app without runtime facts (section 6).** The follow-up batch the same evening: real OFXR with the mode on under arm 2 = the mode off (87.8 new frames/s, 0 dropped; arm 0: 71.4, 2,415 dropped); `e2e_baseline` arm 0 = arm 2; the regression set with the mode forced on: normal games unaffected, the mod unchanged. **Phase B: success in the lab; the field test is pending** (a personal bundle with arm 2 as the default, built 2026-11-23 for the owner's Black Flag session). Still owed: rewriting the two 1.5-only checks, the no-facts rule, removing the switch; then section 9's headset A/B. Noted for later: section 9b (the just-in-time release).** **Base: 1.5** (`1.5-simplify` `7d0d55e`, merged 2026-11-23; 1.4.2 on 2026-11-22, 1.4.1 on 2026-11-21, before that 1.4). Branch `universal-1.4` (worktree `/home/jeff/openxr-universal14`), cut
 from `1.4` at `6c73d0b` with `universal-openxr-2` merged in (`469ea14`: the VDXR fork pipeline and the shim's texture-array views from `vdxr-fork`, the
 fork lab, the identity lab). The merge was clean (`build.ps1`, `harness/lib.py`, `harness/run.py` and two docs auto-merged; `tools/wsl/check_cpp.sh` OK);
 nothing is built on a builder yet. `vdxr-fork` and `universal-openxr-2` stay as they were (from 1.3.11); new work goes on `universal-1.4`. Builder roots: the
@@ -492,8 +493,63 @@ figures are whole-run for every arm, and pose age is missing there. A 1 ms floor
   pairs, but stays under 3 x arm 0's spread (2.6 ms), so it is not a change by the rule. The kept generated pictures carry their frame's
   timestamp (36.4 unique timestamps/s for 55.8 pictures/s), so they arrive one frame later than their stamp, as with the mode off. That reading is
   not measured on this row with the mode off.
-- Not run: `e2e_ofxr_tokyo_on_compat` (real OFXR; its layer was built on the 3080 Ti's D: drive, which is no longer used, so it needs a rebuild on
-  C:). The OFXR criterion below therefore rests on the lab mimic.
+- Not run that day: `e2e_ofxr_tokyo_on_compat` (real OFXR; its layer was built on the 3080 Ti's D: drive, which is no longer used, so it needed a
+  rebuild on C:). Run in the follow-up batch below.
+
+**Follow-up batch: real OFXR, `e2e_baseline`, the mode forced on (2026-11-23 evening, same build; `harness/results/20261123T1428*`-`T1713*`).**
+The owner asked for this batch after reading Phase B's results.
+
+- **The layer.** OFXR is rebuilt on C: by `tools/remote/ofxr_lab_build.ps1`: djules75 V551 `382065f`, the same pin as 2026-11-13, by its own CI recipe,
+  into `C:\_ofxr\lab`.
+  - Smoke run `T142153Z` (arm 0, `e2e_ofxr_tokyo_on`) matches 2026-11-13: 88.1 new frames/s against 87.9, app 42.1 fps against 42.2.
+- **Real OFXR, arm 0 against arm 2:** 3 interleaved pairs per scenario, the order flipped in the middle pair, the 10-40 s window (`harness/ofxr_report.py`).
+  - Medians of the 3 pairs; **bold** = "changes" by section 6's rule (1 ms floor for ms).
+  - "Mode" is the compatibility mode (`drop_duplicate_frames`); "frame gen." is OFXR's own frame generation.
+  - All 18 runs pass.
+
+| metric | frame gen. off, mode off: arm 0 / 2 | frame gen. on, mode off: arm 0 / 2 | frame gen. on, mode on: arm 0 / 2 |
+|---|---|---|---|
+| app fps (log) | 44.5 / 44.5 | 42.4 / 42.5 | 42.7 / 42.5 |
+| new frames/s | 44.5 / 44.5 | 87.8 / 87.8 | 71.4 / **87.8** |
+| repeated ticks % | 50.6 / 50.6 | 2.5 / 2.4 | 20.7 / **2.4** |
+| dropped by the mode | 0 / 0 | 0 / 0 | 2,415 / **0** |
+| client fps | 39.8 / 39.8 | 70.5 / 70.4 | 59.0 / **70.5** |
+| encode ms p50 / p95 | 8.2 / 9.3, 8.3 / 9.4 | 8.3 / 9.3, 8.3 / 9.3 | 8.2 / 9.3, 8.2 / 9.3 |
+| arrival ms p50 / p95 | 16.0 / 52.6, 15.7 / 51.8 | 50.5 / 66.9, 51.4 / 66.7 | 47.8 / 63.0, 50.9 / **66.5** |
+| pose age ms p50 / p95 | - | 67.2 / 83.7, 67.1 / 83.5 | 61.0 / 78.9, **67.1** / 83.2 |
+
+  - **With the mode off, arm 2 is arm 0** on every metric.
+  - **With the mode on, arm 2 keeps every OFXR picture and reads like the mode off.**
+  - Arm 0 drops a third of OFXR's submits. The shim's log shows why: 2,741 of 6,916 submits had the previous frame's render poses with a new image
+    released. That is OFXR's generated frame, and the poses-only test calls it a duplicate. The ratio lands inside the mode's 40-70 % pattern band.
+    Arm 2 sees 181-192 submits per run that released nothing: OFXR's own resubmits, 3.5 %, under the band, so nothing is dropped.
+  - Arm 2's later arrival and pose age with the mode on are the mode-off values. Arm 0 reads lower only because it sends fewer frames.
+  - The ~35 ms between OFXR off and on (arrival p50 16 → 51 ms) is OFXR holding a rendered frame to generate the one between, not our chain.
+- **`e2e_baseline`, arm 0 against arm 2, mode off:** 3 pairs.
+  - App fps 88.9 / 85.0 / 89.0 against 88.6 / 86.0 / 88.7 (median difference -0.3); client fps +0.7; encode -0.3 ms; arrival p50 +0.7 ms.
+  - Nothing changes. The 2 fps gap of the single runs was noise: the middle pair reads 85-86 under both arms.
+  - Arm 0's first run failed `pacing_latency_steady`: last third minus first third +5.8 ms, limit 4. The other five read -1.6 to +1.1.
+- **The regression set under arm 2 with the mode forced on** (`AIRFRAMEXR_LAB_DROP_DUP=1`, every scenario that does not set the key itself): 12 of 15
+  pass.
+  - **Normal games:** every app frame is published (`app_timing.csv` rows = `shim_frames.csv` rows; `e2e_baseline` 900 / 899, as arm 0 with the
+    mode off). The rows that print the shim's stats line read dropped 0 and free waits 0.
+  - **The mod's rows are unchanged:**
+    - `fix_on`: 860 seen, 821 dropped, 820 free waits;
+    - `dup_stops`: 862 seen, 823 dropped;
+    - `triple`: 1,694 seen, 1,642 dropped, 2 per real frame;
+    - `fix_off`: keeps its explicit off; 1,350 seen, 0 dropped, 1,350 re-stamped.
+  - `e2e_modsim_static_pose_fix_on` fails `fix_on_idle_nothing_dropped`, by design (above).
+  - `e2e_openxr_probe` (-7.0 ms) and `e2e_baseline` (+6.1 ms) fail `pacing_latency_steady`. With arm 0's failure above, this check fails on this rig
+    whatever the arm.
+    - **Reruns** (`T1716*`-`T1731*`): `e2e_openxr_probe` with the mode forced on passed 2 of 2 (-0.8 and -0.5 ms).
+    - **5 interleaved pairs of `e2e_baseline`, arm 2, mode forced on against off** (`T1734*`-`T1802*`):
+      - on fails 1 of 5 (+8.6 ms; the others -1.3 to +1.5);
+      - off fails 2 of 5 (+6.5 and -5.2 ms; the others -0.2 to +1.9);
+      - client fps and arrival p50 the same.
+    - **Over the day, `e2e_baseline` failed this check in 6 of 20 runs:** arm 0 with the mode off 1 of 4, arm 2 off 2 of 8, arm 2 forced on 3 of 8.
+      - This is the rig's flake, not the arm or the mode.
+      - The check (a third of a 900-frame run against another) is too short for this rig's latency steps. It is a harness item, not a Phase B
+        one.
 
 **Decision B, where it stands (the owner decides):**
 
@@ -501,17 +557,63 @@ figures are whole-run for every arm, and pose age is missing there. A 1 ms floor
 |---|---|---|
 | every matrix row passes except the re-release row | no: `id_mod_late_stale` fails (the shaking row; section 5b added it after this rule was written) | yes |
 | no regression in R5 and `e2e_modsim_*` | yes, apart from the 1.5-only check above (the probe passed on rerun) | yes, apart from the 1.5-only check above |
-| OFXR with the mode on within 2 fps of off | yes (44.22 / 44.21, lab mimic) | yes (44.25 / 44.24, lab mimic) |
+| OFXR with the mode on within 2 fps of off | yes (44.22 / 44.21, lab mimic; real OFXR not run) | yes (44.25 / 44.24, lab mimic; real OFXR app 42.5 / 42.5 fps, new frames 87.8 / 87.8 per s) |
 | pairing counters 0 | without facts 0; several 1 in 3 runs | without facts 0; several 1 in 3 runs |
 | the mod's numbers unchanged | yes | yes |
 | ships inside the compatibility tick, no effect with the mode off | yes (with the mode off it only counts) | **no**: it re-stamps with the mode off, and that is how it fixes the shaking row |
 
 `e2e_modsim_ofxr_fix_on` (in the matrix) and `e2e_modsim_static_pose_fix_on` (in the regressions) are the two checks that assert 1.5's
 behaviour. Both arms fail them for the right reason, and they are rewritten if an arm ships. Arm 2 is the only arm that meets the matrix
-criterion. Before section 9's headset A/B, three things are owed:
-- the owner accepts arm 2's mode-off re-stamp, or keeps arm 1;
-- the two checks are rewritten;
-- the real-OFXR row is rebuilt on C: and run.
+criterion. Before section 9's headset A/B, three things were owed:
+- ~~the owner accepts arm 2's mode-off re-stamp, or keeps arm 1~~. **Owner's direction, 2026-11-23: arm 2 is the future. The aim is the
+  compatibility mode always on, with its switch removed.**
+  - Arm 2 does not replace the mode. The mod's second-wait pacing and duplicate drop still need it: with the mode off under arm 2, the mod runs
+    at 22.5 real fps against 45 with it on.
+  - What arm 2 removes is the mode's harm to OFXR, the reason it had a switch.
+  - With no switch there is no "mode off", so the last row of the table stops applying.
+  - The regression set with the mode forced on (follow-up batch above) is the evidence that normal games are unaffected.
+  - **The rule, in the spec's terms (owner, 2026-11-23: the spec is the arbiter; OpenXR 1.1 reference pages):** literal for every app that
+    follows the spec; the compatibility behaviour only where the app's own frames contradict the spec's frame model.
+    - **Mode off is the letter.**
+      - Every `xrWaitFrame` is paced ("the runtime **should** block until the beginning of the next frame interval").
+      - Every ended frame is composed with the last released image.
+      - Every frame is stamped from the pose the app declared ("the runtime will map the view and FOV to the system display appropriately").
+    - **The mode breaks no "must".**
+      - The free wait bends one "should" (the blocking).
+      - It keeps the "musts": the display time is one interval later ("**must** be monotonically increasing"), and the wait comes after the
+        previous frame has begun.
+      - The duplicate drop is a case the spec does not cover: the same image under the same poses, which the headset shows as the same picture.
+    - **Arm 2's re-stamp departs from the declared pose only when an app puts new poses on an image it did not release again.**
+      - That was 0 times in every app that follows the spec; the mod did it after submit 12,000.
+      - With the same poses it agrees with the declared pose.
+    - **The mod departs first.** It sends each picture under two display times, where the spec says "Every stage in the engine pipeline
+      **should** use the exact same display time for one particular application-generated frame".
+    - **Measured for apps that follow the spec, arm 2 with the mode on:**
+      - drops 0 and free waits 0 in the normal games;
+      - drops 0 for OFXR, and re-stamps only its own 3.5 % resubmits, with no measured effect.
+  - **An app without runtime facts (owner, 2026-11-23: agreed).** That is stock VDXR or a libOVR game, where every arm fell back to the
+    poses-only test that dropped OFXR's frames.
+    - Decision: no compatibility behaviour without facts. No evidence means the letter. The mode does not engage for those apps; this is not a
+      setting.
+  - **Decision B (owner, 2026-11-23): ship arm 2 with the mode always on; the switch is removed; no compatibility behaviour without facts.**
+    - The 1.5 mode as it is (poses only) is the one the data contradicts. The data supports arm 2's detection.
+    - Owed before shipping:
+      - the two 1.5-only checks rewritten;
+      - the no-facts rule built and run in the lab;
+      - section 9's headset A/B.
+  - **Not covered by the lab:**
+    - an app that double-submits on purpose: the free waits would let its loop run faster, up to its own limiter;
+    - the headset.
+  - Native libOVR games are experimental only (owner, 2026-11-23): a starting point for people who want to tinker with old titles, not a
+    supported target. The no-facts rule only needs to be safe for them, not tuned.
+  - The rule applies per submit: a submit without facts counts as a new picture. That way a layer VDXR rejects in an OpenXR game cannot feed the
+    pattern windows.
+  - Section 9 and the field logs are where "unless data says otherwise" is tested. The field log needs one line when the mode engages and
+    disengages: an engine edit, to confirm with the owner.
+  - Removing the switch is part of shipping arm 2: engine, GUI and `docs/EXPERIMENTAL_SWITCHES.md`. The scenarios that set the mode off are
+    rewritten then; examples are `e2e_modsim_fix_off`, `e2e_ofxr_tokyo_off` and `e2e_ofxr_tokyo_on`.
+- the two checks are rewritten (still owed);
+- ~~the real-OFXR row is rebuilt on C: and run~~: done in the follow-up batch above.
 
 ## 7. U2: cut
 
