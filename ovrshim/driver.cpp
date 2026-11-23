@@ -545,7 +545,9 @@ namespace {
                 // the flag is shared by every app of the session: an app that was told to leave (the desktop mirror, when a game starts) must not clear it
                 // for the app that took over (that one wrote its own name into appExe)
                 if (_wcsicmp(m_ipc.state->shim.appExe, shimlog::ExeName().c_str()) == 0) m_ipc.state->shim.shimAlive = 0;
-                shimlog::General("INFO", "game exit: %llu frames", (unsigned long long)m_framesSubmitted);
+                shimlog::General("INFO", "game exit: %llu frames; eyes mapped by their own poses in %llu submits (right eye newer %llu, angle mean %.3f max %.3f deg)",
+                                 (unsigned long long)m_framesSubmitted, (unsigned long long)m_eyeMapSubmits, (unsigned long long)m_eyeMapRightRef,
+                                 m_eyeMapSubmits ? m_eyeMapAngleSum / (double)m_eyeMapSubmits * 57.29578 : 0.0, m_eyeMapAngleMax * 57.29578);
             }
             airframexr_ipc::CloseIpc(m_ipc);
 
@@ -1342,6 +1344,11 @@ namespace {
                     const auto* l = (const ovrLayerEyeFov*)h;
                     eyeView[0] = l->RenderPose[0];
                     eyeView[1] = l->RenderPose[1];
+                    if (m_eyeMap.on) {   // arm 3: world-locked layers line up with the eye as it is drawn
+                        for (int e = 0; e < ovrEye_Count; e++) {
+                            eyeView[e].Orientation = m_eyeMap.target[e];
+                        }
+                    }
                     haveProjection = true;
                     break;
                 }
@@ -1387,7 +1394,10 @@ namespace {
                             if ((eye == 0 && skipLeft) || (eye == 1 && skipRight)) {
                                 continue;
                             }
-                            constants.reprojectionMatrix = EyeHomography(m_eyeFov[eye], eyeFov->Fov[eye], OVR::Quatf()); // FoV change only
+                            // FoV change only; arm 3 (m_eyeMap): also the rotation from the eye's render orientation to the one it is drawn for
+                            const OVR::Quatf qRel = m_eyeMap.on ? OVR::Quatf(eyeFov->RenderPose[eye].Orientation).Inverted() * m_eyeMap.target[eye]
+                                                                : OVR::Quatf();
+                            constants.reprojectionMatrix = EyeHomography(m_eyeFov[eye], eyeFov->Fov[eye], qRel);
 
                             // OVR allows specifying null texture for the right eye.
                             const auto swapchain = eye == 0 || !eyeFov->ColorTexture[eye] ? eyeFov->ColorTexture[0]
@@ -1587,7 +1597,7 @@ namespace {
             // Frame-identity lab arm (ipc labIdentity, docs/PLAN_UNIVERSAL_OPENXR.md Phase B): the runtime's facts since the previous submit
             // (taken in every arm so none pile up; arm 0 decides nothing with them).
             const uint32_t idArmRaw = m_ipc.state ? *(volatile uint32_t*)&m_ipc.state->host.labIdentity : 0u;
-            const uint32_t idArm = idArmRaw > 2u ? 2u : idArmRaw;
+            const uint32_t idArm = idArmRaw > 3u ? 3u : idArmRaw;
             const vdxrinfo::Facts facts = vdxrinfo::TakeFacts();
             const bool haveFacts = facts.count > 0;
             const bool nothingReleased = haveFacts && facts.released == 0.0;
@@ -1660,8 +1670,11 @@ namespace {
             // Arm 2: a submit that released nothing shows the previous frame's picture, so it leaves with that frame's timestamp (a true
             // repeat, which the headset shows as one: 1.3.10 strobe test), whatever poses the app put on it; the pose matching is skipped so
             // its state (the previous frame's timestamp, never going back) stays the real frames'.
-            const bool restamp = idArm == 2 && nothingReleased && m_idHaveLastTs;
-            const uint64_t clientTs = restamp ? m_idLastTs : FrameClientTimestamp(layers);
+            const bool restamp = idArm >= 2 && nothingReleased && m_idHaveLastTs;
+            // Arm 3: each eye mapped by its own render pose (OpenXR gives every projection view its own pose; alternate-eye rendering mods
+            // submit one eye a frame older than the other). Off (identity, as arm 2) when the eyes share an orientation: every normal game.
+            m_eyeMap = idArm >= 3 ? ComputeEyeMap(layers) : EyeMap{};
+            const uint64_t clientTs = restamp ? m_idLastTs : FrameClientTimestamp(layers, m_eyeMap.on ? m_eyeMap.ref : 0);
             m_idRestamped += restamp ? 1 : 0;
             m_idLastTs = clientTs;
             m_idHaveLastTs = true;
@@ -1761,9 +1774,12 @@ namespace {
                             m_ipc.state->host.appMinPeriodUs ? 1e6 / (double)m_ipc.state->host.appMinPeriodUs : 0.0, (unsigned long long)m_capHolds,
                             (unsigned long long)m_dupSeen, (unsigned long long)m_dupDropped, m_ipc.state->host.dropDuplicateFrames ? "on" : "off", m_dupPerReal.load(), (unsigned long long)m_freeWaits);
                     ShimLog("identity: arm %u, submits %llu, same poses with an image released %llu, new poses with nothing released %llu, "
-                            "re-stamped %llu, without runtime facts %llu, with several %llu",
+                            "re-stamped %llu, without runtime facts %llu, with several %llu; eyes mapped by their own poses %llu (right eye newer %llu, "
+                            "angle mean %.3f max %.3f deg)",
                             idArm, (unsigned long long)m_idSubmits, (unsigned long long)m_idSamePoseReleased, (unsigned long long)m_idStalePose,
-                            (unsigned long long)m_idRestamped, (unsigned long long)m_idNoFacts, (unsigned long long)m_idMultiFacts);
+                            (unsigned long long)m_idRestamped, (unsigned long long)m_idNoFacts, (unsigned long long)m_idMultiFacts,
+                            (unsigned long long)m_eyeMapSubmits, (unsigned long long)m_eyeMapRightRef,
+                            m_eyeMapSubmits ? m_eyeMapAngleSum / (double)m_eyeMapSubmits * 57.29578 : 0.0, m_eyeMapAngleMax * 57.29578);
                     auto pct = [](std::vector<float>& v, double q) {
                         if (v.empty()) {
                             return 0.0f;
@@ -1823,6 +1839,7 @@ namespace {
                     const double releaseS = TakeFrameRelease();
                     PendingFrame pf{slot, clientTs, composeStart, releaseS, trace};
                     FrameRenderOrientation(layers, pf.renderQ, pf.hasProjection);
+                    MappedOrientation(pf.renderQ);
                     pf.displayS = displayS;
                     m_publishQueue.push_back(pf);
                     lock.unlock();
@@ -1833,6 +1850,7 @@ namespace {
                     float renderQ[2][4];
                     bool hasProjection = false;
                     FrameRenderOrientation(layers, renderQ, hasProjection);
+                    MappedOrientation(renderQ);
                     PublishFrame(slot, clientTs, composeStart, TakeFrameRelease(), trace, renderQ, hasProjection, displayS);
                 }
             }
@@ -1888,6 +1906,16 @@ namespace {
                     hasProjection = true;
                     return;
                 }
+            }
+        }
+
+        // Arm 3: the composed eyes stand for the mapped orientations, not the ones the app rendered with.
+        void MappedOrientation(float q[2][4]) const {
+            if (!m_eyeMap.on) {
+                return;
+            }
+            for (int e = 0; e < 2; e++) {
+                q[e][0] = m_eyeMap.target[e].x; q[e][1] = m_eyeMap.target[e].y; q[e][2] = m_eyeMap.target[e].z; q[e][3] = m_eyeMap.target[e].w;
             }
         }
 
@@ -2031,11 +2059,88 @@ namespace {
             }
         }
 
+        // Arm 3 (ipc labIdentity 3, docs/PLAN_UNIVERSAL_OPENXR.md): each eye of the projection layers is drawn rotated from the pose it was
+        // rendered with to the frame's pose, the head pose of the reference eye (the newer one, by the tracking samples the two poses match).
+        // The stream carries one pose per frame (ALVR v20) and the headset reprojects the whole frame by it; rotations compose, so a picture
+        // that one eye kept from the frame before (alternate-eye rendering) lands where its own pose looked. Rotation only: the eyes' position
+        // difference beyond the eye offset is not corrected (no depth). Off when the two eyes' head orientations agree within kEyeMapMinAngle.
+        struct EyeMap {
+            bool on{false};
+            int ref{0};
+            OVR::Quatf target[ovrEye_Count];   // the orientation each eye is drawn for: the reference head orientation * that eye's eye-to-head rotation
+            double angle{0.0};                 // between the two eyes' head orientations, rad
+        };
+        static constexpr double kEyeMapMinAngle = 1e-4;   // rad (~0.006 degree, ~0.2 px at the Vision Pro's density): below it the eyes agree
+        EyeMap m_eyeMap;
+        uint64_t m_eyeMapSubmits{0}, m_eyeMapRightRef{0};
+        double m_eyeMapAngleSum{0.0}, m_eyeMapAngleMax{0.0};
+
+        static double QuatAngle(const OVR::Quatf& a, const OVR::Quatf& b) {   // the rotation angle between two orientations, rad
+            const OVR::Quatf d = a.Inverted() * b;
+            const double v = std::sqrt((double)d.x * d.x + (double)d.y * d.y + (double)d.z * d.z);
+            return 2.0 * std::atan2(v, std::abs((double)d.w));
+        }
+
+        // The newest tracking sample (not behind the previous frame's) whose orientation matches `head` within 0.5 degree, as
+        // FrameClientTimestamp picks it but without its side effects; 0 when none does.
+        uint64_t MatchSampleTs(const OVR::Quatf& head) {
+            std::lock_guard lock(m_lastHeadMutex);
+            uint64_t bestTs = 0;
+            double best = 0.0087;
+            for (size_t k = 0; k < m_poseRingCount; k++) {
+                const PoseSample& p = m_poseRing[(m_poseRingHead + kPoseRing - 1 - k) % kPoseRing];   // newest first
+                if (p.clientTsNs < m_lastFrameTsNs) {
+                    continue;
+                }
+                const double a = QuatAngle(p.orientation, head);
+                if (a < best - 2e-6) {
+                    best = a;
+                    bestTs = p.clientTsNs;
+                }
+            }
+            return bestTs;
+        }
+
+        EyeMap ComputeEyeMap(const std::vector<const ovrLayerHeader*>& layers) {
+            EyeMap m;
+            const ovrLayerEyeFov* l = nullptr;
+            for (const ovrLayerHeader* h : layers) {
+                if (h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth)) {
+                    l = (const ovrLayerEyeFov*)h;
+                    break;
+                }
+            }
+            // a layer drawn for one eye only gives no pose for the other
+            if (!l || (l->Header.Flags & (kLayerFlagDisableLeft | kLayerFlagDisableRight)) != 0) {
+                return m;
+            }
+            OVR::Quatf head[ovrEye_Count];
+            for (int e = 0; e < ovrEye_Count; e++) {
+                head[e] = OVR::Quatf(l->RenderPose[e].Orientation) * OVR::Quatf(m_eyePose[e].Orientation).Inverted();
+                head[e].Normalize();
+            }
+            m.angle = QuatAngle(head[0], head[1]);
+            if (!(m.angle > kEyeMapMinAngle)) {
+                return m;
+            }
+            const uint64_t ts0 = MatchSampleTs(head[0]), ts1 = MatchSampleTs(head[1]);
+            m.ref = ts1 > ts0 ? 1 : 0;   // the newer eye names the frame; neither matched: the left, as today
+            for (int e = 0; e < ovrEye_Count; e++) {
+                m.target[e] = head[m.ref] * OVR::Quatf(m_eyePose[e].Orientation);
+            }
+            m.on = true;
+            m_eyeMapSubmits++;
+            m_eyeMapRightRef += m.ref;
+            m_eyeMapAngleSum += m.angle;
+            m_eyeMapAngleMax = std::max(m_eyeMapAngleMax, m.angle);
+            return m;
+        }
+
         // Client tracking timestamp to send this frame with: the one of the head pose the projection layer was rendered with.
         // Like ALVR's own SteamVR driver (PoseHistory::GetBestPoseMatch), match the layer's RenderPose against the poses the
         // app read; "the last pose read" is wrong for engines that read the next frame's pose before submitting this one
         // (render-thread pipelining), and the headset then reprojects the frame against the wrong pose.
-        uint64_t FrameClientTimestamp(const std::vector<const ovrLayerHeader*>& layers) {
+        uint64_t FrameClientTimestamp(const std::vector<const ovrLayerHeader*>& layers, int refEye = 0) {
             const ovrLayerEyeFov* eye = nullptr;
             for (const ovrLayerHeader* h : layers) {
                 if (h && (h->Type == ovrLayerType_EyeFov || h->Type == ovrLayerType_EyeFovDepth)) {
@@ -2047,8 +2152,9 @@ namespace {
             bool matched = false;
             if (eye) {
                 // eye orientation = head orientation * eye-to-head rotation (identity for ALVR's orthogonal views)
+                // refEye: the eye whose pose names the frame (arm 3: the newer of two eyes rendered with different poses; else the left)
                 const OVR::Quatf target =
-                    OVR::Quatf(eye->RenderPose[0].Orientation) * OVR::Quatf(m_eyePose[ovrEye_Left].Orientation).Inverted();
+                    OVR::Quatf(eye->RenderPose[refEye].Orientation) * OVR::Quatf(m_eyePose[refEye].Orientation).Inverted();
                 std::lock_guard lock(m_lastHeadMutex);
                 auto sample = [&](size_t k) -> const PoseSample& { // k = 0 is the newest
                     return m_poseRing[(m_poseRingHead + kPoseRing - 1 - k) % kPoseRing];
