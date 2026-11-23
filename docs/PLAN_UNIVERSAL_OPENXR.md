@@ -658,6 +658,31 @@ on two or three head motions. One night.
   - There is no earlier Dead Space debug run to compare the latency with.
   - Frame generation x2 was on for most of the first session: 50 fps by design.
 
+**Arm 3: each eye by its own pose (owner, 2026-11-23 night: "it's a universal design", built the same night, `27fb7ff`).**
+- **The problem.** Black Flag's mod uses alternate-eye rendering (AER), as Luke Ross's mods do: one eye's picture is a frame older than the
+  other's. OpenXR gives each projection view its own pose ("the runtime will map the view and FOV to the system display appropriately"). The shim
+  stamped the frame with the left eye's pose and composed both eyes with a FoV change only. The older eye was therefore misplaced by the head's
+  turn over one engine frame: about 1 degree at 100 degrees/s and 100 fps, twice that at Black Flag's 45.
+- **Arm 3 = arm 2, plus each eye mapped by its own pose.**
+  - Each eye of the projection layers is drawn rotated from its render orientation to the frame's orientation, through the existing per-eye
+    homography (`EyeHomography(..., qRel)`, which was given the identity before).
+  - The frame's orientation is the head orientation of the newer eye: the later of the two tracking samples the eyes' poses match.
+  - The frame is stamped with that eye's sample.
+  - Quads are drawn from the mapped orientations, and the host's frame generation gets them as the frame's render orientations.
+  - The headset then reprojects one consistent frame. Rotations compose, so this equals a pose per eye on the wire, with no protocol or client
+    change and with stock clients unaffected. Position (parallax) is not corrected (no depth).
+- **When it acts.** Only when the two eyes' head orientations differ by more than 1e-4 rad (about 0.006 degree). Every normal game is below that,
+  and there the frame is the arm 2 frame bit for bit. A layer drawn for one eye only is left alone.
+- **The switch and its counts.**
+  - It is the default arm; `lab_identity 2` gives tonight's first bundle for an A/B.
+  - Counted in the identity line and in the game-exit line of the release run log: "eyes mapped by their own poses in N submits (right eye
+    newer, angle mean, max)".
+  - A Black Flag count of 0 after submit 12,000 would mean the mod declares the new pose for its stale eye, as `MODSIM_ONE_EYE` models it.
+    Then no runtime can place that eye right.
+- **Tested so far:** clang-cl check from WSL, then the 5090 build. No lab row yet: the 3080 Ti was offline. Owed:
+  - an AER shape in `xr_modsim` (the stale eye keeps its old pose) with a per-eye picture-position check;
+  - the regression set under arm 3.
+
 ## 9b. Noted for later: the just-in-time game release (owner, 2026-11-23)
 
 The owner asked to test it again, now that the chain is understood end to end. It is not a gate of this plan. It is an engine step of its own, after
