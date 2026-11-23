@@ -1,0 +1,88 @@
+{
+  "description": "OFXR LAB (real layer, V551 build in C:\\_ofxr, see docs): xr_probe with the Littlest Tokyo scene and a CPU cost of 22 ms per frame (a game at about half the 90 Hz display, the case OFXR is made for) through the full chain to the mock Vision Pro display (90 Hz). No OFXR layer: the baseline of the same app.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 100,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 100000,
+    "running_start_ms": 2.0,
+    "frame_gen": "off",
+    "drop_duplicate_frames": false,
+    "debug": true
+  },
+  "client": {
+    "seconds": 100,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "display_sim": true,
+    "poll_ms": 5,
+    "queue_max": 2,
+    "motion": "yaw"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 3000,
+    "timeout_s": 110,
+    "env": {
+      "XR_PROBE_SCENE": "bench\\littlest_tokyo.vab",
+      "XR_PROBE_CPU_MS": "22"
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 300,
+  "checks": {
+    "host_min_frames": 600,
+    "client_min_frames": 600,
+    "ts_report": true,
+    "max_duplicate_timestamps": 1000000
+  }
+}
