@@ -74,6 +74,7 @@
     "client_min_frames": 200,
     "vr_guard": [
       "smooth_motion"
-    ]
+    ],
+    "max_duplicate_timestamps": 400
   }
 }
