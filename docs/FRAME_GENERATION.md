@@ -196,7 +196,7 @@ The game's DLSS motion vectors were an alternative motion source from 0.4 to 0.6
 
 The default synthesis since 1.4.2 (`frame_gen_synthesis` "neural" in the Advanced window; "edge", the optical flow's synthesis, is the
 fallback the user can pick, 1.4.1's generation): RIFE 4.4 (Practical-RIFE's weights, vs-rife's model code, MIT) computes, per
-pair, the motion from the output time to each frame and a blend mask, at `AIRFRAMEXR_FG_NEURAL_SCALE` (0.5) of the eye resolution, with our own
+pair, the motion from the output time to each frame and a blend mask, at `AIRFRAMEXR_FG_NEURAL_SCALE` (0.5, fixed: lower scales lose most of the gain over edge, docs/PERFORMANCE_FINDINGS.md) of the eye resolution, with our own
 CUDA network (`airframexr_rife.dll`, docs/NEURAL_RIFE_CUDA.md: the recipe, build, checks); the output pass composes the picture at full resolution
 from them (one sample of each original frame through the same rotation chain as the flow; the older frame fills outside the newer view), and
 keeps still content exact where both frames agree within `AIRFRAMEXR_FG_NEURAL_STILL` (0.02) and the fields move less than
