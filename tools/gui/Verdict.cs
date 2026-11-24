@@ -58,6 +58,18 @@ namespace AirFrameXR
                 add("Head tracking (scene test)", $"{r.HeadSamplesPerS:0}/s, gaps up to {r.HeadGapP95Ms:0} ms, turned {r.HeadYawRangeDeg:0} deg", $"about {ctxFps:0} samples per second, no long gaps; the scene saw your movement", r.HeadSamplesPerS >= 0.8 * ctxFps && (r.HeadYawRangeDeg >= 5 || r.HeadMoveCm >= 3) ? Rating.Good : Rating.Ok);
                 add("Repeated head samples", $"{r.SameTsPct:0.#}% of frames", "a frame sharing the previous frame's head sample is not shown as a new picture; a few percent is normal", r.SameTsPct < 5 ? Rating.Good : r.SameTsPct < 15 ? Rating.Ok : Rating.Poor);
             }
+            if (r.FgRan)
+            {
+                // the scene test's last 30 seconds with frame generation x2: neural keeps its place only if the stream holds the rate (the wizard writes edge otherwise)
+                var synth = r.FgSynthesis == "neural" ? $"neural, {r.FgNeuralMs:0.0} ms a run" : r.FgSynthesis == "" ? "synthesis unknown" : r.FgSynthesis;
+                add("Frame generation x2 (scene test)", $"{r.FgStreamFps:0} of {ctxFps:0} fps streamed, game {r.FgAppFps:0} fps ({synth})", "95% of the refresh rate or more",
+                    r.FgHolds ? Rating.Good : Rating.Poor,
+                    r.FgSynthesis == "neural"
+                        ? "The neural synthesis is too slow on this PC at this resolution: the configuration uses edge (Advanced, Frame generation, to change it). A lower resolution or refresh rate leaves it more room."
+                        : "Frame generation does not hold the refresh rate at this resolution: lower the resolution or the refresh rate for games that need it.");
+                if (r.FgTotalMs > 0 && r.TotalMs > 0)
+                    add("   latency with frame generation", $"{r.FgTotalMs:0.0} ms ({r.FgTotalMs - r.TotalMs:+0.0;-0.0} ms against off)", $"under {tg.LatencyGoodMs:0} ms good, {tg.LatencyOkMs:0} ms acceptable", Reference.Latency(r.FgTotalMs, tg));
+            }
             add("Video codec", hs.Enc10 ? "HEVC 10-bit" : "HEVC 8-bit", prof.CodecAdvice, hs.Enc10 || !prof.Tuned ? Rating.Good : Rating.Ok);
             // OpenXR API layers that load into every game: some capture the controllers before any runtime sees them
             var layersOn = XrLayers.ActiveImplicit();

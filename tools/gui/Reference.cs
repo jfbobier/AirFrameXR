@@ -168,6 +168,12 @@ namespace AirFrameXR
         // the scene test (the real pipeline with the headset's head pose)
         public double HeadSamplesPerS, HeadGapP95Ms, HeadYawRangeDeg, HeadMoveCm, SameTsPct, SceneAppFps, SliceLive;
         public bool SceneRan;
+        // the scene test's last 30 seconds, frame generation x2 on (the streamer's own statistics): streamed and game fps, frames the headset showed,
+        // the total latency, the synthesis that ran ("neural" or "edge") and the neural network's GPU time per run; FgHolds = the stream kept 95 % of the rate
+        public bool FgRan, FgHolds;
+        public string FgSynthesis = "";
+        public double FgStreamFps, FgAppFps, FgDisplayedFps, FgTotalMs, FgNeuralMs;
+        public int FgNeuralFailures;
     }
 
     /// The configuration proposed from the handshake and the tests, with a short reason for each value.

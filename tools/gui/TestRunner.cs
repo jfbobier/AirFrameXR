@@ -240,7 +240,7 @@ namespace AirFrameXR
 
             steps.Add(new TestStep
             {
-                Name = "Scene test: Littlest Tokyo through the real pipeline (head tracking, frames, latency)",
+                Name = "Scene test: Littlest Tokyo through the real pipeline (head tracking, frames, latency), then 30 s with frame generation",
                 NeedsHeadset = true,
                 Run = async (ctx, st) =>
                 {
@@ -257,6 +257,10 @@ namespace AirFrameXR
                     DateTime gameStart = DateTime.MinValue;
                     double frames = 0, fpsW = 0, sameTs = 0, trkN = 0, gapP95 = 0, slices = 0, encMs = 0;
                     double w = 0, total = 0, game = 0, enc = 0, net = 0, dec = 0, dq = 0, vq = 0, cf = 0, df = 0, mbps = 0;
+                    // the last 30 seconds: frame generation x2 switched on live (the streamer's stdin), measured after 6 s of settling
+                    bool fgOn = false; DateTime fgStart = DateTime.MinValue;
+                    double fFrames = 0, fFpsW = 0, fW = 0, fTotal = 0, fDisp = 0;
+                    var fgWin = new List<Dictionary<string, object>>();
                     var host = new HostProcess();
                     Environment.SetEnvironmentVariable("AIRFRAMEXR_AUDIO_CAPTURE", new AppSettings().AudioCapture == "process" ? "process" : null);   // the host captures like the streamer does
                     host.OnEvent += (n, d) =>
@@ -267,7 +271,15 @@ namespace AirFrameXR
                             else if (n == "setup_error") error = d != null && d.TryGetValue("message", out var m) ? m as string : "setup error";
                             else if (n == "game_started") { gameOn = true; gameStart = DateTime.UtcNow; }
                             else if (n == "game_ended") gameDone = true;
-                            else if (n == "encoder_stats" && gameOn && !gameDone && (DateTime.UtcNow - gameStart).TotalSeconds > 5 && d != null)
+                            else if (n == "encoder_stats" && fgOn && !gameDone && (DateTime.UtcNow - fgStart).TotalSeconds > 6 && d != null)
+                            {
+                                var f = Math.Max(1, Num(d, "frames"));
+                                fFrames += f; fFpsW += f * Num(d, "fps");
+                                var cl = Sub(d, "client");
+                                if (cl != null) { var sm = Math.Max(1, Num(cl, "samples")); fW += sm; fTotal += sm * Num(cl, "total_latency_ms"); fDisp += sm * Num(cl, "displayed_fps"); }
+                            }
+                            else if (n == "fg_perf" && fgOn && !gameDone && (DateTime.UtcNow - fgStart).TotalSeconds > 12 && d != null) fgWin.Add(d);
+                            else if (n == "encoder_stats" && gameOn && !fgOn && !gameDone && (DateTime.UtcNow - gameStart).TotalSeconds > 5 && d != null)
                             {
                                 // the first seconds (scene loading, the encoder settling) are left out
                                 var f = Math.Max(1, Num(d, "frames"));
@@ -289,7 +301,7 @@ namespace AirFrameXR
                     };
                     var exited = new TaskCompletionSource<int>();
                     host.OnExit += code => exited.TrySetResult(code);
-                    var herr = host.Start($"--install-dir \"{Paths.Dir}\" --shim --daemon --gui");
+                    var herr = host.Start($"--install-dir \"{Paths.Dir}\" --shim --daemon --gui --frame-gen off --frame-gen-rate half");   // generation off for the first part, x2 when it is switched on
                     if (herr != null) throw new TestFailed(herr);
                     var reg = ctx.Ct.Register(() => { host.Stop(2000); exited.TrySetCanceled(); });
                     System.Diagnostics.Process app = null;
@@ -300,13 +312,13 @@ namespace AirFrameXR
                         while (!connected && error == null && !exited.Task.IsCompleted && (DateTime.UtcNow - t0).TotalSeconds < 120) await Task.Delay(300, ctx.Ct);
                         if (error != null) throw new TestFailed(error);
                         if (!connected) throw new TestFailed("the headset did not connect");
-                        var nFrames = (int)(ctx.Fps * 32);
-                        var psi = new System.Diagnostics.ProcessStartInfo(probe, $"\"{System.IO.Path.Combine(tmp, "scene.log")}\" {nFrames} 60 \"{poseCsv}\"")
+                        var nFrames = (int)(ctx.Fps * 32 + ctx.Fps / 2 * 30);   // 32 s at the headset's rate, then 30 s at half of it (frame generation x2 paces the game)
+                        var psi = new System.Diagnostics.ProcessStartInfo(probe, $"\"{System.IO.Path.Combine(tmp, "scene.log")}\" {nFrames} 110 \"{poseCsv}\"")
                         { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = tmp };
                         psi.EnvironmentVariables["XR_RUNTIME_JSON"] = runtime;
                         psi.EnvironmentVariables["XR_PROBE_SCENE"] = scene;
                         try { app = System.Diagnostics.Process.Start(psi); } catch (Exception e) { throw new TestFailed("cannot start the scene app: " + e.Message); }
-                        ctx.Status("Scene test: you are inside Littlest Tokyo. Look around slowly (left, right, up, down) for about 30 seconds...");
+                        ctx.Status("Scene test: you are inside Littlest Tokyo. Look around slowly (left, right, up, down) for about a minute...");
                         // the scene plays its music: Windows' process loopback (the API the host captures the game audio with) listens for 4 s once the scene has loaded
                         var audioTask = Task.Run(() =>
                         {
@@ -315,7 +327,19 @@ namespace AirFrameXR
                             var err = ProcessLoopbackMeter.Measure(4, out var pk, out var rm);
                             ctx.R.AudioError = err; if (err == null) { ctx.R.AudioPeak = pk; ctx.R.AudioRms = rm; }
                         });
-                        await Task.Run(() => { while (!app.HasExited && !ctx.Ct.IsCancellationRequested) System.Threading.Thread.Sleep(200); });
+                        await Task.Run(() =>
+                        {
+                            while (!app.HasExited && !ctx.Ct.IsCancellationRequested)
+                            {
+                                if (!fgOn && gameOn && (DateTime.UtcNow - gameStart).TotalSeconds >= 32)
+                                {
+                                    host.Send("frame_gen on");
+                                    fgStart = DateTime.UtcNow; fgOn = true;
+                                    ctx.Status("Scene test: frame generation (x2) is on for the last 30 seconds. Keep looking around...");
+                                }
+                                System.Threading.Thread.Sleep(200);
+                            }
+                        });
                         try { await audioTask; } catch { }
                         if (error != null) throw new TestFailed(error);
                     }
@@ -359,14 +383,36 @@ namespace AirFrameXR
                         r.TotalMs = total / w; r.GameMs = game / w; r.EncoderMs = enc / w; r.NetworkMs = net / w; r.DecodeMs = dec / w; r.DecoderQueueMs = dq / w; r.VsyncQueueMs = vq / w;
                         r.ClientFps = cf / w; r.DisplayedFps = df / w; r.StreamedMbps = mbps / w;
                     }
+                    // the frame generation part: what the stream kept of the rate, at what latency, with which synthesis and at what cost
+                    if (fFrames > 0)
+                    {
+                        r.FgRan = true;
+                        r.FgStreamFps = fFpsW / fFrames;
+                        if (fW > 0) { r.FgTotalMs = fTotal / fW; r.FgDisplayedFps = fDisp / fW; }
+                        if (fgWin.Count > 0)
+                        {
+                            var apps = fgWin.Select(x => Num(x, "app_fps")).OrderBy(x => x).ToList();
+                            r.FgAppFps = apps[apps.Count / 2];
+                            var gen = Sub(fgWin[fgWin.Count - 1], "gen");
+                            var nn = Sub(gen, "neural");
+                            var info = gen != null && gen.TryGetValue("info", out var iv) ? iv as string ?? "" : "";
+                            r.FgSynthesis = info.Contains("synthesis neural") && nn != null && Num(nn, "on") == 1 ? "neural" : "edge";
+                            if (nn != null) { r.FgNeuralMs = Num(nn, "ms_avg"); r.FgNeuralFailures = (int)Num(nn, "failures"); }
+                        }
+                        r.FgHolds = r.FgStreamFps >= 0.95 * ctx.Fps && r.FgNeuralFailures == 0;
+                    }
                     var moved = r.HeadYawRangeDeg >= 5 || r.HeadMoveCm >= 3;
                     var problems = new List<string>();
                     if (r.HeadSamplesPerS < 0.8 * ctx.Fps) problems.Add($"head tracking arrives at only {r.HeadSamplesPerS:0}/s (expected about {ctx.Fps:0})");
                     if (!moved) problems.Add("no head movement was seen: look around during the test to verify tracking");
                     if (w > 0 && Reference.Latency(r.TotalMs, Targets.For(Math.Max(1, r.EncW), Math.Max(1, r.EncH), ctx.Fps)) == Rating.Poor) problems.Add("high latency");
+                    if (r.FgRan && !r.FgHolds) problems.Add(r.FgSynthesis == "neural" ? "neural frame generation does not hold the rate on this PC at this size: the configuration will use edge"
+                                                                                         : "frame generation does not hold the rate at this size");
                     if (problems.Count > 0) st.Warn();
                     return $"head pose reaches the scene ({r.HeadSamplesPerS:0}/s, gaps up to {r.HeadGapP95Ms:0} ms; turned {r.HeadYawRangeDeg:0} deg, moved {r.HeadMoveCm:0} cm); streamed {r.SceneAppFps:0} fps, {r.SameTsPct:0.#}% repeated head samples" +
                            (w > 0 ? $"; latency {r.TotalMs:0.0} ms (encode {r.EncoderMs:0.0}, network {r.NetworkMs:0.0}, decode {r.DecodeMs:0.0}, headset queues {r.DecoderQueueMs + r.VsyncQueueMs:0.0}), {r.DisplayedFps:0} fps shown" : "; the headset sent no statistics") +
+                           (r.FgRan ? $"; frame generation x2 ({(r.FgSynthesis == "" ? "?" : r.FgSynthesis)}{(r.FgSynthesis == "neural" ? $", {r.FgNeuralMs:0.0} ms a run" : "")}): " +
+                                      $"{r.FgStreamFps:0} of {ctx.Fps:0} fps streamed, game {r.FgAppFps:0} fps" + (r.FgTotalMs > 0 && w > 0 ? $", latency {r.FgTotalMs:0.0} ms ({r.FgTotalMs - r.TotalMs:+0.0;-0.0} ms)" : "") : "") +
                            (problems.Count > 0 ? " - " + string.Join("; ", problems) : "");
                 },
             });

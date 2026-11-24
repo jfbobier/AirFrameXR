@@ -715,6 +715,8 @@ namespace AirFrameXR
                 panel.Prefill(cand);
                 if (!panel.Save(out var err) && err != null) { testStatus.Text = err; testStatus.ForeColor = Color.Firebrick; }
                 else HmdProfiles.ApplySessionOverrides(profile);   // the field of view is chosen at the Field of view step
+                settings.FrameGenSynthesis = "neural";   // the scene test's frame generation part measures the default synthesis; the result decides (SaveConfig)
+                try { settings.Save(); } catch (Exception e) { Log.Write("WARN", "wizard: synthesis for the scene test not saved: " + e.Message); }
                 ApplyChromaChoice();
             }
             steps = demo ? DemoSteps() : Tests.Build(ctx);
@@ -899,6 +901,14 @@ namespace AirFrameXR
             if (settingsPanel == null) return false;
             if (!settingsPanel.Save(out var err)) { MessageBox.Show(this, err, Text); return false; }
             if (autoconfig) HmdProfiles.ApplySessionOverrides(profile);
+            var r = ctx?.R;
+            if (autoconfig && r != null && r.FgRan && r.FgSynthesis == "neural")
+            {
+                // neural stays the synthesis only where the scene test's frame generation part held the rate with it; otherwise edge (Advanced to change)
+                settings.FrameGenSynthesis = r.FgHolds ? "neural" : "edge";
+                Log.Write("INFO", $"wizard: frame generation synthesis {settings.FrameGenSynthesis} (scene test x2: {r.FgStreamFps:0.0} of {ctxFps:0} fps streamed, neural {r.FgNeuralMs:0.0} ms a run)");
+                try { settings.Save(); } catch (Exception e) { Log.Write("WARN", "wizard: frame generation synthesis not saved: " + e.Message); }
+            }
             ApplyChromaChoice();   // the profile's overrides carry passthrough off (the Vision Pro's): the user's answer comes last
             return true;
         }
@@ -928,6 +938,8 @@ namespace AirFrameXR
                 {
                     ["gpu"] = r.GpuName, ["encode_p50"] = r.EncodeP50, ["encode_p95"] = r.EncodeP95, ["budget_ms"] = r.BudgetMs, ["encode_fits"] = r.EncodeFits, ["enc_size"] = new object[] { r.EncW, r.EncH },
                     ["quality"] = r.QualityLabel, ["clean_mbps"] = r.CleanMbps, ["loss_per_s"] = r.LossPerS, ["total_ms"] = r.TotalMs, ["network_ms"] = r.NetworkMs, ["decode_ms"] = r.DecodeMs, ["displayed_fps"] = r.DisplayedFps, ["audio"] = r.AudioNote,
+                    ["fg"] = !r.FgRan ? null : new Dictionary<string, object> { ["synthesis"] = r.FgSynthesis, ["holds"] = r.FgHolds, ["stream_fps"] = r.FgStreamFps, ["app_fps"] = r.FgAppFps,
+                        ["displayed_fps"] = r.FgDisplayedFps, ["total_ms"] = r.FgTotalMs, ["neural_ms"] = r.FgNeuralMs, ["neural_failures"] = r.FgNeuralFailures, ["written"] = settings.FrameGenSynthesis },
                 },
                 ["tests"] = (steps ?? new List<TestStep>()).Select(x => (object)new Dictionary<string, object> { ["name"] = x.Name, ["state"] = x.State.ToString(), ["note"] = x.Note }).ToArray(),
                 ["proposal"] = proposal == null ? null : new Dictionary<string, object>
@@ -965,10 +977,10 @@ namespace AirFrameXR
             var l = new List<TestStep>();
             var states = new[] { (TestState.Passed, "NVIDIA GeForce RTX 5090 (Blackwell), driver 617.42, 32 GB, NVENC API 13.0"), (TestState.Passed, "3552x3200 encoded: p50 3.1 ms, p95 3.6 ms of 11.1 ms per frame; 3 NVENC engine(s)"),
                 (TestState.Passed, "recommended: P3 foveated (47.1 dB, encode p95 3.6 ms)"), (TestState.Passed, "clean up to 270 Mbps (the highest clean step minus 10%)"),
-                (TestState.Warning, "head pose reaches the scene (90/s; turned 62 deg); streamed 90 fps, 1% repeated head samples; latency 52.0 ms, 89 fps shown"),
+                (TestState.Warning, "head pose reaches the scene (90/s; turned 62 deg); streamed 90 fps, 1% repeated head samples; latency 52.0 ms, 89 fps shown; frame generation x2 (neural, 1.3 ms a run): 90 of 90 fps streamed, game 45 fps, latency 61.0 ms (+9.0 ms)"),
                 (TestState.Passed, "engaged: 3 strips per frame on 3 NVENC engines"), (TestState.Running, "") };
             var names = new[] { "System check (GPU, driver, hardware encoder)", "Encoder speed at the chosen resolution and refresh rate", "Picture quality benchmark (about 1.5 minutes)", "Network test with the headset",
-                "Scene test: Littlest Tokyo through the real pipeline (head tracking, frames, latency)", "Split encoding (one frame cut in strips, one per NVENC engine)", "Audio output" };
+                "Scene test: Littlest Tokyo through the real pipeline (head tracking, frames, latency), then 30 s with frame generation", "Split encoding (one frame cut in strips, one per NVENC engine)", "Audio output" };
             for (int i = 0; i < names.Length; i++) l.Add(new TestStep { Name = names[i], State = states[i].Item1, Note = states[i].Item2 });
             return l;
         }

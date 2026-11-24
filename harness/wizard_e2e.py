@@ -31,6 +31,7 @@ New-Item -ItemType Directory -Force '{wd}\\bin' | Out-Null
 Copy-Item '{root}\\out\\gui\\configure.exe' '{wd}\\bin\\configure.exe' -Force
 Copy-Item '{root}\\src\\ALVR-v20.14.1\\target\\release\\alvr_host.exe' '{wd}\\bin\\alvr_host.exe' -Force
 Copy-Item '{root}\\out\\vdxr-shim\\*' '{wd}\\bin' -Force
+if (Test-Path '{root}\\out\\neural') {{ New-Item -ItemType Directory -Force '{wd}\\bin\\neural' | Out-Null; Copy-Item '{root}\\out\\neural\\*' '{wd}\\bin\\neural' -Force }}   # the scene test's frame generation part measures the neural synthesis
 New-Item -ItemType Directory -Force '{wd}\\bench' | Out-Null
 Copy-Item '{root}\\build\\probe\\xr_probe.exe' '{wd}\\bench\\xr_probe.exe' -Force
 if (-not (Test-Path '{wd}\\bench\\littlest_tokyo.vab')) {{ Copy-Item '{root}\\bench\\littlest_tokyo.vab' '{wd}\\bench\\littlest_tokyo.vab' -Force }}
@@ -77,5 +78,15 @@ if rep.exists():
     for t in r["tests"]:
         print(f"  [{t['state']:8s}] {t['name']}: {t['note']}")
     print(json.dumps(r["results"], indent=1))
+    fg = (r.get("results") or {}).get("fg")   # the scene test's frame generation part (2026-11-24): neural stays only if it held the rate, else edge is written
+    if fg is not None and fg.get("synthesis") == "neural":
+        cfgf = out / "config" / "airframexr.json"
+        got = ((json.loads(cfgf.read_text(encoding="utf-8-sig")) if cfgf.exists() else {}).get("video") or {}).get("frame_gen_synthesis")
+        want = "neural" if fg.get("holds") else "edge"
+        print(f"CHECK {'PASS' if got == want else 'FAIL'} wizard_fg_synthesis: x2 {fg.get('stream_fps', 0):.1f} fps streamed, neural {fg.get('neural_ms', 0):.1f} ms a run, holds {fg.get('holds')}; written {got} (want {want})")
+    elif fg is not None:
+        print(f"CHECK INFO wizard_fg_synthesis: the frame generation part ran with {fg.get('synthesis') or 'an unknown synthesis'} (neural unavailable): nothing written")
+    else:
+        print("CHECK INFO wizard_fg_synthesis: no frame generation part in the report")
 else:
     print("no report; see", out)

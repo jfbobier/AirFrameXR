@@ -572,6 +572,7 @@ namespace AirFrameXR
         public HeadsetKind Kind => KindOf(HeadsetName);
         public string HeadsetIp { get => Json.Str(Root, "headset.ip", ""); set => Json.Set(Root, "headset.ip", value); }
         public string EncodeProfile { get => Json.Str(Root, "video.encode_profile", "foveated"); set => Json.Set(Root, "video.encode_profile", value); }
+        public string FrameGenSynthesis { get => Json.Str(Root, "video.frame_gen_synthesis", "neural"); set => Json.Set(Root, "video.frame_gen_synthesis", value); }
         /// NVENC split-frame encoding ("3" = one strip per engine, up to 3; "off"): on by default, the reason the project exists on a multi-engine GPU
         /// the Logs window deletes the records of games whose exe no longer exists (on by default)
         public bool AutoDeleteGameLogs { get => Json.Bool(Root, "logs.auto_delete_uninstalled", true); set => Json.Set(Root, "logs.auto_delete_uninstalled", value); }
