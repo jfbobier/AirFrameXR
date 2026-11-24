@@ -217,16 +217,26 @@ the same code built with the telemetry on, so a diagnosis never changes the numb
 
 ## Features
 - **Setup wizard** (`configure.exe`): reads what the headset supports, offers a community profile, a pre-filled manual configuration or your existing ALVR settings, then
-  tests the result (system and NVENC, encoder speed, network at the configured bitrate, a real scene streamed through the pipeline with the headset's own head pose, audio).
+  tests the result (system and NVENC, encoder speed, network at the configured bitrate, a real scene streamed through the pipeline with the headset's own head pose and then 30 s of it
+  with frame generation x2, audio). If the neural synthesis cannot hold the headset's rate on your PC, the wizard picks edge for you.
   **Find headset...** in the streamer window searches the network and pairs. Any NVIDIA GPU with NVENC API 12.2+ works.
 - **Frame pacing** with an intake gate and a three-deep in-order queue. The Vision Pro profile defaults to foveated encoding at 300 Mbps.
+- **Each eye at its own pose** (1.5.0). OpenXR gives each eye of a frame its own pose, and the streamer now honours it: mods that render the eyes one after
+  the other (alternate-eye rendering, as in Luke Ross's mods or NoMoreFlat) show each eye where it was rendered, and a frame without a new picture keeps that
+  picture's timestamp. Repeated frames are recognised from the runtime's own records (our [VDXR fork](docs/UPSTREAM.md)), not guessed from the head pose,
+  and nothing is dropped. The *Maximum OpenXR compatibility mode* (Advanced, off by default) lets a game that submits each picture two or three times run at
+  its full rate. How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#frames-repeats-and-the-pose-each-eye-is-shown-at-150); the design and the
+  measurements: [docs/PLAN_UNIVERSAL_OPENXR.md](docs/PLAN_UNIVERSAL_OPENXR.md).
+- **NVIDIA Smooth Motion warning** (1.5.0). NVIDIA's frame generation for flat games (NVIDIA App > Graphics > *Smooth Motion*), left on for a VR game,
+  makes VR mods stutter and one eye lag. When it was active in a game the streamer says so in red after the game, with how to turn it off.
 - **Frame generation** (off by default, a switch in the streamer and in Settings; experimental): for games that cannot hold the display rate. A multiplier sets how many frames the
   headset gets per game frame, **x2** (default: the game runs at half the display rate) or **x3** (a third), and the streamer generates the frames in
   between at fixed moments, the ones the network places right ([why only these](docs/FRAME_GENERATION.md#rates-150-x2-and-x3)). **Since 1.4.2 the frames in between are neural:**
   [RIFE](https://github.com/hzwer/Practical-RIFE) 4.4, run by our own CUDA engine (`bin\neural`: CUTLASS convolutions and a few kernels of our own, hard-coded
   for this network, built from pinned sources by one script), computes for each pair of game frames where every part of the picture moved and how to blend
   the two frames, at half the eye's resolution; the streamer then draws the picture at full resolution from one sample of each game frame, keeps still content
-  exact, and each generated frame gets the motion of its own moment. It needs an RTX 30 series or newer. The fallback, chosen in Advanced video and performance
+  exact, and each generated frame gets the motion of its own moment. It needs an RTX 30 series or newer, and enough GPU for the stream's size: a mid-range GPU at
+  a Vision Pro-sized stream may not hold the rate with it, so the setup wizard measures it and picks edge when it cannot ([1.5.0 notes](docs/releases/v1.5.0.md)). The fallback, chosen in Advanced video and performance
   settings (*Generated-frame synthesis*: **neural** or **edge**) and used by itself on older GPUs, is 1.4.1's synthesis: in-scene motion from the GPU's optical-flow
   engine (NVIDIA Optical Flow, Turing or later) and an edge-aware synthesis (motion edges stay sharp, and where the motion is uncertain the real frame is shown instead
   of a double image; ideas from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented). Head turns are removed
