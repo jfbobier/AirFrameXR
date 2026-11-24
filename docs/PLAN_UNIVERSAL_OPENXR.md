@@ -775,6 +775,25 @@ on two or three head motions. One night.
     not the flicker: the owner saw it with the mode off as well.
     - The general fix needs the app's thread at the wait. The shim's wait runs on VDXR's submission thread, so the fork would have to say
       it: low priority.
+- **SOLVED the same night: NVIDIA Smooth Motion** (the RTX 50 driver's frame generation, `NvPresent64.dll`) **was on for Black Flag; off = fixed, no
+  mod patch.**
+  - **How the diagnostic found it** (diag v2: thread start routines and call stacks; private notes `private/acbfvr/ACBFVR_MOD_PLAN.md`, logs
+    `private/logs/acbfvr-*-2026-11-24/`):
+    - The game presents through Streamline (`sl.interposer.dll`) into the driver's NvPresent64, which calls the mod's Present hook
+      (`dxgi.dll+59b17`), where the mod submits to OpenXR.
+    - After about 6,000 Presents (submit 11,997 in every run), NvPresent64 presents from its own thread (start routine `NvPresent64.dll+1b1024`).
+      That is the 12,000 change.
+  - **Smooth Motion off (session 1820):**
+    - no NvPresent64 thread, 23 s past submit 12,000;
+    - both eyes new in every submit, 0 % duplicates;
+    - 72.2 new pictures/s, against 43.1 of 88.1 submits/s with it on (49 % of submits without a new picture).
+  - **So the mod's "every picture submitted twice" was Smooth Motion's extra flat frame, all along.** It is the case the compatibility mode
+    (Decision B) was built around: section 5's baselines and "the game's limiter at 45 caps it at 22.5 pictures/s" are Smooth Motion effects.
+    - The mode stays right as a general rule: any VR mod that submits from its Present hook under flat frame generation repeats its picture
+      the same way, and the mode stays inert without the pattern. But its main field case is a setting.
+    - Arm 4 keeps its own case: the mod's `VR_FrameTimeWarp=1` (alternate-eye rendering with runtime reprojection) works only since arm 4.
+  - **Proposed (a small shim change, owner's go):** when `NvPresent64.dll` is loaded in the game process, or a frame call comes from one of its
+    threads, a run-log line and a GUI hint: "NVIDIA Smooth Motion is active for this game; turn it off for VR mods (NVIDIA App → Graphics)".
 - **Tested so far:** clang-cl check from WSL, then the 5090 build. No lab row yet: the 3080 Ti was offline. Owed:
   - an AER shape in `xr_modsim` (the stale eye keeps its old pose) with a per-eye picture-position check;
   - the regression set under arm 3.
