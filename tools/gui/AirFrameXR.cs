@@ -851,6 +851,7 @@ namespace AirFrameXR
                     }
                     gameRunning = false; mirrorNotBefore = DateTime.Now.AddSeconds(MirrorReturnDelayS); MirrorSync();
                     game.Text = $"Game: none (last: {S(d, "exe")}, {F(D(d, "seconds") / 60, "0.0")} min)";
+                    VrGuard(S(d, "exe"), d);
                     break;
                 case "game_run":
                     if (IsMirrorApp(S(d, "exe"))) break;   // the mirror's record is kept by the engine like any game's; the Streaming box keeps the last game's numbers
@@ -992,6 +993,20 @@ namespace AirFrameXR
                 foreach (var (c, v) in hidBack) c.Visible = v;
                 foreach (var (t, v, n, col) in tileBack) t.Set(v, n, col == Color.Black ? (Color?)null : col);
             }
+        }
+
+        // VR guard (the engine's one check per game, shim VrGuardCheck -> game_ended "vr_guard"): a setting outside AirFrameXR that breaks VR was active in
+        // the game's process. Shown in the footer, red and bold, until the next message: the user is in the headset when the game runs.
+        void VrGuard(string exe, Dictionary<string, object> d)
+        {
+            var list = d != null && d.TryGetValue("vr_guard", out var v) ? v as System.Collections.IEnumerable : null;
+            var found = new List<string>();
+            if (list != null) foreach (var o in list) found.Add(Convert.ToString(o));
+            if (!found.Contains("smooth_motion")) { if (footer.Font.Bold) footer.Font = new Font(footer.Font, FontStyle.Regular); return; }
+            footer.Text = $"NVIDIA frame generation (Smooth Motion) was active in {exe}: it breaks VR mods (stutter, one eye lagging). Turn it off: NVIDIA App > Graphics > {exe} > Smooth Motion.";
+            footer.ForeColor = Color.Firebrick;
+            footer.Font = new Font(footer.Font, FontStyle.Bold);
+            Log.Write("WARN", "VR guard: NVIDIA Smooth Motion was active in " + exe);
         }
 
         public void DemoDebugOn() { debug.Checked = true; settings.Debug = false; settings.Save(); exportStatus.Text = "Saved to C:\\Users\\someone\\Documents\\AirFrameXR-logs-20261020-1200.zip"; exportStatus.ForeColor = Color.SeaGreen; exportStatus.Visible = exportLink.Visible = true; }

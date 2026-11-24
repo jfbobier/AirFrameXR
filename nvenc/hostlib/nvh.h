@@ -74,6 +74,8 @@ float nvh_last_ffr_gpu_ms(void* nvh);
 float nvh_last_ffr_wait_ms(void* nvh);   // foveation pass queued -> done on the GPU (the share of the encode time spent behind the game)
 // 1 while an OVR session exists AND its heartbeat advanced within the last 500 ms (a crashed app stops beating).
 int nvh_ipc_shim_alive(void* ipc);
+// VR guard findings of the running game (ipc shim.vrGuard; bit 0: NVIDIA Smooth Motion active).
+uint32_t nvh_ipc_vr_guard(void* ipc);
 // Encodes a solid pure-green SBS frame (what the headset chroma-keys when no OpenXR app is running).
 double nvh_encode_green(void* nvh, uint32_t frame_no, uint64_t ts_ns, int force_idr, char* err, int errlen);
 // Encodes the shim's shared SBS slot (same adapter) with the unmodified ALVR encoder. Returns encode ms (<0 on error).

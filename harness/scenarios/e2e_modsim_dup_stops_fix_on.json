@@ -95,7 +95,7 @@
       "min_fps_after_stop": 40,
       "max_gap_ms": 150,
       "dups_stop": true,
-      "min_drop_ratio": 0.9
+      "expect_nothing_dropped": true
     }
   }
 }

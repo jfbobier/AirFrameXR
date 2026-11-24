@@ -1,5 +1,5 @@
 {
-  "description": "MOD-LOOP MIMIC with a STATIONARY head pose (every submit carries the same render poses), knob ON: that is not the duplicate pattern (real frames would all look like duplicates), so the fix must not drop a thing or free a wait; the stream continues as with the knob off.",
+  "description": "MOD-LOOP MIMIC with a STATIONARY head pose (every submit carries the same render poses), knob ON. With the runtime's per-frame facts (arms 2-3) the repeats are told from the real frames whatever the poses, so the mode acts as with a moving head: the second wait returns at once and nothing is dropped (1.5's pose-only test could not see this pattern; rewritten 2026-11-24).",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -89,8 +89,11 @@
     "client_min_frames": 600,
     "max_duplicate_timestamps": 10,
     "modsim": {
-      "fix": "on_idle",
-      "min_real_frames": 600
+      "fix": "on",
+      "min_real_frames": 600,
+      "min_free_wait_ratio": 0.8,
+      "max_second_wait_ms": 1.0,
+      "min_real_fps": 40
     }
   }
 }

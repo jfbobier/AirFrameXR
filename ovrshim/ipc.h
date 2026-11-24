@@ -15,7 +15,7 @@
 namespace airframexr_ipc {
 
 constexpr uint32_t kMagic = 0x56414C31; // 'VAL1'
-constexpr uint32_t kVersion = 39;   // 39 (universal-1.4 Phase B): labIdentity; 38 (1.4-foundation E4): renderCeiling removed
+constexpr uint32_t kVersion = 40;   // 40 (universal-1.4 candidate): shim.vrGuard; 39 (universal-1.4 Phase B): labIdentity; 38 (1.4-foundation E4): renderCeiling removed
 constexpr int kSlots = 6;   // SBS ring: the host holds up to 2 (newest + encoding), 2 may be in flight on the GPU
 
 struct Pose {
@@ -126,8 +126,8 @@ struct HostToShim {
     // that no image was released since the previous frame; 2 = U1, and a submit that released nothing goes out with the previous frame's
     // timestamp whatever its poses (the picture keeps the pose it was first submitted with; with the pacing fix acting it is dropped as a
     // duplicate); 3 = arm 2, and each eye of the projection layers is drawn rotated from its own render pose to the frame's (the newer eye's)
-    // when the two eyes were rendered with different head orientations (alternate-eye rendering; normal games: identity, as arm 2); 4 = arm 3,
-    // and an eye whose swapchain image did not change since the previous submit keeps the pose declared with the submit that brought it.
+    // when the two eyes were rendered with different head orientations (alternate-eye rendering; normal games: identity, as arm 2). Arm 4 (an eye
+    // with no new image keeping its earlier pose) was tried on 2026-11-24 and removed: its field case was a configuration mistake.
     // Without the runtime's per-frame facts (stock VDXR, a libOVR game) every arm decides duplicates as arm 0.
     uint32_t labIdentity;
 };
@@ -165,6 +165,7 @@ struct ShimToHost {
     uint64_t gateHolds;            // releases the intake gate skipped for a standing host queue (see HostToShim::intakeGate)
     uint64_t gateSuppressed;       // standing queue seen while the gate was quiet after a skip (its effect still in flight)
     int32_t recommendedW, recommendedH;   // the per-eye render size the shim told the app (GetRecommendedResolution), for the host's run record
+    uint32_t vrGuard;              // VR guard findings for the running game (bit 0: NVIDIA Smooth Motion active); reset at the game's start
 };
 
 // The shim's log lines travel to the host (its writer thread owns every log file: no disk write on the game's threads, no concurrent appends,

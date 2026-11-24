@@ -644,6 +644,8 @@ int nvh_ipc_wait_frame(void* i, int timeout_ms, uint64_t* counter, uint32_t* slo
     return 1;
 }
 
+uint32_t nvh_ipc_vr_guard(void* i) { return ((Ipc*)i)->state->shim.vrGuard; }
+
 int nvh_ipc_shim_alive(void* i) {
     auto& s = ((Ipc*)i)->state->shim;
     static uint32_t lastBeat = 0; static double lastChange = 0;

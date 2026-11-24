@@ -2960,14 +2960,16 @@ def evaluate(sc, a):
             chk("fix_on_idle_nothing_dropped", sh is not None and sh["fix"] == "on" and sh["dups_dropped"] == 0 and sh["free_waits"] == 0 and sh["dup_per_real"] == 0, sh, "knob ON, no duplicate pattern (stationary pose): nothing dropped, no free wait")
         if "expect_dup_per_real_at_end" in mk:
             chk("shim_dup_per_real_at_end", sh is not None and sh["dup_per_real"] == mk["expect_dup_per_real_at_end"], sh and sh["dup_per_real"], f"the shim ends with {mk['expect_dup_per_real_at_end']} duplicates per real frame")
-        if "min_drop_ratio" in mk:
-            chk("fix_on_drop_ratio", sh is not None and sh["dups_seen"] > 0 and sh["dups_dropped"] >= mk["min_drop_ratio"] * sh["dups_seen"], sh, f">= {mk['min_drop_ratio']} of the duplicates seen are dropped")
+        if "min_drop_ratio" in mk:   # legacy key (the mode dropped repeats until 2026-11-24): now nothing may be dropped
+            chk("fix_on_nothing_dropped", sh is not None and sh["dups_seen"] > 0 and sh["dups_dropped"] == 0, sh, "repeats are seen and none is dropped (the mode only frees waits)")
         if "min_free_per_release" in mk:
             chk("fix_on_free_per_release", sh is not None and sh["free_waits"] >= mk["min_free_per_release"] * max(sh["releases"], 1), sh, f"free waits >= {mk['min_free_per_release']} x paced releases")
+        if mk.get("expect_nothing_dropped"):
+            chk("fix_on_nothing_dropped", sh is not None and sh["dups_seen"] > 0 and sh["dups_dropped"] == 0, sh, "repeats are seen and none is dropped (the mode only frees waits)")
         if mk.get("fix") == "on_nodup":
             chk("fix_on_normal_game_untouched", sh is not None and sh["fix"] == "on" and sh["dups_dropped"] == 0 and sh["free_waits"] == 0, sh, "knob ON with a game that does not resubmit: nothing dropped, no free wait (the fix does not act)")
         if mk.get("fix") == "on" and generic:
-            chk("fix_on_dups_dropped", sh is not None and sh["fix"] == "on" and sh["dups_seen"] > 0 and sh["dups_dropped"] >= 0.95 * sh["dups_seen"], sh, "knob on: >= 95 % of the duplicates seen are dropped")
+            chk("fix_on_nothing_dropped", sh is not None and sh["fix"] == "on" and sh["dups_seen"] > 0 and sh["dups_dropped"] == 0, sh, "knob on: the repeats are seen and every one is published (the mode only frees waits, since 2026-11-24)")
             chk("fix_on_free_waits", sh is not None and sh["free_waits"] >= mk.get("min_free_wait_ratio", 0.8) * max(sh["releases"], 1), sh, f"knob on: free waits >= {mk.get('min_free_wait_ratio', 0.8)} x paced releases")
             wr = (M.get("wait_after_real") or {}).get("p50_ms")
             chk("fix_on_second_wait_free", wr is not None and wr <= mk.get("max_second_wait_ms", 1.0), wr, f"second wait returns at once (<= {mk.get('max_second_wait_ms', 1.0)} ms p50)")
