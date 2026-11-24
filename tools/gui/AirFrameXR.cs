@@ -667,7 +667,7 @@ namespace AirFrameXR
                 Log.Write("ERROR", err);
                 return;
             }
-            footer.Text = "Streamer running. Open ALVR on the headset.";
+            footer.Text = "Streamer running. Open the headset app.";
             Log.Write("INFO", "streamer started: alvr_host " + args);
         }
 
