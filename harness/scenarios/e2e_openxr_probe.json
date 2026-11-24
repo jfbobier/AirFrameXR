@@ -106,6 +106,7 @@
       "p50_tolerance": 0.03,
       "max_late_run": 2,
       "max_drift_ms": 4.0
-    }
+    },
+    "vr_guard": []
   }
 }

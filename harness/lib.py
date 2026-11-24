@@ -2082,6 +2082,14 @@ def analyse(sc, outdir: Path):
         a["handover_chain"] = analyse_handover_chain(sc, outdir)
     if sc.get("checks", {}).get("tool"):
         a["tool"] = analyse_tool(sc, outdir)
+    if "vr_guard" in sc.get("checks", {}):   # the last game_ended event's VR guard findings (host stdout)
+        a["vr_guard"] = None
+        for line in open(outdir / "host_stdout.txt", errors="replace"):
+            if '"event":"game_ended"' in line.replace(" ", ""):
+                try:
+                    a["vr_guard"] = (json.loads(line[line.index("{"):]).get("data") or {}).get("vr_guard", [])
+                except Exception:
+                    pass
     if sc.get("checks", {}).get("fov_restrict"):
         a["fov_restrict"] = analyse_fov_restrict(sc, outdir)
     if sc.get("checks", {}).get("qpmap"):
@@ -2908,6 +2916,9 @@ def evaluate(sc, a):
         chk("killed_game_logs", len(shim) >= 1 and "game exit" not in runs and "game ended: xr_probe.exe" in il.get("general", "") + runs,
             {"shim_lines": len(shim), "shim_game_exit": "game exit" in runs, "game_ended": "game ended: xr_probe.exe" in il.get("general", "") + runs},
             "the run log holds the shim's lines from before the kill, no 'game exit' (it never ran), and the host's 'game ended' line")
+    if "vr_guard" in ck:   # the VR guard (shim VrGuardCheck): the game_ended event lists exactly the findings expected ([] = quiet)
+        found = a.get("vr_guard")
+        chk("vr_guard", found is not None and sorted(found) == sorted(ck["vr_guard"]), found, f"game_ended vr_guard == {ck['vr_guard']}")
     if ck.get("alvr_in_unified_log"):
         # 1.3.10: ALVR's own lines are in AirFrameXR.log as [alvr]; the raw stream (alvr.log) exists only in the debug session folder
         il = a.get("install_logs") or {}

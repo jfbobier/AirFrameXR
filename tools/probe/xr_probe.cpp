@@ -74,6 +74,18 @@ static const char* stateName(XrSessionState s) {
 }
 
 int main(int argc, char** argv) {
+    // XR_PROBE_FAKE_NVPRESENT=1 (lab, e2e_vr_guard): load a harmless copy of version.dll named NvPresent64.dll before the session, so the streamer's
+    // VR guard (which looks for NVIDIA Smooth Motion's module in the game's process) can be checked on a GPU without Smooth Motion
+    if (getenv("XR_PROBE_FAKE_NVPRESENT")) {
+        char tmp[MAX_PATH] = {}, sys[MAX_PATH] = {};
+        GetTempPathA(MAX_PATH, tmp);
+        GetSystemDirectoryA(sys, MAX_PATH);
+        const std::string dst = std::string(tmp) + "NvPresent64.dll", src = std::string(sys) + "\\version.dll";
+        CopyFileA(src.c_str(), dst.c_str(), FALSE);
+        const HMODULE h = LoadLibraryA(dst.c_str());
+        printf("fake NvPresent64.dll: %s\n", h ? "loaded" : "FAILED");
+        fflush(stdout);
+    }
     // Started as fovgrid.exe (a copy of this exe, double-click): the FoV grid scene, until the session ends, like a game
     char exePath[MAX_PATH] = {};
     GetModuleFileNameA(nullptr, exePath, MAX_PATH);

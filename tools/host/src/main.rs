@@ -1823,6 +1823,17 @@ fn net_summary_of(net: &[serde_json::Value], lost: u64) -> serde_json::Value {
         "latency_outliers": outliers, "latency_samples": samples, "packets_lost": lost })
 }
 
+/// VR guard (shim VrGuardCheck, ipc shim.vrGuard): settings outside AirFrameXR that break VR, found once in the game's process. Named for the
+/// game_ended event (the streamer shows them, red, after the game) and logged.
+fn vr_guard_findings(ipc: *mut std::ffi::c_void, exe: &str) -> Vec<&'static str> {
+    let bits = unsafe { nvh::nvh_ipc_vr_guard(ipc) };
+    let found: Vec<&'static str> = if bits & 1 != 0 { vec!["smooth_motion"] } else { vec![] };
+    if !found.is_empty() {
+        logs::general("WARN", &format!("VR guard: {exe} had {}", found.join(", ")));
+    }
+    found
+}
+
 /// What the host records per game (config/games.json, keyed by the executable's file name, then the headset's name, then the generation level:
 /// the rate name or "off"): the last run at that level, for the launcher's "Recommended" tick. The host records and decides nothing; the
 /// launcher reads the file and proposes. A run shorter than 20 s is not recorded. The headset's repeated-period share is given as the median
@@ -2879,12 +2890,7 @@ fn main() {
                     g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline));
                 logs::general("INFO", &ended);
                 logs::game_end(&ended);
-                // VR guard (shim VrGuardCheck): settings outside AirFrameXR that break VR, found in the game's process; the streamer shows them
-                let guard = unsafe { nvh::nvh_ipc_vr_guard(ipc) };
-                let vr_guard: Vec<&str> = if guard & 1 != 0 { vec!["smooth_motion"] } else { vec![] };
-                if !vr_guard.is_empty() {
-                    logs::general("WARN", &format!("VR guard: {} had {}", g.exe, vr_guard.join(", ")));
-                }
+                let vr_guard = vr_guard_findings(ipc, &g.exe);
                 event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames, "vr_guard": vr_guard }));
                 let seg_secs = g.seg_start.elapsed().as_secs_f64();
                 if seg_secs > 2.0 {
@@ -3364,7 +3370,8 @@ fn main() {
             "game ended: {} after {}m{:02}s, {} frames rendered ({:.1} fps), {} streamed ({:.1} fps){} (streamer stopping)",
             g.exe, secs as u64 / 60, secs as u64 % 60, submitted, submitted as f64 / secs.max(1e-3), frames, frames as f64 / secs.max(1e-3), skipped_text(&g, &pipeline));
         logs::general("INFO", &ended);
-        event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames, "host_stopping": true }));
+        let vr_guard = vr_guard_findings(ipc, &g.exe);
+        event(origin, "game_ended", json!({ "exe": g.exe, "seconds": secs, "frames_rendered": submitted, "frames_streamed": frames, "host_stopping": true, "vr_guard": vr_guard }));
         logs::game_end(&ended);
     }
     let frames = shared.frames_sent.load(Ordering::Relaxed);

@@ -1,0 +1,79 @@
+{
+  "description": "VR GUARD: the streamer's one check per game for settings outside AirFrameXR that break VR. NVIDIA Smooth Motion (the RTX 50 driver's frame generation) is NvPresent64.dll in the game's process; this GPU has none, so the probe loads a harmless copy of version.dll under that name before its session (XR_PROBE_FAKE_NVPRESENT=1). The shim must find it at session creation, the host must report it in the game_ended event (vr_guard: smooth_motion), the stream must run as usual.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 40,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 600
+  },
+  "client": {
+    "seconds": 36,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 600,
+    "timeout_s": 40,
+    "env": {
+      "XR_PROBE_FAKE_NVPRESENT": "1"
+    }
+  },
+  "timeout_s": 120,
+  "checks": {
+    "host_min_frames": 250,
+    "client_min_frames": 200,
+    "vr_guard": [
+      "smooth_motion"
+    ]
+  }
+}
