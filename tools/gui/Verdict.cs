@@ -47,7 +47,7 @@ namespace AirFrameXR
             add("Clean network bitrate", r.CleanMbps > 0 ? $"{r.CleanMbps:0} Mbps" : "-", $"{tg.MinMbps:0} Mbps minimum, {tg.GoodMbps:0}+ comfortable ({ew}x{eh} at {ctxFps:0} Hz, HEVC)", Reference.Bitrate(r.CleanMbps, tg),
                 $"The link carries less than the stream needs ({tg.MinMbps:0} Mbps): {prof.WifiAdvice}.");
             add("Packets lost per second", r.LossPerS >= 0 && r.CleanMbps > 0 ? $"{r.LossPerS:0.00}" : "-", "0 is clean; up to 1 is tolerable", Reference.Loss(r.CleanMbps > 0 ? r.LossPerS : -1), $"The wireless link drops packets: {prof.WifiAdvice}.");
-            add("Total latency (ALVR's own)", r.TotalMs > 0 ? $"{r.TotalMs:0.0} ms" : "-", $"under {tg.LatencyGoodMs:0} ms good, {tg.LatencyOkMs:0} ms acceptable", Reference.Latency(r.TotalMs, tg));
+            add("Total latency (measured by the streamer)",r.TotalMs > 0 ? $"{r.TotalMs:0.0} ms" : "-", $"under {tg.LatencyGoodMs:0} ms good, {tg.LatencyOkMs:0} ms acceptable", Reference.Latency(r.TotalMs, tg));
             add("   network", r.NetworkMs > 0 ? $"{r.NetworkMs:0.0} ms" : "-", $"about {tg.NetworkGoodMs:0} ms", Reference.Network(r.NetworkMs, tg));
             add("   headset decoder", r.DecodeMs > 0 ? $"{r.DecodeMs:0.0} ms" : "-", $"5-{tg.DecodeGoodMs:0} ms at high bitrates", Reference.Decode(r.DecodeMs, tg));
             add("   encoder (ALVR's view)", r.EncoderMs > 0 ? $"{r.EncoderMs:0.0} ms" : "-", "", Rating.Unknown);
