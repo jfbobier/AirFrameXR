@@ -1,5 +1,5 @@
 {
-  "description": "GOLDEN BASELINE: the author's session.json verbatim (no overrides; only the harness-required client pin/trust) -> full OpenXR chain at 3552x3200 per eye with foveation on, HEVC Main10 full range at the session's 250 Mbps (900 frames, 10 s: the host's phase lock slides the boundary clock twice and settles about 4.5 s into a game, so a 420-frame run ended with the settling; the latency drift is measured from 0.5 s after its last correction.)",
+  "description": "GOLDEN BASELINE: the author's session.json verbatim (no overrides; only the harness-required client pin/trust) -> full OpenXR chain at 3552x3200 per eye with foveation on, HEVC Main10 full range at the session's 250 Mbps (900 frames, 10 s. The latency drift is measured on the host-to-client transit, the host's boundary pick to the client's arrival: the latency against the pose timestamp flips by about a display period in the lab, harness/lib.py analyse_pacing.)",
   "topology": {
     "host": "builder",
     "client": "builder",
