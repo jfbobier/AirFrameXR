@@ -8,6 +8,21 @@
         "client_p99_ms": 26,
         "max_late_frac": 0.05,
         "intake_p99_ms": 36
+      },
+      "fg_comment": "Frame generation with the neural synthesis (the default since 1.4.2) on this GPU, 2026-11-24 (results 20261124T125845Z, T130120Z, T130357Z): a neural run takes 7.7 ms at x2 and 10.0 ms at x3 at the lab's 1760x1600 eye (1.2-1.8 ms on the RTX 5090), the GPU at full clocks and about 45 % busy, so the generator handles 27 of 45 pairs a second at x2 (stream 65 fps) and 15.5 of 30 at x3 (55.9 fps); edge synthesis holds 89.9 fps on the same rig. This GPU does not hold x2 / x3 at that size with neural: its baseline is the observed value with a margin (stream fps 90 % of it, the neural run 115 % of it), so a regression on this rig still fails. The 5090's bar (0.95 of the display rate) stays the scenarios' own.",
+      "fg": {
+        "e2e_fg_neural": {
+          "min_stream_fps_frac": 0.65,
+          "max_neural_ms": 8.9
+        },
+        "e2e_fg_latency": {
+          "min_stream_fps_frac": 0.65,
+          "max_neural_ms": 8.9
+        },
+        "e2e_fg_neural_13": {
+          "min_stream_fps_frac": 0.56,
+          "max_neural_ms": 11.5
+        }
       }
     }
   ]

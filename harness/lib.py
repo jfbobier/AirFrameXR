@@ -2723,7 +2723,13 @@ def evaluate(sc, a):
             chk("height_calibrated_eye_height", abs(hc.get("eye_height_m", -9) - want["eye_height_m"]) <= want.get("tol", 0.02), hc.get("eye_height_m"), f"{want['eye_height_m']} +- {want.get('tol', 0.02)}")
             chk("height_calibrated_headset_y", abs(hc.get("headset_y", -9) - want["headset_y"]) <= want.get("tol", 0.02), hc.get("headset_y"), f"{want['headset_y']} +- {want.get('tol', 0.02)}")
     if "fg" in ck:   # frame generation: the generator ran clean, generated its share, held the display rate, and what it cost (analyse_fg)
-        want, f = ck["fg"], a.get("fg") or {}
+        want, f = dict(ck["fg"]), a.get("fg") or {}
+        rig_fg = None
+        for rig in (jload(ROOT / "harness" / "rigs.json") or {}).get("rigs", []):   # a slower GPU's own frame generation baseline, per scenario (harness/rigs.json)
+            if a.get("rig") and rig["match"].lower() in a["rig"].lower() and sc.get("name") in (rig.get("fg") or {}):
+                rig_fg = rig["name"]
+                want.update(rig["fg"][sc["name"]])
+        on_rig = f" ({rig_fg}'s baseline, harness/rigs.json)" if rig_fg else ""
         chk("fg_reported", bool(f) and not f.get("error"), f.get("error") or f.get("steady_windows"), "fg_perf windows with outputs (the host's frame generation statistics)")
         if f and not f.get("error"):
             chk("fg_cost", True, {k: f.get(k) for k in ("frame", "flow_size", "flow_ms_avg", "synth_ms_avg", "gpu_ms_per_s", "synth_ms_per_mpx", "flow_ms_per_mpx", "app_fps_p50", "stream_fps_p50")},
@@ -2741,7 +2747,10 @@ def evaluate(sc, a):
                 chk("fg_synth_share", lo <= f.get("synth_share", -1) <= hi, f.get("synth_share"), f"[{lo}, {hi}] of the outputs generated (the rest the newest real frame)")
             if "min_stream_fps_frac" in want:
                 chk("fg_holds_display_rate", f.get("stream_fps_frac", 0) >= want["min_stream_fps_frac"], f.get("stream_fps_p50"),
-                    f">= {want['min_stream_fps_frac']} x the display rate (median of the steady windows; min {f.get('stream_fps_min')})")
+                    f">= {want['min_stream_fps_frac']} x the display rate (median of the steady windows; min {f.get('stream_fps_min')}){on_rig}")
+            if "max_neural_ms" in want:   # the neural run's GPU time (a rig's baseline: a slower network or a slower path fails)
+                nm = (f.get("neural") or {}).get("gpu_ms_avg") or 0
+                chk("fg_neural_ms", 0 < nm <= want["max_neural_ms"], nm, f"(0, {want['max_neural_ms']}] ms per neural run{on_rig}")
             for k, label in (("max_flow_ms", "flow_ms_avg"), ("max_synth_ms", "synth_ms_avg"), ("max_gpu_ms_per_s", "gpu_ms_per_s")):
                 if k in want:
                     chk(f"fg_{label}", 0 < f.get(label, 0) <= want[k], f.get(label), f"(0, {want[k]}]")
