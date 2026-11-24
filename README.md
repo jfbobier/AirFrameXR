@@ -50,6 +50,10 @@ AirFrameXR is built for people with a wireless headset and an NVIDIA GPU who wan
 - **Native Windows tools.** One launcher and native windows for the streamer, statistics, diagnosis and setup, plus an optional desktop mirror you can use from inside the headset.
 - **Keep it simple.** Portable distribution, readable settings, targeted tools, and no attempt to be a general-purpose SteamVR replacement.
 
+<p align="center">
+  <img src="docs/images/airframexr-neural-fg.png" alt="Neural frame generation, built for NVIDIA: RIFE learned from real video to predict the frame between two others; in the streamer it computes, for each pair of game frames, the motion to each frame and a blend mask, and the output pass draws the generated frame at full resolution; learned fields know which frame to trust where an object uncovers the background, so fewer double images than optical flow with hand-written rules. Our own CUDA engine replaced TensorRT for RTX: 210 MB to 11 MB with the same pictures, hard-coded for RIFE 4.4, half-precision tensor cores, frames kept on the GPU, nothing extra to install. NVENC, Optical Flow, CUDA and D3D11 interop all run on one NVIDIA GPU." width="100%">
+</p>
+
 ### Performance: measurements, not promises
 
 **In the maintainer's tests of the new pipeline, gains of up to 10-20 % more FPS and up to about 20 ms lower latency were observed** in some games compared with the earlier SteamVR + ALVR path, and users report similar numbers (for example Enshrouded: about 45 fps here against 35-40 with SteamVR, on one user's own reading). These are observations from tested configurations, **not guaranteed gains**: they vary with the game, headset and network, and in some setups the two paths are at parity. Frame generation should be evaluated separately: it improves delivered/displayed cadence in some GPU-bound cases, but has its own latency trade-off. See the performance findings and testing harness below for technical context.
