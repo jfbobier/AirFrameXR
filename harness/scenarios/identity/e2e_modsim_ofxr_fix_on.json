@@ -1,5 +1,5 @@
 {
-  "description": "OFXR-BRIDGE MIMIC, maximum OpenXR compatibility mode (drop_duplicate_frames) ON: xr_modsim MODSIM_OFXR=1 reproduces what the OFXR layer (frame generation, external/ofxr) does to the runtime: one thread, every engine frame (20 ms, about 45 a second) is submitted twice, a generated image in the slot the app waited for and then, after an internal wait / begin, the real image, both with the game's render poses (field log WEIRD HITCH, Borderlands 4: 50 % of the submits had the previous render poses, the headset showed 44 of 90 streamed fps). Full chain, frame generation off.",
+  "description": "OFXR-BRIDGE MIMIC, maximum OpenXR compatibility mode (drop_duplicate_frames) ON: xr_modsim MODSIM_OFXR=1 reproduces what the OFXR layer (frame generation, external/ofxr) does to the runtime: one thread, every engine frame (20 ms, about 45 a second) is submitted twice, a generated image in the slot the app waited for and then, after an internal wait / begin, the real image, both with the game's render poses (field log WEIRD HITCH, Borderlands 4: 50 % of the submits had the previous render poses, the headset showed 44 of 90 streamed fps). Full chain, frame generation off. Want (Decision C, 2026-11-24): as _fix_off. OFXR's generated picture releases an image, so by the runtime's facts every submit is a new frame: the mode stays out (nothing dropped, no free wait, the second wait paced) and the app keeps its rate (until 2026-11-24 the mode dropped the generated pictures).",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -85,14 +85,11 @@
     "host_min_frames": 600,
     "client_min_frames": 600,
     "modsim": {
-      "fix": "on",
+      "fix": "on_untouched",
       "min_real_frames": 600,
-      "min_free_wait_ratio": 0.8,
-      "max_second_wait_ms": 1.0,
       "min_second_wait_ms": 1.0,
-      "min_real_fps": 40,
-      "max_spacing_stdev_ms": 3
+      "min_real_fps": 40
     },
-    "max_duplicate_timestamps": 100
+    "max_duplicate_timestamps": 100000
   }
 }

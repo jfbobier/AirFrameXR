@@ -1,5 +1,5 @@
 {
-  "description": "FRAME-IDENTITY MATRIX (docs/PLAN_UNIVERSAL_OPENXR.md, run with `run.py identity` for each arm; not part of `all`: some rows fail on 1.3.11 by design, that failure is the baseline). xr_modsim writes what each submit really was (images released, new picture or not, same poses or not); the checks compare it with VDXR's per-frame facts and with what the shim dropped. Row: the mod's loop, but the duplicate cycle copies the last picture into the next image and releases it (same picture, an image release). Whether the real mod does this is what the field check answers. Want: the duplicates are still dropped. A release-based identity (U1) cannot see them: expect U1 to fail here, U0 to pass.",
+  "description": "FRAME-IDENTITY MATRIX (docs/PLAN_UNIVERSAL_OPENXR.md, run with `run.py identity` for each arm; not part of `all`: some rows fail on 1.3.11 by design, that failure is the baseline). xr_modsim writes what each submit really was (images released, new picture or not, same poses or not); the checks compare it with VDXR's per-frame facts and with what the shim did (since 2026-11-24 the compatibility mode drops nothing on any arm; it frees the wait before a confirmed repeat). Row: the mod's loop, but the duplicate cycle copies the last picture into the next image and releases it (same picture, an image release). Whether the real mod does this is what the field check answers. Want (Decision C, 2026-11-24): the mode stays out: nothing dropped, no free wait. Each duplicate released an image, so by the runtime's facts it is a new frame (arms 1-3); arm 0 (poses only) frees its waits and fails here.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -99,7 +99,7 @@
           0.55
         ]
       },
-      "min_true_dups_dropped_frac": 0.95
+      "max_free_waits": 0
     }
   }
 }

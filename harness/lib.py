@@ -2977,6 +2977,10 @@ def evaluate(sc, a):
             chk("fix_on_free_per_release", sh is not None and sh["free_waits"] >= mk["min_free_per_release"] * max(sh["releases"], 1), sh, f"free waits >= {mk['min_free_per_release']} x paced releases")
         if mk.get("expect_nothing_dropped"):
             chk("fix_on_nothing_dropped", sh is not None and sh["dups_seen"] > 0 and sh["dups_dropped"] == 0, sh, "repeats are seen and none is dropped (the mode only frees waits)")
+        if mk.get("fix") == "on_untouched":   # knob ON, a client whose every submit releases an image (OFXR's generated pictures): by the runtime's facts no repeat, the mode stays out
+            chk("fix_on_untouched", sh is not None and sh["fix"] == "on" and sh["dups_dropped"] == 0 and sh["free_waits"] == 0, sh, "knob ON, every submit released an image: nothing dropped, no free wait (as with the knob off)")
+            wr = (M.get("wait_after_real") or {}).get("p50_ms")
+            chk("fix_on_second_wait_paced", wr is not None and wr >= mk.get("min_second_wait_ms", 1.0), wr, f"second wait still blocks (>= {mk.get('min_second_wait_ms', 1.0)} ms p50), as with the knob off")
         if mk.get("fix") == "on_nodup":
             chk("fix_on_normal_game_untouched", sh is not None and sh["fix"] == "on" and sh["dups_dropped"] == 0 and sh["free_waits"] == 0, sh, "knob ON with a game that does not resubmit: nothing dropped, no free wait (the fix does not act)")
         if mk.get("fix") == "on" and generic:
@@ -3021,11 +3025,11 @@ def evaluate(sc, a):
                 v = round(S["dups_dropped"] / max(S["dups_seen"], 1), 3) if S is not None else None
                 chk("identity_no_new_picture_dropped", S is not None and (S["dups_dropped"] == 0 or v <= allowed), S and {"seen": S["dups_seen"], "dropped": S["dups_dropped"], "true_dup_share": round(W["true_dup"] / max(W["same_pose"], 1), 3)},
                     f"dropped / seen <= true duplicates / same-pose submits + {ik['max_dropped_new_pictures_frac']} (a same-pose submit with a new picture is kept)")
-            if "min_true_dups_dropped_frac" in ik:   # the mod fix still works: true duplicates dropped
+            if "min_true_dups_freed_frac" in ik:   # the compatibility mode (since 2026-11-24): every true duplicate published, the wait before it freed
                 share = W["true_dup"] / max(W["same_pose"], 1)
-                ok = S is not None and S["dups_seen"] > 0 and S["dups_dropped"] >= ik["min_true_dups_dropped_frac"] * share * S["dups_seen"]
-                chk("identity_true_dups_dropped", ok, S and {"seen": S["dups_seen"], "dropped": S["dups_dropped"], "true_dup_share": round(share, 3)},
-                    f"dropped >= {ik['min_true_dups_dropped_frac']} x the true duplicates among the same-pose submits")
+                ok = S is not None and S["dups_seen"] > 0 and S["dups_dropped"] == 0 and S["free_waits"] >= ik["min_true_dups_freed_frac"] * share * S["dups_seen"]
+                chk("identity_true_dups_freed", ok, S and {"seen": S["dups_seen"], "dropped": S["dups_dropped"], "free_waits": S["free_waits"], "true_dup_share": round(share, 3)},
+                    f"nothing dropped, free waits >= {ik['min_true_dups_freed_frac']} x the true duplicates among the same-pose submits")
             if "max_wait_rate_hz" in ik:   # no spin: the app's xrWaitFrame returns stay at the display rate (inside the pause when there is one)
                 v = I.get("pause_wait_rate_hz", I.get("wait_rate_hz"))
                 chk("identity_waits_paced", v is not None and v <= ik["max_wait_rate_hz"], v, f"<= {ik['max_wait_rate_hz']} xrWaitFrame returns per second"

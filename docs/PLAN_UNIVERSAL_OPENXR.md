@@ -151,7 +151,7 @@ The engine and ALVR identify a frame by its tracking timestamp. OpenXR gives no 
 | Question | Lab | How |
 |---|---|---|
 | Is VDXR's "nothing released" exact? | yes | `xr_modsim` writes its truth per submit (`modsim.csv`: `rel`, `new_pic`, `same_pose`); `identity_signal_matches_app` compares it with VDXR's count over the same frames |
-| Does the shim keep new pictures and drop true duplicates? | yes | `identity_no_new_picture_dropped`, `identity_true_dups_dropped` against the truth classes |
+| Does the shim keep new pictures and drop true duplicates? (since Decision C: drops nothing, frees the waits) | yes | `identity_no_new_picture_dropped`, `identity_true_dups_dropped` (now `identity_true_dups_freed`) against the truth classes |
 | Does an app stay paced (no spin)? | yes | `identity_waits_paced`: the app's xrWaitFrame returns per second (inside the pause row's pause) |
 | New frames shown, repeated ticks, encode, latency | yes | mock client `display_sim`, host logs, `harness/ofxr_report.py`; n=3 interleaved pairs |
 | What the real mod does on its duplicate cycle | **no** | the field check (G1) |
@@ -629,13 +629,47 @@ field case. The owner judged each departure from OpenXR again, against the spec'
 | no compatibility behaviour without the runtime's facts | **built** | Decision B's rule: a submit without facts is never a repeat |
 | VR guard: NVIDIA Smooth Motion (`NvPresent64.dll`) in the game's process | **built** | checked once at session creation and at the first submit (it is not loaded when Smooth Motion is off). Run-log WARN, `vr_guard` in the `game_ended` event, a red bold line in the streamer's footer after the game. IPC 40 (`shim.vrGuard`) |
 
-Commits `afb47f8`, `994a116` on `universal-1.4`.
-- **Lab, 3080 Ti, 2026-11-24:** `e2e_vr_guard` (the probe loads a harmless copy of `version.dll` named `NvPresent64.dll`): the event carries
-  `smooth_motion` (PASS). The batch is in the follow-up below.
+Commits `afb47f8`, `994a116`, `0d706e6`, `ba36ce0` on `universal-1.4`.
+
+**Lab, 3080 Ti, 2026-11-24 (candidate build, arm 3 default; results `harness/results/20261124T0850*`-`T1005*`): 21 of 22 pass.**
+
+- **OFXR, the real layer (2 interleaved rounds, window 10-40 s, `harness/ofxr_report.py`):**
+
+  | row | app fps | new frames/s | unique ts/s | repeated ticks | shim: repeats seen / dropped / free waits |
+  |---|---|---|---|---|---|
+  | `e2e_ofxr_tokyo_off` | 44.6 / 44.5 | 44.7 / 44.6 | 44.7 / 44.6 | 50.4 / 50.5 % | 0 / 0 / 0 |
+  | `e2e_ofxr_tokyo_on` (mode off) | 42.5 / 42.5 | 88.1 / 87.8 | 42.7 / 42.6 | 2.1 / 2.5 % | 190, 186 / 0 / 0 |
+  | `e2e_ofxr_tokyo_on_compat` (mode on) | 42.5 / 42.5 | 87.7 / 87.8 | 42.5 / 42.7 | 2.6 / 2.5 % | 177, 187 / 0 / 0 |
+
+  The mode on changes nothing for OFXR: its generated picture releases an image, so by VDXR's facts no submit is a repeat, the pattern is never
+  confirmed (0 free waits) and nothing is dropped. Under 1.5 (arm 0) the same row with the mode on gave 71.4 new frames/s and dropped 2,415 generated
+  pictures (2026-11-23). The repeats seen (about 2.5 % of the display ticks) are OFXR submits that released nothing; they are published with their
+  picture's timestamp.
+- **The mod mimic (`e2e_modsim_*`, 7 rows, all PASS):** mode on, every real frame submitted twice: 1,500 real frames in 34.2 s (45 fps), 1,310 free
+  waits, 0 of 1,350 repeats dropped; mode off: the same 1,500 in 66.6 s (22.5 fps). Three submits per frame: 2,946 free waits, 45 fps. A normal game
+  with the mode on: 0 free waits. `static_pose_fix_on` (still head) now gets its free waits too (1,310), as rewritten.
+- **R5 and the VR guard (9 rows):** 8 PASS. `e2e_openxr_probe` FAILS `pacing_latency_steady` only (-7.97 ms: the latency fell in the last third; the
+  known flake of that check, both directions count); its `vr_guard` is `[]`. `e2e_vr_guard` PASS (`smooth_motion`).
+- **The streamer (`harness/streamer_events.py vr_guard game90`, 3080 Ti):** PASS. After a `game_ended` with `vr_guard: ["smooth_motion"]` the footer reads
+  "NVIDIA frame generation (Smooth Motion) was active in ACBlackFlag.exe ... Turn it off: NVIDIA App > Graphics > ACBlackFlag.exe > Smooth Motion."; the
+  next clean game clears it. The dump holds text only: the red colour and the bold font are not checked.
+- **Rewritten for Decision C (harness only):** `min_true_dups_dropped_frac` -> `min_true_dups_freed_frac` (nothing dropped, the waits freed;
+  check `identity_true_dups_freed`) on `id_mod_dup`, `_array`, `_msaa`, `id_mod_late_oneeye`, `_samepose_new`; `id_mod_dup_rerelease` -> `max_free_waits`
+  0 (each of its duplicates released an image: a new frame by the facts); `e2e_modsim_ofxr_fix_on` -> as `_fix_off` (`fix: on_untouched`: no free wait,
+  the second wait paced, >= 40 real fps).
+- **The frame-identity matrix under arm 3, with the rewritten checks (13 rows, `harness/results/20261124T1012*`-`T1049*`): 13 of 13 PASS.**
+  - The mod's loop (`id_mod_dup`, `_array`, `_msaa`): the signal matches the app (1,350 / 1,350), 1,350 repeats seen, 0 dropped, 1,310 free waits.
+  - `id_mod_dup_rerelease`: 0 seen, 0 free waits (each duplicate released an image).
+  - `id_mod_dup_quad`, `id_ofxr_mimic`, `id_normal_game`: 0 seen, nothing done.
+  - The OFXR mimic with the mode on: 44.25 real fps against 44.1 off, 0 free waits.
+  - `id_pause`: 901 re-stamped, 0 free waits, waits paced.
+  - The late shapes: stamp error before / after the change 0.0 / 0.0 % on `_stale` and `_samepose_new`. On `_oneeye` it is 0.0 / 8.3 % (reported, not
+    checked): its stale eye declares the new pose, which no arm can correct (Phase B: 8.0-8.2 % on arms 0-2).
+  - Pairing: 0 submits without facts. One submit took two facts in each of two rows (`_msaa`, `_samepose_new`), as in Phase B.
 - **Not tested:**
-  - the streamer's footer line (GUI);
-  - a real Smooth Motion session on the 5090;
-  - the identity matrix rows that still assert the drop (`min_true_dups_dropped_frac`, `e2e_modsim_ofxr_fix_on`): to rewrite.
+  - a real Smooth Motion session (on the 5090): is `NvPresent64.dll` absent when Smooth Motion is off for that game?
+  - the footer's colour and font (a screenshot);
+  - a headset session on the candidate build.
 
 ## 7. U2: cut
 

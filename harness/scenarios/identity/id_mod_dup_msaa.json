@@ -1,5 +1,5 @@
 {
-  "description": "FRAME-IDENTITY MATRIX (docs/PLAN_UNIVERSAL_OPENXR.md, run with `run.py identity` for each arm; not part of `all`: some rows fail on 1.3.11 by design, that failure is the baseline). xr_modsim writes what each submit really was (images released, new picture or not, same poses or not); the checks compare it with VDXR's per-frame facts and with what the shim dropped. Row: the mod's loop with 4x MSAA swapchains: both eyes go through VDXR's resolve copy. Want: as id_mod_dup, VDXR resolves on real frames only.",
+  "description": "FRAME-IDENTITY MATRIX (docs/PLAN_UNIVERSAL_OPENXR.md, run with `run.py identity` for each arm; not part of `all`: some rows fail on 1.3.11 by design, that failure is the baseline). xr_modsim writes what each submit really was (images released, new picture or not, same poses or not); the checks compare it with VDXR's per-frame facts and with what the shim did (since 2026-11-24 the compatibility mode drops nothing on any arm; it frees the wait before a confirmed repeat). Row: the mod's loop with 4x MSAA swapchains: both eyes go through VDXR's resolve copy. Want: as id_mod_dup, VDXR resolves on real frames only.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -111,7 +111,7 @@
           0.55
         ]
       },
-      "min_true_dups_dropped_frac": 0.95,
+      "min_true_dups_freed_frac": 0.9,
       "max_dropped_new_pictures_frac": 0.02
     }
   }

@@ -1,5 +1,5 @@
 {
-  "description": "FRAME-IDENTITY MATRIX, the AC Black Flag mod's late shapes (docs/PLAN_UNIVERSAL_OPENXR.md 5b: after its change at submit 12,000 picture and pose stop matching, the shaking the owner saw). As id_mod_dup, frame generation off (field runs 5-6), the shape from MODSIM_CHANGE_AT=1000 submits on. The stamp checks decode each received picture's id and compare the yaw it was rendered with against the client's yaw for the frame's timestamp (lib.analyse_stamp_truth); before the change is the control. Row: a share of the real frames release the RIGHT eye only under new poses, so the stamped left eye shows the frame before's picture (field: 3.8 % of new pictures in run 6, 15.9 % in run 1). ALVR v20 carries one pose per frame, so no arm can stamp both eyes right: the after-change stamp error is reported (its size), not checked; the before-change control and the drop checks are.",
+  "description": "FRAME-IDENTITY MATRIX, the AC Black Flag mod's late shapes (docs/PLAN_UNIVERSAL_OPENXR.md 5b: after its change at submit 12,000 picture and pose stop matching, the shaking the owner saw). As id_mod_dup, frame generation off (field runs 5-6), the shape from MODSIM_CHANGE_AT=1000 submits on. The stamp checks decode each received picture's id and compare the yaw it was rendered with against the client's yaw for the frame's timestamp (lib.analyse_stamp_truth); before the change is the control. Row: a share of the real frames release the RIGHT eye only under new poses, so the stamped left eye shows the frame before's picture (field: 3.8 % of new pictures in run 6, 15.9 % in run 1). ALVR v20 carries one pose per frame, so no arm can stamp both eyes right: the after-change stamp error is reported (its size), not checked; the before-change control, nothing dropped and the freed waits are.",
   "topology": {
     "host": "builder",
     "client": "builder",
@@ -104,7 +104,7 @@
         "min_frames": 300,
         "max_before_share": 0.005
       },
-      "min_true_dups_dropped_frac": 0.95,
+      "min_true_dups_freed_frac": 0.9,
       "max_dropped_new_pictures_frac": 0.02
     }
   }
