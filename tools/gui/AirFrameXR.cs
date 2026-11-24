@@ -1002,12 +1002,18 @@ namespace AirFrameXR
             var list = d != null && d.TryGetValue("vr_guard", out var v) ? v as System.Collections.IEnumerable : null;
             var found = new List<string>();
             if (list != null) foreach (var o in list) found.Add(Convert.ToString(o));
-            if (!found.Contains("smooth_motion")) { if (footer.Font.Bold) footer.Font = new Font(footer.Font, FontStyle.Regular); return; }
+            if (!found.Contains("smooth_motion"))
+            {
+                if (vrGuardShown) { vrGuardShown = false; footer.Text = ""; footer.ForeColor = Color.DimGray; footer.Font = new Font(footer.Font, FontStyle.Regular); }   // a clean game clears the last one's warning
+                return;
+            }
             footer.Text = $"NVIDIA frame generation (Smooth Motion) was active in {exe}: it breaks VR mods (stutter, one eye lagging). Turn it off: NVIDIA App > Graphics > {exe} > Smooth Motion.";
             footer.ForeColor = Color.Firebrick;
             footer.Font = new Font(footer.Font, FontStyle.Bold);
+            vrGuardShown = true;
             Log.Write("WARN", "VR guard: NVIDIA Smooth Motion was active in " + exe);
         }
+        bool vrGuardShown;
 
         public void DemoDebugOn() { debug.Checked = true; settings.Debug = false; settings.Save(); exportStatus.Text = "Saved to C:\\Users\\someone\\Documents\\AirFrameXR-logs-20261020-1200.zip"; exportStatus.ForeColor = Color.SeaGreen; exportStatus.Visible = exportLink.Visible = true; }
 

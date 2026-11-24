@@ -615,6 +615,28 @@ criterion. Before section 9's headset A/B, three things were owed:
 - the two checks are rewritten (still owed);
 - ~~the real-OFXR row is rebuilt on C: and run~~: done in the follow-up batch above.
 
+## 6b. Decision C: the universal engine candidate (owner, 2026-11-24; replaces Decision B's "mode always on")
+
+Black Flag's duplicates and its 12,000 flicker were NVIDIA Smooth Motion left on by mistake (section 9 notes), so the compatibility mode lost its
+field case. The owner judged each departure from OpenXR again, against the spec's letter:
+
+| part | decision | why |
+|---|---|---|
+| arm 3: each projection view mapped by its own pose (arm 2's re-stamp included) | **kept, the default arm** (`lab_identity` 0-3 remains for lab A/B runs) | OpenXR gives every view its own pose ("the runtime will map the view and FOV to the system display appropriately"); 1.5 used the left eye's for both |
+| arm 4: an eye with no new image keeps its earlier pose | **removed** | its field case was the misconfiguration |
+| duplicate drop | **removed** | no evidence left; the spec says nothing about it |
+| free waits (the wait after a real picture returns at once, for a confirmed repeat pattern) | **kept behind the switch "Maximum OpenXR compatibility mode", off by default** | the spec: the runtime "**should** block until the beginning of the next frame interval". A "should" an app can rely on the letter of, and an app that resubmits each picture can need the opposite. Off = the most compliant path |
+| no compatibility behaviour without the runtime's facts | **built** | Decision B's rule: a submit without facts is never a repeat |
+| VR guard: NVIDIA Smooth Motion (`NvPresent64.dll`) in the game's process | **built** | checked once at session creation and at the first submit (it is not loaded when Smooth Motion is off). Run-log WARN, `vr_guard` in the `game_ended` event, a red bold line in the streamer's footer after the game. IPC 40 (`shim.vrGuard`) |
+
+Commits `afb47f8`, `994a116` on `universal-1.4`.
+- **Lab, 3080 Ti, 2026-11-24:** `e2e_vr_guard` (the probe loads a harmless copy of `version.dll` named `NvPresent64.dll`): the event carries
+  `smooth_motion` (PASS). The batch is in the follow-up below.
+- **Not tested:**
+  - the streamer's footer line (GUI);
+  - a real Smooth Motion session on the 5090;
+  - the identity matrix rows that still assert the drop (`min_true_dups_dropped_frac`, `e2e_modsim_ofxr_fix_on`): to rewrite.
+
 ## 7. U2: cut
 
 Re-open only with a measured false positive of the pattern windows. If it comes back: identity over all layers (as U1), keep the budget, and rows

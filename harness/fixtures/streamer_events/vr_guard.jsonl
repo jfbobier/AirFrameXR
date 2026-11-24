@@ -1,0 +1,7 @@
+# VR guard (2026-11-24): the engine found NVIDIA Smooth Motion in the game's process; the streamer shows it after the game, red and bold
+{"event":"game_started","data":{"exe":"ACBlackFlag.exe"}}
+{"event":"game_ended","data":{"exe":"ACBlackFlag.exe","seconds":300,"frames_rendered":20000,"frames_streamed":30000,"vr_guard":["smooth_motion"]}}
+{"dump":"guard"}
+{"event":"game_started","data":{"exe":"DeadSpace.exe"}}
+{"event":"game_ended","data":{"exe":"DeadSpace.exe","seconds":200,"frames_rendered":19000,"frames_streamed":19000,"vr_guard":[]}}
+{"dump":"clean"}
