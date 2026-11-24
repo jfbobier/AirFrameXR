@@ -1275,7 +1275,8 @@ namespace {
 
         // Output-eye NDC -> homogeneous source-eye NDC for the projection-layer pass (ReprojectVS/PS, which divide per pixel):
         // the FoV change and the rotation qRel = qSrc^-1 * qOut from the output orientation to the one the layer was rendered
-        // with (identity today: frames leave with the pose they were rendered with; the parked re-stamp branch rotates here). Returned in the cbuffer's memory layout (column-major float4x4 for mul(v, M)).
+        // with (identity in a normal game; arm 3 rotates an eye rendered with another head orientation to the frame's, m_eyeMap). Returned in the
+        // cbuffer's memory layout (column-major float4x4 for mul(v, M)).
         static DirectX::XMFLOAT4X4 EyeHomography(const ovrFovPort& outFov, const ovrFovPort& srcFov, const OVR::Quatf& qRel) {
             // [x y 1] -> view direction in the output eye (OVR: -Z forward, +Y up, NDC y up)
             const double A[3][3] = {{(outFov.LeftTan + outFov.RightTan) / 2.0, 0, (outFov.RightTan - outFov.LeftTan) / 2.0},

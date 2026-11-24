@@ -70,7 +70,8 @@ Legend: **source-verified** (read only) | **built** (compiles) | **tested-pass**
 
 ## Known open
 
-- The Black Flag mod's change of rhythm about 4 minutes in (its submit thread pool shrinks): the lock evens out its effect, nothing removes it.
+- The host's phase lock (`tools/host/src/phase.rs`) does not settle (measured 2026-11-24): in the lab the mock client without its display model reports no wait, and in the field's debug logs (Vision Pro: Dead Space 2026-11-23, 70 corrections in 3 min, -109 ms in all; Gears 2026-11-21, 59; a tester's Enshrouded 2026-11-20, 61) the estimate stays 0-5 ms against the 7 ms target, so it slides the grid every 2-3 s for whole sessions. Inert or a slow drift against the headset: not investigated (a headset A/B with `AIRFRAMEXR_PHASE_LOCK=0` would tell).
+- `pacing_no_stall` fails in about one lab run in eight on the 3080 Ti (8 of 70 `e2e_baseline`, 8 of 53 `e2e_openxr_probe` saved runs), almost always one gap of 2.7-6 display periods.
 - Desktop mirror: a second game started later was once not evicted in the field; the lab chain scenario passes, root cause open.
 - Hand posture reversed in some games (fix not working yet); autoconfig wizard proposals can be inconsistent.
 - Logging framework, found in the first real headset session of 1.3.10 (2026-11-12, 5090) and finished in the lab 2026-11-13 (3080 Ti builder, mock client, debug flavour; plan `docs/PLAN_1_3_10_FINISH.md`):

@@ -122,13 +122,13 @@ struct HostToShim {
     // The host's log verbosity (logsink.rs Level: 0 error, 1 warn, 2 info, 3 verbose, 4 debug): the shim filters its own lines with it, before it formats them.
     uint32_t logLevel;
     // Frame-identity lab arm (docs/PLAN_UNIVERSAL_OPENXR.md Phase B; host --lab-identity N / stdin `lab_identity N`; no GUI, no config file):
-    // 0 = 1.5 exactly (a duplicate = the previous submit's exact render poses); 1 = U1: a duplicate needs the same poses AND the runtime's word
+    // 0 = 1.5's rule (a duplicate = the previous submit's exact render poses); 1 = U1: a duplicate needs the same poses AND the runtime's word
     // that no image was released since the previous frame; 2 = U1, and a submit that released nothing goes out with the previous frame's
-    // timestamp whatever its poses (the picture keeps the pose it was first submitted with; with the pacing fix acting it is dropped as a
-    // duplicate); 3 = arm 2, and each eye of the projection layers is drawn rotated from its own render pose to the frame's (the newer eye's)
+    // timestamp whatever its poses (the picture keeps the pose it was first submitted with); 3 (the default) = arm 2, and each eye of the projection layers is drawn rotated from its own render pose to the frame's (the newer eye's)
     // when the two eyes were rendered with different head orientations (alternate-eye rendering; normal games: identity, as arm 2). Arm 4 (an eye
     // with no new image keeping its earlier pose) was tried on 2026-11-24 and removed: its field case was a configuration mistake.
-    // Without the runtime's per-frame facts (stock VDXR, a libOVR game) every arm decides duplicates as arm 0.
+    // No arm drops anything (since 2026-11-24: the compatibility mode only frees waits). Without the runtime's per-frame facts (stock VDXR,
+    // a libOVR game) arms 1-3 call no submit a duplicate; arm 0 still decides by the poses.
     uint32_t labIdentity;
 };
 
