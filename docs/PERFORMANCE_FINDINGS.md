@@ -73,6 +73,8 @@ the 3 x spread rule). The pass saves less than the hidden share (27 % against 41
 | **Release alignment alone** (`OVRSHIM_ALIGN_RELEASE`) | no effect on duplicates. | Lab only. |
 | **Duplicate-timestamp re-stamp** (shim-side wait for the next sample + rotation, and host-side compositor stamping, 2026-10-13) | duplicates 0, shown fps = host fps, headset gaps halved in the heavy games; but the Vision Pro trembles with host-side stamping (the Quest 3 is clean either way) and the shim-side wait moves Wi-Fi jitter into the frame arrivals. | The visionOS client handles stamped frames differently; wait for a recompiled client rather than work around it in the streamer. Parked on branch `exp/restamp-2026-10-13`; the product sends every frame with its render sample's timestamp. |
 | **A smaller neural network input** (`AIRFRAMEXR_FG_NEURAL_SCALE` below 0.5; OFXR runs RIFE at 18 % of the eye by default, presets 10-36 %), 2026-11-24, judge on the RTX 3080 Ti Laptop, eye 1920x2368, 117 cases each | neural minus edge on the moving-edge band: **+0.82 dB** at 0.5 (better in 102 of 117), +0.30 dB at 0.36 (74), **-0.39 dB** at 0.25 (34, worse than edge); moving region +0.97 / +0.44 / -0.26 dB; blur against edge worse at every lower scale. The network's GPU time fell 43 % at 0.36 and 72 % at 0.25 (judge timing, which on this GPU includes waiting behind the judge's own rendering). | Below 0.5 the network loses most of what it adds over edge, so a GPU too slow for 0.5 is better served by edge, which is cheaper and now better. Owner: 0.5 stays fixed; the wizard's scene test switches a PC that cannot hold the rate with neural to edge. Results `harness/results/20261124T1332*`-`T1339*_fg_judge`. |
+| **Frame generation early hand-over** (2026-11-25, branch `perf-early-handover`: the generator takes the game's next frame as soon as the current pair owes nothing, instead of at the next boundary) | 5090 + Vision Pro, x2 and x3, 30 s alternation inside one session: host outputs later than a period 4.0 -> 0.7 % and 2.1 -> 0.9 %, and nothing the headset counts moved (repeated periods 1.0 %, displayed fps, the two queues). On the 3080 Ti lab (mock headset, 1248x1120 eye) it holds the rate: 87.9 -> 90.0 fps, repeated ticks 3.0 -> 0.4 %. No trembling seen or judged. | The 5090 was not missing slots the headset could see: its queue already hid 2-4 % of late outputs. Left on its branch, not released; a candidate for mid-range GPUs if a headset confirms the lab. Section 2026-11-25/26. |
+| **Just-in-time release, second look** (2026-11-26, lab switch `OVRSHIM_JIT_RELEASE`, branch `perf-experiments`) | 5090 lab: a GPU-bound app with a short CPU frame loses the frame it ran ahead (frame start -> GPU done 31.0 -> 19.3 ms) for 7 % of its fps; an app holding the generation cap with room: 2-3 holds in 2699 releases, nothing moves. | It cannot engage in what is played on the 5090: a game at its cap queues nothing, and a pipelined engine (Unreal: release -> submit about one GPU frame) leaves the rule nothing to hold, as on 2026-10-16. Parked. |
 
 ## Findings that changed our mind
 
@@ -93,6 +95,7 @@ the 3 x spread rule). The pass saves less than the hidden share (27 % against 41
 - Duplicate timestamps (5-10% of the Vision Pro's frames in heavy games, 20% in Dead Space): **displayed** since at least 1.3.10 (see finding 1, corrected), each reprojected from its own pose, so re-stamping them would fix nothing on the headset (re-checked against the 1.4 client source on 2026-11-20: the video pass rotates from the frame's pose to a fresh display-time anchor). The re-stamp stays parked (`exp/restamp-2026-10-13`). What remains open on the Vision Pro is the stale ticks of a clean stream (10-14 %, `docs/VISIONOS_TELEMETRY_LEARNINGS.md`), mostly not same-timestamp frames.
 - Headset decoder queue regimes (12-15 ms against stock 3 ms) when a frame goes missing.
 - Whether foveated or full-frame looks better at the same bitrate on the headset (unjudged).
+- The Vision Pro's two queues, about 31 of 57-67 ms at 100 Hz (2026-11-25/26): a decoded frame waits about 10 ms for the client's render loop (the 7 ms phase margin plus the arrival spread), then about 20.5 ms pass between the client's submit and the display. Neither moves with the bitrate, the game or the generation rate. The second one is parked until a TestFlight build of the client can log the frame's timing (owner, 2026-11-26).
 
 ## Future work on the ALVR visionOS client (why re-stamped frames tremble there and not on the Quest)
 
@@ -465,3 +468,60 @@ E-Day 4 h 39 at 1/2 (plus 30 min), Borderlands 4 at off / 2/3 / 1/2, End of Abys
   code 4 and the streamer window restarted it three times per attempt. Now a setup error with the limit in words, and the scale button
   refuses the value.
 - Also: ten `stall detected` warnings, all within seconds of a game start or end (loading screens); six 100 ms tracking blackouts over the day.
+
+## 2026-11-25/26: where the time is on the 5090 + Vision Pro, and three ideas measured
+
+One evening, one setup: RTX 5090, Vision Pro at 100 Hz, release flavour (the telemetry flavour adds latency of its own), 10 s windows
+written to the game's log by an experiment build (1.5.0 + the early hand-over, alternating on / off every 30 s inside the session so
+both arms see the same scene). Logs: `private/logs/exp-early-handover-2026-11-25` and `-2026-11-26-150mbps`. Lab: the 3080 Ti laptop
+with a small eye (1248x1120: it does not hold more with generation on) and the 5090 with the mock headset. The code is on the branches
+`perf-experiments` (three lab switches) and `perf-early-handover` (the experiment build, its report `harness/exp_early_report.py`),
+kept in the worktree `openxr-perf` and not on GitHub at the time of writing.
+
+**Where the time is** (Dead Space, generation x2, 275 Mbps, medians of 44 windows, as the headset reports it): game 6.3 ms, encode 3.0,
+network 7.6, decode 6.0, decoded frame waiting for the render loop 10.2 ("decoder queue": ALVR measures it from the end of the decode
+to the compositor's pick, not before the decode), client render 6.7, submit to display 20.5 ("vsync queue"). The host is 9 ms of it,
+the headset's two waits 31.
+
+**How to read the total.** The host's window figure is the median of per-frame totals that sit one display period apart (57 or 67 ms),
+while the parts are means. At x2 the two groups are near half and half, so the window figure flips by 10 ms on a shift of a few
+frames; at x3 it reads 67 in nine windows of ten. A change is real only if the parts move.
+
+**1. Early hand-over (host).** What it does: once an output's packets are queued and the current pair owes nothing, the generator
+takes the frame the game already published instead of waiting for the next boundary, so the pair's first generated output no longer
+pays the flow and the camera-turn readback inside its own slot.
+
+| Per 10 s window, off -> on | Dead Space x2 (22 / 22 windows) | Gears of War: E-Day x3 (45 / 44) |
+|---|---|---|
+| Outputs later than a display period | 4.0 -> 0.7 % | 2.1 -> 0.9 % |
+| Generated outputs, encoder thread p50 | 6.3 -> 3.4 ms | 6.7 -> 6.2 ms |
+| Generated outputs ready after the boundary, p95 | 10.3 -> 8.6 ms | 9.5 -> 8.3 ms |
+| Headset: display periods repeated | 1.04 -> 0.97 % | 0.95 -> 1.00 % |
+| Headset: decoded frame waiting / submit to display | 10.0 -> 10.4 / 20.5 -> 20.5 ms | 9.8 -> 9.7 / 20.6 -> 20.6 ms |
+
+The host's gain is outside the quartiles in both games; the headset's figures are inside them. The owner saw no trembling. Lab,
+3080 Ti, two runs per arm: x2 neural 87.9 -> 90.0 fps with repeated ticks 3.0 -> 0.4 %, x3 89.4 -> 90.0 fps, the stick-turn rows better
+or equal with the camera-turn counters unchanged; the stability rows pass with it on (tracking blackouts, host freeze, reconnect
+storm, client freeze); the simrig judges the head path CLEAN in 5 of 5 runs with it on (edge synthesis only: the rig fails with the
+neural synthesis, an encoder error not investigated). Not tested: a headset on a mid-range GPU. The 1 % of repeated periods that
+remains follows neither the late outputs nor, window by window, the boundaries skipped for lack of a tracking sample: unexplained.
+
+**2. Bitrate 275 -> 150 Mbps (a test of "the decoder has no slack").** Decode 6.0 -> 3.9 ms, network 7.6 -> 5.8 ms; the decoded
+frame's wait 10.2 -> 9.8 ms and the submit-to-display time unchanged; repeated periods 0.95 -> 0.70 %, inside the quartiles. The
+window total read 57 ms in 52 of 65 windows against 23 of 65, which is about 4 ms of real gain (the two parts) tipping the median
+(see above). So the 10 ms wait is not the decoder: it is the phase margin (7 ms since 2026-10-17) and the arrival spread it covers.
+Picture quality at 150 Mbps was not measured.
+
+**3. Just-in-time release (shim, lab only).** 5090, mock headset at 90 Hz, probe app, a 1920x1184 eye, two rounds with the same
+numbers. GPU-bound app with a 2.7 ms CPU frame, generation off: frame start -> GPU done 31.0 -> 19.3 ms (p95 31.2 -> 22.5), a hold on
+every release (mean 12.2 ms), 64.3 -> 59.9 fps. App holding the x2 cap with a GPU frame of about 14 ms: 15.7 -> 15.6 ms, 2-3 holds in
+2699 releases. The field logs of the same evening say which case the real games are: Dead Space held its 50 fps cap in every window
+with the GPU 75 % busy (release -> submit 2.6 ms, nothing queued); Gears spends about 33 ms from release to submit, the length of its
+GPU frame, so the rule has nothing to hold. What it would shorten is the age of the pose the game rendered with (hands, translation,
+animation), not the headset's latency figure.
+
+**What is left, as questions and not as promised gains.** On the streamer: the arrival spread behind the 7 ms phase margin (the
+2026-10-17 "deep dive to do"; the hand-over narrows the host's part of it, a lower bitrate the network's and the decoder's), the send
+path (one blocking send per packet on a thread of default priority: never measured), and why the phase lock never settles. On the
+client: how much of the 20.5 ms between its submit and the display is its own slack before Apple's rendering deadline, which only a
+client build that logs the frame's timing (optimal input time, rendering deadline, presentation time) can tell.
