@@ -16,9 +16,9 @@
 
 AirFrameXR replaces the **SteamVR + traditional ALVR PC streamer** with a **lean, NVIDIA-optimized OpenXR runtime and streaming pipeline**. It handles frame pacing, optional frame generation, NVENC encoding, and wireless delivery together, instead of layering those components on top of SteamVR.
 
-**The headset side stays the same:** AirFrameXR speaks the **ALVR v20 protocol**, so you keep the existing ALVR headset client. The Windows streamer is NVIDIA-only; it has been tested on **Apple Vision Pro** and **Meta Quest 3**. Other ALVR-protocol clients may work, but are not verified here.
+**Compatible with ALVR v20 clients, optimized for the AirFrameXR clients.** AirFrameXR speaks the **ALVR v20 protocol**, so the existing ALVR headset apps work with it. It is optimized for the **AirFrameXR clients** (visionOS and Meta Quest), which are **pending validation on the App Store and the Meta store**. Meanwhile: **TestFlight** for the Vision Pro and **APK sideloading** for the Quest (see "Headset clients" below). The Windows streamer is NVIDIA-only; it has been tested on **Apple Vision Pro** and **Meta Quest 3**. Other ALVR-protocol clients may work, but are not verified here.
 
-For the Quest there is a dedicated **AirFrameXR Quest client** ([releases](https://github.com/jfbobier/airframexr-metaquest/releases), version 1.3.0): a Vulkan fork of ALVR 20.14.1 with a welcome panel and a floor-height offset. **Controllers only, there is no hand pinch input** (it was not reliable and was removed, as on the Vision Pro client). It was tested on a Quest 3 only; the Meta-store ALVR client keeps working.
+For the Quest there is a dedicated **AirFrameXR Quest client** ([releases](https://github.com/jfbobier/airframexr-metaquest/releases), version 1.3.0): a Vulkan fork of ALVR 20.14.1 with a welcome panel and a floor-height offset. **Controllers only, there is no hand pinch input** (it was not reliable and was removed, as on the Vision Pro client). It was tested on a Quest 3 only; it is distributed as an APK to sideload while the Meta store validation is pending, and the Meta-store ALVR client keeps working.
 
 <p align="center">
   <img src="docs/images/airframexr-pipeline-comparison.png" alt="Architecture comparison: traditional OpenXR game to SteamVR to ALVR streamer to ALVR client, versus an OpenXR game to an integrated NVIDIA-optimized AirFrameXR runtime and streamer to the same ALVR headset client" width="100%">
@@ -32,7 +32,7 @@ For the Quest there is a dedicated **AirFrameXR Quest client** ([releases](https
 | Streaming | Separate ALVR PC streamer | Integrated streaming pipeline using ALVR server components and protocol v20 |
 | Encoding | General-purpose ALVR configuration | NVIDIA-specific NVENC HEVC 10-bit path |
 | Frame generation | Requires a separate approach if desired | Optional, built into the frame pipeline: a neural interpolator (RIFE) running on our own small CUDA engine, with NVIDIA Optical Flow and an edge-aware synthesis as the fallback |
-| Headset | ALVR client | **Same ALVR client — no custom headset app required** |
+| Headset | ALVR client | ALVR v20 clients work; **AirFrameXR clients (visionOS, Meta Quest) are optimized for it** |
 | Compatibility priority | Broad SteamVR ecosystem | Lean OpenXR-first path; **OpenVR-only titles go through the bundled [OpenComposite](#openvr-only-games-opencomposite) translation** (one switch in the launcher), the rest need SteamVR |
 
 ### Why build it this way?
@@ -41,7 +41,7 @@ AirFrameXR is built for people with a wireless headset and an NVIDIA GPU who wan
 
 - **A leaner engine.** Games talk to [VDXR](https://github.com/mbucchia/VirtualDesktop-OpenXR), a fast, small OpenXR runtime, instead of the SteamVR runtime and compositor.
 - **One runtime, minimal copies.** Composition, frame pacing and encoding run in one pipeline that passes frames in shared GPU memory, with no extra copies between programs.
-- **A proven network layer.** [ALVR](https://github.com/alvr-org/ALVR) provides the networking, encoding and decoding that a large community has stabilised, and the headset only needs the ALVR app. **Meta Quest** and **Apple Vision Pro** are the tested headsets.
+- **A proven network layer.** [ALVR](https://github.com/alvr-org/ALVR) provides the networking, encoding and decoding that a large community has stabilised, and any ALVR v20 client works; the AirFrameXR clients add the end-to-end optimizations. **Meta Quest** and **Apple Vision Pro** are the tested headsets.
 - **Made for NVIDIA.** NVENC HEVC 10-bit encoding, and **split encoding** that uses all of the GPU's NVENC units instead of one (the RTX 5090 has three), tuned with the pacing and the network.
 - **The game renders only what you see.** One choice for every headset: the vendor's own view (Apple, Meta: the default) or a restriction, a rectangle the game is told. *AVP optimized* is a window measured on a Vision Pro and is always in the list; your own takes about a minute in the headset (four bright lines, one eye at a time). A game that renders less is a faster game, and the saving can be spent as render quality. See [How FOV restriction works](#how-fov-restriction-works).
 - **Frame generation in the pipeline.** Optional neural frame generation: a [RIFE](https://github.com/hzwer/Practical-RIFE) network finds how every part of the picture moved between two game frames, and the streamer draws the frames in between at full resolution (fewer double images on moving objects, still content left exact). It runs on our own small CUDA engine shipped with AirFrameXR (11 MB; no TensorRT, no Python). The GPU's optical flow with an edge-aware synthesis (the edge technique comes from [VectorXR](https://github.com/DienerTech/vectorxr), re-implemented) remains as the fallback. It can improve displayed smoothness when a game cannot sustain the headset's refresh rate. It is experimental, off by default and **can add interpolation latency**; it is not a free FPS boost.
@@ -76,8 +76,8 @@ built on ALVR's open-source server libraries (MIT). It is a separate project: it
 project, and the ALVR developers' own streamer remains the place for SteamVR-based streaming.
 - **Headset clients.** The streamer speaks the ALVR protocol (20.14.x), so there are two kinds of clients:
   - **AirFrameXR clients**, built for the two headsets this project targets, so that the optimizations run end to end (the field of view limit, the chroma-key passthrough, timing and latency logs):
-    - **Apple Vision Pro**: the [AirFrameXR visionOS client](https://github.com/jfbobier/airframexr-visionos) (source on GitHub), distributed through **TestFlight**: [join the public beta](https://testflight.apple.com/join/QYxnfNWM) (limited to 100 testers).
-    - **Meta Quest 3**: the [AirFrameXR Quest client](https://github.com/jfbobier/airframexr-metaquest), a full **Vulkan** rewrite of the ALVR client's renderer; **sideload** the APK from the fork's [releases](https://github.com/jfbobier/airframexr-metaquest/releases) (tested on a Quest 3 only).
+    - **Apple Vision Pro**: the [AirFrameXR visionOS client](https://github.com/jfbobier/airframexr-visionos) (source on GitHub), distributed through **TestFlight**: [join the public beta](https://testflight.apple.com/join/QYxnfNWM) (limited to 100 testers); App Store validation is pending.
+    - **Meta Quest 3**: the [AirFrameXR Quest client](https://github.com/jfbobier/airframexr-metaquest), a full **Vulkan** rewrite of the ALVR client's renderer; **sideload** the APK from the fork's [releases](https://github.com/jfbobier/airframexr-metaquest/releases) (tested on a Quest 3 only); Meta store validation is pending, so sideloading is the way for now.
   - **The stock ALVR clients** (the ALVR app on the Vision Pro, the Meta-store ALVR app on the Quest) work natively with the streamer, frame generation included, but with fewer end-to-end optimizations.
 
   Other headsets with an ALVR client (Pico, ...) are not targeted for now.
@@ -120,7 +120,7 @@ flowchart LR
         L <-.->|commands, events| H
     end
     W(("Wi-Fi<br/>ALVR protocol"))
-    C["ALVR client<br/>Vision Pro (stock app), Quest 3, others"]
+    C["ALVR v20 client<br/>AirFrameXR visionOS / Quest, or stock ALVR"]
     H --> W --> C
     C -.->|tracking 90-270 Hz,<br/>per-frame statistics| H
 ```
