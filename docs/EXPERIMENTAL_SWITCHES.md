@@ -76,11 +76,11 @@ Lab: `e2e_fov_restrict` (70 / 90 / 80 / 60 % of the mock's tangents, as tangents
 
 ## 3. The arrival family (docs/PERFORMANCE_KNOBS.md)
 
-Already in the launcher: `phase_margin_ms` (Diagnose's Apply button; default 7, env `AIRFRAMEXR_PHASE_MARGIN_MS` wins).
+`phase_margin_ms` is no longer read since 1.5.1 (Diagnose's margin advice was for the old lock's statistic and is removed); the target is 8 ms, env `AIRFRAMEXR_PHASE_MARGIN_MS` for tests.
 
 | key | values, default | effect | what it does, what we know |
 |---|---|---|---|
-| `phase_lock` | true / false, **true** | streamer restart (env `AIRFRAMEXR_PHASE_LOCK=0`) | slides the host's display grid so frames arrive `phase_margin_ms` before the headset's render tick. Off on 2026-10-23 for a test: no visible change, latency still alternated. Known debt: it slides ~12-25 times a minute whatever it sees, including under a free-running game below the display rate where its input means nothing |
+| `phase_lock` | true / false, **true** | streamer restart (env `AIRFRAMEXR_PHASE_LOCK=0`) | slides the host's display grid so the 90th percentile of the headset's wait for its tick is 8 ms (since 1.5.1, `phase.rs`; the grid runs at the headset's measured period, `display_clock.rs`). Until 1.5.0 it slid ~12-30 times a minute and never settled (the fold, the standing frame: `docs/PLAN_E2E_FRAME_TIMING.md` 10.3) |
 | `running_start_ms` | ms, **2**; 0 = release the game at the tick | streamer restart | the shim's running-start margin: the game is released `envelope + margin` before its boundary. With the gate on this acts at frame start for the first time; 1-4 are plausible values to try, 0 disables the running start |
 | `intake_gate` | true / false, **true** | streamer restart (env `AIRFRAMEXR_INTAKE_GATE=0`) | the shim skips one release when the host's queue has stood 3 boundaries (`AIRFRAMEXR_GATE_AFTER`): drains a standing queue without dropping a frame. Headset verdict 2026-10-13: works when the game keeps up, fires uselessly 3/s in GPU-bound games |
 | `head_wait_ms`, `predict_missing_head` | ms / bool, **off** | streamer restart | the removed in-order head-sample consumption and the predicted-sample stand-in: both measured worse on the headset (2026-10-13/16). Keep off; listed so nobody re-adds them as "new" |
