@@ -472,8 +472,28 @@ The owner noticed no difference (no regression). The host alone cannot remove th
   rarely waits (2 % or less) and there is nothing to remove. The new lock is 1.4 to 1.8 ms lower than today in every arm, about the same as
   evening 1b (67.2 against 68.8). The owner found Black Flag "more reactive"; three quarters of its time ran the new lock, but 1.5 ms
   is small, and the logs do not tie the impression to an arm.
-- **Next:** stage D (the 3-minute blind blocks) in a game with frame generation, where the gain is; it resumes after the remaining
-  6 minutes of stage C.
+
+**Evening 2, continued (22:07 to 22:18, Dead Space x2, 50 to 100 fps):** the last 6 minutes of stage C, then 4.2 minutes of stage D
+(one 3-minute block of the target pick, then 1 minute of today before the owner stopped). Logs `...-evening2b`.
+
+| Stage | Arm | Windows | Decoder queue | Total | Standing | Dropped per 1000 | Repeated ticks |
+|---|---|---|---|---|---|---|---|
+| C | today | 6 | 8.7 | 66.9 | 40 % | 10.5 | 1.1 % |
+| C | v2 6 ms + ff | 9 | 10.6 | 67.0 | 56 % | 9.2 | 1.0 % |
+| C | + `pick = target` | 6 | 4.2 | 57.1 | 3 % | 35.2 | 3.5 % |
+| C | + `sustained` 10 | 6 | 6.9 | 63.5 | 23 % | 16.2 | 1.8 % |
+| D | + `pick = target` | 17 | 3.1 | 57.1 | 1 % | 50.9 | 5.0 % |
+| D | today | 6 | 10.1 | 66.8 | 53 % | 6.9 | 0.8 % |
+
+- **Dead Space with generation confirms Gears:** the target pick is at 57.1 ms in 22 of its 23 windows; today and v2 alone in 3 of 21.
+- **The cost grows with the phase:** in the 3-minute block the drops were 51 per 1000, with one minute (22:15:10 to 22:16:10) at 5 to
+  10 % of the frames. In those windows the resubmits rose with the drops, one for one, and the median slack fell to 1.5 to 1.9 ms
+  (2.5 to 4 elsewhere): frames reached the pick at the last moment, the render missed Apple's deadline, visionOS kept the previous
+  frame, and the next tick found two, the older dropped. Today's setting never sees this because the standing frame is always ready;
+  that is what its 10 ms buy. The lock did not react: its statistic (the 90th percentile of the wait) stayed at 5 to 6 ms.
+- **Next:** give the target pick more margin, not less: v2 at 8 ms + rate fed forward + `pick = target` against the 6 ms arm (the
+  frames ready 2 ms earlier; whether the total stays at 57 depends on where the headset's pose samples fall), then the blind blocks.
+  The owner's impressions of the stutter come first.
 
 ## 11. Steps
 
