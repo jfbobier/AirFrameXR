@@ -15,6 +15,7 @@ use alvr_session::CodecType;
 mod bench_quality;
 mod fg_judge;
 mod discovery;
+mod display_clock;
 mod games;
 mod logs;
 mod logsink;
@@ -548,11 +549,8 @@ fn apply_settings(a: &mut Args, st: &vision::Settings) {
             std::env::set_var("AIRFRAMEXR_INTAKE_GATE", if v { "1" } else { "0" });
         }
     }
-    if let Some(v) = st.phase_margin_ms {
-        if std::env::var_os("AIRFRAMEXR_PHASE_MARGIN_MS").is_none() {
-            std::env::set_var("AIRFRAMEXR_PHASE_MARGIN_MS", v.to_string());
-        }
-    }
+    // video.phase_margin_ms (written by the Diagnose window's margin advice until 1.5.0) is no longer read: it was computed for the old lock's
+    // statistic (the earliest arrivals), which 1.5.1 replaced (phase.rs); AIRFRAMEXR_PHASE_MARGIN_MS stays for tests
     if a.gpu_keepalive.is_none() {
         a.gpu_keepalive = st.gpu_keepalive.map(|d| d as i32);
     }
@@ -730,6 +728,9 @@ static RATE_FILL_CHANGES: Mutex<Vec<(f64, f64, f64, f64)>> = Mutex::new(Vec::new
 /// when the run log's encoder line was last written (ms since the host started; one line per 10 s at most)
 static ENC_RUN_LINE_MS: AtomicU64 = AtomicU64::new(0);
 static LAST_TRACKING_NS: AtomicU64 = AtomicU64::new(0);
+/// the session's display period (ns): set at start and when the headset negotiates another stream, read by the tracking thread (it held a
+/// copy from its start until 1.5.1, so after a Vision Pro's 90 -> 100 Hz renegotiation it judged 100 Hz off nominal and followed it)
+static NOMINAL_PERIOD_NS: AtomicU64 = AtomicU64::new(10_000_000);
 
 fn push_bounded(m: &std::sync::Mutex<Vec<f64>>, v: f64) {
     if let Ok(mut g) = m.lock() {
@@ -2246,6 +2247,7 @@ fn main() {
     // Shim mode: the staged pipeline owns the encoder from here on (intake / clock pick / encoder / sender threads).
     let mut pipeline: Option<Arc<pipeline::Pipeline>> = None;
     let vsync_period_ns = Arc::new(AtomicU64::new((1e9 / args.fps) as u64));
+    NOMINAL_PERIOD_NS.store((1e9 / args.fps) as u64, Ordering::Relaxed);
     let mut fg_active = false;
     if args.shim {
         let l = live.take().expect("live encoder context");
@@ -2363,7 +2365,9 @@ fn main() {
             let mut recenter_pending = false;
             let mut samples_since_connect = 0u32;
             let mut rate_est = vision::RateEstimator::new();
-            let nominal_period_ns = (1e9 / args.fps) as u64;
+            // the display period measured from the headset's timestamps (display_clock.rs): the grid's period once it is known
+            let mut display_clock = display_clock::DisplayClock::new();
+            let mut clock_applied = false;
             let mut buttons_seen = 0usize;
             let mut invalid_views = 0usize;
             for ev in events {
@@ -2373,6 +2377,8 @@ fn main() {
                         height_anchored = false;
                         samples_since_connect = 0;
                         rate_est.reset();
+                        display_clock.reset();
+                        clock_applied = false;
                         RATE_IGNORED.store(false, Ordering::Relaxed);
                         recenter = None;
                         recenter_pending = false;
@@ -2397,6 +2403,7 @@ fn main() {
                         event(origin, "client_disconnected", json!(null));
                     }
                     ServerCoreEvent::Tracking { sample_timestamp } => {
+                        let nominal_period_ns = NOMINAL_PERIOD_NS.load(Ordering::Relaxed);
                         let n = shared.tracking_events.fetch_add(1, Ordering::Relaxed);
                         let now_ns = origin.elapsed().as_nanos() as u64;
                         let prev_ns = LAST_TRACKING_NS.swap(now_ns, Ordering::Relaxed);
@@ -2431,6 +2438,19 @@ fn main() {
                                     logs::general("INFO", &format!("client display rate {:.1} Hz: host clock {}", 1e9 / period as f64,
                                         if off_nominal { "follows it" } else { "back on the nominal grid" }));
                                 }
+                            }
+                        }
+                        if let Some(e) = display_clock.push(sample_timestamp.as_nanos() as u64, now_ns as f64, nominal_period_ns) {
+                            let cur = vsync_period_ns.load(Ordering::Relaxed) as f64;
+                            let free = !FOLLOW_RATE.load(Ordering::Relaxed) && !RATE_IGNORED.load(Ordering::Relaxed);
+                            if e.usable(nominal_period_ns) && free && (!clock_applied || (e.host_period_ns - cur).abs() > 50.0) {
+                                if !clock_applied {
+                                    logs::general("INFO", &format!("display clock: the host's grid at {:.5} ms (the headset's display {:.5} ms, clocks {:+.1} ppm)",
+                                        e.host_period_ns / 1e6, e.client_period_ns / 1e6, e.clock_ppm));
+                                }
+                                clock_applied = true;
+                                vsync_period_ns.store(e.host_period_ns.round() as u64, Ordering::Relaxed);
+                                event(origin, "display_clock", json!({ "from_ms": cur / 1e6, "to_ms": e.host_period_ns / 1e6, "client_period_ms": e.client_period_ns / 1e6, "clock_ppm": e.clock_ppm }));
                             }
                         }
                         if !ipc.is_null() {
@@ -3079,6 +3099,8 @@ fn main() {
                     }));
                     enc_size = (ew, eh);
                     vsync_period_ns.store((1e9 / args.fps) as u64, Ordering::Relaxed);
+                    NOMINAL_PERIOD_NS.store((1e9 / args.fps) as u64, Ordering::Relaxed);
+                    FOLLOW_RATE.store(false, Ordering::Relaxed); // the grid is on the new stream's nominal period; the rate check follows again if the display is elsewhere
                     cur_cfg = want;
                     reconfigs += 1;
                     idx = 0;

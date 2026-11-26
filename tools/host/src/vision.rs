@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-pub const VERSION: &str = "1.5.0";
+pub const VERSION: &str = "1.5.1";
 
 /// Portable install: everything sits in the folder the user unzipped (`alvr_host.exe` next to the runtime DLLs), with
 /// `config/` (session.json, airframexr.json) and `logs/` inside it.
@@ -46,8 +46,6 @@ pub struct Settings {
     pub drop_duplicate_frames: Option<bool>,
     /// slide the host's display grid so frames arrive just before the headset's tick (phase.rs); default on
     pub phase_lock: Option<bool>,
-    /// arrival margin of the phase lock, ms (default 7; the environment variable AIRFRAMEXR_PHASE_MARGIN_MS wins)
-    pub phase_margin_ms: Option<f64>,
     /// GPU keepalive duty in percent (a laptop GPU that drops to a low power state while streaming; --gpu-keepalive wins)
     pub gpu_keepalive: Option<i64>,
     /// frame generation (docs/FRAME_GENERATION.md): half-rate pacing + optical-flow interpolated frames; default off
@@ -134,7 +132,6 @@ pub fn load_settings(path: &Path) -> Settings {
         intake_gate: video["intake_gate"].as_bool(),
         drop_duplicate_frames: video["drop_duplicate_frames"].as_bool(),
         phase_lock: video["phase_lock"].as_bool(),
-        phase_margin_ms: video["phase_margin_ms"].as_f64(),
         gpu_keepalive: video["gpu_keepalive"].as_i64(),
         frame_gen: video["frame_gen"].as_bool(),
         frame_gen_synthesis: video["frame_gen_synthesis"].as_str().map(str::to_string),

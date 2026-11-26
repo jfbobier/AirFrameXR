@@ -186,16 +186,15 @@ namespace AirFrameXR
             void check(string name, bool ok, string detail = "") { if (!ok) fails++; o.AppendLine($"CHECK {(ok ? "PASS" : "FAIL")} {name}" + (ok ? "" : ": " + detail)); }
             string Titles(List<Suggestion> l) => string.Join(" | ", l.Select(x => x.Sev + ": " + x.Title));
             var hs = new Handshake { Rates = new List<double> { 90, 100 } };
-            // fixture logs: a noisy link, a laptop GPU in P8, a long arrival spread, four games
+            // fixture logs: a noisy link, a laptop GPU in P8, four games
             var root = Path.Combine(Path.GetTempPath(), "advice_" + Guid.NewGuid().ToString("N"));
-            string MakeLogs(string name, double encP95, double gap95, int over15, double spread, string pstate, double videoMhz, double gpuPct)
+            string MakeLogs(string name, double encP95, double gap95, int over15, string pstate, double videoMhz, double gpuPct)
             {
                 var d = Path.Combine(root, name, "logs", "debug", "20261019-120000"); Directory.CreateDirectory(d);
                 var ev = new List<string>();
                 for (int i = 0; i < 6; i++)
                 {
                     ev.Add("{\"data\":{\"fps\":88.0,\"encode_ms_p95\":" + encP95.ToString(CultureInfo.InvariantCulture) + ",\"tracking_gap_ms\":{\"p95\":" + gap95.ToString(CultureInfo.InvariantCulture) + ",\"over_15ms\":" + over15 + ",\"n\":500}},\"event\":\"encoder_stats\"}");
-                    ev.Add("{\"data\":{\"spread_ms\":" + spread.ToString(CultureInfo.InvariantCulture) + ",\"period_ms\":11.1,\"est_ms\":3.0},\"event\":\"phase_lock\"}");
                 }
                 ev.Add("{\"data\":{\"fps\":30.0,\"encode_ms_p95\":2.0},\"event\":\"encoder_stats\"}");   // a menu window: ignored
                 File.WriteAllLines(Path.Combine(d, "host_events.jsonl"), ev);
@@ -228,21 +227,20 @@ namespace AirFrameXR
             var same = Advice.From(new Results { EncodeP95 = 4, SceneRan = true, HeadSamplesPerS = 270, HeadGapP95Ms = 5, SameTsPct = 9 }, hs, 90, false, new LogFacts());
             check("repeated head samples are explained (known Vision Pro issue)", same.Any(x => x.Title.Contains("same head sample")), Titles(same));
 
-            // logs: noisy link, long spread, laptop GPU, debug on, games
-            var logs = MakeLogs("noisy", 9.5, 21, 40, 11.0, "P8", 555, 10);
+            // logs: noisy link, laptop GPU, debug on, games
+            var logs = MakeLogs("noisy", 9.5, 21, 40, "P8", 555, 10);
             var games = MakeGames("noisy",
                 Game("a.exe", "Game A", "off", 55, 12, 0, now - 400),
                 Game("b.exe", "Game B", "half", 44, 0.4, 20, now - 300),
                 Game("c.exe", "Game C", "half", 44, 0.5, 0.2, now - 200),
                 Game("d.exe", "Game D", "third", 30, 7, 0.2, now - 100));
             var f = LogFacts.Read(logs, games);
-            check("the newest debug session with a game streaming is read", f.Windows == 6 && Math.Abs(f.EncodeP95 - 9.5) < 0.01 && Math.Abs(f.SpreadMed - 11.0) < 0.01 && f.GpuSamples == 8, $"windows {f.Windows} enc {f.EncodeP95} spread {f.SpreadMed} gpu samples {f.GpuSamples}");
+            check("the newest debug session with a game streaming is read", f.Windows == 6 && Math.Abs(f.EncodeP95 - 9.5) < 0.01 && f.GpuSamples == 8, $"windows {f.Windows} enc {f.EncodeP95} gpu samples {f.GpuSamples}");
             check("the four newest games are read, newest first", f.Games.Count == 4 && f.Games[0].Name == "Game D", string.Join(",", f.Games.Select(g => g.Name)));
             bool off = false;
             var all = Advice.From(null, hs, 90, true, f, () => off = true);
             check("logs: the encoder headroom", all.Any(x => x.Title.Contains("encoder") && x.Source.Contains("logs")), Titles(all));
             check("logs: bursty tracking", all.Any(x => x.Title.Contains("bursts") && x.Source.Contains("logs")), Titles(all));
-            check("logs: arrival margin 9 proposed for an 11 ms spread", all.Any(x => x.Title.Contains("try 9") && x.Apply != null && x.ApplyText.Contains("9 ms")), Titles(all));
             check("logs: the GPU in P8 gets the keepalive", all.Any(x => x.Title.Contains("low power state") && x.Apply != null), Titles(all));
             var dbg = all.FirstOrDefault(x => x.Title.Contains("Debug logging is on") && x.Apply != null); dbg?.Apply();   // by its title: other suggestions with a button come first
             check("debug logging: a button that turns it off", dbg != null && off, Titles(all));
@@ -251,9 +249,9 @@ namespace AirFrameXR
             check("every suggestion says what it measured and where from", all.All(x => x.Measured.Length > 0 && x.Source.Length > 0 && x.Title.Length > 0), "");
             check("warnings come first", all.Count > 1 && (int)all[0].Sev >= (int)all[all.Count - 1].Sev, Titles(all).Substring(0, Math.Min(120, Titles(all).Length)));
 
-            var fine = LogFacts.Read(MakeLogs("fine", 4.0, 6, 3, 8.0, "P0", 1500, 55), MakeGames("fine"));
+            var fine = LogFacts.Read(MakeLogs("fine", 4.0, 6, 3, "P0", 1500, 55), MakeGames("fine"));
             var good = Advice.From(null, hs, 90, false, fine);
-            check("a healthy session: margin default fits, nothing above Info", good.Any(x => x.Title.Contains("default 7 ms fits")) && good.All(x => x.Sev == Sev.Info), Titles(good));
+            check("a healthy session: nothing above Info", good.All(x => x.Sev == Sev.Info), Titles(good));
 
             File.WriteAllText(Path.Combine(outDir, "advice.txt"), o.ToString());
             return fails == 0 ? 0 : 1;

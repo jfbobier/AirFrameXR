@@ -25,8 +25,7 @@ namespace AirFrameXR
     {
         public string Run = ""; public DateTime When;
         public int Windows;                                  // encoder_stats windows with the game streaming
-        public double EncodeP95, TrackGapP95, TrackOver15Share, SpreadMed, SpreadP90, PeriodMs;
-        public int PhaseSamples;
+        public double EncodeP95, TrackGapP95, TrackOver15Share;
         public double VideoMhz, GpuPct; public string Pstate = ""; public int GpuSamples;
         public class Game { public string Name = "", Exe = "", Headset = "", Level = ""; public DateTime When; public double Fps, Hz, RepTyp, RepP90, HostRep, LatencyMs; }
         public List<Game> Games = new List<Game>();
@@ -34,7 +33,6 @@ namespace AirFrameXR
         static double Num(Dictionary<string, object> d, string k, double def = double.NaN) { try { return d != null && d.TryGetValue(k, out var v) && v != null ? Convert.ToDouble(v, CultureInfo.InvariantCulture) : def; } catch { return def; } }
         static Dictionary<string, object> Obj(Dictionary<string, object> d, string k) => d != null && d.TryGetValue(k, out var v) ? v as Dictionary<string, object> : null;
         static double Median(List<double> v) { if (v.Count == 0) return double.NaN; v.Sort(); return v[v.Count / 2]; }
-        static double Pct(List<double> v, double q) { if (v.Count == 0) return double.NaN; v.Sort(); return v[(int)Math.Round((v.Count - 1) * q)]; }
 
         /// The newest debug session with a game streaming in it (at most the five newest are looked at), and the latest session of each recorded game.
         public static LogFacts Read(string logsDir, string gamesDir)
@@ -74,11 +72,11 @@ namespace AirFrameXR
         {
             var ev = Path.Combine(dir, "host_events.jsonl");
             if (!File.Exists(ev)) return false;
-            var enc = new List<double>(); var gap = new List<double>(); var spread = new List<double>(); var periods = new List<double>();
+            var enc = new List<double>(); var gap = new List<double>();
             double over = 0, n = 0;
             foreach (var line in File.ReadLines(ev).Reverse().Take(4000))   // the end of a long session is what the setup looks like now
             {
-                if (line.IndexOf("\"encoder_stats\"", StringComparison.Ordinal) < 0 && line.IndexOf("\"phase_lock\"", StringComparison.Ordinal) < 0) continue;
+                if (line.IndexOf("\"encoder_stats\"", StringComparison.Ordinal) < 0) continue;
                 Dictionary<string, object> j; try { j = Json.Parse(line); } catch { continue; }
                 var d = Obj(j, "data"); if (d == null) continue;
                 var name = j.TryGetValue("event", out var en) ? Convert.ToString(en) : "";
@@ -90,11 +88,9 @@ namespace AirFrameXR
                     if (gp != null) { var g95 = Num(gp, "p95"); if (!double.IsNaN(g95)) gap.Add(g95); over += Num(gp, "over_15ms", 0); n += Num(gp, "n", 0); }
                     Windows++;
                 }
-                else if (name == "phase_lock") { var s = Num(d, "spread_ms"); if (!double.IsNaN(s) && s > 0) spread.Add(s); var pm = Num(d, "period_ms"); if (!double.IsNaN(pm)) periods.Add(pm); }
             }
             if (Windows < 3) { Windows = 0; return false; }
             EncodeP95 = Median(enc); TrackGapP95 = Median(gap); TrackOver15Share = n > 0 ? over / n : double.NaN;
-            PhaseSamples = spread.Count; SpreadMed = Median(spread); SpreadP90 = Pct(spread, 0.9); PeriodMs = Median(periods);
             var gpu = Path.Combine(dir, "gpu.csv");
             if (File.Exists(gpu))
             {
@@ -145,25 +141,12 @@ namespace AirFrameXR
                 s.Add(new Suggestion { Sev = Sev.Warn, Knob = "the wireless link", Source = gapSrc.Length > 0 ? gapSrc : logSrc,
                     Title = "The headset's tracking arrives in bursts",
                     Measured = (double.IsNaN(gapP95) ? "" : $"tracking gaps p95 {F(gapP95)} ms (a regular stream is under 12) ") + (burstLogs ? $"{F(100 * facts.TrackOver15Share, "0.0")} % of gaps over 15 ms " : "") + (lowRate ? $"{F(r.HeadSamplesPerS, "0")} samples/s against {F(fps, "0")} Hz" : ""),
-                    Do = "this is the Wi-Fi: a 5 GHz or 6 GHz channel without neighbours (a neighbour's network cost one night its smoothness; channel 149 cured it), the PC on Ethernet, the router in the room; a noisy link also wants the larger arrival margin below" });
+                    Do = "this is the Wi-Fi: a 5 GHz or 6 GHz channel without neighbours (a neighbour's network cost one night its smoothness; channel 149 cured it), the PC on Ethernet, the router in the room" });
             if (r != null && r.SceneRan && r.SameTsPct >= 5)
                 s.Add(new Suggestion { Sev = Sev.Hint, Knob = "the headset's tracking stamps", Source = "from the wizard's scene test",
                     Title = "Some frames carry the same head sample as the one before",
                     Measured = $"{F(r.SameTsPct, "0.0")} % of frames share the previous frame's tracking timestamp",
                     Do = "the headset skips them (shown fps a little under the host's). Seen on the Vision Pro in heavy games: the game reads its pose in bursts; nothing to set here" });
-
-            // arrival margin: the knob the UI should own (logs only: the wizard does not see the phase lock)
-            if (facts.PhaseSamples >= 5 && !double.IsNaN(facts.SpreadMed))
-            {
-                int proposal = (int)Math.Max(4, Math.Min(10, Math.Round(0.85 * facts.SpreadMed)));
-                bool differs = Math.Abs(proposal - 7) >= 2;
-                s.Add(new Suggestion { Sev = differs ? Sev.Hint : Sev.Info, Knob = "AIRFRAMEXR_PHASE_MARGIN_MS", Source = logSrc,
-                    Title = differs ? $"Arrival margin: try {proposal} ms instead of the default 7" : "Arrival margin: the default 7 ms fits your link",
-                    Measured = $"frames arrive over a spread of {F(facts.SpreadMed)} ms (p90 {F(facts.SpreadP90)}) of a {F(facts.PeriodMs > 0 ? facts.PeriodMs : period)} ms period",
-                    Do = differs ? $"the margin steers the earliest arrivals that far before the headset's tick; it should cover the spread so the p90 arrival lands before it. The button sets it for the next streamer start (video.phase_margin_ms); it costs at most one period of latency, invisible until it crosses a tick"
-                                    : "frames land before the headset's tick; nothing to change",
-                    Apply = differs ? (Action)(() => { var st = new AppSettings(); st.PhaseMarginMs = proposal; st.Save(); }) : null, ApplyText = $"Use {proposal} ms (next start)" });
-            }
 
             // GPU power state: a laptop GPU that idles while it streams makes the encode slow
             if (facts.GpuSamples >= 5 && !double.IsNaN(facts.VideoMhz) && facts.VideoMhz > 0 && facts.VideoMhz < 900 && facts.GpuPct < 30)

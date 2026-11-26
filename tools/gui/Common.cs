@@ -41,7 +41,7 @@ namespace AirFrameXR
 
     public static class Version
     {
-        public const string Number = "1.5.0";
+        public const string Number = "1.5.1";
         /// "1.1.0", plus " (debug build)" for a package built with the per-frame telemetry (bin\flavour.txt, written by the packaging step; docs/DEVELOPMENT.md)
         public static readonly string Text = Number + (IsDebugBuild() ? " (debug build)" : "");
         static bool IsDebugBuild()
@@ -694,7 +694,6 @@ namespace AirFrameXR
         // docs/FRAME_GENERATION.md "Game profiles": the launcher sets the rate from the game's recorded runs on the connected headset (on by default)
         public bool FrameGenRecommended { get => Json.Bool(Root, "video.frame_gen_recommended", false); set => Json.Set(Root, "video.frame_gen_recommended", value); }
         /// arrival margin of the phase lock in ms (host default 7; the host reads it at start) and the GPU keepalive duty in % (0 = off); 0 = not set
-        public double PhaseMarginMs { get => Json.Num(Root, "video.phase_margin_ms", 0); set => Json.Set(Root, "video.phase_margin_ms", value); }
         public int GpuKeepalive { get => (int)Json.Num(Root, "video.gpu_keepalive", 0); set => Json.Set(Root, "video.gpu_keepalive", (double)value); }
         /// the Windows power plan the streamer switches to while it runs (a GUID; "" = leave it alone); the plan that was active comes back when the streamer closes
         public string PowerPlan { get => Json.Str(Root, "system.power_plan", ""); set => Json.Set(Root, "system.power_plan", value); }
