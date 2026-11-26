@@ -95,7 +95,7 @@ the 3 x spread rule). The pass saves less than the hidden share (27 % against 41
 - Duplicate timestamps (5-10% of the Vision Pro's frames in heavy games, 20% in Dead Space): **displayed** since at least 1.3.10 (see finding 1, corrected), each reprojected from its own pose, so re-stamping them would fix nothing on the headset (re-checked against the 1.4 client source on 2026-11-20: the video pass rotates from the frame's pose to a fresh display-time anchor). The re-stamp stays parked (`exp/restamp-2026-10-13`). What remains open on the Vision Pro is the stale ticks of a clean stream (10-14 %, `docs/VISIONOS_TELEMETRY_LEARNINGS.md`), mostly not same-timestamp frames.
 - Headset decoder queue regimes (12-15 ms against stock 3 ms) when a frame goes missing.
 - Whether foveated or full-frame looks better at the same bitrate on the headset (unjudged).
-- The Vision Pro's two queues, about 31 of 57-67 ms at 100 Hz (2026-11-25/26): a decoded frame waits about 10 ms for the client's render loop (the 7 ms phase margin plus the arrival spread), then about 20.5 ms pass between the client's submit and the display. Neither moves with the bitrate, the game or the generation rate. The second one is parked until a TestFlight build of the client can log the frame's timing (owner, 2026-11-26).
+- The Vision Pro's two queues, about 31 of 57-67 ms at 100 Hz (2026-11-25/26): a decoded frame waits about 10 ms for the client's render loop, then about 20.5 ms pass between the client's submit and the display. **The first is explained and solved in the experiment** (a standing second frame; the target pick takes 5 to 6 ms of it, see the 2026-11-26 campaign below; not released). The second did not move with any arm of the campaign.
 
 ## Future work on the ALVR visionOS client (why re-stamped frames tremble there and not on the Quest)
 
@@ -525,3 +525,26 @@ animation), not the headset's latency figure.
 path (one blocking send per packet on a thread of default priority: never measured), and why the phase lock never settles. On the
 client: how much of the 20.5 ms between its submit and the display is its own slack before Apple's rendering deadline, which only a
 client build that logs the frame's timing (optimal input time, rendering deadline, presentation time) can tell.
+
+## 2026-11-26: the end-to-end frame timing campaign (streamer + visionOS TestFlight 98)
+
+Four sessions on the 5090 + Vision Pro at 100 Hz with an experimental bundle whose settings changed by themselves every 40 s while
+the owner played (Gears of War: E-Day x3, Dead Space x2, AC Black Flag without generation), and a TestFlight client that took its
+switches from the streamer. Plan, tables and method: `docs/PLAN_E2E_FRAME_TIMING.md` sections 2.2, 10.2 and 10.3; logs
+`private/logs/exp-frame-timing-2026-11-26-*`; code on the branches `exp-frame-timing` (engine worktree `openxr-timing`, client on
+kteque).
+
+- **The 10 ms the decoded frame waits in the headset was a standing second frame** (40 to 61 % of the frames with generation), not
+  the phase margin. The phase lock folds the wait at half a period, so it cannot see the extra period, and it slid the host earlier
+  for ever (−0.6 to −0.8 ms/s in every log). No host setting removes it: a lock that does not fold (v2) with the display's rate fed
+  forward from the headset's timestamps stops the slide but leaves the latency unchanged.
+- **The client's pick removes it.** Showing the newest frame whose display tick has come and dropping the older ones ("target pick",
+  after WiVRn's and Steam Link's per-frame target time) cuts the decoder queue from about 10 to 3.5-5 ms: **about 6 ms less on average
+  with the lock at 6 ms, 5 ms at 8 ms**, in both games with generation; nothing in a game below the display rate without it. With
+  the standing frame gone the lock settles for the first time.
+- **The cost is skipped frames**: 15 per 1000 at 8 ms, 23 at 6 ms, 8 today; the owner saw no stutter in any session. The lock at
+  6 ms let frames reach the pick at the last moment (one minute of 5 to 10 % drops in Dead Space); 8 ms gives them 1.4 ms more.
+- **How to read the total, again**: ALVR's window total is a median of per-frame totals on a 10 ms grid, so the first readings showed
+  57 against 67 ms, a whole period, for what the parts measure as 5 to 6 ms. Read the sum of the parts. The 1.5 ms the median showed
+  for the new lock in Black Flag was the same effect (parts: 0.2 to 0.5 ms).
+- **Not measured**: the blind blocks against today, a game at the display rate without generation, 90/96 Hz, the Quest.

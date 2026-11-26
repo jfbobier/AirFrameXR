@@ -434,6 +434,12 @@ also events.
 Read with `harness/exp_field_report.py <logs>` (branch `exp-frame-timing`): medians of 10 s windows per game and arm, the window after
 a switch and a game's first 20 s left out. Logs in `private/logs/exp-frame-timing-2026-11-26-*`. Total = ALVR's total latency.
 
+**Correction (2026-11-26, after evening 3): the Total column overstates every gain.** Each window's total is the median of per-frame
+totals that sit one display period apart (57 or 67 ms, section 2.1 and `docs/PERFORMANCE_FINDINGS.md` 2026-11-25), so it jumps 10 ms
+when half the frames move. The gain is what the parts show: the sum of the parts' means, in which only the decoder queue moves.
+Measured that way the target pick saves **about 6 ms** in the games with generation (table in 10.3), not a display period; the
+bullets below were first written from the median and are corrected in place.
+
 **Evening 1 (stage A, 28 min): no result.** The rate fed forward never applied: the host starts on the session's 90 Hz, the headset
 renegotiates 100 Hz, and the tracking thread kept its start-up period, so every measured period was rejected. Fixed (one shared
 nominal period, guards: 20 s after connect, clocks within 500 ppm, period within 0.2 %); checked by replaying the evening's head
@@ -458,20 +464,20 @@ The owner noticed no difference (no regression). The host alone cannot remove th
 | | + `pick = target` | 24 | 1.2 | 67.7 | 0 % | 2.4 | 35.6 % | 14 | −0.22 |
 | | + `sustained` 10 | 24 | 1.3 | 67.4 | 0.6 % | 0.3 | 34.1 % | 13 | −0.19 |
 
-- **The target pick takes one display period out of Gears with generation: 57.0 against 66.8 ms**, in 14 of its 15 windows (today
-  and v2 alone: 1 of 24). The total moves in steps of one period (57.0 or 67.0 in nearly every window), so the gain is the standing
-  frame itself. The decoder queue falls from 9.9 to 3.8 ms, standing frames from 53 to 2 %. The vsync queue is unchanged (20.5 ms).
+- **The target pick removes the standing frame in Gears with generation:** standing frames 53 to 2 %, the decoder queue 9.9 to 3.8
+  ms, the sum of the parts 63.7 to 57.3 ms (**6.4 ms**). The median total reads 57.0 in 14 of its 15 windows (today and v2 alone: 1 of
+  24), which looks like a whole period and is not (see the correction above). The vsync queue is unchanged (20.5 ms).
 - **With the standing frame gone, lock v2 settles** in the field for the first time: 6 corrections a minute, no slide, its estimate
   6.6 ms on a 6 ms target (v2 alone: estimate 9.5, the waits behind a standing frame pass its filter).
 - **The cost:** 22.5 frames dropped per 1000 shown, against 7.1 today: a frame too late for its tick is skipped instead of delaying
   every later one, about 2 a second at 100 Hz. The repeated ticks the host counts rise from 0.9 to 2.3 %; most of the rise is
   resubmits (the client re-sends the shown frame when visionOS has not taken the last one, which it does more often with a short
   queue), not frames shown twice. Whether the skips are visible is stage D's question.
-- **`sustained` 10 is halfway**: its windows alternate between 57 and 67 ms, standing 19 %, half the drops.
+- **`sustained` 10 is halfway**: decoder queue 6.3 ms (parts 60.9), standing 19 %, half the drops.
 - **Black Flag without generation shows no client effect**: the game gives fewer frames than the display shows, so a second frame
-  rarely waits (2 % or less) and there is nothing to remove. The new lock is 1.4 to 1.8 ms lower than today in every arm, about the same as
-  evening 1b (67.2 against 68.8). The owner found Black Flag "more reactive"; three quarters of its time ran the new lock, but 1.5 ms
-  is small, and the logs do not tie the impression to an arm.
+  rarely waits (2 % or less) and there is nothing to remove. The 1.4 to 1.8 ms the median total showed for the new lock is the median
+  effect: the parts differ by 0.2 to 0.5 ms (70.8 today, 70.3 to 70.6 the others). The owner found Black Flag "more reactive"; the
+  logs do not show a difference between the arms.
 
 **Evening 2, continued (22:07 to 22:18, Dead Space x2, 50 to 100 fps):** the last 6 minutes of stage C, then 4.2 minutes of stage D
 (one 3-minute block of the target pick, then 1 minute of today before the owner stopped). Logs `...-evening2b`.
@@ -485,7 +491,8 @@ The owner noticed no difference (no regression). The host alone cannot remove th
 | D | + `pick = target` | 17 | 3.1 | 57.1 | 1 % | 50.9 | 5.0 % |
 | D | today | 6 | 10.1 | 66.8 | 53 % | 6.9 | 0.8 % |
 
-- **Dead Space with generation confirms Gears:** the target pick is at 57.1 ms in 22 of its 23 windows; today and v2 alone in 3 of 21.
+- **Dead Space with generation confirms Gears:** decoder queue 9.5 to 3.4 ms, the sum of the parts 62.4 to 56.3 ms (**6.1 ms**); the
+  median total at 57.1 in 22 of its 23 windows, today and v2 alone in 3 of 21.
 - **The cost grows with the phase:** in the 3-minute block the drops were 51 per 1000, with one minute (22:15:10 to 22:16:10) at 5 to
   10 % of the frames. In those windows the resubmits rose with the drops, one for one, and the median slack fell to 1.5 to 1.9 ms
   (2.5 to 4 elsewhere): frames reached the pick at the last moment, the render missed Apple's deadline, visionOS kept the previous
@@ -497,6 +504,50 @@ The owner noticed no difference (no regression). The host alone cannot remove th
 - **Evening 3's schedule** (owner's go, 2026-11-26; `config\exp_schedule.json` on the 5090, it overrides the compiled one): stage E,
   30 minutes of 40 s arms: today, v2 6 ms + ff + `pick = target`, v2 8 ms + ff + `pick = target`; then stage F, v2 8 ms + ff +
   `pick = target` against today in 3-minute blocks, not announced. Stage F is replaced if stage E shows 8 ms losing the 57 ms.
+
+**Evening 3 (22:42 to 23:15, Gears E-Day x3, 33 to 99 fps).** Stage E's 30 minutes, then 2.7 minutes of stage F (one block of the
+8 ms arm; today's block never came). Logs `...-evening3`. The owner: "I didn't notice any stutter".
+
+| Arm | Windows | Decoder queue | Sum of the parts | Median total (windows at 57) | Standing | Dropped per 1000 (per 10 s: p50 / p90 / max) | Resubmits / reprojected per 1000 ticks |
+|---|---|---|---|---|---|---|---|
+| today | 45 | 9.9 | 63.2 | 66.2 (13 of 45) | 48 % | 8.3 (8 / 12 / 15) | 8.5 / 0.5 |
+| v2 6 ms + ff + `pick = target` | 43 | 3.6 | 57.6 | 57.0 (40 of 43) | 2.2 % | 23.5 (19 / 40 / 50) | 22.1 / 1.8 |
+| v2 8 ms + ff + `pick = target` (E and F) | 60 | 5.0 | 58.6 | 57.0 (52 of 60) | 3.2 % | 15.0 (14 / 25 / 31) | 14.1 / 1.4 |
+
+- **8 ms keeps most of the gain and a third fewer drops:** the frames are ready 1.4 ms earlier, which costs 1.0 ms of the parts
+  (4.6 against 5.6 ms saved) and brings the drops from 23.5 to 15.0 per 1000, the worst 10 s window from 50 to 31. The lock holds its
+  target (estimate 7.8 on 8, no slide, 10 corrections a minute against 29 for today).
+
+### 10.3 Conclusion (2026-11-26)
+
+| Game, generation | today | + target pick, lock 6 ms | + target pick, lock 8 ms |
+|---|---|---|---|
+| Gears E-Day x3, evening 2 | 63.7 | 57.3 (−6.4) | |
+| Dead Space x2, evening 2 | 62.4 | 56.3 (−6.1) | |
+| Gears E-Day x3, evening 3 | 63.2 | 57.6 (−5.6) | 58.6 (−4.6) |
+| AC Black Flag, none (63 fps) | 70.8 | 70.6 (−0.2) | |
+
+Sum of the parts' means, ms (ALVR's legs from the game to the display); the medians of the total read 57 against 67 throughout.
+
+- **Root cause confirmed in the field.** With generation, a second decoded frame stands in the headset's queue for 40 to 61 % of the
+  frames. The phase lock cannot see it (it folds the wait at half a period) and the host cannot remove it: v2 with the rate fed
+  forward stops the lock's slide but leaves the latency where it was (evening 1b, and v2 alone on evening 2).
+- **The headset's target pick removes it: about 6 ms (lock at 6 ms) or 5 ms (lock at 8 ms) less on average** in the two games with
+  generation, all of it in the decoder queue, the other legs unchanged (the 20.5 ms vsync queue included). Nothing in a game that
+  runs below the display rate without generation, where no frame stands.
+- **With the standing frame gone the lock settles** (v2 + rate fed forward: 6 to 11 corrections a minute, no slide; today 27 to 30 a
+  minute and −0.6 to −0.8 ms/s), the first time in any field log.
+- **The cost is skipped frames:** 15 per 1000 at 8 ms and 23 at 6 ms, against 8 today, with one minute of 5 to 10 % in Dead Space at
+  6 ms; the frames shown twice (reprojected) 1.4 to 1.8 per 1000 ticks against 0.5. The owner saw no stutter in any of the three
+  sessions.
+- **Against section 9:** the 6 ms arm passes the result (at least 5 ms) and fails the drop guard; the 8 ms arm is at 4.6 ms (parts;
+  5.6 on the mean total), in the 2 to 5 ms band, where every guard should be flat, and its drops rise beyond their spread. By the
+  plan's letter neither passes; the guard that the drops stand for, a visible hitch, held in the owner's eyes. That trade is the
+  owner's decision.
+- **Not measured:** the blind 3-minute blocks against today (one 8 ms block was played); a game at the display rate without
+  generation; 90 and 96 Hz; the Quest (the lock change would reach it, the pick is visionOS only); a worse Wi-Fi than the owner's.
+- **Candidate for a release:** on the streamer, lock v2 at 8 ms with the rate fed forward (for the visionOS client until the Quest is
+  checked); on the client, `pick = target` as the default. Without the experiment's switches, schedule and per-second telemetry.
 
 ## 11. Steps
 
