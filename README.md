@@ -8,8 +8,8 @@
 **Wireless PCVR for people who want high performance and simplicity. Re-engineered for NVIDIA. No SteamVR required. Optional integrated frame generation.**
 
 <p align="center">
-  <a href="https://youtu.be/8F8zQXMi9BA"><img src="https://img.youtube.com/vi/8F8zQXMi9BA/maxresdefault.jpg" alt="Watch the 2-minute AirFrameXR overview on YouTube" width="640"></a><br>
-  <sub>Watch the 2-minute overview (YouTube). Narration is synthetic; charts use the maintainer's measurements.</sub>
+  <a href="https://youtu.be/Ph9Q9iA0AhY"><img src="https://img.youtube.com/vi/Ph9Q9iA0AhY/maxresdefault.jpg" alt="Watch the 3-minute AirFrameXR overview on YouTube" width="640"></a><br>
+  <sub>Watch the 3-minute overview (YouTube). Narration is synthetic; charts use the maintainer's measurements.</sub>
 </p>
 
 **Questions, profiles, test reports: join the [AirFrameXR Discord](https://discord.gg/T2jQep5h6).**
