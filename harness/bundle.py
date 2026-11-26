@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The bundle: the stock (release) package with the Black Box (the telemetry package) nested in it as blackbox\\ (blackbox_perf.exe in the root starts it), as a folder and a zip on the builder, public and personal.
+"""The release zips, two since 1.5.1: "streamer" (the stock release package alone; public, and the owner's personal one, which is streamer only) and "blackbox" (the Black Box alone: blackbox_perf.exe and blackbox\\, the telemetry package; public only), as folders and zips on the builder.
 
-    python3 harness/bundle.py            # builds both flavours (about 20 minutes), stashes them, assembles out\\bundle\\<stamp>-public and -personal, fetches both zips to build/bundle/
+    python3 harness/bundle.py            # builds both flavours (about 20 minutes), stashes them, assembles out\\bundle\\<stamp>-streamer / -streamer-personal / -blackbox, fetches the three zips to build/bundle/
 
 Order (the builder's outputs are shared between flavours, so each flavour is stashed before the next build): release build + public package -> stash; the same release build + personal
 package -> stash; debug (telemetry) build + package -> stash; assemble. Nothing is deleted anywhere: every run uses new names. The last build left on the builder is the debug one, as the lab expects.
@@ -51,12 +51,12 @@ p = run(["build", "host", "shim", "gui", "bench", "package"]); need(p, "debug bu
 stash(f"debug_{stamp}")
 dest = lib.ROOT / "build" / "bundle"
 dest.mkdir(parents=True, exist_ok=True)
-for kind, suffix in (("public", ""), ("personal", "-personal")):
-    name = f"{stamp}-{kind}"
-    zipname = f"AirFrameXR-{VERSION}-bundle{suffix}{'-' + TAG if TAG else ''}.zip"
-    out = ps_text(open(lib.ROOT / "tools/remote/stage24_bundle.ps1").read(), "stage24_bundle.ps1", f"{kind}_{stamp}", f"debug_{stamp}", name, zipname)
+for kind, mode, suffix in (("public", "streamer", "streamer"), ("personal", "streamer", "streamer-personal"), ("public", "blackbox", "blackbox")):
+    name = f"{stamp}-{suffix}"
+    zipname = f"AirFrameXR-{VERSION}-{suffix}{'-' + TAG if TAG else ''}.zip"
+    out = ps_text(open(lib.ROOT / "tools/remote/stage24_bundle.ps1").read(), "stage24_bundle.ps1", f"{kind}_{stamp}", f"debug_{stamp}", name, zipname, mode)
     print(out.strip()[-400:])
     if "RESULT: OK" not in out:
-        sys.exit("bundle failed")
+        sys.exit(f"{suffix} zip failed")
     lib.b_get(f"out/bundle/{name}/{zipname}", dest / zipname)
     print("fetched", dest / zipname, round((dest / zipname).stat().st_size / 1048576, 1), "MB")
