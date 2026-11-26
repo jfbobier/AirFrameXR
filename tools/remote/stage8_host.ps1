@@ -12,6 +12,11 @@ $env:PATH += ";$env:USERPROFILE\.cargo\bin"
 $flavour = if (Test-Path "$root\_tmp\flavour.txt") { (Get-Content "$root\_tmp\flavour.txt" -Raw).Trim() } else { 'debug' }
 $cargoArgs = @('build', '--release', '-p', 'alvr_host')
 if ($flavour -eq 'release') { $cargoArgs += '--no-default-features' }
+# release flavour since 1.5.1: whole-program optimisation, fat LTO across the ALVR crates and ours in one code generation unit (ALVR's profile
+# has neither: thin-local LTO, 16 units). The shipped host only; the lab's debug flavour keeps the faster profile. No target-cpu: the zip
+# runs on any x86-64 PC.
+if ($flavour -eq 'release') { $env:CARGO_PROFILE_RELEASE_LTO = 'fat'; $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = '1' }
+else { $env:CARGO_PROFILE_RELEASE_LTO = $null; $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = $null }
 # simrig (harness/simrig, docs/DEVELOPMENT.md): the headset-less rig, a separate build that is never deployed as the installed host
 if ($env:AIRFRAMEXR_SIMRIG_BUILD -eq '1') { $cargoArgs += @('--features', 'simrig') }
 Write-Host "flavour: $flavour$(if ($env:AIRFRAMEXR_SIMRIG_BUILD -eq '1') { ' + simrig' })"
