@@ -279,8 +279,10 @@ count, and the next stage starts by itself. The progress is saved in `config\exp
 last one stopped. The file is read again whenever it changes, at each 10 s window, without a restart: copying a file is the only
 action ever taken on the install, and the streamer is never stopped. Each arm sets the lock's version and target and the client's
 switches (the headset view message's `exp` object, which a stock client ignores). One `frame timing experiment` line per window
-carries the stage and the arm. With no file, the bundle behaves as the release. The stages do not choose their own winner: Claude
-reads the report between evenings and writes the next schedule.
+carries the stage and the arm. **Evening 1 is compiled in** (owner, 2026-11-26: "hard code the experiment in the bundle so I just unzip and use it"): a streaming
+host started from an install (the launcher's `--install-dir --shim --daemon`) runs it when there is no schedule file; a file overrides
+it, and `{"off": true}` in `config\exp_schedule.json` gives the release behaviour. Lab hosts run nothing unless told. The stages do not
+choose their own winner: Claude reads the report between evenings and writes the next schedule (or the next bundle).
 
 **Evening 1: the streamer only** (the experiment bundle; the TestFlight client already installed, no upload).
 
