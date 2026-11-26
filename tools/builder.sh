@@ -22,7 +22,7 @@ fi
 ROOTNAME="${AIRFRAMEXR_BUILDER_ROOT:-openxr}"    # the working folder under %USERPROFILE% (default openxr; e.g. AirFrameXR to work in a git clone)
 HOST="${AIRFRAMEXR_BUILDER:?set AIRFRAMEXR_BUILDER=user@host (or write it to tools/builder.local), see docs/DEVELOPMENT.md}"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o LogLevel=ERROR -o ControlMaster=auto -o "ControlPath=/tmp/airframexr-ssh-%C" -o ControlPersist=10m)   # one multiplexed connection: some sshd setups drop fresh ones
-NOISE='post-quantum|store now, decrypt later|openssh.com/pq|server may need to be upgraded|^\*\* *$'
+NOISE='post-quantum|store now, decrypt later|openssh.com/pq|server may need to be upgraded|^\*\* *$|^#< CLIXML|^<Objs Version'
 
 allow_destructive=0
 if [[ "${1:-}" == "--allow-destructive" ]]; then allow_destructive=1; shift; fi
@@ -38,26 +38,40 @@ guard() {
 
 filter() { grep -vE "$NOISE" || true; }
 
+# One cmd.exe command line on the builder, whatever its sshd's default shell is (cmd.exe, or PowerShell, which the 5090 was switched to on
+# 2026-11-26): the line travels as a literal here-string inside a -EncodedCommand script, which both shells start the same way, and runs
+# under cmd /d /s /c (PowerShell quotes it as one argument for cmd.exe, /s takes it back verbatim); a failure comes back as non-zero (1
+# through a PowerShell default shell, which reports success or failure, not the code).
+rcmd() {
+  local script="\$ProgressPreference='SilentlyContinue'
+\$c = @'
+$1
+'@
+& \$env:ComSpec /d /s /c \$c
+exit \$LASTEXITCODE"
+  ssh "${SSH_OPTS[@]}" "$HOST" "powershell -NoProfile -NonInteractive -EncodedCommand $(printf '%s' "$script" | iconv -t UTF-16LE | base64 -w0)"
+}
+
 case "$mode" in
   run)
     cmd="${1:?usage: builder.sh run '<cmd>'}"
     guard "$cmd"
     # the working folder is created on first use (fresh builder, or after the user removed it)
-    ssh "${SSH_OPTS[@]}" "$HOST" "(if not exist %USERPROFILE%\\$ROOTNAME mkdir %USERPROFILE%\\$ROOTNAME) & cd /d %USERPROFILE%\\$ROOTNAME && set AIRFRAMEXR_ROOT=%USERPROFILE%\\$ROOTNAME&& $cmd" 2>&1 | filter
+    rcmd "(if not exist %USERPROFILE%\\$ROOTNAME mkdir %USERPROFILE%\\$ROOTNAME) & cd /d %USERPROFILE%\\$ROOTNAME && set AIRFRAMEXR_ROOT=%USERPROFILE%\\$ROOTNAME&& $cmd" 2>&1 | filter
     ;;
   ps)
     script="${1:?usage: builder.sh ps script.ps1 [args]}"; shift
     [[ -f "$script" ]] || { echo "no such script: $script" >&2; exit 2; }
     guard "$(cat "$script")"
-    ssh "${SSH_OPTS[@]}" "$HOST" "if not exist %USERPROFILE%\\$ROOTNAME\\_tmp mkdir %USERPROFILE%\\$ROOTNAME\\_tmp" 2>&1 | filter   # mkdir creates openxr too
+    rcmd "if not exist %USERPROFILE%\\$ROOTNAME\\_tmp mkdir %USERPROFILE%\\$ROOTNAME\\_tmp" 2>&1 | filter   # mkdir creates openxr too
     base="$(basename "$script")"
     scp "${SSH_OPTS[@]}" "$script" "$HOST:$ROOTNAME/_tmp/$base" 2>&1 | filter
-    ssh "${SSH_OPTS[@]}" "$HOST" "cd /d %USERPROFILE%\\$ROOTNAME && set AIRFRAMEXR_ROOT=%USERPROFILE%\\$ROOTNAME&& powershell -NoProfile -ExecutionPolicy Bypass -File _tmp\\$base $*" 2>&1 | filter
+    rcmd "cd /d %USERPROFILE%\\$ROOTNAME && set AIRFRAMEXR_ROOT=%USERPROFILE%\\$ROOTNAME&& powershell -NoProfile -ExecutionPolicy Bypass -File _tmp\\$base $*" 2>&1 | filter
     ;;
   put)
     src="${1:?usage: put local remote_rel}"; dst="${2:?usage: put local remote_rel}"
     [[ "$dst" != /* && "$dst" != *..* && "$dst" != *:* ]] || { echo "remote path must be relative to ~/openxr" >&2; exit 2; }
-    ssh "${SSH_OPTS[@]}" "$HOST" "if not exist %USERPROFILE%\\$ROOTNAME mkdir %USERPROFILE%\\$ROOTNAME" 2>&1 | filter
+    rcmd "if not exist %USERPROFILE%\\$ROOTNAME mkdir %USERPROFILE%\\$ROOTNAME" 2>&1 | filter
     scp -r "${SSH_OPTS[@]}" "$src" "$HOST:$ROOTNAME/$dst" 2>&1 | filter
     ;;
   get)
