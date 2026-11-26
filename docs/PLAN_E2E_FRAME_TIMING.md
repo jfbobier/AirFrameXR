@@ -494,6 +494,9 @@ The owner noticed no difference (no regression). The host alone cannot remove th
 - **Next:** give the target pick more margin, not less: v2 at 8 ms + rate fed forward + `pick = target` against the 6 ms arm (the
   frames ready 2 ms earlier; whether the total stays at 57 depends on where the headset's pose samples fall), then the blind blocks.
   The owner's impressions of the stutter come first.
+- **Evening 3's schedule** (owner's go, 2026-11-26; `config\exp_schedule.json` on the 5090, it overrides the compiled one): stage E,
+  30 minutes of 40 s arms: today, v2 6 ms + ff + `pick = target`, v2 8 ms + ff + `pick = target`; then stage F, v2 8 ms + ff +
+  `pick = target` against today in 3-minute blocks, not announced. Stage F is replaced if stage E shows 8 ms losing the 57 ms.
 
 ## 11. Steps
 
