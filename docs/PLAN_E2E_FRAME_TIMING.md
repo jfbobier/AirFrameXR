@@ -291,13 +291,13 @@ choose their own winner: Claude reads the report between evenings and writes the
 | A | today (v1 at 7 ms) against v2 at 4 ms with the rate fed forward, and v2 at 6 ms with it (the lab's best and a cautious one, 10.1), 40 s each | 40 min of play | H4 in the field (does the slide stop?), H5 for the host's part |
 | B | the better v2 arm against today, 3 minutes each, alternated, not announced | the rest of the evening | the owner's impressions, section 9 |
 
-**Evening 2: with the temporary TestFlight client** (`va_slack`, `catchup = sustained`, `wait`, `sub`; S1).
+**Evening 2: with the temporary TestFlight client** (`va_slack`, `pick = target`, `catchup = sustained`; S1). As built (bundle
+`exp-frame-timing-3`, TestFlight 1.4.1 (98), compiled in; the 4 ms arm dropped after evening 1b, `wait` and `sub` not built):
 
 | Stage | What runs | For | Settles |
 |---|---|---|---|
-| C | evening 1's best alone, with `pick = target`, and with `catchup = sustained` (fewer drops), 40 s each | 40 min | H3 on the client: the lab's largest gain, and the dropped frames' cost |
-| D | `sub` in / lean and `wait` fixed8 / deadline at C's best, switched every 4 arms of 40 s (how fast Apple adapts is unknown: watch `o_r`) | 30 min | H2 |
-| E | the finalist against today, 3 minutes each, not announced | the rest | section 9, impressions |
+| C | today, v2 6 ms + rate fed forward alone, with `pick = target`, and with `catchup = sustained` 10, 40 s each | 40 min | H3 on the client: the lab's largest gain, and the dropped frames' cost |
+| D | v2 6 ms + rate fed forward + `pick = target` against today, 3 minutes each, not announced | the rest | section 9, impressions |
 
 A 40 s arm is three measured windows after one dropped window (the lock and the client settle). The arms are too short to feel, so
 the owner's impressions count only in the 3-minute stages. Each minute in the log carries its stage and arm, so a remark like
@@ -428,6 +428,52 @@ runs of today's chain give wait 5.7 / 6.1 / 6.0 ms and repeats 3.9 / 2.3 / 2.2 %
 logged its switch each time (catch-up 10 / 0, through the headset view message). Stage B began after 1.0 minute of play, and
 `exp_state.json` recorded it. The experiment's window lines go to the game's run log, which a lab host does not have; they are now
 also events.
+
+### 10.2 Field results (5090 + Vision Pro at 100 Hz, 2026-11-26)
+
+Read with `harness/exp_field_report.py <logs>` (branch `exp-frame-timing`): medians of 10 s windows per game and arm, the window after
+a switch and a game's first 20 s left out. Logs in `private/logs/exp-frame-timing-2026-11-26-*`. Total = ALVR's total latency.
+
+**Evening 1 (stage A, 28 min): no result.** The rate fed forward never applied: the host starts on the session's 90 Hz, the headset
+renegotiates 100 Hz, and the tracking thread kept its start-up period, so every measured period was rejected. Fixed (one shared
+nominal period, guards: 20 s after connect, clocks within 500 ppm, period within 0.2 %); checked by replaying the evening's head
+samples through the same code (applies after 49 s, 10.00224 ms). The Black Box recording afterwards: standing frames 22 to 30 % in
+Dead Space x2 in every arm.
+
+**Evening 1b (stage A, fixed, 20 min, streamer only).** Rate fed forward applied (9.996 ms, clocks +1.4 ppm). Gears E-Day x3: the
+lock's slide −0.60 ms/s today against +0.12 with v2 6 ms (30 against 9 corrections a minute). No latency change: total 66.6 against
+66.9 ms, decoder queue 10.0 against 11.5 ms. v2 at 4 ms cannot hold with x3 (it slides later; repeats 1.17 against 0.72 %): dropped.
+The owner noticed no difference (no regression). The host alone cannot remove the standing frame, as the lab said.
+
+**Evening 2 (stage C, 33.7 of its 40 min; stage D not reached).** TestFlight 98 confirmed each switch in the log.
+
+| Game | Arm | Windows | Decoder queue | Total | Standing | Dropped per 1000 | Repeated ticks | Corrections / min | Slide ms/s |
+|---|---|---|---|---|---|---|---|---|---|
+| Gears E-Day x3 (30 to 99 fps) | today | 12 | 9.9 | 66.8 | 53 % | 7.1 | 0.9 % | 30 | −0.77 |
+| | v2 6 ms + ff | 12 | 10.7 | 66.9 | 61 % | 7.1 | 0.8 % | 14 | +0.24 |
+| | **+ `pick = target`** | 15 | **3.8** | **57.0** | **2 %** | 22.5 | 2.3 % | 6 | +0.03 |
+| | + `sustained` 10 | 15 | 6.5 | 57.1 | 19 % | 11.8 | 1.3 % | 20 | +0.31 |
+| AC Black Flag, no generation (63 fps) | today | 21 | 1.1 | 69.0 | 1.9 % | 0.4 | 34.9 % | 18 | −0.47 |
+| | v2 6 ms + ff | 24 | 1.2 | 67.3 | 0.3 % | 0.1 | 34.8 % | 10 | −0.13 |
+| | + `pick = target` | 24 | 1.2 | 67.7 | 0 % | 2.4 | 35.6 % | 14 | −0.22 |
+| | + `sustained` 10 | 24 | 1.3 | 67.4 | 0.6 % | 0.3 | 34.1 % | 13 | −0.19 |
+
+- **The target pick takes one display period out of Gears with generation: 57.0 against 66.8 ms**, in 14 of its 15 windows (today
+  and v2 alone: 1 of 24). The total moves in steps of one period (57.0 or 67.0 in nearly every window), so the gain is the standing
+  frame itself. The decoder queue falls from 9.9 to 3.8 ms, standing frames from 53 to 2 %. The vsync queue is unchanged (20.5 ms).
+- **With the standing frame gone, lock v2 settles** in the field for the first time: 6 corrections a minute, no slide, its estimate
+  6.6 ms on a 6 ms target (v2 alone: estimate 9.5, the waits behind a standing frame pass its filter).
+- **The cost:** 22.5 frames dropped per 1000 shown, against 7.1 today: a frame too late for its tick is skipped instead of delaying
+  every later one, about 2 a second at 100 Hz. The repeated ticks the host counts rise from 0.9 to 2.3 %; most of the rise is
+  resubmits (the client re-sends the shown frame when visionOS has not taken the last one, which it does more often with a short
+  queue), not frames shown twice. Whether the skips are visible is stage D's question.
+- **`sustained` 10 is halfway**: its windows alternate between 57 and 67 ms, standing 19 %, half the drops.
+- **Black Flag without generation shows no client effect**: the game gives fewer frames than the display shows, so a second frame
+  rarely waits (2 % or less) and there is nothing to remove. The new lock is 1.4 to 1.8 ms lower than today in every arm, about the same as
+  evening 1b (67.2 against 68.8). The owner found Black Flag "more reactive"; three quarters of its time ran the new lock, but 1.5 ms
+  is small, and the logs do not tie the impression to an arm.
+- **Next:** stage D (the 3-minute blind blocks) in a game with frame generation, where the gain is; it resumes after the remaining
+  6 minutes of stage C.
 
 ## 11. Steps
 
