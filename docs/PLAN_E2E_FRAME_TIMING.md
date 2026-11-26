@@ -180,8 +180,8 @@ wait already reaches past the safe point (finding 17: misses 0.6 -> 1.0 per 1000
 | client | `wait` | `fixed8`, `deadline` | deadline = wait until K instead of a fixed 8 ms: fewer misses, perhaps more repeats |
 | client | `pick` | `oldest`, `target` | target = with two frames queued, the newest that is not early is shown and older ones whose tick has passed are dropped; the pipeline's distance in ticks is the 10th percentile of the last 64 shown (WiVRn, Steam Link: `docs/IDEAS_FROM_OTHER_STREAMERS.md` 3.1). The rule with no N that `sustained` approximates (H3) |
 | client | `sub` | `in`, `lean` | lean = the wait moves before `startSubmission`, so Apple measures only real work (H2). Only together with `deadline`, which caps it |
-| host | `lock` | `v1`, `v2`, `v3` | v2 = the wait as it is (no fold) + a rate term, same steps and limits: works with any client (H3, H4). v3 = v2 steered by the client's signed slack (`va_slack`) when it reports, else v2 (H4, H5). `AIRFRAMEXR_PHASE_LOCK_V`, live through the schedule. Off was measured in the lab: 11.6 % repeated ticks, not an arm |
-| host | `rate` | `lock`, `ff` | ff = the grid's period fed forward from the headset's tick timestamps (the mean period-sized gap, times the clocks' ratio from the lower envelope of arrival minus timestamp over a minute), no loop; the lock keeps only its steps (`AIRFRAMEXR_RATE_FF=1`; Sony's patents, Sunshine PR 5282: `docs/IDEAS_FROM_OTHER_STREAMERS.md` 3.4). lock = v2/v3's rate term, which ran away twice in the lab on a biased input (10.1) |
+| host | `lock` | `v1`, `v2`, `v3` | v2 = the wait as it is (no fold), its percentile taken over waits under a period (a frame standing behind another is left out: the grid cannot empty a queue), same steps and limits: works with any client (H3, H4). v3 = v2 steered by the client's signed slack (`va_slack`) when it reports, else v2 (H4, H5). `AIRFRAMEXR_PHASE_LOCK_V`, live through the schedule. Off was measured in the lab: 11.6 % repeated ticks, not an arm |
+| host | `rate` | `lock`, `ff` | ff = the grid's period fed forward from the headset's tick timestamps (the mean period-sized gap, times the clocks' ratio from the lower envelope of arrival minus timestamp over a minute), no loop; the lock keeps only its steps (`AIRFRAMEXR_RATE_FF=1`; Sony's patents, Sunshine PR 5282: `docs/IDEAS_FROM_OTHER_STREAMERS.md` 3.4). lock = v2/v3's integral rate term, which ran to its limit in every lab batch it ran in (10.1): ff is the one to keep |
 | host | `target` | 7 ms (v1), then the lab's values | v1: the folded 10th percentile, as shipped. v2 / v3: the steered percentile of the wait or the slack, the 90th by default (`AIRFRAMEXR_PHASE_STAT`): the client's wait censors the low end, and a 10th percentile at 7 ms cannot be held at 100 Hz with an 8 to 9 ms spread without frames queuing a period early (10.1). `AIRFRAMEXR_PHASE_MARGIN_MS`, live through `phase::set_margin_ms` (H5). v3 at a low percentile (p1) of the signed slack is WiVRn's rule seen from the headset: the target is the share of frames allowed to come late, and it sits near the end of the wait (3.3 of the ideas document) |
 
 Telemetry is always on. The first stage alone alternates it with off, to show that the recording costs nothing.
@@ -286,14 +286,14 @@ reads the report between evenings and writes the next schedule.
 
 | Stage | What runs | For | Settles |
 |---|---|---|---|
-| A | today (v1 at 7 ms) against v2 at the two targets the lab retains (10.1), 40 s each | 40 min of play | H3, H4, H5 for the host's part; the first numbers of H6 |
+| A | today (v1 at 7 ms) against v2 at 4 ms with the rate fed forward, and v2 at 6 ms with it (the lab's best and a cautious one, 10.1), 40 s each | 40 min of play | H4 in the field (does the slide stop?), H5 for the host's part |
 | B | the better v2 arm against today, 3 minutes each, alternated, not announced | the rest of the evening | the owner's impressions, section 9 |
 
 **Evening 2: with the temporary TestFlight client** (`va_slack`, `catchup = sustained`, `wait`, `sub`; S1).
 
 | Stage | What runs | For | Settles |
 |---|---|---|---|
-| C | evening 1's best against it plus `catchup = sustained`, and v3 at two targets (one below 0: the wait as the net), 40 s each | 40 min | H3 on the client, H5 with an uncensored input |
+| C | evening 1's best alone, with `pick = target`, and with `catchup = sustained` (fewer drops), 40 s each | 40 min | H3 on the client: the lab's largest gain, and the dropped frames' cost |
 | D | `sub` in / lean and `wait` fixed8 / deadline at C's best, switched every 4 arms of 40 s (how fast Apple adapts is unknown: watch `o_r`) | 30 min | H2 |
 | E | the finalist against today, 3 minutes each, not announced | the rest | section 9, impressions |
 
@@ -388,6 +388,39 @@ repeated ticks, so only large effects count).**
   which `Renderer.swift` does), so v3 fell back to v2. Fixed; batch 3 repeats them.
 - **Deadline model.** With the pick's wait counted against a 7.8 ms slack (model B), today's chain misses 8.3 per 1000 against 2.5
   under the 11-10 model. The headset's `slack_r` decides which is closer; until then, every arm that aims into the wait runs under both.
+
+**Batch 3: the 90th percentile, with standing frames counted, cannot be steered either.** v2 aimed at 8, 6 and 4 ms read 9 to 11 ms
+throughout and slid later for ever (+0.5 to +0.7 ms/s). The stalls keep 10 to 14 % of frames standing behind another, and moving the
+grid cannot empty a queue: one frame still leaves per tick. v3 now received the client's slack (the batch 2 bug fixed). Its 10th
+percentile, signed, settled at −0.9 against −2 ms, but its upper end carried the same standing frames. The sustained arm of this batch
+had no effect: the host's message reset the rig's flag (fixed: a message without `exp` changes nothing unless an experiment ran).
+
+**Batch 4: the client removes standing frames, the lock leaves them out, the rate is fed forward.** Same scenario, one run each; three
+runs of today's chain give wait 5.7 / 6.1 / 6.0 ms and repeats 3.9 / 2.3 / 2.2 %.
+
+| Arm | Lock slide, ms/s | Mean wait | Over a period | Runs of 10+ per 1000 | Repeated ticks | Deadline misses per 1000 | Dropped by the client |
+|---|---|---|---|---|---|---|---|
+| today, third run | −0.60 | 6.0 | 15 % | 5.2 | 2.2 % | 2.5 | 0 |
+| today + `sustained` 10 | −0.60 | 5.1 | 6 % | 0.1 | 2.8 % | 2.5 | 64 |
+| today + `pick = target` | −0.60 | 4.5 | 0 % | 0.0 | 3.0 % | 2.5 | 98 |
+| v2, 90th percentile of the waits under a period, 6 / 4 ms | +0.20 / +0.55 | 4.7 / 4.4 | 14 / 14 % | 3.9 / 3.4 | 2.6 / 2.5 % | 2.5 | 0 |
+| v2 4 ms + `sustained` 10 | +0.47 | 4.0 | 8 % | 0.1 | 2.8 % | 2.5 | 42 |
+| v2 4 ms + `pick = target` | +0.18 | 2.1 | 0 % | 0.0 | 3.5 % | 2.5 | 141 |
+| **v2 4 ms + `pick = target` + rate fed forward** | **+0.02 (R² 0.11)** | **2.0** | **0 %** | **0.0** | **3.3 %** | 2.5 | 141 |
+
+- **The target pick removes standing frames completely**; `sustained` nearly (6 to 8 %) and drops fewer frames. Either moves the
+  wait more than any lock setting.
+- **The rate fed forward is the rate term to keep.** It measured the display's period at 9.99468 ms, and the two clocks' ratio at under
+  1 ppm (one machine here; the field's 30 to 180 ppm is untested). With it the lock stops sliding (no trend, half the corrections) and
+  holds near its target (3.3 against 4 ms). The integral rate term ran to its limit in every batch it ran in: dropped.
+- **The lock's own statistic is noisy under stalls**: per 1 s window the median wait jumps between 0.1 and 8.5 ms. WiVRn's window is
+  5,000 frames; a longer window is the next step if the headset shows the same.
+- **Best so far:** 2.0 ms of wait against 6.0, standing frames gone, repeats inside today's spread. The cost is about 12 dropped frames
+  per 1000: each is a skipped picture, not a repeated one, and whether it shows is for the owner to say. One run per arm, rig only
+  (no frame generation, 98 fps game, one machine).
+- **For the campaign:** the largest part of the gain needs the client (the target pick). Evening 1, the streamer alone, can still check
+  in the field that the lock fix stops the slide: v2 at 4 ms plus the rate fed forward, against today. The client's pick then comes
+  with the TestFlight build on evening 2.
 
 **L4, the schedule dry run (one run).** A two-stage schedule ran by itself: stage A's two arms alternated every 20 s, and the client
 logged its switch each time (catch-up 10 / 0, through the headset view message). Stage B began after 1.0 minute of play, and
