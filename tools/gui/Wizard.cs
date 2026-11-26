@@ -181,6 +181,10 @@ namespace AirFrameXR
                     settings.HeadsetHost = chosenHost; settings.HeadsetName = chosenName; settings.HeadsetIp = chosenIp;
                     settings.Save();
                     Log.Write("INFO", $"paired headset {chosenName} ({chosenHost}) at {chosenIp}");
+                    // The handshake's host (next page) and the tests read config\session.json, which only a streamer start compiled from the golden master: with
+                    // another headset trusted there (a Vision Pro, then a Quest: 2026-11-27) the handshake waited for the old one. Compile it now, as a streamer start would.
+                    var compiled = SessionCompiler.Compile(new AppSettings(), AppSettings.ReadClientFov());
+                    if (compiled != null) Log.Write("INFO", "wizard: " + compiled);
                     hsDone = false;
                     GoTo(2);
                     break;
