@@ -1,0 +1,132 @@
+{
+  "description": "A worn controller in the fit tool (tools/probe/xr_tool.h, StickCal): the left stick comes to rest off centre (0.58 up and to the right) right after A and stays there; under the 1.5.1 rule (any stick past half its travel is a key) that moved the upper-right corner by itself. Now its rest point is learned (re-centred) and both sticks go through Microsoft's scaled radial dead zones, so the drift moves nothing, the right stick works as in e2e_fov_tool_pad, and a full push of the drifted left stick (frame 300) still maps to 'left' from its new centre. Expected: the right stick's edits and the left push, and no corner moved by the drift.",
+  "topology": {
+    "host": "builder",
+    "client": "builder",
+    "client_bind_ip": "127.0.0.2",
+    "host_launch": "interactive"
+  },
+  "session_overrides": {
+    "session_settings.video.foveated_encoding.enabled": false,
+    "openvr_config.enable_foveated_encoding": false,
+    "openvr_config.eye_resolution_width": 1760,
+    "openvr_config.eye_resolution_height": 1600,
+    "openvr_config.target_eye_resolution_width": 1760,
+    "openvr_config.target_eye_resolution_height": 1600,
+    "session_settings.connection.client_recv_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.connection.server_send_buffer_bytes": {
+      "variant": "Custom",
+      "Custom": 16777216
+    },
+    "session_settings.video.transcoding_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    },
+    "session_settings.video.emulated_headset_view_resolution": {
+      "Scale": 1.0,
+      "Absolute": {
+        "width": 1760,
+        "height": {
+          "set": true,
+          "content": 1600
+        }
+      },
+      "variant": "Absolute"
+    }
+  },
+  "host": {
+    "shim": true,
+    "fps": 90,
+    "seconds": 60,
+    "connect_timeout": 45,
+    "gpu_keepalive": 90,
+    "exit_after_frames": 1250,
+    "gui": true
+  },
+  "client": {
+    "seconds": 55,
+    "connect_timeout": 45,
+    "yaw_amp": 0.5,
+    "yaw_hz": 0.25,
+    "views_tan": "1.732,1.0,1.192,1.0"
+  },
+  "client_env": {
+    "RUST_LOG": "warn"
+  },
+  "app": {
+    "frames": 1400,
+    "timeout_s": 60,
+    "env": {
+      "XR_PROBE_TOOL": "fit",
+      "XR_PROBE_TOOL_START": "0.8",
+      "XR_PROBE_KEYS": "120:a,130:+ls_drift,150:rs_up,154:rs_up,190:rs_upleft,194:rs_upleft,198:rs_upleft,300:ls_left,330:a,350:rs_right,360:rs_downleft,1000:a",
+      "XR_PROBE_START_CORNERS": "0.8,0.8,0.7,0.8,0.9,0.8,0.7,0.8"
+    }
+  },
+  "gpu_sample": true,
+  "timeout_s": 240,
+  "checks": {
+    "host_min_frames": 800,
+    "client_min_frames": 700,
+    "timestamps_monotonic": true,
+    "max_duplicate_timestamps": 400,
+    "min_delivery_ratio": 0.7,
+    "codec": "Hevc",
+    "stream": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 3520,
+      "height": 1600,
+      "color_range": "pc"
+    },
+    "decode": true,
+    "refresh_hz": 90,
+    "max_pipeline_latency_ms": 150,
+    "decode_frame_slack": 60,
+    "tool": {
+      "corners": [
+        [
+          0.83,
+          0.8,
+          0.7,
+          0.8
+        ],
+        [
+          0.9,
+          0.8,
+          0.71,
+          0.8
+        ]
+      ],
+      "corners_tol": 0.006,
+      "expect": {
+        "start": 0.8,
+        "deltas": [
+          [
+            -0.5,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ]
+      }
+    }
+  }
+}

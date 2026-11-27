@@ -107,10 +107,46 @@ struct XrTool {
     typedef DWORD(WINAPI* XInputGetStateFn)(DWORD, XINPUT_STATE*);
     XInputGetStateFn xget = nullptr; bool xtried = false; int xslot = -1; double xscanMs = -1e9;
 
+    // A worn stick rests off its centre (drift), and the tool took any stick past half its travel for a key: a drifting controller moved the lines by
+    // itself, which is why some users could not calibrate with one (owner, 2026-11-27). The community's practice, applied here: re-centre first, then a
+    // scaled radial dead zone (Microsoft's XInput guide and its recommended sizes, 7849 and 8689 of 32767 for the left and right sticks; J. Sutphin,
+    // "Doing thumbstick dead zones right"). The rest point is where the stick stays still for a second, learned again at every rest; a stick read inside
+    // the dead zone at the start is taken as centred until then; one that rests further out than kMaxRest is worn beyond use: ignored, and the text says so.
+    static constexpr float kDeadL = 7849.f / 32767.f, kDeadR = 8689.f / 32767.f, kMaxRest = 0.7f;
+    struct StickCal {
+        float cx = 0, cy = 0, sx = 0, sy = 0; double stillMs = 0; bool seen = false, known = false, broken = false;
+        void Feed(float x, float y, float dz, double ms) {
+            if (!seen) { seen = true; sx = x; sy = y; stillMs = ms; known = hypotf(x, y) <= dz; return; }
+            if (hypotf(x - sx, y - sy) > 0.03f) { sx = x; sy = y; stillMs = ms; return; }
+            const double still = ms - stillMs;
+            if (still >= 1000.0 && hypotf(x, y) <= kMaxRest) { cx = x; cy = y; known = true; broken = false; }
+            else if (still >= 3000.0 && !known && hypotf(x, y) > kMaxRest) broken = true;
+        }
+        // the deflection from the rest point, past the dead zone, rescaled over the travel left in that direction (a stick resting to the right still reaches 1 to the right)
+        void Apply(float& x, float& y, float dz) const {
+            if (!known || broken) { x = y = 0; return; }
+            const float vx = x - cx, vy = y - cy, m = hypotf(vx, vy);
+            if (m <= dz) { x = y = 0; return; }
+            const float dx = vx / m, dy = vy / m, cd = cx * dx + cy * dy;
+            const float reach = -cd + sqrtf(std::max(0.f, cd * cd - (cx * cx + cy * cy) + 1.f));   // from the rest point to the edge of a round gate
+            const float k = std::min(1.f, (m - dz) / std::max(reach - dz, 1e-3f));
+            x = dx * k; y = dy * k;
+        }
+    };
+    StickCal calL, calR;
+    // the pad as the keys see it: both sticks re-centred and through their dead zones
+    Pad Condition(const Pad& raw, double nowMs) {
+        calL.Feed(raw.lx, raw.ly, kDeadL, nowMs); calR.Feed(raw.rx, raw.ry, kDeadR, nowMs);
+        Pad p = raw; calL.Apply(p.lx, p.ly, kDeadL); calR.Apply(p.rx, p.ry, kDeadR);
+        return p;
+    }
+
     bool ParsePad(int fr, char hold, const std::string& w) {
         if (w == "a") { if (hold != '-') padEvents.push_back({ fr, 2, 1, 0 }); if (hold != '+') padEvents.push_back({ hold == '-' ? fr : fr + 1, 2, 0, 0 }); return true; }
         if (w.size() < 2 || (w[0] != 'l' && w[0] != 'r') || w[1] != 's') return false;
         const int st = w[0] == 'l' ? 0 : 1;
+        // a worn stick resting off centre (0.58 up and to the right: past the old half-travel rule, inside the dead zone's reach), for the drift scenario
+        if (w.compare(2, std::string::npos, "_drift") == 0) { padEvents.push_back({ fr, st, 0.45f, 0.37f }); if (!hold) padEvents.push_back({ fr + 1, st, 0, 0 }); return true; }
         if (w.size() == 2) { if (hold == '-') padEvents.push_back({ fr, st, 0, 0 }); return hold == '-'; }
         if (w[2] != '_') return false;
         static const char* dn[8] = { "right", "upright", "up", "upleft", "left", "downleft", "down", "downright" };
@@ -196,6 +232,7 @@ struct XrTool {
                 if (v.what == 0) { scriptedPad.lx = v.x; scriptedPad.ly = v.y; } else if (v.what == 1) { scriptedPad.rx = v.x; scriptedPad.ry = v.y; } else scriptedPad.a = v.x > 0.5f;
             }
             pad = scriptedPad; havePad = !padEvents.empty();
+            if (havePad) pad = Condition(pad, nowMs);
             // a scripted stick steps once per deflection (the lab's frames, not the clock, decide)
             bool pk[KCount] = {}; if (havePad) PadKeys(pad, pk, padShift);
             for (int k = 0; k < KCount; k++) { if (pk[k] && !padPrev[k]) pressed[k] = true; padPrev[k] = pk[k]; }
@@ -204,6 +241,7 @@ struct XrTool {
             static const int vk[KCount] = { VK_SPACE, VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_SHIFT, VK_TAB, VK_RETURN, VK_ESCAPE, VK_NUMPAD7, VK_NUMPAD9, VK_NUMPAD3, VK_NUMPAD1 };
             static const int vk2[KCount] = { 0, VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD8, VK_NUMPAD2, 0, 0, 0, 0, VK_HOME, VK_PRIOR, VK_NEXT, VK_END };
             havePad = ReadPad(nowMs, pad);
+            if (havePad) pad = Condition(pad, nowMs);
             bool pk[KCount] = {}; padShift = false; if (havePad) PadKeys(pad, pk, padShift);
             for (int k = 0; k < KCount; k++) {
                 const bool d = (GetAsyncKeyState(vk[k]) & 0x8000) != 0 || (vk2[k] && (GetAsyncKeyState(vk2[k]) & 0x8000) != 0) || pk[k];
@@ -283,7 +321,16 @@ struct XrTool {
     struct TextTex { ID3D11Texture2D* tex = nullptr; std::wstring key; int w = 0, h = 0; };
     TextTex tt[2];
 
+    // the text, with a word when a stick is worn beyond use (StickCal)
     std::wstring Text(int e, bool& show) const {
+        std::wstring t = BaseText(e, show);
+        if (show && (calL.broken || calR.broken))
+            t += calL.broken && calR.broken ? L"\n(Both sticks of the controller drift too far to be used: use the numpad.)"
+                                            : calL.broken ? L"\n(The left stick drifts too far to be used: the right stick and the numpad still work.)"
+                                                          : L"\n(The right stick drifts too far to be used: the left stick and the numpad still work.)";
+        return t;
+    }
+    std::wstring BaseText(int e, bool& show) const {
         show = true;
         if (mode == Fit) {
             if (lineStyle && phase == Intro) return L"Fit the picture to your eyes.\nMove each line with the numpad: 8 2 4 6 the yellow edges (up, down, left, right), 7 9 1 3 the blue corners. Push a line out until it disappears, then bring it back with Shift + the same key until you just see it.\nXbox controller: right stick pushes the line in its direction out, left stick brings it back; diagonals for the corners.\nEnter or A: this eye is finished (the second eye saves). Esc: quit.\nPress SPACE or A to start.";
