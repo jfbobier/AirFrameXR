@@ -496,9 +496,13 @@ def run_scenario(sc, outdir: Path, log=print):
         if sc.get("fov_settings_from_gui"):
             # the settings file a user's choice in the launcher's FOV card leaves (the GUI's own code, UserFovStore.Apply, through uitest.exe), not a lab flag: the host reads it at its start
             fg = sc["fov_settings_from_gui"]
+            # a uitest.exe of this checkout, built once per harness process like the session compile's (it was used only if an earlier step had left
+            # one on the builder: BLOCKED in a full suite run, or a stale one from another checkout, 2026-11-27)
+            import sessioncompile
+            sessioncompile.ensure_uitest()
             rc, out = b_run(f"if exist _tmp\\uitest\\run\\uitest.exe (_tmp\\uitest\\run\\uitest.exe --fov-apply-to {inst}\\config\\airframexr.json --tan {','.join(map(str, fg['tan']))} --client {','.join(map(str, fg['client']))} && echo APPLIED) else echo NOUITEST")
             if "APPLIED" not in out:
-                raise Blocked("uitest.exe missing or failed (python3 harness/ui_matrix.py builds it): " + out[-300:])
+                raise Blocked("uitest.exe failed: " + out[-300:])
         host_exe = f"{inst}\\bin\\alvr_host.exe"
         h = sc["host"] = {**sc["host"], "install_dir": f"%USERPROFILE%\\{ROOTNAME}\\{inst}"}
         if sc.get("app"):
@@ -963,6 +967,28 @@ def layer_expectations(eye_w, eye_h, tan_l, tan_r, tan_u, tan_d, cube=False):
     return out
 
 
+def idle_rgb(sc):
+    """The colour of the streamer's waiting picture, sent until the app's first frame (the lab starts the host with --idle-rgb: 00ff00 unless the
+    scenario's host sets idle_rgb)."""
+    v = str((sc.get("host") or {}).get("idle_rgb", "00ff00")).lstrip("#")
+    return tuple(int(v[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def is_idle_px(px, rgb, tol=60):
+    return all(abs(int(a) - b) <= tol for a, b in zip(px, rgb))
+
+
+def lead_idle_frames(frames, rgb):
+    """How many decoded frames at the start of the stream are the waiting picture (every sampled point at its colour). Their number follows the
+    app's start-up (7 to 55 in the same scenario on the same laptop), so a fixed skip at the start does not cover them."""
+    n = 0
+    for fr in frames:
+        if not all(is_idle_px(p, rgb) for p in fr):
+            break
+        n += 1
+    return n
+
+
 def read_rgb_at(path, pts, win=4):
     """Per decoded frame, the mean RGB of a win x win window at each point. Software decode (the D3D11VA download is unreliable here)."""
     n = len(pts)
@@ -1251,12 +1277,16 @@ def analyse_fov_restrict(sc, outdir):
         sx, sy = (1 - cutL - cutR) * ew / gw, (1 - cutT - cutB) * eh / gh     # stream pixels per game pixel
         x0, y0 = cutL * ew + 1152 * sx, cutT * eh                           # the block's top-left in the stream
         cpts = [(int(x0 + (8 + 11 * i) * sx), int(y0 + (8 + 11 * j) * sy)) for i in range(5) for j in range(5)]   # a 5 x 5 grid well inside the block; an ODD step: at 1:1 the points alternate between the checkerboard's two colours (an even step reads one colour only: std 0 on a perfect checkerboard)
-        vals = [0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2] for fr in read_rgb_at(outdir / "client.hevc", cpts, win=1)[30:] for px in fr]
+        cfr = read_rgb_at(outdir / "client.hevc", cpts, win=1)
+        vals = [0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2] for fr in cfr[max(30, lead_idle_frames(cfr, idle_rgb(sc))):] for px in fr]
         if vals:
             m = sum(vals) / len(vals)
             out["checker"] = {"mean": round(m, 1), "std": round((sum((v - m) ** 2 for v in vals) / len(vals)) ** 0.5, 1), "stream_px_per_game_px": (round(sx, 3), round(sy, 3)), "samples": len(vals)}
     if pts:
-        frames = read_rgb_at(outdir / "client.hevc", pts)[30:]
+        frames = read_rgb_at(outdir / "client.hevc", pts)
+        # past the waiting picture (green, before the app's first frame: its margins are not black and are not the app's) and the first 30 frames
+        out["idle_frames"] = lead_idle_frames(frames, idle_rgb(sc))
+        frames = frames[max(30, out["idle_frames"]):]
         lum = lambda px: 0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]
         black_ok = content_ok = 0
         for fr in frames:
@@ -1869,10 +1899,13 @@ def analyse_tool(sc, outdir):
             return None
         return np.frombuffer(p.stdout, dtype=np.uint8).reshape(eh, 2 * ew, 3).astype(np.int16)
 
-    # the stream frame that carries the app's first frame: the first one with the blue box (or the scene's sky) at the centre of the left eye
+    # the stream frame that carries the app's first frame: the first one with the blue box (or the scene's sky) at the centre of the left eye, not the
+    # streamer's waiting picture before it (green, bright enough to pass for the sky: it made every sample read 28-55 frames early, 2026-11-27)
     L, R, U, D = headset[0:4]
     cx0, cy0 = int(L / (L + R) * ew), int((1 - D / (U + D)) * eh)   # the view axis in the stream (left eye)
-    first = next((i for i, fr in enumerate(read_rgb_at(outdir / "client.hevc", [(cx0 - 60, cy0 + 120), (cx0 + 60, cy0 - 120)])) if any(px[2] - px[0] > 60 or sum(px) > 90 for px in fr)), None)
+    irgb = idle_rgb(sc)
+    first = next((i for i, fr in enumerate(read_rgb_at(outdir / "client.hevc", [(cx0 - 60, cy0 + 120), (cx0 + 60, cy0 - 120)]))
+                  if any((px[2] - px[0] > 60 or sum(px) > 90) and not is_idle_px(px, irgb) for px in fr)), None)
     out["first_frame"] = first
     if first is None:
         out["error"] = "no frame with the tool's picture in the decoded stream"

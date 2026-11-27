@@ -27,6 +27,11 @@ def _ensure_built():
     return _built["rid"]
 
 
+def ensure_uitest():
+    """uitest.exe of this checkout in the builder's _tmp\\uitest\\run (built once per harness process); Blocked if it does not build."""
+    return _ensure_built()
+
+
 def compile_session(golden, settings, views=None):
     rid = _ensure_built()
     name = f"compile_{time.strftime('%H%M%S')}_{int(time.time() * 1000) % 100000}"
