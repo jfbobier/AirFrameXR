@@ -1,0 +1,32 @@
+{
+ "schema": 1,
+ "made_by": "harness/blackbox_fixture.py",
+ "headset": "Apple Vision Pro",
+ "duration_s": 904.8,
+ "head_samples": 89910,
+ "client_frames": 60390,
+ "games": [
+  {
+   "label": "game 1",
+   "start_us": 85558871,
+   "end_us": 404878209,
+   "display_hz": 100.0,
+   "frame_generation": "off",
+   "rendered_fps": 50.2
+  },
+  {
+   "label": "game 2",
+   "start_us": 431636944,
+   "end_us": 897853252,
+   "display_hz": 100.0,
+   "frame_generation": "half",
+   "rendered_fps": 50.0
+  }
+ ],
+ "columns": {
+  "head_timing": "arrival_us: when the sample reached the PC (the PC's clock), headset_ts_us: its timestamp (the headset's clock); both from the first sample",
+  "client_waits": "per displayed frame: the PC's receive time and the frame's headset timestamp, then ALVR's decode, decoder queue (the wait for the render tick) and vsync queue, us",
+  "lock": "the phase lock's evaluations (estimate, acted, the cumulative slide) and the experiment's arm changes"
+ },
+ "removed": "poses, hostnames, IP addresses, paths, executable names, dates and wall-clock times, settings"
+}
