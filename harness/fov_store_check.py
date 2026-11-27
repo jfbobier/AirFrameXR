@@ -15,7 +15,7 @@ WANT = [
     "zero_red=Invalid",
     "negative_red=Invalid",
     "deg90_red=Invalid",
-    "over_declared_red=Invalid area=1.00",
+    "over_declared_yellow=Strange area=0.94",   # above the box the headset app declared: a warning since 1.3.2 (a calibration measures the wearer; the streamer gives at most the declared box), the expectation was stale
     "avp_calibration_valid=Valid",
     "quest_trim_valid=Valid area=0.90",          # the Quest 3 starting point: 51 / 40 / 43 / 54 degrees, about 10 % less area than the declared box
     "quest_declared_valid=Valid area=1.00",
