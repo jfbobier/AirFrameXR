@@ -541,7 +541,8 @@ namespace AirFrameXR
                 // a headset does not always list every rate it can run (a Quest 3 may leave 120 out of what it reports): the usual ones stay selectable, with a warning
                 foreach (var r in new double[] { 60, 72, 80, 90, 96, 100, 120, 144 })
                     if (!hs.Rates.Any(x => Math.Abs(x - r) < 0.6)) rateBox.Items.Add(r.ToString("0.#", CultureInfo.InvariantCulture));
-                rateBox.SelectedIndex = Math.Max(0, hs.Rates.Count - 1);
+                var defRate = DefaultRate().ToString("0.#", CultureInfo.InvariantCulture);
+                rateBox.SelectedIndex = rateBox.Items.Contains(defRate) ? rateBox.Items.IndexOf(defRate) : Math.Max(0, hs.Rates.Count - 1);
                 var listed = "the headset supports " + string.Join(", ", hs.Rates.Select(x => x.ToString("0.#", CultureInfo.InvariantCulture))) + " Hz";
                 var rateInfo = Ui.Line(listed);
                 rateBox.SelectedIndexChanged += (s, e) =>
@@ -616,6 +617,15 @@ namespace AirFrameXR
             GoTo(3);
         }
 
+        /// The rate offered first (1.5.2, owner, 2026-11-27): a Quest starts at 90 Hz when it has it (x3 of a 30 fps game and x2 of 45 fit it exactly; the 5090 could not feed
+        /// 120 Hz at the full frame in Gears or Star Wars), the other headsets at their highest rate as before (the Vision Pro: 100).
+        double DefaultRate()
+        {
+            if (hs == null || hs.Rates.Count == 0) return 90;
+            var kind = AppSettings.KindOf(string.IsNullOrEmpty(hs.DisplayName) ? chosenName : hs.DisplayName);
+            return kind == HeadsetKind.Quest && hs.Rates.Any(x => Math.Abs(x - 90) < 0.6) ? 90 : hs.Rates.Max();
+        }
+
         void ApplyOverrides()
         {
             if (profile != null)
@@ -627,7 +637,7 @@ namespace AirFrameXR
             }
             else if (modeExisting != null && modeExisting.Checked)
             {
-                ctxFps = Json.Num(session, "session_settings.video.preferred_fps", hs.Rates.Count > 0 ? hs.Rates.Max() : 90);
+                ctxFps = Json.Num(session, "session_settings.video.preferred_fps", DefaultRate());
                 ctxScale = 1.0; ctxFoveation = settings.EncodeProfile != "full-split";
             }
             else
@@ -853,6 +863,19 @@ namespace AirFrameXR
         {
             var p = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
             p.Controls.Add(H("Field of view"));
+            // 1.5.2: the restriction and its profiles are the Vision Pro's; another headset runs on its own view (SessionCompiler.FovForHeadsetKind sets a Vision Pro restriction aside)
+            var kind = demo ? HeadsetKind.VisionPro : new AppSettings().Kind;
+            fovHeadsetOwn = kind == HeadsetKind.Quest || kind == HeadsetKind.Other;
+            if (fovHeadsetOwn)
+            {
+                var own = Ui.Line((kind == HeadsetKind.Quest ? "Your Quest uses its own field of view: Meta calibrates it, and the games render everything it declares." : "Your headset uses its own field of view: the games render everything it declares.")
+                    + " The field-of-view restriction and its profiles are for the Apple Vision Pro.");
+                own.MaximumSize = new Size(760, 0);
+                p.Controls.Add(own);
+                fovNone = new RadioButton { Checked = true, Visible = false };
+                UpdateFovNext();
+                return p;
+            }
             var intro = Ui.Line("Your headset may not show everything a game renders, and a game can skip rendering what you cannot see: fewer pixels, a faster game. Choose what the games are told. The stock vendor view is the default. For a Vision Pro, AVP optimized is a window measured on a real headset; you can also calibrate your own in one minute (the headset on) or enter values by hand. What you pick here is what is used: you can change it any time in the launcher (FOV restriction)."); Ui.FitWidth(intro, 760, asMaximum: true);
             p.Controls.Add(intro);
             fovNone = new RadioButton { Text = "Stock vendor view (Apple, Meta): the games render everything the headset declares", AutoSize = true, Margin = new Padding(3, 8, 3, 3), AccessibleName = "No restriction" };
@@ -880,13 +903,15 @@ namespace AirFrameXR
         }
 
         /// Next is greyed until the choice is valid: no restriction always is, a profile needs one selected (or four usable values typed).
-        void UpdateFovNext() { if (step == 7) next.Enabled = fovNone.Checked || (fovUse.Checked && fovCard != null && (fovCard.Selected != null || fovCard.TypedValid)); }
+        bool fovHeadsetOwn;   // the FoV page of a Quest or another headset: nothing to choose (its own view)
+        void UpdateFovNext() { if (step == 7) next.Enabled = fovHeadsetOwn || fovNone.Checked || (fovUse != null && fovUse.Checked && fovCard != null && (fovCard.Selected != null || fovCard.TypedValid)); }
 
         /// Writes the choice where the streamer reads it (a copy of the profile, UserFovStore.Apply), or switches the restriction off.
         void ApplyFovChoice()
         {
             try
             {
+                if (fovHeadsetOwn) { Log.Write("INFO", "wizard: the headset's own field of view (no restriction for this headset)"); return; }   // a Vision Pro restriction stays set aside, kept for it
                 if (fovNone != null && fovNone.Checked) { Json.Remove(settings.Root, "video.fov_override"); Log.Write("INFO", "wizard: no field of view restriction"); }
                 else if (fovCard != null)
                 {

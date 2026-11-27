@@ -38,6 +38,8 @@ WANT = [
     "seed_again=0 after_delete=0",
     "seed_quest=1 name=Test Quest (starting point, not measured) tan=1.23/0.84/0.93/1.38",
     "apply=True 0.90/0.71/0.69/0.60 id=std-t-avp for=Apple Headset",
+    "revision=1/1/0/0 outer=0.84 rev=2",                    # 1.5.2: a newer shipped revision refreshes the copy once; a deleted copy stays deleted
+    "set_aside=True override=False kept=True | back=True override=True outer=0.97 kept=False",   # 1.5.2: the restriction is the Vision Pro's
 ]
 
 rid = f"fovs_{time.strftime('%H%M%S')}"

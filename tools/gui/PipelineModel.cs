@@ -1017,6 +1017,8 @@ namespace AirFrameXR
         {
             try
             {
+                var aside = FovForHeadsetKind();
+                if (aside != null) Log.Write("INFO", aside);
                 var golden = Session.Load();
                 AbsorbPairing(golden);
                 var s = Build(golden, declared, out var log, out var scratch);
@@ -1037,6 +1039,35 @@ namespace AirFrameXR
                 return log ?? "session compiled (no stream size known yet)";
             }
             catch (Exception e) { Log.Write("WARN", "session compile failed: " + e.Message); return null; }
+        }
+
+        /// 1.5.2 (owner, 2026-11-27): the field-of-view restriction, and with it the mask of its profile, is the Vision Pro's. A Quest or another headset runs on its own view (Meta
+        /// calibrates it): with one paired, a restriction in the settings is set aside under video.fov_set_aside, kept for the Vision Pro, which gets it back when it is paired again.
+        /// Here, at every compile (each streamer start and the wizard's pairing), so a settings file carried over from a Vision Pro cannot reach another headset (field, 2026-11-27:
+        /// the Vision Pro's restriction was told to the Quest's games and its mask hid 71 % of the Quest's stream). Returns the log line, null when nothing changed.
+        static readonly string[] FovKeys = { "fov_override", "fov_outer", "fov_inner", "fov_upper", "fov_lower", "fov_profile", "fov_for", "fov_for_headset", "fov_override_right" };
+        public static string FovForHeadsetKind()
+        {
+            var st = new AppSettings();
+            var kind = st.Kind;
+            if (kind == HeadsetKind.None) return null;
+            var stash = Json.Get(st.Root, "video.fov_set_aside") as Dictionary<string, object>;
+            if (kind != HeadsetKind.VisionPro && st.FovOverride)
+            {
+                var keep = new Dictionary<string, object>();
+                foreach (var k in FovKeys) { var v = Json.Get(st.Root, "video." + k); if (v != null) keep[k] = v; Json.Remove(st.Root, "video." + k); }
+                Json.Set(st.Root, "video.fov_set_aside", keep);
+                st.Save();
+                return $"field of view: the restriction is the Vision Pro's; {st.HeadsetName} runs on its own view (the restriction is kept for the Vision Pro)";
+            }
+            if (kind == HeadsetKind.VisionPro && stash != null)
+            {
+                if (!st.FovOverride) foreach (var kv in stash) Json.Set(st.Root, "video." + kv.Key, kv.Value);   // a restriction chosen since wins
+                Json.Remove(st.Root, "video.fov_set_aside");
+                st.Save();
+                return st.FovOverride ? "field of view: the Vision Pro's restriction is back" : null;
+            }
+            return null;
         }
 
         /// A headset ALVR trusted while the streamer ran is in the live file only: taken into the golden master (as Disconnected) when the live file is newer than the master

@@ -671,7 +671,34 @@ namespace AirFrameXR
                     var stA = new AppSettings(); var av = new UserFov { Id = "std-t-avp", Tan = new[] { 0.97, 0.71, 0.69, 0.63 } };
                     UserFovStore.Apply(av, stA, new[] { 0.9, 0.8, 0.7, 0.6 }, "Apple Headset");
                     lines.Add(string.Format(CultureInfo.InvariantCulture, "apply={0} {1:0.00}/{2:0.00}/{3:0.00}/{4:0.00} id={5} for={6}", stA.FovOverride, stA.FovOuter, stA.FovInner, stA.FovUpper, stA.FovLower, global::AirFrameXR.Json.Str(stA.Root, "video.fov_profile", ""), stA.FovForHeadset));
-                    try { File.Delete(sp); Directory.Delete(pd, true); } catch { }
+                    // 1.5.2: a shipped profile of a newer revision refreshes its copy (same id), once; a deleted copy stays deleted
+                    var sp2 = Path.Combine(outDir, "user_fov_seed_rev.json"); try { File.Delete(sp2); } catch { }
+                    var rev1 = File.ReadAllText(Path.Combine(pd, "a.profile.json"));
+                    var r1 = UserFovStore.SeedFromShipped("Apple Headset", sp2, pd);
+                    File.WriteAllText(Path.Combine(pd, "a.profile.json"), rev1.Replace("\"visible_deg\":{\"outer\":44.1", "\"revision\":2,\"visible_deg\":{\"outer\":40.0"));
+                    var r2 = UserFovStore.SeedFromShipped("Apple Headset", sp2, pd); var ur = UserFovStore.Load(sp2).FirstOrDefault(x => x.Id == "std-t-avp");
+                    var r3 = UserFovStore.SeedFromShipped("Apple Headset", sp2, pd);
+                    UserFovStore.Remove("std-t-avp", sp2);
+                    File.WriteAllText(Path.Combine(pd, "a.profile.json"), rev1.Replace("\"visible_deg\":{\"outer\":44.1", "\"revision\":3,\"visible_deg\":{\"outer\":40.0"));
+                    var r4 = UserFovStore.SeedFromShipped("Apple Headset", sp2, pd);
+                    lines.Add("revision=" + r1 + "/" + r2 + "/" + r3 + "/" + r4 + " outer=" + (ur == null ? "" : ur.Tan[0].ToString("0.00", CultureInfo.InvariantCulture)) + " rev=" + ur?.Revision);
+                    try { File.Delete(sp); File.Delete(sp2); Directory.Delete(pd, true); } catch { }
+                }
+                // 1.5.2: the restriction is the Vision Pro's: set aside with a Quest paired, back with a Vision Pro (SessionCompiler.FovForHeadsetKind); the settings file is restored after
+                {
+                    var keepSettings = File.Exists(Paths.Settings) ? File.ReadAllText(Paths.Settings) : null;
+                    try
+                    {
+                        var q0 = new AppSettings(); q0.HeadsetName = "Quest 3"; var avR = new UserFov { Id = "std-t-avp", Tan = new[] { 0.97, 0.71, 0.69, 0.63 } };
+                        UserFovStore.Apply(avR, q0, null, "Apple Headset"); q0.Save();
+                        var said = SessionCompiler.FovForHeadsetKind(); var q1 = new AppSettings();
+                        var aside = global::AirFrameXR.Json.Get(q1.Root, "video.fov_set_aside") != null;
+                        q1.HeadsetName = "Apple Headset"; q1.Save();
+                        var said2 = SessionCompiler.FovForHeadsetKind(); var q2 = new AppSettings();
+                        lines.Add(string.Format(CultureInfo.InvariantCulture, "set_aside={0} override={1} kept={2} | back={3} override={4} outer={5:0.00} kept={6}", said != null, q1.FovOverride, aside,
+                            said2 != null, q2.FovOverride, q2.FovOuter, global::AirFrameXR.Json.Get(q2.Root, "video.fov_set_aside") != null));
+                    }
+                    finally { if (keepSettings != null) File.WriteAllText(Paths.Settings, keepSettings); else try { File.Delete(Paths.Settings); } catch { } }
                 }
                 File.WriteAllLines(Path.Combine(outDir, "fovstore.txt"), lines);
                 return 0;

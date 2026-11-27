@@ -133,7 +133,16 @@ namespace AirFrameXR
             // the field of view (1.3.5): what the game renders. Set once and forgotten, so it lives here and not on the launcher; calibrating is in its Manage profiles window
             Section(body, "Field of view (what the game renders)");
             var fovHost = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0), AccessibleName = "Field of view" };
-            fovHost.Controls.Add(new FovRestrictionPanel());
+            // 1.5.2: the restriction, its profiles and the calibration are the Vision Pro's; a Quest (Meta calibrates its view) or another headset sees one line
+            var kindNow = new AppSettings().Kind;
+            if (kindNow == HeadsetKind.Quest || kindNow == HeadsetKind.Other)
+            {
+                var own = Ui.Line((kindNow == HeadsetKind.Quest ? "The Quest uses its own field of view: Meta calibrates it, and the games render everything it declares." : "This headset uses its own field of view: the games render everything it declares.")
+                    + " The restriction, its profiles and the calibration are for the Apple Vision Pro (a restriction made for one is kept for it).");
+                own.MaximumSize = new Size(WrapWidth, 0); own.ForeColor = Color.DimGray;
+                fovHost.Controls.Add(own);
+            }
+            else fovHost.Controls.Add(new FovRestrictionPanel());
             body.Controls.Add(fovHost);
 
             // on top, what people reach for: the field of view (with its calibration), the game's fps lock and pacing fix, the stream size; everything else is folded under Experimental

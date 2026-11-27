@@ -172,7 +172,11 @@ namespace AirFrameXR
             row("", eyeNote);
             sizeNote.ForeColor = Color.DimGray; sizeNote.MaximumSize = new Size(560, 0);
             row("", flow(sizeAuto, sizeNote));
-            fps.Items.AddRange(new object[] { "90", "96", "100" });
+            // each headset's own rates (1.5.2): the Vision Pro 90 / 96 / 100, the Quest 72 / 80 / 90 / 120 (it was offered the Vision Pro's: ALVR fell back to 90 on 100)
+            var kindRates = AppSettings.KindOf(settings.HeadsetName);
+            fps.Items.AddRange(kindRates == HeadsetKind.Quest ? new object[] { "72", "80", "90", "120" }
+                             : kindRates == HeadsetKind.Other ? new object[] { "72", "80", "90", "96", "100", "120" }
+                             : new object[] { "90", "96", "100" });
             row("Refresh rate (Hz)", fps);
             row("Bitrate (Mbps)", flow(bitrate, Ui.Line("constant; the Benchmark tab can find yours")));
             var prof = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, Margin = new Padding(0) };
