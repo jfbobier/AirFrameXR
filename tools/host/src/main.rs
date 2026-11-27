@@ -3315,16 +3315,27 @@ fn main() {
                     "client_fps": c["client_fps"], "total_latency_ms": c["total_latency_ms"], "encode_ms": c["encode_ms"],
                     "network_ms": c["network_ms"], "decode_ms": c["decode_ms"], "decoder_queue_ms": c["decoder_queue_ms"],
                 });
+                b.results.push(r.clone());
+                // each step's verdict as it ends (the same rules as the result), and the ramp stops at the first step that fails: no higher bitrate can change the
+                // answer (the highest clean step), and pushing on froze a Quest's picture (field, 2026-11-27: its decoder was rebuilt twice at 400 / 500 Mbps)
+                let judged = bench_recommendation(&b.results, args.fps);
+                let last = judged["steps"].as_array().and_then(|v| v.last()).cloned().unwrap_or(json!({}));
+                let mut r = r;
+                r["ok"] = last["ok"].clone();
+                r["why"] = last["why"].clone();
                 event(origin, "bench_step", r.clone());
-                b.results.push(r);
+                let failed = last["ok"] == json!(false);
                 b.i += 1;
-                if b.i < steps.len() {
+                if b.i < steps.len() && !failed {
                     l.bitrate_override = steps[b.i] as u64 * 1_000_000;
                     b.start = now;
                     b.measuring = false;
                     event(origin, "bench_step_start", json!({ "step": b.i, "target_mbps": steps[b.i] }));
                 } else {
-                    let res = bench_recommendation(&b.results, args.fps);
+                    let mut res = judged;
+                    if failed && b.i < steps.len() {
+                        res["stopped_at_mbps"] = json!(steps[b.i - 1]);   // the steps above it were not run
+                    }
                     logs::general("INFO", &format!("network benchmark: {}", res));
                     event(origin, "bench_result", res);
                     break;

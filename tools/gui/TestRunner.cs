@@ -37,7 +37,9 @@ namespace AirFrameXR
         /// asks the person whether they heard the scene's music in the headset (set by the wizard; null in the lab, then the answer stays unknown)
         public Func<bool?> AskHeard;
         public bool HeadsetAvailable;
-        public string NetSteps = "100,150,200,250,300,350,400,500";
+        /// 1.5.2: up to 400 Mbps (Wi-Fi); WiredSteps follow only on a cable (see the network test)
+        public string NetSteps = "100,150,200,250,300,350,400";
+        public string WiredSteps = "450,500,600,700,800";
         /// the community profile in use (null: the generic path with its searches) and the bitrate it asks for; the tests then verify that configuration
         public HmdProfile Profile;
         public double ConfigMbps;
@@ -214,23 +216,46 @@ namespace AirFrameXR
                         return $"{mbps} Mbps ran clean (no packet loss, the headset kept its frame rate, the network latency did not rise)";
                     }
                     string error = null; int rec = 0; var lost = new List<double>(); string note = null;
-                    ctx.Status("Network test: waiting for the headset (open the headset app)...");
-                    await Host(ctx, Base + $"--benchmark-network {ctx.NetSteps} --bench-step-s {ctx.StepSecs} --connect-timeout 120 --seconds 900 --encode-profile foveated", (n, d) =>
+                    double lastNet = double.NaN, lastTarget = 0; bool lastOk = false;
+                    // one ramp: the streamer stops it at the first step that fails (1.5.2) and judges each step as it ends
+                    async Task Ramp(string list, string label)
                     {
-                        switch (n)
+                        note = null;
+                        await Host(ctx, Base + $"--benchmark-network {list} --bench-step-s {ctx.StepSecs} --connect-timeout 120 --seconds 900 --encode-profile foveated", (n, d) =>
                         {
-                            case "client_connected": ctx.Status("Network test: headset connected, testing..."); break;
-                            case "setup_error": error = d != null && d.TryGetValue("message", out var m) ? m as string : "setup error"; break;
-                            case "bench_step_start": ctx.Status($"Network test: {d?["target_mbps"]} Mbps..."); break;
-                            case "bench_step": lost.Add(Num(d, "packets_lost_per_s")); break;
-                            case "bench_result":
-                                rec = (int)Num(d, "recommended_mbps");
-                                note = rec > 0 ? $"clean up to {rec} Mbps (the highest clean step minus 10%)" : "no step passed: " + (d != null && d.TryGetValue("note", out var nt) ? nt : "");
-                                break;
-                        }
-                    }, 1200000);
+                            switch (n)
+                            {
+                                case "client_connected": ctx.Status($"Network test{label}: headset connected, testing..."); break;
+                                case "setup_error": error = d != null && d.TryGetValue("message", out var m) ? m as string : "setup error"; break;
+                                case "bench_step_start": ctx.Status($"Network test{label}: {d?["target_mbps"]} Mbps..."); break;
+                                case "bench_step":
+                                    lost.Add(Num(d, "packets_lost_per_s")); lastTarget = Num(d, "target_mbps"); lastNet = Num(d, "network_ms");
+                                    lastOk = d != null && d.TryGetValue("ok", out var ov) && ov is bool ob && ob;
+                                    break;
+                                case "bench_result":
+                                    rec = Math.Max(rec, (int)Num(d, "recommended_mbps"));
+                                    note = "done";
+                                    break;
+                            }
+                        }, 1200000);
+                    }
+                    ctx.Status("Network test: waiting for the headset (open the headset app)...");
+                    await Ramp(ctx.NetSteps, "");
                     if (error != null) throw new TestFailed(error);
                     if (note == null) throw new TestFailed("the headset did not connect or the test did not finish");
+                    // Past 400 Mbps only on a cable (owner, 2026-11-27: the ramp froze a Quest on Wi-Fi): the Quest's USB bridge (ALVR's ADBForwarder, the headset at 127.0.0.1)
+                    // or a link whose network latency stayed at 3 ms or less at 400 Mbps (Wi-Fi measured 5 to 9 ms at these rates), which is how the Vision Pro's
+                    // Developer Strap shows, whatever its adapter
+                    var top = ctx.NetSteps.Split(',').Select(x => double.TryParse(x.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0).Max();
+                    bool wired = lastOk && lastTarget >= top && (ctx.HS?.Ip == QuestUsb.Address || (lastNet > 0 && lastNet <= 3.0));
+                    if (wired && ctx.WiredSteps.Length > 0)
+                    {
+                        Log.Write("INFO", $"network test: a wired link ({(ctx.HS?.Ip == QuestUsb.Address ? "the USB bridge" : $"{lastNet:0.0} ms at {lastTarget:0} Mbps")}): testing above {top:0} Mbps");
+                        await Ramp(ctx.WiredSteps, " (wired)");
+                        if (error != null) throw new TestFailed(error);
+                    }
+                    note = rec > 0 ? $"clean up to {rec} Mbps (the highest clean step minus 10%)" + (wired ? ", on a wired link" : top > 0 && lastOk ? $"; tested up to {top:0} Mbps (a Wi-Fi link: higher only on a cable)" : "")
+                                   : "no step passed: check the Wi-Fi link (5/6 GHz, close to the router) and try lower bitrates";
                     ctx.R.CleanMbps = rec;
                     ctx.R.LossPerS = lost.Count > 0 ? lost.Average() : -1;
                     if (rec <= 0) { st.Warn(); }
@@ -501,6 +526,7 @@ namespace AirFrameXR
                 }
                 catch (TestSkipped s) { st.State = TestState.Skipped; st.Note = s.Message; }
                 catch (TaskCanceledException) { st.State = TestState.Skipped; st.Note = "cancelled"; }
+                catch (AggregateException a) when (a.Flatten().InnerExceptions.All(x => x is OperationCanceledException)) { st.State = TestState.Skipped; st.Note = "cancelled"; }   // a wait cancelled inside a task (1.5.2: was logged as a failure with its stack)
                 catch (OperationCanceledException) { st.State = TestState.Skipped; st.Note = "cancelled"; }
                 catch (TestFailed f) { st.State = TestState.Failed; st.Note = f.Message; }
                 catch (Exception e) { st.State = TestState.Failed; st.Note = e.Message; Log.Write("ERROR", $"test '{st.Name}': {e}"); }
