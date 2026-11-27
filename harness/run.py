@@ -177,6 +177,10 @@ def build(what):
             lib.b_run("if not exist _tmp\\install mkdir _tmp\\install")
             for f in ("register_openxr_runtime.ps1", "session.default.json", "README.txt", "fovgrid.bat"):
                 lib.b_put(lib.ROOT / "tools/install" / f, f"_tmp/install/{f}")
+            # the bench scene's music (tracked in git) goes with every package: it reached the builder only with a probe build from a checkout that has
+            # build/bench/littlest_tokyo.vab, so 1.5.2's first bundle (built from a worktree without it) shipped the scene silent (2026-11-27)
+            lib.b_run("if not exist bench mkdir bench")
+            lib.b_put(lib.ROOT / "tools/bench_scene/sakura_breeze.mp3", "bench/sakura_breeze.mp3")
             # personal build (AIRFRAMEXR_PERSONAL=1, values from private/personal_config.json, never published): other session defaults, a ready
             # config\airframexr.json and a zip suffix. A generic build overwrites these with empty ones so a stale personal file cannot leak.
             pers = lib.ROOT / "private/personal_config.json"
