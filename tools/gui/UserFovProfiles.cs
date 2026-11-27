@@ -32,6 +32,8 @@ namespace AirFrameXR
         public List<double[]> Window = new List<double[]>();
         /// 1.4 the mask (FovMask): per eye four corner fractions (upper-outer, upper-inner, lower-inner, lower-outer), 1 = nothing cut; null = no mask
         public double[] MaskLeft, MaskRight;
+        /// a shipped profile's revision (fov.revision of its profiles\*.profile.json, 1 when absent): a copy of an older revision is replaced by the newer one at the next seeding
+        public int Revision = 1;
         public bool HasMask => MaskLeft != null && MaskRight != null;
         public bool Calibrated => Source == "calibrated";
 
@@ -47,6 +49,7 @@ namespace AirFrameXR
             if (ClientScale > 0) d["client_scale"] = Math.Round(ClientScale, 2);
             if (PerEye) { d["tan_left"] = TanLeft.Select(v => (object)Math.Round(v, 4)).ToList(); d["tan_right"] = TanRight.Select(v => (object)Math.Round(v, 4)).ToList(); }
             if (Method.Length > 0) d["method"] = Method;
+            if (Revision > 1) d["revision"] = Revision;
             if (LightSeal.Length > 0) d["light_seal"] = LightSeal;
             if (DeclaredAtMeasure != null) d["declared_at_measure"] = DeclaredAtMeasure.Select(v => (object)Math.Round(v, 4)).ToList();
             if (Window.Count > 0) d["window"] = Window.Select(p => (object)new List<object> { Math.Round(p[0], 4), Math.Round(p[1], 4) }).ToList();
@@ -67,6 +70,7 @@ namespace AirFrameXR
                     Tan = Enumerable.Range(0, 4).Select(i => Convert.ToDouble(t[i], CultureInfo.InvariantCulture)).ToArray(),
                 };
                 u.Method = Json.Str(d, "method", "");
+                u.Revision = Math.Max(1, (int)Json.Num(d, "revision", 1));
                 u.LightSeal = Json.Str(d, "light_seal", "");
                 if (Json.Get(d, "declared_at_measure") is System.Collections.IList dm && dm.Count >= 8) u.DeclaredAtMeasure = Enumerable.Range(0, 8).Select(i => Convert.ToDouble(dm[i], CultureInfo.InvariantCulture)).ToArray();
                 if (Json.Get(d, "tan_left") is System.Collections.IList tl && tl.Count >= 4 && Json.Get(d, "tan_right") is System.Collections.IList tr && tr.Count >= 4)
@@ -140,7 +144,10 @@ namespace AirFrameXR
                     var fov = Json.Get(d, "fov") as Dictionary<string, object>;
                     var vis = fov == null ? null : Json.Get(fov, "visible_deg") as Dictionary<string, object>;
                     var names = (Json.Get(d, "match.name_contains") as System.Collections.IList)?.OfType<string>().ToList();
-                    if (id.Length == 0 || vis == null || names == null || seeded.Contains(id)) continue;
+                    if (id.Length == 0 || vis == null || names == null) continue;
+                    var revision = Math.Max(1, (int)Json.Num(fov, "revision", 1));
+                    // seeded before: only a copy of an older revision is refreshed (1.5.2: the trade-off profile made the same for both eyes); a copy the user deleted stays deleted
+                    if (seeded.Contains(id) && !all.Any(x => x.Id == "std-" + id && x.Revision < revision)) continue;
                     // the Vision Pro's "AVP optimized" window is offered to everybody (a user can pick it before a headset was ever seen); the other shipped windows follow the headset's name
                     if (id != "apple-vision-pro" && !names.Any(n => headsetName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0)) continue;
                     var margin = Math.Max(0, Math.Min(15, Json.Num(fov, "margin_deg", 3)));
@@ -160,8 +167,10 @@ namespace AirFrameXR
                         Created = "2026-01-01T00:00:00", Tan = tan, Quality = Math.Max(0, Math.Min(1, Json.Num(fov, "render_quality", 0))), ClientScale = scale >= 0.2 && scale <= 1.6 && Math.Abs(scale - 1) > 0.001 ? scale : 0, Note = Json.Str(fov, "note", ""),
                         TanLeft = tanL != null && tanR != null && tanL.Concat(tanR).All(v => v > 0) ? tanL : null, TanRight = tanL != null && tanR != null && tanL.Concat(tanR).All(v => v > 0) ? tanR : null,
                         MaskLeft = maskL != null && maskR != null && maskL.Concat(maskR).All(v => v >= FovMask.Min && v <= 1.0) ? maskL : null, MaskRight = maskL != null && maskR != null && maskL.Concat(maskR).All(v => v >= FovMask.Min && v <= 1.0) ? maskR : null,
+                        Revision = revision,
                     });
-                    seeded.Add(id); added++;
+                    if (!seeded.Contains(id)) seeded.Add(id);
+                    added++;
                 }
                 if (added > 0) Save(all.OrderByDescending(u => u.Created, StringComparer.Ordinal), seeded, path);
             }
