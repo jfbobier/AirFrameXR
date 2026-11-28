@@ -455,6 +455,14 @@ namespace AirFrameXR
                 lines.Add("kept_keys|" + string.Join(",", after.Keys.OrderBy(k => k)) + "|backup=" + File.Exists(global::AirFrameXR.OpenComposite.VrPath + ".airframexr.bak"));
                 lines.Add("enable_twice|" + (global::AirFrameXR.OpenComposite.Enable() ?? "ok") + "|runtime=" + R());
                 lines.Add("disable|" + (global::AirFrameXR.OpenComposite.Disable() ?? "ok") + "|active=" + global::AirFrameXR.OpenComposite.Active + "|runtime=" + R());
+                // SteamVR puts itself back in front when it starts ([SteamVR, ours]): OpenVR loads the first entry, so the switch reads off, and on puts us first again
+                global::AirFrameXR.OpenComposite.Enable();
+                var vr = global::AirFrameXR.Json.Load(global::AirFrameXR.OpenComposite.VrPath);
+                vr["runtime"] = new object[] { "C:\\Steam\\SteamVR", global::AirFrameXR.OpenComposite.Root };
+                global::AirFrameXR.Json.Save(global::AirFrameXR.OpenComposite.VrPath, vr);
+                lines.Add("steamvr_front|active=" + global::AirFrameXR.OpenComposite.Active + "|runtime=" + R());
+                lines.Add("enable_over_steamvr|" + (global::AirFrameXR.OpenComposite.Enable() ?? "ok") + "|active=" + global::AirFrameXR.OpenComposite.Active + "|runtime=" + R());
+                lines.Add("disable_after|" + (global::AirFrameXR.OpenComposite.Disable() ?? "ok") + "|active=" + global::AirFrameXR.OpenComposite.Active + "|runtime=" + R());
                 File.WriteAllLines(Path.Combine(ocDir, "opencomposite.txt"), lines);
                 return 0;
             }

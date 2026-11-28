@@ -250,7 +250,7 @@ def build(what):
             lib.b_put(lib.ROOT / "THIRD_PARTY_NOTICES.md", "_tmp/install/THIRD_PARTY_NOTICES.md")
             if (lib.ROOT / "LICENSE").exists():
                 lib.b_put(lib.ROOT / "LICENSE", "_tmp/install/LICENSE.txt")
-            # OpenComposite (GPLv3, unmodified): its two DLLs, the source it was built from and where it came from ship in opencomposite\\ (third_party/opencomposite/SOURCE.txt)
+            # OpenComposite (GPLv3; AirFrameXR's fork since 1.5.3, github.com/jfbobier/airframexr-opencomposite): its two DLLs, the source it was built from and where it came from ship in opencomposite\\ (third_party/opencomposite/SOURCE.txt)
             lib.b_run("if not exist _tmp\\install\\opencomposite mkdir _tmp\\install\\opencomposite")
             for f in sorted((lib.ROOT / "third_party/opencomposite").glob("*")):
                 lib.b_put(f, f"_tmp/install/opencomposite/{f.name}")

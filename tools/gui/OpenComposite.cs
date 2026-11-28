@@ -1,5 +1,6 @@
-// OpenComposite (OpenVR -> OpenXR, GPLv3, https://gitlab.com/znixian/OpenOVR) as the launcher uses it: its two vrclient DLLs ship in the package, unmodified, in
-// opencomposite\bin\ with the licence texts and the corresponding source (opencomposite\SOURCE.txt); we do not link to them. The launcher only points the
+// OpenComposite (OpenVR -> OpenXR, GPLv3, https://gitlab.com/znixian/OpenOVR) as the launcher uses it: the two vrclient DLLs of AirFrameXR's fork
+// (https://github.com/jfbobier/airframexr-opencomposite, since 1.5.3) ship in the package in opencomposite\bin\ with the licence texts and the corresponding
+// source (opencomposite\SOURCE.txt); we do not link to them. The launcher only points the
 // system-wide OpenVR runtime path (%LOCALAPPDATA%\openvr\openvrpaths.vrpath) at that folder, or back at SteamVR; the output goes to the active OpenXR runtime, which is
 // AirFrameXR. Reversible: the previous runtime entry is kept and restored.
 using System;
@@ -29,7 +30,9 @@ namespace AirFrameXR
         }
 
         static string Norm(string p) => (p ?? "").Trim().TrimEnd('\\', '/').Replace('/', '\\').ToLowerInvariant();
-        public static bool Active => Runtimes().Any(p => Norm(p) == Norm(Root));
+        /// OpenVR games load OpenComposite: OpenVR takes the FIRST runtime entry. Our folder further down the list is not active: SteamVR puts itself
+        /// back in front each time it starts (seen 2026-11-27: [SteamVR, ours], the switch said on while games loaded SteamVR).
+        public static bool Active { get { var r = Runtimes(); return r.Length > 0 && Norm(r[0]) == Norm(Root); } }
 
         /// OpenVR games now load OpenComposite. The runtime entry that was there is kept (once) for Disable.
         public static string Enable()
@@ -39,7 +42,7 @@ namespace AirFrameXR
                 if (!Installed) return "This folder has no OpenComposite (opencomposite\\bin\\ is missing).";
                 var root = Json.Load(VrPath);
                 var current = Runtimes();
-                if (!current.Any(p => Norm(p) == Norm(Root)))
+                if (!Active)   // not in front (absent, or SteamVR re-registered itself first): keep what is there for Disable (which drops our folder from it)
                 {
                     Json.Save(Previous, new Dictionary<string, object> { ["runtime"] = current.Cast<object>().ToArray() });
                     if (File.Exists(VrPath) && !File.Exists(VrPath + ".airframexr.bak")) File.Copy(VrPath, VrPath + ".airframexr.bak");

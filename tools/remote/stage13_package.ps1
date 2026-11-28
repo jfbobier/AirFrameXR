@@ -33,7 +33,7 @@ if (Test-Path "$root\_tmp\install\LICENSE.txt") { Copy-Item "$root\_tmp\install\
 # the repo has dropped since, which must not ship
 $licenses = @(Get-Content "$root\_tmp\install\licenses.txt" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 foreach ($l in $licenses) { Copy-Item "$root\_tmp\install\licenses\$l" "$pkg\docs\licenses" -Force }
-# OpenComposite (GPLv3, unmodified): the two DLLs the launcher's OpenVR switch points the system at, with SOURCE.txt and the source archive they were built from
+# OpenComposite (GPLv3; AirFrameXR's fork since 1.5.3, github.com/jfbobier/airframexr-opencomposite): the two DLLs the launcher's OpenVR switch points the system at, with SOURCE.txt and the source archive they were built from
 New-Item -ItemType Directory -Force "$pkg\opencomposite\bin" | Out-Null
 foreach ($d in 'vrclient.dll', 'vrclient_x64.dll') { Copy-Item "$root\_tmp\install\opencomposite\$d" "$pkg\opencomposite\bin" -Force }
 Copy-Item "$root\_tmp\install\opencomposite\SOURCE.txt" "$pkg\opencomposite" -Force

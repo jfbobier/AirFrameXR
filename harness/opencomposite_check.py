@@ -39,11 +39,15 @@ def main():
         ("the licence texts ship (GPL-3 and the two bundled)", all((lib.ROOT / "third_party/licenses" / f).exists() for f in ("OpenComposite-LICENSE.txt", "OpenComposite-OpenVR-headers-LICENSE.txt", "OpenComposite-inih-LICENSE.txt"))),
         ("starts on SteamVR, nothing there", "active=False" in L["start"] and "installed=False" in L["start"] and steam in L["start"]),
         ("cannot switch to what is not there", "has no OpenComposite" in L["enable_without_bundle"]),
-        ("the package's two DLLs are found", "installed=True" in L["bundle"] and "dll32=2261504" in L["bundle"] and "dll64=2447872" in L["bundle"]),
+        ("the package's two DLLs are found", "installed=True" in L["bundle"] and f"dll32={(BUNDLE / 'vrclient.dll').stat().st_size}" in L["bundle"] and f"dll64={(BUNDLE / 'vrclient_x64.dll').stat().st_size}" in L["bundle"]),
         ("enable points the runtime at our folder", "active=True" in L["enable"] and steam not in L["enable"]),
         ("the other keys of the file are kept, a backup exists", all(k in L["kept_keys"] for k in ("config", "external_drivers", "jsonid", "runtime", "version")) and "backup=True" in L["kept_keys"]),
         ("enabling twice does not lose the SteamVR entry", L["enable_twice"].split("runtime=")[1] == L["enable"].split("runtime=")[1] and steam in L["disable"]),
         ("disable restores SteamVR", "active=False" in L["disable"] and steam in L["disable"]),
+        # 1.5.3: OpenVR loads the first runtime entry; SteamVR puts itself back in front when it starts
+        ("SteamVR in front of our folder: the switch reads off", "active=False" in L["steamvr_front"] and L["steamvr_front"].split("runtime=")[1].lower().startswith(steam.lower())),
+        ("switching on over it puts our folder alone in front", "active=True" in L["enable_over_steamvr"] and steam not in L["enable_over_steamvr"]),
+        ("switching off after that gives SteamVR back, without our folder", "active=False" in L["disable_after"] and L["disable_after"].split("runtime=")[1] == steam),
     ]
     ok = True
     for name, c in checks:

@@ -97,11 +97,11 @@ already open source [ALVR](https://github.com/alvr-org/ALVR) as the infrastructu
 
 #### OpenVR-only games: OpenComposite
 
-AirFrameXR itself only speaks OpenXR. For older OpenVR games it ships [OpenComposite](https://gitlab.com/znixian/OpenOVR) (GPL-3.0-or-later; also on [GitHub](https://github.com/QuestCraftPlusPlus/OpenComposite)), which translates OpenVR calls to OpenXR, so those games run on AirFrameXR without SteamVR. In our tests it worked
+AirFrameXR itself only speaks OpenXR. For older OpenVR games it ships [OpenComposite](https://gitlab.com/znixian/OpenOVR) (GPL-3.0-or-later), in our own fork [airframexr-opencomposite](https://github.com/jfbobier/airframexr-opencomposite) since 1.5.3, which translates OpenVR calls to OpenXR, so those games run on AirFrameXR without SteamVR. In our tests it worked
 on about 60 % of the "old" OpenVR games we tried. In the launcher, turn on **OpenComposite (OpenVR) translation**: OpenVR games then load the copy in the `opencomposite\` folder of the package; turn it off and the
 system-wide OpenVR runtime goes back to what it was (SteamVR). It takes effect at the next game start. Games that still fail need SteamVR + stock ALVR.
 
-OpenComposite is a separate program: its two DLLs ship unmodified with the source they were built from and the licence texts (`opencomposite\SOURCE.txt`, `docs\licenses\`); AirFrameXR does not link to them, it only changes the OpenVR runtime path.
+OpenComposite is a separate program: its two DLLs ship with the source they were built from and the licence texts (`opencomposite\SOURCE.txt`, `docs\licenses\`); AirFrameXR does not link to them, it only changes the OpenVR runtime path.
 
 How it is built: the headset's ALVR app sees an ordinary ALVR 20.14.1 server; in between there is no SteamVR compositor, no extra frame copies
 between processes, and an encode path written for NVENC only.
@@ -435,8 +435,8 @@ AirFrameXR stands on the shoulders of giants: the projects below made it possibl
   engine follows the model code of **[vs-rife](https://github.com/HolyWu/vs-rife)** (MIT) by HolyWu, whose release hosts the weights file.
   Thank you for making real-time interpolation open.
 - **[OpenComposite](https://gitlab.com/znixian/OpenOVR)** (GPL-3.0-or-later) by znixian and its contributors: the OpenVR-to-OpenXR translation that lets
-  old OpenVR games run on AirFrameXR without SteamVR. Its project's own prebuilt DLLs ship unmodified in `opencomposite\` with their source and
-  licences; they are separate programs (not linked into AirFrameXR), loaded by the games when the launcher's OpenVR switch is on.
+  old OpenVR games run on AirFrameXR without SteamVR. AirFrameXR ships its fork ([airframexr-opencomposite](https://github.com/jfbobier/airframexr-opencomposite): upstream plus
+  pending upstream fixes and ours) in `opencomposite\` with the source and licences; they are separate programs (not linked into AirFrameXR), loaded by the games when the launcher's OpenVR switch is on.
 - NVIDIA Video Codec SDK and Optical Flow SDK headers (MIT); NVIDIA [CUTLASS](https://github.com/NVIDIA/cutlass) (BSD-3-Clause), compiled into the neural
   engine. cgltf (MIT), stb_image (public domain / MIT), Draco (Apache-2.0, offline converter only).
 - Benchmark scene: "Littlest Tokyo" by Glen Fox ([glenatron](https://sketchfab.com/glenatron)), CC-BY-4.0, converted and placed
