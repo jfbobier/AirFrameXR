@@ -37,7 +37,11 @@ foreach ($l in $licenses) { Copy-Item "$root\_tmp\install\licenses\$l" "$pkg\doc
 New-Item -ItemType Directory -Force "$pkg\opencomposite\bin" | Out-Null
 foreach ($d in 'vrclient.dll', 'vrclient_x64.dll') { Copy-Item "$root\_tmp\install\opencomposite\$d" "$pkg\opencomposite\bin" -Force }
 Copy-Item "$root\_tmp\install\opencomposite\SOURCE.txt" "$pkg\opencomposite" -Force
-$ocSource = @(Get-ChildItem "$root\_tmp\install\opencomposite" -Filter 'OpenOVR-*.tar.gz' | ForEach-Object { $_.Name })
+# only the archive SOURCE.txt names: the builder keeps the files of earlier runs (1.5.3's first bundle also carried 1.3.8's upstream a27e7e6 archive)
+$ocText = Get-Content -Raw "$root\_tmp\install\opencomposite\SOURCE.txt"
+$ocSource = @(Get-ChildItem "$root\_tmp\install\opencomposite" -Filter 'OpenOVR-*.tar.gz' | Where-Object { $ocText.Contains($_.Name) } | ForEach-Object { $_.Name })
+# an archive an earlier package left in the folder (the bundle zips the whole folder): moved out of the package, never deleted
+foreach ($o in @(Get-ChildItem "$pkg\opencomposite" -Filter 'OpenOVR-*.tar.gz' | Where-Object { $ocSource -notcontains $_.Name })) { New-Item -ItemType Directory -Force "$root\out\dist\stale-opencomposite" | Out-Null; Move-Item $o.FullName "$root\out\dist\stale-opencomposite\$($o.Name)" -Force }
 foreach ($t in $ocSource) { Copy-Item "$root\_tmp\install\opencomposite\$t" "$pkg\opencomposite" -Force }
 # the benchmark scene (tools/bench_scene/build.sh, uploaded by `run.py build host`)
 New-Item -ItemType Directory -Force "$pkg\bench" | Out-Null
@@ -105,4 +109,6 @@ Get-ChildItem $pkg -Recurse -File | Select-Object @{n='file';e={$_.FullName.Subs
 $missing = @('AirFrameXR.exe', 'bin\alvr_host.exe', 'bin\streamer.exe', 'bin\configure.exe', 'bin\performance.exe', 'bin\launcher.exe', 'bin\launcher.exe.config', 'bin\streamer.exe.config', 'bin\register_openxr_runtime.ps1', 'bin\LibOVRRT64_1.dll', 'bin\virtualdesktop-openxr.dll', 'bin\virtualdesktop-openxr.json', 'bin\neural\airframexr_rife.dll', 'bin\neural\rife44.afxw', 'bench\littlest_tokyo.vab', 'bench\xr_probe.exe', 'bench\fovgrid.exe', 'bench\fovgrid.bat', 'docs\THIRD_PARTY_NOTICES.md', 'docs\licenses\ALVR-LICENSE.txt', 'opencomposite\bin\vrclient.dll', 'opencomposite\bin\vrclient_x64.dll', 'opencomposite\SOURCE.txt', 'docs\licenses\OpenComposite-LICENSE.txt') | Where-Object { -not (Test-Path "$pkg\$_") }
 $rootFiles = @(Get-ChildItem $pkg -File | ForEach-Object { $_.Name })
 if ($rootFiles.Count -ne 1 -or $rootFiles[0] -ne 'AirFrameXR.exe') { Write-Host "RESULT: FAILED the root must hold only AirFrameXR.exe, found: $($rootFiles -join ', ')"; exit 1 }
+$ocShipped = @(Get-ChildItem "$pkg\opencomposite" -Filter 'OpenOVR-*.tar.gz' | ForEach-Object { $_.Name })
+if ($ocShipped.Count -ne 1) { Write-Host "RESULT: FAILED opencomposite\ must hold the one source archive SOURCE.txt names, found: $($ocShipped -join ', ')"; exit 1 }
 if ($missing) { Write-Host "RESULT: FAILED missing $($missing -join ', ')" } else { Write-Host "RESULT: OK $pkg ($zip)" }
