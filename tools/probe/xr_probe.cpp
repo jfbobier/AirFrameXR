@@ -541,7 +541,17 @@ int main(int argc, char** argv) {
                 fprintf(poseF, "%d,%.6f,%.5f,%.5f,%.5f,%lld\n", done + 1, yaw, views[0].pose.position.x, views[0].pose.position.y, views[0].pose.position.z, (long long)fs.predictedDisplayTime);
                 fflush(poseF);
             }
-            if (sceneOn && !sceneAtHead && (vs.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) && (vs.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
+            // Recenter, as games and mods offer: once 1 s after the first placement (a headset's first valid pose can be before its tracking settled: a Quest
+            // put the scene's walls around the head), and on F8 at any time. The scene is placed again from the head's pose of that moment.
+            static double placedAt = 0; static bool recenteredOnce = false, f8Was = false;
+            bool recenterNow = false;
+            if (sceneOn && sceneAtHead) {
+                const bool f8 = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
+                if (!recenteredOnce && qpcMs() - placedAt >= 1000.0) { recenteredOnce = true; recenterNow = true; }
+                else if (f8 && !f8Was) recenterNow = true;
+                f8Was = f8;
+            }
+            if (sceneOn && (!sceneAtHead || recenterNow) && (vs.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) && (vs.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
                 const XrPosef& hp = views[0].pose;
                 const float qx = hp.orientation.x, qy = hp.orientation.y, qz = hp.orientation.z, qw = hp.orientation.w;
                 // horizontal forward = the view's -z axis projected on the floor plane (a head looking straight down keeps the previous placement)
@@ -553,6 +563,7 @@ int main(int argc, char** argv) {
                     const float yaw = atan2f(dx, -dz);
                     scenePlace = XMMatrixRotationY(yaw) * XMMatrixTranslation(hp.position.x + dx * 1.9f, hp.position.y - 0.2f, hp.position.z + dz * 1.9f);
                     sceneAtHead = true;
+                    placedAt = qpcMs();
                     L("scene placed at the head: eyes (%.2f %.2f %.2f), facing yaw %.0f deg", hp.position.x, hp.position.y, hp.position.z, yaw * 57.29578f);
                 }
             }

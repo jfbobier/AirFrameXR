@@ -132,7 +132,7 @@ Regenerate them with `python3 harness/readme_screens.py`.
 
 **One front door.** Double-click `AirFrameXR.exe`: a card per tool (the streamer, game statistics, settings, the advanced video and performance settings, diagnostics and headset setup) and, at the bottom, two small switches: **OpenXR runtime** (AirFrameXR, or back to the one you had) and **OpenComposite (OpenVR) translation** (OpenVR games on AirFrameXR, or back to SteamVR). Reviews of the OpenXR layers and the firewall rules appear there when something needs attention. The field of view the games are told (stock vendor view, or a restriction from one of your profiles, with its calibration) is at the top of the advanced settings: set once and forgotten.
 
-<p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, Game statistics, Settings, Advanced video and performance settings, Diagnostics and headset setup, and the two switches: OpenXR runtime AirFrameXR and OpenVR through OpenComposite"></p>
+<p align="center"><img src="docs/images/ui_launcher.png" width="520" alt="The launcher: Streamer, Game statistics, Settings, Advanced settings, and the two switches: OpenXR runtime AirFrameXR and OpenVR through OpenComposite"></p>
 
 **The streamer.** Three live tiles (the game's fps, what the headset shows, the latency), a line under them with the streamed fps, the bitrate and the packets lost, then **Features**: frame generation (x2 or x3, or Auto) and the optional desktop mirror, aligned switches; gamma and sharpening, eye height and Recenter. The menu in the header (the three bars) opens the main menu, the game statistics and the advanced settings.
 
@@ -255,7 +255,7 @@ the same code built with the telemetry on, so a diagnosis never changes the numb
 - **The windows** (above): one launcher, the streamer, Logs and performance, Diagnose with suggestions, the wizard, the field of view calibration, the firewall and OpenXR-layer reviews. They follow the display
   (1080p laptops to 4K, 100-200 % scale), checked by the UI harness below.
 - **Desktop mirror** (optional): see above; it works with either hand.
-- **Advanced video and performance settings**: the switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect and what we
+- **Advanced settings**: the picture the game renders (field of view, stream size), frame rate and frame generation, game compatibility, the encoder, and the latency and pacing internals (folded, their defaults suit every game tested), grouped by what you want to change. Each one says when it takes effect and what we
   measured; a switch at its default is removed from the settings file. The HEVC QP map stays on by default and its trade-off is written next to it.
 - **Black Box** (a separate install inside the download): a performance flight recorder and analyzer for one game, [see above](#black-box-the-performance-suite).
 - **Lab tools**: the test harness below, including a frame generation judge ([docs/FRAME_GENERATION_JUDGE.md](docs/FRAME_GENERATION_JUDGE.md)) and the QP map A/B.

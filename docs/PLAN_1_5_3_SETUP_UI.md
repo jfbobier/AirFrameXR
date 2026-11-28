@@ -1,6 +1,6 @@
 # Plan: one window for setup and settings (1.5.3)
 
-Status: proposal for the owner's review (2026-11-27). Nothing built. GUI only (`tools/gui/`), through the existing settings
+Status: SUPERSEDED 2026-11-28 by a smaller change the owner chose (built on branch 1.5.3): the launcher's one **Settings** card (no paired headset: the wizard; else two tabs, Manual settings and Settings assistance, the latter holding Check my setup / Run the setup wizard again and the single tests), the headset IP typed in Manual settings, **Advanced settings** grouped by intent. The one-window, page-per-subject design below was not built. Original status: proposal for the owner's review (2026-11-27). Nothing built. GUI only (`tools/gui/`), through the existing settings
 (`airframexr.json`, `session.base.json`); no engine change.
 
 ## 1. Why

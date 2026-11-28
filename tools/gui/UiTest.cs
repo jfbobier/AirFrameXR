@@ -122,9 +122,9 @@ namespace AirFrameXR
             yield return new Case { Name = "streamer-headset-seen", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); ((RuntimeForm)f).HostEvent("headset_seen", new Dictionary<string, object> { { "hostname", "1234.client.alvr" }, { "ip", "192.168.1.50" } }); } };
             yield return new Case { Name = "streamer-headset-lost", Make = () => new RuntimeForm(null), Prepare = f => { ((RuntimeForm)f).ApplyDemoState(false); ((RuntimeForm)f).HostEvent("client_disconnected", new Dictionary<string, object>()); } };
             yield return new Case { Name = "advanced-switches", Make = () => new AdvancedForm() };
-            yield return new Case { Name = "advanced-experimental", Make = () => new AdvancedForm(), Prepare = f =>   // the Experimental fold opened: every switch the window has is on screen
+            yield return new Case { Name = "advanced-experimental", Make = () => new AdvancedForm(), Prepare = f =>   // the latency fold opened: every switch the window has is on screen
             {
-                Button Find(Control c) { foreach (Control k in c.Controls) { if (k is Button b && b.Text.Contains("Experimental:")) return b; var r = Find(k); if (r != null) return r; } return null; }
+                Button Find(Control c) { foreach (Control k in c.Controls) { if (k is Button b && b.Text.Contains("latency and pacing")) return b; var r = Find(k); if (r != null) return r; } return null; }
                 Find(f)?.PerformClick();
             } };
             var avpBox = new[] { 1.045, 0.800, 0.759, 0.871 };   // the AirFrameXR client's declared box

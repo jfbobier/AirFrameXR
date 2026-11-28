@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import lib
 
-TOOLS = ["Game statistics", "Diagnostics (experimental)", "Setup wizard", "Streamer"]
+TOOLS = ["Game statistics", "Settings", "Streamer"]   # 1.5.3: Settings with no paired headset in the copied package opens the setup wizard (the old Diagnostics / Setup wizard choices are gone)
 only = sys.argv[1:] or TOOLS
 fails = 0
 stamp = time.strftime("%Y%m%d_%H%M%S")

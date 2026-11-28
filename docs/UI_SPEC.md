@@ -25,7 +25,7 @@ screenshot each; 0 FAIL required), `harness/launcher_flow.py`.
 ## Windows
 
 ### Launcher (`bin\launcher.exe`, started by the root stub `AirFrameXR.exe`)
-Cards, in this order (1.3.5): **Streamer** (primary); **Field of view** (a mini app, not a launch button: `FovRestrictionPanel`, see below); **Game statistics**; **Settings** (`configure.exe --settings`: pairing, benchmarks, video, audio, network); **Advanced video and performance settings** (`configure.exe --switches`: docs/EXPERIMENTAL_SWITCHES.md, the picture and timing switches, no field of view); **Diagnostics and headset setup** (rarely used: a step with two buttons, **Diagnostics (experimental)** and **Setup wizard**, both close the streamer). A status card says
+Cards, in this order (1.3.5): **Streamer** (primary); **Field of view** (a mini app, not a launch button: `FovRestrictionPanel`, see below); **Game statistics**; **Settings** (`configure.exe --settings`, 1.5.3; one card for what used to be Settings plus "Diagnostics and headset setup"): with no paired headset (a first start) it opens the setup wizard; with one it shows two tabs, **Manual settings** (the headset's IP address, typed by hand when it is not found, then video, audio, network, chroma key) and **Settings assistance** (**Check my setup** = the wizard's diagnose mode, **Run the setup wizard again**, and the single tests: encoder, quality benchmark, network). Both wizard buttons close the streamer. Pairing happens in the wizard only. **Advanced settings** (`configure.exe --switches`: docs/EXPERIMENTAL_SWITCHES.md), grouped by intent: Field of view, Stream size, Frame rate and frame generation, Game compatibility, Encoder, and a folded Latency and pacing. A status card says
 "Ready" (green) or "Needs attention" (red) with one row per problem and its button: the OpenXR runtime (shows the active one, the same button goes back), OpenXR
 layers that may take the controllers, the Windows Firewall (read in the background). Under the OpenXR row, one switch, **OpenComposite (OpenVR) translation** (2026-11-10): on, OpenVR games load OpenComposite (shipped unmodified in `opencomposite\`, GPL-3.0, with its source and licences; THIRD_PARTY_NOTICES.md), which translates them to OpenXR, so they run on AirFrameXR without SteamVR; off, the system-wide OpenVR runtime goes back to what it was (SteamVR). Not shown in a folder without `opencomposite\bin\`. Quiet links: *Advanced (full ALVR settings)...*, *Help*. The launcher
 steps aside while a tool is open and returns when all are closed; starting the streamer from it first offers to close a running one. Single instance.
@@ -40,7 +40,7 @@ The same card (`FovCard`): the list with a map of the selected profile (the head
 Top to bottom. Controls are grouped where they balance the window (Picture and Position side by side), not one box per feature.
 
 ```
-[logo header: the version number only, 1.3.8]                                         [☰]   <- menu: Main menu, Game statistics, Advanced video and performance settings
+[logo header: the version number only, 1.3.8]                                         [☰]   <- menu: Main menu, Game statistics, Advanced settings
 Headset: connected - Apple Vision Pro (192.168.1.50)                  [Find headset...]   <- the button only while not connected
 Game: Lies of P   (none while the mirror runs)    GPU ... · OpenXR runtime ...
 +- Streaming ---------------------------------------------------------------------+

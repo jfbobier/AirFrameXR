@@ -1,4 +1,4 @@
-// configure.exe: one-time setup. 1) find the Vision Pro on the LAN (ALVR's discovery broadcast) and pair it, 2) optional
+// configure.exe: the Settings card. No paired headset: the setup wizard (Wizard.cs; --wizard / --diagnose start it directly). Paired: two tabs, 1) the settings by hand, 2) optional
 // benchmarks (encoder alone, then the network with the headset) that recommend a bitrate and show where the latency goes,
 // 3) the settings AirFrameXR actually uses (everything else stays in config\session.json for hand editing).
 using System;
@@ -16,11 +16,6 @@ namespace AirFrameXR
         readonly AppSettings settings = new AppSettings();
         Dictionary<string, object> session = Session.Load();
         readonly Dictionary<string, object> check;
-        Discovery discovery;
-        readonly ListView found = new ListView { View = View.Details, FullRowSelect = true, Height = 150, Width = 760, HideSelection = false };
-        readonly Label paired = Ui.Line("", Ui.Bold);
-        readonly Label discStatus = Ui.Line("");
-        readonly Dictionary<string, Discovery.Found> seen = new Dictionary<string, Discovery.Found>();
         // settings controls
         readonly NumericUpDown eyeW = Num(1024, Nvenc.MaxEyeWidth, 32), eyeH = Num(1024, Nvenc.MaxEyeHeight, 32), bitrate = Num(10, 1000, 10);
         readonly ComboBox fps = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
@@ -38,7 +33,6 @@ namespace AirFrameXR
         readonly ComboBox proto = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         readonly NumericUpDown packet = Num(500, 4000, 100);
         readonly NumericUpDown haptics = Dec(0m, 5m);
-        readonly CheckBox debugDefault = new CheckBox { Text = "Debug logging on by default (recommended during the alpha)", AutoSize = true };
         // benchmark
         readonly ListView benchList = new ListView { View = View.Details, FullRowSelect = true, Height = 190, Width = 640 };
         readonly Label benchStatus = Ui.Line("");
@@ -64,106 +58,43 @@ namespace AirFrameXR
             Width = 920; Height = 860;
             Ui.FitToWorkArea(this);
             var tabs = new TabControl { Dock = DockStyle.Fill };
-            // workflow: pair, then the benchmark (it fills the settings), then review the settings
-            tabs.TabPages.Add(HeadsetTab());
-            tabs.TabPages.Add(BenchTab());
+            // two tabs (the launcher's one Settings card): the settings by hand, or let the tests adjust them; pairing is the wizard's (a button on the second tab)
             tabs.TabPages.Add(SettingsTab());
+            tabs.TabPages.Add(BenchTab());
             var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
             var save = new Button { Text = "Save settings", AutoSize = true, Font = Ui.Bold };
             save.Click += (s, e) => SaveSettings(true);
             var launch = new Button { Text = "Save and start AirFrameXR", AutoSize = true };
             launch.Click += (s, e) => { if (SaveSettings(false)) { System.Diagnostics.Process.Start(Paths.Runtime); Close(); } };
             var import = new Button { Text = "Import ALVR settings...", AutoSize = true };
-            import.Click += (s, e) => { if (AlvrImport.Run(this)) { session = Session.Load(); LoadSettings(); ShowPaired(); MessageBox.Show(this, "Imported. The settings tab shows what was read from it.", Text); } };
+            import.Click += (s, e) => { if (AlvrImport.Run(this)) { session = Session.Load(); LoadSettings(); MessageBox.Show(this, "Imported. The settings tab shows what was read from it.", Text); } };
             bottom.Controls.Add(launch);
             bottom.Controls.Add(save);
             bottom.Controls.Add(import);
             Controls.Add(tabs);
             Controls.Add(bottom);
             LoadSettings();
-            Shown += (s, e) => StartDiscovery();
             var shot = Ui.ScreenshotPath();
-            if (shot != null && shot.Contains("settings")) Shown += (s, e) => tabs.SelectedIndex = 2;
-            if (shot != null && shot.Contains("bench")) Shown += (s, e) => tabs.SelectedIndex = 1;
+            if (shot != null && shot.Contains("settings")) Shown += (s, e) => tabs.SelectedIndex = 0;
+            if (shot != null && (shot.Contains("bench") || shot.Contains("auto"))) Shown += (s, e) => tabs.SelectedIndex = 1;
             Ui.ScreenshotWhenShown(this, 4000);
-            FormClosing += (s, e) => { discovery?.Dispose(); bench?.Stop(1000); };
-        }
-
-        // ---------------------------------------------------------------- 1. headset
-        TabPage HeadsetTab()
-        {
-            var t = new TabPage("1. Headset") { BackColor = Color.White, Padding = new Padding(10) };
-            var p = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoScroll = true };
-            p.Controls.Add(Ui.Line("Open the headset app (same network as this PC). It appears below within a few seconds."));
-            Ui.Col(found, "Name (hostname)", 260);
-            Ui.Col(found, "IP address", 140);
-            Ui.Col(found, "ALVR version", 170);
-            p.Controls.Add(found); Ui.FitWidth(found, 760);
-            var pair = new Button { Text = "Pair the selected headset", AutoSize = true, Font = Ui.Bold };
-            pair.Click += (s, e) => PairSelected();
-            found.DoubleClick += (s, e) => PairSelected();
-            p.Controls.Add(pair);
-            p.Controls.Add(discStatus);
-            p.Controls.Add(paired);
-            p.Controls.Add(Ui.Line("When its address changes (DHCP), AirFrameXR re-finds the paired headset by name on its own."));
-            t.Controls.Add(p);
-            ShowPaired();
-            return t;
-        }
-
-        void ShowPaired()
-        {
-            var hs = Session.Headset(session);
-            paired.Text = hs == null ? "Paired headset: none" : $"Paired headset: {hs.Item2} ({hs.Item1}) at {hs.Item3}";
-            paired.ForeColor = hs == null ? Color.DarkOrange : Color.SeaGreen;
-        }
-
-        void StartDiscovery()
-        {
-            discovery?.Dispose();
-            discovery = new Discovery();
-            discovery.OnFound += f => BeginInvoke((Action)(() => AddFound(f)));
-            discovery.OnError += m => BeginInvoke((Action)(() => { discStatus.Text = "Discovery failed: " + m; discStatus.ForeColor = Color.Firebrick; }));
-            var err = discovery.Start();
-            discStatus.Text = err ?? "Looking for headsets (Bonjour/mDNS and UDP 9943)... If Windows asks, allow alvr_host.exe on private networks.";
-            discStatus.ForeColor = err == null ? Color.DimGray : Color.Firebrick;
-        }
-
-        void AddFound(Discovery.Found f)
-        {
-            var key = f.Hostname + "|" + f.Ip;
-            if (seen.ContainsKey(key)) { seen[key].Seen = f.Seen; return; }
-            seen[key] = f;
-            var version = f.Via == "mdns" ? f.Protocol : (check != null && check.TryGetValue("alvr_protocol", out var pv) ? pv as string : "?");
-            var item = new ListViewItem(new[] { f.Hostname, f.Ip, f.Compatible ? $"compatible (ALVR {version})" : $"INCOMPATIBLE ({f.Protocol}, streamer {f.ServerProtocol})" }) { Tag = f };
-            if (!f.Compatible) item.ForeColor = Color.Firebrick;
-            found.Items.Add(item);
-            Ui.FitColumns(found);
-            if (found.Items.Count == 1) item.Selected = true;
-        }
-
-        void PairSelected()
-        {
-            if (found.SelectedItems.Count == 0) { MessageBox.Show(this, "Select a headset first (open the headset app).", Text); return; }
-            var f = (Discovery.Found)found.SelectedItems[0].Tag;
-            var name = HeadsetNames.FromHost(f.Hostname);
-            Session.Pair(session, f.Hostname, name, f.Ip);
-            Session.Save(session);
-            settings.HeadsetHost = f.Hostname; settings.HeadsetName = name; settings.HeadsetIp = f.Ip;
-            settings.Save();
-            Log.Write("INFO", $"paired headset {name} ({f.Hostname}) at {f.Ip}");
-            ShowPaired();
+            FormClosing += (s, e) => { bench?.Stop(1000); };
         }
 
         // ---------------------------------------------------------------- 2. settings
         TabPage SettingsTab()
         {
-            var t = new TabPage("3. Settings") { BackColor = Color.White, Padding = new Padding(10), AutoScroll = true };
+            var t = new TabPage("Manual settings") { BackColor = Color.White, Padding = new Padding(10), AutoScroll = true };
             var g = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Top };
             void row(string label, Control c) { g.Controls.Add(Ui.Line(label)); g.Controls.Add(c); }
             void section(string title) { var l = Ui.Line(title, Ui.Big); l.ForeColor = Ui.Accent; l.Margin = new Padding(3, 12, 3, 3); g.Controls.Add(l); g.SetColumnSpan(l, 2); }
             Control flow(params Control[] cs) { var f = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) }; f.Controls.AddRange(cs); return f; }
 
+            section("Headset");
+            row("Paired headset", headsetName);
+            row("IP address", headsetIp);
+            var ipNote = Ui.Line("Type it when the headset is not found by itself (another network, a VPN, the Quest over USB: 127.0.0.1). The headset app must be open."); ipNote.ForeColor = Color.DimGray; ipNote.MaximumSize = new Size(560, 0);
+            row("", ipNote);
             section("Video");
             sizeAuto.Click += (s, e) => SizeAutomatic();
             row("Resolution per eye", flow(eyeW, Ui.Line("x"), eyeH));
@@ -178,11 +109,11 @@ namespace AirFrameXR
                              : kindRates == HeadsetKind.Other ? new object[] { "72", "80", "90", "96", "100", "120" }
                              : new object[] { "90", "96", "100" });
             row("Refresh rate (Hz)", fps);
-            row("Bitrate (Mbps)", flow(bitrate, Ui.Line("constant; the Benchmark tab can find yours")));
+            row("Bitrate (Mbps)", flow(bitrate, Ui.Line("constant; the Settings assistance tab can find yours")));
             var prof = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, Margin = new Padding(0) };
             Ui.Exclusive(profFov, profFull);
             prof.Controls.Add(profFov);
-            prof.Controls.Add(flow(profFull, Ui.Badge("Experimental")));
+            prof.Controls.Add(profFull);
             row("Encoding", prof);
             row("Foveation center size", flow(fcx, fcy));
             row("Foveation center shift", flow(fsx, fsy));
@@ -223,8 +154,6 @@ namespace AirFrameXR
             row("Packet size (bytes)", packet);
             row("Haptics strength", haptics);
 
-            section("Logging");
-            g.Controls.Add(new Label()); g.Controls.Add(debugDefault);
             var note = Ui.Line("Everything else (ALVR's advanced options) stays in config\\session.json.");
             note.ForeColor = Color.DimGray;
             g.Controls.Add(new Label()); g.Controls.Add(note);
@@ -253,9 +182,15 @@ namespace AirFrameXR
             sizeAuto.Enabled = settings.StreamSizeManual;
         }
 
+        readonly TextBox headsetIp = new TextBox { Width = 140, AccessibleName = "Headset IP address" };
+        readonly Label headsetName = Ui.Line("", Ui.Bold);
+
         void LoadSettings()
         {
             var s = session;
+            var hs = Session.Headset(s);
+            headsetName.Text = hs == null ? "none" : $"{hs.Item2} ({hs.Item1})";
+            headsetIp.Text = hs?.Item3 ?? "";
             ShowSizeNote();
             eyeW.Value = Clamp(eyeW, Json.Num(s, V + "transcoding_view_resolution.Absolute.width", 3648));
             eyeH.Value = Clamp(eyeH, Json.Num(s, V + "transcoding_view_resolution.Absolute.height.content", 3200));
@@ -287,7 +222,6 @@ namespace AirFrameXR
             proto.SelectedItem = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp") == "Tcp" ? "Tcp" : "Udp";
             packet.Value = Clamp(packet, Json.Num(s, "session_settings.connection.packet_size", 1400));
             haptics.Value = Clamp(haptics, Json.Num(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", 1));
-            debugDefault.Checked = settings.Debug;
         }
 
         static decimal Clamp(NumericUpDown n, double v) => Math.Max(n.Minimum, Math.Min(n.Maximum, (decimal)v));
@@ -305,6 +239,14 @@ namespace AirFrameXR
             {   // a size the user typed is theirs: it is kept (the size no longer follows the bitrate; the foveation is still computed for it) and it is the declared resolution of the game's render choice
                 var was = PipelineModel.StreamEyeExpected(s);
                 if (was != null && (was[0] != w || was[1] != h)) { settings.StreamSizeManual = true; settings.RenderReferenceEye = new[] { w, h }; }
+            }
+            var hsNow = Session.Headset(s); var ipTyped = headsetIp.Text.Trim();
+            if (hsNow != null && ipTyped.Length > 0 && ipTyped != hsNow.Item3)
+            {
+                if (!System.Net.IPAddress.TryParse(ipTyped, out _)) { MessageBox.Show(this, "\"" + ipTyped + "\" is not an IP address (for example 192.168.1.30).", Text); return false; }
+                Session.Pair(s, hsNow.Item1, hsNow.Item2, ipTyped);   // the same headset at another address
+                settings.HeadsetIp = ipTyped;
+                Log.Write("INFO", $"headset address typed: {ipTyped}");
             }
             PipelineModel.SaveEyeChoice(s, settings, w, h);
             var rate = double.Parse((string)fps.SelectedItem, CultureInfo.InvariantCulture);
@@ -340,10 +282,9 @@ namespace AirFrameXR
             try { Session.Save(s); }
             catch (Exception e) { MessageBox.Show(this, "Cannot write config\\session.json: " + e.Message, Text); return false; }
             settings.EncodeProfile = profFull.Checked ? "full-split" : "foveated";
-            settings.Debug = debugDefault.Checked;
             settings.Save();
             PipelineModel.PictureEdgesFoveation.ApplyToFiles(settings, false);   // a new bitrate or rate resizes the stream (and its foveation) now, as it will at the next start; hand-set sizes stay
-            Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {fps.SelectedItem} Hz, {bitrate.Value} Mbps, {settings.EncodeProfile}, idle #{settings.IdleRgb}, audio {audio.Checked}, {proto.SelectedItem}, debug {settings.Debug}");
+            Log.Write("INFO", $"settings saved: {w}x{h}/eye @ {fps.SelectedItem} Hz, {bitrate.Value} Mbps, {settings.EncodeProfile}, idle #{settings.IdleRgb}, audio {audio.Checked}, {proto.SelectedItem}");
             if (confirm) MessageBox.Show(this, "Saved. The changes apply the next time AirFrameXR starts.", Text);
             return true;
         }
@@ -351,8 +292,18 @@ namespace AirFrameXR
         // ---------------------------------------------------------------- 3. benchmark
         TabPage BenchTab()
         {
-            var t = new TabPage("2. Benchmark") { BackColor = Color.White, Padding = new Padding(10) };
+            var t = new TabPage("Settings assistance") { BackColor = Color.White, Padding = new Padding(10) };
             var p = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoScroll = true, Padding = new Padding(0, 0, SystemInformation.VerticalScrollBarWidth, 0) };   // room for the vertical scroll bar: without it the filled column is as wide as the whole panel and a sideways bar appears
+            p.Controls.Add(Ui.Line("Let the tests set it up", Ui.Big));
+            p.Controls.Add(Ui.Line("Check your setup and get suggestions with the settings as they are, or run the setup wizard again to pair another headset and let the tests propose the settings. Either one closes this window and needs the headset app open."));
+            var wizRow = new FlowLayoutPanel { AutoSize = true };
+            var diag = new Button { Text = "Check my setup", AutoSize = true, Font = Ui.Bold };
+            diag.Click += (s, e) => OpenWizard("--diagnose");
+            var again = new Button { Text = "Run the setup wizard again", AutoSize = true };
+            again.Click += (s, e) => OpenWizard("--wizard");
+            wizRow.Controls.Add(diag); wizRow.Controls.Add(again);
+            p.Controls.Add(wizRow);
+            p.Controls.Add(Ui.Line("Single tests", Ui.Big));
             p.Controls.Add(Ui.Line("Encoder test (no headset needed): how long NVENC takes per frame with each encoding.", Ui.Bold));
             var enc = new Button { Text = "Run encoder test", AutoSize = true };
             enc.Click += (s, e) => RunEncoderTest();
@@ -392,6 +343,14 @@ namespace AirFrameXR
             return t;
         }
 
+        /// The wizard is configure.exe itself in its other modes: this window gives way to it.
+        void OpenWizard(string arg)
+        {
+            if (BenchBusy()) return;
+            try { System.Diagnostics.Process.Start(Application.ExecutablePath, arg); Close(); }
+            catch (Exception e) { MessageBox.Show(this, "Cannot start the wizard: " + e.Message, Text); }
+        }
+
         static string Fmt(Dictionary<string, object> d, string k, string f)
         {
             try { return d != null && d.TryGetValue(k, out var v) && v != null ? Convert.ToDouble(v, CultureInfo.InvariantCulture).ToString(f, CultureInfo.InvariantCulture) : "-"; }
@@ -403,7 +362,6 @@ namespace AirFrameXR
         void RunEncoderTest()
         {
             if (BenchBusy()) return;
-            discovery?.Dispose();
             var profiles = new Queue<string>(new[] { "foveated", "full-split" });
             benchStatus.Text = "Encoder test running...";
             void next()
@@ -411,7 +369,7 @@ namespace AirFrameXR
                 if (profiles.Count == 0)
                 {
                     if (!benchStatus.Text.StartsWith("Encoder test failed")) benchStatus.Text = "Encoder test done. 'fits' = p95 under 90% of the frame time.";
-                    StartDiscovery(); return;
+                    return;
                 }
                 var prof = profiles.Dequeue();
                 bench = new HostProcess();
@@ -426,7 +384,7 @@ namespace AirFrameXR
                 }));
                 bench.OnExit += c => BeginInvoke((Action)next);
                 var err = bench.Start($"--install-dir \"{Paths.Dir}\" --live --bench 300 --noise-temporal --encode-profile {prof}");
-                if (err != null) { benchStatus.Text = err; StartDiscovery(); }
+                if (err != null) benchStatus.Text = err;
             }
             next();
         }
@@ -441,7 +399,6 @@ namespace AirFrameXR
             if (BenchBusy()) return;
             if (!File.Exists(Path.Combine(Paths.Dir, "bench", "littlest_tokyo.vab"))) { MessageBox.Show(this, "bench\\littlest_tokyo.vab is missing from this folder.", Text); return; }
             SaveSettings(false);
-            discovery?.Dispose();
             benchStatus.Text = "Quality benchmark: starting...";
             int n = 0;
             bench = new HostProcess();
@@ -479,9 +436,9 @@ namespace AirFrameXR
                     case "setup_error": benchStatus.Text = $"Quality benchmark failed: {d?["message"]}"; break;
                 }
             }));
-            bench.OnExit += c => BeginInvoke((Action)(() => { if (c != 0 && !benchStatus.Text.StartsWith("Quality benchmark failed")) benchStatus.Text = $"Quality benchmark ended (code {c}) - see logs"; StartDiscovery(); }));
+            bench.OnExit += c => BeginInvoke((Action)(() => { if (c != 0 && !benchStatus.Text.StartsWith("Quality benchmark failed")) benchStatus.Text = $"Quality benchmark ended (code {c}) - see logs"; }));
             var r = bench.Start($"--install-dir \"{Paths.Dir}\" --benchmark-quality");
-            if (r != null) { benchStatus.Text = r; StartDiscovery(); }
+            if (r != null) benchStatus.Text = r;
         }
 
         void RunNetworkTest()
@@ -491,7 +448,6 @@ namespace AirFrameXR
             var list = string.Join(",", steps.Text.Split(',').Select(x => x.Trim()).Where(x => int.TryParse(x, out _)));
             if (list.Length == 0) { MessageBox.Show(this, "Enter bitrates in Mbps, e.g. 100,200,300", Text); return; }
             SaveSettings(false);
-            discovery?.Dispose();
             applyBitrate.Enabled = false;
             benchStatus.Text = "Waiting for the headset (open the headset app)...";
             bench = new HostProcess();
@@ -523,9 +479,9 @@ namespace AirFrameXR
                         break;
                 }
             }));
-            bench.OnExit += c => BeginInvoke((Action)(() => { if (!applyBitrate.Enabled && !benchStatus.Text.StartsWith("No step") && !benchStatus.Text.StartsWith("Network test failed")) benchStatus.Text = $"Network test ended (code {c}) - see logs"; StartDiscovery(); }));
+            bench.OnExit += c => BeginInvoke((Action)(() => { if (!applyBitrate.Enabled && !benchStatus.Text.StartsWith("No step") && !benchStatus.Text.StartsWith("Network test failed")) benchStatus.Text = $"Network test ended (code {c}) - see logs"; }));
             var err = bench.Start($"--install-dir \"{Paths.Dir}\" --benchmark-network {list} --bench-step-s {stepSecs.Value} --connect-timeout 120 --seconds 900 --encode-profile {(profFull.Checked ? "full-split" : "foveated")}");
-            if (err != null) { benchStatus.Text = err; StartDiscovery(); }
+            if (err != null) benchStatus.Text = err;
         }
 
         [STAThread]
@@ -537,9 +493,14 @@ namespace AirFrameXR
             var args = Environment.GetCommandLineArgs();
             Log.Write("INFO", $"configure.exe {Version.Text} start ({Paths.Dir})");
             if (args.Contains("--fov")) { Application.Run(new FovManagerForm()); return; }   // the field-of-view profile manager: no system check, no streamer port
-            if (args.Contains("--switches")) { Application.Run(new AdvancedForm()); return; }   // the Advanced video and performance settings window: no system check, no streamer port
+            if (args.Contains("--switches")) { Application.Run(new AdvancedForm()); return; }   // the Advanced settings window: no system check, no streamer port
             var check = File.Exists(Paths.Host) ? SystemCheck.Run() : null;
-            if (args.Contains("--settings") || args.Contains("--advanced")) { Application.Run(new ConfigureForm(check)); return; }
+            // the launcher's one Settings card: with no paired headset (a first start, or the config folder deleted) it is the wizard, else the two tabs
+            if (args.Contains("--settings") || args.Contains("--advanced"))
+            {
+                if (Session.Headset(Session.Load()) != null || args.Contains("--demo")) { Application.Run(new ConfigureForm(check)); return; }
+                Log.Write("INFO", "settings: no paired headset, starting the wizard");
+            }
             Application.Run(new WizardForm(check, args.Contains("--demo")));
         }
     }

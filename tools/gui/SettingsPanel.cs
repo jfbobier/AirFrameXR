@@ -30,7 +30,6 @@ namespace AirFrameXR
         public readonly ComboBox Proto = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
         public readonly NumericUpDown Packet = Num(500, 4000, 100);
         public readonly NumericUpDown Haptics = Dec(0m, 5m);
-        public readonly CheckBox DebugDefault = new CheckBox { Text = "Debug logging at every start (costs a few ms per frame)", AutoSize = true };
         public readonly CheckBox Mic = new CheckBox { Text = "Headset microphone for games (VRChat voice; needs VB-CABLE)", AutoSize = true };
         public readonly ComboBox CaptureBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 330 };
         public readonly ComboBox PowerPlanBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
@@ -74,10 +73,10 @@ namespace AirFrameXR
             var prof = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, Margin = new Padding(0) };
             Ui.Exclusive(ProfFov, ProfFull);
             prof.Controls.Add(ProfFov);
-            prof.Controls.Add(flow(ProfFull, Ui.Badge("Experimental")));
+            prof.Controls.Add(ProfFull);
             row("Encoding", prof, ProfFov);
             row("Split encoding", Split, Split);
-            row("Frame generation", flow(FrameGen, Ui.Badge("Experimental")), FrameGen);
+            row("Frame generation", FrameGen, FrameGen);
             row("Foveation center size", flow(Fcx, Fcy), Fcx);
             row("Foveation center shift", flow(Fsx, Fsy), Fsx);
             row("Foveation edge ratio", flow(Frx, Fry, Ui.Line("(higher = fewer pixels at the edges)")), Frx);
@@ -120,8 +119,6 @@ namespace AirFrameXR
             planNote.ForeColor = Color.DimGray;
             note(planNote);
 
-            section("Logging");
-            note(DebugDefault);
             var more = Ui.Line("Everything else (ALVR's advanced options) stays in config\\session.json.");
             more.ForeColor = Color.DimGray;
             note(more);
@@ -186,7 +183,6 @@ namespace AirFrameXR
             Proto.SelectedItem = Json.Str(s, "session_settings.connection.stream_protocol.variant", "Udp") == "Tcp" ? "Tcp" : "Udp";
             Packet.Value = Clamp(Packet, Json.Num(s, "session_settings.connection.packet_size", 1400));
             Haptics.Value = Clamp(Haptics, Json.Num(s, "session_settings.headset.controllers.content.haptics.content.intensity_multiplier", 1));
-            DebugDefault.Checked = settings.Debug;
             RecenterKey.Text = settings.RecenterKey;
             CaptureBox.SelectedIndex = settings.AudioCapture == "device" ? 1 : 0;
             Mic.Checked = Json.Bool(s, "session_settings.audio.microphone.enabled", false);
@@ -264,7 +260,6 @@ namespace AirFrameXR
             settings.FrameGen = FrameGen.Checked;
             settings.MuteSpeakers = Mute.Checked;
             settings.AudioCapture = CaptureBox.SelectedIndex == 1 ? "device" : "process";
-            settings.Debug = DebugDefault.Checked;
             settings.RecenterKey = RecenterKey.Text.Trim().Length > 0 ? RecenterKey.Text.Trim() : "End";
             settings.PowerPlan = PowerPlanBox.SelectedIndex > 0 && PowerPlanBox.SelectedIndex <= plans.Count ? plans[PowerPlanBox.SelectedIndex - 1].Guid : (PowerPlanBox.SelectedIndex < 0 ? settings.PowerPlan : "");
             settings.Save();

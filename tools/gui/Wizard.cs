@@ -183,6 +183,17 @@ namespace AirFrameXR
                     Log.Write("INFO", $"paired headset {chosenName} ({chosenHost}) at {chosenIp}");
                     // The handshake's host (next page) and the tests read config\session.json, which only a streamer start compiled from the golden master: with
                     // another headset trusted there (a Vision Pro, then a Quest: 2026-11-27) the handshake waited for the old one. Compile it now, as a streamer start would.
+                    // A Quest starts from its own 2K default (the shipped Quest 3 profile: 2064 x 2208, 90 Hz, 150 Mbps), not from the golden master's Vision Pro size:
+                    // the handshake and the first tests (the scene included) run before the proposal exists, and the scene takes its size from this session.
+                    if (AppSettings.KindOf(chosenName) == HeadsetKind.Quest)
+                    {
+                        var qp = new SettingsPanel(settings, session);
+                        qp.Load();
+                        qp.Prefill(new Proposal { EyeW = 2064, EyeH = 2208, Fps = 90, BitrateMbps = 150, Foveated = true, Audio = true });
+                        if (!qp.Save(out var qerr)) Log.Write("WARN", "wizard: Quest 2K default not preloaded: " + qerr);
+                        else Log.Write("INFO", "wizard: Quest detected, 2064x2208 @ 90 Hz preloaded");
+                        session = Session.Load();
+                    }
                     var compiled = SessionCompiler.Compile(new AppSettings(), AppSettings.ReadClientFov());
                     if (compiled != null) Log.Write("INFO", "wizard: " + compiled);
                     hsDone = false;

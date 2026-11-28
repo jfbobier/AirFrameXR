@@ -27,14 +27,9 @@ namespace AirFrameXR
         static readonly Tool[] Tools = {
             new Tool { Title = "Streamer", Exe = @"bin\streamer.exe", Primary = true, What = "Start streaming to your headset." },
             new Tool { Title = "Game statistics", Exe = @"bin\performance.exe", What = "How your games ran." },
-            new Tool { Title = "Settings", Exe = @"bin\configure.exe", Args = "--settings", StopsStreamer = true, What = "Headset pairing, benchmarks, video, audio and network settings." },
+            new Tool { Title = "Settings", Exe = @"bin\configure.exe", Args = "--settings", StopsStreamer = true, What = "Your stream settings by hand, or let the tests adjust them (check your setup, run the setup wizard again). The first time, it starts the setup wizard." },
             // experimental and tuning switches (docs/EXPERIMENTAL_SWITCHES.md): writes config files, the streamer picks the live ones up, so it can stay open
-            new Tool { Title = "Advanced video and performance settings", Exe = @"bin\configure.exe", Args = "--switches", What = "The field of view the games are told (stock or a restriction, and its calibration), frame generation, pacing, GPU and encoder switches, each with when it takes effect." },
-            // the rarely used ones, one card: the checkup (streamer closed) or the setup wizard again (streamer closed)
-            new Tool { Title = "Diagnostics and headset setup", Exe = @"bin\configure.exe", What = "Check your setup and get suggestions, or run the setup wizard again to pair a headset and let the tests propose the settings.",
-                Choices = new[] {
-                    new Tool { Title = "Diagnostics (experimental)", Exe = @"bin\configure.exe", Args = "--diagnose", StopsStreamer = true, What = "Check your setup and get suggestions." },
-                    new Tool { Title = "Setup wizard", Exe = @"bin\configure.exe", StopsStreamer = true, What = "Pair a headset and let the tests propose the stream settings." } } },
+            new Tool { Title = "Advanced settings", Exe = @"bin\configure.exe", Args = "--switches", What = "The field of view the games are told (stock or a restriction, and its calibration), frame generation, pacing, GPU and encoder switches, each with when it takes effect." },
         };
 
         readonly FlowLayoutPanel sys = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 8, 0, 0), Padding = new Padding(10), BackColor = Color.FromArgb(0xF3, 0xF5, 0xF9), MinimumSize = new Size(700, 0) };

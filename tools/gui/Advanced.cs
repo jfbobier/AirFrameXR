@@ -1,4 +1,4 @@
-// configure.exe --switches: the Advanced video and performance settings window. The experimental and tuning switches of docs/EXPERIMENTAL_SWITCHES.md, grouped, each with the moment
+// configure.exe --switches: the Advanced settings window. The experimental and tuning switches of docs/EXPERIMENTAL_SWITCHES.md, grouped, each with the moment
 // its change takes effect (live in the running streamer, at the next streamer start, at the next game start) and its value read back from the file or the registry.
 // Everything applies when changed; a switch at its default is removed from config\airframexr.json. The streamer may stay open: it forwards the live ones itself.
 using System;
@@ -44,7 +44,7 @@ namespace AirFrameXR
 
         public AdvancedForm()
         {
-            Text = "AirFrameXR – Advanced video and performance settings";
+            Text = "AirFrameXR – Advanced settings";
             Icon = Ui.AppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleDimensions = new SizeF(96F, 96F);
@@ -54,14 +54,14 @@ namespace AirFrameXR
             Width = 1000; Height = 860;
             Ui.FitToWorkArea(this);
 
-            const string GF = "Game frame rate", FG = "Frame generation", AR = "Arrival and pacing", GE = "GPU and encoder", SS = "Stream size";
+            const string GF = "Frame rate and frame generation", AR = "Latency and pacing", CP = "Game compatibility", GE = "Encoder", SS = "Stream size";
             knobs.AddRange(new[]
             {
                 N(GF, "frame_gen_cap_fps", "Game fps lock (fps)", 0, 0, 240, 5, 0, Live, "0 = no lock. Holds the game back to at most this many frames per second, with or without frame generation. For a game that forces its own rate (cutscenes locked at 30, a game that renders in bursts) or a GPU-bound game that builds a queue of frames in front of the GPU. Pick a rate that divides the headset's refresh rate evenly (45 or 30 at 90 Hz, 50 or 25 at 100 Hz); a lock that does not divide it gives uneven repeats. Hover for the numbers."),
-                C(FG, "frame_gen_synthesis", "Generated-frame synthesis", "neural", new[] { "neural", "edge" }, Restart, "How a generated frame is drawn. neural (default): a neural network (RIFE 4.4, bin\\neural) finds where every part of the picture moved between the two game frames; fewer double images and torn outlines on moving objects, still content exact, about 1.8 ms of GPU per game frame pair on an RTX 5090 at the Vision Pro's stream size; needs an RTX 30 series or newer (older GPUs get edge by themselves). edge: the fallback, drawn from the GPU's optical flow: sharp motion boundaries; where the motion is uncertain the real frame is shown (a little local judder) instead of a double image. Hover for the numbers."),
+                C(GF, "frame_gen_synthesis", "Generated-frame synthesis", "neural", new[] { "neural", "edge" }, Restart, "How a generated frame is drawn. neural (default): a neural network (RIFE 4.4, bin\\neural) finds where every part of the picture moved between the two game frames; fewer double images and torn outlines on moving objects, still content exact, about 1.8 ms of GPU per game frame pair on an RTX 5090 at the Vision Pro's stream size; needs an RTX 30 series or newer (older GPUs get edge by themselves). edge: the fallback, drawn from the GPU's optical flow: sharp motion boundaries; where the motion is uncertain the real frame is shown (a little local judder) instead of a double image. Hover for the numbers."),
                 B(AR, "phase_lock", "Phase lock", true, Restart, "Slides the host's frame clock (up to 2 ms every 2-4 s) so frames arrive 7 ms before the headset's render tick. The margin matters: at 3 ms 1.2-2.3 % of the headset's refreshes repeated, at 7 ms 0.5 %, with the same 67 ms latency. Known flaw: it slides 12-25 times a minute even when it has nothing to correct (999 slides in an hour of a game running free at 56 fps). Leave it on; turn it off only to compare. Hover for the numbers."),
                 N(AR, "running_start_ms", "Running-start margin (ms)", 2, 0, 10, 0.5, 1, Restart, "How much earlier than the display tick the game is released, on top of its own frame-time envelope: 0 releases it at the tick, higher gives the game's frame more time to finish before the host needs it. The default is 2 ms; 1-4 are plausible. Honest status: no headset A/B for this value. In the lab a run with 0 was the cleanest (0.1 % repeats, no empty boundary) and a lead capped below one game period changed nothing. Hover for the context."),
-                B(GF, "drop_duplicate_frames", "Maximum OpenXR compatibility mode", false, Restart, "Off (default): every frame wait is paced, as OpenXR specifies. On: when a game submits each picture twice (some VR mods submit from the game's own Present), the wait before the repeat returns at once, so the game is paced once per picture instead of twice. Nothing is dropped. It acts only when that pattern is seen; other games are unchanged. If a VR mod suddenly runs at half its frame rate, try it, and check that NVIDIA Smooth Motion is off for the game."),
+                B(CP, "drop_duplicate_frames", "Compatibility mode for games that submit each picture twice", false, Restart, "For a game or VR mod that breaks OpenXR's frame loop by submitting the same picture two or more times (for example from the game's own Present). Off (default): every wait is paced, as OpenXR says, so such a game runs at half its rate. On: once AirFrameXR sees that pattern, the waits after a real picture return at once, so the game is paced once per picture; every submit is still composed and published. It acts only on that pattern, so other games are unchanged. If a VR mod suddenly runs at half its frame rate, turn it on, and check that NVIDIA Smooth Motion is off for the game. Needs the bundled OpenXR runtime."),
                 B(AR, "intake_gate", "Intake gate", true, Restart, "When the host's queue has stood 3 frames in a row (the game runs a frame ahead of the stream), the shim skips one release of the game, so the queue drains without dropping a rendered frame. In the lab on a GPU-bound scene it cut pose-to-display latency to 32 ms against 43 ms for plain in-order sending (33 ms with the drop-based drain), same fps and repeats. It only acts when the game keeps up: in GPU-bound games that deliver in bunches it fired uselessly 3 times a second, hence its guard. Hover for the numbers."),
                 B(SS, "stream_keep_panel_size", "Keep the stream as big as the whole panel's", false, Restart, "Off (default): the stream's size follows the view the headset declares, at the density its bitrate pays for, so a smaller view (the client's FoV Scale, or a fit) gives a smaller stream and the same sharpness. On: the stream is sized for the whole panel (what the headset declares at FoV 1), whatever view it declares now, so a smaller view puts the same pixels on less angle: sharper, as the stock client's FoV Scale does, for a heavier encode and decode than the bitrate alone suggests. Only for the Vision Pro, and only while the stream size follows the bitrate (not a size typed in Settings, not the fit tick)."),
                 B(GE, "qp_map", "HEVC QP map", true, Restart, "A trade-off, on by default (since 0.1): more bits for the centre of the foveated picture, fewer for the edges (quality level -3 at the centre, +6 at the edges). Measured against the native render in the lab: the centre gains 0.1-0.3 dB and the periphery loses 0.2-0.9 dB at 40-100 Mbps, and the stream carries about 5 % fewer bits; at 250 Mbps nothing changes. No encode-time cost measured (within 0.5 ms). Untick it for an even picture with the most detail at the edges. Hover for the numbers and what is not measured."),
@@ -95,7 +95,7 @@ namespace AirFrameXR
             knobs.Find(k => k.Key == "phase_lock").Tip =
                 "Phase lock\r\n" +
                 "\r\n" +
-                "The arrival cluster of the frames spans 8-9 ms of a 10 ms display period (7.9-9.0 ms with frame generation off). The lock slides the host's frame clock so the earliest 10 % arrive 'phase margin' ms before the headset's render tick (default 7 ms, set from Diagnose).\r\n" +
+                "The arrival cluster of the frames spans 8-9 ms of a 10 ms display period (7.9-9.0 ms with frame generation off). The lock slides the host's frame clock so the earliest 10 % arrive 'phase margin' ms before the headset's render tick (default 7 ms).\r\n" +
                 "Margin 3 ms: a share of the frames landed after the tick and were shown a tick late: the headset repeated 1.2-2.3 % of its refreshes.\r\n" +
                 "Margin 7 ms: 0.5 %, and the total latency stayed 67 ms, because the panel shows a frame at its next tick either way. Cost: up to one period of latency, invisible until a frame crosses a tick.\r\n" +
                 "Flaw: it corrects 12-25 times a minute in every session (999 slides in an hour of Gears with frame generation off, where a free-running 56 fps game gives it nothing to measure). A guard is planned: no action when the stream runs well under the display rate.";
@@ -125,8 +125,8 @@ namespace AirFrameXR
                 "Not measured: how it looks (PSNR is not what your eyes see; judge by looking, the switch takes effect at the next streamer start), and split encoding " +
                 "across several NVENC engines (the lab GPU has one). The full-frame + split encoding profile turns the map off by itself. Spatial AQ is separate and always on.";
             var body = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(12, 4, 12, 12), Dock = DockStyle.None, Location = Point.Empty };
-            var intro = Ui.Line("Switches that change the picture the game renders and the timing, for people who measure. Each one says when it takes effect: live = the running streamer takes it within seconds; needs streamer restart = the window closes the streamer when you change it (a warning shows while it runs), you start it again when you are done; next game start = start the game again. " +
-                "A switch at its default is removed from config\\airframexr.json. The signals to judge by are in logs\\AirFrameXR.log: the 'frame generation perf' and 'frame generation samples' lines every 10 s, and 'game run recorded' at the end of a game.");
+            var intro = Ui.Line("Settings that go beyond the Settings window, grouped by what you want to change. The defaults suit most games; each setting says when it takes effect: live = the running streamer takes it within seconds; needs streamer restart = the window closes the streamer when you change it, you start it again when you are done; next game start = start the game again. " +
+                "A setting at its default is removed from config\\airframexr.json. To judge a change, read logs\\AirFrameXR.log: the 'frame generation perf' line every 10 s and 'game run recorded' at the end of a game.");
             intro.MaximumSize = new Size(WrapWidth, 0); intro.ForeColor = Color.DimGray;
             body.Controls.Add(intro);
 
@@ -145,21 +145,25 @@ namespace AirFrameXR
             else fovHost.Controls.Add(new FovRestrictionPanel());
             body.Controls.Add(fovHost);
 
-            // on top, what people reach for: the field of view (with its calibration), the game's fps lock and pacing fix, the stream size; everything else is folded under Experimental
-            Section(body, GF);
-            foreach (var k in knobs.Where(x => x.Section == GF)) AddKnob(body, k);
+            // grouped by what the user wants: the picture (field of view above, stream size), smoothness (fps lock, frame generation), a game that misbehaves, the encoder;
+            // the latency and pacing internals are folded: their defaults were chosen on measurements and suit every game tested
             Section(body, SS);
+            Hint(body, "Touch it if the picture looks too soft or too heavy for your PC.");
             foreach (var k in knobs.Where(x => x.Section == SS)) AddKnob(body, k);
-            var exp = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0), AccessibleName = "Experimental settings" };
-            Section(exp, FG);
-            foreach (var k in knobs.Where(x => x.Section == FG)) AddKnob(exp, k);
-            Section(exp, AR);
-            foreach (var k in knobs.Where(x => x.Section == AR)) AddKnob(exp, k);
-            Section(exp, GE);
-            foreach (var k in knobs.Where(x => x.Section == GE)) AddKnob(exp, k);
+            Section(body, GF);
+            Hint(body, "Touch it for a game that runs at a fixed or uneven rate, or to choose how the in-between frames are drawn.");
+            foreach (var k in knobs.Where(x => x.Section == GF)) AddKnob(body, k);
+            Section(body, CP);
+            Hint(body, "Touch it only if a game or VR mod runs at half its frame rate or shakes.");
+            foreach (var k in knobs.Where(x => x.Section == CP)) AddKnob(body, k);
+            Section(body, GE);
+            Hint(body, "A quality trade-off between the centre of the picture and its edges.");
+            foreach (var k in knobs.Where(x => x.Section == GE)) AddKnob(body, k);
+            var lat = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0), AccessibleName = "Latency and pacing settings" };
+            Hint(lat, "These keep the frames arriving at the headset on time with the least delay. They are on by default and suit every game tested; change one only to compare.");
+            foreach (var k in knobs.Where(x => x.Section == AR)) AddKnob(lat, k);
             var orphan = knobs.FirstOrDefault(x => x.Ctl == null); if (orphan != null) throw new InvalidOperationException("Advanced: the switch \"" + orphan.Key + "\" is in a section the window does not build");
-            Section(exp, "Frame-start gate (the OpenXR layer)");
-            var gateRow = Row(exp, gate, null, NextGame, "On (default): the game's xrWaitFrame waits for the shim's release, so the GPU throttle and the running start act at the game's frame start. Off: the pre-0.6 behaviour, where VDXR's own running start woke the game a display period minus 2 ms after its previous release, one frame ahead of the release, so the game's render queue sat at 2-3 frames. Lab A/B on a GPU-bound scene: frame start to GPU done 55 -> 42 ms (p50) at the same fps, one display period less between the pose being read and the frame being finished. On the headset: no fps loss in 6 h (Gears of War at 1/2: 49.0 fps median against a 50 fps cap). Needs bin\\virtualdesktop-openxr.dll of 0.6 or newer; changing it asks for administrator rights once. Hover for the numbers.", "Frame-start gate (VDXR patch 5)\r\n" +
+            var gateRow = Row(lat, gate, null, NextGame, "On (default): the game's xrWaitFrame waits for the shim's release, so the GPU throttle and the running start act at the game's frame start. Off: the pre-0.6 behaviour, where VDXR's own running start woke the game a display period minus 2 ms after its previous release, one frame ahead of the release, so the game's render queue sat at 2-3 frames. Lab A/B on a GPU-bound scene: frame start to GPU done 55 -> 42 ms (p50) at the same fps, one display period less between the pose being read and the frame being finished. On the headset: no fps loss in 6 h (Gears of War at 1/2: 49.0 fps median against a 50 fps cap). Needs bin\\virtualdesktop-openxr.dll of 0.6 or newer; changing it asks for administrator rights once. Hover for the numbers.", "Frame-start gate (VDXR patch 5)\r\n" +
                 "\r\n" +
                 "Cause: VDXR's async submission thread calls the shim's release, but the game's xrWaitFrame did not wait for it: it woke the game at the earlier of 'the shim released' and 'one display period minus 2 ms after the previous release'. So in every GPU-bound game the CPU ran a frame ahead of the release, the frame was submitted before the shim's throttle could look at the GPU, and the render queue sat at 2-3 frames. xrWaitFrame returned 10-13 ms before the shim's release of the same frame.\r\n" +
                 "Lab A/B (RTX 3080 Ti laptop, stream 3520 x 1600 at 100 Hz, 40 s runs), stock VDXR against gate on:\r\n" +
@@ -170,7 +174,8 @@ namespace AirFrameXR
                 "Off = VDXR's own behaviour (registry value ovrshim_vdxr_running_start = 1).");
             gateRow.Controls.Add(gateNow);
             gate.CheckedChanged += (s, e) => { if (!loading) SetGate(gate.Checked); };
-            body.Controls.Add(Ui.Expander("Experimental: frame generation, pacing and encoder internals", exp));
+            Section(body, AR);
+            body.Controls.Add(Ui.Expander("Show the latency and pacing settings", lat));
 
             var bottom = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 14, 0, 0) };
             var reset = new Button { Text = "Back to defaults", AutoSize = true };
@@ -185,11 +190,17 @@ namespace AirFrameXR
             var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
             scroller.Controls.Add(body);
             Controls.Add(scroller);
-            var hdr = Ui.CompactHeader("Advanced video and performance settings");
+            var hdr = Ui.CompactHeader("Advanced settings");
             Controls.Add(hdr);
             Ui.AutoFitWindow(this, hdr, body);
             LoadValues();
             Ui.ScreenshotWhenShown(this, 1500);
+        }
+
+        static void Hint(FlowLayoutPanel body, string text)
+        {
+            var l = Ui.Line(text); l.ForeColor = Color.DimGray; l.MaximumSize = new Size(WrapWidth, 0); l.Margin = new Padding(3, 0, 3, 2);
+            body.Controls.Add(l);
         }
 
         static void Section(FlowLayoutPanel body, string title)

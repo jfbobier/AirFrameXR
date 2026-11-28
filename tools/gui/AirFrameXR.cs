@@ -234,7 +234,7 @@ namespace AirFrameXR
             var menu = new ContextMenuStrip();
             menu.Items.Add("Main menu", null, (o, e) => openTool("launcher.exe", ""));
             menu.Items.Add("Game statistics", null, (o, e) => openTool("performance.exe", ""));
-            menu.Items.Add("Advanced video and performance settings", null, (o, e) => openTool("configure.exe", "--switches"));
+            menu.Items.Add("Advanced settings", null, (o, e) => openTool("configure.exe", "--switches"));
             var menuBtn = new Button { Text = "\u2630", Font = new Font("Segoe UI Symbol", 14f), AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Color.White, Anchor = AnchorStyles.Top | AnchorStyles.Right, Margin = new Padding(0, 14, 14, 0), Padding = new Padding(4, 0, 4, 0), AccessibleName = "Menu" };
             menuBtn.FlatAppearance.BorderSize = 0;
             menuBtn.Click += (o, e) => menu.Show(menuBtn, new Point(menuBtn.Width, menuBtn.Height), ToolStripDropDownDirection.BelowLeft);
